@@ -1,0 +1,347 @@
+# Docker Compose for memQL cluster mode (multi-node development).
+#
+# Usage:
+#   docker-compose -f docker/docker-compose.cluster.yml up --build
+#   docker-compose -f docker/docker-compose.cluster.yml down
+#
+# Or via the /deploy skill:
+#   /deploy development --cluster
+
+# Compose project name -- distinct from full.yml's "memql-cluster" so
+# both topologies can coexist on the same host (rare in practice but
+# avoids a startup conflict if it happens). The "-multinode" suffix
+# hints at the per-node-type-binary deployment shape.
+name: memql-cluster-multinode
+
+services:
+  # Shared PostgreSQL + TimescaleDB (single instance for all nodes)
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: memql-db
+    hostname: postgres
+    environment:
+      POSTGRES_USER: memql
+      POSTGRES_PASSWORD: memql_dev
+      POSTGRES_DB: memql
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - cluster_postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memql"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
+  # BFF node -- backend for frontend (domain-specific), primary API surface
+  bff:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: bff
+    container_name: memql-bff
+    hostname: bff
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: bff
+      MEMQL_NODE_ID: bff-local
+      MEMQL_NODE_ADDRESS: bff:50058
+      MEMQL_NODE_SERVICE_ADDRESS: ":50058"
+      MEMQL_NODE_FLAVOR: ""
+      # Static seed addresses for WorkerDialer. DB-based discovery
+      # (via v1:cluster:node events) takes over once workers register
+      # themselves, so this is a first-boot safety net -- not the
+      # long-term source of truth.
+      MEMQL_WORKER_PEERS: "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056"
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8088"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
+  # Nginx load balancer -- single stable entry point for clients.
+  nginx:
+    image: nginx:alpine
+    container_name: memql-lb
+    hostname: nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8085:8080"
+      - "50050:50051"
+    depends_on:
+      - bff
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
+  # Cognition node -- conversation intelligence (scoring, response generation)
+  cognition:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: cognition
+    container_name: memql-cognition
+    hostname: cognition
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: cognition
+      MEMQL_NODE_ID: cognition-local
+      MEMQL_NODE_ADDRESS: cognition:50054
+      MEMQL_NODE_SERVICE_ADDRESS: ":50054"
+      # Dial BFF so events originated here (SI responses, presence updates)
+      # flow back to BFF's event bus and reach the frontend subscribers.
+      # Without this the worker has no outbound stream to BFF; EventBridge
+      # iterates AllPeers but every peer.Connection is nil, so forwards are
+      # silent no-ops. The BFF -> worker direction is already covered by
+      # BFF's WorkerDialer.
+      MEMQL_PARENT_ADDRESS: bff:50058
+      # Cognition runs its own WorkerDialer (narrowed to agent peers) so
+      # it can forward AgentGenerateTurnMsg to an agent node instead of
+      # generating replies locally. Seeded with agent's address for
+      # first-boot; DB discovery via v1:cluster:node takes over once the
+      # agent registers. Other worker types are filtered out by
+      # dialer.SetDialTypes(NodeTypeAgent) in app/cluster.go.
+      MEMQL_WORKER_PEERS: "agent=agent:50055"
+
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8085"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
+  # Voice node -- audio I/O pipeline (ASR, TTS, LiveKit)
+  voice:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: voice
+    container_name: memql-voice
+    hostname: voice
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: voice
+      MEMQL_NODE_ID: voice-local
+      MEMQL_NODE_ADDRESS: voice:50059
+      MEMQL_NODE_SERVICE_ADDRESS: ":50059"
+      MEMQL_PARENT_ADDRESS: bff:50058
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8085"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+
+      # ---- STT provider selection ----
+      # Auto-selected default is "deepgram" when MEMQL_DEEPGRAM_API_KEY
+      # is set, else "openai-realtime". Valid explicit values:
+      # "deepgram", "openai-realtime", "openai-whisper".
+      MEMQL_STT_PROVIDER: "${MEMQL_STT_PROVIDER:-}"
+
+      # ---- Deepgram (default when key present) ----
+      MEMQL_DEEPGRAM_API_KEY: "${MEMQL_DEEPGRAM_API_KEY:-}"
+      POLYPHON_DEEPGRAM_ASR_MODEL: "${POLYPHON_DEEPGRAM_ASR_MODEL:-}"
+      POLYPHON_DEEPGRAM_TTS_MODEL: "${POLYPHON_DEEPGRAM_TTS_MODEL:-}"
+      POLYPHON_DEEPGRAM_LANGUAGE: "${POLYPHON_DEEPGRAM_LANGUAGE:-}"
+      POLYPHON_DEEPGRAM_ENDPOINTING_MS: "${POLYPHON_DEEPGRAM_ENDPOINTING_MS:-}"
+      POLYPHON_DEEPGRAM_UTTERANCE_END_MS: "${POLYPHON_DEEPGRAM_UTTERANCE_END_MS:-}"
+      POLYPHON_DEEPGRAM_CLIENT_EOU_TIMEOUT_MS: "${POLYPHON_DEEPGRAM_CLIENT_EOU_TIMEOUT_MS:-}"
+
+      # ---- OpenAI Realtime (fallback) ----
+      # Transcription model used by the Realtime API. Defaults to
+      # "whisper-1" -- universally available on every OpenAI project
+      # AND supported by the Realtime API's transcription-only mode
+      # (streams interim deltas, unlike the batch /audio/transcriptions
+      # endpoint). Upgrade to "gpt-4o-transcribe" for slightly better
+      # quality IFF your OpenAI project has that model enabled on the
+      # dashboard (it is gated per-project). Other options:
+      # "gpt-4o-mini-transcribe" (cheaper than gpt-4o-transcribe).
+      # Falls back to POLYPHON_OPENAI_ASR_MODEL if set, so the same env
+      # var can drive both the STT path and the Polyphon voice path.
+      MEMQL_OPENAI_REALTIME_MODEL: "${MEMQL_OPENAI_REALTIME_MODEL:-}"
+
+      # ---- OpenAI Whisper (fallback) ----
+      # Used when explicit MEMQL_STT_PROVIDER selects whisper, or when
+      # the Realtime path is unavailable at startup.
+      MEMQL_WHISPER_MODEL: "${MEMQL_WHISPER_MODEL:-whisper-1}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
+  # Agent node -- task execution and AI work
+  agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: agent
+    container_name: memql-agent
+    hostname: agent
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: agent
+      MEMQL_NODE_ID: agent-local
+      MEMQL_NODE_ADDRESS: agent:50055
+      MEMQL_NODE_SERVICE_ADDRESS: ":50055"
+      MEMQL_PARENT_ADDRESS: bff:50058
+
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8085"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
+  # Planner node -- task planning and orchestration
+  planner:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: planner
+    container_name: memql-planner
+    hostname: planner
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: planner
+      MEMQL_NODE_ID: planner-local
+      MEMQL_NODE_ADDRESS: planner:50056
+      MEMQL_NODE_SERVICE_ADDRESS: ":50056"
+      MEMQL_PARENT_ADDRESS: bff:50058
+
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8085"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+
+  # Identity node -- in-house auth provider (magic-link, JWT issuance,
+  # JWKS publishing, web UI, admin app, PAT management).
+  identity:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: identity
+    container_name: memql-identity
+    hostname: identity
+    env_file:
+      - ../.env.local
+    environment:
+      MEMQL_NODE_TYPE: identity
+      MEMQL_NODE_ID: identity-local
+      MEMQL_NODE_ADDRESS: identity:50061
+      MEMQL_NODE_SERVICE_ADDRESS: ":50061"
+      MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
+      MEMQL_GRPC_ADDRESS: ":50051"
+      SERVER_ADDRESS: "0.0.0.0:8081"
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_ENABLED: "true"
+      IDENTITY_BASE_URL: http://localhost:8081
+      IDENTITY_KEY_DIR: /var/identity/keys
+      IDENTITY_KEY_ENCRYPTION_KEY: ""
+      # See docker-compose.full.yml for the full annotation on this
+      # registered-clients shape (cockpit + copresent + RFC 8252
+      # loopback rule).
+      IDENTITY_REGISTERED_CLIENTS: '[{"clientId":"copresent","redirectURIs":["http://localhost:8080/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
+      IDENTITY_CORS_ALLOWED_ORIGINS: "http://localhost:8080,http://localhost:5173"
+      MEMQL_DISCOVERY_GRPC_ENDPOINT: localhost:50050
+      MEMQL_DISCOVERY_CLIENT_ID: cockpit
+      MEMQL_DISCOVERY_CLUSTER_NAME: local
+      IDENTITY_REGISTRATION_MODE: waitlist
+      # Branding intentionally unset; operator picks at /admin/settings.
+      IDENTITY_BRAND_NAME: ${IDENTITY_BRAND_NAME:-}
+      IDENTITY_BRAND_PRIMARY_COLOR: ${IDENTITY_BRAND_PRIMARY_COLOR:-}
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cluster_identity_keys:/var/identity/keys
+    healthcheck:
+      # Other nodes wait on this before starting their JWKS fetch.
+      # Same rationale as the full-mode compose: without this gate
+      # bff/voice/cognition/agent/planner race identity at startup
+      # and burn Docker restarts on the initial JWKS fetch.
+      test: ["CMD", "/app/healthcheck", "8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
+  # pgAdmin (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: memql-dbadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@memql.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - memql-cluster
+    profiles:
+      - tools
+    restart: unless-stopped
+
+volumes:
+  cluster_postgres_data:
+    driver: local
+  cluster_identity_keys:
+    driver: local
+
+networks:
+  memql-cluster:
+    driver: bridge

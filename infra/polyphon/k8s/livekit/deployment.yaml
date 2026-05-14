@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit
+  namespace: polyphon
+  labels:
+    app: livekit
+    app.kubernetes.io/part-of: polyphon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: livekit
+  template:
+    metadata:
+      labels:
+        app: livekit
+    spec:
+      nodeSelector:
+        polyphon-role: cpu
+      containers:
+        - name: livekit
+          image: livekit/livekit-server:latest
+          ports:
+            - containerPort: 7880
+              name: http
+            - containerPort: 7881
+              name: rtc
+          env:
+            - name: LIVEKIT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: api-keys
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7880
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 7880
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit
+  namespace: polyphon
+  labels:
+    app: livekit
+spec:
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 7880
+      targetPort: 7880
+    - name: rtc
+      port: 7881
+      targetPort: 7881
+      protocol: UDP
+  selector:
+    app: livekit
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: livekit-secrets
+  namespace: polyphon
+type: Opaque
+stringData:
+  # IMPORTANT: Replace with production keys before deploying.
+  # Generate with: openssl rand -hex 32
+  api-keys: "polyphon_api_key: polyphon_api_secret_replace_me"

@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - gosimple
+    - gofmt
+    - goimports
+
+issues:
+  exclude-use-default: false
+
+output:
+  format: colored-line-number
+

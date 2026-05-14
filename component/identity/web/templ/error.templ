@@ -1,0 +1,28 @@
+package webtempl
+
+// ErrorData drives the generic error page. `ErrorID` is shown only
+// when set so handlers that don't have a correlation id render
+// a clean panel.
+type ErrorData struct {
+	Layout  LayoutData
+	Heading string
+	Message string
+	ErrorID string
+}
+
+templ Error(data ErrorData) {
+	@Layout(data.Layout) {
+		<div class="card">
+			<h1 class="card-title">{ data.Heading }</h1>
+			<p class="text-muted">{ data.Message }</p>
+			if data.ErrorID != "" {
+				<p class="text-small text-subtle">
+					Reference: <code>{ data.ErrorID }</code>
+				</p>
+			}
+			<div class="btn-row">
+				<a href="/login" class="btn btn-primary">Back to sign in</a>
+			</div>
+		</div>
+	}
+}

@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+package polyphon;
+
+option go_package = "github.com/visionarys-io/memql/component/polyphon/proto";
+
+// PolyphonScoreEngine is the gRPC service exposed by memQL (Cloud Run)
+// for the Bridge Agent (GKE) to communicate with the score engine.
+service PolyphonScoreEngine {
+  // ProcessUtterance sends a human utterance to the score engine for evaluation.
+  // The score engine scores all agents and returns a decision about who should respond.
+  rpc ProcessUtterance(ProcessUtteranceRequest) returns (ProcessUtteranceResponse);
+
+  // GenerateAgentResponse requests the score engine to generate an agent's response
+  // via the LLM (OpenAI GPT-4). Returns a stream of text chunks for low-latency TTS.
+  rpc GenerateAgentResponse(AgentResponseRequest) returns (stream AgentResponseChunk);
+
+  // RecordAgentCompletion notifies the score engine that an agent has finished speaking.
+  // Returns whether another agent should continue (continuation check).
+  rpc RecordAgentCompletion(AgentCompletionRequest) returns (AgentCompletionResponse);
+}
+
+// PolyphonBridge is the gRPC service exposed by the Bridge Agent (GKE)
+// for memQL (Cloud Run) to manage rooms and generate tokens.
+service PolyphonBridge {
+  // CreateRoom creates a new LiveKit room for a space.
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+
+  // DestroyRoom tears down a LiveKit room and all agent participants.
+  rpc DestroyRoom(DestroyRoomRequest) returns (DestroyRoomResponse);
+
+  // GenerateRoomToken creates a LiveKit access token for a browser participant.
+  rpc GenerateRoomToken(RoomTokenRequest) returns (RoomTokenResponse);
+
+  // GetRoomStatus returns the current state of a room.
+  rpc GetRoomStatus(RoomStatusRequest) returns (RoomStatusResponse);
+}
+
+// --- ProcessUtterance ---
+
+message ProcessUtteranceRequest {
+  string space_id = 1;
+  string utterance_id = 2;
+  string participant_id = 3;
+  string speaker_name = 4;
+  string text = 5;
+  bool is_final = 6;
+  int64 timestamp_unix_ms = 7;
+}
+
+message ProcessUtteranceResponse {
+  string action = 1;  // "respond", "silence", "continue"
+  AgentDecision winner = 2;  // The agent that should respond (nil if silence)
+  repeated AgentDecision scores = 3;  // All agent scores for observability
+  int32 response_delay_ms = 4;  // Suggested delay before agent responds
+}
+
+message AgentDecision {
+  string agent_id = 1;
+  string agent_name = 2;
+  double total_score = 3;
+  bool should_respond = 4;
+  string reason = 5;
+  repeated ScoringFactorProto factors = 6;
+}
+
+message ScoringFactorProto {
+  string name = 1;
+  double weight = 2;
+  double value = 3;
+  double score = 4;
+  string detail = 5;
+}
+
+// --- GenerateAgentResponse ---
+
+message AgentResponseRequest {
+  string space_id = 1;
+  string agent_id = 2;
+  string agent_name = 3;
+  string utterance_id = 4;  // The utterance being responded to
+  // Conversation context is managed server-side by the score engine.
+}
+
+message AgentResponseChunk {
+  string text = 1;       // Text chunk (for TTS streaming)
+  bool is_final = 2;     // Last chunk
+  string full_text = 3;  // Complete response (only set when is_final=true)
+}
+
+// --- RecordAgentCompletion ---
+
+message AgentCompletionRequest {
+  string space_id = 1;
+  string agent_id = 2;
+  string agent_name = 3;
+  string response_text = 4;  // Full text of the agent's response
+}
+
+message AgentCompletionResponse {
+  bool should_continue = 1;   // Should another agent follow up?
+  AgentDecision next_agent = 2;  // The next agent (if should_continue=true)
+}
+
+// --- Room Management ---
+
+message CreateRoomRequest {
+  string space_id = 1;
+  repeated AgentConfig agents = 2;  // Agents to join the room
+}
+
+message AgentConfig {
+  string agent_id = 1;
+  string name = 2;
+  string voice_model = 3;  // Canonical voice name (resolved per-provider at TTS-publish time)
+}
+
+message CreateRoomResponse {
+  string room_name = 1;
+  string room_sid = 2;  // LiveKit room SID
+  int32 agent_count = 3;
+}
+
+message DestroyRoomRequest {
+  string space_id = 1;
+}
+
+message DestroyRoomResponse {
+  bool success = 1;
+}
+
+message RoomTokenRequest {
+  string space_id = 1;
+  string participant_id = 2;
+  string display_name = 3;
+}
+
+message RoomTokenResponse {
+  string token = 1;
+  string room_name = 2;
+  string livekit_url = 3;
+  int64 expires_at_unix = 4;
+}
+
+message RoomStatusRequest {
+  string space_id = 1;
+}
+
+message RoomStatusResponse {
+  string room_name = 1;
+  bool active = 2;
+  int32 human_count = 3;
+  int32 agent_count = 4;
+  repeated ParticipantInfo participants = 5;
+}
+
+message ParticipantInfo {
+  string id = 1;
+  string name = 2;
+  string type = 3;  // "human" or "agent"
+  bool is_speaking = 4;
+}

@@ -1,0 +1,353 @@
+syntax = "proto3";
+
+package visionarys.memql.internal.v1;
+
+option go_package = "github.com/visionarys-io/memql/component/bus/gen;busv1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Envelope
+// ---------------------------------------------------------------------------
+
+// InternalMessage is the universal envelope for all inter-component
+// communication within a memQL process. Components exchange these messages
+// over typed Go channels instead of direct method calls.
+message InternalMessage {
+  string message_id = 1;
+  string correlate_to = 2;
+  string correlation_id = 3; // Traces a request across all channel hops
+  map<string, string> metadata = 4;
+  google.protobuf.Timestamp created_at = 5;
+
+  oneof payload {
+    // Database operations (10-15)
+    DbQueryRequest db_query = 10;
+    DbQueryResponse db_query_response = 11;
+    DbExecRequest db_exec = 12;
+    DbExecResponse db_exec_response = 13;
+    DbHealthRequest db_health = 14;
+    DbHealthResponse db_health_response = 15;
+
+    // Engine operations (20-29)
+    EngineExecuteRequest engine_execute = 20;
+    EngineExecuteResponse engine_execute_response = 21;
+    EngineAIInvokeRequest engine_ai_invoke = 22;
+    EngineAIInvokeResponse engine_ai_invoke_response = 23;
+    EngineToolExecRequest engine_tool_exec = 24;
+    EngineToolExecResponse engine_tool_exec_response = 25;
+    EngineRenderPromptRequest engine_render_prompt = 26;
+    EngineRenderPromptResponse engine_render_prompt_response = 27;
+    EngineVariableResolveRequest engine_var_resolve = 28;
+    EngineVariableResolveResponse engine_var_resolve_response = 29;
+
+    // Integration dispatch (30-31)
+    IntegrationDispatchRequest integration_dispatch = 30;
+    IntegrationDispatchResponse integration_dispatch_response = 31;
+
+    // Event bus operations (40-43)
+    EventPublish event_publish = 40;
+    EventSubscribe event_subscribe = 41;
+    EventUnsubscribe event_unsubscribe = 42;
+    EventNotify event_notify = 43;
+
+    // Config distribution (50-51)
+    ConfigSnapshot config_snapshot = 50;
+    ConfigUpdate config_update = 51;
+
+    // Telemetry (60-61)
+    ChannelMetrics channel_metrics = 60;
+    ComponentMetrics component_metrics = 61;
+
+    // Lifecycle (70-72)
+    ReadySignal ready_signal = 70;
+    ShutdownSignal shutdown_signal = 71;
+    DrainComplete drain_complete = 72;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Database Messages
+// ---------------------------------------------------------------------------
+
+message DbQueryRequest {
+  string query = 1;
+  repeated google.protobuf.Value args = 2;
+}
+
+message DbQueryResponse {
+  bool success = 1;
+  repeated google.protobuf.Struct rows = 2;
+  string error = 3;
+  int64 took_ms = 4;
+}
+
+message DbExecRequest {
+  string query = 1;
+  repeated google.protobuf.Value args = 2;
+}
+
+message DbExecResponse {
+  bool success = 1;
+  int64 rows_affected = 2;
+  string error = 3;
+  int64 took_ms = 4;
+}
+
+message DbHealthRequest {}
+
+message DbHealthResponse {
+  bool healthy = 1;
+  string status = 2;
+  int64 pool_size = 3;
+  int64 idle_conns = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Engine Messages
+// ---------------------------------------------------------------------------
+
+message EngineExecuteRequest {
+  string query = 1;
+  google.protobuf.Struct variables = 2;
+  string actor = 3;
+  repeated string roles = 4;
+  DelegationInfo delegation = 5;
+  string partition = 6;
+}
+
+message EngineExecuteResponse {
+  bool success = 1;
+  google.protobuf.Value result = 2;
+  string error = 3;
+  int64 took_ms = 4;
+}
+
+message EngineAIInvokeRequest {
+  string template_id = 1;
+  google.protobuf.Struct data = 2;
+  string actor = 3;
+  bool stream = 4;
+  string stream_id = 5;
+  DelegationInfo delegation = 6;
+}
+
+message EngineAIInvokeResponse {
+  bool success = 1;
+  google.protobuf.Value result = 2;
+  string error = 3;
+}
+
+message EngineToolExecRequest {
+  string tool_name = 1;
+  google.protobuf.Struct arguments = 2;
+  string actor = 3;
+}
+
+message EngineToolExecResponse {
+  bool success = 1;
+  string result = 2;
+  string error = 3;
+}
+
+message EngineRenderPromptRequest {
+  string template_id = 1;
+  google.protobuf.Struct data = 2;
+}
+
+message EngineRenderPromptResponse {
+  bool success = 1;
+  string rendered = 2;
+  string error = 3;
+}
+
+message EngineVariableResolveRequest {
+  string variable_name = 1;
+  string default_value = 2;
+}
+
+message EngineVariableResolveResponse {
+  bool success = 1;
+  string value = 2;
+  string error = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Integration Messages
+// ---------------------------------------------------------------------------
+
+message IntegrationDispatchRequest {
+  string capability_fqn = 1; // e.g., "integration.cognition.scoreUtterance"
+  google.protobuf.Struct args = 2;
+  string actor = 3;
+  int32 target = 4; // Target parameter passed to builtin executor handler
+  DelegationInfo delegation = 5;
+}
+
+message IntegrationDispatchResponse {
+  bool success = 1;
+  google.protobuf.Value result = 2;
+  string error = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Delegation Context
+// ---------------------------------------------------------------------------
+
+message DelegationInfo {
+  string delegation_id = 1;
+  string identity_id = 2;
+  string delegating_subject = 3;
+  string delegating_email = 4;
+  string identity_type = 5;
+  string guardian_subject = 6;
+  string agent_id = 7;
+  string role_ceiling = 8;
+  repeated string scopes = 9;
+  google.protobuf.Timestamp expires_at = 10;
+}
+
+// ---------------------------------------------------------------------------
+// Event Messages
+// ---------------------------------------------------------------------------
+
+message EventPublish {
+  string topic = 1;
+  int32 kind = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  google.protobuf.Struct payload = 4;
+  map<string, string> event_metadata = 5;
+  string origin_node_id = 6;
+  string partition = 7;
+}
+
+message EventSubscribe {
+  string subscription_id = 1;
+  string pattern = 2;
+  string subscriber_name = 3;
+}
+
+message EventUnsubscribe {
+  string subscription_id = 1;
+}
+
+message EventNotify {
+  string subscription_id = 1;
+  EventPublish event = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Config Messages
+// ---------------------------------------------------------------------------
+
+message ConfigSnapshot {
+  // Database
+  string db_dsn = 1;
+  int32 db_max_open_conns = 2;
+  int32 db_max_idle_conns = 3;
+
+  // Engine
+  int32 engine_max_results = 10;
+  int32 engine_max_window = 11;
+  bool engine_step_cache_enabled = 12;
+
+  // AI
+  string ai_openai_api_key = 20;
+  string ai_openai_project_id = 21;
+  string ai_default_provider = 22;
+
+  // Server
+  string grpc_address = 30;
+  string http_address = 31;
+  string http_public_path = 32;
+
+  // STT
+  string stt_provider = 40;
+
+  // Auth
+  bool auth_enabled = 50;
+  bool delegation_enabled = 56;
+
+  // Polyphon
+  string polyphon_bridge_agent_url = 60;
+  string polyphon_voice_provider = 61;
+  string polyphon_openai_asr_model = 62;
+  string polyphon_openai_tts_model = 63;
+  string polyphon_openai_tts_voice = 64;
+
+  // Node
+  string node_type = 70;
+  string node_id = 71;
+  string node_address = 72;
+  string node_parent_address = 73;
+  string node_labels = 74;
+  string node_service_address = 75;
+
+  // GCS
+  string gcs_bucket = 80;
+
+
+  // Runtime-mutable
+  string log_level = 90;
+  bool demo_mode = 91;
+  map<string, string> feature_flags = 92;
+
+  // Version
+  string version = 100;
+
+  // Partition
+  string partition = 101;
+
+  // Cognition guardrails
+  // Fit-score threshold (0..1) below which the router gates a specialist
+  // answer and falls through to the general-assistant fallback chain.
+  // Defaults to 0.4 when unset.
+  double cognition_fit_threshold = 110;
+}
+
+message ConfigUpdate {
+  string field = 1;
+  google.protobuf.Value value = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry Messages
+// ---------------------------------------------------------------------------
+
+message ChannelMetrics {
+  string channel_name = 1;
+  int32 buffer_size = 2;
+  int32 current_fill = 3;
+  int64 messages_sent = 4;
+  int64 messages_dropped = 5;
+  google.protobuf.Timestamp sampled_at = 6;
+}
+
+message ComponentMetrics {
+  string component_name = 1;
+  int64 requests_total = 2;
+  int64 errors_total = 3;
+  double avg_latency_ms = 4;
+  double p99_latency_ms = 5;
+  google.protobuf.Timestamp sampled_at = 6;
+  map<string, string> labels = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle Messages
+// ---------------------------------------------------------------------------
+
+message ReadySignal {
+  string component_name = 1;
+}
+
+message ShutdownSignal {
+  string reason = 1;
+  int32 grace_seconds = 2;
+}
+
+message DrainComplete {
+  string component_name = 1;
+  int64 drained_count = 2;
+}

@@ -1,0 +1,201 @@
+syntax = "proto3";
+
+package visionarys.memql.worker.v1;
+
+option go_package = "github.com/visionarys-io/memql/grpc/gen;memqlv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// WorkerService is the bidi-stream surface a memql-cockpit-worker
+// process opens against the agent node. Per-user routing: the worker's
+// token authenticates as a worker:<id> principal owned by exactly one
+// human user; only agents acting in sessions owned by that user can
+// dispatch to this worker.
+service WorkerService {
+  rpc Stream(stream WorkerClientMessage) returns (stream WorkerServerMessage);
+}
+
+// -----------------------------------------------------------------------------
+// Envelopes
+// -----------------------------------------------------------------------------
+
+message WorkerClientMessage {
+  string message_id = 1;
+  string correlate_to = 2;
+  map<string, string> metadata = 3;
+
+  oneof payload {
+    Register register = 10;
+    Heartbeat heartbeat = 11;
+    ToolResult tool_result = 12;
+    ToolStream tool_stream = 13;
+    AuditEvent audit_event = 14;
+    RotationRequest rotation_request = 15;
+  }
+}
+
+message WorkerServerMessage {
+  string message_id = 1;
+  string correlate_to = 2;
+  map<string, string> metadata = 3;
+
+  oneof payload {
+    RegisterAck register_ack = 10;
+    ToolDispatch tool_dispatch = 11;
+    ToolCancel tool_cancel = 12;
+    Drain drain = 13;
+    RotationResponse rotation_response = 14;
+    RegisterError register_error = 15;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Registration
+// -----------------------------------------------------------------------------
+
+message Register {
+  string name = 1;
+  // Capabilities advertised. "HEADLESS" must always be present;
+  // "GUI" is an optional addition declared only by cockpit-gui builds
+  // with TCC / X11 confirmed available.
+  repeated string capabilities = 2;
+  map<string, string> labels = 3;
+  // Per-capability concurrency caps. e.g. {"HEADLESS": 8, "GUI": 1}.
+  map<string, uint32> concurrency = 4;
+  PlatformInfo platform = 5;
+  PermissionStatus permissions = 6;
+  string version = 7;
+  // build_tag = "gui" or "nogui".
+  string build_tag = 8;
+}
+
+message PlatformInfo {
+  string os = 1;
+  string arch = 2;
+  string hostname = 3;
+}
+
+message PermissionStatus {
+  bool accessibility = 1;
+  bool screen_recording = 2;
+  bool x11_display = 3;
+  string detail = 4;
+}
+
+message RegisterAck {
+  string registration_id = 1;
+  google.protobuf.Timestamp registered_at = 2;
+  // Server-resolved owner user id for cross-checking on the worker side.
+  string owner_user_id = 3;
+}
+
+message RegisterError {
+  string code = 1;
+  string message = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Liveness
+// -----------------------------------------------------------------------------
+
+message Heartbeat {
+  google.protobuf.Timestamp ts = 1;
+  uint32 active_calls_total = 2;
+  map<string, uint32> active_calls_per_capability = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Tool dispatch (agent -> worker)
+// -----------------------------------------------------------------------------
+
+message ToolDispatch {
+  string call_id = 1;
+  string plan_id = 2;
+  string task_id = 3;
+  string agent_id = 4;
+  string correlation_id = 5;
+  // tool = "workerHost" or "workerComputer"
+  string tool = 6;
+  string action = 7;
+  // Discriminated-union args: {action: <X>, X: {...}} serialized as JSON.
+  bytes args_json = 8;
+  google.protobuf.Duration timeout = 9;
+}
+
+message ToolCancel {
+  string call_id = 1;
+  string reason = 2;
+}
+
+// Drain tells the worker to stop accepting new dispatches, finish
+// in-flight ones, and exit cleanly. Server-initiated.
+message Drain {
+}
+
+// -----------------------------------------------------------------------------
+// Tool result / streaming (worker -> agent)
+// -----------------------------------------------------------------------------
+
+message ToolStream {
+  string call_id = 1;
+  oneof payload {
+    bytes stdout_chunk = 2;
+    bytes stderr_chunk = 3;
+    bytes data_chunk = 4;
+  }
+}
+
+message ToolResult {
+  string call_id = 1;
+  oneof payload {
+    Success success = 2;
+    Failure failure = 3;
+  }
+}
+
+message Success {
+  bytes result_json = 1;
+  int32 exit_code = 2;
+  uint64 bytes_in = 3;
+  uint64 bytes_out = 4;
+  string output_preview = 5;
+}
+
+message Failure {
+  // Common error codes:
+  //   worker_disconnected
+  //   scope_exceeded
+  //   denied_by_policy
+  //   timeout
+  //   exec_failed
+  //   fs_denied
+  //   http_blocked
+  //   kill_switch_engaged
+  //   no_worker_available
+  string error_code = 1;
+  string error_message = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Token rotation
+// -----------------------------------------------------------------------------
+
+message RotationRequest {
+  google.protobuf.Timestamp current_token_expires_at = 1;
+}
+
+message RotationResponse {
+  string new_token = 1;
+  google.protobuf.Timestamp new_token_expires_at = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Worker-emitted audit events
+// -----------------------------------------------------------------------------
+
+message AuditEvent {
+  string action = 1;
+  bytes detail_json = 2;
+  google.protobuf.Timestamp ts = 3;
+}

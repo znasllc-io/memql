@@ -1,0 +1,10 @@
+Summarize the following conversation messages into a concise paragraph. Focus on key facts, decisions made, questions asked and answered, and action items. Omit greetings and small talk.
+
+{{if .previousSummary}}PREVIOUS SUMMARY (incorporate and extend):
+{{.previousSummary}}
+
+NEW MESSAGES TO SUMMARIZE:
+{{end}}{{range .entries}}[{{.speakerType}}] {{.speakerName}}: {{.text}}
+{{end}}
+
+Write a single concise paragraph summarizing the conversation. Focus on facts and outcomes.

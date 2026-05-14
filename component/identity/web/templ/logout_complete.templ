@@ -1,0 +1,27 @@
+package webtempl
+
+// LogoutCompleteData drives the post-logout splash. Optional
+// `ReturnTo` adds a "back to {ReturnToLabel}" button, used when
+// the upstream OAuth client passed a return URL.
+type LogoutCompleteData struct {
+	Layout        LayoutData
+	ReturnTo      string
+	ReturnToLabel string
+}
+
+templ LogoutComplete(data LogoutCompleteData) {
+	@Layout(data.Layout) {
+		<div class="card text-center">
+			<h1 class="card-title">You've been signed out</h1>
+			<p class="text-muted">
+				Your session on { data.Layout.BrandName } has been ended on this device.
+			</p>
+			<div class="btn-row" style="justify-content:center;">
+				<a href="/login" class="btn btn-primary">Sign in again</a>
+				if data.ReturnTo != "" {
+					<a href={ templ.SafeURL(data.ReturnTo) } class="btn btn-secondary">Back to { data.ReturnToLabel }</a>
+				}
+			</div>
+		</div>
+	}
+}

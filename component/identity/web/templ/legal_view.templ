@@ -1,0 +1,33 @@
+package webtempl
+
+// LegalViewData drives the static legal documents (TOS / privacy).
+// `Body` is the markdown-rendered HTML — wrapped in templ.Raw because
+// the upstream loader has already sanitized + bounded it.
+type LegalViewData struct {
+	Layout        LayoutData
+	DocTitle      string
+	Heading       string
+	Body          string
+	Version       string
+	EffectiveDate string
+}
+
+templ LegalView(data LegalViewData) {
+	@Layout(data.Layout) {
+		<div class="card card-wide">
+			<h1 class="card-title">{ data.DocTitle }</h1>
+			if data.Version != "" {
+				<p class="text-small text-subtle">
+					Version { data.Version }
+					if data.EffectiveDate != "" {
+						{ " — effective " + data.EffectiveDate }
+					}
+				</p>
+			}
+			<hr/>
+			<div class="markdown">
+				@templ.Raw(data.Body)
+			</div>
+		</div>
+	}
+}

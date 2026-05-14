@@ -1,0 +1,41 @@
+package webtempl
+
+// LandingData drives the cross-browser magic-link confirmation page.
+// `MagicToken` is round-tripped through a hidden form field so the
+// /auth/landing handler can verify it after the user re-types their
+// email.
+type LandingData struct {
+	Layout     LayoutData
+	Flash      *Flash
+	MagicToken string
+	State      string
+}
+
+templ Landing(data LandingData) {
+	@Layout(data.Layout) {
+		<div class="card">
+			<h1 class="card-title">Confirm sign-in</h1>
+			<p class="text-muted">
+				It looks like you opened this sign-in link in a different browser
+				than where you started. To finish signing in, confirm your email
+				address below.
+			</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			<form method="POST" action="/auth/landing" data-submit-once>
+				<input type="hidden" name="ml" value={ data.MagicToken }/>
+				<div class="form-row">
+					<label for="email">Email</label>
+					<input id="email" name="email" type="email" required autocomplete="email" autofocus inputmode="email" data-hint-target="#email-hint"/>
+					<span id="email-hint" class="help"></span>
+				</div>
+				<button type="submit" class="btn btn-primary btn-block" data-pending-label="Verifying...">Confirm and continue</button>
+			</form>
+			<hr/>
+			<p class="text-small text-muted mb-0">
+				Need a new link? <a href="/login">Start over</a>.
+			</p>
+		</div>
+	}
+}

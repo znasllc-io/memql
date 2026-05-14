@@ -1,0 +1,83 @@
+You are generating retrievable knowledge chunks for a domain that an AI agent will be trained on. Output ONLY a JSON object matching the response schema -- no markdown fences, no prose.
+
+## What you're producing
+
+A list of ~{{if .targetCount}}{{.targetCount}}{{else}}30{{end}} chunks for the domain "{{.domainName}}" (id: `{{.domainId}}`, category: {{if .category}}{{.category}}{{else}}general{{end}}).
+
+Domain scope:
+> {{.domainDescription}}
+
+Each chunk goes into a vector index. At chat time, the agent retrieves the top-K chunks by similarity to the user's question and includes them in its prompt context. So your job is to write chunks that are:
+
+- **Self-contained** -- a chunk should make sense without surrounding text
+- **Dense** -- 100-300 words, no fluff, no "introduction to X is fascinating" filler
+- **Declarative** -- not Q&A; state facts and rules directly
+- **Specific** -- include numbers, formulas, named concepts, cited rules
+- **Retrieval-friendly** -- if a user asks "explain the uncertainty principle", the chunk titled "Heisenberg uncertainty principle" should be the top hit
+
+## Mix per domain
+
+Aim for roughly:
+- **8 principle** chunks -- core concepts, definitions, fundamental laws or terminology
+- **12 decisionRule** chunks -- "when X, do Y because Z" -- the heuristics an agent uses to reason in this domain
+- **10 factExample** chunks -- specific facts, named examples, common patterns, concrete numbers
+
+The split doesn't have to be exact. If a domain is more rule-heavy (law, medicine), bias toward decisionRule. If it's more conceptual (philosophy, theory), bias toward principle.
+
+{{if .broadSurvey}}
+## Broad-survey mode (this domain spans many sub-areas)
+
+This domain's scope covers multiple millennia, civilizations, sub-disciplines, or comparable axes. The default 30-chunk budget produces ~5 chunks per major sub-area, which leaves named events / works / figures invisible to retrieval -- a user asking specifically about, say, the Bronze Age Collapse retrieves a generic "Imperial administration" overview at 0.4 cosine similarity and the agent honestly declines to cite. Don't let that happen here.
+
+For this generation:
+
+- **Aim for {{if .targetCount}}~{{.targetCount}}{{else}}60{{end}} chunks** -- you have room to cover the territory at retrievable depth.
+- **Bias factExample to 25-30 of the total.** Each factExample chunk title should NAME a specific event, person, work, location, or framework someone might explicitly ask about by name -- "Battle of Marathon, 490 BCE", "Reign of Hatshepsut, ~1479-1458 BCE", "Bronze Age Collapse, ~1200-1150 BCE", "Eric Cline's 1177 BC thesis". A good rule of thumb: if a knowledgeable friend would say "what about X?" for a major X in this domain, you should have a chunk approximately titled X.
+- **Cover EVERY major sub-area with at least 3-5 dense chunks.** For history domains, that means each major civilization / region / period gets dedicated coverage; don't lavish 15 chunks on Greece + Rome and 2 on Mesopotamia.
+- **Date everything.** factExample chunks for historical / temporal domains MUST carry specific dates or date ranges in the title and body. "Battle of Marathon" without "490 BCE" is a worse retrieval target.
+- **Name the scholarly frameworks.** If there's an established named thesis, school, or model that explains a contested topic (e.g. Cline's "perfect storm" model for the Bronze Age Collapse, the "Pirenne thesis" for medieval economic collapse), give it its own chunk titled after the named framework.
+
+Before you finalise: skim your chunk titles. If you see two chunks that could share a title, you've left a sub-area uncovered. Trade one for an unrepresented topic.
+{{end}}
+
+{{if eq .tier "B"}}
+## Tier-B framing (safety-relevant)
+
+This is a safety-relevant domain. The seeder will prepend a separate "general info, not professional advice" disclaimer chunk before your generated content. You don't need to repeat that disclaimer in every chunk, BUT:
+
+- Don't write actionable instructions that could cause harm if followed without expert oversight (e.g. don't say "for chest pain, take aspirin" -- say "chest pain warrants prompt evaluation; don't self-diagnose").
+- Frame medication, dosage, treatment, legal-action, financial-investment specifics as "this is the general framework; consult a licensed [doctor / attorney / advisor] for your specific situation".
+- Cite professional standards or evidence base where you state a rule.
+
+The agent's job is to be a knowledgeable conversationalist, not a substitute for a licensed professional.
+{{end}}
+
+## Style examples
+
+A good `principle` chunk for `physics_quantum_mechanics`:
+
+> **title:** "Heisenberg uncertainty principle"
+> **body:** Position and momentum of a particle cannot both be measured to arbitrary precision simultaneously. The product of standard deviations is bounded by ℏ/2. Practically: localizing a particle to within Δx requires momentum uncertainty of at least ℏ/(2Δx). Not a measurement limitation -- a fundamental property of quantum systems. Same applies to other conjugate pairs (energy/time). Origin: x̂ and p̂ operators don't commute, [x̂,p̂] = iℏ. Used to bound zero-point energy of harmonic oscillators and derive minimum widths of quantum wave packets.
+> **keyTerms:** ["uncertainty", "complementarity", "wave function", "operators", "Planck constant"]
+
+A good `decisionRule` chunk for `cs_databases`:
+
+> **title:** "When to denormalize a relational schema"
+> **body:** Denormalize when read performance is the bottleneck and writes are infrequent: report-style tables, search indexes, materialized aggregates. Pre-conditions: profiling shows joins dominate latency; the redundant data has a clear update story (cron job, trigger, application-level dual-write); the read pattern is stable. Don't denormalize speculatively -- normalized schemas catch bugs that denormalized ones smear across rows. Common safe denormalizations: counter caches (likes_count on a post), latest-value rollups (last_seen_at on a user), pre-joined search projections rebuilt nightly. Avoid denormalizing transactional data where readers and writers race.
+> **keyTerms:** ["normalization", "OLAP vs OLTP", "materialized views", "counter caches", "read amplification"]
+
+A good `factExample` chunk for `hist_ancient`:
+
+> **title:** "Battle of Marathon, 490 BCE"
+> **body:** Athenian + Plataean force of ~10,000 hoplites defeated a Persian invasion army (~25,000 under Datis and Artaphernes) on the plain of Marathon, 26 miles from Athens. Greek phalanx tactics + battlefield positioning along the marshes neutralized the Persian numerical and cavalry advantages. Casualty asymmetry per Herodotus: 192 Greek dead, 6,400 Persian. Strategic significance: ended the first Persian invasion of Greece; Persia returned a decade later under Xerxes (Thermopylae, Salamis, Plataea). Cultural legacy: the marathon footrace commemorates the messenger Pheidippides reporting the victory in Athens.
+> **keyTerms:** ["Persian Wars", "phalanx", "Pheidippides", "Greco-Persian Wars", "Herodotus"]
+
+## A bad chunk (don't do this)
+
+> "Quantum mechanics is a fascinating field of physics that explores the smallest scales. It has revolutionized our understanding of the universe and has many practical applications including lasers, semiconductors, and MRI machines."
+
+Vague, no specifics, no formula, generic praise -- useless for retrieval.
+
+## Output
+
+Generate the chunks now for "{{.domainName}}". Use the schema's `chunks` array. Each chunk is `{kind, title, body, keyTerms}`. `kind` is one of `principle`, `decisionRule`, `factExample`. Aim for ~30 chunks total with the rough mix described above. If the domain is narrow and 30 is forced filler, prefer 15-20 dense chunks over 30 weak ones.

@@ -1,0 +1,24 @@
+package webtempl
+
+// MeDashboardData drives /me/. The page is a thin shell — app.js
+// hydrates the overview panel by fetching account data from
+// /auth/refresh and friends.
+type MeDashboardData struct {
+	Layout LayoutData
+}
+
+templ MeDashboard(data MeDashboardData) {
+	@Layout(data.Layout) {
+		<div class="me-shell">
+			@meSidebar("overview", false)
+			<section>
+				<div class="card card-wide">
+					<h1 class="card-title">Your account</h1>
+					<div data-content="overview">
+						<p class="text-muted"><span class="spinner"></span> Loading your account&hellip;</p>
+					</div>
+				</div>
+			</section>
+		</div>
+	}
+}

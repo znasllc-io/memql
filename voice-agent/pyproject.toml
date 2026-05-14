@@ -1,0 +1,50 @@
+[project]
+name = "memql-voice-agent"
+version = "0.1.0"
+description = "memql realtime voice + video pipeline (LiveKit Agents 1.5, Deepgram, Anam)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Visionarys", email = "engineering@visionarys.io" }]
+
+dependencies = [
+    "livekit-agents>=1.5.0",
+    "livekit-plugins-deepgram>=1.5.0",
+    "livekit-plugins-silero>=1.5.0",
+    "grpcio>=1.62.0",
+    "grpcio-tools>=1.62.0",
+    "protobuf>=4.25.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+# Avatar vendors. Install only the one selected by MEMQL_AVATAR_VENDOR.
+anam = ["livekit-plugins-anam>=1.5.0"]
+simli = ["livekit-plugins-simli>=1.5.0"]
+# Dev tooling.
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+memql-voice-agent = "voice_agent.main:run"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["voice_agent*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

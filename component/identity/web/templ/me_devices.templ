@@ -1,0 +1,34 @@
+package webtempl
+
+// MeDevicesData drives /me/devices. Sessions are populated client-side
+// from /me/devices.json by app.js.
+type MeDevicesData struct {
+	Layout LayoutData
+}
+
+templ MeDevices(data MeDevicesData) {
+	@Layout(data.Layout) {
+		<div class="me-shell">
+			@meSidebar("devices", false)
+			<section>
+				<div class="card card-wide">
+					<h1 class="card-title">Active sessions</h1>
+					<p class="card-subtitle">
+						Each row is a browser or app currently signed in to your account.
+						Revoke any session you don't recognize, or sign out everywhere
+						to revoke all of them at once.
+					</p>
+					<div data-content="devices">
+						<p class="text-muted"><span class="spinner"></span> Loading your sessions&hellip;</p>
+					</div>
+					<hr/>
+					<form method="POST" action="/me/devices/revoke-all" data-submit-once>
+						<button type="submit" class="btn btn-danger">
+							Sign out everywhere
+						</button>
+					</form>
+				</div>
+			</section>
+		</div>
+	}
+}

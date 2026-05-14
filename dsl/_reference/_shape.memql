@@ -1,0 +1,243 @@
+// =============================================================================
+// MemQL Shape Reference
+// =============================================================================
+//
+// This file is the source of truth for `shape` syntax. It is NOT loaded by
+// the engine (the leading underscore on the path tells every walker to
+// skip it). Every shape-level annotation, every body form, every kind
+// (concept-bound, trait, caller, mixed), and every rejected form is
+// demonstrated below with inline commentary.
+//
+// A shape is a projection template. Queries and mutations apply shapes to
+// rows; specs bind to shapes to express predicates over projected fields.
+// Shapes have NO inputs, NO outputs -- the body is a list of field paths
+// and optional `include` statements.
+//
+// =============================================================================
+//   1. Shape-level annotations
+// =============================================================================
+//
+// Every annotation goes above the `shape` keyword. The full author surface
+// is FOUR annotations:
+//
+//   @description("text")        Human-readable description.       optional
+//   @row                        Kind marker: projects row fields. optional*
+//   @caller                     Kind marker: projects auth envelope. optional*
+//   @useConcept(<bareName>, ...) Concept binding (repeatable).    optional
+//
+//   (* a shape must carry at least one of @row / @caller. Both is
+//      allowed but no current users exist.)
+//
+// Anything else is rejected at parse time with
+//
+//      `unknown shape annotation @<name> -- the supported surface is
+//       @description, @row, @caller, @useConcept`
+//
+// =============================================================================
+//   2. Canonical concept-bound shape -- the most common case
+// =============================================================================
+//
+// A concept-bound shape declares `@row` (project row fields) plus
+// `@useConcept(N)` (which concept's payload). The body lists the row
+// intrinsics and payload fields to project. Body translations:
+//
+//   row.X            -> row intrinsic (id, createdAt, createdBy, etc.)
+//   <bareName>.X     -> payload.X      (via @useConcept binding)
+//   payload.X        -> payload.X      (direct form)
+
+@row
+@useConcept(participant)
+@description("Comprehensive participant projection.")
+shape participantFull {
+  row.id
+  participant.spaceId
+  participant.userId
+  participant.displayName
+  participant.status
+  row.createdAt
+  row.createdBy
+}
+
+// =============================================================================
+//   3. Trait shape -- concept-agnostic row scaffold
+// =============================================================================
+//
+// A trait shape is `@row` WITHOUT `@useConcept(...)`. It declares row
+// fields that any concept might have. Specs bind to trait shapes via
+// `@useShape(N)` to express predicates that apply across many concepts.
+//
+// Trait shapes shipped under `dsl/common/shapes.memql`:
+//   activeRowTrait      payload.active
+//   statusRowTrait      payload.status
+//   deletedRowTrait     payload.deleted
+//   archivedRowTrait    payload.archivedAt
+//   savedRowTrait       payload.savedAt
+//   validationRowTrait  payload.validationStatus + checkedAt + confirmedAt
+
+@row
+@description("Concept-agnostic scaffold for predicates that check payload.active.")
+shape activeRowTrait {
+  payload.active
+}
+
+@row
+@description("Concept-agnostic scaffold for predicates that check payload.status.")
+shape statusRowTrait {
+  payload.status
+}
+
+// =============================================================================
+//   4. Caller shape -- auth envelope projection
+// =============================================================================
+//
+// A caller shape declares `@caller` (project auth envelope) instead of
+// `@row`. Body paths reference `caller.*` fields. The canonical example
+// is `callerActor`, used by every context-spec via @useShape(callerActor).
+
+@caller
+@description("Caller envelope projection: authenticated actor, role, partition, and now.")
+shape callerActor {
+  caller.userId
+  caller.role
+  caller.identityId
+  caller.isClusterOwner
+  caller.partitions
+  caller.partition
+  caller.now
+}
+
+// =============================================================================
+//   5. @useConcept -- repeatable, multi-concept bindings
+// =============================================================================
+//
+// @useConcept(N) can name a single bare concept. The annotation is
+// repeatable: a shape that projects fields from multiple concepts can
+// declare multiple @useConcept entries (or one entry with a comma-
+// separated list -- both forms accumulate).
+
+@row
+@useConcept(participant)
+@useConcept(space)
+@description("Hypothetical join projection drawing from both concepts.")
+shape participantWithSpaceContext {
+  row.id
+  participant.spaceId
+  participant.displayName
+  // space.* fields would be projected via a relationship-walked join
+}
+
+// =============================================================================
+//   6. Mixed @row + @caller -- both worlds
+// =============================================================================
+//
+// A shape MAY carry both kind markers. Body paths can then reference
+// both row fields and caller fields. The engine accepts this; no
+// current users exist.
+
+@row
+@caller
+@useConcept(participant)
+@description("Hypothetical mixed projection -- row + caller envelope.")
+shape participantWithCallerContext {
+  row.id
+  participant.displayName
+  caller.userId
+  caller.role
+}
+
+// =============================================================================
+//   7. Body path syntax
+// =============================================================================
+//
+// Each line in the body is one of:
+//
+//   <fieldPath>           Project the named field.
+//   // <comment>          Inline comment -- ignored by the parser.
+//
+// Field path translation rules:
+//
+//   row.X                Row intrinsic (no `payload.` prefix). Renders
+//                        in the projection under key X.
+//                        Intrinsics: id, createdAt, createdBy, concept,
+//                        partition, type, schema.
+//
+//   payload.X            Direct payload field reference. Renders under
+//                        key X. Use when you don't have a @useConcept
+//                        binding or want to be explicit.
+//
+//   <bareName>.X         Bare-name reference rewritten to `payload.X`
+//                        when @useConcept(<bareName>) is set. Renders
+//                        under key X. The canonical author surface for
+//                        concept-bound shapes.
+//
+//   caller.X             Auth-envelope reference. Requires @caller.
+
+@row
+@useConcept(participant)
+@description("Demonstrates the four path forms in one body.")
+shape pathSyntaxExample {
+  row.id                            // intrinsic
+  row.createdAt                     // intrinsic
+  participant.spaceId               // bare-name -> payload.spaceId
+  participant.displayName           // bare-name -> payload.displayName
+  payload.status                    // direct payload reference
+}
+
+// =============================================================================
+//   9. EXPLICITLY REJECTED on shapes
+// =============================================================================
+//
+//   @concepts("v1:foo:bar")
+//     The legacy fully-qualified-id binding form. Retired. Error:
+//
+//        `@concepts("v1:...") is retired -- bind the shape via
+//         @useConcept(<bareName>) (e.g. @useConcept(space)); the
+//         loader resolves bare names against the registry`
+//
+//   Any unknown annotation
+//     The parser hard-rejects with the full allow-list in the error.
+//     This is intentional: typos surface as load-time errors, not as
+//     silent no-ops.
+
+// =============================================================================
+//   10. The legacy `func (Shape) name(...) { ... }` form -- retired
+// =============================================================================
+//
+// The struct-form `shape NAME { ... }` is the only shape declaration
+// the parser accepts. The procedural function-receiver form was
+// retired during the consolidation. Attempting it produces a parser
+// receiver-type error.
+//
+//     // NOT VALID -- struct form is required.
+//     func (Shape) participantFull() { ... }
+
+// =============================================================================
+//   11. How shapes get consumed
+// =============================================================================
+//
+//   - From a query's `shape` clause:
+//
+//         use cognition.participant
+//         query foo {
+//           filter participant.spaceId == args.spaceId
+//           shape  participantFull
+//         }
+//
+//   - From a spec's @useShape binding:
+//
+//         @useShape(callerActor)
+//         spec requiresAdmin {
+//           caller.role == "admin"
+//         }
+//
+//     The shape must exist at engine startup. The post-load
+//     ValidateSpecBindings pass enforces this and errors with
+//
+//          `spec %q binds @useShape(%s) but no such shape is
+//           registered`
+//
+//     when a referenced shape is missing.
+//
+//   - From a mutation's `insert` / `update` body: payload field
+//     references inside the mutation correspond to the shape's
+//     projected fields.

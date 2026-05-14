@@ -1,0 +1,884 @@
+package memql
+
+import (
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	"github.com/visionarys-io/memql/component/language/compiler"
+	languageParser "github.com/visionarys-io/memql/component/language/parser"
+)
+
+// builtinFunctionDefinition represents the JSON schema for builtin function files.
+type builtinFunctionDefinition struct {
+	Name        string                        `json:"name"`
+	Description string                        `json:"description"`
+	Type        string                        `json:"type"`
+	Executor    string                        `json:"executor"`
+	Aliases     []string                      `json:"aliases,omitempty"`
+	Args        *builtinArgContractDefinition `json:"args,omitempty"`
+}
+
+type builtinArgContractDefinition struct {
+	Profile              string            `json:"profile,omitempty"`
+	StringKey            string            `json:"stringKey,omitempty"`
+	Required             []string          `json:"required,omitempty"`
+	Properties           map[string]string `json:"properties,omitempty"`
+	AdditionalProperties *bool             `json:"additionalProperties,omitempty"`
+}
+
+// loadBuiltinFunctions / loadEmbeddedFunctions are stubs as of
+// Pass 3 of the DSL restructure migration. The legacy walk over
+// dsl/v1/queries/, dsl/v1/mutations/, dsl/v1/logic/ was retired;
+// the real loading happens in LoadUnifiedFunctions + LoadUnifiedBuiltins
+// (component/memql/unified_functions_loader.go +
+// unified_kinds_loader.go) which read from dsl/<domain>/*.memql.
+// engine.go calls these stubs first (giving an empty registry the
+// unified loaders then fill) so the bootstrap signature is preserved.
+
+// loadBuiltinFunctions returns an empty map. See note above.
+func loadBuiltinFunctions(logger *slog.Logger) (map[string]*Function, error) {
+	_ = logger
+	return map[string]*Function{}, nil
+}
+
+// loadEmbeddedFunctions returns an empty registry. See note above.
+func loadEmbeddedFunctions(logger *slog.Logger, registry memoryNodes.Registry) (*FunctionRegistry, error) {
+	_ = logger
+	_ = registry
+	return newFunctionRegistry(), nil
+}
+
+// === Legacy walker code retired in Pass 3 ===
+// discoverBuiltinDirs / discoverFunctionVersionDirs / collectVersionDirs
+// / loadFlatFunctionFile / readEmbeddedFunctionFile /
+// expectedFunctionNameFromFile -- all deleted with the legacy walk.
+// Inert placeholder follows; the next block was the legacy walker.
+
+var _legacyWalkRetired = true // marker so the next deletion attempt is grep-able
+
+/*
+// LEGACY: the deleted block was a ~540-line implementation that
+// walked dsl/v1/queries/, dsl/v1/mutations/, dsl/v1/logic/ and
+// loaded each .memql file in turn. The unified loader's
+// LoadUnifiedFunctions / LoadUnifiedBuiltins handle the same work
+// against the new dsl/<domain>/*.memql tree.
+*/
+
+// discoverBuiltinDirsRetired is a sentinel-shaped function preserved
+// for grep history. It returns nothing.
+func discoverBuiltinDirsRetired(versionDir string) ([]string, error) { _ = versionDir; return nil, nil }
+// (allowing blank lines) from a function .memql file. This is used for on-demand
+// agent guidance (describeFunction/help), not for execution.
+func extractLeadingCommentBlock(content string) string {
+	lines := strings.Split(content, "\n")
+	var out []string
+	started := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			started = true
+			// Strip the leading // and one optional space.
+			txt := strings.TrimSpace(strings.TrimPrefix(trimmed, "//"))
+			out = append(out, txt)
+			continue
+		}
+		if trimmed == "" && started {
+			out = append(out, "")
+			continue
+		}
+		// Stop at the first non-comment content after we've started.
+		if started {
+			break
+		}
+		// Skip leading blank lines before comments.
+	}
+	joined := strings.TrimSpace(strings.Join(out, "\n"))
+	return joined
+}
+
+// tryParseNewFunctionSyntax attempts to parse a function .memql file using the new syntax:
+// @enabled
+// @description("...")
+// query functionName() { expression }
+//
+// Enforces CQS file composition rules:
+//   - Max 1 mutation per file (can have supporting queries)
+//   - Unlimited queries per file
+//   - Automations should be in automations/ directory, not queries/mutations
+func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry) (*Function, error) {
+	// Apply every struct-form rewriter defensively here too -- callers
+	// that don't go through loadFlatFunctionFile (tests, ad-hoc uses)
+	// would otherwise see a raw struct-form shape the legacy parser
+	// doesn't grok. Per-stage errors are swallowed (best-effort
+	// normalisation; the eventual parse failure is the actual signal).
+	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
+		content = rewritten
+	}
+
+	// Keep the pre-translation source for the declared-usage validator
+	// (Phase G.3.g pt 4). The validator checks `@useConcept(<name>)`
+	// against `\b<name>\.` references in the body, which would already
+	// be translated to `payload.` if we ran it on the post-translation
+	// source.
+	rawSourceForUsage := content
+
+	// Concept-namespace path translation. A function bound via
+	// `@useConcept(name)` writes payload references in the canonical
+	// `<name>.X` form (e.g. `space.name`). Translate every occurrence
+	// of `\b<name>\.` to `payload.` BEFORE the parser sees the source,
+	// so downstream evaluator code keeps reading rows under its
+	// existing `payload.X` accessor without any AST-level changes.
+	//
+	// Operates on the post-rewrite source so both struct-form and
+	// procedural-form bodies are covered uniformly. The translation
+	// is naive `\b<name>\.` replacement -- it intentionally rewrites
+	// `<name>.` occurrences in comments / docstrings too (comments
+	// don't affect parsing, and the rewrite reads as a clarifying
+	// "this is payload data" annotation rather than a mis-edit).
+	if name, ok := extractUseConceptName(content); ok && name != "" {
+		content = translateConceptPathsToPayload(content, name)
+	}
+	// Same naive rewrite for @useShape(<bareName>): the binding's
+	// effective concept is the shape's, but the body still references
+	// payload fields via `<bareName>.X` -- translate to `payload.X`.
+	if name, ok := extractUseShapeName(content); ok && name != "" {
+		content = translateConceptPathsToPayload(content, name)
+	}
+
+	// Try parsing with the full parser
+	lexer := languageParser.NewLexer(content)
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		return nil, err
+	}
+
+	p := languageParser.NewParser(tokens)
+	ast, err := p.Parse()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if we got a File with definitions
+	file, ok := ast.(*languageParser.File)
+	if !ok {
+		return nil, fmt.Errorf("expected File, got %T", ast)
+	}
+
+	if len(file.Definitions) == 0 {
+		return nil, fmt.Errorf("no definitions found")
+	}
+
+	// Resolve symbolic concept references. Trigger when EITHER a
+	// file-top `use` directive OR a function-def `@useConcept(...)`
+	// annotation is present -- the resolver handles both.
+	if registry != nil && (len(file.Uses) > 0 || hasUseConceptAnnotation(file)) {
+		version := VersionFromFilePath(origin)
+		if version == "" {
+			version = "v1" // default
+		}
+		resolver := NewConceptResolver(registry)
+		if err := resolver.ResolveFile(file, version); err != nil {
+			return nil, fmt.Errorf("concept resolution: %w", err)
+		}
+	}
+
+	// Set BoundConcept from the resolved use declaration OR a
+	// `@useConcept(<name>)` annotation on the function definition. The
+	// resulting fully-qualified concept ID is the implicit binding
+	// for bare `concept` in query expressions and argument-less
+	// `insert()` calls. Exactly one binding source is permitted; the
+	// concept-resolver guards against collisions.
+	var boundConcept string
+	if len(file.Uses) == 1 {
+		if file.Uses[0].ResolvedId != "" {
+			boundConcept = file.Uses[0].ResolvedId
+		} else {
+			// Fallback when registry is nil (no concept resolver ran):
+			// construct concept ID from the use path + version context.
+			version := VersionFromFilePath(origin)
+			if version == "" {
+				version = "v1"
+			}
+			parts := file.Uses[0].Parts
+			startIdx := 0
+			if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
+				version = parts[0]
+				startIdx = 1
+			}
+			if len(parts)-startIdx >= 2 {
+				boundConcept = version + ":" + strings.Join(parts[startIdx:], ":")
+			}
+		}
+	}
+	if boundConcept == "" {
+		if id, err := boundConceptFromUseAnnotation(file, registry); err != nil {
+			return nil, fmt.Errorf("function %q: %w", expectedName, err)
+		} else if id != "" {
+			boundConcept = id
+		}
+	}
+
+	// Enforce single-use rule for queries and mutations. Each query or
+	// mutation operates on at most one concept (declared via its single
+	// use declaration). Multiple use declarations on a query/mutation are
+	// a parse error. Zero use declarations are allowed -- some queries
+	// wrap a builtin (`queryVersion` -> `memqlVersion()`) and never
+	// reference a bare `concept` or argumentless `insert()`. If a
+	// no-use function tries to reference a bare concept at runtime,
+	// execution will fail with an unresolved-reference error; this
+	// loader does not preemptively reject that case.
+	// Automations, prompts, and other types are exempt.
+	if len(file.Definitions) > 0 {
+		if fd, ok := file.Definitions[0].(*languageParser.FunctionDef); ok {
+			switch fd.Type {
+			case languageParser.FunctionTypeQuery, languageParser.FunctionTypeMutation:
+				if len(file.Uses) > 1 {
+					return nil, fmt.Errorf("function %q: query/mutation functions must have at most one use declaration (found %d)", expectedName, len(file.Uses))
+				}
+			}
+		}
+	}
+
+	// Validate file composition (CQS rules)
+	if err := compiler.ValidateFileComposition(file); err != nil {
+		return nil, fmt.Errorf("file composition error: %w", err)
+	}
+
+	// Check for automations in named-function directories (should be in automations/)
+	comp := compiler.AnalyzeComposition(file)
+	if comp.Automations > 0 {
+		return nil, fmt.Errorf("automation definitions should be in automations/ directory, not query/mutation files")
+	}
+
+	// Get the primary definition (mutation or first query)
+	def := file.Definitions[0]
+	funcDef, ok := def.(*languageParser.FunctionDef)
+	if !ok {
+		return nil, fmt.Errorf("expected FunctionDef, got %T", def)
+	}
+
+	// Find the primary definition (mutation takes precedence over queries)
+	for _, d := range file.Definitions {
+		if fd, ok := d.(*languageParser.FunctionDef); ok {
+			if fd.Type == languageParser.FunctionTypeMutation {
+				funcDef = fd
+				break
+			}
+		}
+	}
+
+	if err := validateStrictFunctionContract(funcDef, expectedName, content); err != nil {
+		return nil, err
+	}
+
+	// Declared-must-be-used enforcement (Phase G.3.g pt 4). Every
+	// `@use*(target)` annotation and every declared args field must be
+	// referenced in the body somewhere; stale declarations error here.
+	if err := validateDeclaredUsage(rawSourceForUsage, funcDef); err != nil {
+		return nil, err
+	}
+
+	// Validate the function name matches the file-derived function name.
+	if funcDef.Name != "" && funcDef.Name != expectedName {
+		return nil, fmt.Errorf("function name %q does not match expected name %q", funcDef.Name, expectedName)
+	}
+	if expectedKind != "" && !strings.EqualFold(string(funcDef.Type), expectedKind) {
+		return nil, fmt.Errorf("function %q kind %q does not match expected kind %q from filename", expectedName, funcDef.Type, expectedKind)
+	}
+
+	// Convert to Function struct
+	fn := &Function{
+		Name:         expectedName,
+		Description:  funcDef.Description,
+		FunctionKind: string(funcDef.Type),
+		BoundConcept: boundConcept,
+		Origin:       origin,
+		// Attribute values
+		Enabled:    funcDef.Enabled,
+		Deprecated: funcDef.Deprecated,
+		Version:    funcDef.Version,
+		Internal:   funcDef.Internal,
+		Role:       funcDef.Role,
+		Permission: funcDef.Permission,
+		Timeout:    funcDef.Timeout,
+		CacheTTL:   funcDef.CacheTTL,
+		Retry:      funcDef.Retry,
+		Idempotent: funcDef.Idempotent,
+		Audit:      funcDef.Audit,
+	}
+
+	// Handle rate limit
+	if funcDef.RateLimit != nil {
+		fn.RateLimitRequests = funcDef.RateLimit.Requests
+		fn.RateLimitPer = funcDef.RateLimit.Per
+	}
+
+	// Handle args assertions populated from the function's args block.
+	if funcDef.ArgsSchema != nil {
+		fn.ArgsSchema = convertArgsSchema(funcDef.ArgsSchema)
+	}
+
+	// Extract and convert expression from the body
+	// The parser produces languageParser.ExpressionNode types, but the executor expects
+	// memql.ExpressionNode types. We use the AST converter to bridge this gap.
+	if funcDef.Body != nil {
+		switch funcDef.Type {
+		case languageParser.FunctionTypeMutation:
+			// Mutation functions: parse the mutation statement into a runtime template.
+			stmt, ok := funcDef.Body.(*languageParser.MutationStmt)
+			if !ok || stmt == nil {
+				return nil, fmt.Errorf("function %q mutation body must be an insert() statement, got %T", expectedName, funcDef.Body)
+			}
+
+			payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+			}
+
+			// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
+			// If the payloadObj includes an id or payload key, normalize them.
+			var idTemplate any = stmt.IDTemplate
+			var createdAtTemplate any = stmt.CreatedAtTemplate
+			var payloadTemplate any = payloadObj
+			if payloadObj != nil {
+				if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
+					idTemplate = idVal
+				}
+				if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
+					createdAtTemplate = createdAtVal
+				}
+				if payloadVal, ok := payloadObj["payload"]; ok {
+					// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
+					payloadTemplate = payloadVal
+				}
+				// Remove id if it was embedded inside the object literal.
+				delete(payloadObj, "id")
+				delete(payloadObj, "createdAt")
+				delete(payloadObj, "payload")
+				// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
+				if payloadTemplate == nil {
+					payloadTemplate = payloadObj
+				}
+			}
+
+			parentTemplate := stmt.ParentTemplate
+			aliasOfTemplate := stmt.AliasOfTemplate
+
+			// If the mutation body didn't specify a concept (implicit from use),
+			// fill it from BoundConcept.
+			mutationConcept := stmt.Concept
+			if mutationConcept == "" && boundConcept != "" {
+				mutationConcept = boundConcept
+			}
+			fn.MutationTemplate = &FunctionMutationTemplate{
+				Kind:              stmt.Kind,
+				Concept:           mutationConcept,
+				IDTemplate:        idTemplate,
+				CreatedAtTemplate: createdAtTemplate,
+				PayloadTemplate:   payloadTemplate,
+				ParentTemplate:    parentTemplate,
+				AliasOfTemplate:   aliasOfTemplate,
+			}
+			fn.ExprSource = extractExpressionFromContent(content)
+
+		default:
+			// Query functions: convert the expression AST to executable engine AST.
+			if parserExpr, ok := funcDef.Body.(languageParser.ExpressionNode); ok {
+				converter := NewASTConverter()
+				engineExpr, err := converter.ConvertExpression(parserExpr)
+				if err != nil {
+					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
+				}
+				// Resolve bare `concept` keyword: if the expression (or
+				// any sub-expression) is a SpecReferenceExpression with
+				// Name "concept", replace it with a ComparisonExpression
+				// that binds to the function's use-declared concept.
+				if boundConcept != "" {
+					engineExpr = resolveBareConcept(engineExpr, boundConcept)
+				}
+				fn.Expr = engineExpr
+				fn.ExprSource = extractExpressionFromContent(content)
+			} else {
+				return nil, fmt.Errorf("function %q body is not an expression node: %T", expectedName, funcDef.Body)
+			}
+		}
+	} else {
+		slog.Warn("function definition body is nil", "expectedName", expectedName)
+	}
+
+	return fn, nil
+}
+
+// useConceptAnnotSourceRe matches a `@useConcept(<bareName>)` annotation
+// in raw .memql source. Single bare name only -- the canonical
+// query/mutation form. The submatch captures the bare name.
+var useConceptAnnotSourceRe = regexp.MustCompile(`@useConcept\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
+
+// useShapeAnnotSourceRe matches a `@useShape(<bareName>)` annotation in
+// raw .memql source. Same pattern as useConcept; the binding form on
+// specs that prefer to bind to a shape (the shape's concept becomes
+// the spec's effective concept).
+var useShapeAnnotSourceRe = regexp.MustCompile(`@useShape\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
+
+// extractUseConceptName scans raw .memql source for a single-name
+// `@useConcept(<bareName>)` annotation and returns the bare name.
+// Returns ("", false) when no annotation is present.
+func extractUseConceptName(source string) (string, bool) {
+	m := useConceptAnnotSourceRe.FindStringSubmatch(source)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// extractUseShapeName scans raw .memql source for a single-name
+// `@useShape(<bareName>)` annotation and returns the bare name.
+// Returns ("", false) when no annotation is present.
+func extractUseShapeName(source string) (string, bool) {
+	m := useShapeAnnotSourceRe.FindStringSubmatch(source)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// translateConceptPathsToPayload rewrites every `\b<bareName>\.`
+// occurrence in `source` to `payload.`. The annotation itself
+// (`@useConcept(<bareName>)` / `@useShape(<bareName>)`) is preserved
+// because there's no trailing `.` after the bare name inside the
+// `(...)` argument context, so the regex doesn't match it.
+func translateConceptPathsToPayload(source, bareName string) string {
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(bareName) + `\.`)
+	return re.ReplaceAllString(source, "payload.")
+}
+
+// hasUseConceptAnnotation reports whether any function definition in
+// the parsed file carries a `@useConcept(...)` attribute. Used to gate
+// the concept-resolver pass for files that bind their concept via the
+// annotation instead of the legacy `use <ns>.<concept>` directive.
+func hasUseConceptAnnotation(file *languageParser.File) bool {
+	if file == nil {
+		return false
+	}
+	for _, def := range file.Definitions {
+		fn, ok := def.(*languageParser.FunctionDef)
+		if !ok {
+			continue
+		}
+		for _, attr := range fn.Attributes {
+			if attr != nil && attr.Name == languageParser.AttrUseConcept {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// boundConceptFromUseAnnotation resolves the file's `@useConcept(<name>)`
+// annotation to a fully-qualified concept id via the registry's
+// trailing-segment match. Used to derive `BoundConcept` for files
+// that bind their concept via the annotation instead of the legacy
+// `use <ns>.<concept>` directive.
+//
+// Returns an empty string with no error when no annotation is present
+// (so the caller can fall through to other binding paths). Returns
+// an error when the annotation is present but unresolvable.
+func boundConceptFromUseAnnotation(file *languageParser.File, registry memoryNodes.Registry) (string, error) {
+	if file == nil || registry == nil {
+		return "", nil
+	}
+	var picked string
+	for _, def := range file.Definitions {
+		fn, ok := def.(*languageParser.FunctionDef)
+		if !ok {
+			continue
+		}
+		for _, attr := range fn.Attributes {
+			if attr == nil || attr.Name != languageParser.AttrUseConcept {
+				continue
+			}
+			targets := attr.UseTargets()
+			if len(targets) == 0 {
+				continue
+			}
+			if len(targets) > 1 {
+				return "", fmt.Errorf("@useConcept on a query/mutation must name exactly one concept (got %d: %s)", len(targets), strings.Join(targets, ", "))
+			}
+			name := targets[0]
+			resolver := NewConceptResolver(registry)
+			id, err := resolver.resolveBareConceptName(name)
+			if err != nil {
+				return "", fmt.Errorf("@useConcept(%s): %w", name, err)
+			}
+			if picked != "" && picked != id {
+				return "", fmt.Errorf("multiple @useConcept annotations on the same function resolve to different concepts (%q and %q)", picked, id)
+			}
+			picked = id
+		}
+	}
+	return picked, nil
+}
+
+// resolveBareConcept walks an expression tree and replaces any bare
+// `concept` reference (a SpecReferenceExpression with Name "concept")
+// with a ComparisonExpression{concept == boundConcept}. This supports
+// the implicit concept binding syntax where `use cluster.node` +
+// `return concept, nil` is equivalent to `return concept==v1:cluster:node, nil`.
+func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode {
+	if expr == nil {
+		return nil
+	}
+	switch n := expr.(type) {
+	case *SpecReferenceExpression:
+		if n.Name == "concept" {
+			return &ComparisonExpression{
+				Field: FieldReference{
+					Raw:   "concept",
+					Parts: []string{"concept"},
+				},
+				Operator: OpEq,
+				Value:    boundConcept,
+			}
+		}
+		return n
+	case *LogicalExpression:
+		return &LogicalExpression{
+			Op:    n.Op,
+			Left:  resolveBareConcept(n.Left, boundConcept),
+			Right: resolveBareConcept(n.Right, boundConcept),
+		}
+	case *RelationshipExpression:
+		return &RelationshipExpression{
+			Function: n.Function,
+			Target:   resolveBareConcept(n.Target, boundConcept),
+		}
+	case *SortExpression:
+		return &SortExpression{
+			Fields: n.Fields,
+			Target: resolveBareConcept(n.Target, boundConcept),
+		}
+	case *PaginateExpression:
+		return &PaginateExpression{
+			Limit:  n.Limit,
+			Offset: n.Offset,
+			Target: resolveBareConcept(n.Target, boundConcept),
+		}
+	case *ShapeExpression:
+		return &ShapeExpression{
+			Target:        resolveBareConcept(n.Target, boundConcept),
+			Template:      n.Template,
+			TemplateName:  n.TemplateName,
+			IncludeBundle: n.IncludeBundle,
+		}
+	default:
+		return expr
+	}
+}
+
+// extractExpressionFromContent extracts the expression part from a function definition.
+func extractExpressionFromContent(content string) string {
+	// Find the content between { and the last }
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		return strings.TrimSpace(content[start+1 : end])
+	}
+	return content
+}
+
+func validateStrictFunctionContract(funcDef *languageParser.FunctionDef, expectedName, content string) error {
+	if funcDef == nil {
+		return fmt.Errorf("function %q: definition is nil", expectedName)
+	}
+
+	switch funcDef.Type {
+	case languageParser.FunctionTypeQuery:
+		if len(funcDef.Args) != 1 || !strings.EqualFold(strings.TrimSpace(funcDef.Args[0].Type), "any") {
+			return fmt.Errorf("function %q: query signature must be (args any)", expectedName)
+		}
+		if len(funcDef.Returns) != 2 ||
+			!strings.EqualFold(strings.TrimSpace(funcDef.Returns[0]), "any") ||
+			!strings.EqualFold(strings.TrimSpace(funcDef.Returns[1]), "error") {
+			return fmt.Errorf("function %q: query return signature must be (any, error)", expectedName)
+		}
+		if !functionBodyStartsWithReturn(content) {
+			return fmt.Errorf("function %q: query body must start with 'return'", expectedName)
+		}
+	case languageParser.FunctionTypeMutation:
+		if len(funcDef.Args) != 1 || !strings.EqualFold(strings.TrimSpace(funcDef.Args[0].Type), "any") {
+			return fmt.Errorf("function %q: mutation signature must be (args any)", expectedName)
+		}
+		if len(funcDef.Returns) != 1 || !strings.EqualFold(strings.TrimSpace(funcDef.Returns[0]), "error") {
+			return fmt.Errorf("function %q: mutation return signature must be error", expectedName)
+		}
+		if !functionBodyStartsWithReturn(content) {
+			return fmt.Errorf("function %q: mutation body must start with 'return'", expectedName)
+		}
+	}
+
+	return nil
+}
+
+func functionBodyStartsWithReturn(content string) bool {
+	funcIdx := strings.Index(content, "func ")
+	if funcIdx < 0 {
+		return false
+	}
+	start := strings.Index(content[funcIdx:], "{")
+	if start < 0 {
+		return false
+	}
+	start += funcIdx
+	end := strings.LastIndex(content, "}")
+	if start < 0 || end <= start {
+		return false
+	}
+	body := strings.TrimSpace(content[start+1 : end])
+
+	// Skip leading comments and blank lines to find the first statement.
+	// Accept either:
+	//   - legacy form: body starts with `return ...`
+	//   - new ctx-envelope form: body starts with `ctx.output = ...`
+	// Both shapes produce the same AST through the body parsers; the
+	// per-receiver structural check here just needs to recognise both
+	// as valid entry points.
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "return ") {
+			return true
+		}
+		if strings.HasPrefix(trimmed, "ctx.output") {
+			return true
+		}
+		return false
+	}
+
+	return false
+}
+
+// validateFunctions validates all parsed functions for correctness.
+// Checks for valid expressions and detects circular dependencies.
+func validateFunctions(functions map[string]*Function) error {
+	// Build dependency graph
+	deps := make(map[string][]string)
+	for name, fn := range functions {
+		refs := collectFunctionReferences(fn.Expr)
+		deps[name] = refs
+	}
+
+	// Check for circular dependencies
+	if cycle := detectFunctionCycle(deps); cycle != nil {
+		return fmt.Errorf("circular function dependency detected: %s", strings.Join(cycle, " -> "))
+	}
+
+	// Validate that referenced functions exist
+	for name, refs := range deps {
+		for _, ref := range refs {
+			if _, ok := functions[ref]; !ok {
+				return fmt.Errorf("function %q references unknown function %q", name, ref)
+			}
+		}
+	}
+
+	return nil
+}
+
+// collectFunctionReferences finds all FunctionCallExpression nodes in an expression tree.
+func collectFunctionReferences(expr ExpressionNode) []string {
+	var refs []string
+	collectFunctionRefsRecursive(expr, &refs)
+	return refs
+}
+
+func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
+	if expr == nil {
+		return
+	}
+
+	switch node := expr.(type) {
+	case *FunctionCallExpression:
+		*refs = append(*refs, node.Name)
+	case *BuiltinFunctionExpression:
+		// Builtin functions are not included in function references
+		// as they are handled directly by the executor
+	case *LogicalExpression:
+		collectFunctionRefsRecursive(node.Left, refs)
+		collectFunctionRefsRecursive(node.Right, refs)
+	case *RelationshipExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *SortExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *PaginateExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *SelectExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *TimestampExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *DepthExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *ShapeExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *ConditionalFilterExpression:
+		collectFunctionRefsRecursive(node.Filter, refs)
+	case *ArgRefExpression:
+		// ArgRefExpression doesn't reference functions
+	}
+}
+
+// detectFunctionCycle uses DFS to detect cycles in the function dependency graph.
+func detectFunctionCycle(deps map[string][]string) []string {
+	visited := make(map[string]bool)
+	recStack := make(map[string]bool)
+	path := make([]string, 0)
+
+	var dfs func(name string) []string
+	dfs = func(name string) []string {
+		visited[name] = true
+		recStack[name] = true
+		path = append(path, name)
+
+		for _, dep := range deps[name] {
+			if !visited[dep] {
+				if cycle := dfs(dep); cycle != nil {
+					return cycle
+				}
+			} else if recStack[dep] {
+				// Found cycle - find where it starts
+				cycleStart := -1
+				for i, p := range path {
+					if p == dep {
+						cycleStart = i
+						break
+					}
+				}
+				if cycleStart >= 0 {
+					cycle := append(path[cycleStart:], dep)
+					return cycle
+				}
+				return []string{dep, name, dep}
+			}
+		}
+
+		path = path[:len(path)-1]
+		recStack[name] = false
+		return nil
+	}
+
+	for name := range deps {
+		if !visited[name] {
+			if cycle := dfs(name); cycle != nil {
+				return cycle
+			}
+		}
+	}
+
+	return nil
+}
+
+func normalizeBuiltinArgContract(raw *builtinArgContractDefinition) (*BuiltinArgContract, error) {
+	if raw == nil {
+		return &BuiltinArgContract{Profile: BuiltinArgProfileNone}, nil
+	}
+	profile := BuiltinArgProfile(strings.TrimSpace(raw.Profile))
+	if profile == "" {
+		profile = BuiltinArgProfileNone
+	}
+	switch profile {
+	case BuiltinArgProfileNone, BuiltinArgProfileObject, BuiltinArgProfileOptionalObject,
+		BuiltinArgProfileStringOrObject, BuiltinArgProfileOptionalString, BuiltinArgProfileOptionalStringOrObject:
+	default:
+		return nil, fmt.Errorf("unsupported profile %q", raw.Profile)
+	}
+
+	contract := &BuiltinArgContract{
+		Profile:              profile,
+		StringKey:            strings.TrimSpace(raw.StringKey),
+		Required:             append([]string(nil), raw.Required...),
+		Properties:           nil,
+		AdditionalProperties: raw.AdditionalProperties,
+	}
+	if raw.Properties != nil {
+		contract.Properties = make(map[string]string, len(raw.Properties))
+		for key, typ := range raw.Properties {
+			key = strings.TrimSpace(key)
+			typ = strings.TrimSpace(strings.ToLower(typ))
+			if key == "" {
+				continue
+			}
+			contract.Properties[key] = typ
+		}
+	}
+
+	if profile == BuiltinArgProfileStringOrObject || profile == BuiltinArgProfileOptionalString || profile == BuiltinArgProfileOptionalStringOrObject {
+		if contract.StringKey == "" {
+			return nil, fmt.Errorf("profile %q requires stringKey", profile)
+		}
+	}
+	return contract, nil
+}
+
+func reportFunctionError(logger *slog.Logger, origin string, err error) {
+	if logger == nil || err == nil {
+		return
+	}
+	logger.Error("function skipped",
+		"component", ComponentName,
+		"file", filepath.Base(origin),
+		"error", err.Error(),
+	)
+}
+
+// convertArgsSchema converts languageParser.ArgsSchema to memql.ArgsSchemaConfig
+func convertArgsSchema(assertDef *languageParser.ArgsSchema) *ArgsSchemaConfig {
+	if assertDef == nil || len(assertDef.Fields) == 0 {
+		return nil
+	}
+
+	config := &ArgsSchemaConfig{
+		Fields:               make([]*FunctionArgsField, len(assertDef.Fields)),
+		AdditionalProperties: assertDef.AdditionalProperties,
+	}
+
+	for i, field := range assertDef.Fields {
+		config.Fields[i] = convertArgsField(field)
+	}
+
+	return config
+}
+
+// convertArgsField converts languageParser.ArgsField to memql.FunctionArgsField
+func convertArgsField(field *languageParser.ArgsField) *FunctionArgsField {
+	if field == nil {
+		return nil
+	}
+
+	result := &FunctionArgsField{
+		Name:                 field.Name,
+		Type:                 field.Type,
+		Optional:             field.Optional,
+		Enum:                 append([]any(nil), field.Enum...),
+		Minimum:              field.Minimum,
+		Maximum:              field.Maximum,
+		Format:               field.Format,
+		AdditionalProperties: field.AdditionalProperties,
+	}
+
+	if len(field.Nested) > 0 {
+		result.Nested = make([]*FunctionArgsField, len(field.Nested))
+		for i, nested := range field.Nested {
+			result.Nested[i] = convertArgsField(nested)
+		}
+	}
+	if field.Items != nil {
+		result.Items = convertArgsField(field.Items)
+	}
+
+	return result
+}

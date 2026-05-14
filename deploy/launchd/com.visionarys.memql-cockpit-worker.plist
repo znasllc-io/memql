@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    deploy/launchd/com.visionarys.memql-cockpit-worker.plist
+    =========================================================
+
+    Template LaunchAgent for memql-cockpit-worker on macOS. The
+    install script (scripts/install/install-mac.sh) copies this to
+    ~/Library/LaunchAgents/ with the binary path filled in.
+
+    LaunchAgent (per-user, runs after login) is the right choice
+    over LaunchDaemon (system-wide, runs before login) because the
+    GUI capability requires a logged-in user session for macOS TCC
+    permissions to apply.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.visionarys.memql-cockpit-worker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BINARY_PATH__</string>
+        <string>worker</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/worker.log</string>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+</dict>
+</plist>

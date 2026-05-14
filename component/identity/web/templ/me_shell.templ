@@ -1,0 +1,41 @@
+package webtempl
+
+// meSideLink renders one row of the /me/* sidebar.
+type meSideLink struct {
+	Href   string
+	Label  string
+	Active bool
+}
+
+// meSidebar is the shared left rail rendered on every /me/* page.
+// `active` is the slug of the current page so the matching link
+// gets the .active class.
+templ meSidebar(active string, includeTokens bool) {
+	<aside class="me-side">
+		<ul>
+			@meSideRow(meSideLink{Href: "/me/", Label: "Overview", Active: active == "overview"})
+			@meSideRow(meSideLink{Href: "/me/settings", Label: "Settings", Active: active == "settings"})
+			@meSideRow(meSideLink{Href: "/me/devices", Label: "Devices", Active: active == "devices"})
+			if includeTokens {
+				@meSideRow(meSideLink{Href: "/me/tokens", Label: "API tokens", Active: active == "tokens"})
+			}
+			@meSideRow(meSideLink{Href: "/me/export", Label: "Export data", Active: active == "export"})
+		</ul>
+		<hr/>
+		<ul>
+			<li>
+				<form method="POST" action="/auth/logout" data-submit-once style="margin:0;">
+					<button class="btn btn-secondary btn-block" type="submit">Sign out</button>
+				</form>
+			</li>
+		</ul>
+	</aside>
+}
+
+templ meSideRow(link meSideLink) {
+	if link.Active {
+		<li><a href={ templ.SafeURL(link.Href) } class="active">{ link.Label }</a></li>
+	} else {
+		<li><a href={ templ.SafeURL(link.Href) }>{ link.Label }</a></li>
+	}
+}

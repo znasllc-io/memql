@@ -1,0 +1,65 @@
+You are generating CROSS-DOMAIN bridge chunks for an agent specialised at the intersection of multiple knowledge domains. Output ONLY a JSON object matching the response schema -- no markdown, no prose.
+
+## What this is
+
+The agent has multiple knowledge domains assigned to it. Per-domain chunks already exist (one corpus per domain) and the agent retrieves from each at chat time. What's MISSING from per-domain content is the **intersection**: where these specific domains overlap, conflict, or compose into reasoning patterns that don't exist within any single domain alone.
+
+These bridge chunks fill that gap. They're a small supplementary corpus (~{{if .targetCount}}{{.targetCount}}{{else}}10{{end}} chunks) that the agent retrieves alongside its per-domain content. Cached by `(role, sortedDomains)`, so the same combination across many agents pays for this once.
+
+## Inputs
+
+**Agent role:** `{{.roleSlug}}` ({{.roleLabel}})
+
+The role MATTERS. A `customer_service` agent at the intersection of `accounting + tax_law` writes bridge content about explaining tax-driven pricing to customers. A `legal_compliance` agent at the same intersection writes bridge content about flagging tax-regulatory exposure. Same domains, different bridge.
+
+**Domains in this combination:**
+
+{{range .domains}}- **{{.name}}** ({{.id}}): {{.description}}
+{{end}}
+
+## Bridge chunk style
+
+Each chunk should be:
+
+- **Cross-domain** -- if it could have been written from inside ONE domain, it's not a bridge chunk. Bridge chunks NAME the interaction. Either:
+  - Two-domain interaction: "When {domain A's principle} meets {domain B's principle}, the resolution is X" / "{Domain A} treats Z as P, {domain B} treats Z as Q -- reconcile by..."
+  - Multi-domain composition: "For a {role} working across {A, B, C}, the recurring pattern is..."
+  - Role-shaped framing: "A {role} applying {domain A} typically prioritises X, but the {domain B} angle adds Y, so..."
+
+- **Concrete** -- name specific concepts, not "interesting connections."
+
+- **Short** -- 80-200 words. Bridges are dense pointers, not deep dives.
+
+- **Retrievable** -- a chunk titled "Tax-driven accounting choices in close-period reporting" should surface when the user asks Sofia about period close.
+
+## Examples
+
+For role=`accounting_finance`, domains=[accounting, tax_law]:
+
+> **title:** "Tax-deductible vs book expense: reconciliation rule"
+> **body:** Same expense can be fully deductible for tax (immediate, dollar-for-dollar) AND treated differently on the income statement (depreciated, amortised, or capitalised). The reconciliation lives in the deferred-tax workpapers: book basis - tax basis = temporary difference, multiplied by the effective rate, gives the deferred tax asset or liability. For an accountant who handles both: any expense that hits accounts payable should also flag against the tax-treatment matrix at month-end. Common slip: meals + entertainment partial deductibility (50% limit federally) tracked as if 100% deductible -- catches you at year-end provision.
+> **keyTerms:** ["deferred tax", "book-tax difference", "M-1", "temporary differences"]
+
+For role=`customer_service`, domains=[accounting, tax_law]:
+
+> **title:** "Explaining sales tax variance to customers"
+> **body:** Customer-facing situation: identical product, different tax burden across orders. Why: state + local sales-tax rates differ, ship-to vs bill-to address, drop-ship origins, taxable vs exempt customer status (resale certificate, non-profit). The CS-friendly framing: "Your tax was calculated using your shipping address's combined state and local rate. If you have a resale certificate or tax-exempt status we haven't recorded, send it to support and we'll re-issue the order." Don't quote tax law clauses -- customers find that condescending. Don't volunteer rate predictions for future orders -- rates change.
+> **keyTerms:** ["sales tax", "tax exempt", "resale certificate", "ship-to address"]
+
+Same two domains. Completely different bridges. The role is doing the work.
+
+For a 3-domain combo (role=`research_development`, domains=[cs_machine_learning, math_statistics, biology_neuroscience]):
+
+> **title:** "Why neuroscience-informed ML evaluation prefers per-subject splits"
+> **body:** ML practitioners default to random train/test splits; statisticians know this hides covariate structure; neuroscience adds the wrinkle that brain data has hierarchical confounders (subject identity, hemisphere, time-of-day). For an R&D agent at this intersection: when evaluating models on neural recordings, default to leave-one-subject-out cross-validation, not random splits. Justification anchors in all three fields: the ML pattern (hold out a coherent slice), the statistical pattern (the per-subject random effect is the largest variance component), and the neuroscience pattern (within-subject correlations near 1.0 inflate apparent generalisation). Pre-register the split scheme in any paper claiming generalisation.
+> **keyTerms:** ["leave-one-subject-out", "covariate confounding", "neural decoding", "hierarchical data"]
+
+Notice: every chunk EXPLICITLY names two or more of the input domains in the body. If a chunk doesn't, it's not a bridge -- it's just a regular per-domain chunk in disguise.
+
+## Output
+
+Generate ~{{if .targetCount}}{{.targetCount}}{{else}}10{{end}} chunks. Mix is mostly `decisionRule` (cross-domain heuristics) and `principle` (cross-domain conceptual rules). Use `factExample` sparingly -- bridges aren't the place for per-domain facts.
+
+Skip generation entirely (return chunks: []) ONLY if the input domain set has no real intersection -- e.g. `{quantum_mechanics, restaurant_dining}` for a `general_assistant`. In that case the bridge would be filler. Don't manufacture connections that aren't there.
+
+Output the JSON object now.

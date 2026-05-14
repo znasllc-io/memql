@@ -1,0 +1,50 @@
+package webtempl
+
+// MeSettingsData drives /me/settings. The profile + legal panels are
+// hydrated client-side; the deletion cooldown copy comes from config
+// and is pre-rendered server-side.
+type MeSettingsData struct {
+	Layout               LayoutData
+	DeletionCooldownDays int
+}
+
+templ MeSettings(data MeSettingsData) {
+	@Layout(data.Layout) {
+		<div class="me-shell">
+			@meSidebar("settings", false)
+			<section>
+				<div class="card card-wide">
+					<h1 class="card-title">Profile</h1>
+					<div data-content="profile">
+						<p class="text-muted"><span class="spinner"></span> Loading your profile&hellip;</p>
+					</div>
+				</div>
+				<div class="card card-wide mt-3">
+					<h1 class="card-title">Legal acceptance</h1>
+					<p class="card-subtitle">
+						Versions of our Terms of Service and Privacy Policy you've
+						agreed to.
+					</p>
+					<div data-content="legal">
+						<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
+					</div>
+				</div>
+				<div class="card card-wide mt-3">
+					<h1 class="card-title">Delete account</h1>
+					<p class="text-muted">
+						Account deletion enters a { formatInt(data.DeletionCooldownDays) }-day cooldown
+						window. You can cancel deletion any time during cooldown by
+						signing back in. After { formatInt(data.DeletionCooldownDays) } days, your
+						user record, sessions, and personal partition are permanently
+						removed.
+					</p>
+					<form method="POST" action="/me/settings/delete" data-submit-once>
+						<button type="submit" class="btn btn-danger">
+							Schedule account deletion
+						</button>
+					</form>
+				</div>
+			</section>
+		</div>
+	}
+}

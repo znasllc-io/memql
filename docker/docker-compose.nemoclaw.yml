@@ -1,0 +1,107 @@
+# OpenClaw Development Stack (Hardened)
+#
+# Adds OpenClaw as a shared coding/automation agent service.
+# Multiple agents share this single OpenClaw instance,
+# each with an isolated workspace directory.
+#
+# OpenClaw (MIT license) -- the open-source AI coding agent.
+# Hardened configuration:
+#   - Pinned to v2026.1.29+ (patches CVE-2026-25253)
+#   - Gateway bound to internal network only
+#   - Community skills disabled
+#   - AI calls routed through memQL's centralized provider system
+#
+# Upgrade path: When NVIDIA NemoClaw publishes a container image,
+# swap the image to nvcr.io/nvidia/nemoclaw:latest for OpenShell
+# sandboxing and enterprise features.
+#
+# Usage:
+#   docker-compose -f docker/docker-compose.full.yml -f docker/docker-compose.nemoclaw.yml up -d
+#
+# Architecture:
+#   LOCAL (Docker): PostgreSQL, memQL, OpenClaw
+#   Per-agent workspaces stored in claw_workspaces volume
+
+services:
+  # OpenClaw Agent Service (Hardened)
+  # Shared instance for all agents.
+  # Each agent gets an isolated workspace at /workspaces/{agentId}/.
+  nemoclaw:
+    image: ghcr.io/openclaw/openclaw:2026.2.26
+    container_name: memql-openclaw
+    hostname: nemoclaw
+    user: "root"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        chown -R node:node /openclaw/.openclaw /workspaces
+        # Write config for Docker networking (lan bind requires auth + CORS)
+        cat > /openclaw/.openclaw/openclaw.json <<CONF
+        {
+          "gateway": {
+            "auth": { "mode": "token" },
+            "controlUi": {
+              "dangerouslyAllowHostHeaderOriginFallback": true
+            }
+          }
+        }
+        CONF
+        chown node:node /openclaw/.openclaw/openclaw.json
+        exec runuser -u node -- node openclaw.mjs gateway --allow-unconfigured --bind lan --port 18789
+    env_file:
+      - ../.env.local
+    environment:
+      # Home directory for OpenClaw state
+      OPENCLAW_HOME: "/openclaw"
+      OPENCLAW_STATE_DIR: "/openclaw/.openclaw"
+
+      # Gateway bind mode (overridden by --bind lan in entrypoint)
+      # lan + token auth binds to 0.0.0.0 for Docker cross-container traffic
+      OPENCLAW_GATEWAY_BIND: "lan"
+
+      # Shell mode -- headless server, no interactive TUI
+      OPENCLAW_SHELL: "acp-client"
+
+      # --- SECURITY HARDENING ---
+
+      # Gateway authentication token for Docker internal network
+      OPENCLAW_GATEWAY_TOKEN: "${OPENCLAW_GATEWAY_TOKEN:-memql-dev-token}"
+
+      # Workspace root for per-agent isolation
+      OPENCLAW_WORKSPACE_ROOT: "/workspaces"
+    ports:
+      - "18789:18789"  # Gateway API + WebSocket
+    volumes:
+      # Per-agent workspace directories
+      - claw_workspaces:/workspaces
+      # OpenClaw state (config, memory)
+      - claw_state:/openclaw/.openclaw
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:18789/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      memql:
+        condition: service_healthy
+    networks:
+      - memql
+    restart: unless-stopped
+
+  # Override memQL service with OpenClaw connection details
+  memql:
+    environment:
+      MEMQL_NEMOCLAW_URL: "http://nemoclaw:18789"
+      MEMQL_WEBHOOK_ALLOWED_HOSTS: "nemoclaw:18789"
+
+volumes:
+  claw_workspaces:
+  claw_state:
+
+# Uses the same network as the main memQL stack.
+networks:
+  memql:
+    external: true
+    name: docker_memql

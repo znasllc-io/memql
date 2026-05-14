@@ -1,0 +1,164 @@
+# Polyphon Development Stack
+#
+# Adds LiveKit, Redis, and Bridge Agent to the standard memQL development
+# stack. The Bridge Agent talks to OpenAI Realtime + /v1/audio/speech for
+# ASR/TTS in Stage 1; Stage 2 of the Deepgram migration switches the default
+# to Deepgram Nova-3 + Aura-2.
+#
+# Usage:
+#   docker-compose -f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml up -d
+#
+# Architecture:
+#   LOCAL (Docker):  PostgreSQL, memQL, LiveKit, Redis, Bridge Agent
+#   Cloud (API):     OpenAI Realtime (ASR) + OpenAI /v1/audio/speech (TTS)
+
+services:
+  # LiveKit Server
+  # Open-source WebRTC SFU for multi-party audio rooms.
+  # Agents join rooms as participants; humans connect via LiveKit SDK in browser.
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: polyphon-livekit
+    hostname: livekit
+    # Use an explicit config file instead of --dev so we can pin
+    # rtc.node_ip to 127.0.0.1. With --dev's auto-detect, LiveKit
+    # advertises the container's internal IP (unreachable from the
+    # browser) plus a STUN-srflx public-IP candidate (typically
+    # blocked by home-router NAT loopback), and the browser's
+    # peer-connection negotiation fails with "could not establish
+    # pc connection" even though signaling came up cleanly.
+    command: --config /etc/livekit.yaml --bind 0.0.0.0
+    volumes:
+      - ./livekit/livekit-dev.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"   # HTTP + WebSocket signaling (proxied via wss://livekit.${DOMAIN})
+      - "7881:7881/tcp"  # RTC TCP fallback
+      - "7882:7882/udp"  # RTC UDP -- the browser-reachable media port
+    networks:
+      - memql
+    restart: unless-stopped
+
+  # Redis
+  # Shared conversation state for Polyphon sessions.
+  redis:
+    image: redis:7-alpine
+    container_name: polyphon-redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - memql
+    restart: unless-stopped
+
+  # Bridge Agent has been retired (Initiative C, Phase 11). The Python
+  # voice-agent (under voice-agent/, defined below) is now the sole
+  # voice participant for the General Assistant in LiveKit rooms.
+  # See docs/voice/ for the architecture.
+
+  # Stamp LiveKit env on every memQL node that
+  # touches the voice path. The BFF mints LiveKit room tokens for
+  # browsers (PolyphonRoomTokenMsg gRPC) and dispatches a join
+  # request to the Bridge Agent; the voice node forwards
+  # transcription work; the cognition node forwards agent responses
+  # to the Bridge Agent for TTS publication. The legacy `memql:`
+  # override block targeted a single-binary service that no longer
+  # exists in docker-compose.full.yml -- the cluster split moved
+  # the voice surface to bff + voice + cognition.
+  bff:
+    environment:
+      # Internal URL the BFF uses for any backend chatter (none today).
+      POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
+      # NB: POLYPHON_LIVEKIT_PUBLIC_URL is NOT redeclared here on
+      # purpose. It's sourced from .env.local via env_file so the
+      # ngrok URL (or any other public face) can change without a
+      # compose edit. The historical hardcoded value was
+      # "wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN}" pointing at the
+      # nginx-terminated dev domain; that doesn't work for external
+      # services like Anam's cloud avatar engine, so the runtime
+      # value lives where the rest of the dev env lives.
+      POLYPHON_LIVEKIT_API_KEY: "devkey"
+      POLYPHON_LIVEKIT_API_SECRET: "secret"
+      # MEMQL_VOICE_AGENT_SHARED_TOKEN is sourced from .env.local via
+      # env_file (defined in docker-compose.full.yml's bff service).
+      # We don't re-declare it here because the `environment:` block
+      # overrides env_file and `${VAR:-}` would evaluate against an
+      # unset host shell var, shadowing the real value with empty.
+      # Same footgun as the voice-agent block fixed in e9d1013.
+    depends_on:
+      - livekit
+
+  # Make nginx wait for livekit so the livekit.${DOMAIN} server
+  # block has a healthy upstream to resolve at first request.
+  nginx:
+    depends_on:
+      - livekit
+
+  voice:
+    environment:
+      POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
+      POLYPHON_LIVEKIT_API_KEY: "devkey"
+      POLYPHON_LIVEKIT_API_SECRET: "secret"
+    depends_on:
+      - livekit
+
+  cognition:
+    environment:
+      POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
+      POLYPHON_LIVEKIT_API_KEY: "devkey"
+      POLYPHON_LIVEKIT_API_SECRET: "secret"
+    depends_on:
+      - livekit
+
+  # voice-agent (Initiative C). Python process running LiveKit Agents
+  # 1.5. The sole voice + video participant for the General Assistant
+  # in every LiveKit room. Speaks the VoiceAgent* gRPC contract on
+  # MemqlService.Stream with a shared-secret bearer token; the
+  # voice_agent_stream_interceptor pins this identity-type to the
+  # voice-agent message surface only.
+  voice-agent:
+    build:
+      context: ..
+      dockerfile: voice-agent/Dockerfile
+      args:
+        AVATAR: "${MEMQL_AVATAR_VENDOR:-anam}"
+    container_name: polyphon-voice-agent
+    hostname: voice-agent
+    # env_file is the source of truth for secrets sourced from
+    # .env.local (Deepgram key, Anam / Simli keys, shared token).
+    # DO NOT re-declare those keys under `environment:` -- compose
+    # treats the `environment:` block as overriding env_file, and
+    # `${VAR:-}` evaluates against the docker-compose-invoking
+    # SHELL (where these are not exported), which shadows the
+    # .env.local value with an empty string.
+    env_file:
+      - ../.env.local
+    environment:
+      # Container-internal infra knobs -- safe to set here since
+      # they're hardcoded for dev rather than sourced from .env.local.
+      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_API_KEY: "devkey"
+      LIVEKIT_API_SECRET: "secret"
+      MEMQL_GRPC_ADDR: "bff:50051"
+      VOICE_AGENT_LOG_LEVEL: "${VOICE_AGENT_LOG_LEVEL:-INFO}"
+    depends_on:
+      - livekit
+      - bff
+    networks:
+      - memql
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+# The `memql` network is created by docker-compose.full.yml (the
+# overlay we sit on top of). Don't redeclare it as external -- when
+# dev-refresh wipes volumes the docker_memql network is gone, and
+# the external lookup fails. Compose merges the network reference
+# from full.yml when no declaration is present here.
