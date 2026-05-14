@@ -52,7 +52,7 @@ func (s *AdminServer) handleTokensList(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		v := webtempl.AdminPATRow{
 			ID:     row.ID,
-			UserId: row.UserId,
+			UserID: row.UserId,
 			Label:  row.Label,
 			Active: row.Active,
 		}

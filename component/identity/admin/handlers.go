@@ -1037,7 +1037,7 @@ func projectAuditViews(rows []auditView) []webtempl.AdminAuditView {
 			Action:        a.Action,
 			ActorEmail:    a.ActorEmail,
 			ActorRole:     a.ActorRole,
-			TargetId:      a.TargetId,
+			TargetID:      a.TargetId,
 			TargetEmail:   a.TargetEmail,
 			Outcome:       a.Outcome,
 			FailureReason: a.FailureReason,
