@@ -58,7 +58,7 @@ memQL/
 │   ├── memql/dslfs/   MEMQL_DSL_PATH on-disk override / embedded FS picker
 │   └── ...            (memql, grpc, events, database, server, auth, etc.)
 ├── core/              Shared utilities (logger, env, id)
-├── cmd/               Command-line tools (memql-cockpit, healthcheck, ...)
+├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate, admin-preview)
 ├── voice-agent/       Python voice-agent process (LiveKit Agents 1.5)
 ├── scripts/           Database and migration scripts
 ├── infra/             Infrastructure configuration
@@ -116,7 +116,7 @@ memQL/
 - [Tool ↔ Knowledge Domain Pattern](docs/architecture/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**
-- **memql-cockpit** -- terminal-native IDE and operations console (display name "memQL Cockpit"). Source at [`cmd/memql-cockpit/`](cmd/memql-cockpit), TUI library at [`cli/`](cli/CLAUDE.md). Build with `make cockpit`. **Every interactive subcommand of this binary uses the `cli/ui/` + `cli/canvas/` TUI primitives** -- the multi-tab IDE for the main entry point, single-panel wizards (e.g. `memql-cockpit-gui worker setup`) for focused flows. See [cli/CLAUDE.md](cli/CLAUDE.md) for the canonical-TUI rule and the two layout patterns. Non-interactive subcommands (`cluster list`, `--version`, `worker config`) stay printf; non-TTY callers (CI, install scripts, piped output) get a printf fallback automatically.
+- **memql-cockpit** -- terminal-native IDE and operations console (display name "memQL Cockpit"). Lives in its own repo at `github.com/visionarys-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
 
 ---
 
@@ -655,10 +655,10 @@ document itself is gone per the no-stale-docs convention.
   the `pat` package). The frontend's AddWorkerModal calls these
   directly so plaintext never lives outside the gRPC reply.
 - **Worker side:** `memql-cockpit worker run` is a separate run
-  mode of the Cockpit binary. Headless + GUI build variants
-  (`make cockpit` / `make cockpit-gui`); the GUI build wraps
-  RobotGo for screenshot + mouse + keyboard. macOS TCC / Linux
-  X11 pre-flight via `memql-cockpit-gui worker setup`.
+  mode of the Cockpit binary, built from the `memql-cockpit` repo
+  (`make cockpit` / `make cockpit-gui`). The GUI build wraps RobotGo
+  for screenshot + mouse + keyboard. macOS TCC / Linux X11 pre-flight
+  via `memql-cockpit-gui worker setup`.
 - **Per-user routing:** every worker is owned by exactly one
   v1:identity:user; agents in that user's sessions are the only
   callers admitted by the registry.
