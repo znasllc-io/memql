@@ -5,7 +5,6 @@
 #   make              Build all binaries
 #   make help         Show all available targets
 #   make dev          Start full development stack (Docker)
-#   make cockpit      Build memQL Cockpit (was 'make cli')
 #   make test         Run all tests
 
 # ---------------------------------------------------------------------------
@@ -29,68 +28,17 @@ COMPOSE_CLST := -f docker/docker-compose.cluster.yml
 # Build targets
 # ---------------------------------------------------------------------------
 
-.PHONY: all build build-all cli cli-darwin-arm64 cli-darwin-amd64 cli-linux-amd64 cli-linux-arm64 cli-all-platforms server bff voice cognition agent planner identity identity-templ identity-tailwind identity-assets identity-build healthcheck
+.PHONY: all build build-all server bff voice cognition agent planner identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
-## Build all binaries (standalone + CLI + healthcheck)
-all: build cli healthcheck
+## Build all binaries (standalone + healthcheck)
+all: build healthcheck
 
 ## Build the standalone memQL server (all components)
 build:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql .
 
 ## Build all binaries including node-type variants
-build-all: build cockpit bff voice cognition agent planner identity healthcheck
-
-## Build memQL Cockpit (host platform)
-cockpit:
-	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-cockpit ./cmd/memql-cockpit
-
-## Build Cockpit for macOS (Apple Silicon + Intel) and Linux
-## (amd64 + arm64) into platform-specific binary names under $(BIN_DIR)/.
-cockpit-darwin-arm64:
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-cockpit-darwin-arm64 ./cmd/memql-cockpit
-
-cockpit-darwin-amd64:
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-cockpit-darwin-amd64 ./cmd/memql-cockpit
-
-cockpit-linux-amd64:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-cockpit-linux-amd64 ./cmd/memql-cockpit
-
-cockpit-linux-arm64:
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-cockpit-linux-arm64 ./cmd/memql-cockpit
-
-## Build Cockpit for all supported platforms at once
-cockpit-all-platforms: cockpit-darwin-arm64 cockpit-darwin-amd64 cockpit-linux-amd64 cockpit-linux-arm64
-
-## Build Cockpit GUI variant (CGO + RobotGo). Enables workerComputer.*
-## actions in `memql-cockpit worker run`. Requires platform-native
-## build tooling: macOS Xcode CLT, Linux gcc + libxtst-dev / libxinerama-dev /
-## libxkbcommon-dev / libpng-dev. Default `make cockpit` is the
-## headless variant and ships everywhere.
-cockpit-gui:
-	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags gui -o $(BIN_DIR)/memql-cockpit-gui ./cmd/memql-cockpit
-
-cockpit-gui-darwin-arm64:
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags gui -o $(BIN_DIR)/memql-cockpit-gui-darwin-arm64 ./cmd/memql-cockpit
-
-cockpit-gui-darwin-amd64:
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags gui -o $(BIN_DIR)/memql-cockpit-gui-darwin-amd64 ./cmd/memql-cockpit
-
-cockpit-gui-linux-amd64:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags gui -o $(BIN_DIR)/memql-cockpit-gui-linux-amd64 ./cmd/memql-cockpit
-
-cockpit-gui-linux-arm64:
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags gui -o $(BIN_DIR)/memql-cockpit-gui-linux-arm64 ./cmd/memql-cockpit
-
-cockpit-gui-all-platforms: cockpit-gui-darwin-arm64 cockpit-gui-darwin-amd64 cockpit-gui-linux-amd64 cockpit-gui-linux-arm64
-
-# Backwards-compat aliases (some scripts still call `make cli`).
-cli: cockpit
-cli-darwin-arm64: cockpit-darwin-arm64
-cli-darwin-amd64: cockpit-darwin-amd64
-cli-linux-amd64: cockpit-linux-amd64
-cli-linux-arm64: cockpit-linux-arm64
-cli-all-platforms: cockpit-all-platforms
+build-all: build bff voice cognition agent planner identity healthcheck
 
 ## Build BFF node binary
 bff:
@@ -183,19 +131,11 @@ voice-loop-test-livekit:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run run-cockpit dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
+.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
 	./$(BIN_DIR)/memql
-
-## Build and run memQL Cockpit. Reads ~/.memql/clusters.yaml for the
-## active cluster + credential (PAT or cached OIDC token). Run
-## 'memql-cockpit authorize <url>' once to authorize against an
-## identity service if you haven't already.
-run-cockpit:
-	@$(GO) build -o $(BIN_DIR)/memql-cockpit ./cmd/memql-cockpit 2>/dev/null
-	@./$(BIN_DIR)/memql-cockpit
 
 ## Start full development stack (PostgreSQL + memQL) in Docker
 dev:
@@ -347,7 +287,7 @@ db:
 # Test targets
 # ---------------------------------------------------------------------------
 
-.PHONY: test test-v test-cover test-cli test-polyphon policies-lint policies-trace
+.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace
 
 ## Run all tests
 test:
@@ -380,10 +320,6 @@ test-cover:
 	$(GO) test -coverprofile=coverage.out ./...
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
-
-## Run CLI tests only
-test-cli:
-	$(GO) test ./cli/...
 
 ## Run Polyphon/cognition tests only
 test-polyphon:
@@ -603,16 +539,9 @@ help:
 	@echo "memQL Makefile — v$(VERSION)"
 	@echo ""
 	@echo "BUILD"
-	@echo "  make              Build standalone server + Cockpit + healthcheck"
+	@echo "  make              Build standalone server + healthcheck"
 	@echo "  make build        Build standalone server"
-	@echo "  make build-all    Build all binaries (server + Cockpit + all node types)"
-	@echo "  make cockpit                 Build memQL Cockpit (host platform)"
-	@echo "  make cockpit-darwin-arm64    Cross-build Cockpit for macOS Apple Silicon"
-	@echo "  make cockpit-darwin-amd64    Cross-build Cockpit for macOS Intel"
-	@echo "  make cockpit-linux-amd64     Cross-build Cockpit for Linux x86_64"
-	@echo "  make cockpit-linux-arm64     Cross-build Cockpit for Linux aarch64"
-	@echo "  make cockpit-all-platforms   Cross-build Cockpit for all platforms"
-	@echo "    (legacy 'make cli' / 'make cli-*' targets still work as aliases)"
+	@echo "  make build-all    Build all binaries (server + all node types)"
 	@echo "  make bff          Build BFF node binary"
 	@echo "  make voice        Build voice node binary"
 	@echo "  make cognition    Build cognition node binary"
@@ -621,7 +550,6 @@ help:
 	@echo ""
 	@echo "RUN"
 	@echo "  make run          Run standalone server locally"
-	@echo "  make run-cockpit  Build and run memQL Cockpit (uses ~/.memql/clusters.yaml)"
 	@echo "  make dev          Start full dev stack in Docker (foreground)"
 	@echo "  make dev-bg       Start full dev stack in Docker (background)"
 	@echo "  make dev-polyphon Start dev stack with Polyphon voice pipeline"
@@ -644,7 +572,6 @@ help:
 	@echo "  make test         Run all tests"
 	@echo "  make test-v       Run all tests (verbose)"
 	@echo "  make test-cover   Run tests with coverage report"
-	@echo "  make test-cli     Run CLI tests only"
 	@echo "  make test-polyphon Run Polyphon/cognition tests only"
 	@echo ""
 	@echo "QUALITY"
