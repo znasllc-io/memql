@@ -1,0 +1,319 @@
+package sense
+
+import (
+	"strings"
+
+	"github.com/visionarys-io/memql/component/language/parser"
+)
+
+// ContextKind describes the syntactic context at a cursor position.
+type ContextKind int
+
+const (
+	ContextTopLevel      ContextKind = iota // Outside any definition
+	ContextAnnotation                       // After @
+	ContextAnnotationArgs                   // Inside @trigger(...)
+	ContextFuncBody                         // Inside func body { ... }
+	ContextFuncCallArgs                     // Inside someFunc(...)
+	ContextConceptFilter                    // After concept==
+	ContextFieldAccess                      // After node.payload. or event.payload.
+	ContextReceiver                         // Inside func (...) receiver declaration
+	ContextUseDeclaration                   // After "use "
+	ContextConceptDef                       // Inside concept { ... }
+)
+
+// CursorContext describes the syntactic context at a cursor position.
+type CursorContext struct {
+	Kind           ContextKind
+	Prefix         string // partial identifier before cursor
+	ParentFunc     string // function being called (for signature help)
+	ArgIndex       int    // argument position (0-indexed)
+	ReceiverType   string // if inside a func definition with a known receiver
+	AnnotationName string // if inside annotation args
+	ConceptName    string // if in field access, the relevant concept
+}
+
+// analyzeCursorContext determines the syntactic context at a cursor position.
+func analyzeCursorContext(source string, line, col int) CursorContext {
+	// Get text up to cursor position.
+	textBefore := textBeforeCursor(source, line, col)
+	if textBefore == "" {
+		return CursorContext{Kind: ContextTopLevel}
+	}
+
+	// Tokenize the text before the cursor.
+	lexer := parser.NewLexer(textBefore)
+	tokens, _ := lexer.Tokenize()
+
+	// Remove EOF token.
+	if len(tokens) > 0 && tokens[len(tokens)-1].Type == parser.TokenEOF {
+		tokens = tokens[:len(tokens)-1]
+	}
+
+	if len(tokens) == 0 {
+		return CursorContext{Kind: ContextTopLevel}
+	}
+
+	// Extract the prefix (partial identifier at cursor).
+	prefix := extractPrefix(textBefore)
+
+	// Check contexts in priority order.
+
+	// 1. After @: annotation context
+	if ctx, ok := checkAnnotationContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 2. Inside func (...) receiver
+	if ctx, ok := checkReceiverContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 3. After "use ": use declaration
+	if ctx, ok := checkUseContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 4. After concept==: concept filter
+	if ctx, ok := checkConceptFilterContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 5. Inside function call args: funcName(...)
+	if ctx, ok := checkFuncCallContext(tokens, prefix, textBefore); ok {
+		return ctx
+	}
+
+	// 6. Inside concept definition body
+	if ctx, ok := checkConceptDefContext(tokens, prefix); ok {
+		return ctx
+	}
+
+	// 7. Inside func body (between braces)
+	if isInsideFuncBody(tokens) {
+		return CursorContext{Kind: ContextFuncBody, Prefix: prefix}
+	}
+
+	return CursorContext{Kind: ContextTopLevel, Prefix: prefix}
+}
+
+// textBeforeCursor extracts text from the source up to the cursor position.
+func textBeforeCursor(source string, line, col int) string {
+	lines := strings.Split(source, "\n")
+	if line <= 0 || line > len(lines) {
+		return source
+	}
+
+	var sb strings.Builder
+	for i := 0; i < line-1 && i < len(lines); i++ {
+		sb.WriteString(lines[i])
+		sb.WriteByte('\n')
+	}
+	lineText := lines[line-1]
+	endCol := col - 1
+	if endCol > len(lineText) {
+		endCol = len(lineText)
+	}
+	if endCol < 0 {
+		endCol = 0
+	}
+	sb.WriteString(lineText[:endCol])
+	return sb.String()
+}
+
+// extractPrefix gets the partial identifier at the cursor.
+func extractPrefix(textBefore string) string {
+	if len(textBefore) == 0 {
+		return ""
+	}
+	// Walk backwards to find the start of the current identifier.
+	i := len(textBefore) - 1
+	for i >= 0 && isIdentChar(textBefore[i]) {
+		i--
+	}
+	return textBefore[i+1:]
+}
+
+func isIdentChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == ':'
+}
+
+// checkAnnotationContext checks if cursor is after @ or inside @name(...).
+func checkAnnotationContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	if n == 0 {
+		return CursorContext{}, false
+	}
+
+	// After bare @
+	if tokens[n-1].Type == parser.TokenAt {
+		return CursorContext{Kind: ContextAnnotation, Prefix: ""}, true
+	}
+
+	// After @name (identifier immediately after @)
+	if n >= 2 && tokens[n-2].Type == parser.TokenAt && tokens[n-1].Type == parser.TokenIdentifier {
+		return CursorContext{Kind: ContextAnnotation, Prefix: tokens[n-1].Literal}, true
+	}
+
+	// Inside @name(...) -- find matching @ before open paren
+	parenDepth := 0
+	for i := n - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case parser.TokenParenClose:
+			parenDepth++
+		case parser.TokenParenOpen:
+			parenDepth--
+			if parenDepth < 0 {
+				// Found unmatched open paren. Check if preceded by @name.
+				if i >= 2 && tokens[i-2].Type == parser.TokenAt && tokens[i-1].Type == parser.TokenIdentifier {
+					return CursorContext{
+						Kind:           ContextAnnotationArgs,
+						Prefix:         prefix,
+						AnnotationName: tokens[i-1].Literal,
+					}, true
+				}
+			}
+		}
+	}
+
+	return CursorContext{}, false
+}
+
+// checkReceiverContext checks if cursor is inside func (...) receiver.
+func checkReceiverContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	// Pattern: func (prefix  OR  func (
+	for i := n - 1; i >= 0; i-- {
+		if tokens[i].Type == parser.TokenParenOpen {
+			if i >= 1 && tokens[i-1].Type == parser.TokenKeywordFunc {
+				return CursorContext{Kind: ContextReceiver, Prefix: prefix}, true
+			}
+			break
+		}
+		// Only allow identifiers between the open paren and cursor
+		if tokens[i].Type != parser.TokenIdentifier {
+			break
+		}
+	}
+	return CursorContext{}, false
+}
+
+// checkUseContext checks if cursor is after "use ".
+func checkUseContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	if n >= 1 && tokens[n-1].Type == parser.TokenKeywordUse {
+		return CursorContext{Kind: ContextUseDeclaration, Prefix: prefix}, true
+	}
+	if n >= 2 && tokens[n-2].Type == parser.TokenKeywordUse && tokens[n-1].Type == parser.TokenIdentifier {
+		return CursorContext{Kind: ContextUseDeclaration, Prefix: tokens[n-1].Literal}, true
+	}
+	return CursorContext{}, false
+}
+
+// checkConceptFilterContext checks if cursor is after concept==.
+func checkConceptFilterContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	n := len(tokens)
+	// Pattern: concept == prefix
+	if n >= 2 && tokens[n-2].Type == parser.TokenOperator && tokens[n-2].Literal == "==" {
+		// Check if the token before == is "concept"
+		if n >= 3 && tokens[n-3].Type == parser.TokenIdentifier && tokens[n-3].Literal == "concept" {
+			return CursorContext{Kind: ContextConceptFilter, Prefix: prefix}, true
+		}
+	}
+	// Pattern: concept==
+	if n >= 1 && tokens[n-1].Type == parser.TokenOperator && tokens[n-1].Literal == "==" {
+		if n >= 2 && tokens[n-2].Type == parser.TokenIdentifier && tokens[n-2].Literal == "concept" {
+			return CursorContext{Kind: ContextConceptFilter, Prefix: ""}, true
+		}
+	}
+	return CursorContext{}, false
+}
+
+// checkFuncCallContext checks if cursor is inside a function call's arguments.
+func checkFuncCallContext(tokens []parser.Token, prefix, textBefore string) (CursorContext, bool) {
+	parenDepth := 0
+	for i := len(tokens) - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case parser.TokenParenClose:
+			parenDepth++
+		case parser.TokenParenOpen:
+			parenDepth--
+			if parenDepth < 0 {
+				// Found unmatched open paren.
+				if i >= 1 && tokens[i-1].Type == parser.TokenIdentifier {
+					funcName := tokens[i-1].Literal
+					// Skip receiver declarations: func (Type)
+					if i >= 2 && tokens[i-2].Type == parser.TokenKeywordFunc {
+						return CursorContext{}, false
+					}
+					// Count commas to determine arg index.
+					argIdx := countCommasBetween(tokens, i+1, len(tokens)-1)
+					return CursorContext{
+						Kind:       ContextFuncCallArgs,
+						Prefix:     prefix,
+						ParentFunc: funcName,
+						ArgIndex:   argIdx,
+					}, true
+				}
+				return CursorContext{}, false
+			}
+		}
+	}
+	return CursorContext{}, false
+}
+
+// checkConceptDefContext checks if cursor is inside a concept { ... } definition.
+func checkConceptDefContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
+	braceDepth := 0
+	for i := len(tokens) - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case parser.TokenBraceClose:
+			braceDepth++
+		case parser.TokenBraceOpen:
+			braceDepth--
+			if braceDepth < 0 {
+				// Inside unmatched brace. Check if preceded by concept Name.
+				if i >= 2 && tokens[i-2].Type == parser.TokenKeywordConcept {
+					return CursorContext{Kind: ContextConceptDef, Prefix: prefix}, true
+				}
+			}
+		}
+	}
+	return CursorContext{}, false
+}
+
+// isInsideFuncBody checks if we're inside a function body (between braces after func declaration).
+func isInsideFuncBody(tokens []parser.Token) bool {
+	braceDepth := 0
+	for i := len(tokens) - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case parser.TokenBraceClose:
+			braceDepth++
+		case parser.TokenBraceOpen:
+			braceDepth--
+			if braceDepth < 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// countCommasBetween counts comma tokens between two indices.
+func countCommasBetween(tokens []parser.Token, start, end int) int {
+	count := 0
+	depth := 0
+	for i := start; i <= end && i < len(tokens); i++ {
+		switch tokens[i].Type {
+		case parser.TokenParenOpen, parser.TokenBraceOpen, parser.TokenBracketOpen:
+			depth++
+		case parser.TokenParenClose, parser.TokenBraceClose, parser.TokenBracketClose:
+			depth--
+		case parser.TokenComma:
+			if depth == 0 {
+				count++
+			}
+		}
+	}
+	return count
+}

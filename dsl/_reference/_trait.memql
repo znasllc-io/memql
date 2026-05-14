@@ -1,0 +1,261 @@
+// =============================================================================
+// MemQL Trait Reference
+// =============================================================================
+//
+// This file is the source of truth for `trait` syntax. It is NOT loaded by
+// the engine (the leading underscore on the path tells every walker to skip
+// it). Every trait-level annotation, every body classification, and every
+// rejected form is demonstrated below with inline commentary.
+//
+// A trait is a concept-agnostic atomic boolean predicate. Same shape as a
+// spec, but a trait does NOT bind to any concept or shape -- it tests a
+// property that can apply to rows from many different concepts (e.g.
+// "active record", "cancelled record", "owned by caller").
+//
+// The body is a single boolean expression. The expression's field
+// references implicitly classify the trait:
+//
+//   - References to payload.* / id / createdAt / createdBy  ->  row-spec
+//     (compiles to a SQL WHERE fragment, pushed down to the database)
+//   - References to caller.userId / caller.role / etc.       ->  context-spec
+//     (evaluates in-process against the auth-context envelope)
+//
+// Mixed bodies (both row and caller refs) are rejected -- the author must
+// split them into a row-spec + a context-spec and compose via a policy.
+//
+// =============================================================================
+//   1. Trait-level annotations
+// =============================================================================
+//
+// Every annotation goes above the `trait` keyword. The full author surface
+// is three annotations:
+//
+//   @description("text")   Human-readable description.
+//   @enabled               Marks the trait as active.
+//   @disabled              Marks the trait as inactive (parsed but never registered).
+//
+// One internal sentinel is injected by the rewriter -- never write it by hand:
+//
+//   @_isTrait              Synthetic marker the rewriter prepends so the AST
+//                          converter applies trait-specific validation. Authors
+//                          who include it explicitly get duplicate-attribute
+//                          behavior; just don't write it.
+//
+// Anything else is rejected (see section 5 for the explicit denial list).
+//
+// =============================================================================
+//   2. Row-spec traits -- the most common case
+// =============================================================================
+//
+// A row-spec trait references row fields. The body compiles to a SQL WHERE
+// fragment so the engine pushes the predicate down to the database. Pattern:
+// `payload.<fieldName> <comparison> <literal>`.
+
+@enabled
+@description("Matches records with active==true field.")
+trait traitIsActiveRecord {
+  payload.active == true
+}
+
+@enabled
+@description("Matches records with status=='cancelled'.")
+trait traitIsCancelled {
+  payload.status == "cancelled"
+}
+
+@enabled
+@description("Matches records that are not soft-deleted (deleted!=true).")
+trait traitIsNotDeleted {
+  payload.deleted != true
+}
+
+@enabled
+@description("Matches records whose status sits in the live set.")
+trait traitIsLive {
+  payload.status == "active" || payload.status == "saved"
+}
+
+// =============================================================================
+//   3. Row intrinsics -- bare-name references inside traits
+// =============================================================================
+//
+// Row-spec traits can reference intrinsic row fields by their bare name:
+//
+//     id          -- row id
+//     createdAt   -- insert timestamp
+//     createdBy   -- author identity id
+//     concept     -- canonical concept id (v1:ns:name)
+//     partition   -- partition the row lives in
+//
+// These don't go through `payload.` because they're not payload fields --
+// they're engine-stamped intrinsics. The same trait can reference both
+// payload fields AND intrinsics.
+
+@enabled
+@description("Matches rows from the cognition:participant concept.")
+trait traitIsParticipantRow {
+  concept == "v1:cognition:participant"
+}
+
+@enabled
+@description("Matches rows authored by a specific known identity (placeholder for tests).")
+trait traitIsSeedRow {
+  createdBy == "seed"
+}
+
+// =============================================================================
+//   4. Context-spec traits -- caller-based predicates
+// =============================================================================
+//
+// A context-spec trait references caller.* fields. The body evaluates
+// in-process against the auth-context envelope -- no SQL pushdown.
+//
+// Context-spec field reference vocabulary:
+//
+//     caller.userId          -- authenticated user's id (string)
+//     caller.role            -- cluster-wide role (owner / admin / writer / reader)
+//     caller.identityId      -- credential's identity id (magic-link, oauth, pat, ...)
+//     caller.isClusterOwner  -- bool, true for the cluster owner
+//     caller.partitions      -- []string of partitions the caller may touch
+//     caller.partition       -- current request's partition
+//     caller.now             -- RFC3339 timestamp captured at request start
+//     caller.config.<key>    -- allow-listed config values (see policy_exposable.go)
+
+@enabled
+@description("Caller must hold an identity-issued JWT with admin or owner role.")
+trait traitRequiresAdmin {
+  caller.role == "admin" || caller.role == "owner"
+}
+
+@enabled
+@description("Caller is the cluster owner (top-most privilege tier).")
+trait traitIsClusterOwner {
+  caller.isClusterOwner == true
+}
+
+// =============================================================================
+//   5. Annotations REJECTED on traits
+// =============================================================================
+//
+// The AST converter rejects two annotations on traits with structured
+// error messages. Both are valid on specs but never on traits, because
+// traits are concept-agnostic and shape-agnostic.
+//
+//   @useConcept(...)
+//     Error: `trait %q must not carry an @useConcept(...) annotation
+//             (traits are concept-agnostic; use @useConcept only on
+//             specs that bind to a single concept)`.
+//
+//   @shape("name")
+//     Error: `trait %q must not carry a @shape("name") annotation
+//             (traits are concept-agnostic; bind to a shape only on
+//             specs)`.
+//
+// Example of what NOT to write:
+//
+//     // REJECTED: traits cannot bind to a concept.
+//     @useConcept(participant)
+//     trait traitMatchesParticipant { payload.spaceId == "x" }
+//
+//     // REJECTED: traits cannot bind to a shape.
+//     @shape("participantFull")
+//     trait traitOfShape { payload.active == true }
+//
+// If you need either binding, declare a `spec` instead -- specs require
+// exactly one of them.
+//
+// =============================================================================
+//   6. Mixed-reference bodies are REJECTED
+// =============================================================================
+//
+// The AST converter classifies the body as row-spec OR context-spec, never
+// both. A body that touches both `payload.*` AND `caller.*` is rejected at
+// load time. Split such logic into a row-spec trait + a context-spec trait
+// and compose via a policy.
+//
+// Example of what NOT to write:
+//
+//     // REJECTED: mixed payload + caller references.
+//     @enabled
+//     @description("Caller owns this row.")
+//     trait traitOwnedByCaller {
+//       payload.ownerId == caller.userId
+//     }
+//
+// The correct pattern: declare two traits and compose at the call site.
+//
+//     @enabled
+//     @description("Row carries the caller's userId in ownerId.")
+//     trait traitRowOwnerFieldPresent {
+//       payload.ownerId != null
+//     }
+//
+//     // Plus a policy that compares payload.ownerId against caller.userId
+//     // via two spec() lookups + an explicit boolean composition.
+//
+// =============================================================================
+//   7. The legacy `func (Trait) name(...) bool { ... }` form -- doesn't exist
+// =============================================================================
+//
+// The struct-form `trait NAME { <expr> }` is the only trait declaration
+// the parser accepts. There is no receiver-function form. The parser has
+// no ReceiverTrait / FunctionTypeTrait enum value -- attempting the
+// pseudo-form below produces a generic syntax error one parser layer down.
+//
+//     // NOT VALID -- the parser rejects this as an unknown receiver.
+//     func (Trait) isActive(_ any) bool { return payload.active == true }
+//
+// =============================================================================
+//   8. Calling traits from queries / specs / policies
+// =============================================================================
+//
+// Traits register under their declared name. Callers reference them like
+// any other named predicate:
+//
+//   - From a query's filter clause: list the trait name alongside other
+//     predicates, separated by `;`.
+//
+//         query foo {
+//           filter payload.spaceId==args.spaceId; traitIsActiveRecord
+//           shape  fooFull
+//         }
+//
+//   - From a policy body: use `spec("traitName")` -- the trait is a
+//     context-spec or row-spec, both routed via spec().
+//
+//         func (Policy) canEdit(_ any) bool {
+//           ctx.output = spec("traitRequiresAdmin")
+//           return ctx, nil
+//         }
+//
+//   - As a shape binding on a spec: every spec must bind to a shape via
+//     @shape("name"). When the spec is concept-agnostic, the binding is a
+//     trait shape (a @row shape WITHOUT @concepts(...)). See the shape
+//     reference for the trait-shape pattern.
+//
+// =============================================================================
+//   9. Lifecycle: @enabled and @disabled
+// =============================================================================
+//
+// @enabled and @disabled are common lifecycle annotations shared with
+// every function-style construct. On a trait:
+//
+//   - @enabled = register the trait so other constructs can reference it.
+//   - @disabled = parse the trait but skip registration. Useful for
+//     temporarily turning off a predicate without deleting it (debugging,
+//     A/B comparisons).
+//
+// In practice every trait in the current tree carries @enabled. @disabled
+// is a debug knob -- not a documented production pattern.
+
+@enabled
+@description("Live, registered.")
+trait traitLiveExample {
+  payload.active == true
+}
+
+@disabled
+@description("Parsed but skipped at registration. Flip to @enabled to activate.")
+trait traitParkedExample {
+  payload.active == true
+}

@@ -1,0 +1,5 @@
+# Normalize line endings
+* text=auto
+
+# Ensure shell scripts use LF to avoid /bin/sh carriage-return errors in devcontainers
+*.sh text eol=lf

@@ -1,0 +1,320 @@
+// Package voice owns the canonical voice catalog and the gender-bucketed
+// auto-assignment + provider-resolution path used by Polyphon and the
+// agent reply pipeline. The catalog is hardcoded on purpose -- voices
+// change rarely, they're shared across all tenants, and seeding /
+// validation overhead would buy nothing. Per-tenant voice customisation
+// (if ever needed) will get its own concept.
+//
+// Two surfaces:
+//
+//   - PickVoiceForGender(gender, exclude) -- returns a canonical voice
+//     name suitable for an agent of that gender, biased away from voices
+//     already used by the same owner's other agents. Called by the
+//     frontend at agent creation time via the `voicePickForGender`
+//     builtin.
+//   - ResolveVoice(canonical, provider) -- returns the provider-specific
+//     voice ID. Called by the cognition handler before forwarding TTS to
+//     the Bridge Agent, and by the bridge / TTS clients at synthesis
+//     time. Falls back to a sensible default if the canonical name is
+//     unknown so the audio path never goes silent.
+package voice
+
+import (
+	"os"
+	"strings"
+)
+
+// ActiveProvider returns the currently active TTS / ASR provider name,
+// applying the same auto-selection rule the bridge-agent and the
+// engine's STT selector use:
+//
+//  1. POLYPHON_VOICE_PROVIDER explicit (non-empty) -> honor it.
+//  2. MEMQL_DEEPGRAM_API_KEY set -> "deepgram".
+//  3. Default -> "openai".
+//
+// Every node in the cluster (cognition, voice, bridge-agent) must
+// agree on the active provider, otherwise voice resolution on one
+// side produces ids the other side can't synthesize. Hardcoding
+// "openai" anywhere is a bug -- always go through this helper.
+func ActiveProvider() string {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("POLYPHON_VOICE_PROVIDER"))); v != "" {
+		return v
+	}
+	if strings.TrimSpace(os.Getenv("MEMQL_DEEPGRAM_API_KEY")) != "" {
+		return "deepgram"
+	}
+	return "openai"
+}
+
+// CanonicalVoice is one entry in the gender-bucketed catalog.
+type CanonicalVoice struct {
+	Name   string // canonical name -- lowercased, stable across providers
+	Gender string // "male" | "female"
+	// PreferredProviderHint records which provider's voice was the
+	// inspiration for the canonical entry. Not used at resolution
+	// time -- we pick the per-provider id from the maps below -- but
+	// it documents intent.
+	PreferredProviderHint string
+}
+
+// FemaleVoices is the canonical female catalog. Order matters: the
+// auto-assigner walks this list when picking a fresh voice for a new
+// agent and prefers earlier entries (so a tenant's first three female
+// agents get distinct, well-known voices before we start cycling).
+var FemaleVoices = []CanonicalVoice{
+	{Name: "alto", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "soprano", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "mezzo", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "lyric", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "aria", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "cadence", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "harmony", Gender: "female", PreferredProviderHint: "openai"},
+	{Name: "nova", Gender: "female", PreferredProviderHint: "openai"},
+}
+
+// MaleVoices is the canonical male catalog. Same ordering rule as
+// FemaleVoices.
+var MaleVoices = []CanonicalVoice{
+	{Name: "tenor", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "baritone", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "bass", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "echo", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "anchor", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "marcus", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "drake", Gender: "male", PreferredProviderHint: "openai"},
+	{Name: "atlas", Gender: "male", PreferredProviderHint: "openai"},
+}
+
+// GAVoiceCanonical is the hardcoded canonical voice the General
+// Assistant gets seeded with. The GA is provisioned with gender
+// "female" by default, so this lands in the female bucket. The user
+// can rename the GA but cannot edit its voice (per Q7's no-user-edit
+// rule); changing the GA's voice means changing this constant and
+// re-running the provision automation.
+const GAVoiceCanonical = "alto"
+
+// openAIVoiceMap maps canonical names to OpenAI TTS voice IDs.
+// OpenAI's catalog: alloy, nova, coral, sage, echo, shimmer (plus
+// fable, onyx in the realtime API). We pick the closest timbre per
+// canonical entry; any unmapped canonical falls back to the
+// gender-appropriate default.
+var openAIVoiceMap = map[string]string{
+	// female bucket
+	"alto":    "nova",
+	"soprano": "shimmer",
+	"mezzo":   "coral",
+	"lyric":   "sage",
+	"aria":    "shimmer",
+	"cadence": "nova",
+	"harmony": "coral",
+	"nova":    "nova",
+	// male bucket
+	"tenor":    "echo",
+	"baritone": "onyx",
+	"bass":     "onyx",
+	"echo":     "echo",
+	"anchor":   "echo",
+	"marcus":   "onyx",
+	"drake":    "echo",
+	"atlas":    "onyx",
+}
+
+// deepgramVoiceMap maps canonical names to Deepgram Aura-2 voice ids
+// (`aura-2-<name>-<lang>` form -- the same string Deepgram's
+// /v1/speak `model` parameter accepts). Picked to roughly match the
+// canonical timbre per entry; the OpenAI map is the comparison
+// baseline.
+//
+// Aura-2 voice ids verified against Deepgram's TTS catalog at the
+// time of the migration; any future Deepgram catalog churn lands in
+// this map without touching consumers.
+var deepgramVoiceMap = map[string]string{
+	// female bucket
+	"alto":    "aura-2-thalia-en",
+	"soprano": "aura-2-asteria-en",
+	"mezzo":   "aura-2-luna-en",
+	"lyric":   "aura-2-stella-en",
+	"aria":    "aura-2-asteria-en",
+	"cadence": "aura-2-athena-en",
+	"harmony": "aura-2-hera-en",
+	"nova":    "aura-2-thalia-en",
+	// male bucket
+	"tenor":    "aura-2-arcas-en",
+	"baritone": "aura-2-orion-en",
+	"bass":     "aura-2-orion-en",
+	"echo":     "aura-2-perseus-en",
+	"anchor":   "aura-2-orpheus-en",
+	"marcus":   "aura-2-angus-en",
+	"drake":    "aura-2-helios-en",
+	"atlas":    "aura-2-orion-en",
+}
+
+// providerDefaults is the per-provider fallback voice when the
+// canonical name is unknown. Picked to be safe + inoffensive for
+// either gender.
+var providerDefaults = map[string]string{
+	"openai":          "alloy",
+	"openai-realtime": "alloy",
+	"deepgram":        "aura-2-thalia-en",
+}
+
+// canonicalDefaults are the catalog defaults we hand back when
+// PickVoiceForGender exhausts the bucket (every voice is already
+// taken). At that point we cycle from the head of the bucket -- the
+// "no-collision" rule degrades to "best effort, may collide." A user
+// with 9+ female agents will start to see voice repeats, which is the
+// least-bad outcome.
+var canonicalDefaults = map[string]string{
+	"female": "alto",
+	"male":   "tenor",
+}
+
+// PickVoiceForGender returns a canonical voice name for the given
+// gender, biased away from the supplied exclude list. Returns the
+// catalog default for the gender if every voice in the bucket is
+// excluded.
+//
+// gender is normalised case-insensitively. Anything other than
+// "female" or "male" falls back to the female bucket -- the GA's
+// default -- rather than erroring; agent creation stays write-through.
+func PickVoiceForGender(gender string, exclude []string) string {
+	bucket := bucketForGender(gender)
+
+	excludedSet := make(map[string]struct{}, len(exclude))
+	for _, name := range exclude {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		excludedSet[key] = struct{}{}
+	}
+
+	for _, v := range bucket {
+		if _, taken := excludedSet[strings.ToLower(v.Name)]; taken {
+			continue
+		}
+		return v.Name
+	}
+
+	// Bucket exhausted -- cycle back to the head.
+	if defaultName, ok := canonicalDefaults[normalisedGender(gender)]; ok {
+		return defaultName
+	}
+	return canonicalDefaults["female"]
+}
+
+// ResolveVoice maps a canonical voice name + provider to the
+// provider-specific voice ID. Returns the provider's default voice if
+// the canonical name is unknown, so the audio path never goes silent.
+//
+// Provider name is normalised case-insensitively; "openai-realtime"
+// shares OpenAI's catalog. Empty canonical falls back to the
+// provider default.
+func ResolveVoice(canonical, provider string) string {
+	canon := strings.ToLower(strings.TrimSpace(canonical))
+	prov := strings.ToLower(strings.TrimSpace(provider))
+
+	if canon == "" {
+		return providerDefault(prov)
+	}
+
+	switch prov {
+	case "openai", "openai-realtime", "":
+		if id, ok := openAIVoiceMap[canon]; ok && id != "" {
+			return id
+		}
+		return providerDefault("openai")
+	case "deepgram":
+		if id, ok := deepgramVoiceMap[canon]; ok && id != "" {
+			return id
+		}
+		// Unknown canonical: fall back to a gender-appropriate
+		// default Aura-2 voice so the audio path doesn't go silent.
+		switch CanonicalGender(canon) {
+		case "male":
+			return "aura-2-arcas-en"
+		default:
+			return providerDefault("deepgram")
+		}
+	default:
+		// Unknown provider -- hand back the canonical name and let
+		// the provider client decide. Prevents callers from getting
+		// an empty string and hitting a TTS error downstream.
+		return canon
+	}
+}
+
+// AllCanonicalNames returns every canonical voice name in declaration
+// order, female bucket first then male. Used by callers that need the
+// full catalog (UI rendering, audit, doc generation).
+func AllCanonicalNames() []string {
+	out := make([]string, 0, len(FemaleVoices)+len(MaleVoices))
+	for _, v := range FemaleVoices {
+		out = append(out, v.Name)
+	}
+	for _, v := range MaleVoices {
+		out = append(out, v.Name)
+	}
+	return out
+}
+
+// IsCanonical reports whether the given name (case-insensitive) is a
+// known canonical voice in either bucket.
+func IsCanonical(name string) bool {
+	target := strings.ToLower(strings.TrimSpace(name))
+	if target == "" {
+		return false
+	}
+	for _, v := range FemaleVoices {
+		if strings.ToLower(v.Name) == target {
+			return true
+		}
+	}
+	for _, v := range MaleVoices {
+		if strings.ToLower(v.Name) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// CanonicalGender returns the gender bucket of the named canonical
+// voice, or "" if unknown.
+func CanonicalGender(name string) string {
+	target := strings.ToLower(strings.TrimSpace(name))
+	for _, v := range FemaleVoices {
+		if strings.ToLower(v.Name) == target {
+			return "female"
+		}
+	}
+	for _, v := range MaleVoices {
+		if strings.ToLower(v.Name) == target {
+			return "male"
+		}
+	}
+	return ""
+}
+
+func bucketForGender(gender string) []CanonicalVoice {
+	switch normalisedGender(gender) {
+	case "male":
+		return MaleVoices
+	default:
+		return FemaleVoices
+	}
+}
+
+func normalisedGender(gender string) string {
+	g := strings.ToLower(strings.TrimSpace(gender))
+	if g == "male" {
+		return "male"
+	}
+	return "female"
+}
+
+func providerDefault(provider string) string {
+	if v, ok := providerDefaults[provider]; ok {
+		return v
+	}
+	return providerDefaults["openai"]
+}

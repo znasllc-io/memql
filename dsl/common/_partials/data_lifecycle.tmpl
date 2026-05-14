@@ -1,0 +1,5 @@
+{{define "data_lifecycle"}}Data Lifecycle (staging vs production):
+- All data from research, imports, or AI-generated content starts as STAGING (amber, #f59e0b). Never create production data directly.
+- Production data uses emerald (#34d399). NEVER auto-promote -- always ask the human for approval.
+- When conflicts exist (same key in production), present differences and ask: keep, overwrite, merge, or skip.
+- Use "staged for your review" -- never say "added to database" or "saved".{{end}}

@@ -1,0 +1,263 @@
+syntax = "proto3";
+
+package visionarys.memql.node.v1;
+
+option go_package = "github.com/visionarys-io/memql/component/node/gen;nodev1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// NodeService provides bidirectional streaming for inter-node communication
+// in a memQL cluster. All node types use this service to discover peers,
+// exchange heartbeats, forward events, and coordinate work.
+service NodeService {
+  rpc Stream(stream NodeClientMessage) returns (stream NodeServerMessage);
+}
+
+// ---------------------------------------------------------------------------
+// Envelopes
+// ---------------------------------------------------------------------------
+
+message NodeClientMessage {
+  string message_id = 1;
+  string correlate_to = 2;
+  map<string, string> metadata = 3;
+
+  oneof payload {
+    NodeHello node_hello = 10;
+    NodeHeartbeat heartbeat = 11;
+    PeerIntroduction peer_intro = 12;
+    SpawnRequest spawn_request = 20;
+    SpawnResult spawn_result = 21;
+    EventForward event_forward = 30;
+    EventAck event_ack = 31;
+    CapabilityQuery capability_query = 40;
+    CapabilityResponse capability_response = 41;
+    QueryForward query_forward = 60;
+    AiForwardRequest ai_forward_request = 70;
+    AiForwardCancel ai_forward_cancel = 71;
+  }
+}
+
+message NodeServerMessage {
+  string message_id = 1;
+  string correlate_to = 2;
+  map<string, string> metadata = 3;
+
+  oneof payload {
+    NodeWelcome node_welcome = 10;
+    NodeHeartbeat heartbeat = 11;
+    PeerIntroduction peer_intro = 12;
+    SpawnRequest spawn_request = 20;
+    SpawnResult spawn_result = 21;
+    EventForward event_forward = 30;
+    EventAck event_ack = 31;
+    CapabilityQuery capability_query = 40;
+    CapabilityResponse capability_response = 41;
+    NodeShutdown node_shutdown = 50;
+    QueryResponse query_response = 60;
+    AiForwardResponse ai_forward_response = 70;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handshake
+// ---------------------------------------------------------------------------
+
+// NodeHello is sent by a connecting node to identify itself.
+message NodeHello {
+  string node_id = 1;
+  string node_type = 2;
+  string version = 3;
+  string address = 4;
+  string parent_id = 5;
+  map<string, string> labels = 6;
+  repeated string capabilities = 7;
+}
+
+// NodeWelcome is sent by the server in response to NodeHello.
+message NodeWelcome {
+  string node_id = 1;
+  repeated PeerInfo peers = 2;
+  // Server's own node type (bff / voice / cognition / agent / planner).
+  // Lets the client register the parent peer with a populated NodeType so
+  // downstream consumers (NodeStatusWriter, CapabilityRouter) don't see
+  // an empty-type peer.
+  string node_type = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
+
+message NodeHeartbeat {
+  google.protobuf.Timestamp ts = 1;
+  NodeHealthStatus health = 2;
+  map<string, string> metrics = 3;
+}
+
+enum NodeHealthStatus {
+  NODE_HEALTH_UNSPECIFIED = 0;
+  // Registered but has not yet sent a heartbeat. Transient startup state.
+  NODE_HEALTH_CONNECTING = 1;
+  // Heartbeating within the liveness timeout.
+  NODE_HEALTH_HEALTHY = 2;
+  // Missed heartbeats but not yet past the offline threshold.
+  NODE_HEALTH_DEGRADED = 3;
+  // Voluntarily winding down (advertised via heartbeat or shutdown).
+  NODE_HEALTH_DRAINING = 4;
+  // Missed heartbeats past the offline threshold. Concept record retained
+  // for display; removed from the in-memory peer routing table.
+  NODE_HEALTH_OFFLINE = 5;
+  // Received an explicit NodeShutdown.
+  NODE_HEALTH_STOPPED = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Peer Discovery
+// ---------------------------------------------------------------------------
+
+message PeerInfo {
+  string node_id = 1;
+  string node_type = 2;
+  string address = 3;
+  NodeHealthStatus health = 4;
+  repeated string capabilities = 5;
+  map<string, string> labels = 6;
+}
+
+message PeerIntroduction {
+  repeated PeerInfo peers = 1;
+  bool removal = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Spawn
+// ---------------------------------------------------------------------------
+
+message SpawnRequest {
+  string request_id = 1;
+  string node_type = 2;
+  map<string, string> labels = 3;
+  map<string, string> env = 4;
+}
+
+message SpawnResult {
+  string request_id = 1;
+  bool success = 2;
+  string node_id = 3;
+  string error = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Distributed Events
+// ---------------------------------------------------------------------------
+
+message EventForward {
+  string event_id = 1;
+  string topic = 2;
+  int32 kind = 3;
+  google.protobuf.Timestamp ts = 4;
+  google.protobuf.Struct payload = 5;
+  string origin_node_id = 6;
+  int32 ttl = 7;
+}
+
+message EventAck {
+  string event_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Capability Query
+// ---------------------------------------------------------------------------
+
+message CapabilityQuery {
+  string request_id = 1;
+  string capability_name = 2;
+}
+
+message CapabilityResponse {
+  string request_id = 1;
+  bool available = 2;
+  string node_id = 3;
+  string address = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Query Forwarding
+// ---------------------------------------------------------------------------
+
+// QueryForward carries a MemQL query from one node to another for
+// execution. Used when a client sends a query to a node that doesn't
+// own the target concept. The receiving node executes the query
+// locally and returns a QueryResponse.
+message QueryForward {
+  string request_id = 1;
+  string query = 2;
+  string partition = 3;
+}
+
+// QueryResponse carries the result of a forwarded query back to the
+// requesting node. result_json is the JSON-encoded query result.
+message QueryResponse {
+  string request_id = 1;
+  bool success = 2;
+  bytes result_json = 3;
+  string error = 4;
+}
+
+// ---------------------------------------------------------------------------
+// AI / voice request forwarding
+// ---------------------------------------------------------------------------
+
+// AiForwardRequest carries an AI / voice envelope from a BFF node to a
+// worker node that has the required provider registered. The body is the
+// proto-serialized MemqlClientMessage the BFF originally received from
+// its client -- the worker unmarshals it and dispatches to its local
+// handler as if the client had connected to it directly.
+//
+// Using a byte-envelope here (rather than embedding each AI message
+// type) keeps component/node/ independent of component/grpc/: the node
+// layer just moves bytes; the grpc layer owns the wire-type semantics.
+//
+// `auth` carries the originating principal's claims (subject, email,
+// role) so the worker can reconstruct a TokenInfo and enforce the same
+// ACLs it would have applied if the client had connected directly.
+//
+// `partition` is the tenant partition from the original request
+// envelope so partition-scoped queries continue to work after the hop.
+message AiForwardRequest {
+  string request_id = 1;
+  map<string, string> auth = 2;
+  string partition = 3;
+  bytes memql_envelope = 4;  // Serialized memqlv1.MemqlClientMessage
+}
+
+// AiForwardResponse carries a worker's response back to the originating
+// BFF. Streamed responses (e.g. aiChat with stream=true) send multiple
+// messages with the same request_id. `done=true` marks the last one.
+//
+// `memql_server_msg` is a proto-serialized memqlv1.MemqlServerMessage
+// (AiChunk / AiChatResult / AiSpeechResult / AiTranscribeResult /
+// AiSuggestResult / ListToolsResult / CallToolResult / QueryError).
+message AiForwardResponse {
+  string request_id = 1;
+  bytes memql_server_msg = 2;
+  bool done = 3;
+}
+
+// AiForwardCancel signals the worker that the BFF's client cancelled
+// the request (stream closed, explicit cancel message). The worker
+// should stop producing responses for `request_id` and clean up.
+message AiForwardCancel {
+  string request_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown
+// ---------------------------------------------------------------------------
+
+message NodeShutdown {
+  string reason = 1;
+  int32 grace_seconds = 2;
+}

@@ -1,0 +1,42 @@
+package webtempl
+
+// AdminLoginData drives /admin/login (the paste-token form).
+type AdminLoginData struct {
+	Layout LayoutData
+	Flash  *Flash
+}
+
+templ AdminLogin(data AdminLoginData) {
+	@Layout(data.Layout) {
+		<div class="card">
+			<h1 class="card-title">Admin sign-in required</h1>
+			<p class="card-subtitle">
+				The admin console is only available to cluster owners and admins.
+			</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			<p class="text-muted">
+				Sign in through the regular login flow first. Once you have an
+				access token, paste it below to start an admin session in this
+				browser.
+			</p>
+			<form method="POST" action="/admin/establish" data-submit-once>
+				<div class="form-row">
+					<label for="token">Access token (JWT)</label>
+					<textarea id="token" name="token" rows="3" placeholder="eyJhbGciOiJFZERTQSIs..." required></textarea>
+					<span class="help">
+						Get this from the SPA's developer console
+						(<code>window.IdentityMe.accessToken</code>) after signing in
+						through <a href="/login">the standard login flow</a>.
+					</span>
+				</div>
+				<button type="submit" class="btn btn-primary" data-pending-label="Establishing...">Open admin console</button>
+			</form>
+			<hr/>
+			<p class="text-small text-muted mb-0">
+				<a href="/login">&larr; Back to user sign-in</a>
+			</p>
+		</div>
+	}
+}

@@ -1,0 +1,93 @@
+package webtempl
+
+// AdminUsersListData drives /admin/users.
+type AdminUsersListData struct {
+	Layout    LayoutData
+	Flash     *Flash
+	Users     []AdminUserView
+	UserCount int
+	Query     string
+	Capped    bool
+	Limit     int
+}
+
+templ AdminUsersList(data AdminUsersListData) {
+	@Layout(data.Layout) {
+		<div class="card card-full">
+			<h1 class="card-title">Users</h1>
+			<p class="card-subtitle">
+				{ formatInt(data.UserCount) } active
+				if data.UserCount == 1 {
+					user.
+				} else {
+					users.
+				}
+				Use the search box to filter by name or email.
+			</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			<form method="GET" action="/admin/users" class="form-row inline">
+				<input type="search" name="q" value={ data.Query } placeholder="Search by name or email"/>
+				<button type="submit" class="btn btn-secondary">Search</button>
+			</form>
+			if len(data.Users) == 0 {
+				<p class="text-muted mt-2">No users match.</p>
+			} else {
+				<div class="table-wrap">
+					<table class="data">
+						<thead>
+							<tr>
+								<th>Name</th>
+								<th>Email</th>
+								<th>Role</th>
+								<th>Status</th>
+								<th>Member since</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, u := range data.Users {
+								<tr>
+									<td class="font-medium text-slate-900">{ u.DisplayName }</td>
+									<td>{ u.PrimaryEmail }</td>
+									<td>
+										@roleBadge(u.Role)
+									</td>
+									<td>
+										if u.SuspendedAt != "" {
+											<span class="badge badge-danger">suspended</span>
+										} else {
+											<span class="badge">active</span>
+										}
+									</td>
+									<td class="text-slate-500">{ u.CreatedAt }</td>
+									<td><a href={ templ.SafeURL("/admin/users/detail?id=" + u.ID) }>View</a></td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+			if data.Capped {
+				<p class="text-small text-muted mt-4 mb-0">
+					Showing the first { formatInt(data.Limit) } matches. Refine your search to narrow further.
+				</p>
+			}
+		</div>
+	}
+}
+
+// roleBadge picks the right tone for a user's cluster role so the
+// users list reads at a glance: owner = brand-blue, admin = warn,
+// reader/writer = muted.
+templ roleBadge(role string) {
+	switch role {
+		case "owner":
+			<span class="badge badge-info">{ role }</span>
+		case "admin":
+			<span class="badge badge-warn">{ role }</span>
+		default:
+			<span class="badge badge-muted">{ role }</span>
+	}
+}

@@ -1,0 +1,39 @@
+package webtempl
+
+// CheckEmailData drives the post-submission "check your email" page.
+// `Action` is one of "magic_link_sent" (default) or
+// "access_request_created", which switches the body copy.
+type CheckEmailData struct {
+	Layout    LayoutData
+	Email     string
+	ExpiresIn string
+	Action    string
+}
+
+templ CheckEmail(data CheckEmailData) {
+	@Layout(data.Layout) {
+		<div class="card text-center">
+			<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand-primary); margin: 0 auto 12px; display: block;">
+				<path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"></path>
+			</svg>
+			<h1 class="card-title">Check your email</h1>
+			if data.Action == "access_request_created" {
+				<p class="text-muted">
+					Thanks for your interest in { data.Layout.BrandName }. We received your request
+					and an admin will follow up shortly. You'll get an email at
+					<strong>{ data.Email }</strong> when your access is approved.
+				</p>
+			} else {
+				<p class="text-muted">
+					We sent a sign-in link to <strong>{ data.Email }</strong>. Open the
+					email and click the link to continue.
+				</p>
+				<p class="text-small text-subtle mt-2">
+					The link expires in { data.ExpiresIn }. If it doesn't arrive within a
+					few minutes, check your spam folder or
+					<a href="/login">request a new link</a>.
+				</p>
+			}
+		</div>
+	}
+}

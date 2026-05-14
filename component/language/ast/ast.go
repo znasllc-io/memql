@@ -1,0 +1,1270 @@
+// Package ast defines the MemQL Abstract Syntax Tree node types.
+//
+// These types are emitted by the parser (component/language/parser)
+// and consumed by the compiler (component/language/compiler),
+// execution engine (component/memql), and language-intelligence
+// service (component/memql/sense). Separating the types into their
+// own package lets consumers depend on the AST surface without
+// pulling in the full lexer/parser machinery.
+//
+// Phase 2 Item 9 of the language-improvements plan. The parser
+// package still re-exports every symbol here as a type alias so the
+// existing ~25 consumer files continue to compile unchanged; new
+// code should import ast/ directly.
+package ast
+
+import "time"
+
+// Node is the interface implemented by all AST nodes.
+type Node interface {
+	node()
+}
+
+// ExpressionNode is the interface implemented by all expression AST nodes.
+type ExpressionNode interface {
+	Node
+	expressionNode()
+}
+
+// StatementNode is the interface implemented by all statement AST nodes.
+type StatementNode interface {
+	Node
+	statementNode()
+}
+
+// ----------------------------------------------------------------------------
+// Core Types
+// ----------------------------------------------------------------------------
+
+// FieldReference describes paths to structured fields within memory nodes.
+type FieldReference struct {
+	Raw      string
+	Parts    []string
+	Wildcard bool
+}
+
+// AttributeMap stores arbitrary key/value arguments discovered in query stages.
+type AttributeMap map[string]any
+
+// ----------------------------------------------------------------------------
+// Operators
+// ----------------------------------------------------------------------------
+
+// LogicalOp identifies logical operators applied between expressions.
+type LogicalOp string
+
+const (
+	LogicalAnd LogicalOp = "AND"
+	LogicalOr  LogicalOp = "OR"
+)
+
+// ComparisonOperator enumerates supported comparison operators.
+type ComparisonOperator string
+
+const (
+	OpEq         ComparisonOperator = "=="
+	OpNe         ComparisonOperator = "!="
+	OpGt         ComparisonOperator = ">"
+	OpGe         ComparisonOperator = ">="
+	OpLt         ComparisonOperator = "<"
+	OpLe         ComparisonOperator = "<="
+	OpIn         ComparisonOperator = "in"
+	OpOut        ComparisonOperator = "not in"
+	OpHas        ComparisonOperator = "has"
+	OpMissing    ComparisonOperator = "== nil"
+	OpNotMissing ComparisonOperator = "!= nil"
+)
+
+// SortDirection enumerates supported sort directions.
+type SortDirection string
+
+const (
+	SortAsc  SortDirection = "asc"
+	SortDesc SortDirection = "desc"
+)
+
+// SortField captures a field/direction pair applied when ordering results.
+type SortField struct {
+	Field     string
+	Direction SortDirection
+}
+
+// RelationshipFunction enumerates supported relationship traversal functions.
+type RelationshipFunction string
+
+const (
+	RelParentOf      RelationshipFunction = "parentOf"
+	RelChildOf       RelationshipFunction = "childOf"
+	RelAliasOf       RelationshipFunction = "aliasOf"
+	RelEquals        RelationshipFunction = "equals"
+	RelInteractsWith RelationshipFunction = "interactsWith"
+	RelContains      RelationshipFunction = "contains"
+	RelOwns          RelationshipFunction = "owns"
+	RelCreatedBy     RelationshipFunction = "createdBy"
+	RelIds           RelationshipFunction = "ids"
+)
+
+// ----------------------------------------------------------------------------
+// Expression Nodes
+// ----------------------------------------------------------------------------
+
+// LogicalExpr joins two expressions using a logical operator.
+type LogicalExpr struct {
+	Op    LogicalOp
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*LogicalExpr) node()           {}
+func (*LogicalExpr) expressionNode() {}
+
+// ComparisonExpr compares a field to a literal value or collection.
+type ComparisonExpr struct {
+	Field            FieldReference
+	Operator         ComparisonOperator
+	Value            any
+	CacheHintSeconds *int
+	FieldSelections  []FieldReference
+}
+
+func (*ComparisonExpr) node()           {}
+func (*ComparisonExpr) expressionNode() {}
+
+// RelationshipExpr wraps a nested expression within a relationship function invocation.
+type RelationshipExpr struct {
+	Function RelationshipFunction
+	Target   ExpressionNode
+}
+
+func (*RelationshipExpr) node()           {}
+func (*RelationshipExpr) expressionNode() {}
+
+// SortExpr wraps an expression whose results should be returned in a defined order.
+type SortExpr struct {
+	Target ExpressionNode
+	Fields []SortField
+}
+
+func (*SortExpr) node()           {}
+func (*SortExpr) expressionNode() {}
+
+// PaginateExpr limits and offsets results produced by its target expression.
+type PaginateExpr struct {
+	Target ExpressionNode
+	Limit  *int
+	Offset *int
+}
+
+func (*PaginateExpr) node()           {}
+func (*PaginateExpr) expressionNode() {}
+
+// SelectExpr projects fields for the results produced by its target expression.
+type SelectExpr struct {
+	Target ExpressionNode
+	Fields []FieldReference
+}
+
+func (*SelectExpr) node()           {}
+func (*SelectExpr) expressionNode() {}
+
+// TimestampExpr pins execution to a given point in time.
+type TimestampExpr struct {
+	Target    ExpressionNode
+	Timestamp *time.Time
+	UseLatest bool
+}
+
+func (*TimestampExpr) node()           {}
+func (*TimestampExpr) expressionNode() {}
+
+// DepthExpr overrides relationship traversal depth for its target expression.
+type DepthExpr struct {
+	Target ExpressionNode
+	Depth  int
+}
+
+func (*DepthExpr) node()           {}
+func (*DepthExpr) expressionNode() {}
+
+// ShapeExpr applies a result-shaping template to the target expression.
+type ShapeExpr struct {
+	Target        ExpressionNode
+	Template      any    // ShapeTemplate - kept as any to avoid circular deps
+	TemplateName  string // Named shape reference (e.g., "participantFull"); mutually exclusive with Template
+	IncludeBundle bool
+}
+
+func (*ShapeExpr) node()           {}
+func (*ShapeExpr) expressionNode() {}
+
+// FunctionCallExpr references a named function invocation with arguments.
+type FunctionCallExpr struct {
+	Name string
+	Args map[string]any
+}
+
+func (*FunctionCallExpr) node()           {}
+func (*FunctionCallExpr) expressionNode() {}
+
+// BuiltinFunctionExpr represents a builtin function invocation.
+type BuiltinFunctionExpr struct {
+	Name     string
+	Executor string
+}
+
+func (*BuiltinFunctionExpr) node()           {}
+func (*BuiltinFunctionExpr) expressionNode() {}
+
+// SpecReferenceExpr references a named specification.
+type SpecReferenceExpr struct {
+	Name string
+}
+
+func (*SpecReferenceExpr) node()           {}
+func (*SpecReferenceExpr) expressionNode() {}
+
+// ConditionalFilterExpr represents a ?. conditional filter.
+type ConditionalFilterExpr struct {
+	ArgPath string
+	Filter  ExpressionNode
+}
+
+func (*ConditionalFilterExpr) node()           {}
+func (*ConditionalFilterExpr) expressionNode() {}
+
+// ArgRefExpr references a value from the function arguments.
+type ArgRefExpr struct {
+	Path string
+}
+
+func (*ArgRefExpr) node()           {}
+func (*ArgRefExpr) expressionNode() {}
+
+// LiteralExpr wraps a literal value.
+type LiteralExpr struct {
+	Value any
+}
+
+func (*LiteralExpr) node()           {}
+func (*LiteralExpr) expressionNode() {}
+
+// SIExpr captures si() invocation nodes parsed inside MemQL expressions.
+type SIExpr struct {
+	TemplateId       string
+	ProviderOverride *string
+	CacheSeconds     *int
+}
+
+func (*SIExpr) node()           {}
+func (*SIExpr) expressionNode() {}
+
+// ----------------------------------------------------------------------------
+// Accessor Function Nodes (NEW - for automation/mutation expressions)
+// ----------------------------------------------------------------------------
+
+// VarRefExpr references a configuration variable: var("NAME")
+type VarRefExpr struct {
+	Name string
+}
+
+func (*VarRefExpr) node()           {}
+func (*VarRefExpr) expressionNode() {}
+
+// StepRefExpr references a previous step's result: step("id")
+type StepRefExpr struct {
+	StepId string
+}
+
+func (*StepRefExpr) node()           {}
+func (*StepRefExpr) expressionNode() {}
+
+// InputRefExpr references the automation input: input()
+type InputRefExpr struct{}
+
+func (*InputRefExpr) node()           {}
+func (*InputRefExpr) expressionNode() {}
+
+// ItemRefExpr references the current forEach item: item()
+type ItemRefExpr struct{}
+
+func (*ItemRefExpr) node()           {}
+func (*ItemRefExpr) expressionNode() {}
+
+// IndexRefExpr references the current forEach index: index()
+type IndexRefExpr struct{}
+
+func (*IndexRefExpr) node()           {}
+func (*IndexRefExpr) expressionNode() {}
+
+// EventRefExpr references the trigger event: event()
+type EventRefExpr struct{}
+
+// CallerRefExpr references the caller() accessor, which yields the
+// authenticated user's AccessContext at query-evaluation time.
+// Exposed fields (resolved by the runtime):
+//
+//   caller.userId        -- v1:identity:user.id
+//   caller.primaryEmail  -- the caller's primary email
+//   caller.role          -- cluster-wide role (owner / admin / writer / reader)
+//   caller.identityId    -- v1:identity:identity.id used for this request
+//   caller.partitions    -- []string of partition names the caller can access
+//                            (empty for cluster owners, who bypass the ACL)
+//
+// Callable in expression position inside .memql function bodies, used
+// by server-side filters like listPartitions to scope results without
+// the gRPC handler having to intercept.
+type CallerRefExpr struct{}
+
+func (*EventRefExpr) node()           {}
+func (*EventRefExpr) expressionNode() {}
+
+func (*CallerRefExpr) node()           {}
+func (*CallerRefExpr) expressionNode() {}
+
+// ErrorRefExpr references the current error in onError context: $error
+type ErrorRefExpr struct{}
+
+func (*ErrorRefExpr) node()           {}
+func (*ErrorRefExpr) expressionNode() {}
+
+// ErrorExpr creates an error with a message: error("message")
+// Used for early returns: return error("something went wrong")
+type ErrorExpr struct {
+	Message ExpressionNode
+}
+
+func (*ErrorExpr) node()           {}
+func (*ErrorExpr) expressionNode() {}
+
+// TimestampExprFunc returns the current timestamp: timestamp() or now()
+type TimestampExprFunc struct{}
+
+func (*TimestampExprFunc) node()           {}
+func (*TimestampExprFunc) expressionNode() {}
+
+// FieldRefExpr accesses a field on an object: field(obj, "key")
+type FieldRefExpr struct {
+	Object ExpressionNode
+	Key    string
+}
+
+func (*FieldRefExpr) node()           {}
+func (*FieldRefExpr) expressionNode() {}
+
+// ConcatExpr concatenates values: concat(a, b, ...)
+type ConcatExpr struct {
+	Args []ExpressionNode
+}
+
+func (*ConcatExpr) node()           {}
+func (*ConcatExpr) expressionNode() {}
+
+// CoalesceExpr returns the first non-null value: coalesce(a, b, ...)
+type CoalesceExpr struct {
+	Args []ExpressionNode
+}
+
+func (*CoalesceExpr) node()           {}
+func (*CoalesceExpr) expressionNode() {}
+
+// CondExpr represents a three-argument conditional-value expression:
+// cond(predicate, thenValue, elseValue). Evaluates predicate, returns
+// thenValue when truthy and elseValue otherwise. Renamed from IfExpr
+// so the AST doesn't collide with Go readers' intuition about `if`
+// statements.
+type CondExpr struct {
+	Condition ExpressionNode
+	Then      ExpressionNode
+	Else      ExpressionNode
+}
+
+func (*CondExpr) node()           {}
+func (*CondExpr) expressionNode() {}
+
+// TernaryExpr represents the ternary operator: cond ? then : else
+type TernaryExpr struct {
+	Condition ExpressionNode
+	Then      ExpressionNode
+	Else      ExpressionNode
+}
+
+func (*TernaryExpr) node()           {}
+func (*TernaryExpr) expressionNode() {}
+
+// FirstExpr returns the first item: first(expr)
+type FirstExpr struct {
+	Target ExpressionNode
+}
+
+func (*FirstExpr) node()           {}
+func (*FirstExpr) expressionNode() {}
+
+// LastExpr returns the last item: last(expr)
+type LastExpr struct {
+	Target ExpressionNode
+}
+
+func (*LastExpr) node()           {}
+func (*LastExpr) expressionNode() {}
+
+// LowerExpr converts to lowercase: lower(str)
+type LowerExpr struct {
+	Target ExpressionNode
+}
+
+func (*LowerExpr) node()           {}
+func (*LowerExpr) expressionNode() {}
+
+// UpperExpr converts to uppercase: upper(str)
+type UpperExpr struct {
+	Target ExpressionNode
+}
+
+func (*UpperExpr) node()           {}
+func (*UpperExpr) expressionNode() {}
+
+// TrimExpr removes whitespace: trim(str)
+type TrimExpr struct {
+	Target ExpressionNode
+}
+
+func (*TrimExpr) node()           {}
+func (*TrimExpr) expressionNode() {}
+
+// ContainsExpr checks substring: contains(str, substr)
+type ContainsExpr struct {
+	Target    ExpressionNode
+	Substring ExpressionNode
+}
+
+func (*ContainsExpr) node()           {}
+func (*ContainsExpr) expressionNode() {}
+
+// HashExpr computes SHA256: hash(str)
+type HashExpr struct {
+	Target ExpressionNode
+}
+
+func (*HashExpr) node()           {}
+func (*HashExpr) expressionNode() {}
+
+// CanonicalIdExpr normalizes an id-shaped value to canonical form
+// for the named concept: canonicalId(value, "<conceptType>").
+//
+// The Concept arg is required to be a string literal at parse time
+// (not a runtime expression), so it can be validated against the
+// concept registry during compilation. Value is any expression that
+// resolves to a string at runtime.
+type CanonicalIdExpr struct {
+	Value   ExpressionNode
+	Concept string
+}
+
+func (*CanonicalIdExpr) node()           {}
+func (*CanonicalIdExpr) expressionNode() {}
+
+// AndExpr returns true if all args are truthy: and(a, b, ...)
+type AndExpr struct {
+	Args []ExpressionNode
+}
+
+func (*AndExpr) node()           {}
+func (*AndExpr) expressionNode() {}
+
+// OrExpr returns true if any arg is truthy: or(a, b, ...)
+type OrExpr struct {
+	Args []ExpressionNode
+}
+
+func (*OrExpr) node()           {}
+func (*OrExpr) expressionNode() {}
+
+// NotExpr returns boolean negation: not(expr)
+type NotExpr struct {
+	Target ExpressionNode
+}
+
+func (*NotExpr) node()           {}
+func (*NotExpr) expressionNode() {}
+
+// EqExpr returns true if a == b: eq(a, b)
+type EqExpr struct {
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*EqExpr) node()           {}
+func (*EqExpr) expressionNode() {}
+
+// LtExpr returns true if a < b: lt(a, b)
+type LtExpr struct {
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*LtExpr) node()           {}
+func (*LtExpr) expressionNode() {}
+
+// GtExpr returns true if a > b: gt(a, b)
+type GtExpr struct {
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*GtExpr) node()           {}
+func (*GtExpr) expressionNode() {}
+
+// LteExpr returns true if a <= b: lte(a, b)
+type LteExpr struct {
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*LteExpr) node()           {}
+func (*LteExpr) expressionNode() {}
+
+// GteExpr returns true if a >= b: gte(a, b)
+type GteExpr struct {
+	Left  ExpressionNode
+	Right ExpressionNode
+}
+
+func (*GteExpr) node()           {}
+func (*GteExpr) expressionNode() {}
+
+// ToStringExpr converts value to string: toString(expr)
+type ToStringExpr struct {
+	Target ExpressionNode
+}
+
+func (*ToStringExpr) node()           {}
+func (*ToStringExpr) expressionNode() {}
+
+// AddDurationExpr adds duration to timestamp: addDuration(timestamp, duration)
+type AddDurationExpr struct {
+	Timestamp ExpressionNode
+	Duration  ExpressionNode
+}
+
+func (*AddDurationExpr) node()           {}
+func (*AddDurationExpr) expressionNode() {}
+
+// DaysBetweenExpr calculates days between dates: daysBetween(date1, date2)
+type DaysBetweenExpr struct {
+	Date1 ExpressionNode
+	Date2 ExpressionNode
+}
+
+func (*DaysBetweenExpr) node()           {}
+func (*DaysBetweenExpr) expressionNode() {}
+
+// SubtractTimestampsExpr calculates duration between timestamps: subtractTimestamps(t1, t2)
+type SubtractTimestampsExpr struct {
+	T1 ExpressionNode
+	T2 ExpressionNode
+}
+
+func (*SubtractTimestampsExpr) node()           {}
+func (*SubtractTimestampsExpr) expressionNode() {}
+
+// YearExpr extracts year from timestamp: year(timestamp)
+type YearExpr struct {
+	Target ExpressionNode
+}
+
+func (*YearExpr) node()           {}
+func (*YearExpr) expressionNode() {}
+
+// QuarterExpr extracts quarter (1-4) from timestamp: quarter(timestamp)
+type QuarterExpr struct {
+	Target ExpressionNode
+}
+
+func (*QuarterExpr) node()           {}
+func (*QuarterExpr) expressionNode() {}
+
+// MonthExpr extracts month (1-12) from timestamp: month(timestamp)
+type MonthExpr struct {
+	Target ExpressionNode
+}
+
+func (*MonthExpr) node()           {}
+func (*MonthExpr) expressionNode() {}
+
+// DayOfMonthExpr extracts day of month (1-31) from timestamp: dayOfMonth(timestamp)
+type DayOfMonthExpr struct {
+	Target ExpressionNode
+}
+
+func (*DayOfMonthExpr) node()           {}
+func (*DayOfMonthExpr) expressionNode() {}
+
+// IsAnniversaryExpr checks if checkDate is anniversary of startDate: isAnniversary(startDate, checkDate)
+type IsAnniversaryExpr struct {
+	StartDate ExpressionNode
+	CheckDate ExpressionNode
+}
+
+func (*IsAnniversaryExpr) node()           {}
+func (*IsAnniversaryExpr) expressionNode() {}
+
+// IsFirstDayOfQuarterExpr checks if date is first day of quarter: isFirstDayOfQuarter(timestamp)
+type IsFirstDayOfQuarterExpr struct {
+	Target ExpressionNode
+}
+
+func (*IsFirstDayOfQuarterExpr) node()           {}
+func (*IsFirstDayOfQuarterExpr) expressionNode() {}
+
+// ----------------------------------------------------------------------------
+// Statement Nodes (for functions, mutations, automations)
+// ----------------------------------------------------------------------------
+
+// MutationKind discriminates between insert() and update() call forms.
+//
+// insert() -- the legacy, full-payload form: every required field on
+// the concept must be present in the payload, validated independently
+// per row. Each call appends a new row in the time-series; queries
+// resolve to the latest row by createdAt. Existing prior rows are
+// NOT consulted.
+//
+// update() -- partial-payload form added to bridge the time-series-
+// vs-mental-model gap. The engine reads the latest existing row by
+// id, splats the new payload fields on top, validates the merged
+// result against the concept schema, then appends a new row carrying
+// the merged payload. Required fields the caller doesn't pass are
+// inherited from the prior row. Non-existent prior row -> error
+// (update can't synthesize a record from nothing).
+//
+// Default: MutationKindInsert. Mutations that want partial-update
+// semantics use `return update(...)` instead of `return insert(...)`.
+type MutationKind string
+
+const (
+	MutationKindInsert MutationKind = "insert"
+	MutationKindUpdate MutationKind = "update"
+)
+
+// MutationStmt captures mutation intents parsed from MemQL statements.
+type MutationStmt struct {
+	// Kind discriminates insert vs update call form. Empty / unset
+	// is equivalent to MutationKindInsert -- consumers should treat a
+	// blank Kind as insert for backwards compatibility with AST nodes
+	// produced before update() landed.
+	Kind    MutationKind
+	Concept string
+	// IDTemplate preserves the id=... expression (string literal, args.X, concat(...), etc.)
+	// for later runtime evaluation by mutation/function execution.
+	IDTemplate any
+	// CreatedAtTemplate preserves createdAt=... expression for optional CreatedAt overrides.
+	// It should evaluate to an RFC3339/RFC3339Nano timestamp string at runtime.
+	CreatedAtTemplate any
+	PayloadRaw        string
+	// ParentTemplate and AliasOfTemplate preserve relationship hints for later evaluation.
+	ParentTemplate  any
+	AliasOfTemplate any
+}
+
+func (*MutationStmt) node()          {}
+func (*MutationStmt) statementNode() {}
+
+// QueryStmt represents a query expression as a statement.
+type QueryStmt struct {
+	Expression ExpressionNode
+}
+
+func (*QueryStmt) node()          {}
+func (*QueryStmt) statementNode() {}
+
+// ----------------------------------------------------------------------------
+// Directive Nodes (for //memql:xxx Go-style directives)
+// ----------------------------------------------------------------------------
+
+// Attribute represents a Python-style @decorator attribute.
+// Examples:
+//   - @enabled
+//   - @description("Auto-provisions a user")
+//   - @trigger(event="session.opened")
+//   - @args({ "userId": { "type": "string" } })
+type Attribute struct {
+	Name  string         // e.g., "enabled", "trigger", "description"
+	Value any            // Single value (string, bool, etc.) or nil for flag attributes
+	Args  map[string]any // Named args: key=value pairs
+}
+
+func (*Attribute) node() {}
+
+// UseTargets extracts the comma-list of bare names declared in this
+// attribute. Returns the names that appeared inside the parens of
+// `@useConcept(a, b)` / `@useShape(x)` / etc.
+//
+// The parser stores `@useConcept(a, b)` with Args=map[a:true b:true]
+// (bare identifiers become keys with boolean true). Map iteration
+// order is non-deterministic; the returned slice is alphabetically
+// sorted for stable ordering across loads.
+func (a *Attribute) UseTargets() []string {
+	if a == nil || len(a.Args) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(a.Args))
+	for k := range a.Args {
+		names = append(names, k)
+	}
+	// Stable order for downstream consumers (validators, debug
+	// output, etc.).
+	for i := 0; i < len(names); i++ {
+		for j := i + 1; j < len(names); j++ {
+			if names[j] < names[i] {
+				names[i], names[j] = names[j], names[i]
+			}
+		}
+	}
+	return names
+}
+
+// Common attribute names (used in @name syntax)
+const (
+	// Lifecycle attributes
+	AttrEnabled    = "enabled"
+	AttrDisabled   = "disabled"
+	AttrDeprecated = "deprecated"
+	AttrVersion    = "version"
+
+	// Documentation
+	AttrDescription = "description"
+
+	// Access control
+	AttrInternal   = "internal"
+	AttrPublic     = "public"
+	AttrRole       = "role"
+	AttrPermission = "permission"
+
+	// Performance
+	AttrTimeout   = "timeout"
+	AttrCache     = "cache"
+	AttrRateLimit = "rateLimit"
+
+	// Reliability
+	AttrRetry      = "retry"
+	AttrIdempotent = "idempotent"
+
+	// Auditing
+	AttrAudit = "audit"
+
+	// Triggers (automation only)
+	AttrTrigger  = "trigger"
+	AttrFilter   = "filter"
+	AttrSchedule = "schedule"
+	AttrAsync    = "async"
+
+	// Tool-specific attributes
+	AttrHandler              = "handler"
+	AttrDestructive          = "destructive"
+	AttrRequiresConfirmation = "requiresConfirmation"
+	AttrExecutionTime        = "executionTime"
+
+	// Builtin-specific attributes
+	AttrExecutor = "executor"
+
+	// Dependency-declaration attributes. Every named construct
+	// referenced inside a body MUST be declared via the matching
+	// @use* annotation. Unused declarations error at load.
+	AttrUse           = "use"
+	AttrUseConcept    = "useConcept"
+	AttrUseShape      = "useShape"
+	AttrUseSpec       = "useSpec"
+	AttrUseTrait      = "useTrait"
+	AttrUseQuery      = "useQuery"
+	AttrUseMutation   = "useMutation"
+	AttrUseAutomation = "useAutomation"
+	AttrUseLogic      = "useLogic"
+	AttrUseTool       = "useTool"
+	AttrUsePrompt     = "usePrompt"
+	AttrUseProvider   = "useProvider"
+	AttrUseBuiltin    = "useBuiltin"
+)
+
+// ----------------------------------------------------------------------------
+// Go-like Statement Nodes (NEW - for Go-style syntax)
+// ----------------------------------------------------------------------------
+
+// AssignStmt represents a := assignment: name := expr or name, err := expr
+type AssignStmt struct {
+	Names []string       // Variable names (e.g., ["result"] or ["result", "err"])
+	Value ExpressionNode // The expression being assigned
+}
+
+func (*AssignStmt) node()          {}
+func (*AssignStmt) statementNode() {}
+
+// ForRangeStmt represents a for-range loop: for item := range collection { ... }
+type ForRangeStmt struct {
+	Index      string         // Index variable (optional, e.g., "i")
+	Value      string         // Value variable (e.g., "item")
+	Collection ExpressionNode // Collection to iterate over
+	Filter     ExpressionNode // Optional filter condition (for item := range x if cond)
+	Body       []Node         // Statements in the loop body
+}
+
+func (*ForRangeStmt) node()          {}
+func (*ForRangeStmt) statementNode() {}
+
+// SwitchStmt represents a Go-style switch statement
+type SwitchStmt struct {
+	Expr    ExpressionNode // Expression being switched on
+	Cases   []*CaseClause  // Case clauses
+	Default []Node         // Default clause body (nil if no default)
+}
+
+func (*SwitchStmt) node()          {}
+func (*SwitchStmt) statementNode() {}
+
+// CaseClause represents a single case in a switch statement
+type CaseClause struct {
+	Values []ExpressionNode // Case values (can be multiple: case "a", "b":)
+	Body   []Node           // Statements to execute
+}
+
+func (*CaseClause) node() {}
+
+// IfStmt represents a Go-style if statement: if cond { } else { }
+type IfStmt struct {
+	Init      StatementNode  // Optional init statement: if x, err := foo(); err != nil
+	Condition ExpressionNode // Condition to evaluate
+	Then      []Node         // Body if condition is true
+	Else      []Node         // Body if condition is false (can contain another IfStmt)
+}
+
+func (*IfStmt) node()          {}
+func (*IfStmt) statementNode() {}
+
+// ContinueStmt represents a continue statement in a loop
+type ContinueStmt struct {
+	Label string // Optional label for labeled continue
+}
+
+func (*ContinueStmt) node()          {}
+func (*ContinueStmt) statementNode() {}
+
+// BreakStmt represents a break statement in a loop or switch
+type BreakStmt struct {
+	Label string // Optional label for labeled break
+}
+
+func (*BreakStmt) node()          {}
+func (*BreakStmt) statementNode() {}
+
+// ReturnStmt represents a return statement: return expr or return expr, err
+type ReturnStmt struct {
+	Results []ExpressionNode // Return values (typically [value, error] or [value])
+}
+
+func (*ReturnStmt) node()          {}
+func (*ReturnStmt) statementNode() {}
+
+// RetryExpr wraps an expression with retry logic: retry(3) expr
+type RetryExpr struct {
+	Count  int            // Number of retry attempts
+	Target ExpressionNode // Expression to retry
+}
+
+func (*RetryExpr) node()           {}
+func (*RetryExpr) expressionNode() {}
+
+// DotAccessExpr represents dot notation access: event.payload.subject
+type DotAccessExpr struct {
+	Object ExpressionNode // The object being accessed
+	Field  string         // The field name
+}
+
+func (*DotAccessExpr) node()           {}
+func (*DotAccessExpr) expressionNode() {}
+
+// NilExpr represents the nil literal
+type NilExpr struct{}
+
+func (*NilExpr) node()           {}
+func (*NilExpr) expressionNode() {}
+
+// ----------------------------------------------------------------------------
+// Function Definition Nodes (UPDATED - for Go-style receiver syntax)
+// ----------------------------------------------------------------------------
+
+// ReceiverType identifies the function receiver type.
+type ReceiverType string
+
+const (
+	ReceiverQuery      ReceiverType = "Query"
+	ReceiverMutation   ReceiverType = "Mutation"
+	ReceiverAutomation ReceiverType = "Automation"
+	ReceiverLogic      ReceiverType = "Logic"
+	ReceiverSpec       ReceiverType = "Spec"
+	ReceiverTool       ReceiverType = "Tool"
+	ReceiverBuiltin    ReceiverType = "Builtin"
+	ReceiverPrompt     ReceiverType = "Prompt"
+	ReceiverProvider   ReceiverType = "Provider"
+	ReceiverShape      ReceiverType = "Shape"
+	ReceiverPolicy     ReceiverType = "Policy"
+)
+
+// FunctionReceiver represents the receiver in func (r Type) syntax
+type FunctionReceiver struct {
+	Name string       // Optional receiver name (e.g., "a" in "func (a Automation)")
+	Type ReceiverType // The receiver type: Query, Mutation, Automation
+}
+
+// FunctionDef represents a named function definition.
+// Go-style syntax: func (Type) name(args any) (any, error) { ... }
+type FunctionDef struct {
+	Attributes  []*Attribute      // @name Python-style attributes
+	Receiver    *FunctionReceiver // Go-style receiver: (Query), (m Mutation), etc.
+	Name        string
+	Description string
+	Type        FunctionType
+	Args        []FunctionArg
+	Body        Node     // Can be ExpressionNode, MutationStmt, AutomationDef, or []Node for block
+	Returns     []string // Return type names, e.g., ["any", "error"]
+
+	// Parsed directive values
+	Enabled    bool   // from //memql:enabled
+	Deprecated string // from //memql:deprecated (empty = not deprecated)
+	Version    string // from //memql:version
+	Internal   bool   // from //memql:internal
+	Role       string // from //memql:role
+	Permission string // from //memql:permission
+	Timeout    string // from //memql:timeout
+	CacheTTL   string // from //memql:cache (queries only)
+	RateLimit  *RateLimitConfig
+	Retry      int  // from //memql:retry
+	Idempotent bool // from //memql:idempotent (mutations only)
+	Audit      bool // from //memql:audit
+
+	// ArgsSchema is the function's input schema, populated from the
+	// file-top `args { ... }` block.
+	ArgsSchema *ArgsSchema
+}
+
+// RateLimitConfig holds rate limiting configuration.
+type RateLimitConfig struct {
+	Requests int
+	Per      string
+}
+
+func (*FunctionDef) node() {}
+
+// FunctionType identifies the kind of function.
+type FunctionType string
+
+const (
+	FunctionTypeQuery      FunctionType = "query"
+	FunctionTypeMutation   FunctionType = "mutation"
+	FunctionTypeAutomation FunctionType = "automation"
+	FunctionTypeLogic      FunctionType = "logic"
+	FunctionTypeSpec       FunctionType = "spec"
+	FunctionTypeTool       FunctionType = "tool"
+	FunctionTypeBuiltin    FunctionType = "builtin"
+	FunctionTypePrompt     FunctionType = "prompt"
+	FunctionTypeProvider   FunctionType = "provider"
+	FunctionTypeShape      FunctionType = "shape"
+	FunctionTypePolicy     FunctionType = "policy"
+)
+
+// FunctionArg represents a function argument declaration.
+type FunctionArg struct {
+	Name     string
+	Type     string // optional type hint
+	Required bool
+	Default  any
+}
+
+// ----------------------------------------------------------------------------
+// Automation Definition Nodes
+// ----------------------------------------------------------------------------
+
+// AutomationDef represents an automation definition.
+type AutomationDef struct {
+	Attributes  []*Attribute // @name Python-style attributes
+	Name        string
+	Description string
+	Schedule    string // cron expression (from @schedule)
+	Trigger     *TriggerDef
+	Input       ExpressionNode
+	Steps       []StepDef
+	OnComplete  *StepDef
+	OnError     *StepDef
+
+	// Parsed attribute values
+	Enabled    bool   // from @enabled
+	Deprecated string // from @deprecated
+	Version    string // from @version
+	Internal   bool   // from @internal
+	Role       string // from @role
+	Permission string // from @permission
+	Timeout    string // from @timeout
+	RateLimit  *RateLimitConfig
+	Retry      int  // from @retry
+	Audit      bool // from @audit
+	Async      bool // from @async
+}
+
+func (*AutomationDef) node() {}
+
+// TriggerDef defines event-based triggers for an automation.
+type TriggerDef struct {
+	Event  string
+	Filter string
+}
+
+// ArgsSchema defines an args-block schema -- the input schema for a
+// procedural function, populated from the file-top `args { ... }`
+// block. The struct is named "ArgsSchema" for historical reasons;
+// the data it carries is purely the args schema.
+type ArgsSchema struct {
+	// Target names the block kind ("args").
+	Target string
+	// Fields defines the expected fields and their types
+	Fields []*ArgsField
+	// AdditionalProperties controls whether unknown fields are allowed.
+	// nil means default behavior.
+	AdditionalProperties *bool
+}
+
+// ArgsField defines a single field's type assertion.
+type ArgsField struct {
+	// Name is the field name (e.g., "subject", "email")
+	Name string
+	// Type is the expected type: "string", "number", "bool", "object", "array"
+	Type string
+	// Optional indicates if the field can be missing (field? syntax)
+	Optional bool
+	// Nested contains nested field assertions for object types
+	Nested []*ArgsField
+	// Enum restricts values to the provided set.
+	Enum []any
+	// Minimum/Maximum constrain numeric values.
+	Minimum *float64
+	Maximum *float64
+	// Format constrains string format (e.g., date-time).
+	Format string
+	// AdditionalProperties controls whether unknown fields are allowed for object values.
+	AdditionalProperties *bool
+	// Items defines array item schema.
+	Items *ArgsField
+}
+
+// StepDef represents a step in an automation.
+type StepDef struct {
+	ID         string
+	Name       string
+	Type       StepType
+	Condition  string // "if condition" after step type
+	RetryCount int    // from retry(n) wrapper
+	OnError    string // error handling strategy (e.g., "continue", "fail")
+	Config     any    // Step-type-specific configuration
+}
+
+// StepType identifies the kind of step.
+type StepType string
+
+const (
+	StepTypeQuery      StepType = "query"
+	StepTypeMutation   StepType = "mutation"
+	StepTypeForEach    StepType = "forEach"
+	StepTypeParallel   StepType = "parallel"
+	StepTypeSwitch     StepType = "switch"
+	StepTypeFunction   StepType = "function"
+	StepTypeAutomation StepType = "automation"
+)
+
+// QueryStepConfig configures a query step.
+type QueryStepConfig struct {
+	Query ExpressionNode
+}
+
+// MutationStepConfig configures a mutation step.
+type MutationStepConfig struct {
+	Mutation *MutationStmt
+}
+
+// FunctionStepConfig configures a named function invocation step.
+type FunctionStepConfig struct {
+	Name string
+	Args map[string]any
+}
+
+// ForEachStepConfig configures iteration over a collection.
+type ForEachStepConfig struct {
+	Source      string
+	Filter      string
+	As          string // Value variable (e.g., "item" in "for item := range")
+	Index       string // Index variable (optional, e.g., "i" in "for i, item := range")
+	Concurrency int
+	Do          []StepDef
+}
+
+// ParallelStepConfig configures concurrent step execution.
+type ParallelStepConfig struct {
+	Branches []StepDef
+	Wait     string
+	FailFast bool
+}
+
+// SwitchStepConfig configures conditional branching.
+type SwitchStepConfig struct {
+	Expression string
+	Cases      map[string]*SwitchCase
+	Default    *SwitchCase
+}
+
+// SwitchCase defines what to execute for a switch case.
+type SwitchCase struct {
+	Steps []StepDef
+}
+
+// ----------------------------------------------------------------------------
+// File/Module Nodes (NEW - for .memql files with multiple definitions)
+// ----------------------------------------------------------------------------
+
+// UseDeclaration represents a `use` import for a concept reference.
+// Examples:
+//   - use cognition.participant           -> resolves to v1:cognition:participant (version from file path)
+//   - use cognition.session as cognitionSess -> aliased reference
+//   - use v1.cognition.participant        -> explicit version override
+type UseDeclaration struct {
+	// Path is the dotted path as written: "cognition.participant", "data.staging"
+	Path string
+	// Alias is the optional alias from `as <name>`, empty if none
+	Alias string
+	// Parts are the split components: ["cognition", "participant"]
+	Parts []string
+	// ResolvedId is filled by the concept resolver: "v1:cognition:participant"
+	ResolvedId string
+}
+
+func (*UseDeclaration) node() {}
+
+// LeafName returns the short name used to reference this concept.
+// If aliased, returns the alias; otherwise returns the last path component.
+func (u *UseDeclaration) LeafName() string {
+	if u.Alias != "" {
+		return u.Alias
+	}
+	if len(u.Parts) > 0 {
+		return u.Parts[len(u.Parts)-1]
+	}
+	return u.Path
+}
+
+// ImportDecl represents a `import "./path" [as alias]` entry inside
+// an `import (...)` block at the top of a .memql file. This is the
+// Go-style file-import surface introduced by the DSL import-model
+// refactor (docs/dsl-import-model-refactor.md). Imports name files;
+// symbols within an imported file are reached as `<alias>.<name>`.
+//
+// Path is the raw string from source ("./cognition/participant" or
+// "../common/space"). It is relative-only (validated at parse time);
+// the loader resolves it against the importing file's directory and
+// the configured DSL root. The `.memql` suffix is auto-appended at
+// resolution time if absent.
+//
+// Alias is the local binding used in the importing file. If `as` is
+// omitted the alias defaults to the path's basename (without the
+// `.memql` suffix); the default rule is applied by the loader after
+// parsing, so a parsed ImportDecl with Alias == "" carries the
+// "default" intent.
+//
+// ResolvedPath is filled by the loader after path resolution
+// (basename joined with the importing file's directory + root cap).
+// Empty until the loader runs.
+type ImportDecl struct {
+	Path         string // raw source, e.g. "./cognition/participant"
+	Alias        string // explicit alias from `as <name>`, empty when default
+	ResolvedPath string // populated by the loader; canonical path inside the DSL root
+}
+
+func (*ImportDecl) node() {}
+
+// File represents a parsed .memql file containing multiple definitions.
+type File struct {
+	Path        string
+	Uses        []*UseDeclaration // legacy use declarations at the top of the file (retired in Commit 3)
+	Imports     []*ImportDecl     // file-import entries from an `import (...)` block
+	Definitions []Node            // FunctionDef, AutomationDef, ConceptDecl, etc.
+}
+
+func (*File) node() {}
+
+// ConceptDecl is the shared-frontend AST node for a concept declaration.
+// Introduced in Phase 2 of the language-improvements plan so the
+// concept loader (component/database/memory-nodes) can consume AST
+// nodes from the shared parser instead of running its own recursive-
+// descent parser at concept_parser.go.
+//
+// The wiring happens in a follow-up: this type is defined up-front so
+// downstream consumers (Sense hover, diagnostics, schema builder) can
+// reference it before the legacy concept_parser.go is retired.
+type ConceptDecl struct {
+	Name          string              // concept name (post-colon trailing segment)
+	Attributes    []*Attribute        // concept-level annotations (@description, @scope, @cache, ...)
+	Properties    []*PropertyDecl     // field declarations
+	Relationships []*RelationshipDecl // @relationship() annotations inside the body
+	Path          string              // source path, for errors/diagnostics
+}
+
+func (*ConceptDecl) node() {}
+
+// PropertyDecl is a single field declaration inside a ConceptDecl.
+// Supports both primitive types (string, bool, int, float, datetime,
+// enum, array, object) and nested object blocks via the Nested slice.
+type PropertyDecl struct {
+	Name       string
+	Type       *TypeRef
+	Attributes []*Attribute    // property-level annotations (@required, @default, @description, ...)
+	Nested     []*PropertyDecl // populated when Type.Kind == "object" AND the field is written as `name { ... }`
+
+	// Variants is populated when the property is declared with a
+	// @variant(discriminator="fieldName") block attached to the
+	// nested object body, e.g.:
+	//
+	//   credentials object @variant(discriminator="identityType") {
+	//     oauth          { provider string @required; externalUserId string @required }
+	//     api_key        { keyHash string @required }
+	//   }
+	//
+	// The schema builder emits a `oneOf` with one sub-schema per
+	// variant, so JSON-Schema validation rejects payloads whose
+	// shape doesn't match the declared discriminator value.
+	Variants []*PropertyVariant
+}
+
+// PropertyVariant is one branch of a discriminated-union property.
+type PropertyVariant struct {
+	Name       string          // discriminator value, e.g. "oauth"
+	Properties []*PropertyDecl // fields required/allowed when the discriminator matches
+}
+
+func (*PropertyDecl) node() {}
+
+// TypeRef describes a property's declared type. Uses a discriminated
+// shape rather than a string so downstream consumers don't have to
+// re-parse the type expression.
+type TypeRef struct {
+	// Kind is one of: "string", "bool", "int", "float", "datetime",
+	// "enum", "array", "object", "any", or a concept reference
+	// (e.g. "v1:cognition:space") for relationship targets.
+	Kind       string
+	EnumValues []string // populated when Kind == "enum"
+	ArrayItem  *TypeRef // populated when Kind == "array"
+	Format     string   // optional format hint, e.g. "date-time"
+}
+
+// RelationshipDecl is a @relationship() annotation parsed out of a
+// concept body. Kept separate from Attributes so downstream consumers
+// have typed access without string-splitting annotation values.
+type RelationshipDecl struct {
+	Type        string // "parent", "child", "alias", "owns", "createdBy", "contains", "interactsWith"
+	Field       string
+	FieldSource string // "payload" (default) or "table" (edge table)
+	Target      string // concept name, e.g. "v1:cognition:space"
+	Direction   string // "outgoing", "incoming", "bidirectional"
+}

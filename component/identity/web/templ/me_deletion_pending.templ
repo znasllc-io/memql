@@ -1,0 +1,42 @@
+package webtempl
+
+// MeDeletionPendingData drives /me/deletion-pending — the splash shown
+// while a scheduled deletion is in its cooldown window.
+type MeDeletionPendingData struct {
+	Layout                LayoutData
+	ScheduledDeletionDate string
+	DeletionCooldownDays  int
+}
+
+templ MeDeletionPending(data MeDeletionPendingData) {
+	@Layout(data.Layout) {
+		<div class="me-shell">
+			@meSidebar("", false)
+			<section>
+				<div class="card card-wide">
+					<h1 class="card-title">Account deletion scheduled</h1>
+					<div class="alert alert-warning">
+						Your account is scheduled for permanent deletion on
+						<strong>{ data.ScheduledDeletionDate }</strong>.
+					</div>
+					<p class="text-muted">
+						Until that date, you can cancel the deletion at any time and
+						return to using { data.Layout.BrandName } normally. After that date, your
+						user record, identities, sessions, and personal partition will
+						be permanently removed and cannot be recovered.
+					</p>
+					<p class="text-small text-subtle">
+						We'll send reminder emails at 7 days and 25 days into the
+						cooldown window.
+					</p>
+					<hr/>
+					<form method="POST" action="/me/settings/cancel-deletion" data-submit-once>
+						<button type="submit" class="btn btn-primary">
+							Cancel deletion
+						</button>
+					</form>
+				</div>
+			</section>
+		</div>
+	}
+}

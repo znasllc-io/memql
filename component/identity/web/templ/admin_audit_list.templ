@@ -1,0 +1,86 @@
+package webtempl
+
+// AdminAuditListData drives /admin/audit.
+type AdminAuditListData struct {
+	Layout   LayoutData
+	Flash    *Flash
+	Category string
+	Limit    int
+	Events   []AdminAuditView
+}
+
+templ AdminAuditList(data AdminAuditListData) {
+	@Layout(data.Layout) {
+		<div class="card card-full">
+			<h1 class="card-title">Audit log</h1>
+			<p class="card-subtitle">
+				Most recent first. Server-side cap of { formatInt(data.Limit) } rows; for
+				a full export use the JSON or CSV endpoints (Phase 7).
+			</p>
+			<form method="GET" action="/admin/audit" class="form-row inline">
+				<label for="category" class="sr-only">Category</label>
+				<select id="category" name="category">
+					<option value="" selected?={ data.Category == "" }>All categories</option>
+					<option value="auth" selected?={ data.Category == "auth" }>auth</option>
+					<option value="identity" selected?={ data.Category == "identity" }>identity</option>
+					<option value="authorization" selected?={ data.Category == "authorization" }>authorization</option>
+					<option value="configuration" selected?={ data.Category == "configuration" }>configuration</option>
+					<option value="admin" selected?={ data.Category == "admin" }>admin</option>
+					<option value="data" selected?={ data.Category == "data" }>data</option>
+				</select>
+				<button type="submit" class="btn btn-secondary">Filter</button>
+			</form>
+			if len(data.Events) == 0 {
+				<p class="text-muted mt-4">No matching audit events.</p>
+			} else {
+				<div class="table-wrap">
+					<table class="data">
+						<thead>
+							<tr>
+								<th>When</th>
+								<th>Category</th>
+								<th>Action</th>
+								<th>Actor</th>
+								<th>Target</th>
+								<th>Outcome</th>
+								<th>Source IP</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, ev := range data.Events {
+								<tr>
+									<td class="text-slate-500 whitespace-nowrap">{ ev.OccurredAt }</td>
+									<td>{ ev.Category }</td>
+									<td><code>{ ev.Action }</code></td>
+									<td>
+										if ev.ActorEmail != "" {
+											{ ev.ActorEmail }
+										} else {
+											<span class="text-subtle">(system)</span>
+										}
+									</td>
+									<td>
+										if ev.TargetID != "" {
+											<code>{ ev.TargetID }</code>
+										}
+									</td>
+									<td>
+										if ev.Outcome == "success" {
+											<span class="badge">{ ev.Outcome }</span>
+										} else {
+											<span class="badge badge-danger">{ ev.Outcome }</span>
+										}
+										if ev.FailureReason != "" {
+											<span class="text-xs text-slate-500 ml-1">— { ev.FailureReason }</span>
+										}
+									</td>
+									<td class="text-slate-500 whitespace-nowrap">{ ev.SourceIP }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		</div>
+	}
+}

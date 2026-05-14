@@ -1,0 +1,39 @@
+# LiveKit dev config for the local Polyphon stack.
+#
+# Signaling rides ngrok (wss://<random>.ngrok.app -> :7880); ICE
+# media is local-loopback only. `node_ip: 127.0.0.1` is advertised
+# as the host candidate so the browser (same Mac) negotiates ICE
+# in ~100ms.
+#
+# Why not advertise the WAN IP too: enabling `use_external_ip:
+# true` made LiveKit STUN-discover the WAN IP and ADVERTISE THAT
+# ALONE (overriding `node_ip`). The browser then tried the WAN
+# candidate first, that path doesn't actually work (UDP can't
+# loop back through every consumer router reliably), and the SDK
+# spent ~15s timing out the first ICE attempt before falling
+# back. End result: 15s "connecting to voice" pill every join.
+# Anam wasn't able to use the WAN IP either -- ngrok doesn't
+# tunnel arbitrary UDP. So the WAN-IP advertisement was pure
+# overhead.
+#
+# Anam-via-ngrok media support is a follow-up: add a second
+# ngrok TCP tunnel for LiveKit's TURN-TCP fallback (port 7881)
+# and configure LiveKit's `turn:` block to advertise that
+# endpoint as a relay candidate. Documented in
+# docs/voice/eou-tuning.md (move section) -- not built today.
+
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+  node_ip: 127.0.0.1
+
+keys:
+  devkey: secret
+
+logging:
+  level: info
+
+development: true

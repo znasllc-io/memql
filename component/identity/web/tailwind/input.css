@@ -1,0 +1,482 @@
+/*
+ * Tailwind input source for the identity web app.
+ *
+ * Compiled by `make identity-tailwind` (which invokes the standalone
+ * Tailwind CLI) into component/identity/web/static/app.css. The
+ * compiled output is gitignored and regenerated on every build —
+ * the canonical source is this file plus the .templ component class
+ * usage that Tailwind's JIT compiler scans.
+ *
+ * Layers:
+ *   - @tailwind base       -- normalize + design-token reset
+ *   - @tailwind components -- our reusable component classes
+ *   - @tailwind utilities  -- the utility-first classes templ uses
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * Per-cluster brand color injection.
+   *
+   * The layout component renders
+   *   <body style="--brand-primary: #0433ff; --brand-primary-hover: #0328cc;">
+   * so the value is whatever the operator chose at /setup. The
+   * Tailwind config maps `bg-brand` / `text-brand` / `border-brand`
+   * to var(--brand-primary), so every brand-colored element picks
+   * up the operator's choice without rebuilding.
+   *
+   * Defaults here are the dev fallback when the layout doesn't set
+   * the variables (shouldn't happen in practice but keeps the
+   * design tokens self-healing).
+   */
+  :root {
+    --brand-primary: #0433ff;
+    --brand-primary-hover: #0328cc;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold text-slate-900;
+  }
+
+  a {
+    @apply text-brand hover:text-brand-hover;
+  }
+
+  /* Form-element baseline. Tailwind doesn't reset these; the @apply
+     inside @layer base keeps every input/select/button consistent
+     without needing utility soup on every <input> tag.
+
+     `select` carries the same padding, but native macOS / Chromium
+     selects ignore content padding when their built-in chrome is
+     visible. We pin appearance: none below + paint our own chevron
+     so the height actually matches the text inputs side-by-side. */
+  input[type="text"],
+  input[type="email"],
+  input[type="url"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  textarea,
+  select {
+    @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500;
+  }
+
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 1.125rem 1.125rem;
+    padding-right: 2.25rem;
+  }
+
+  textarea {
+    @apply min-h-[100px] resize-y;
+  }
+
+  /* type="color" is a tiny native swatch by default; size it to match
+     the surrounding text inputs so the color-picker + hex pair reads
+     as one composite control. */
+  input[type="color"] {
+    @apply h-[38px] w-12 cursor-pointer rounded-md border border-slate-300 bg-white p-1 shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-blue-500/30;
+  }
+
+  /* type="file" — neutral chrome plus a clickable button that
+     matches our .btn-secondary. Without this it renders as the
+     OS-default ugly button. */
+  input[type="file"] {
+    @apply block w-full text-sm text-slate-500 file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-50;
+  }
+
+  label {
+    @apply block text-sm font-medium text-slate-700;
+  }
+
+  hr {
+    @apply my-6 border-slate-200;
+  }
+}
+
+@layer components {
+  /* Top-level page shell — header, main, footer */
+  .shell {
+    @apply mx-auto flex min-h-screen max-w-6xl flex-col px-4 sm:px-6 lg:px-8;
+  }
+  .shell-header {
+    @apply flex flex-wrap items-center gap-4 border-b border-slate-200 py-4;
+  }
+  .shell-main {
+    @apply flex-1 py-8;
+  }
+  .shell-footer {
+    @apply mt-12 flex items-center justify-between gap-4 border-t border-slate-200 py-6 text-xs text-slate-500;
+  }
+  .brand {
+    @apply text-base font-semibold text-slate-900 no-underline hover:no-underline;
+  }
+  .brand img {
+    /* Header logo height. Large enough that a wordmark with both
+       icon + name reads cleanly without leaning into the layout
+       breakpoints; the width is auto so any aspect ratio fits. */
+    @apply h-12 w-auto;
+  }
+
+  /* Cards — the standard wrapper for every page's primary content */
+  .card {
+    @apply mx-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8;
+  }
+  .card + .card {
+    @apply mt-6;
+  }
+  .card-wide {
+    @apply max-w-3xl;
+  }
+  .card-full {
+    @apply max-w-6xl;
+  }
+  .card-title {
+    @apply mb-2 text-2xl font-semibold tracking-tight text-slate-900;
+  }
+  .card-subtitle {
+    @apply mb-6 text-sm text-slate-600;
+  }
+
+  /* Section headings inside cards. h2 inside a card after content gets
+     a top margin + bottom margin so multi-section forms (admin-settings,
+     admin-jwks, admin-users-detail) read as distinct blocks. */
+  .card h2 {
+    @apply mb-3 mt-8 text-lg font-semibold tracking-tight text-slate-900 first:mt-0;
+  }
+
+  /* Form rows + helper text */
+  .form-row {
+    @apply mb-4 space-y-1.5;
+  }
+  .help {
+    @apply block text-xs text-slate-500;
+  }
+
+  /* Inline form rows (search box + button on the same line) */
+  .form-row.inline {
+    @apply flex flex-wrap items-end gap-2 space-y-0;
+  }
+  .form-row.inline > input,
+  .form-row.inline > select {
+    @apply flex-1 min-w-[200px];
+  }
+
+  /* Radio + checkbox groups */
+  .radio-group,
+  .check-group {
+    @apply space-y-2;
+  }
+  .radio-group label,
+  .check-group label {
+    @apply flex cursor-pointer items-start gap-3 rounded-md border border-slate-200 bg-white p-3 text-sm font-normal text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 has-[:checked]:border-brand has-[:checked]:bg-blue-50 has-[:checked]:ring-1 has-[:checked]:ring-blue-500/30;
+  }
+  .radio-group input,
+  .check-group input {
+    @apply mt-0.5 h-4 w-4 shrink-0 accent-brand;
+  }
+  .label-detail {
+    @apply mt-0.5 block text-xs font-normal text-slate-500;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-brand bg-brand text-white hover:bg-brand-hover hover:border-brand-hover;
+  }
+  .btn-secondary {
+    @apply border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  }
+  .btn-danger {
+    @apply border-red-500 bg-red-500 text-white hover:bg-red-600 hover:border-red-600;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900;
+  }
+  .btn-small {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .btn-block {
+    @apply w-full;
+  }
+  .btn-row {
+    @apply mt-4 flex flex-wrap gap-2;
+  }
+
+  /* Pill badges — used in users list (role / status) and tokens list. */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800;
+  }
+  .badge-muted {
+    @apply bg-slate-100 text-slate-600;
+  }
+  .badge-warn {
+    @apply bg-amber-100 text-amber-800;
+  }
+  .badge-danger {
+    @apply bg-red-100 text-red-800;
+  }
+  .badge-info {
+    @apply bg-blue-100 text-blue-800;
+  }
+
+  /* Alerts */
+  .alert {
+    @apply mb-4 rounded-md border px-4 py-3 text-sm;
+  }
+  .alert-info {
+    @apply border-blue-200 bg-blue-50 text-blue-900;
+  }
+  .alert-success {
+    @apply border-emerald-200 bg-emerald-50 text-emerald-900;
+  }
+  .alert-warn {
+    @apply border-amber-200 bg-amber-50 text-amber-900;
+  }
+  .alert-error {
+    @apply border-red-200 bg-red-50 text-red-900;
+  }
+
+  /* Tables — used by admin lists.
+
+     `.data` is the historical class name our admin templates use; styled
+     identically to `.table` so we don't have to rewrite every templ file
+     to switch class names. Wrapped in an overflow scroll on small
+     screens so a wide audit row doesn't blow out the card.
+
+     `.table-wrap` is the optional outer div that gives horizontal
+     scroll on narrow viewports. */
+  .table-wrap {
+    @apply -mx-4 overflow-x-auto sm:mx-0 sm:rounded-lg sm:border sm:border-slate-200;
+  }
+  .table,
+  .data {
+    @apply min-w-full divide-y divide-slate-200 text-sm;
+  }
+  .table thead,
+  .data thead {
+    @apply bg-slate-50;
+  }
+  .table th,
+  .data th {
+    @apply px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .table td,
+  .data td {
+    @apply px-4 py-3 text-slate-700 align-top;
+  }
+  .table tbody tr,
+  .data tbody tr {
+    @apply border-b border-slate-100 transition last:border-0 hover:bg-slate-50;
+  }
+  /* Key/value `.data` table (no thead, just a stack of `<tr><th>k</th><td>v</td></tr>`).
+     Tailwind's JIT picks `:not(:has(thead))` only when explicitly
+     compiled, so we instead style the th differently when it sits
+     inside a tr inside a tbody (or no tbody) without sibling th cells. */
+  .data tr > th:first-child:last-of-type {
+    @apply w-1/3 bg-slate-50/60 text-slate-600 normal-case tracking-normal text-sm font-medium;
+  }
+
+  /* Top nav bar in the layout header (admin pages, /me/* shells). */
+  .nav {
+    @apply ml-auto flex flex-wrap items-center gap-1;
+  }
+  .nav a {
+    @apply rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 no-underline transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .nav a.active {
+    @apply bg-blue-50 text-brand hover:bg-blue-100;
+  }
+
+  /* Code chips for hashes / ids */
+  code {
+    @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-700;
+  }
+
+  /* Dashboard stat cards — the four-up summary at the top of /admin/. */
+  .stat-grid {
+    @apply mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4;
+  }
+  .stat {
+    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  }
+  .stat-label {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .stat-value {
+    @apply mt-1 text-2xl font-semibold text-slate-900;
+  }
+  .stat-meta {
+    @apply mt-1 text-xs text-slate-500;
+  }
+
+  /* Multi-column dashboard grids */
+  .grid-2 {
+    @apply grid gap-6 lg:grid-cols-2;
+  }
+  .grid-3 {
+    @apply grid gap-6 lg:grid-cols-3;
+  }
+
+  /* Definition-list rows for the cluster overview */
+  .dl-row {
+    @apply flex items-baseline justify-between gap-4 border-b border-slate-100 py-3 last:border-0;
+  }
+  .dl-key {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .dl-value {
+    @apply text-right text-sm text-slate-900;
+  }
+
+  /* Branding uploader card — stacked layout used by both the Logo
+     and Icon fields on /admin/settings. Visually distinct from the
+     surrounding form rows so it doesn't look like another text input.
+
+     States:
+       .image-upload-idle      preview tile + Upload/Replace + Remove
+       .image-upload-editor    crop stage + zoom + Apply/Cancel
+     The Stimulus controller toggles `hidden` between the two. */
+  .image-upload-field {
+    @apply mb-6 rounded-lg border border-slate-200 bg-slate-50/40 p-4 sm:p-5;
+  }
+  .image-upload-field + .image-upload-field {
+    @apply mt-4;
+  }
+  .image-upload-header {
+    @apply mb-4 flex items-start justify-between gap-4;
+  }
+  .image-upload-label {
+    @apply text-sm font-semibold uppercase tracking-wide text-slate-700;
+  }
+  .image-upload-description {
+    @apply mt-1 text-sm text-slate-500 max-w-prose;
+  }
+  .image-upload-idle {
+    @apply flex flex-col items-start gap-4 sm:flex-row sm:items-center;
+  }
+  /* Browser-default `[hidden] { display: none }` is lowest-specificity
+     and gets overridden by our `.image-upload-idle { display: flex }`.
+     Re-apply at the same specificity-with-attribute so the controller's
+     `el.hidden = true` actually hides the section. Same for the editor. */
+  .image-upload-idle[hidden],
+  .image-upload-editor[hidden] {
+    display: none;
+  }
+  .image-upload-preview {
+    @apply flex shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white p-2;
+  }
+  /* Preview tile aspect — matches the variant's output ratio so the
+     operator sees roughly what the saved image will look like. */
+  .image-upload-idle--logo .image-upload-preview {
+    width: 480px;
+    height: 120px;
+    max-width: 100%;
+  }
+  .image-upload-idle--icon .image-upload-preview {
+    @apply h-24 w-24;
+  }
+  .image-upload-preview img {
+    @apply max-h-full max-w-full object-contain;
+  }
+  .image-upload-empty {
+    @apply text-xs text-slate-400 italic;
+  }
+  .image-upload-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .image-upload-editor {
+    @apply mt-2 space-y-3 rounded-md border border-slate-200 bg-white p-4;
+  }
+  .image-upload-zoom {
+    @apply flex items-center gap-3;
+  }
+  .image-upload-zoom-label {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .image-upload-zoom input[type="range"] {
+    @apply w-full max-w-md;
+  }
+  .image-upload-status {
+    @apply mt-3 min-h-[1.25rem] text-xs text-slate-500;
+  }
+
+  /* Crop stage — fixed-size viewport the operator drags an image
+     around inside. The image is positioned absolute and translated
+     via inline transform from JS; the stage clips anything outside
+     its frame. Two variants:
+
+       --logo  3:1 horizontal frame for full wordmarks
+       --icon  1:1 square frame for icon-only marks */
+  .crop-stage {
+    @apply relative overflow-hidden rounded-md border-2 border-brand bg-slate-200 select-none;
+    cursor: grab;
+    touch-action: none;
+  }
+  .crop-stage:active {
+    cursor: grabbing;
+  }
+  /* Wordmarks usually run 3:1 to 5:1; pick 4:1 so a typical logo
+     fits without aggressive cropping. The stage fills the available
+     width up to 1000px and uses aspect-ratio so the height scales
+     down with it on narrow viewports. */
+  .crop-stage--logo {
+    width: 100%;
+    max-width: 1000px;
+    aspect-ratio: 4 / 1;
+  }
+  .crop-stage--icon {
+    @apply h-64 w-64;
+  }
+  .crop-stage img {
+    @apply absolute left-0 top-0 max-w-none select-none;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  /* Markdown body (legal pages) */
+  .markdown {
+    @apply space-y-3 text-sm leading-relaxed text-slate-700;
+  }
+  .markdown h1 {
+    @apply mt-6 text-2xl font-semibold;
+  }
+  .markdown h2 {
+    @apply mt-5 text-xl font-semibold;
+  }
+  .markdown h3 {
+    @apply mt-4 text-base font-semibold;
+  }
+  .markdown ul {
+    @apply list-disc space-y-1 pl-6;
+  }
+  .markdown ol {
+    @apply list-decimal space-y-1 pl-6;
+  }
+
+  /* Semantic-text helpers — these alias to specific shades so the
+     templ files can say `class="text-muted"` instead of guessing
+     which slate shade to use. Native Tailwind utilities like
+     text-center, mb-0, mt-2 are NOT shadowed here (they're already
+     in @tailwind utilities; redefining them creates circular @apply
+     references). */
+  .text-muted   { @apply text-slate-500; }
+  .text-subtle  { @apply text-slate-400; }
+  .text-danger  { @apply text-red-600; }
+  .text-success { @apply text-emerald-600; }
+  .text-small   { @apply text-xs; }
+}

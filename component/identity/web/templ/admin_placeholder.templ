@@ -1,0 +1,27 @@
+package webtempl
+
+// AdminPlaceholderData drives the deferred-surface stub pages
+// (/admin/sessions, /admin/invitations, etc.).
+type AdminPlaceholderData struct {
+	Layout  LayoutData
+	Heading string
+	Body    string
+}
+
+templ AdminPlaceholder(data AdminPlaceholderData) {
+	@Layout(data.Layout) {
+		<div class="card card-wide">
+			<h1 class="card-title">{ data.Heading }</h1>
+			<p class="card-subtitle">
+				This admin surface is planned but not yet implemented.
+			</p>
+			if data.Body != "" {
+				<p class="text-muted">{ data.Body }</p>
+			}
+			<p class="text-small text-muted">
+				Implementation tracked in <code>docs/auth/identity-implementation-plan.md</code>
+				&sect;8 (Phase 6).
+			</p>
+		</div>
+	}
+}

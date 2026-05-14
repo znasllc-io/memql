@@ -1,0 +1,54 @@
+version: '3.8'
+
+# Compose project name -- distinct from the docker/ stacks. This file
+# is the lightweight "just postgres" spin-up; full and cluster topologies
+# live under docker/docker-compose.{full,cluster}.yml.
+name: memql-db-only
+
+services:
+  # Local PostgreSQL with TimescaleDB extension
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: memql-db
+    environment:
+      POSTGRES_USER: memql
+      POSTGRES_PASSWORD: memql_local_dev
+      POSTGRES_DB: memql
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memql"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memql-network
+
+  # pgAdmin for database management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: memql-dbadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@memql.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - memql-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  memql-network:
+    driver: bridge

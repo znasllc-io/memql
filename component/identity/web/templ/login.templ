@@ -1,0 +1,189 @@
+package webtempl
+
+// LoginData drives the /login page. The page is stage-based, NOT
+// registration-mode-based: every visit opens with the email field
+// (Stage="email"), and the POST handler decides whether to route
+// the user to a magic-link or re-render in a follow-up stage.
+//
+//	Stage="email"            initial email-only form. Always rendered
+//	                         on GET, regardless of registration mode.
+//	Stage="waitlist_signup"  new user; collect name + context so the
+//	                         operator can review the access request.
+//	                         Email is preserved from step 1.
+//	Stage="needs_invite"     new user, mode=invite_only. Offer the
+//	                         token-paste field; operator-side outreach
+//	                         is the only other path.
+type LoginData struct {
+	Layout             LayoutData
+	Flash              *Flash
+	Mode               string
+	Stage              string
+	AllowedDomainsHint string
+	PrefillEmail       string
+	// ReturnTo is the post-sign-in landing path the relying-party SPA
+	// wants to send the user to after the OAuth code-flow completes.
+	// Threaded through unchanged.
+	ReturnTo string
+	// OAuth code-flow context. When present, identity matches the
+	// (ClientID, RedirectURI) pair against registered clients and
+	// stamps the magic link with the OAuth context so /auth/complete
+	// can mint an auth code for that client. When absent, the magic
+	// link goes through the admin-session path and lands in /admin/.
+	ClientID    string
+	RedirectURI string
+	OAuthState  string
+}
+
+templ Login(data LoginData) {
+	@Layout(data.Layout) {
+		<div class="card">
+			<h1 class="card-title">{ loginTitleFor(data) }</h1>
+			<p class="card-subtitle">{ loginSubtitleFor(data) }</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			switch data.Stage {
+				case "waitlist_signup":
+					@loginFormWaitlist(data)
+				case "needs_invite":
+					@loginFormInvite(data)
+				default:
+					@loginFormEmail(data)
+			}
+			<hr/>
+			<p class="text-small text-muted mb-0">
+				By continuing, you agree to our
+				<a href="/legal/tos">Terms of Service</a> and
+				<a href="/legal/privacy">Privacy Policy</a>.
+			</p>
+		</div>
+	}
+}
+
+// loginTitleFor picks the heading based on which stage we're in.
+// Stage 1 always reads "Sign in" so a returning user sees the
+// language they expect; stages 2-3 swap to "Request access" /
+// "Use an invitation" so the new context is obvious.
+func loginTitleFor(data LoginData) string {
+	switch data.Stage {
+	case "waitlist_signup":
+		return "Request access to " + data.Layout.BrandName
+	case "needs_invite":
+		return "Use your invitation"
+	default:
+		return "Sign in to " + data.Layout.BrandName
+	}
+}
+
+// loginSubtitleFor picks the supporting copy. Stage 1 uses the
+// "magic link, no password" line for everyone; stages 2-3 explain
+// the new context.
+func loginSubtitleFor(data LoginData) string {
+	switch data.Stage {
+	case "waitlist_signup":
+		return "Tell us a bit about yourself and we'll get back to you."
+	case "needs_invite":
+		return "Paste the token from your invitation email."
+	default:
+		return "Enter your email — we'll send you a single-use sign-in link. If you don't have an account yet, we'll walk you through requesting access."
+	}
+}
+
+// loginFormEmail is the universal step-1 form. Same shape regardless
+// of registration mode; the server decides what to do once it sees
+// the submitted email.
+templ loginFormEmail(data LoginData) {
+	<form method="POST" action="/login" data-submit-once>
+		<input type="hidden" name="form" value="email"/>
+		if data.ReturnTo != "" {
+			<input type="hidden" name="return_to" value={ data.ReturnTo }/>
+		}
+		if data.ClientID != "" {
+			<input type="hidden" name="client_id" value={ data.ClientID }/>
+		}
+		if data.RedirectURI != "" {
+			<input type="hidden" name="redirect_uri" value={ data.RedirectURI }/>
+		}
+		if data.OAuthState != "" {
+			<input type="hidden" name="state" value={ data.OAuthState }/>
+		}
+		<div class="form-row">
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" required autocomplete="email" autofocus inputmode="email" data-hint-target="#email-hint" value={ data.PrefillEmail }/>
+			if data.Mode == "domain_restricted" && data.AllowedDomainsHint != "" {
+				<span class="help">
+					Registration on this cluster is limited to: { data.AllowedDomainsHint }. Existing users from any domain can still sign in.
+				</span>
+			}
+			<span id="email-hint" class="help"></span>
+		</div>
+		<button type="submit" class="btn btn-primary btn-block" data-pending-label="Continuing...">Continue</button>
+	</form>
+}
+
+// loginFormWaitlist is rendered after step 1 reveals a new user
+// in waitlist or domain-restricted-denied mode. Email is preserved
+// from step 1; operator collects name + context so they can decide
+// whether to approve.
+templ loginFormWaitlist(data LoginData) {
+	<form method="POST" action="/login" data-submit-once>
+		<input type="hidden" name="form" value="waitlist"/>
+		if data.ReturnTo != "" {
+			<input type="hidden" name="return_to" value={ data.ReturnTo }/>
+		}
+		if data.ClientID != "" {
+			<input type="hidden" name="client_id" value={ data.ClientID }/>
+		}
+		if data.RedirectURI != "" {
+			<input type="hidden" name="redirect_uri" value={ data.RedirectURI }/>
+		}
+		if data.OAuthState != "" {
+			<input type="hidden" name="state" value={ data.OAuthState }/>
+		}
+		<div class="form-row">
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" required autocomplete="email" inputmode="email" value={ data.PrefillEmail }/>
+		</div>
+		<div class="form-row">
+			<label for="name">Name <span class="text-subtle">(optional)</span></label>
+			<input id="name" name="name" type="text" autocomplete="name"/>
+		</div>
+		<div class="form-row">
+			<label for="additional_context">What would you use { data.Layout.BrandName } for? <span class="text-subtle">(optional)</span></label>
+			<textarea id="additional_context" name="additional_context" rows="3" placeholder="A sentence or two helps us prioritize."></textarea>
+		</div>
+		<button type="submit" class="btn btn-primary btn-block" data-pending-label="Submitting...">Request access</button>
+		<p class="text-small text-muted mt-3 mb-0">
+			<a href="/login">&larr; Use a different email</a>
+		</p>
+	</form>
+}
+
+// loginFormInvite is rendered after step 1 reveals a new user in
+// invite-only mode, OR when an existing operator with a token
+// reaches /login?stage=needs_invite directly.
+templ loginFormInvite(data LoginData) {
+	<form method="POST" action="/login" data-submit-once>
+		<input type="hidden" name="form" value="invite"/>
+		if data.ReturnTo != "" {
+			<input type="hidden" name="return_to" value={ data.ReturnTo }/>
+		}
+		if data.ClientID != "" {
+			<input type="hidden" name="client_id" value={ data.ClientID }/>
+		}
+		if data.RedirectURI != "" {
+			<input type="hidden" name="redirect_uri" value={ data.RedirectURI }/>
+		}
+		if data.OAuthState != "" {
+			<input type="hidden" name="state" value={ data.OAuthState }/>
+		}
+		<div class="form-row">
+			<label for="invitation">Invitation token</label>
+			<input id="invitation" name="invitation" type="text" autocomplete="off" required placeholder="paste your invitation token"/>
+		</div>
+		<button type="submit" class="btn btn-primary btn-block" data-pending-label="Working...">Continue</button>
+		<p class="text-small text-muted mt-3 mb-0">
+			<a href="/login">&larr; Sign in with email instead</a>
+		</p>
+	</form>
+}

@@ -1,0 +1,109 @@
+package webtempl
+
+// AdminPATRow is the per-row PAT projection rendered into /admin/tokens.
+// Includes owner email so admins can identify tokens without
+// cross-referencing user ids.
+type AdminPATRow struct {
+	ID         string
+	UserID     string
+	OwnerEmail string
+	Label      string
+	Active     bool
+	LastUsedAt string
+	CreatedAt  string
+}
+
+// AdminTokensData drives /admin/tokens.
+type AdminTokensData struct {
+	Layout      LayoutData
+	Flash       *Flash
+	Tokens      []AdminPATRow
+	TotalCount  int
+	ActiveCount int
+}
+
+templ AdminTokens(data AdminTokensData) {
+	@Layout(data.Layout) {
+		<div class="card card-full">
+			<h1 class="card-title">Personal access tokens</h1>
+			<p class="card-subtitle">
+				Every PAT issued in the cluster. Use Revoke for security-incident
+				response &mdash; revoking a PAT immediately stops any CLI client
+				using it.
+			</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			if len(data.Tokens) == 0 {
+				<p class="text-muted mt-2">No PATs have been issued yet.</p>
+			} else {
+				<div class="table-wrap">
+					<table class="data">
+						<thead>
+							<tr>
+								<th>Owner</th>
+								<th>Label</th>
+								<th>Status</th>
+								<th>Last used</th>
+								<th>Created</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, t := range data.Tokens {
+								@adminTokensRow(t)
+							}
+						</tbody>
+					</table>
+				</div>
+				<p class="text-small text-muted mt-4">
+					Total: { formatInt(data.TotalCount) } ({ formatInt(data.ActiveCount) } active).
+				</p>
+			}
+		</div>
+	}
+}
+
+templ adminTokensRow(t AdminPATRow) {
+	<tr>
+		<td>
+			if t.OwnerEmail != "" {
+				{ t.OwnerEmail }
+			} else {
+				<span class="text-muted">{ t.UserID }</span>
+			}
+		</td>
+		<td>
+			if t.Label != "" {
+				{ t.Label }
+			} else {
+				<em>(no label)</em>
+			}
+		</td>
+		<td>
+			if t.Active {
+				<span class="badge">active</span>
+			} else {
+				<span class="badge badge-muted">revoked</span>
+			}
+		</td>
+		<td>
+			if t.LastUsedAt != "" {
+				{ t.LastUsedAt }
+			} else {
+				<span class="text-muted">never</span>
+			}
+		</td>
+		<td>{ t.CreatedAt }</td>
+		<td>
+			if t.Active {
+				<form method="POST" action="/admin/tokens/revoke" style="display:inline;" data-submit-once data-confirm="Revoke this token? The owner will be signed out of any CLI session using it.">
+					<input type="hidden" name="id" value={ t.ID }/>
+					<button type="submit" class="btn btn-danger btn-small">
+						Revoke
+					</button>
+				</form>
+			}
+		</td>
+	</tr>
+}

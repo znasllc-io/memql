@@ -1,0 +1,446 @@
+// =============================================================================
+// MemQL Concept Reference
+// =============================================================================
+//
+// This file is the source of truth for `concept` syntax. It is NOT loaded by
+// the engine (the leading underscore on the path tells every walker to skip
+// it). Every concept-level annotation, every field-level annotation, every
+// supported type, and every body-level decorator is demonstrated below with
+// inline commentary.
+//
+// A concept defines the schema for a class of memory-graph rows. Concepts
+// are the only DSL construct that introduces new persistent data: every
+// other construct (queries, mutations, shapes, specs, etc.) reads or writes
+// rows whose shape is defined by a concept.
+//
+// The canonical concept ID assembled by the engine is:
+//
+//     v<MAJOR>:<namespace>:<conceptName>
+//
+// Authors stamp the MAJOR/MINOR/PATCH via @version and the namespace via
+// @namespace; the concept name comes from the declaration header. The
+// engine assembles the ID; authors never write the prefix.
+//
+// =============================================================================
+//   1. Concept-level annotations
+// =============================================================================
+//
+// Every annotation goes above the `concept` keyword. The full author surface
+// is six annotations -- nothing else is recognized.
+//
+//   @description("text")        Human-readable description.
+//   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
+//   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
+//   @scope("partition"|"global") Partition scope. Default: partition-scoped.
+//   @visibility(...)             Which node types load this concept.
+//   @type("object"|"collection"|"reference")  Default: object.
+//
+// Other annotations are rejected at load time with
+//   `unknown concept annotation @<name>`.
+//
+// =============================================================================
+//   2. Canonical minimal concept
+// =============================================================================
+//
+// The minimum a concept needs to register is @version + @namespace + the
+// declaration. Everything else is optional. @description is conventional but
+// not required.
+
+@version("1.0.0")
+@namespace("reference")
+@description("Smallest legal concept declaration -- one required string field.")
+concept minimal {
+  name string @required @description("Display name.")
+}
+
+// =============================================================================
+//   3. @version -- strict semver string
+// =============================================================================
+//
+//   - Strict three-segment form: "MAJOR.MINOR.PATCH". Single-segment "1" and
+//     two-segment "1.0" are rejected at load time.
+//   - Major must be >= 1. Minor + patch must be >= 0.
+//   - Only the MAJOR segment flows into the concept ID prefix
+//     (v<MAJOR>:<namespace>:<name>). MINOR + PATCH are documentation for
+//     additive / non-breaking schema evolution within a major version.
+//   - Bumping major is the breaking-change signal: it changes the concept
+//     ID, which changes every row id, every event topic, and every
+//     cross-concept reference.
+
+@version("1.0.0")        // shipping baseline
+@namespace("reference")
+@description("Examples that use @version 1.x.x. ID prefix is v1:.")
+concept versionedV1 {
+  field string @required
+}
+
+@version("2.5.7")        // post-breaking-change, minor + patch reflect evolution
+@namespace("reference")
+@description("Example bumping past major version 2. ID prefix becomes v2:.")
+concept versionedV2 {
+  field string @required
+}
+
+// =============================================================================
+//   4. @namespace -- colon-separated lowercase identifiers
+// =============================================================================
+//
+//   - Pattern: ^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)*$
+//   - Single-segment ("cognition") and multi-segment ("cognition:client:tool")
+//     are both valid.
+//   - Dotted form (cognition.client) is rejected -- the on-the-wire
+//     concept ID uses `:` as the separator, and the author surface
+//     mirrors it.
+//   - Every segment must start with a lowercase letter.
+
+@version("1.0.0")
+@namespace("cognition")
+@description("Single-segment namespace.")
+concept singleSegmentNs {
+  field string @required
+}
+
+@version("1.0.0")
+@namespace("cognition:client:tool")
+@description("Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.")
+concept nestedNs {
+  field string @required
+}
+
+// =============================================================================
+//   5. @scope -- partition (default) | global
+// =============================================================================
+//
+//   - Omitted = partition-scoped. Rows stamp the request envelope's
+//     partition; reads auto-filter on the same partition. Tenant data.
+//   - @scope("global") = rows live in the reserved `_system` partition
+//     regardless of the envelope. Used for infrastructure metadata
+//     (cluster topology, identity, partition registry) that has to be
+//     visible from every tenant's view.
+//   - @scope("partition") is the explicit form of the default; rare in
+//     practice.
+
+@version("1.0.0")
+@namespace("reference")
+@description("Partition-scoped concept (default). Rows live under the request's partition.")
+concept partitionScoped {
+  field string @required
+}
+
+@version("1.0.0")
+@namespace("reference")
+@scope("global")
+@description("Global-scoped concept. Rows live in _system regardless of request envelope.")
+concept globalScoped {
+  field string @required
+}
+
+// =============================================================================
+//   6. @visibility -- which node types load this concept
+// =============================================================================
+//
+//   - Opt-in model: omitting @visibility entirely means the concept is
+//     loaded by NO node. This makes visibility explicit at every concept.
+//   - Three forms:
+//       @visibility("*")                       -- every node loads it
+//       @visibility("bff", "cognition")        -- only these (include list)
+//       @visibility(!"planner")                -- everything except these
+//   - Artifacts (queries, mutations, automations) inherit visibility from
+//     the concepts they reference. A query that touches a concept the
+//     local node can't load is itself unloaded.
+
+@version("1.0.0")
+@namespace("reference")
+@visibility("*")
+@description("Visible to every node type.")
+concept everywhereVisible {
+  field string @required
+}
+
+@version("1.0.0")
+@namespace("reference")
+@visibility("bff", "cognition")
+@description("Loaded only on bff and cognition nodes.")
+concept includeListed {
+  field string @required
+}
+
+@version("1.0.0")
+@namespace("reference")
+@visibility(!"planner")
+@description("Loaded everywhere except planner.")
+concept excludePlanner {
+  field string @required
+}
+
+// =============================================================================
+//   7. @type -- object (default) | collection | reference
+// =============================================================================
+//
+//   - @type("object") (default): the row is a self-contained record.
+//   - @type("collection"): the row is a logical container for other
+//     concepts. The engine requires a @relationship(type="contains", ...)
+//     in the body.
+//   - @type("reference"): the row is an alias / pointer to another concept.
+//     The engine requires a @relationship(type="alias"|"equals", ...) in
+//     the body.
+
+@version("1.0.0")
+@namespace("reference")
+@type("object")
+@description("Default record-shaped concept.")
+concept objectExample {
+  field string @required
+}
+
+@version("1.0.0")
+@namespace("reference")
+@type("collection")
+@description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
+concept collectionExample {
+  // Body decorator: every collection MUST declare what it contains.
+  @relationship(type="contains", field="memberIds", target="v1:reference:objectExample", direction="outgoing")
+  memberIds []string
+}
+
+@version("1.0.0")
+@namespace("reference")
+@type("reference")
+@description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
+concept referenceExample {
+  @relationship(type="alias", field="targetId", target="v1:reference:objectExample", direction="outgoing")
+  targetId string @required
+}
+
+// =============================================================================
+//   8. Field types
+// =============================================================================
+//
+//   The supported scalar types:
+//     string      -- text
+//     bool        -- true / false
+//     int         -- integer
+//     float       -- floating-point number
+//     datetime    -- RFC3339 timestamp
+//
+//   The composite forms:
+//     []<type>            -- array of T (shorthand for array(T))
+//     enum("a", "b", ...) -- closed value set
+//     object              -- arbitrary nested object (with body fields)
+//     map(string, T)      -- string-keyed map
+//
+//   The escape hatch:
+//     any         -- accepts any JSON value; no validation
+
+@version("1.0.0")
+@namespace("reference")
+@description("Every supported field type, one of each.")
+concept fieldTypes {
+  textField        string                      @description("UTF-8 text.")
+  flagField        bool       @default("false") @description("Boolean.")
+  countField       int        @default("0")     @description("Integer.")
+  ratioField       float      @default("0.0")   @description("Floating-point.")
+  whenField        datetime                     @description("RFC3339 timestamp.")
+  arrayField       []string                     @description("Array of strings.")
+  statusField      enum("active", "archived", "deleted") @default("active")
+  anyField         any                          @description("Untyped JSON.")
+}
+
+// =============================================================================
+//   9. Field-level annotations
+// =============================================================================
+//
+// Every field accepts a subset of:
+//   @required           Field must be present on insert. No default.
+//   @default("value")   Auto-fill on insert when caller omits the field.
+//                       Value is parsed -- numbers as numbers, "true"/"false"
+//                       as bools, RFC3339 strings as datetimes.
+//   @description("..."  Human-readable description.
+//   @unique             Engine enforces uniqueness across rows.
+//   @pattern("regex")   String pattern (only valid on string fields).
+//   @minLength(N)       Min character count (string) / element count (array).
+//   @maxLength(N)       Max character count (string) / element count (array).
+//   @minimum(N)         Min numeric value (int / float).
+//   @maximum(N)         Max numeric value (int / float).
+//   @immutable          Field cannot change after insert.
+//   @secret             Field is redacted from logs + non-elevated readers.
+//   @variant(discriminator="field")  Discriminated-union field. See section 10.
+//
+// Unknown @-annotations on a field are rejected at load time with
+//   `unknown property annotation @<name> on field "<field>"`.
+
+@version("1.0.0")
+@namespace("reference")
+@description("Every field-level annotation in use.")
+concept fieldAnnotations {
+  // String constraints
+  slug         string @required @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
+  shortText    string @minLength(1) @maxLength(280) @description("Tweet-shaped string.")
+  uniqueKey    string @required @unique @description("Engine-enforced unique key.")
+
+  // Numeric constraints
+  ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
+  priceUsd     float  @minimum(0.0) @maximum(999999.99) @description("Currency.")
+
+  // Defaults
+  status       enum("draft", "published") @default("draft")
+  createdYear  int    @default("2026") @description("Year for legacy backfill.")
+  isPinned     bool   @default("false")
+
+  // Immutability + secrecy
+  externalId   string @required @immutable @description("Foreign-system id; never changes.")
+  apiKey       string @secret @description("Redacted from logs + reads.")
+
+  // Description-only (no constraint)
+  notes        string @description("Free-form notes.")
+}
+
+// =============================================================================
+//   10. Variant fields (discriminated unions)
+// =============================================================================
+//
+//   A `@variant(discriminator="kind")` field declares a value whose shape
+//   depends on the value of a sibling field. Inside the variant body the
+//   author writes each branch keyed by the discriminator value.
+//
+//   Engine validation: payloads carrying this field must match exactly one
+//   declared branch based on the discriminator's value.
+
+@version("1.0.0")
+@namespace("reference")
+@description("Discriminated-union example: the `body` field's shape depends on `kind`.")
+concept variantExample {
+  kind  enum("text", "image", "embed") @required
+
+  body  @variant(discriminator="kind") {
+    text {
+      content   string @required
+      wordCount int    @default("0")
+    }
+    image {
+      url       string @required
+      width     int    @required
+      height    int    @required
+      altText   string
+    }
+    embed {
+      url       string @required
+      provider  enum("youtube", "vimeo", "twitter") @required
+    }
+  }
+}
+
+// =============================================================================
+//   11. Nested object fields
+// =============================================================================
+//
+//   A field can introduce a nested object by declaring a body block under
+//   its name. Nested objects use the same field-level annotations as
+//   top-level fields.
+
+@version("1.0.0")
+@namespace("reference")
+@description("A flat concept with a nested settings sub-object.")
+concept nestedExample {
+  name   string @required
+
+  // Inline nested object: the body declares its own fields.
+  settings {
+    autoTranscribe  bool   @default("true")
+    maxAttendees    int    @default("5") @minimum(1) @maximum(50)
+    theme           enum("light", "dark", "auto") @default("auto")
+  }
+}
+
+// =============================================================================
+//   12. Body-level @relationship decorators
+// =============================================================================
+//
+//   A concept body can declare zero or more @relationship decorators that
+//   describe how this concept points to others. These live at the top of
+//   the body block (alongside fields) and accept four named args:
+//
+//       @relationship(
+//         type="parent"|"contains"|"alias"|"equals"|"references",
+//         field="<fieldName>",
+//         target="v1:<ns>:<conceptName>",
+//         direction="outgoing"|"incoming"
+//       )
+//
+//   The engine uses these to:
+//     - validate referential integrity at insert time
+//     - drive graph-bundle expansion in queries
+//     - enforce the @type("collection") / @type("reference") constraints
+//
+//   `type` values:
+//     parent      -- the named field carries the id of a logical parent.
+//                    Required for concepts that nest under another.
+//     contains    -- the named field carries ids of contained children.
+//                    Required when @type("collection").
+//     alias       -- this concept aliases the target concept's row.
+//                    Required when @type("reference").
+//     equals      -- this concept equals the target concept's row (id
+//                    identity). Alternative form of alias for the
+//                    @type("reference") requirement.
+//     references  -- soft reference -- no constraint, just metadata.
+
+@version("1.0.0")
+@namespace("reference")
+@description("A concept with three different relationship decorators.")
+concept relationshipExample {
+  // Parent: this row hangs off a space.
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  spaceId    string @required
+
+  // References (soft): this row may name an author.
+  @relationship(type="references", field="authorId", target="v1:identity:user", direction="outgoing")
+  authorId   string
+
+  // Plain data fields can sit next to relationships.
+  content    string @required
+  publishedAt datetime
+}
+
+// =============================================================================
+//   13. Reserved fields -- do not declare these
+// =============================================================================
+//
+// The engine auto-stamps these intrinsic fields on every row. Authors must
+// NOT declare them in the concept body; the parser rejects collisions.
+//
+//   id          string    -- row identity (auto-derived from content hash)
+//   createdAt   datetime  -- insert timestamp
+//   createdBy   string    -- author identity id
+//   concept     string    -- the concept's canonical id (v1:ns:name)
+//   partition   string    -- partition the row lives in
+//   payload     object    -- the auto-rolled-up payload object
+//   schema      string    -- the schema variant id for this row version
+//   type        string    -- the concept's @type value
+//
+// Queries reference these intrinsics by their bare names (e.g.
+// `concept==v1:cognition:participant`). Insert mutations don't supply them.
+
+// =============================================================================
+//   14. @scope("global") concepts -- the special _system partition
+// =============================================================================
+//
+// Global concepts are reserved for infrastructure metadata that every
+// tenant needs to see the same way. The current canonical set:
+//
+//     v1:cluster:node, v1:cluster:nodeType    -- cluster topology
+//     v1:identity:user, v1:identity:identity  -- identity service
+//     v1:platform:partition                   -- the partition registry
+//
+// User-data concepts should NOT be global -- making a user-data concept
+// global breaks the tenant isolation contract.
+
+@version("1.0.0")
+@namespace("cluster")
+@scope("global")
+@visibility("*")
+@description("Example of an infrastructure-metadata concept that every node loads.")
+concept globalInfraExample {
+  hostname  string @required
+  nodeType  enum("bff", "voice", "cognition", "agent", "planner") @required
+  startedAt datetime @required
+}
