@@ -1,8 +1,12 @@
 # Plan: agents as a first-class DSL primitive
 
-> **Status:** Brainstorm + design locked. Phase 0 (groundwork) shipped.
-> Phases 1-5 implementation pending. **This document deletes itself
-> when Phase 5 lands**, per the no-stale-docs convention.
+> **Status:** Phases 0-5 shipped on `feature/agents-dsl-primitive`.
+> Phase 6 deferred (genuinely premature; reasoning at the bottom).
+> Follow-ups identified but not in scope for this branch:
+> row materialization, full tool loop in dispatch, retiring the
+> (absent-here) `provisionGeneralAssistantOnUserCreate` automation.
+> **This document deletes itself when the deferred follow-ups land
+> + memql is in steady state**, per the no-stale-docs convention.
 
 ## Context
 
@@ -169,11 +173,27 @@ No engine / parser changes. Lays the contract for phases 1-5.
   Go code paths that special-cased it.
 - End-to-end test against a fresh cluster.
 
-### Phase 6 — Tighten `capabilities.tools[]` (optional follow-up)
+### Phase 6 — Tighten `capabilities.tools[]` (deferred — see reasoning)
 
-- Change the concept's `capabilities.tools` from `[]string` to a typed
-  reference collection.
-- Row-level migration for existing data.
+The brainstorm called for tightening `v1:agents:agent.capabilities.tools`
+from `[]string` to a typed reference collection. After implementation
+ramped up, this turned out to be premature for two compounding reasons:
+
+1. **Tools are not concept-row-backed.** `tool` DSL constructs live in
+   an in-memory `ToolRegistry`, not as `v1:tools:tool` rows. The
+   `@relationship(type="references", field="tools", target="...")`
+   decorator that would express the typed reference needs a concrete
+   target concept; today there is no such concept.
+2. **The safety the brainstorm wanted is already in place at load
+   time.** `LoadUnifiedAgents` (Phase 3) calls `validateAgentToolRefs`
+   against the live `ToolRegistry`, rejecting typo'd `tool("...")`
+   refs in agent declarations before the agent is registered. The
+   schema-level enforcement Phase 6 would add is a duplicate guarantee
+   on top of the loader-level one.
+
+Phase 6 lands when (and if) tools become concept-row-backed -- a
+separate initiative that affects the entire DSL surface, not just
+agents. Re-evaluate at that point.
 
 ## Critical files
 
@@ -217,7 +237,7 @@ No engine / parser changes. Lays the contract for phases 1-5.
   needs a "skip if user already has an agent with this roleSlug" guard
   with a warning log.
 
-## Out of scope
+## Out of scope (this branch)
 
 - Hot-reload of agent files in a running cluster.
 - Per-invocation prompt-template substitution (`{{userName}}`). Static
@@ -225,18 +245,59 @@ No engine / parser changes. Lays the contract for phases 1-5.
 - Agent versioning / rollback. DSL file is the source of truth.
 - Cockpit UI for browsing DSL-declared vs user-created agents.
 
+## Deferred follow-ups (separate commits / sessions)
+
+These were in the original plan's scope but turned out to need their
+own focused work after Phases 0-5 landed:
+
+- **Row materialization.** `LoadUnifiedAgents` populates the
+  `AgentRegistry` (in-memory) but does NOT yet stamp `v1:agents:agent`
+  rows for `@scope("perUser")` (per-user) or `@scope("global")`
+  (singleton in `_system`) agents. The `agent(...)` builtin works
+  against the registry directly, so the feature is functional for
+  DSL invocation. Cognition's existing dispatch path (which selects
+  agents from concept rows) is unaffected. Materialization is needed
+  before the existing `provisionGeneralAssistantOnUserCreate`
+  automation can be retired.
+- **Full streaming tool loop in `agents.invoke`.** Today the handler
+  does a one-shot `ChatSIProvider.CallChat` (system prompt + user
+  utterance → response text). Tomorrow it runs the same streaming
+  tool loop the cognition `ForwardTurn` path uses, intercepting
+  `respondToUser` for the envelope. Mirror
+  `integrations/agent/streaming.go`.
+- **Retire `provisionGeneralAssistantOnUserCreate`.** The automation
+  is referenced by stale comments in this branch but the actual
+  declaration lives on the CoPresent BFF branch. Retire it from THAT
+  branch once row materialization is in place here.
+- **CoPresent UI tools as DSL constructs.** The strawman GA tool
+  list (uiClick, uiNarrate, uiDescribe, respondToUser) requires
+  CoPresent-side `tool` DSL constructs that don't exist in memql core
+  today. When CoPresent grows DSL-declared UI tools, wire them onto
+  the GA's `capabilities.tools` (cross-ref will validate cleanly).
+
 ## Verification (per phase)
 
-1. **Phase 0**: reference + planning docs exist and read coherently. No
-   engine changes. `make test` clean.
-2. **Phase 1**: parser unit tests pass. Drop a sample agent file at
-   `dsl/agents/v1/_sample.memql` (leading underscore so loader skips it);
-   verify `go run ./cmd/admin-preview parse` (or equivalent) returns a
-   clean AST.
-3. **Phase 2**: cross-ref errors fire on missing tool / unknown knowledge.
-4. **Phase 3**: `make dev-refresh`, query the materialized rows. Stop +
-   re-run, verify idempotency. Touch a baseline field, verify update.
-5. **Phase 4**: `agent("generalAssistant", { utterance: "hello" })` from
-   a unit-test automation returns a non-empty response.
-6. **Phase 5**: fresh cluster + new user → GA materializes from DSL; old
-   provisioning automation gone; existing tests pass.
+1. **Phase 0** (shipped): reference + planning docs exist and read
+   coherently. No engine changes. `make test` clean.
+2. **Phase 1** (shipped): 8 parser unit tests pass — round-trip
+   canonical decl, global scope, reject unknown annotation, reject
+   invalid `@scope`, reject unknown body field, reject wrong ref kind,
+   reject missing decl, reject legacy `func` form.
+3. **Phase 2** (shipped): 7 compile + registry tests pass — canonical
+   compile round-trip, scope/role defaults, global scope, registry
+   Upsert/Get/Names + nil-safety, validateAgentToolRefs.
+4. **Phase 3** (shipped — registry only): `LoadUnifiedAgents` smoke
+   test in `TestUnifiedLoadersCoverNewTree` runs cleanly against the
+   live tree. Bootstrap wires the registry into `MemQLEngine.agents`.
+   Row materialization deferred (see follow-ups).
+5. **Phase 4** (shipped): 7 integration handler tests pass — nil
+   inputs, capability shape, missing arg validation, unregistered
+   agent error, resolved-agent envelope round-trip. Builtin count
+   incremented from 45 to 46.
+6. **Phase 5** (shipped): GA agent count 0 → 1 in
+   `TestUnifiedLoadersCoverNewTree`. `dispatch()` now calls
+   `ChatSIProvider.CallChat` against the resolved provider when one
+   is available, falls back to the deterministic stub when the
+   provider registry is nil (tests stay fast + offline).
+7. **Phase 6**: deferred. See "Phase 6 — Tighten capabilities.tools[]"
+   above for reasoning.
