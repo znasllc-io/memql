@@ -376,6 +376,54 @@ func TestExtractConceptFromExpression(t *testing.T) {
 			},
 			expected: "",
 		},
+		{
+			// resolvePlanFunctions expands FunctionCallExpression AFTER
+			// planQuery has stripped directives, so a function whose
+			// fn.Expr is shape(...) lands as plan.Root with the wrapper
+			// still on top. The extractor needs to descend.
+			name: "shape wrapper carries concept on its target",
+			expr: &ShapeExpression{
+				TemplateName: "magicLinkRequestFull",
+				Target: &LogicalExpression{
+					Op: LogicalAnd,
+					Left: &ComparisonExpression{
+						Field:    FieldReference{Parts: []string{"concept"}},
+						Operator: OpEq,
+						Value:    "v1:identity:magicLinkRequest",
+					},
+					Right: &ComparisonExpression{
+						Field:    FieldReference{Parts: []string{"payload", "tokenHash"}},
+						Operator: OpEq,
+						Value:    "deadbeef",
+					},
+				},
+			},
+			expected: "v1:identity:magicLinkRequest",
+		},
+		{
+			name: "sort wrapper carries concept on its target",
+			expr: &SortExpression{
+				Target: &ComparisonExpression{
+					Field:    FieldReference{Parts: []string{"concept"}},
+					Operator: OpEq,
+					Value:    "v1:identity:user",
+				},
+			},
+			expected: "v1:identity:user",
+		},
+		{
+			name: "paginate -> sort -> filter chain still extracts",
+			expr: &PaginateExpression{
+				Target: &SortExpression{
+					Target: &ComparisonExpression{
+						Field:    FieldReference{Parts: []string{"concept"}},
+						Operator: OpEq,
+						Value:    "v1:identity:authCode",
+					},
+				},
+			},
+			expected: "v1:identity:authCode",
+		},
 	}
 
 	for _, tc := range tests {
