@@ -1,0 +1,345 @@
+// =============================================================================
+// MemQL Agent Reference
+// =============================================================================
+//
+// This file is the source of truth for `agent` syntax. It is NOT loaded by
+// the engine (the leading underscore on the path tells every walker to skip
+// it). Every agent-level annotation, every declarable field, and every
+// reference-typed collection is demonstrated below with inline commentary.
+//
+// An agent is a callable AI entity declared in DSL: a bundle of LLM provider
+// settings, capability flags + tool list, knowledge-domain bindings, persona
+// instructions (loaded from a .tmpl file), and turn-taking behavior. Agents
+// are a TWELFTH DSL primitive joining concept / query / mutation / automation
+// / policy / prompt / provider / tool / builtin / shape / spec.
+//
+// At engine startup, each `.memql` agent file is loaded by the agent loader,
+// which (a) registers the agent in an in-memory registry keyed by the
+// declaration name and (b) materializes corresponding `v1:agents:agent` rows
+// per the declared `@scope` annotation. Automations, logic functions, and
+// policies can then call the agent via the `agent(name, args)` builtin and
+// get back a reply envelope `{response, citations[]}`.
+//
+// Agent body shape: VALUE-shaped assignments + nested objects, NOT
+// schema-shaped field declarations. (Concepts declare field types; agents
+// declare specific values. Closer in shape to a mutation's `insert { ... }`
+// body than to a concept's body.)
+//
+// =============================================================================
+//   1. Agent-level annotations
+// =============================================================================
+//
+// Every annotation goes above the `agent` keyword. The full author surface
+// is six annotations -- nothing else is recognized.
+//
+//   @description("text")          Human-readable description.
+//   @version("MAJOR.MINOR.PATCH") Strict semver. Same shape as concepts.
+//   @namespace("foo[:bar:baz]")   Colon-separated lowercase identifiers.
+//   @scope("global"|"perUser")    Materialization scope. See section 4.
+//   @visibility(...)              Which node types load this agent.
+//   @templateFile("path/to.tmpl") Path to the systemPrompt template.
+//
+// Other annotations are rejected at load time with
+//   `unknown agent annotation @<name>`.
+//
+// =============================================================================
+//   2. Canonical minimal agent
+// =============================================================================
+//
+// The minimum an agent needs to register is @version + @namespace +
+// @templateFile + the declaration body with at least `name` and `role`.
+// Everything else is optional but most agents will set most fields.
+
+@version("1.0.0")
+@namespace("agents")
+@templateFile("templates/minimal.tmpl")
+@description("Smallest legal agent declaration.")
+agent minimalAgent {
+  name: "Minimal Agent"
+  role: "specialist"
+}
+
+// =============================================================================
+//   3. @version, @namespace, @description, @visibility
+// =============================================================================
+//
+// These match the concept conventions exactly:
+//
+//   - @version: strict three-segment semver "MAJOR.MINOR.PATCH". Only MAJOR
+//     flows into the materialized concept row prefix (the agent's row uses
+//     v1:agents:agent regardless of the agent declaration's version; the
+//     version is metadata for the declaration itself).
+//
+//   - @namespace: colon-separated lowercase identifiers, e.g. "agents" or
+//     "agents:internal:tooling". Default is "agents" -- the namespace under
+//     which agent declarations conventionally live. Other namespaces are
+//     allowed for product-specific agent groupings.
+//
+//   - @description: free-form text. Surfaced in tooling (cockpit `agents
+//     list`, in-engine debug dumps, etc.).
+//
+//   - @visibility: opt-in node load list. Same syntax as concepts:
+//       @visibility("*")             every node loads it
+//       @visibility("bff", "agent")  only these
+//       @visibility(!"planner")      everything except these
+//     Agent declarations typically target the same set as v1:agents:agent
+//     (bff, cognition, agent).
+
+// =============================================================================
+//   4. @scope -- global | perUser
+// =============================================================================
+//
+// Two materialization models:
+//
+//   @scope("global")
+//     One v1:agents:agent row in the _system partition. No `ownerUserId`.
+//     Invokable from any partition / any actor. The row is marked
+//     system-owned (see Phase 3 implementation note re: marker mechanism).
+//
+//     Use this for system-internal agents that don't represent a personal
+//     assistant -- examples: a "PR reviewer" agent invoked by automations,
+//     a "doc generator" agent triggered by build events.
+//
+//   @scope("perUser")
+//     One row per v1:identity:user, materialized at engine startup and on
+//     each subsequent user-creation event. `ownerUserId` is stamped from
+//     the materialized-for-user. Lives in the partition the user's data
+//     lives in.
+//
+//     Use this for agents that represent a personalized assistant: the
+//     General Assistant baseline, per-user specialist defaults, etc.
+//     User-personalization fields (avatar persona, voice id, gender) are
+//     left empty by the loader and filled in via UI mutations later.
+//
+// The loader uses deterministic row ids derived from the agent name + scope
+// (and userId for perUser scope) so re-runs are idempotent. On a re-run,
+// baseline fields the DSL declares are stamped into existing rows (so a
+// systemPrompt rewrite propagates); personalization fields the DSL did not
+// declare are left untouched.
+
+@version("1.0.0")
+@namespace("agents")
+@scope("global")
+@templateFile("templates/prReviewer.tmpl")
+@description("System-internal PR reviewer agent invoked by CI automations. One row globally.")
+agent prReviewer {
+  name: "PR Reviewer"
+  role: "specialist"
+  roleSlug: "pr_reviewer"
+}
+
+@version("1.0.0")
+@namespace("agents")
+@scope("perUser")
+@templateFile("templates/generalAssistant.tmpl")
+@description("Per-user General Assistant. Materialized per existing user at startup and per new user on creation events.")
+agent generalAssistant {
+  name: "General Assistant"
+  role: "general_assistant"
+  roleSlug: "general_assistant"
+}
+
+// =============================================================================
+//   5. @templateFile -- the systemPrompt template
+// =============================================================================
+//
+// Required. Path is relative to the agent file's directory. The loader
+// reads the file at startup and stamps its contents verbatim into the
+// materialized row's `systemPrompt` field.
+//
+// Templates are STATIC for v1. No per-invocation `{{var}}` substitution.
+// The agent's runtime behavior parameterization happens at reply time via
+// the cognition `agentReply` prompt template (which substitutes space
+// context, history, etc.); the agent's own systemPrompt is durable persona
+// text.
+//
+// File extension: `.tmpl` by convention, matching the existing `prompt`
+// construct's @templateFile pattern.
+//
+// Conventional layout:
+//
+//   dsl/agents/v1/<namespace>/<name>.memql
+//   dsl/agents/v1/<namespace>/templates/<name>.tmpl
+
+// =============================================================================
+//   6. Body field assignments -- the "baseline" field set
+// =============================================================================
+//
+// The body declares VALUES (not schema). Each top-level entry is either a
+// scalar assignment (`name: "..."`) or a nested object block. The set of
+// allowed top-level fields is the "baseline + capability bundle" subset of
+// v1:agents:agent's concept fields:
+//
+//   Identity         name, description, personality, role, roleSlug, gender
+//   Provider config  providerConfig.llm.{provider, model, policyName,
+//                                        temperature, maxTokens}
+//   Capabilities     capabilities.{avatar, lipSync, vision, voiceToVoice,
+//                                  claw, clawWorkspace, domains, keywords,
+//                                  tools}
+//   Knowledge        knowledge (top-level, list of knowledgeDomain refs)
+//   Behavior         triggerBehavior.{autoJoin, greetOnJoin,
+//                                     interruptionStyle, speakWhen}
+//   Media control    audioControl, videoControl
+//
+// User-personalization fields are NOT declarable in DSL. They are owned by
+// the UI/mutation path:
+//
+//   avatar.{avatarId, provider, url}, colorIndex, groupIds,
+//   providerConfig.voice.voiceId, avatarPersonaId, avatarVendor,
+//   identity.{identityId, identitySubject, identityEmail, identityType}
+//
+// Unknown body fields are rejected at load time with
+//   `unknown agent field <name>`. See the strawman declaration further
+// below for a comprehensive example.
+
+// =============================================================================
+//   7. Reference-typed collections
+// =============================================================================
+//
+//   tools: [tool("respondToUser"), tool("uiClick"), ...]
+//   knowledge: [knowledgeDomain("baseline"), knowledgeDomain("hrPolicies")]
+//
+// The `tool(...)` and `knowledgeDomain(...)` constructor-calls are
+// reference expressions. The compiler validates at load time that each
+// referenced name resolves to a registered tool / knowledge-domain
+// construct. Errors point at the unresolved reference + the agent file.
+//
+// In the materialized v1:agents:agent row, these collections are stored
+// in their existing concept-field shapes:
+//
+//   capabilities.tools[]    string array (names; Phase 6 follow-up may
+//                           tighten this to a typed reference collection)
+//   knowledge[]             tbd -- new top-level field on the concept
+//                           OR mapped to capabilities.knowledgeDomainIds
+//                           depending on the concept's evolution
+//
+// Plain strings are NOT accepted in these positions. The DSL form is the
+// load-time-checked form.
+
+// =============================================================================
+//   8. Canonical comprehensive example
+// =============================================================================
+
+@version("1.0.0")
+@namespace("agents")
+@scope("perUser")
+@visibility("bff", "cognition", "agent")
+@templateFile("templates/generalAssistant.tmpl")
+@description("Per-user General Assistant. Comprehensive shape -- every supported field demonstrated.")
+agent generalAssistantComprehensive {
+  // Identity
+  name:        "General Assistant"
+  description: "Designated fallback when no specialist fits."
+  personality: "Friendly, capable, proactive."
+  role:        "general_assistant"
+  roleSlug:    "general_assistant"
+  gender:      "female"
+
+  // Provider config (LLM only; voice + avatar provider settings come from
+  // the user's row via UI mutations).
+  providerConfig {
+    llm {
+      provider:    ""              // explicit override; empty -> use policy
+      model:       ""              // explicit override; empty -> use policy
+      policyName:  "balancedChat"  // SI Router policy
+      temperature: 0.7
+      maxTokens:   4000
+    }
+  }
+
+  // Capabilities (flags + cross-cutting capability lists).
+  capabilities {
+    avatar:       true
+    lipSync:      true
+    vision:       true
+    voiceToVoice: true
+    claw:         false
+    clawWorkspace: ""
+
+    // Reference-typed collections: load-time checked.
+    tools: [
+      tool("respondToUser"),
+      tool("uiClick"),
+      tool("uiNarrate"),
+      tool("uiDescribe")
+    ]
+
+    // Plain string arrays remain for unbounded label-style fields.
+    domains:  ["general"]
+    keywords: []
+  }
+
+  // Knowledge: top-level (not nested under capabilities) because it's a
+  // distinct concern from capabilities.domains[]: knowledge = RAG corpus;
+  // domains = routing-scoring categories.
+  knowledge: [
+    knowledgeDomain("generalAssistantBaseline")
+  ]
+
+  // Trigger behavior.
+  triggerBehavior {
+    autoJoin:          true
+    greetOnJoin:       true
+    interruptionStyle: "polite"
+    speakWhen:         "always"
+  }
+
+  // Media control defaults (user can override per (space, agent) via UI).
+  audioControl: "mirror_user"
+  videoControl: "mirror_user"
+}
+
+// =============================================================================
+//   9. Invocation contract
+// =============================================================================
+//
+// From any DSL context that supports builtins (automations, logic functions,
+// policies):
+//
+//   reply := agent("generalAssistant", {
+//     utterance: args.text,
+//     spaceContext: { spaceId: args.spaceId, ... },
+//     history: args.recentUtterances
+//   })
+//
+//   // reply.response  string  -- the agent's reply text
+//   // reply.citations []object -- {domainId, matchedPhrase, ...} entries
+//                                  pulled from the agent's respondToUser
+//                                  envelope at the end of its tool loop.
+//
+// The builtin resolves the agent name against the in-memory registry,
+// looks up the corresponding v1:agents:agent row (per actor partition + the
+// declaration's scope rules), invokes the existing cognition agent dispatch
+// pipeline (ForwardTurn -> agent-node tool loop -> respondToUser
+// envelope), and returns the envelope as the function value.
+//
+// The call is synchronous from the DSL caller's perspective. The agent's
+// tool loop runs to completion (or errors out) before the call returns.
+//
+// =============================================================================
+//   10. Relationship to v1:agents:agent
+// =============================================================================
+//
+// Every loaded DSL agent declaration MATERIALIZES one or more v1:agents:agent
+// rows. The DSL declaration is the SCHEMA + BASELINE; the row is the
+// runtime instance. User-personalization fields (avatar, voice id, etc.)
+// are added to the row via UI mutations after materialization.
+//
+// At engine startup the loader:
+//
+//   1. Walks dsl/agents/v1/**/*.memql and parses each agent declaration.
+//   2. For each declaration, registers the agent in the in-memory
+//      registry (used by the agent(...) builtin).
+//   3. Materializes rows per the @scope annotation:
+//      - global  -> one row in _system, ownerUserId="", system-marked.
+//      - perUser -> one row per existing v1:identity:user. Then subscribes
+//                   to v1:identity:user create events for ongoing
+//                   materialization on new-user signup.
+//   4. On re-run, stamps DSL-declared field values into existing rows by
+//      deterministic id; preserves fields the DSL didn't declare so user
+//      personalization survives DSL edits.
+//
+// Removing an agent file from the tree DOES NOT delete the materialized
+// rows. The operator runs an explicit cleanup or marks the agent
+// deleted=true via mutation. Implicit row deletion is too dangerous
+// (an accidental DSL file deletion would orphan every user's GA).

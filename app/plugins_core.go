@@ -14,6 +14,7 @@ package app
 // integrations/ with an init() that calls memql.RegisterPlugin, then add a
 // blank import in a build-tagged file alongside this one.
 import (
+	_ "github.com/visionarys-io/memql/integrations/agents"
 	_ "github.com/visionarys-io/memql/integrations/auth"
 	_ "github.com/visionarys-io/memql/integrations/database"
 	_ "github.com/visionarys-io/memql/integrations/email"

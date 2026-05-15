@@ -199,6 +199,106 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	return total, nil
 }
 
+// LoadUnifiedAgents walks the new tree, extracts every `agent NAME
+// { ... }` block, resolves its @templateFile sidecar against the
+// unified FS, validates tool references against the supplied
+// ToolRegistry, and registers the result via AgentRegistry.Upsert.
+//
+// Cross-reference validation behavior:
+//   - tool("name") refs that don't resolve against the ToolRegistry
+//     are reported as load-time errors (with the agent file path +
+//     the unresolved tool name); the agent is skipped so a typo
+//     can't bring down the whole load. Other agents continue to load.
+//   - knowledgeDomain("name") refs are NOT validated here -- knowledge
+//     domains are runtime concept rows (v1:common:knowledgeDomain),
+//     not DSL constructs. Resolution happens at invocation time
+//     inside the agent(...) builtin (Phase 4).
+//
+// Agents can't use the generic baseloader helper directly because the
+// per-slice work (template sidecar resolution + tool cross-ref
+// validation) needs the raw file's directory path + the ToolRegistry.
+// Kept inline for that reason.
+func LoadUnifiedAgents(logger *slog.Logger, registry *AgentRegistry, tools *ToolRegistry) (int, error) {
+	if registry == nil {
+		return 0, fmt.Errorf("agent registry is nil")
+	}
+	tree := memqldsl.Tree()
+	total := 0
+	for _, raw := range baseloader.ReadAll(logger) {
+		for _, slice := range ExtractKeywordSlices(raw.Content, "agent") {
+			origin := "unified:" + raw.Path + ":" + slice.Name
+			decl, err := parseAgentMemQL(origin, []byte(slice.Source))
+			if err != nil {
+				if logger != nil {
+					logger.Debug("memql.unifiedAgentLoader: parse failed",
+						"file", raw.Path, "agent", slice.Name, "error", err)
+				}
+				continue
+			}
+			def, err := compileAgentDecl(decl)
+			if err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedAgentLoader: compile failed",
+						"file", raw.Path, "agent", slice.Name, "error", err)
+				}
+				continue
+			}
+			def.Origin = origin
+
+			// Resolve @templateFile sidecar (required when declared).
+			if def.TemplateFile != "" {
+				dir := path.Dir(raw.Path)
+				tmplPath := path.Join(dir, def.TemplateFile)
+				data, rErr := fs.ReadFile(tree, tmplPath)
+				if rErr != nil {
+					if logger != nil {
+						logger.Warn("memql.unifiedAgentLoader: templateFile resolve failed",
+							"file", raw.Path, "agent", slice.Name, "templateFile", def.TemplateFile,
+							"resolvedTo", tmplPath, "error", rErr)
+					}
+					continue
+				}
+				source := strings.TrimSpace(string(data))
+				if source == "" {
+					if logger != nil {
+						logger.Warn("memql.unifiedAgentLoader: templateFile is empty",
+							"file", raw.Path, "agent", slice.Name, "templateFile", tmplPath)
+					}
+					continue
+				}
+				def.SystemPrompt = source
+			}
+
+			// Cross-ref validate tool refs against the registry. A typo
+			// here is the most common authoring error; surfacing it
+			// loud avoids silent runtime "tool not found" later.
+			if tools != nil {
+				if unresolved := validateAgentToolRefs(def, tools); len(unresolved) > 0 {
+					if logger != nil {
+						logger.Warn("memql.unifiedAgentLoader: unresolved tool refs",
+							"file", raw.Path, "agent", slice.Name, "unresolved", unresolved)
+					}
+					continue
+				}
+			}
+
+			if err := registry.Upsert(def); err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedAgentLoader: registry upsert failed",
+						"file", raw.Path, "agent", slice.Name, "error", err)
+				}
+				continue
+			}
+			total++
+		}
+	}
+	if logger != nil {
+		logger.Info("memql.unifiedAgentLoader: registered",
+			"component", "memql.unifiedAgentLoader", "count", total)
+	}
+	return total, nil
+}
+
 // resolveUnifiedPromptTemplate mirrors resolvePromptDeclTemplate but
 // reads .tmpl sidecars from dsl.Tree() at the prompt's relative
 // path.

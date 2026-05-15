@@ -239,6 +239,24 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
+	// Load DSL-declared agents. Walks dsl/agents/v1/**/*.memql,
+	// resolves @templateFile sidecars, cross-validates tool refs
+	// against the ToolRegistry, and registers compiled
+	// AgentDefinitions in the AgentRegistry. The agent(name, args)
+	// builtin (Phase 4) reads from this registry at invocation time.
+	//
+	// Row materialization (one v1:agents:agent row per @scope("global")
+	// agent in _system, one row per user for @scope("perUser")) is a
+	// separate concern that lands in a follow-up commit -- the registry
+	// alone is enough for the builtin path. See
+	// docs/planning/agents-dsl-primitive.md.
+	agentRegistry := NewAgentRegistry()
+	if _, ulErr := LoadUnifiedAgents(e.Logger, agentRegistry, toolRegistry); ulErr != nil {
+		e.Logger.Warn("unified agent loader returned an error",
+			"component", "memql.engine", "error", ulErr)
+	}
+	e.agents = agentRegistry
+
 	// Wire concept-storage resolvers BEFORE loading providers so a
 	// provider's auth.apiKey="${MEMQL_SI_OPENAI_API_KEY}" picks up the
 	// value from v1:platform:globalSecret if a developer has run
