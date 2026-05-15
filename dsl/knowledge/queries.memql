@@ -146,3 +146,12 @@ query queryValidationEventsForTarget {
   filter  validationEvent.targetId==args.targetId
   shape   validationEventFull
 }
+
+@enabled
+@useConcept(knowledgeDomain)
+@description("Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).")
+query queryDueRefreshDomains {
+  args {}
+  filter  payload.active==true; payload.refreshCadenceDays!=null
+  shape   knowledgeDomainFull
+}
