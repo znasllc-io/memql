@@ -27,24 +27,35 @@ import (
 
 	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
 	"github.com/visionarys-io/memql/component/memql"
+	"github.com/visionarys-io/memql/core/common"
 )
 
-// Integration owns the AgentRegistry pointer + the engine handle and
+// Integration owns the AgentRegistry + ProviderRegistry pointers and
 // implements memql.IntegrationProvider. Constructed by the plug-in
-// factory in plugin.go from PluginContext.Agents + PluginContext.Engine.
+// factory in plugin.go from PluginContext.Agents + .Providers.
+//
+// The handler dispatches an LLM call directly via ProviderRegistry's
+// ChatProvider lookup -- one-shot, non-streaming, non-tool-calling.
+// Future iterations swap this for the full streaming tool loop
+// (the same path cognition's ForwardTurn uses), but the one-shot path
+// is enough to make `agent(...)` produce real LLM-generated text
+// from the agent's systemPrompt + the caller's utterance.
 type Integration struct {
-	agents *memql.AgentRegistry
-	engine memql.IntegrationEngineAccess
+	agents    *memql.AgentRegistry
+	providers *memql.ProviderRegistry
 }
 
-// New constructs the agents integration. Returns nil if either input
-// is nil so the plug-in factory can skip registration cleanly when
-// the engine hasn't built an AgentRegistry yet (test contexts, etc.).
-func New(agents *memql.AgentRegistry, engine memql.IntegrationEngineAccess) *Integration {
+// New constructs the agents integration. Returns nil if the
+// AgentRegistry is nil so the plug-in factory can skip registration
+// cleanly when the engine hasn't built one yet (test contexts).
+// providers may be nil -- the handler falls back to a stub envelope
+// in that case so unit tests / startup smoke don't need a live
+// provider registry to exercise the registry-lookup path.
+func New(agents *memql.AgentRegistry, providers *memql.ProviderRegistry) *Integration {
 	if agents == nil {
 		return nil
 	}
-	return &Integration{agents: agents, engine: engine}
+	return &Integration{agents: agents, providers: providers}
 }
 
 // IntegrationName implements memql.IntegrationProvider.
@@ -115,12 +126,20 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.Names())
 	}
 
-	// Phase 4 placeholder envelope. The actual SI dispatch lands in
-	// the next commit; the contract below is what callers will
-	// consume either way (response: string, citations: []object,
-	// agent: {...metadata}).
+	response, err := i.dispatch(ctx, def, utterance)
+	if err != nil {
+		return nil, fmt.Errorf("agent(%q): dispatch: %w", name, err)
+	}
+
+	// Envelope contract: { response: string, citations: []object,
+	// agent: {name, role, roleSlug, scope} }. The tool-loop +
+	// respondToUser-interception path the cognition dispatcher uses
+	// produces citations; this one-shot path doesn't have a tool
+	// loop yet, so citations stays empty here. Future commit adds
+	// the tool loop (mirroring the streaming dispatch in
+	// integrations/agent/streaming.go).
 	payload := map[string]any{
-		"response":  fmt.Sprintf("[agents/invoke stub] agent %q (role=%q) acknowledged utterance: %s", def.Name, def.Role, utterance),
+		"response":  response,
 		"citations": []any{},
 		"agent": map[string]any{
 			"name":     def.Name,
@@ -143,4 +162,47 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		Payload:   payloadBytes,
 	}
 	return []memorynodes.MemoryNode{node}, nil
+}
+
+// dispatch turns an agent definition + a caller's utterance into the
+// agent's reply text. Today: one-shot synchronous chat completion
+// (system=agent.SystemPrompt, user=utterance) via the SI provider
+// registry. Tomorrow: full streaming tool loop with respondToUser
+// envelope interception, matching the cognition ForwardTurn path.
+//
+// When no ProviderRegistry was supplied to the integration (typical
+// for unit-test fixtures that construct a bare engine without
+// providers loaded), dispatch falls back to a deterministic stub
+// string so the rest of the envelope pipeline can still be exercised.
+func (i *Integration) dispatch(ctx context.Context, def *memql.AgentDefinition, utterance string) (string, error) {
+	if i.providers == nil {
+		return fmt.Sprintf("[agents/invoke stub: no provider registry] agent %q (role=%q) acknowledged utterance: %s", def.Name, def.Role, utterance), nil
+	}
+
+	// Provider selection precedence matches the agent concept's:
+	//   providerConfig.llm.provider (explicit)
+	//   providerConfig.llm.policyName (router policy resolution; today
+	//                                  we treat policyName as a provider
+	//                                  name fallback -- the router-aware
+	//                                  resolution is a follow-up.)
+	//   else -- registry default.
+	providerName := def.LLMProvider
+	if providerName == "" {
+		providerName = def.LLMPolicyName
+	}
+	chat := i.providers.ChatProvider(providerName)
+	if chat == nil {
+		return "", fmt.Errorf("no chat provider available (tried %q, then default)", providerName)
+	}
+
+	systemPrompt := def.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = fmt.Sprintf("You are %s. %s", def.DisplayName, def.Personality)
+	}
+
+	messages := []common.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: utterance},
+	}
+	return chat.CallChat(ctx, messages)
 }

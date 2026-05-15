@@ -16,7 +16,7 @@ import (
 // rather than at load time.
 func init() {
 	memql.RegisterPlugin("agents", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		integration := New(pctx.Agents, pctx.Engine)
+		integration := New(pctx.Agents, pctx.Providers)
 		if integration == nil {
 			// Agents is nil -- skip registration. PluginContext.Agents is
 			// only nil on engines that haven't called LoadUnifiedAgents,
