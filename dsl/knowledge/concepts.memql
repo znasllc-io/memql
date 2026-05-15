@@ -8,8 +8,8 @@
 @visibility("bff", "cognition", "agent", "planner")
 @description("A user-uploaded file (or chat-promoted segment) that's been analyzed and structured into queryable items. Container concept that owns metadata + back-references; the actual structured content lives in per-format item concepts (v1:knowledge:spreadsheetRow for tabular, v1:knowledge:imageRegion for visual, v1:common:documentChunk for text-style breakdowns of PDFs / markdown / plain text). Per the v1 brainstorm Q8 hybrid model: one Document container query gives the Knowledge page its listing, typed per-format item queries give analytic surfaces (e.g. spreadsheet row column-filters) without JSON-path indirection.")
 concept document {
-  attachmentId      string  @required @description("Back-reference to v1:copresent:attachment. The bytes live in GCS via the attachment row; this Document carries the analyzed projection.")
-  planId            string  @required @description("Back-reference to the v1:copresent:plan that produced this analysis. Used by the Tasks page expand-drawer + by re-analysis triggers.")
+  attachmentId      string  @required @description("Back-reference to v1:common:attachment. The bytes live in GCS via the attachment row; this Document carries the analyzed projection.")
+  planId            string  @required @description("Back-reference to the v1:planner:plan that produced this analysis. Used by the Tasks page expand-drawer + by re-analysis triggers.")
   spaceId           string  @required @description("Workspace partition this Document belongs to; redundant with attachment.spaceId but stored explicitly for cheap per-space queries.")
   fileName          string  @required @description("Original filename, copied from the attachment for display.")
   mimeType          string  @required @description("MIME type, copied from the attachment.")
@@ -29,8 +29,8 @@ concept document {
   embeddedItemCount int     @default("0") @description("Count of items that have been embedded. itemCount - embeddedItemCount = remaining work for the embedDomainItems Plan.")
   uploadedBy        string  @required @description("v1:identity:user.id of the uploader. Owner-only operations (delete, re-validate, attach) check against this.")
 
-  @relationship(type="parent", field="attachmentId", target="v1:copresent:attachment", direction="outgoing")
-  @relationship(type="parent", field="planId", target="v1:copresent:plan", direction="outgoing")
+  @relationship(type="parent", field="attachmentId", target="v1:common:attachment", direction="outgoing")
+  @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
 }
 
 @version("1.0.0")

@@ -1610,7 +1610,7 @@ so new features add fields/automations without migrations.
 
 **Concepts**:
 
-- `v1:copresent:plan` -- a user-visible unit of work. Carries
+- `v1:planner:plan` -- a user-visible unit of work. Carries
   parentPlanId (sub-plan nesting), kind, status (queued / routing
   / running / paused / awaitingFeedback / needsAgent / succeeded
   / failed / cancelled), goal, ownerAgentId, requestedBy,
@@ -1619,13 +1619,13 @@ so new features add fields/automations without migrations.
   estimate (Q5), tokenBudget / tokenSpent / tokenAllocatedToChildren
   / tokenCapDisabled (Q6), metrics (Q7), pause + feedback +
   chat-anchor bookkeeping.
-- `v1:copresent:task` -- one executable step inside a Plan, never
+- `v1:planner:task` -- one executable step inside a Plan, never
   recursive. Carries phase tag, executionSurface (inProcess /
   containerExecutor) + executorBackend (Q13), metrics, parking
   fields.
 - `v1:copresent:agentAuthorization` -- standing authorization
   per Q4 tiered-trust model.
-- `v1:copresent:taskState` -- persisted Task working state for
+- `v1:planner:taskState` -- persisted Task working state for
   async parking + planner re-invocation (Q18).
 - `v1:knowledge:document` -- container/manifest for analyzed user
   files (Q8). Owns attached-domain list, validation rollup,
@@ -1674,7 +1674,7 @@ CreateAndCompleteAnalyzePlan` chains:
 Refinement child Plans (kind='refineAnalysis') spawned by the
 front-end Refine action are picked up by the
 `handleRefinementPlan` automation (triggers on
-graph.node.created.*.v1:copresent:plan filtered by
+graph.node.created.*.v1:planner:plan filtered by
 payload.kind=='refineAnalysis'); the automation drives the child
 Plan through queued -> running -> succeeded and emits its own
 plan.completed card. v0.x acknowledges feedback as the result;

@@ -66,7 +66,7 @@ type TextExtractor interface {
 
 // AttachmentStore creates and stores attachment memory nodes.
 type AttachmentStore interface {
-	// CreateAttachment creates a new v1:copresent:attachment node and returns the node JSON.
+	// CreateAttachment creates a new v1:common:attachment node and returns the node JSON.
 	CreateAttachment(ctx context.Context, params AttachmentCreateParams) (json.RawMessage, error)
 }
 

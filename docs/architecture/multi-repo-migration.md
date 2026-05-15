@@ -152,7 +152,7 @@ Every build/run/test command is a Makefile target in the relevant repo. Multi-st
 - **memql becomes a clean core library.** Today it contains both engine/infrastructure code AND copresent-specific concepts. After migration, memql contains only generic platform code.
 - **The `bff` node-type goes away.** Currently a `make bff` target produces a generic BFF binary. After migration, each client's BFF is its own binary built from its own repo (`copresent-bff`, `memql-cockpit-bff`, etc.).
 - **memql-cockpit moves out of memql.** Currently `cmd/memql-cockpit/` lives inside memql. After migration, it's its own repo.
-- **Client-specific concepts move to client-specific BFF repos.** Concepts like `v1:copresent:plan`, `v1:copresent:agent`, etc. relocate to `copresent-bff`. Same for mutations, queries, automations, tools, prompts, providers, shapes, and integrations.
+- **Client-specific concepts move to client-specific BFF repos.** Concepts like `v1:planner:plan`, `v1:copresent:agent`, etc. relocate to `copresent-bff`. Same for mutations, queries, automations, tools, prompts, providers, shapes, and integrations.
 - **`go.work` ties the modules together for development.** A single workspace file at `~/projects/go.work` lets you edit core memql and a BFF in tandem without bumping versions.
 
 ### 1.3 What stays the same

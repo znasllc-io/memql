@@ -328,3 +328,18 @@ concept workerPairingCode {
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
   @relationship(type="parent", field="redeemedBy", target="v1:identity:identity", direction="outgoing")
 }
+
+@version("1.0.0")
+@namespace("identity")
+@visibility("bff", "cognition")
+@description("Organization group. Users belong to groups; agents are assigned to groups for scoped access control. Created and managed in-app; the externalId field is preserved for any legacy rows that came from a previous external sync source.")
+concept group {
+  name         string  @required @description("Display name of the group.")
+  description  string  @required @description("Short description of the group's purpose. Required so group pickers (CreateSpaceModal, admin lists) always have a useful subtitle.")
+  externalId   string  @required @description("External group id for legacy sync correlation. Empty for in-app-created groups.")
+  memberIds    []string  @description("User IDs that belong to this group.")
+  agentIds     []string  @description("Agent IDs assigned to this group.")
+  maxHumans    int     @default("5") @description("Maximum human members this group can hold. Matches v1:cognition:space.maxHumans so a group can seed a space without silent truncation.")
+  maxAgents    int     @default("3") @description("Maximum agent members this group can hold, inclusive of any user's auto-joined general assistant. Matches v1:cognition:space.maxAgents.")
+  active       bool    @default("true") @description("Whether the group is active.")
+}

@@ -408,3 +408,55 @@ concept videoOverride {
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
   @relationship(type="interactsWith", field="agentId", target="v1:copresent:agent", direction="outgoing")
 }
+
+@version("1.0.0")
+@namespace("cognition")
+@visibility("bff")
+@description("Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score threshold and identifying missing specialist domains. One row per rollup run.")
+concept guardrailHealth {
+  periodStart             datetime  @required  @description("Start of the rollup window (inclusive).")
+  periodEnd               datetime  @required  @description("End of the rollup window (exclusive).")
+  generatedAt             datetime  @required  @description("When this rollup was produced.")
+
+  totalUnmet              int  @required  @default("0")  @description("Total v1:cognition:unmetCapability rows in the window.")
+  specialistGapCount      int  @required  @default("0")  @description("Rows with severity=specialist_gap -- general assistant absorbed the turn.")
+  fullGapCount            int  @required  @default("0")  @description("Rows with severity=full_gap -- no agent could help.")
+
+  belowThresholdCount     int  @default("0")  @description("Triggered by the fit-score gate.")
+  handoffChainCapCount    int  @default("0")  @description("Triggered by the handoff-chain cap.")
+  noFitNoFallbackCount    int  @default("0")  @description("Triggered when no fallback agent was available (silent).")
+  routerEscalatedCount    int  @default("0")  @description("Triggered when the router itself requested escalation_notice.")
+  routerFallbackCount     int  @default("0")  @description("Triggered when the router itself requested fallback_attempt.")
+
+  avgFitScore             float  @description("Mean topFitScore across the window (null when totalUnmet==0).")
+  currentThreshold        float  @description("Fit-score threshold in effect at rollup time.")
+  suggestedThreshold      float  @description("Advisory threshold suggestion based on observed fit-score distribution. Consumer decides whether to apply.")
+
+  topMissingDomains       string  @description("JSON array of { domain, count } entries ranked by frequency -- clusters of utterances that nobody in the relevant spaces could handle. Product signal for which specialist agents to add next.")
+  topSpaces               string  @description("JSON array of { spaceId, count } entries -- spaces with the highest unmet rate.")
+  notes                   string  @description("Free-form notes from the rollup (e.g. 'handoff_chain_cap triggered 8x, review routing prompt').")
+}
+
+@version("1.0.0")
+@namespace("cognition")
+@visibility("bff")
+@description("A single instance of the cognition router determining that no agent in a space could meet the user's request -- either the general assistant stepped in as fallback (specialist_gap) or nobody could help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by the guardrail health rollup for product-level insight into missing capabilities.")
+concept unmetCapability {
+  spaceId          string   @required  @description("ID of the space the utterance occurred in.")
+  utteranceId      string   @description("ID of the triggering human utterance.")
+  utterance        string   @description("Text of the user's request that no agent could meet.")
+  speakerName      string   @description("Display name of the human who spoke.")
+
+  severity         enum("specialist_gap", "full_gap")  @required  @description("specialist_gap: general assistant absorbed the turn as fallback (we lacked a specialist). full_gap: even the general assistant could not help / no general assistant in the room.")
+  turnMode         enum("answer", "fallback_attempt", "escalation_notice")  @description("Turn mode the router chose. answer = specialist stretch absorbed it; fallback_attempt = general assistant stretched on a knowledge gap; escalation_notice = general assistant refused and flagged.")
+  trigger          enum("below_threshold", "handoff_chain_cap", "no_fit_no_fallback", "router_escalated", "router_fallback")  @required  @description("Why the unmet event fired: threshold gate, chain cap, missing general assistant, or router-initiated.")
+
+  topFitScore      float   @description("Router's fit score for the chosen agent (0..1). Low scores indicate nobody was a strong match.")
+  routedAgentId    string  @description("ID of the agent the router ultimately routed to (may be empty when no agent was selected).")
+  routedAgentName  string  @description("Display name of the routed agent.")
+
+  rosterSnapshot   string  @description("JSON-serialized snapshot of the space's agent roster at decision time (id/name/role/domains/keywords). Used by the rollup to cluster missing domains.")
+  reason           string  @description("Router's short explanation of why no agent fit.")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+}
