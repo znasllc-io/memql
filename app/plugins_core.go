@@ -24,6 +24,7 @@ import (
 	_ "github.com/visionarys-io/memql/integrations/identity"
 	_ "github.com/visionarys-io/memql/integrations/knowledge"
 	_ "github.com/visionarys-io/memql/integrations/liveavatar"
+	_ "github.com/visionarys-io/memql/integrations/liveknowledge"
 	_ "github.com/visionarys-io/memql/integrations/router"
 	_ "github.com/visionarys-io/memql/integrations/similarity"
 	_ "github.com/visionarys-io/memql/integrations/training"

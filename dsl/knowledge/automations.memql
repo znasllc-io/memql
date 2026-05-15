@@ -1,0 +1,16 @@
+// automations.memql
+//
+// Knowledge-domain lifecycle automations. Currently houses the daily
+// refresh-cadence cron from Q9 of the planner-redesign work; future
+// automations (auto-archive of zero-citation domains, supersession
+// rollup) land here too.
+
+@enabled
+@trigger(schedule="0 30 2 * * *")
+@description("Daily 02:30 UTC scheduled fallback for Q9 event-driven training refresh. Reads every active knowledgeDomain with a non-null refreshCadenceDays, filters Go-side to those whose lastSeededAt + refreshCadenceDays*86400 < now, and spawns a Plan(kind=trainSpecialist, mode='refresh') per matching domain. The Trainer Agent picks them up via the Phase 4 Planner Agent loop. Event-driven refreshes (the Planner Agent calling markKnowledgeDomainStale and choosing to refresh proactively) run in parallel and reset the cadence on completion.")
+@useLogic(logicRefreshDueKnowledgeDomains)
+automation refreshDueKnowledgeDomains {
+  step run {
+    logic logicRefreshDueKnowledgeDomains { event: event }
+  }
+}

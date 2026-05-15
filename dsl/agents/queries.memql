@@ -1,0 +1,19 @@
+// queries.memql
+//
+// Agent-namespace queries. Today these layer on top of the
+// agent-management queries that still live in
+// memql-bff-copresent/dsl/copresent/queries.memql (queryAgentById +
+// friends). New agent-domain queries needed by Phase 7's layered
+// dedupe land here so the hygiene moves with the planner-redesign
+// work.
+
+@enabled
+@useConcept(agent)
+@description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. System-bootstrap agents (roleSlug starts with 'system_') are intentionally INCLUDED -- the dedupe layer treats them like any other candidate. The createSpecialist code path filters them out separately after similarity scoring so they never get proposed as extension targets.")
+query queryActiveAgentsForUser {
+  args {
+    ownerUserId  string  @required
+  }
+  filter  payload.ownerUserId==args.ownerUserId; payload.active==true; payload.deleted==false
+  shape   agentMinimalForDedupe
+}

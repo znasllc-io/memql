@@ -1,0 +1,115 @@
+// mutations.memql
+//
+// Planner mutations. These were historically inline-constructed strings
+// passed to engine.Execute from Go; the engine resolves them as DSL
+// functions when defined here, matching the resolution path used by
+// every other namespace's mutations.
+//
+// Mutations defined elsewhere (memql-bff-copresent/dsl/copresent/mutations.memql):
+//   mutationCreatePlan, mutationCreateTask, mutationUpdatePlanStatus,
+//   mutationUpdateTaskStatus. Those work today by global trailing-segment
+//   @useConcept resolution and are NOT redefined here. New mutations
+//   needed for Phase 2 auto-stamping land in this file.
+
+@enabled
+@useConcept(plan)
+@description("Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.")
+mutation mutationCreateAdHocPlan {
+  args {
+    planId        string  @required
+    spaceId       string  @required
+    agentId       string  @required
+    ownerUserId   string  @required
+    goal          string  @required
+  }
+  insert plan {
+    id: args.planId
+    args.spaceId
+    args.ownerUserId
+    kind: "adHocAction"
+    status: "running"
+    args.goal
+    requestedBy: args.ownerUserId
+    ownerAgentId: args.agentId
+    triggerSource: "user.implicit"
+    authorizedBy: args.ownerUserId
+    input: {kind: "adHocAction"}
+  }
+}
+
+@enabled
+@useConcept(task)
+@description("Create a semantic Task -- the Planner-decision unit. Differs from mutationCreateTask (in bff-copresent) by carrying the new category/logicalStepId/attemptNumber fields explicitly. Used by the Planner Agent at decomposition time and by the taskstamp Stamper to materialize the parent semantic Task for ad-hoc tool calls.")
+mutation mutationCreateSemanticTask {
+  args {
+    taskId          string  @required
+    planId          string  @required
+    kind            string  @required
+    seq             int     @required
+    logicalStepId   string
+    attemptNumber   int
+    agentId         string
+    phase           string
+    input           object  @required
+  }
+  insert task {
+    id: args.taskId
+    args.planId
+    category: "semantic"
+    args.kind
+    status: "queued"
+    args.seq
+    args.phase
+    args.logicalStepId
+    attemptNumber: coalesce(args.attemptNumber, 1)
+    args.input
+  }
+}
+
+@enabled
+@useConcept(task)
+@description("Create a toolInvocation Task -- the engine-auto-stamped record of an agent tool call. Per Q5+Q6: every tool call by an executing agent produces one of these, parented to the semantic Task that was executing when the tool fired. The engine's tool-dispatch wrapper inserts this row at dispatch time then calls mutationCompleteToolInvocation when the call returns. parentTaskId is required (a toolInvocation row must have a semantic parent); the engine enforces this invariant.")
+mutation mutationCreateToolInvocationTask {
+  args {
+    taskId          string  @required
+    planId          string  @required
+    parentTaskId    string  @required
+    toolName        string  @required
+    toolArgs        object
+    seq             int     @required
+  }
+  insert task {
+    id: args.taskId
+    args.planId
+    args.parentTaskId
+    category: "toolInvocation"
+    kind: args.toolName
+    toolName: args.toolName
+    args.toolArgs
+    status: "running"
+    args.seq
+    attemptNumber: 1
+    input: coalesce(args.toolArgs, {})
+    startedAt: now()
+  }
+}
+
+@enabled
+@useConcept(task)
+@description("Update a toolInvocation Task to a terminal state with its result or error. Companion to mutationCreateToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.")
+mutation mutationCompleteToolInvocation {
+  args {
+    taskId        string  @required
+    status        string  @required
+    toolResult    object
+    errorMessage  string
+    completedAt   string
+  }
+  update task {
+    id: args.taskId
+    args.status
+    args.toolResult
+    args.errorMessage
+    completedAt: coalesce(args.completedAt, now())
+  }
+}

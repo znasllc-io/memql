@@ -1,0 +1,104 @@
+// logic.memql
+//
+// Logic bodies for the agent-domain automations. Two bootstrap-agent
+// provisioning flows: Planner Agent + Trainer Agent. Both are
+// platform-level (every memql user gets them), idempotent, and stamp
+// their agent row + a sensible default agentAuthorization envelope.
+
+@description("Imperative body of automation provisionPlannerAgentOnUserCreate. Creates the user's Planner Agent with the strong-reasoning policy and stamps a default agentAuthorization granting createSpecialist + extendSpecialist standing privileges (up to 3 specialists per Plan in any space). Idempotent via deterministic agent id pa-<hash(primaryEmail)>.")
+logic logicProvisionPlannerAgent {
+  args {
+    event object @required
+  }
+  body {
+    existingPlanner := queryAgentById({
+      agentId: concat("pa-", hash(args.event.payload.primaryEmail))
+    })
+
+    insertPlanner := if existingPlanner.Empty() {
+      mutationCreateAgent({
+        agentId: concat("pa-", hash(args.event.payload.primaryEmail)),
+        ownerUserId: args.event.payload.id,
+        name: "Planner",
+        role: "specialist",
+        roleSlug: "system_planner",
+        gender: "female",
+        description: "Platform orchestration agent -- decomposes Plans into Tasks, dispatches to specialists, manages retries. Not user-facing in chat.",
+        personality: "Deliberate, lean, evidence-driven. Never chatty.",
+        providerConfig: {
+          llm: {
+            provider: "streamClaudeOpus"
+          }
+        },
+        capabilities: {
+          domains: [],
+          tools: [],
+          keywords: []
+        },
+        triggerBehavior: {
+          autoJoin: false,
+          greetOnJoin: false,
+          speakWhen: "asked"
+        },
+        audioControl: "always_off",
+        videoControl: "always_off"
+      })
+    }
+
+    // Standing grant: the Planner Agent may auto-create / extend
+    // specialists up to 3 per Plan in any space owned by the user.
+    // Outside the envelope the engine falls back to the approval card
+    // (Q4 layered governance). User can narrow / widen in settings.
+    grantCreateSpecialist := if existingPlanner.Empty() {
+      mutationCreateAgentAuthorization({
+        agentId: concat("pa-", hash(args.event.payload.primaryEmail)),
+        userId: args.event.payload.id,
+        planKind: "*",
+        spaceScope: "*",
+        active: true
+      })
+    }
+  }
+}
+
+@description("Imperative body of automation provisionTrainerAgentOnUserCreate. Creates the user's Trainer Agent with the strong-reasoning + web-search provider. Stamps a standing agentAuthorization so the Planner Agent can spawn trainSpecialist Plans against the Trainer without per-Plan approval. Idempotent via deterministic agent id tr-<hash(primaryEmail)>.")
+logic logicProvisionTrainerAgent {
+  args {
+    event object @required
+  }
+  body {
+    existingTrainer := queryAgentById({
+      agentId: concat("tr-", hash(args.event.payload.primaryEmail))
+    })
+
+    insertTrainer := if existingTrainer.Empty() {
+      mutationCreateAgent({
+        agentId: concat("tr-", hash(args.event.payload.primaryEmail)),
+        ownerUserId: args.event.payload.id,
+        name: "Trainer",
+        role: "specialist",
+        roleSlug: "system_trainer",
+        gender: "female",
+        description: "Platform training agent -- web-search-grounded knowledge distillation for specialist domains. Not user-facing in chat.",
+        personality: "Reads more than writes. Authoritative sources first. Cites everything.",
+        providerConfig: {
+          llm: {
+            provider: "streamClaudeOpus"
+          }
+        },
+        capabilities: {
+          domains: [],
+          tools: [],
+          keywords: []
+        },
+        triggerBehavior: {
+          autoJoin: false,
+          greetOnJoin: false,
+          speakWhen: "asked"
+        },
+        audioControl: "always_off",
+        videoControl: "always_off"
+      })
+    }
+  }
+}

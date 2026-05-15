@@ -1,0 +1,28 @@
+// prompts.memql
+//
+// Agent-namespace prompt declarations. These are the SYSTEM prompts the
+// platform-bootstrapped agents (Planner, Trainer) carry on their
+// providerConfig. The bodies live in prompts/<name>.tmpl.
+
+@defaultProvider("streamClaudeOpus")
+@templateFile("prompts/plannerAgent.tmpl")
+@description("System prompt for the user's Planner Agent -- the orchestrator persona that owns Plan decomposition, Task dispatch, retry decisions, and escalation to the user. Paired with a strong-reasoning model by default (streamClaudeOpus). Invoked by the planner-service on every Plan loop iteration. Output contract: one structured-output decision per turn (decompose / dispatchTask / retry / createSpecialist / extendSpecialist / spawnTrainingPlan / escalate / markPlanSucceeded / markPlanFailed).")
+prompt plannerAgent {
+  plan          object  @required @description("Current v1:planner:plan row with goal, phases, status, tokenBudget, tokenSpent, retryThreshold.")
+  tasks         []object         @description("All v1:planner:task rows under this plan, semantic + toolInvocation, sorted by createdAt. Lets the Planner see what's been attempted and what's still queued.")
+  specialists   []object @required @description("Agents available in the space, with roleSlug, capabilities.tools, capabilities.domains, and lineage. The Planner picks dispatch targets from this list.")
+  feedbackResponse object       @description("User's response when resuming from an awaitingFeedback parking event. Carries {response, respondedBy, respondedAt}.")
+  partition     string  @required @description("Active partition envelope -- needed when proposing createSpecialist (the new agent lands in this partition).")
+  now           string  @required @description("RFC3339 wall-clock at invocation. Lets the Planner reason about elapsed time, deadlines, refresh windows.")
+}
+
+@defaultProvider("streamClaudeOpus")
+@templateFile("prompts/trainerAgent.tmpl")
+@description("System prompt for the user's Trainer Agent -- the specialist persona that runs knowledge-domain training via web search + reasoning. Paired with a strong-reasoning + web-search-capable model. Invoked when the planner-service picks up a Plan of kind='trainSpecialist'. Output contract: a sequence of tool calls (webSearch / fetchUrl / writeKnowledgeChunk / markChunkSuperseded / embedChunk) followed by a respondToUser envelope summarizing chunks written, sources consulted, and confidence.")
+prompt trainerAgent {
+  plan              object  @required @description("Current v1:planner:plan row, kind='trainSpecialist', input={specialistId, topic, mode, domainId}.")
+  targetSpecialist  object  @required @description("The agent being trained -- role, description, domains, existing chunk summaries (truncated for refresh mode).")
+  existingCorpus    []object         @description("For mode='refresh': summaries of existing chunks in the target domain, with createdAt. Lets the Trainer decide what's still current.")
+  partition         string  @required @description("Active partition -- new chunks land in this partition.")
+  now               string  @required @description("RFC3339 wall-clock.")
+}

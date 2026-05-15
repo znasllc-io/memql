@@ -1,0 +1,22 @@
+// logic.memql
+//
+// Logic bodies for the knowledge-domain automations.
+
+@description("Imperative body of automation refreshDueKnowledgeDomains. Reads candidate domains via queryDueRefreshDomains, then for each candidate the Go-side cron handler (registered against this automation by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9: the schema-side cadence + the runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.")
+logic logicRefreshDueKnowledgeDomains {
+  args {
+    event object @required
+  }
+  body {
+    // Phase 6 scaffolding: the actual elapsed-time + spawn loop lives
+    // in the Go cron-handler (integrations/planner/training_refresh.go,
+    // ships when the Phase 4b re-invoke wiring lands). The DSL body
+    // is the entry point + the candidate-fetch query; everything
+    // downstream of the candidate list runs Go-side.
+    //
+    // Phase 4b will fill this in with the actual per-domain spawn
+    // (build a Plan with kind='trainSpecialist', mode='refresh',
+    // input.domainId, then insert via mutationCreatePlan).
+    candidates := queryDueRefreshDomains({})
+  }
+}

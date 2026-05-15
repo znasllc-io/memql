@@ -31,3 +31,23 @@ shape variableFull {
   partitionVariable.description
   row.createdAt
 }
+
+@row
+@useConcept(missingCapability)
+@description("Missing-capability projection for the platform-backlog view + the Planner Agent's lookup-by-(kind, capability) before logging a new sighting. Carries the dedup key (kind, capability) plus the prioritization signals (sightingCount, lastSeenAt, exampleGoals).")
+shape missingCapabilityFull {
+  row.id
+  missingCapability.kind
+  missingCapability.capability
+  missingCapability.description
+  missingCapability.requestedFromPlanId
+  missingCapability.requestedByAgentId
+  missingCapability.spaceId
+  missingCapability.partitionScope
+  missingCapability.sightingCount
+  missingCapability.firstSeenAt
+  missingCapability.lastSeenAt
+  missingCapability.status
+  missingCapability.resolution
+  missingCapability.exampleGoals
+}
