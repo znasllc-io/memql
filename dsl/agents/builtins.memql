@@ -1,0 +1,44 @@
+// Builtins in the agents namespace. Today: one builtin (`agent`)
+// that invokes a DSL-registered agent and returns its reply
+// envelope. See dsl/_reference/_agent.memql for the agent primitive
+// itself and docs/planning/agents-dsl-primitive.md for the phased
+// implementation plan.
+
+// ---- builtin agent --------------------------------------------------
+//
+// Invoke a DSL-registered agent by name. The handler
+// (integrations/agents.invoke) resolves the name against the
+// AgentRegistry populated by LoadUnifiedAgents at engine startup,
+// runs the agent's reply turn, and returns the agent's envelope
+// (response text + citations + agent metadata).
+//
+// Callable from any DSL context that supports builtin calls --
+// automations, logic functions, policies. Synchronous from the
+// caller's perspective.
+//
+// Args:
+//   name         The agent's declaration name (e.g. "generalAssistant").
+//                Must match an entry in the AgentRegistry; the handler
+//                returns an error listing the registered names when no
+//                match is found.
+//   utterance    The user's text. Required.
+//   spaceContext Optional bag of space-scoped metadata (spaceId,
+//                participants, etc.) forwarded to the agent. Shape
+//                matches the cognition dispatch path; an empty object
+//                is a valid default for non-space invocations.
+//   history      Optional list of prior turns. Used by the agent's
+//                tool loop when constructing the LLM context.
+//
+// Returns one MemoryNode whose payload is
+//   { response: string, citations: []object, agent: {name, role, roleSlug, scope} }
+
+@enabled
+@executor("integration.agents.invoke")
+@args(profile="object")
+@description("Invoke a DSL-registered agent by name. Returns {response, citations} envelope. See integrations/agents/ for the handler.")
+builtin agent {
+  name          string    @required
+  utterance     string    @required
+  spaceContext  object
+  history       []object
+}

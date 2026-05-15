@@ -27,6 +27,7 @@ type MemQLEngine struct {
 	functions     *FunctionRegistry
 	tools         *ToolRegistry
 	prompts       *PromptRegistry
+	agents        *AgentRegistry
 	providers     *ProviderRegistry
 	policies      *PolicyRegistry
 	// policyFunctions holds parsed `func (Policy)` definitions
@@ -160,6 +161,13 @@ func (e *MemQLEngine) Specs() *SpecRegistry {
 // Prompts returns the prompt registry.
 func (e *MemQLEngine) Prompts() *PromptRegistry {
 	return e.prompts
+}
+
+// Agents returns the agent registry populated by LoadUnifiedAgents
+// at engine startup. Used by the `agent(name, args)` builtin's
+// executor to resolve agent names to their compiled AgentDefinition.
+func (e *MemQLEngine) Agents() *AgentRegistry {
+	return e.agents
 }
 
 // Shapes returns the shape registry.
