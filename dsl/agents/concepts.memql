@@ -85,6 +85,15 @@ concept agent {
     identityType     enum("human", "synthetic")  @description("Type of the backing identity.")
   }
 
+  lineage {
+    createdBy           enum("user", "planner", "system") @description("Who instantiated this agent. 'user' = explicit Create Agent modal; 'planner' = the Planner Agent minted it inside its loop to fill a capability gap; 'system' = provisioning automation (e.g. the GA/Planner/Trainer bootstrap stamps).")
+    originatingPlanId   string @description("v1:planner:plan.id of the Plan that prompted this agent's creation. Empty for user-explicit and system-bootstrap creations. Lets the agent roster show 'created for Plan X' attribution.")
+    extendedFromAgentId string @description("v1:agents:agent.id of the agent this one was extended from, if any. Empty for fresh creations. Set when the layered dedupe (Q10) decides to clone-and-extend an existing specialist rather than mint a new one.")
+    extensionGoals      []string @description("If this agent is the result of an extension or is itself the target of extensions, the list of training goals (e.g. ['Java', 'JavaScript', 'TypeScript']) accumulated over its lifetime. Used by the dedupe similarity score and by the Planner Agent's 'who to extend' decision.")
+  }
+
+  roleEmbedding      []float @description("Embedding of (role + roleSlug + description + capabilities.domains[]) used by the layered dedupe (Q10) similarity check. Recomputed on insert/update of any of those fields by the agentRoleEmbed automation. Empty for legacy agents until the backfill runs. Stored on the row rather than a sidecar concept for v1 simplicity; can be moved to v1:agents:agentEmbedding later if row width becomes a concern.")
+
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
 }
 
@@ -95,7 +104,10 @@ concept agent {
 concept agentAuthorization {
   agentId         string  @required @description("v1:agents:agent.id this grant authorizes.")
   userId          string  @required @description("v1:identity:user.id of the user who granted the authorization. Only the granting user can revoke.")
-  planKind        string  @required @description("Plan kind this grant covers, OR '*' to cover any kind. Matches v1:planner:plan.kind values.")
+  action          enum("triggerPlan", "createSpecialist", "extendSpecialist", "trainSpecialist") @default("triggerPlan") @description("What the grant authorizes the agent to do. triggerPlan = auto-trigger Plans matching planKind without per-Plan approval (legacy behavior; default for backward compatibility). createSpecialist = the Planner Agent may auto-mint specialists matching planKind (Q4 standing envelope). extendSpecialist = may auto-clone-and-extend an existing specialist (Q10 layered dedupe). trainSpecialist = may auto-trigger trainSpecialist Plans for the specialist.")
+  maxPerPlan      int     @description("Cap on how many times this action can fire under a single parent Plan. Used primarily for action='createSpecialist' (e.g. 'up to 3 new specialists per Plan'). Null = no cap.")
+  roleSlugAllowlist []string @description("Optional list of agent.roleSlug values this grant covers; empty = any roleSlug. Lets the user say 'auto-create technical specialists but ask before HR / Legal / Finance roles'. Only meaningful for action='createSpecialist'/'extendSpecialist'.")
+  planKind        string  @required @description("Plan kind this grant covers, OR '*' to cover any kind. Matches v1:planner:plan.kind values. For action='triggerPlan' this is the kind being triggered; for createSpecialist/extendSpecialist/trainSpecialist this is the originating-Plan kind that the action fires under.")
   spaceScope      string  @required @description("Space id this grant is restricted to, OR '*' to cover any space owned by the user. Lets users grant 'Cleo can auto-run analyzeFile in the HR space' without granting workspace-wide.")
   tokenBudgetCap  int     @description("Per-Plan token budget ceiling enforced when this authorization is consumed. Even auto-approved plans can't blow through tokens beyond this cap. Null = use User.preferences.defaultPlanTokenBudget.")
   expiresAt       datetime @description("When this grant expires. Null = no expiry (lifetime grant). Default UI proposes 30-day expiry with a renewal prompt before expiration.")
