@@ -88,5 +88,6 @@ func (a *App) pluginContext() memql.PluginContext {
 		},
 		Providers: a.engine.Providers(),
 		Policies:  a.engine.Policies(),
+		Agents:    a.engine.Agents(),
 	}
 }

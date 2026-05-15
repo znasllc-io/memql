@@ -72,6 +72,14 @@ type PluginContext struct {
 	// Policies is the SI Router policy registry loaded from
 	// policies/v1/*.memql. Same stability contract as Providers.
 	Policies *PolicyRegistry
+
+	// Agents is the registry of DSL-declared agents loaded from
+	// dsl/agents/v1/*.memql by LoadUnifiedAgents. The agents
+	// integration's `agent(name, args)` builtin handler reads this to
+	// resolve a name to its compiled AgentDefinition (system prompt,
+	// tool refs, knowledge bindings, provider config). Lives on the
+	// engine; pointer is stable for the life of the process.
+	Agents *AgentRegistry
 }
 
 // PluginFactory constructs an IntegrationProvider from a PluginContext.

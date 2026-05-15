@@ -40,4 +40,15 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	} else {
 		t.Logf("builtins: %d", n)
 	}
+
+	// Agents -- no agent files in the tree yet (Phase 5 adds the
+	// generalAssistant declaration), so 0 is the expected count
+	// today. The smoke value is "loader runs without error against
+	// the live tree."
+	agentReg := NewAgentRegistry()
+	if n, err := LoadUnifiedAgents(logger, agentReg, toolReg); err != nil {
+		t.Fatalf("LoadUnifiedAgents: %v", err)
+	} else {
+		t.Logf("agents: %d", n)
+	}
 }
