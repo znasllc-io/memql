@@ -26,9 +26,9 @@ func TestUnifiedTreeLoadsClean(t *testing.T) {
 // top-level domain folder is present in the embed.
 func TestUnifiedTreeCoversAllDomains(t *testing.T) {
 	want := []string{
-		"cluster", "cognition", "common", "copresent", "data",
-		"identity", "knowledge", "memql", "platform", "policies",
-		"providers", "router", "worker",
+		"agents", "cluster", "cognition", "common", "curriculum",
+		"data", "identity", "knowledge", "memql", "planner",
+		"platform", "policies", "providers", "router", "worker",
 	}
 	paths, err := dslfs.WalkMemqlFiles(Tree())
 	if err != nil {
