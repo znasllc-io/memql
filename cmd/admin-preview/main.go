@@ -80,7 +80,7 @@ func main() {
 	auditEvents := []webtempl.AdminAuditView{
 		{ID: "ev-1", OccurredAt: fmtTime(now.Add(-2 * time.Minute)), Category: "auth", Action: "magic_link_issued", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
 		{ID: "ev-2", OccurredAt: fmtTime(now.Add(-5 * time.Minute)), Category: "auth", Action: "session_started", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
-		{ID: "ev-3", OccurredAt: fmtTime(now.Add(-12 * time.Minute)), Category: "admin", Action: "user_role_changed", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", TargetId: "user-abc123", TargetEmail: "ops@acme.com", Outcome: "success", SourceIP: "10.0.0.42"},
+		{ID: "ev-3", OccurredAt: fmtTime(now.Add(-12 * time.Minute)), Category: "admin", Action: "user_role_changed", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", TargetID: "user-abc123", TargetEmail: "ops@acme.com", Outcome: "success", SourceIP: "10.0.0.42"},
 		{ID: "ev-4", OccurredAt: fmtTime(now.Add(-45 * time.Minute)), Category: "auth", Action: "magic_link_verify_failed", Outcome: "failure", FailureReason: "expired", SourceIP: "203.0.113.7"},
 		{ID: "ev-5", OccurredAt: fmtTime(now.Add(-2 * time.Hour)), Category: "configuration", Action: "settings_updated", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
 	}
@@ -149,9 +149,9 @@ func main() {
 		TotalCount:  3,
 		ActiveCount: 2,
 		Tokens: []webtempl.AdminPATRow{
-			{ID: "pat-1", UserId: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "laptop CLI", Active: true, LastUsedAt: fmtTime(now.Add(-15 * time.Minute)), CreatedAt: fmtTime(now.Add(-21 * 24 * time.Hour))},
-			{ID: "pat-2", UserId: "user-2", OwnerEmail: "ops@acme.com", Label: "ci-runner", Active: true, LastUsedAt: fmtTime(now.Add(-3 * time.Hour)), CreatedAt: fmtTime(now.Add(-7 * 24 * time.Hour))},
-			{ID: "pat-3", UserId: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "old laptop", Active: false, LastUsedAt: "", CreatedAt: fmtTime(now.Add(-90 * 24 * time.Hour))},
+			{ID: "pat-1", UserID: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "laptop CLI", Active: true, LastUsedAt: fmtTime(now.Add(-15 * time.Minute)), CreatedAt: fmtTime(now.Add(-21 * 24 * time.Hour))},
+			{ID: "pat-2", UserID: "user-2", OwnerEmail: "ops@acme.com", Label: "ci-runner", Active: true, LastUsedAt: fmtTime(now.Add(-3 * time.Hour)), CreatedAt: fmtTime(now.Add(-7 * 24 * time.Hour))},
+			{ID: "pat-3", UserID: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "old laptop", Active: false, LastUsedAt: "", CreatedAt: fmtTime(now.Add(-90 * 24 * time.Hour))},
 		},
 	}))
 

@@ -152,7 +152,7 @@ Every build/run/test command is a Makefile target in the relevant repo. Multi-st
 - **memql becomes a clean core library.** Today it contains both engine/infrastructure code AND copresent-specific concepts. After migration, memql contains only generic platform code.
 - **The `bff` node-type goes away.** Currently a `make bff` target produces a generic BFF binary. After migration, each client's BFF is its own binary built from its own repo (`copresent-bff`, `memql-cockpit-bff`, etc.).
 - **memql-cockpit moves out of memql.** Currently `cmd/memql-cockpit/` lives inside memql. After migration, it's its own repo.
-- **Client-specific concepts move to client-specific BFF repos.** Concepts like `v1:copresent:plan`, `v1:copresent:agent`, etc. relocate to `copresent-bff`. Same for mutations, queries, automations, tools, prompts, providers, shapes, and integrations.
+- **Client-specific concepts move to client-specific BFF repos.** Concepts like `v1:planner:plan`, `v1:agents:agent`, etc. relocate to `copresent-bff`. Same for mutations, queries, automations, tools, prompts, providers, shapes, and integrations.
 - **`go.work` ties the modules together for development.** A single workspace file at `~/projects/go.work` lets you edit core memql and a BFF in tandem without bumping versions.
 
 ### 1.3 What stays the same
@@ -337,7 +337,7 @@ memql/
 ### 3.2 The problems this causes
 
 - A new contributor to memql core has to know which concepts under `concepts/v1/` they're allowed to touch and which are copresent's territory. There's no enforcement.
-- A copresent concern (e.g., adding a new `v1:copresent:agent` field) shows up as a memql change in the git log, conflating product changes with platform changes.
+- A copresent concern (e.g., adding a new `v1:agents:agent` field) shows up as a memql change in the git log, conflating product changes with platform changes.
 - The single Makefile carries targets for both core (voice, cognition, identity) and copresent-specific tools (claw, agent reply integrations).
 - Adding a second client (cockpit) means more conflation. Adding a third (portal) makes it worse.
 - The retired `bff/copresent` branch was a symptom of this — the user tried to physically separate copresent code from main, but the dual-branch overhead was too much. With proper module separation, the same goal is achieved without the merge pain.

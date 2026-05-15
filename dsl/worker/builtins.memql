@@ -59,7 +59,7 @@ builtin agentworkerListWorkers {
 //
 // Bridges the requestComputerUseScope.memql tool definition to the
 // agentworker Go integration's `requestScope` capability. The
-// integration creates a v1:copresent:plan in awaitingFeedback +
+// integration creates a v1:planner:plan in awaitingFeedback +
 // emits a canvas card; the agent's tool result is just a small
 // JSON payload acknowledging the request.
 

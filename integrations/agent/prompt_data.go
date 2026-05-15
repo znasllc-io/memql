@@ -152,7 +152,7 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 
 	// assistant block -- agent identity + tools + roster + workspace.
 	// Populated from AgentGenerateTurnMsg.acting_agent (filled by the
-	// cognition forwarder from the v1:copresent:agent record) so the
+	// cognition forwarder from the v1:agents:agent record) so the
 	// template has everything it needs to render the scope fence, tool
 	// list, and turn-mode branch. Falls back to the agent ID only when
 	// the forwarder omits acting_agent (minimal routing at session start).

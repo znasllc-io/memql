@@ -101,3 +101,24 @@ concept spawnEvent {
   reason        string  @description("Human-readable reason for the event (e.g. shutdown signal, health check failure).")
   metadata      object  @description("Additional context about the event.")
 }
+
+@version("1.0.0")
+@namespace("cluster")
+@visibility("*")
+@description("Ephemeral result node returned by trainAgent + trainAgentRetryStep capability handlers. Carries the per-run summary (counts of chunks indexed, identity-vector + system-prompt write status, retry-plan ids when the in-handler retry exhausted, elapsed wall-clock). The frontend reads this off the bundle to render the in-card success toast; the same fields also land on the training.completed canvas card for the historical record. Not intended to be queried -- it's a transit container, not a persisted entity. Cache TTL 0 + skipDeleted matches the other Plan/Task lifecycle concepts.")
+concept trainingResult {
+  agentId             string  @required @description("v1:agents:agent.id this result describes.")
+  agentName           string  @description("Display name of the agent at the time of training. Surfaced in toasts + cards so the UI doesn't have to re-fetch.")
+  domainsAdded        int     @description("Domains in the new set that weren't on the agent before.")
+  domainsRemoved      int     @description("Domains in the old set that aren't in the new set.")
+  chunksEmbedded      int     @description("Chunks the embedding loop pre-warmed during this run.")
+  chunksAlready       int     @description("Chunks that were already in node_vectors and didn't need re-embedding.")
+  identityVectorWrote bool    @description("Step B (per-agent identity embedding) succeeded.")
+  systemPromptWrote   bool    @description("Step C (distilled system prompt) succeeded.")
+  elapsedMs           int     @description("Wall-clock duration of the trainAgent handler.")
+  identityRetryPlanId string  @description("trainAgentRetryStep Plan id queued by the backend when Step B failed after the in-handler retry. Empty when Step B succeeded.")
+  distillRetryPlanId  string  @description("trainAgentRetryStep Plan id queued by the backend when Step C failed after the in-handler retry. Empty when Step C succeeded.")
+  identityError       string  @description("Step B's error message when identityVectorWrote is false. Empty when Step B succeeded.")
+  distillError        string  @description("Step C's error message when systemPromptWrote is false. Empty when Step C succeeded.")
+  step                string  @description("For trainAgentRetryStep results: which step was retried ('identityVector' or 'distillPrompt'). Empty for the main trainAgent capability.")
+}

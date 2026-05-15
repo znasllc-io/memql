@@ -73,7 +73,7 @@ type Replier struct {
 
 // ComputerUseStatusFn is the agent-build hook that resolves
 // computer_use availability for an agent. agentId is the
-// v1:copresent:agent.id of the speaker; the implementation queries
+// v1:agents:agent.id of the speaker; the implementation queries
 // the agent's owner + worker registry and the agent's standing
 // authorization row, and returns:
 //
@@ -173,7 +173,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 
 	// Server-side ActingAgent fallback. If a caller forwarded the turn
 	// without populating msg.ActingAgent (planner-driven post-approval
-	// dispatch is the canonical example -- v1:copresent:agent has
+	// dispatch is the canonical example -- v1:agents:agent has
 	// @visibility("bff", "cognition", "agent"), so the planner can't
 	// load the record itself), self-resolve the agent record from
 	// the agent node where this turn lands. Without this, the assistant
@@ -561,7 +561,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	//      auth middleware. This is the most authoritative source on
 	//      a real user-driven chat turn (the user's identity is
 	//      verified, not inferred from data).
-	//   2. resolveOwnerForAgent -- queries the v1:copresent:agent
+	//   2. resolveOwnerForAgent -- queries the v1:agents:agent
 	//      record's ownerUserId / createdBy. Used as a fallback when
 	//      AccessContext is missing (planner-driven post-approval
 	//      turn -- the planner forwards with system-actor claims, no
@@ -657,7 +657,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	return result, nil
 }
 
-// resolveOwnerForAgent looks up the v1:copresent:agent's createdBy
+// resolveOwnerForAgent looks up the v1:agents:agent's createdBy
 // (which is the agent's owner user id, auto-stamped on insert) for
 // per-turn agent-context injection into worker tools. Mirrors the
 // resolution logic in app/computer_use_status_agent.go's
@@ -827,7 +827,7 @@ func planOutcomeRowsFromResult(res any) []map[string]any {
 // fillActingAgentIfEmpty self-resolves the agent record on the
 // agent node when a forwarder dispatched a turn without populating
 // msg.ActingAgent. The cognition forwarder always pre-fills it
-// (cognition has @visibility on v1:copresent:agent), but the
+// (cognition has @visibility on v1:agents:agent), but the
 // planner doesn't (planner is deliberately NOT in the agent
 // concept's visibility list -- it's a cross-domain leak we wanted
 // to avoid). The agent node IS in the visibility list, so it can

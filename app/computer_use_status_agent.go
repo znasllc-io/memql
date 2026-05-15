@@ -27,7 +27,7 @@ import (
 //	          empty otherwise.
 //
 //	scope  -- the agent's CURRENT standing computer_use scope from
-//	          v1:copresent:agentAuthorization (observe / interact /
+//	          v1:agents:agentAuthorization (observe / interact /
 //	          full), or "" if no standing grant exists. The agent
 //	          reads this each turn so it can dispatch worker tools
 //	          directly when its standing scope already covers the
@@ -111,7 +111,7 @@ func (a *App) computerUseStatusFn() agent.ComputerUseStatusFn {
 // standingComputerUseScope reads the agent's current standing
 // computer_use scope from queryAgentAuthorizationsForUser. Tolerates
 // both bare-slug and canonical-form agentIds on the stored row
-// because v1:copresent:agentAuthorization has no @relationship on
+// because v1:agents:agentAuthorization has no @relationship on
 // agentId yet (auto-canon doesn't fire). Returns "" on lookup
 // errors; the caller treats empty as "no standing grant" which
 // prompts the agent to request elevation, the safe default.

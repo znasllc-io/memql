@@ -144,7 +144,7 @@ trait traitIsNotArchived {
 // be inactive (deactivated) but still visible in management views.
 //
 // Usage in queries:
-//   concept==v1:copresent:agent;traitIsNotDeleted()
+//   concept==v1:agents:agent;traitIsNotDeleted()
 //
 @enabled
 @description("Excludes records with deleted==true field")

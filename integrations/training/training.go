@@ -422,7 +422,7 @@ func (i *Integration) trainAgentHandler(
 			identityErr = fmt.Sprintf("identity-embed: %v", err)
 			i.Logger.Warn("training.trainAgent: identity-embed failed (after retries)",
 				"agentId", agentId, "err", err)
-		} else if err := i.storeVector(ctx, partition, agentId, "v1:copresent:agent", vec); err != nil {
+		} else if err := i.storeVector(ctx, partition, agentId, "v1:agents:agent", vec); err != nil {
 			identityErr = fmt.Sprintf("identity-vector store: %v", err)
 			i.Logger.Warn("training.trainAgent: identity-vector store failed",
 				"agentId", agentId, "err", err)

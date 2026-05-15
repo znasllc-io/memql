@@ -150,7 +150,7 @@ kill -HUP $(pgrep memql-cockpit)
 Three independent gates run **before** every dispatch:
 
 1. **Layer 1 — agent capability flag.** The agent must carry
-   `computer_use` in `v1:copresent:agent.capabilities`. Set on
+   `computer_use` in `v1:agents:agent.capabilities`. Set on
    create, edit on the agent panel.
 2. **Layer 2 — standing scope.** The user grants the agent a
    tier on the agentAuthorization row:

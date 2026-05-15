@@ -24,7 +24,7 @@ Examples:
 |---|---|---|---|
 | `default:v1:cognition:utterance:474e57df-...` | `default` | `v1:cognition:utterance` | `474e57df-...` |
 | `_system:v1:cluster:node:bff-local` | `_system` | `v1:cluster:node` | `bff-local` |
-| `acme:v1:copresent:agent:a9f3b7c2...` | `acme` | `v1:copresent:agent` | `a9f3b7c2...` |
+| `acme:v1:agents:agent:a9f3b7c2...` | `acme` | `v1:agents:agent` | `a9f3b7c2...` |
 
 Where:
 

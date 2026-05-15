@@ -98,7 +98,7 @@ func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 @enabled
 func (Automation) autoJoinAIExample(_ any) {
   getAgents := query {
-    concept==v1:copresent:agent;
+    concept==v1:agents:agent;
     payload.active==true
   }
 

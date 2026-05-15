@@ -207,7 +207,7 @@ type participantPayload struct {
 // agentPayload represents the payload of an agent node.
 type agentPayload struct {
 	// ID is the canonical full agent id
-	// (`default:v1:copresent:agent:<short>`). Not part of the
+	// (`default:v1:agents:agent:<short>`). Not part of the
 	// payload JSON -- populated by `getAgent` from the resolved
 	// query id. Used downstream as `AgentGenerateTurnMsg.AgentId`
 	// + `ActingAgentIdentity.Id` so the gRPC stream can stamp

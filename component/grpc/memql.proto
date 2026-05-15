@@ -553,7 +553,7 @@ message ClientToolCall {
   // Lets the client render per-turn progress and cancel in-flight calls
   // when the enclosing turn is cancelled.
   string turn_id = 2;
-  // The v1:copresent:agent (or equivalent) ID of the caller.
+  // The v1:agents:agent (or equivalent) ID of the caller.
   string agent_id = 3;
   // Tool name as registered in the tool registry.
   string tool_name = 4;
@@ -1045,7 +1045,7 @@ message AgentGenerateTurnMsg {
   string request_id = 1;
 
   // Who is speaking.
-  string agent_id = 2;              // v1:copresent:agent ID
+  string agent_id = 2;              // v1:agents:agent ID
   string space_id = 3;
   string participant_id = 4;        // agent's participant record in this space
 
@@ -1073,7 +1073,7 @@ message AgentGenerateTurnMsg {
 
 // ActingAgentIdentity carries the full identity of the agent being asked
 // to generate this turn: role, domains, tools, system prompt. Populated
-// by cognition's forwarder from the v1:copresent:agent record. Distinct
+// by cognition's forwarder from the v1:agents:agent record. Distinct
 // from AgentTurnPeer (used for rendering the peer roster) -- peers don't
 // need tools or system prompt.
 message ActingAgentIdentity {
@@ -1578,7 +1578,7 @@ message RevokeWorkerTokenResult {
 message VoiceAgentSessionStart {
   string request_id = 1;
   string space_id = 2;      // v1:cognition:space.id
-  string ga_agent_id = 3;   // v1:copresent:agent.id of the General Assistant
+  string ga_agent_id = 3;   // v1:agents:agent.id of the General Assistant
   string room_name = 4;     // LiveKit room name
   // Optional: identity hint for the avatar vendor. Currently
   // 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the

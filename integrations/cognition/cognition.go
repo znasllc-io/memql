@@ -547,7 +547,7 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	// utterances; Plan / Task lifecycle and the AgentForwarder
 	// dispatch for "Allow on a permission card" rides on the
 	// planner node. The planner integration subscribes to
-	// graph.node.updated.*.v1:copresent:plan in its own Start.)
+	// graph.node.updated.*.v1:planner:plan in its own Start.)
 
 	// Start space context heartbeat for reconciliation.
 	c.startSpaceContextHeartbeat(ctx)

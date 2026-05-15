@@ -76,7 +76,7 @@ mutation mutationRecordRouterCall {
 
 @enabled
 @useConcept(budget)
-@description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:copresent:agent by scopeId.")
+@description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.")
 mutation mutationSetBudget {
   args {
     id                 string  @required

@@ -246,7 +246,7 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 	}
 
 	// 2) Agent record's default.
-	agentQuery := fmt.Sprintf(`from(v1:copresent:agent) ?.id=="%s" select id, payload.%s`, agentId, field)
+	agentQuery := fmt.Sprintf(`from(v1:agents:agent) ?.id=="%s" select id, payload.%s`, agentId, field)
 	if result, err := s.service.engine.Execute(ctx, agentQuery); err == nil {
 		if mode, ok := extractFirstAgentField(result.OutputPayload(), field); ok && isValidChannelMode(mode) {
 			return mode

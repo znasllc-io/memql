@@ -93,7 +93,7 @@ logic logicAutoJoinSI {
   checkExistingGA := if !getGA.Empty() {
     queryParticipantByAgentSpace({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:copresent:agent")
+      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:agents:agent")
     })
   }
   // Owner GA join carries two chat-architecture flags (Phase 1.5):
@@ -111,7 +111,7 @@ logic logicAutoJoinSI {
   insertGA := if !getGA.Empty() && checkExistingGA.Empty() {
     mutationJoinSpaceAsSI({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:copresent:agent"),
+      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:agents:agent"),
       displayName: "Sofia",
       forUserId: args.event.payload.actor,
       isGroupGA: true

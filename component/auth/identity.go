@@ -33,7 +33,7 @@ type DelegationContext struct {
 	IdentityType string
 	// GuardianSubject is the authenticated subject of the guardian (for synthetic identities).
 	GuardianSubject string
-	// AgentId is the v1:copresent:agent node ID performing the action.
+	// AgentId is the v1:agents:agent node ID performing the action.
 	AgentId string
 	// RoleCeiling is the maximum role allowed under this delegation.
 	RoleCeiling Role

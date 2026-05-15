@@ -1,0 +1,46 @@
+// concepts.memql
+//
+// Concepts in the common namespace.
+
+@version("1.0.0")
+@namespace("common")
+@visibility("bff", "cognition")
+@description("A file attachment uploaded to a space, with extracted transcription.")
+concept attachment {
+  fileName  string  @required  @description("Original filename of the uploaded file.")
+  fileSize  int  @description("File size in bytes.")
+  gcsURL  string  @required  @description("Google Cloud Storage URI where the file is stored (gs://bucket/object).")
+  mimeType  string  @required  @description("MIME type of the uploaded file.")
+  spaceId  string  @required  @description("ID of the space this attachment belongs to.")
+  status  enum("processing", "ready", "error")  @required  @description("Processing status of the attachment.")
+  summary  string  @description("AI-generated 2-3 sentence summary of the file content.")
+  transcription  string  @description("Extracted plain text from the file, or image description for images.")
+  uploadedBy  string  @required  @description("Actor identifier of the user who uploaded the file.")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+}
+
+@version("1.0.0")
+@namespace("common")
+@visibility("bff", "cognition")
+@description("Audio, video, image, and document assets referenced by utterances.")
+concept media {
+  dimensions {
+    height  int
+    width  int
+  }
+  duration  int  @description("Duration in milliseconds (for audio/video).")
+  filename  string  @description("Original filename.")
+  mediaType  enum("audio", "video", "image", "document")  @required  @description("Type of media asset.")
+  metadata  object  @description("Additional format-specific metadata.")
+  mimeType  string  @required  @description("MIME type of the asset.")
+  size  int  @description("File size in bytes.")
+  spaceId  string  @required  @description("ID of the space this media belongs to.")
+  transcription {
+    text  string  @description("Full transcribed text.")
+    timestamps  []object
+  }
+  url  string  @required  @description("Storage URL for the asset.")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+}

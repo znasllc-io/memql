@@ -197,7 +197,7 @@ func (i *Integration) trainAgentRetryStepHandler(
 		if err != nil {
 			return nil, fmt.Errorf("training.trainAgentRetryStep: identity-embed: %w", err)
 		}
-		if err := i.storeVector(ctx, partition, agentId, "v1:copresent:agent", vec); err != nil {
+		if err := i.storeVector(ctx, partition, agentId, "v1:agents:agent", vec); err != nil {
 			return nil, fmt.Errorf("training.trainAgentRetryStep: identity-vector store: %w", err)
 		}
 		identityVectorWrote = true

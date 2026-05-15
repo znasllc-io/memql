@@ -102,12 +102,12 @@ remaining work is to make the elevation card actually show up.
    `integrations/agent/worker/integration.go` runs
    `mutationCreateScopeElevationPlan` (with a synthetic user actor on
    the context, fix in `6b702bb`).
-5. The mutation lands a `v1:copresent:plan` row with
+5. The mutation lands a `v1:planner:plan` row with
    `kind="scopeElevation"`, `status="awaitingFeedback"`,
    `feedbackReason="scope_elevation_required"`,
    `computerUseScope=<requested>`.
 6. `automations/v1/copresent/emitScopeElevationCanvasCard/automation.memql`
-   triggers on `graph.node.created.*.v1:copresent:plan` filtered by
+   triggers on `graph.node.created.*.v1:planner:plan` filtered by
    `payload.kind=="scopeElevation"` and writes a `v1:copresent:canvasState`
    row via `mutationCreateCanvasState`. Visibility=private,
    forUserId=requestedBy.
@@ -130,7 +130,7 @@ What works as of `6b702bb`:
 What does NOT work (or needs verifying):
 - Step 6 — does the `emitScopeElevationCanvasCard` automation
   actually fire? The trigger pattern is
-  `graph.node.created.*.v1:copresent:plan`; the `*` should match the
+  `graph.node.created.*.v1:planner:plan`; the `*` should match the
   partition. The filter is `payload.kind=="scopeElevation"`. Verify
   with `docker logs memql-cognition --tail 500 | grep
   emitScopeElevationCanvasCard`.
@@ -219,7 +219,7 @@ Easy to rule out — ask the user to hard-refresh and try again.
           payload::jsonb->>'feedbackReason' AS reason,
           payload::jsonb->>'spaceId' AS space_id
    FROM "MemoryNodes"
-   WHERE concept='v1:copresent:plan'
+   WHERE concept='v1:planner:plan'
      AND payload::jsonb->>'kind'='scopeElevation'
    ORDER BY "createdAt" DESC LIMIT 3;
 
@@ -263,7 +263,7 @@ Frontend (copresent):
 
 ## Open follow-ups (NOT this handoff's job, but worth knowing)
 
-- `v1:copresent:agentAuthorization` has no `@relationship` on
+- `v1:agents:agentAuthorization` has no `@relationship` on
   `agentId` or `userId`. Auto-canon doesn't fire; values are stored
   as bare slugs. The frontend's `pickGAAuthRow` matcher (in
   `PlanScopeElevationCard.tsx`) compensates with a tolerant
