@@ -33,11 +33,11 @@ type LoginData struct {
 	// Threaded through unchanged.
 	ReturnTo string
 	// OAuth code-flow context. When present, identity matches the
-	// (ClientId, RedirectURI) pair against registered clients and
+	// (ClientID, RedirectURI) pair against registered clients and
 	// stamps the magic link with the OAuth context so /auth/complete
 	// can mint an auth code for that client. When absent, the magic
 	// link goes through the admin-session path and lands in /admin/.
-	ClientId    string
+	ClientID    string
 	RedirectURI string
 	OAuthState  string
 }
@@ -249,13 +249,13 @@ func loginFormEmail(data LoginData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if data.ClientId != "" {
+		if data.ClientID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<input type=\"hidden\" name=\"client_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientId)
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientID)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `login.templ`, Line: 102, Col: 62}
 			}
@@ -398,13 +398,13 @@ func loginFormWaitlist(data LoginData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if data.ClientId != "" {
+		if data.ClientID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<input type=\"hidden\" name=\"client_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
-			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientId)
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientID)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `login.templ`, Line: 135, Col: 62}
 			}
@@ -536,13 +536,13 @@ func loginFormInvite(data LoginData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if data.ClientId != "" {
+		if data.ClientID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<input type=\"hidden\" name=\"client_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientId)
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.ClientID)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `login.templ`, Line: 172, Col: 62}
 			}

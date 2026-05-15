@@ -8,14 +8,14 @@ package webtempl
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// ErrorData drives the generic error page. `ErrorId` is shown only
+// ErrorData drives the generic error page. `ErrorID` is shown only
 // when set so handlers that don't have a correlation id render
 // a clean panel.
 type ErrorData struct {
 	Layout  LayoutData
 	Heading string
 	Message string
-	ErrorId string
+	ErrorID string
 }
 
 func Error(data ErrorData) templ.Component {
@@ -81,13 +81,13 @@ func Error(data ErrorData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if data.ErrorId != "" {
+			if data.ErrorID != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<p class=\"text-small text-subtle\">Reference: <code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.ErrorId)
+				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.ErrorID)
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `error.templ`, Line: 20, Col: 36}
 				}

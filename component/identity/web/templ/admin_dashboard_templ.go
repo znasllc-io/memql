@@ -17,7 +17,7 @@ type AdminAuditView struct {
 	Action        string
 	ActorEmail    string
 	ActorRole     string
-	TargetId      string
+	TargetID      string
 	TargetEmail   string
 	Outcome       string
 	FailureReason string

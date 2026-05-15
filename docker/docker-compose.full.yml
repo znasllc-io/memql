@@ -93,7 +93,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    volumes:
     networks:
       - memql
     restart: unless-stopped
@@ -198,7 +197,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    volumes:
     networks:
       - memql
     restart: unless-stopped
@@ -253,7 +251,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    volumes:
     networks:
       - memql
     restart: unless-stopped
@@ -338,7 +335,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    volumes:
     networks:
       - memql
     restart: unless-stopped
@@ -401,7 +397,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    volumes:
     networks:
       - memql
     restart: unless-stopped

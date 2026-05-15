@@ -211,13 +211,13 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if ev.TargetId != "" {
+					if ev.TargetID != "" {
 						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<code>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var8 string
-						templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(ev.TargetId)
+						templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(ev.TargetID)
 						if templ_7745c5c3_Err != nil {
 							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 64, Col: 30}
 						}
