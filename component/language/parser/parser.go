@@ -3724,10 +3724,29 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// `?.field==args.id` produced different shapes for the same
 	// reference -- which broke spec / executor logic that switched
 	// on the value type.
+	//
+	// `ctx.<path>` is the post-rewrite form of `args.<path>` (the
+	// struct-form rewriter translates one to the other in filter /
+	// insert / update bodies). Both must land at the same AST node
+	// so a `ctx.X` reference outside an immediate value position
+	// (e.g. as a function-call argument) still resolves to the
+	// caller arg instead of leaking through as a bare identifier.
 	if strings.HasPrefix(name, "args.") {
 		argPath := strings.TrimPrefix(name, "args.")
 		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
 			return &ArgRefExpr{Path: argPath}, nil
+		}
+	}
+	if strings.HasPrefix(name, "ctx.") {
+		argPath := strings.TrimPrefix(name, "ctx.")
+		if argPath != "" && !p.check(TokenOperator) && !p.check(TokenKeywordIn) && !p.check(TokenKeywordHas) && !p.check(TokenKeywordNot) {
+			switch argPath {
+			case "input", "output", "actor", "partition", "now", "config", "error", "trace":
+				// Reserved envelope fields -- leave for downstream
+				// resolution paths instead of treating as caller args.
+			default:
+				return &ArgRefExpr{Path: argPath}, nil
+			}
 		}
 	}
 
@@ -4269,9 +4288,32 @@ func (p *Parser) parseValue() (any, error) {
 			}
 
 			// Dotted identifier path (event.payload.id) parsed as single identifier when '.' in ident chars
-			// Check for args.fieldName syntax - convert to ArgRefExpr
+			// Check for args.fieldName / ctx.fieldName syntax - convert to ArgRefExpr.
+			// The struct-form rewriter (rewriter.go:translateArgsRefsToCtx)
+			// rewrites `args.X` to `ctx.X` in filter / insert / update
+			// bodies before the parser sees them, so both shapes need to
+			// land at the same AST node here -- otherwise `ctx.X` in a
+			// value position falls through as the literal string
+			// "ctx.X" and the comparison compiles to a no-op SQL
+			// predicate (= 'ctx.X') that never matches a real row.
 			if strings.HasPrefix(val, "args.") {
 				argPath := strings.TrimPrefix(val, "args.")
+				return &ArgRefExpr{Path: argPath}, nil
+			}
+			if strings.HasPrefix(val, "ctx.") {
+				argPath := strings.TrimPrefix(val, "ctx.")
+				// Reserved envelope fields (ctx.input / ctx.output /
+				// ctx.actor / ctx.partition / ctx.now / ctx.config /
+				// ctx.error / ctx.trace) are addressed via dedicated
+				// resolution paths in the engine, not the args bag, so
+				// don't shadow them here. In practice these don't appear
+				// in comparison-value position (the canonical struct form
+				// is `actor.X` / `now` / etc. as bare references) but the
+				// guard keeps the parse surface honest.
+				switch argPath {
+				case "input", "output", "actor", "partition", "now", "config", "error", "trace":
+					return val, nil
+				}
 				return &ArgRefExpr{Path: argPath}, nil
 			}
 			return val, nil
