@@ -546,7 +546,33 @@ func boundConceptFromUseAnnotation(file *languageParser.File, registry memoryNod
 // downstream stages (concept-extraction for partition routing,
 // SQL concept filter, post-filter validation) all see the same
 // concept handle the author intended.
+//
+// Directive wrappers (shape, sort, paginate, select, timestamp,
+// depth) must be the outermost nodes in a query expression --
+// parser.go's planQuery enforces this. Descending into the
+// wrapper's Target keeps the directive on the outside and lands
+// the AND on the inner filter where it belongs.
 func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) ExpressionNode {
+	switch n := expr.(type) {
+	case *ShapeExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *SortExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *PaginateExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *SelectExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *TimestampExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *DepthExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	}
 	conceptCmp := &ComparisonExpression{
 		Field:    FieldReference{Raw: "concept", Parts: []string{"concept"}},
 		Operator: OpEq,
