@@ -3,10 +3,12 @@
 # scripts/dev/refresh.sh
 # ======================
 #
-# Single-command "fresh testing stack" for memQL: backs up running
-# state into ~/.memql/dev-secrets.yaml, wipes the database, restarts
-# the cluster with the full identity flow, then re-seeds from the
-# yaml. Seed + health both authenticate via the operator credential
+# Single-command "fresh testing stack" for memQL: decrypts the
+# operator's ~/.memql/genesis.znas using MEMQL_MASTER_KEY, exports
+# every env var into the shell so docker compose can substitute,
+# wipes the database, restarts the cluster with the full identity
+# flow, then re-seeds manifest-listed entries from the decrypted
+# env. Seed + health both authenticate via the operator credential
 # (cluster master key) so no `--no-auth` shortcut is needed. Used
 # by 'make dev-refresh'.
 #
@@ -22,29 +24,22 @@ source "${SCRIPT_DIR}/lib.sh"
 # Steps
 # -----------------------------------------------------------------
 
-function step1_load_master_key() {
-    require_master_key
-    echo "[1/6] Master key loaded from yaml."
+function step1_load_genesis() {
+    require_genesis
+    local path="${MEMQL_GENESIS_PATH:-$HOME/.memql/genesis.znas}"
+    echo "[1/6] Genesis loaded from $path (decrypted to $GENESIS_ENV_FILE)."
 }
 
 function step2_export_running_state() {
-    # First-run / cold-start: no postgres container, no cluster to
-    # back up. Print one clean line and skip both substeps. The
-    # secrets `export` and knowledge-export.sh both handle the
-    # missing-cluster case themselves, but their messages read like
-    # warnings -- catching it here means a clean cold-start log.
+    # Genesis is the source of truth for secrets + variables, so the
+    # cluster -> yaml backup is gone. Knowledge cache backup still
+    # runs -- LLM-seeded chunks aren't in genesis and would be burned
+    # by the upcoming wipe otherwise.
     if ! docker ps --filter "name=^memql-db$" --filter "status=running" --format '{{.Names}}' | grep -q "memql-db"; then
-        echo "[2/6] No running cluster detected -- skipping state + knowledge backup."
+        echo "[2/6] No running cluster detected -- skipping knowledge backup."
         return 0
     fi
 
-    echo "[2/6] Backing up running memQL state into yaml..."
-    go run ./scripts/secrets export
-
-    # Knowledge cache: pulls LLM-seeded chunks + their vectors into
-    # ~/.memql/dev-knowledge.sql so the upcoming wipe doesn't burn
-    # them. Best-effort -- if Postgres isn't responding we skip and
-    # the user gets the wipe anyway. See scripts/dev/knowledge-export.sh.
     echo "[2/6] Backing up LLM-seeded knowledge chunks..."
     bash "${SCRIPT_DIR}/knowledge-export.sh" || \
         echo "  WARNING: knowledge cache export failed; proceeding anyway."
@@ -90,22 +85,24 @@ function step4_wait_for_ready() {
         cat <<'EOF'
 
   WARNING: memQL did not respond to a gRPC handshake within 120s.
-  Going to attempt the seed anyway -- if it fails, run:
-      make dev-logs       # see what's wrong
-      make secrets-seed   # seed once it comes up
+  Going to attempt the seed anyway -- if it fails, check:
+      make dev-logs                                       # what's wrong
+      go run ./scripts/secrets seed --env-file=...        # once memQL is up
 
 EOF
     fi
 }
 
 function step5_seed_and_finish() {
-    echo "[5/6] Re-seeding secrets + variables from yaml..."
-    if ! go run ./scripts/secrets seed; then
-        cat <<'EOF'
+    echo "[5/6] Re-seeding secrets + variables from genesis..."
+    if ! go run ./scripts/secrets seed --env-file="$GENESIS_ENV_FILE"; then
+        cat <<EOF
 
   Seed failed. memQL is up (containers running) but the secrets
-  push didn't complete. Check 'make dev-logs' and re-run
-  'make secrets-seed' once the issue is resolved.
+  push didn't complete. Check 'make dev-logs', then once memQL is
+  responsive re-run:
+
+      go run ./scripts/secrets seed --env-file="$GENESIS_ENV_FILE"
 
 EOF
         exit 1
@@ -130,7 +127,7 @@ function step6_restore_knowledge() {
 
 function main() {
     check_docker
-    step1_load_master_key
+    step1_load_genesis
     step2_export_running_state
     step3_wipe_and_restart
     step4_wait_for_ready

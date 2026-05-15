@@ -50,7 +50,7 @@ services:
         chown node:node /openclaw/.openclaw/openclaw.json
         exec runuser -u node -- node openclaw.mjs gateway --allow-unconfigured --bind lan --port 18789
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Home directory for OpenClaw state
       OPENCLAW_HOME: "/openclaw"

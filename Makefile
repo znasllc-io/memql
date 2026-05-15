@@ -393,117 +393,39 @@ docker-planner:
 	docker build -f docker/memql.Dockerfile --build-arg BUILD_TAGS=planner -t memql:planner .
 
 # ---------------------------------------------------------------------------
-# Dev-secrets workflow
+# Database wipe / dev refresh
 # ---------------------------------------------------------------------------
-# Operator tooling for populating a local memQL with the secrets and
-# variables declared in scripts/secrets/manifest.yaml. Values live in
-# the developer's personal ~/.memql/dev-secrets.yaml (gitignored).
-# See docs/planning/env-var-refactor-plan.md for the design.
+# Authoring of env vars / secrets lives in `memql-cockpit genesis init`
+# (writes ~/.memql/genesis.znas). dev-refresh decrypts that file, brings
+# up the stack, and seeds manifest-listed entries into the running
+# memQL cluster as concept rows.
 
-.PHONY: secrets-init secrets-seed secrets-list secrets-edit secret-set secret-delete variable-set variable-delete db-purge db-purge-and-reseed dev-fresh dev-refresh dev-status
+.PHONY: db-purge dev-fresh dev-refresh dev-status
 
-## Interactively create / update ~/.memql/dev-secrets.yaml from the
-## committed manifest at scripts/secrets/manifest.yaml. Prompts only
-## for entries that don't already have a value. Values are masked for
-## secrets, plaintext for variables.
-secrets-init:
-	$(GO) run ./scripts/secrets init
-
-## Read ~/.memql/dev-secrets.yaml and push every entry into the
-## running memQL. Secrets are encrypted locally with MEMQL_MASTER_KEY
-## before insert. Requires a running cluster (make dev or dev-cluster)
-## and MEMQL_MASTER_KEY exported in this shell.
-secrets-seed:
-	$(GO) run ./scripts/secrets seed
-
-## Show manifest entries and whether each has a value in the local
-## yaml. Safe to run without MEMQL_MASTER_KEY.
-secrets-list:
-	$(GO) run ./scripts/secrets list
-
-## Open ~/.memql/dev-secrets.yaml in $$EDITOR for batch edits.
-secrets-edit:
-	$${EDITOR:-vi} $$HOME/.memql/dev-secrets.yaml
-
-## One-off secret upsert without touching the yaml.
-## Usage: make secret-set NAME=OPENAI_API_KEY VALUE=sk-... SCOPE=global [KIND=vendor_api_key] [PARTITION=name]
-secret-set:
-	@[ -n "$(NAME)" ] || (echo "NAME is required"; exit 1)
-	@[ -n "$(VALUE)" ] || (echo "VALUE is required"; exit 1)
-	@[ -n "$(SCOPE)" ] || (echo "SCOPE=global|partition is required"; exit 1)
-	$(GO) run ./scripts/secrets set secret "$(NAME)" "$(VALUE)" --scope=$(SCOPE) $(if $(PARTITION),--partition=$(PARTITION)) $(if $(KIND),--kind=$(KIND))
-
-## One-off soft-delete of a secret.
-## Usage: make secret-delete NAME=OPENAI_API_KEY SCOPE=global [PARTITION=name]
-secret-delete:
-	@[ -n "$(NAME)" ] || (echo "NAME is required"; exit 1)
-	@[ -n "$(SCOPE)" ] || (echo "SCOPE=global|partition is required"; exit 1)
-	$(GO) run ./scripts/secrets delete secret "$(NAME)" --scope=$(SCOPE) $(if $(PARTITION),--partition=$(PARTITION))
-
-## One-off plaintext variable upsert.
-## Usage: make variable-set NAME=MEMQL_DEFAULT_CHAT_PROVIDER VALUE=chat54Mini SCOPE=global
-variable-set:
-	@[ -n "$(NAME)" ] || (echo "NAME is required"; exit 1)
-	@[ -n "$(VALUE)" ] || (echo "VALUE is required"; exit 1)
-	@[ -n "$(SCOPE)" ] || (echo "SCOPE=global|partition is required"; exit 1)
-	$(GO) run ./scripts/secrets set variable "$(NAME)" "$(VALUE)" --scope=$(SCOPE) $(if $(PARTITION),--partition=$(PARTITION))
-
-## One-off soft-delete of a plaintext variable.
-variable-delete:
-	@[ -n "$(NAME)" ] || (echo "NAME is required"; exit 1)
-	@[ -n "$(SCOPE)" ] || (echo "SCOPE=global|partition is required"; exit 1)
-	$(GO) run ./scripts/secrets delete variable "$(NAME)" --scope=$(SCOPE) $(if $(PARTITION),--partition=$(PARTITION))
-
-## Wipe ALL local memQL data (docker-compose down -v + up -d). Does
-## NOT restore secrets or variables -- you run `make secrets-seed`
-## after if you want them back.
+## Wipe ALL local memQL data (docker compose down -v + up -d). The
+## next dev-refresh will re-seed from ~/.memql/genesis.znas.
 db-purge:
 	$(COMPOSE) $(COMPOSE_FULL) down -v
 	$(COMPOSE) $(COMPOSE_FULL) up -d --build
 
-## Wipe ALL local memQL data and immediately re-seed secrets +
-## variables from ~/.memql/dev-secrets.yaml. The common iterative dev
-## path: fresh DB without retyping keys. Waits ~10s for memQL to come
-## back up before seeding.
-db-purge-and-reseed:
-	$(COMPOSE) $(COMPOSE_FULL) down -v
-	$(COMPOSE) $(COMPOSE_FULL) up -d --build
-	@echo "Waiting for memQL to accept connections..."
-	@for i in 1 2 3 4 5 6 7 8 9 10 11 12; do \
-		if nc -z localhost 50051 2>/dev/null; then \
-			echo "memQL is up."; \
-			exit 0; \
-		fi; \
-		sleep 1; \
-	done; \
-	echo "memQL did not come up within 12s; seed manually with: make secrets-seed"; exit 1
-	$(GO) run ./scripts/secrets seed
-
-## Single-command dev workflow: back up everything in the running
-## memQL into ~/.memql/dev-secrets.yaml, nuke the database, restart
-## the stack with the full identity flow, then re-seed secrets +
-## variables from the yaml. The point: a freshly-rebuilt stack with
-## the same config you had before. Used for testing.
+## Single-command "fresh testing stack": decrypt the operator's
+## ~/.memql/genesis.znas (requires MEMQL_MASTER_KEY in env), wipe the
+## database, restart the cluster with the full identity flow, then
+## re-seed manifest-listed entries into the cluster.
 ##
-## Steps in order:
-##   1. Read MEMQL_MASTER_KEY from ~/.memql/dev-secrets.yaml. Errors
-##      out with guidance if the yaml has no master key (operator
-##      runs `make secrets-init` first).
-##   2. Run `secrets-export`: pulls every active row from the running
-##      memQL into the yaml so any value the dev `secret-set`'d
-##      directly (without going through yaml) survives the purge.
-##      No-ops gracefully if memQL isn't up yet.
-##   3. `docker compose down -v` + rebuild + `up -d`. The full
-##      identity stack (identity service + verifiers on every node)
-##      comes up exactly as it does in production.
-##   4. Wait for memQL gRPC to accept connections (handshake uses
-##      the operator credential -- the master key from step 1 -- to
-##      satisfy the verifier).
-##   5. Run `secrets-seed`: pushes every entry in the yaml into the
-##      fresh memQL, encrypting secrets under the master key. Same
-##      operator credential authorizes the writes.
-## Alias: most folks reach for `dev-refresh` first. Both names point
-## at the same recipe so muscle memory wins either way.
+## Steps:
+##   1. Verify MEMQL_MASTER_KEY + locate genesis.znas; decrypt to a
+##      temp .env (mode 0600); export every KEY=VALUE so docker
+##      compose's interpolation finds them.
+##   2. Knowledge-cache export (so the wipe doesn't burn LLM-seeded
+##      chunks).
+##   3. docker compose down -v + rebuild + up -d.
+##   4. Wait for memQL gRPC to accept connections.
+##   5. `secrets seed --env-file <temp>` pushes manifest entries as
+##      concept rows.
+##   6. Restore the knowledge cache from step 2.
+##
+## Alias: dev-fresh is the same recipe; either name works.
 dev-refresh: dev-fresh
 
 ## Quick status snapshot: docker daemon? memQL gRPC reachable? what
@@ -513,10 +435,8 @@ dev-refresh: dev-fresh
 dev-status:
 	@bash scripts/dev/status.sh
 
-## Single-command "fresh testing stack": back up running state,
-## wipe the database, restart containers with the full identity
-## flow, then re-seed from yaml. Implementation lives in
-## scripts/dev/refresh.sh.
+## Single-command "fresh testing stack" -- see dev-refresh.
+## Implementation lives in scripts/dev/refresh.sh.
 dev-fresh:
 	@bash scripts/dev/refresh.sh
 
@@ -589,18 +509,12 @@ help:
 	@echo "  make docker-agent      Build agent image"
 	@echo "  make docker-planner    Build planner image"
 	@echo ""
-	@echo "DEV SECRETS"
-	@echo "  make secrets-init              Interactively build ~/.memql/dev-secrets.yaml"
-	@echo "  make secrets-seed              Push yaml values into running memQL (needs MEMQL_MASTER_KEY)"
-	@echo "  make secrets-list              Show manifest vs yaml state"
-	@echo "  make secrets-edit              Open yaml in \$$EDITOR"
-	@echo "  make secret-set NAME=.. VALUE=.. SCOPE=global|partition [KIND=..] [PARTITION=..]"
-	@echo "  make secret-delete NAME=.. SCOPE=.."
-	@echo "  make variable-set NAME=.. VALUE=.. SCOPE=.."
-	@echo "  make variable-delete NAME=.. SCOPE=.."
+	@echo "DEV REFRESH"
+	@echo "  Authoring of env vars / secrets is in memql-cockpit (see"
+	@echo "  'memql-cockpit genesis init'). The targets below operate on"
+	@echo "  the cluster + the decrypted genesis."
 	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make db-purge-and-reseed       Wipe DB + re-apply dev-secrets.yaml"
-	@echo "  make dev-refresh               Backup -> wipe -> restart -> re-seed (single-command testing flow)"
+	@echo "  make dev-refresh               Decrypt genesis -> wipe -> restart -> seed (single-command testing flow)"
 	@echo "                                 (dev-fresh works as an alias)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
 	@echo ""
