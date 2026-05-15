@@ -71,15 +71,16 @@ query queryActiveDelegationsForAgent {
   shape   delegationFull
 }
 
-func (Query) queryActiveUsers(ctx any) (any, error) {
-  ctx.output = shape(
-    concept;
-    traitIsActiveRecord;
-    ?.user.role==args.role;
-    ?.user.groupIds has args.groupId,
-    "userFull"
-  )
-  return ctx, nil
+@enabled
+@useConcept(user)
+@description("Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).")
+query queryActiveUsers {
+  args {
+    role     string
+    groupId  string
+  }
+  filter  traitIsActiveRecord; ?.user.role==args.role; ?.user.groupIds has args.groupId
+  shape   userFull
 }
 
 // ---- queries/v1/identity/auditEventsByActor.memql ----
@@ -836,13 +837,15 @@ query queryPendingAccessRequests {
   shape   accessRequestFull
 }
 
-func (Query) queryRecentAuditEvents(ctx any) (any, error) {
-  ctx.output = shape(
-    concept;
-    ?.auditEvent.category==args.category,
-    "auditEventFull"
-  )
-  return ctx, nil
+@enabled
+@useConcept(auditEvent)
+@description("Recent audit events, optionally filtered by category. Powers the admin audit-log view.")
+query queryRecentAuditEvents {
+  args {
+    category  string
+  }
+  filter  ?.auditEvent.category==args.category
+  shape   auditEventFull
 }
 
 // ---- queries/v1/identity/userActiveSpace.memql ----
