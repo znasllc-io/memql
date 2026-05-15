@@ -400,6 +400,21 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if boundConcept != "" {
 					engineExpr = resolveBareConcept(engineExpr, boundConcept)
 				}
+				// For queries bound to a single concept via @useConcept,
+				// fold an implicit `concept == boundConcept` into the
+				// filter when the author hasn't written one explicitly.
+				// Without this, `magicLinkRequest.tokenHash == ...` gets
+				// translated to `payload.tokenHash == ...` before the
+				// engine sees it, leaving no concept handle for
+				// extractConceptFromExpression -> partitionForConcept to
+				// latch onto. Global-scope concepts then route to the
+				// envelope's partition (typically "default") instead of
+				// "_system" where their rows live, and the read silently
+				// returns nothing. Mutations are unaffected: their
+				// executor reads BoundConcept directly off the function.
+				if boundConcept != "" && funcDef.Type == languageParser.FunctionTypeQuery {
+					engineExpr = ensureBoundConceptFilter(engineExpr, boundConcept)
+				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
 			} else {
@@ -521,6 +536,81 @@ func boundConceptFromUseAnnotation(file *languageParser.File, registry memoryNod
 		}
 	}
 	return picked, nil
+}
+
+// ensureBoundConceptFilter returns expr AND'd with a
+// `concept == boundConcept` comparison, unless the expression
+// already contains that same equality somewhere in an AND chain.
+// A nil input returns the bare comparison. The wrap makes the
+// implicit concept binding from @useConcept explicit in the AST so
+// downstream stages (concept-extraction for partition routing,
+// SQL concept filter, post-filter validation) all see the same
+// concept handle the author intended.
+//
+// Directive wrappers (shape, sort, paginate, select, timestamp,
+// depth) must be the outermost nodes in a query expression --
+// parser.go's planQuery enforces this. Descending into the
+// wrapper's Target keeps the directive on the outside and lands
+// the AND on the inner filter where it belongs.
+func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) ExpressionNode {
+	switch n := expr.(type) {
+	case *ShapeExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *SortExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *PaginateExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *SelectExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *TimestampExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *DepthExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	}
+	conceptCmp := &ComparisonExpression{
+		Field:    FieldReference{Raw: "concept", Parts: []string{"concept"}},
+		Operator: OpEq,
+		Value:    boundConcept,
+	}
+	if expr == nil {
+		return conceptCmp
+	}
+	if containsBoundConceptEquality(expr, boundConcept) {
+		return expr
+	}
+	return &LogicalExpression{Op: LogicalAnd, Left: expr, Right: conceptCmp}
+}
+
+// containsBoundConceptEquality reports whether expr (or any AND-leaf
+// descendant) already binds `concept == boundConcept`. Only AND
+// chains are walked: an OR branch can't be relied on to constrain
+// the concept on every path, so we treat it as "not present" and
+// add our own AND.
+func containsBoundConceptEquality(expr ExpressionNode, boundConcept string) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ComparisonExpression:
+		if n == nil || n.Operator != OpEq || n.Field.Raw != "concept" {
+			return false
+		}
+		v, ok := n.Value.(string)
+		return ok && v == boundConcept
+	case *LogicalExpression:
+		if n == nil || n.Op != LogicalAnd {
+			return false
+		}
+		return containsBoundConceptEquality(n.Left, boundConcept) ||
+			containsBoundConceptEquality(n.Right, boundConcept)
+	default:
+		return false
+	}
 }
 
 // resolveBareConcept walks an expression tree and replaces any bare

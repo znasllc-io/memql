@@ -436,7 +436,14 @@ func emitMutation(name, conceptId, body string) (string, error) {
 		if idExpr == "" {
 			return "", fmt.Errorf("update block requires an `id: <expr>` line identifying the target row")
 		}
-		sb.WriteString(fmt.Sprintf("  ctx.output = update(id=%s, payload=%s)\n", idExpr, payload))
+		// Emit the bare concept name as the first positional arg
+		// (mirroring insert) so the declared-usage validator finds
+		// the implicit `@useConcept(X)` reference in the body. The
+		// runtime doesn't strictly need it -- update looks up by id
+		// -- but emitting it keeps the post-rewrite shape symmetric
+		// with insert and prevents `function not found` at call
+		// time from a silently-dropped load.
+		sb.WriteString(fmt.Sprintf("  ctx.output = update(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
 	}
 	sb.WriteString("  return ctx, nil\n}")
 	return sb.String(), nil

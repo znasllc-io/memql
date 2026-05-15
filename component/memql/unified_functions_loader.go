@@ -52,7 +52,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 			fn, parseErr := dispatchPerConstructParser(slice, "unified:"+raw.Path, conceptRegistry)
 			if parseErr != nil {
 				if logger != nil {
-					logger.Debug("unified function loader: skipping slice that failed to parse",
+					logger.Warn("unified function loader: skipping slice that failed to parse",
 						"component", "memql.unifiedFunctionLoader",
 						"file", raw.Path,
 						"function", slice.Name,

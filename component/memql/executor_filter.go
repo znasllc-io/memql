@@ -429,6 +429,44 @@ func extractConceptFromExpression(expr ExpressionNode) string {
 			return ""
 		}
 		return extractConceptFromExpression(node.Target)
+	// Directive wrappers carry their filter on .Target. They normally
+	// get peeled off into plan fields by planQuery before the filter
+	// reaches this extractor -- but resolvePlanFunctions expands
+	// FunctionCallExpression nodes AFTER planQuery has run, so a
+	// function whose fn.Expr is shape(...) / sort(...) / paginate(...)
+	// lands as plan.Root with the wrapper still on top. Descending
+	// here lets the concept filter inside the wrapper still drive
+	// partitionForConcept's _system routing for global concepts.
+	case *ShapeExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *SortExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *PaginateExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *SelectExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *TimestampExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *DepthExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
 	default:
 		return ""
 	}

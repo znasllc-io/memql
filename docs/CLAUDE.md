@@ -88,7 +88,15 @@ Active planning docs only -- removed when work ships. Currently:
   shape silently vanishes on the next full-payload update.
 - `PARTICIPANT_VIDEO_SPECS.md` -- coordination doc for the
   CoPresent + Polyphon video extension.
-- `teaching-mode.md` -- design notes for a future teaching mode.
+- `llm-driven-decisions.md` -- proposed phasing for replacing keyword
+  routing in cognition with structured-output LLM classification.
+  Phase 0 (cache audit + instrumentation) shipped; Phases 1-2 next.
+- `knowledge-seeder.md` -- pipeline shipped, first authoritative seed
+  run pending API-spend approval.
+- `struct-form-rewriter-retirement.md` -- deferred design proposal
+  for collapsing the rewriter passes into grammar + AST changes.
+- `agents-dsl-primitive.md` -- Phases 0-5 shipped (commit 26a8d65);
+  Phase 6 (tighten capabilities.tools) deferred.
 
 ---
 
