@@ -95,6 +95,95 @@ func TestEnsureBoundConceptFilter_AddsWhenConceptEqualityIsForDifferentId(t *tes
 	}
 }
 
+func TestEnsureBoundConceptFilter_DescendsIntoShapeWrapper(t *testing.T) {
+	// Mirrors the AST shape of `queryMagicLinkRequestByTokenHash`:
+	//   shape("...") wrapping a filter Comparison.
+	innerFilter := &ComparisonExpression{
+		Field:    FieldReference{Raw: "payload.tokenHash", Parts: []string{"payload", "tokenHash"}},
+		Operator: OpEq,
+		Value:    "deadbeef",
+	}
+	shape := &ShapeExpression{
+		Target:       innerFilter,
+		TemplateName: "magicLinkRequestFull",
+	}
+	got := ensureBoundConceptFilter(shape, "v1:identity:magicLinkRequest")
+	// Shape must remain the outermost node (parser enforces it).
+	outShape, ok := got.(*ShapeExpression)
+	if !ok {
+		t.Fatalf("expected ShapeExpression at the outermost, got %T", got)
+	}
+	if outShape != shape {
+		t.Fatalf("expected the same ShapeExpression instance to be returned")
+	}
+	// The AND should now live INSIDE the shape, around the filter.
+	logic, ok := outShape.Target.(*LogicalExpression)
+	if !ok {
+		t.Fatalf("expected shape.Target to be LogicalExpression, got %T", outShape.Target)
+	}
+	if logic.Op != LogicalAnd {
+		t.Fatalf("expected LogicalAnd inside shape, got %v", logic.Op)
+	}
+	if logic.Left != innerFilter {
+		t.Fatalf("expected the original filter to survive on the AND's left side")
+	}
+	right, _ := logic.Right.(*ComparisonExpression)
+	if right == nil || right.Field.Raw != "concept" || right.Value != "v1:identity:magicLinkRequest" {
+		t.Fatalf("expected concept==boundConcept on the AND's right side, got %+v", logic.Right)
+	}
+}
+
+func TestEnsureBoundConceptFilter_DescendsThroughChainedDirectives(t *testing.T) {
+	// shape(paginate(sort(filter, ...))) -- chain of directives wrapping
+	// the actual filter expression. The AND must land on the filter,
+	// keeping every directive layer outermost.
+	innerFilter := &ComparisonExpression{
+		Field:    FieldReference{Raw: "payload.active", Parts: []string{"payload", "active"}},
+		Operator: OpEq,
+		Value:    true,
+	}
+	sortNode := &SortExpression{Target: innerFilter}
+	paginateNode := &PaginateExpression{Target: sortNode}
+	shape := &ShapeExpression{Target: paginateNode}
+
+	got := ensureBoundConceptFilter(shape, "v1:identity:magicLinkRequest")
+
+	outShape, ok := got.(*ShapeExpression)
+	if !ok {
+		t.Fatalf("outermost: expected ShapeExpression, got %T", got)
+	}
+	outPaginate, ok := outShape.Target.(*PaginateExpression)
+	if !ok {
+		t.Fatalf("layer 2: expected PaginateExpression, got %T", outShape.Target)
+	}
+	outSort, ok := outPaginate.Target.(*SortExpression)
+	if !ok {
+		t.Fatalf("layer 3: expected SortExpression, got %T", outPaginate.Target)
+	}
+	logic, ok := outSort.Target.(*LogicalExpression)
+	if !ok {
+		t.Fatalf("inner: expected LogicalExpression, got %T", outSort.Target)
+	}
+	if logic.Left != innerFilter {
+		t.Fatalf("inner filter not preserved on AND's left")
+	}
+}
+
+func TestEnsureBoundConceptFilter_ShapeWrappingNilTargetGetsConceptOnly(t *testing.T) {
+	// `query foo { shape someShape }` with no filter -- Target is nil.
+	// The wrap should produce shape(concept==boundConcept).
+	shape := &ShapeExpression{Target: nil}
+	got := ensureBoundConceptFilter(shape, "v1:identity:clusterSettings")
+	outShape, ok := got.(*ShapeExpression)
+	if !ok {
+		t.Fatalf("outermost: expected ShapeExpression, got %T", got)
+	}
+	cmp, ok := outShape.Target.(*ComparisonExpression)
+	if !ok || cmp.Field.Raw != "concept" || cmp.Value != "v1:identity:clusterSettings" {
+		t.Fatalf("expected concept==boundConcept inside shape, got %+v", outShape.Target)
+	}
+}
+
 func TestEnsureBoundConceptFilter_TreatsOrAsAbsent(t *testing.T) {
 	// concept==X inside an OR branch can't constrain every path, so
 	// the helper should still add its AND clause.
