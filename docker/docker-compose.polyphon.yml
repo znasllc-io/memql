@@ -138,7 +138,7 @@ services:
     # SHELL (where these are not exported), which shadows the
     # .env.local value with an empty string.
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Container-internal infra knobs -- safe to set here since
       # they're hardcoded for dev rather than sourced from .env.local.

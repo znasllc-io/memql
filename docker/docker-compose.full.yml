@@ -51,7 +51,7 @@ services:
     container_name: memql-bff
     hostname: bff
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: bff
       MEMQL_NODE_ID: bff-local
@@ -148,7 +148,7 @@ services:
     container_name: memql-cognition
     hostname: cognition
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Node identity
       MEMQL_NODE_TYPE: cognition
@@ -213,7 +213,7 @@ services:
     container_name: memql-planner
     hostname: planner
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Node identity
       MEMQL_NODE_TYPE: planner
@@ -274,7 +274,7 @@ services:
     container_name: memql-voice
     hostname: voice
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Node identity
       MEMQL_NODE_TYPE: voice
@@ -356,7 +356,7 @@ services:
     container_name: memql-agent
     hostname: agent
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Node identity
       MEMQL_NODE_TYPE: agent
@@ -429,7 +429,7 @@ services:
     container_name: memql-identity
     hostname: identity
     env_file:
-      - ../.env.local
+      - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: identity
       MEMQL_NODE_ID: identity-local
