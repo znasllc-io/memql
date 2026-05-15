@@ -1,21 +1,34 @@
 // Package secret provides authenticated symmetric encryption helpers
-// for values stored in memQL concept rows (v1:platform:partitionSecret and
-// v1:platform:globalSecret).
+// for memql. Two surfaces:
 //
-// Scheme: NaCl secretbox (XSalsa20-Poly1305), the Go port of libsodium's
-// secretbox primitive. The master key comes from the env var
-// MEMQL_MASTER_KEY and must be 32 bytes, hex-encoded (so 64 hex
-// characters). NaCl secretbox was chosen per the Phase 1 decision:
-// simplest authenticated symmetric encryption that works everywhere the
-// platform runs, with no KMS dependency.
+//   - Per-value Encrypt / Decrypt: seals one secret string at a time
+//     for storage in memQL concept rows (v1:platform:partitionSecret,
+//     v1:platform:globalSecret, historical v1:router:apikey).
+//   - Whole-blob SealBlob / OpenBlob: seals a full byte slice with a
+//     versioned, self-describing header for on-disk artifacts like
+//     ~/.memql/genesis.znas.
 //
-// Ciphertext format written to *:secret.encryptedValue (and historical
-// v1:router:apikey.encryptedKey rows):
+// Both share NaCl secretbox (XSalsa20-Poly1305) -- the Go port of
+// libsodium's secretbox primitive -- and a single 32-byte master key
+// from the MEMQL_MASTER_KEY env var (64 hex characters). NaCl secretbox
+// was chosen per the Phase 1 decision: simplest authenticated symmetric
+// encryption that works everywhere the platform runs, no KMS dependency.
 //
-//   base64( nonce (24B) || secretbox_seal(plaintext) )
+// Per-value ciphertext format (concept rows):
 //
-// Decryption reverses it. Helpers are pure -- they don't mutate shared
-// state and are safe to call concurrently.
+//   base64( nonce(24B) || secretbox_seal(plaintext) )
+//
+// Whole-blob ciphertext format (genesis.znas and similar):
+//
+//   "ZNAS"  4B magic
+//   0x01    1B format version
+//   0x01    1B algorithm tag (1 = secretbox)
+//   0x0000  2B reserved (must be zero)
+//   nonce(24B)
+//   secretbox_seal(plaintext)
+//
+// Helpers are pure -- they don't mutate shared state and are safe to
+// call concurrently.
 package secret
 
 import (
@@ -124,4 +137,81 @@ func Fingerprint(s string) string {
 		return s
 	}
 	return "..." + s[len(s)-4:]
+}
+
+// ---------------------------------------------------------------------
+// Whole-blob seal / open (for on-disk artifacts like genesis.znas)
+// ---------------------------------------------------------------------
+
+// BlobMagic is the 4-byte ASCII prefix that identifies every sealed blob.
+const BlobMagic = "ZNAS"
+
+// Version + algorithm tags carried in the blob header. Bumping the
+// version tag is how this package signals a forward-incompatible
+// envelope change; OpenBlob refuses any version it doesn't recognize.
+const (
+	BlobVersion       byte = 0x01
+	BlobAlgoSecretbox byte = 0x01
+)
+
+// blobHeaderLen is the fixed-size prefix before the nonce:
+// 4B magic + 1B version + 1B algo + 2B reserved.
+const blobHeaderLen = 8
+
+// SealBlob seals plaintext into a self-describing envelope ready to
+// write to disk verbatim. Uses the master key from MEMQL_MASTER_KEY
+// and a fresh CSPRNG nonce; two seals of identical plaintext produce
+// different outputs. Errors only on missing/invalid master key or a
+// CSPRNG read failure.
+func SealBlob(plaintext []byte) ([]byte, error) {
+	key, err := masterKey()
+	if err != nil {
+		return nil, err
+	}
+	var nonce [nonceLen]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, fmt.Errorf("secret.SealBlob: read nonce: %w", err)
+	}
+	sealed := secretbox.Seal(nil, plaintext, &nonce, key)
+
+	out := make([]byte, 0, blobHeaderLen+nonceLen+len(sealed))
+	out = append(out, []byte(BlobMagic)...)
+	out = append(out, BlobVersion, BlobAlgoSecretbox, 0x00, 0x00)
+	out = append(out, nonce[:]...)
+	out = append(out, sealed...)
+	return out, nil
+}
+
+// OpenBlob reverses SealBlob. Returns a descriptive error for bad
+// magic, unsupported version, unknown algorithm, truncated envelope,
+// missing master key, or authentication failure (wrong key or
+// tampered bytes).
+func OpenBlob(envelope []byte) ([]byte, error) {
+	if len(envelope) < blobHeaderLen+nonceLen {
+		return nil, fmt.Errorf("secret.OpenBlob: envelope too short (%d bytes; need >= %d)", len(envelope), blobHeaderLen+nonceLen)
+	}
+	if string(envelope[0:4]) != BlobMagic {
+		return nil, fmt.Errorf("secret.OpenBlob: bad magic (got %q, want %q)", envelope[0:4], BlobMagic)
+	}
+	if envelope[4] != BlobVersion {
+		return nil, fmt.Errorf("secret.OpenBlob: unsupported format version %d (this binary supports %d)", envelope[4], BlobVersion)
+	}
+	if envelope[5] != BlobAlgoSecretbox {
+		return nil, fmt.Errorf("secret.OpenBlob: unknown algorithm %d (this binary supports %d=secretbox)", envelope[5], BlobAlgoSecretbox)
+	}
+	// envelope[6:8] reserved; ignored.
+
+	key, err := masterKey()
+	if err != nil {
+		return nil, err
+	}
+	var nonce [nonceLen]byte
+	copy(nonce[:], envelope[blobHeaderLen:blobHeaderLen+nonceLen])
+	sealed := envelope[blobHeaderLen+nonceLen:]
+
+	opened, ok := secretbox.Open(nil, sealed, &nonce, key)
+	if !ok {
+		return nil, fmt.Errorf("secret.OpenBlob: authenticated decryption failed (wrong key or tampered envelope)")
+	}
+	return opened, nil
 }
