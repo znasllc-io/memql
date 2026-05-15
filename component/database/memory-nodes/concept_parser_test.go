@@ -29,7 +29,7 @@ concept Agent {
 }
 `)
 
-	concept, err := ParseConceptMemQL(content, "v1/copresent/agent")
+	concept, err := ParseConceptMemQL(content, "v1/agents/agent")
 	if err != nil {
 		t.Fatalf("ParseConceptMemQL failed: %v", err)
 	}
