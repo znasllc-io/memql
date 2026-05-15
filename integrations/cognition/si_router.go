@@ -24,7 +24,7 @@ const (
 
 // Severity levels for an unmet capability signal. Emitted on
 // cognition.capability.unmet events and written onto the downstream
-// v1:copresent:unmetCapability concept.
+// v1:cognition:unmetCapability concept.
 const (
 	severitySpecialistGap = "specialist_gap"
 	severityFullGap       = "full_gap"
@@ -814,7 +814,7 @@ func (c *CognitionIntegration) recordHandoffOutcome(session *polyphon.PolyphonSe
 
 // emitUnmetCapability publishes a cognition.capability.unmet event. The
 // downstream consumer is a copresent automation that writes a
-// v1:copresent:unmetCapability row (the guardrail health rollup reads
+// v1:cognition:unmetCapability row (the guardrail health rollup reads
 // those rows). Fire-and-forget: we never block the routing path on the
 // event bus.
 func (c *CognitionIntegration) emitUnmetCapability(
@@ -933,7 +933,7 @@ func (c *CognitionIntegration) emitUnmetCapability(
 // topicCapabilityUnmet is the event topic for "no agent can fulfil this
 // utterance well enough." Downstream automations under
 // automations/v1/copresent/ subscribe to this topic and write
-// v1:copresent:unmetCapability rows.
+// v1:cognition:unmetCapability rows.
 const topicCapabilityUnmet = "cognition.capability.unmet"
 
 // partitionCtxKey is a local context key used by the router to optionally

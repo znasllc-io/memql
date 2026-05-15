@@ -1021,7 +1021,7 @@ func buildCandidateLookup(candidates []polyphon.AgentCandidate) candidateLookup 
 //   2. Agent-template-id match (LLM emitted the short template id).
 //   3. Case-folded name match (LLM emitted "Sofia" instead of an id).
 //   4. SUBSTRING match -- the LLM frequently strips the
-//      `si-default:v1:copresent:agent:` prefix from a participant id,
+//      `si-default:v1:agents:agent:` prefix from a participant id,
 //      emitting only the suffix. If the LLM-emitted id is a strict
 //      substring of exactly one participant id (or vice versa), that
 //      participant is the unambiguous match. Multiple matches => fail.

@@ -21,7 +21,7 @@ query queryExpiredWorkerInvocations {
 // the plan.completed canvas card's "view worker activity" link.
 //
 // Arguments:
-//   planId (string, required) - v1:copresent:plan.id
+//   planId (string, required) - v1:planner:plan.id
 
 @enabled
 @useConcept(invocation)

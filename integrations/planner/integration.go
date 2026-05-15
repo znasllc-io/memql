@@ -107,7 +107,7 @@ func WithEngine(engine Engine) PlannerArg {
 }
 
 // WithEventBus wires the event bus the integration subscribes on
-// for graph.node.updated.*.v1:copresent:plan events.
+// for graph.node.updated.*.v1:planner:plan events.
 func WithEventBus(bus *events.Bus) PlannerArg {
 	return func(p *PlannerIntegration) { p.eventBus = bus }
 }
@@ -169,13 +169,13 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// on kind=scopeElevation && status=running and dispatches
 		// the agent for the actual work.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.*.v1:copresent:plan",
+			"graph.node.updated.*.v1:planner:plan",
 			p.handlePlanApprovedForExecution,
 			events.WithSubscriberName("planner:plan-execution"),
 		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: plan-execution subscription registered",
-			"pattern", "graph.node.updated.*.v1:copresent:plan",
+			"pattern", "graph.node.updated.*.v1:planner:plan",
 		)
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,

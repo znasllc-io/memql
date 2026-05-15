@@ -196,7 +196,7 @@ Move action = atomic `mutationDeleteUtterance` + `mutationSendOtherThreadUtteran
 
 Chat-primary output: every dispatch posts a chat message in the private thread. Task spawns are inline — when the agent's `respondToUser` envelope includes a task tool call, the chat utterance announces it ("Starting research on X — I'll let you know what I find") and renders a task chip linking to the running task.
 
-Inter-agent dialogue uses **hard cap (max 3 turns per dispatch) + decaying threshold (each turn applies +0.1 to firing threshold) + user-input pause** (if the user types during the loop, conductor immediately receives the user input). Each turn creates a `v1:copresent:task` per the tasks-as-the-unit direction.
+Inter-agent dialogue uses **hard cap (max 3 turns per dispatch) + decaying threshold (each turn applies +0.1 to firing threshold) + user-input pause** (if the user types during the loop, conductor immediately receives the user input). Each turn creates a `v1:planner:task` per the tasks-as-the-unit direction.
 
 Discussion mode runs ONLY in private; never injects into group.
 
@@ -810,7 +810,7 @@ Any system / lifecycle / state-change notification is a canvas card, not a chat 
 
 ### 14.7 Tasks-as-the-unit-of-work
 
-Discussion-mode dispatches create `v1:copresent:task` rows. So do tool calls (eventually, per the tasks-as-the-unit direction). Don't add new agent-action paths that bypass the task model — design every new dispatch to be a task.
+Discussion-mode dispatches create `v1:planner:task` rows. So do tool calls (eventually, per the tasks-as-the-unit direction). Don't add new agent-action paths that bypass the task model — design every new dispatch to be a task.
 
 ### 14.8 The misroute classifier is best-effort, not authoritative
 

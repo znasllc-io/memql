@@ -92,7 +92,7 @@ provide scoped access control:
 
 ### Group Model
 
-Groups are stored as `v1:copresent:group` concepts with:
+Groups are stored as `v1:identity:group` concepts with:
 - `name`: Display name
 - `externalId`: free-form back-reference for external systems;
   empty for cluster-native groups

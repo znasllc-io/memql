@@ -3793,7 +3793,7 @@ type ClientToolCall struct {
 	// Lets the client render per-turn progress and cancel in-flight calls
 	// when the enclosing turn is cancelled.
 	TurnId string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
-	// The v1:copresent:agent (or equivalent) ID of the caller.
+	// The v1:agents:agent (or equivalent) ID of the caller.
 	AgentId string `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	// Tool name as registered in the tool registry.
 	ToolName string `protobuf:"bytes,4,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
@@ -7742,7 +7742,7 @@ type AgentGenerateTurnMsg struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Who is speaking.
-	AgentId       string `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // v1:copresent:agent ID
+	AgentId       string `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // v1:agents:agent ID
 	SpaceId       string `protobuf:"bytes,3,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	ParticipantId string `protobuf:"bytes,4,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"` // agent's participant record in this space
 	// Conversation history (system / user / assistant / tool messages).
@@ -7861,7 +7861,7 @@ func (x *AgentGenerateTurnMsg) GetHints() map[string]string {
 
 // ActingAgentIdentity carries the full identity of the agent being asked
 // to generate this turn: role, domains, tools, system prompt. Populated
-// by cognition's forwarder from the v1:copresent:agent record. Distinct
+// by cognition's forwarder from the v1:agents:agent record. Distinct
 // from AgentTurnPeer (used for rendering the peer roster) -- peers don't
 // need tools or system prompt.
 type ActingAgentIdentity struct {
@@ -10542,7 +10542,7 @@ type VoiceAgentSessionStart struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	SpaceId   string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`         // v1:cognition:space.id
-	GaAgentId string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:copresent:agent.id of the General Assistant
+	GaAgentId string                 `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the General Assistant
 	RoomName  string                 `protobuf:"bytes,4,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`      // LiveKit room name
 	// Optional: identity hint for the avatar vendor. Currently
 	// 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the

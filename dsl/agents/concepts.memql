@@ -1,0 +1,118 @@
+// concepts.memql
+//
+// Concepts in the agents namespace -- user-domain agent entities (the
+// agent template itself, the trust grants attached to it, the operator
+// memory that lives alongside it). Distinct from dsl/cluster/ which
+// holds the cluster's own topology (nodes, databases, identity
+// providers) and dsl/worker/ which holds workers that EXECUTE on the
+// user's machine.
+
+@version("1.0.0")
+@namespace("agents")
+@visibility("bff", "cognition", "agent")
+@description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings.")
+concept agent {
+  ownerUserId     string  @description("Canonical owning-user pointer. Distinct from the engine-auto-stamped `createdBy` column: createdBy carries the request actor at insert time, which is the user when the agent is created via the Create Agent modal but is the system actor (`system:automation:provisionGeneralAssistantOnUserCreate`) when the GA is auto-seeded by the provisioning automation. Owner-keyed lookups (Computer Use status, worker dispatch routing, agent-context auto-injection for worker tools) read this field first and fall back to createdBy.")
+  name            string  @required @description("Display name of the agent.")
+  description     string  @description("Brief description of the agent's purpose.")
+  personality     string  @description("System prompt describing the agent's persona and behavior.")
+  systemPrompt    string  @description("System prompt/instructions that define how this agent interacts with users.")
+  active          bool    @default("true") @description("Whether the agent template is available for use.")
+  deleted         bool    @default("false") @description("When true, the agent has been permanently removed and should not appear in any agent list. Distinct from active:false (deactivated) which keeps the agent visible but disabled.")
+  role            enum("specialist", "general_assistant")  @default("specialist") @description("Role in the guardrail routing hierarchy. Specialists answer within their domains; the general assistant is the designated fallback when no specialist fits and the one that owns CoPresent Control tools to drive the UI on the user's behalf.")
+  roleSlug        string  @description("Specialty slug -- the canonical identifier for the agent's specialty (it_support, accounting_finance, customer_service, human_resources, legal_compliance, sales_marketing, operations, project_management, research_development, training_education, quality_assurance, general_assistant, ...). UNIQUE per partition: at most one non-deleted agent may carry any given roleSlug per partition. Empty for legacy / unscoped agents. The frontend's role dropdown filters out roleSlugs already taken in the partition so duplicates can't be created from the UI; the constraint is enforced caller-side.")
+  gender          enum("female", "male")  @default("female") @description("Agent's voice / persona gender bucket. Drives canonical-voice auto-assignment at creation time and the avatar gender presented in PresencePanel. Required at creation; the user picks from a Female / Male toggle in CreateAgentModal. The General Assistant defaults to female when seeded by the provisionGeneralAssistantOnUserCreate automation. Once assigned the value is fixed -- the canonical voice is stamped from this bucket and the user does not edit it later (per Q7 voice/audio plan).")
+
+  colorIndex      int  @description("Persistent color palette index (0-12). Assigned at creation, never changes. Used for consistent avatar colors across all surfaces.")
+  groupIds        []string  @description("IDs of groups this agent is assigned to. Empty means global/unscoped.")
+
+  avatar {
+    avatarId   string  @description("Provider-specific avatar identifier.")
+    provider   enum("heygen", "d-id", "custom")  @description("Avatar provider for lip-sync video.")
+    url        string  @description("URL to avatar image or video.")
+  }
+
+  capabilities {
+    avatar       bool  @default("false") @description("Does the agent have video avatar rendering?")
+    lipSync      bool  @default("false") @description("Does the avatar support lip-sync?")
+    vision       bool  @default("false") @description("Can the agent see/analyze images and video?")
+    voiceToVoice bool  @default("false") @description("Can the agent do real-time voice conversation?")
+    claw         bool  @default("false") @description("Can the agent use NemoClaw for coding and automation tasks?")
+    clawWorkspace string @description("Isolated workspace directory identifier for this agent's NemoClaw environment.")
+    domains      []string  @description("Domain areas the agent specializes in. Used by the Cognition scoring engine for domain relevance matching.")
+    keywords     []string  @description("Explicit keywords that trigger domain relevance scoring.")
+    tools        []string  @description("Tools and integrations the agent has access to.")
+  }
+
+  providerConfig {
+    llm {
+      provider     string  @description("Specific provider registry entry (e.g. stream54Mini). When set, takes precedence over policyName and model. Empty = fall through.")
+      model        string  @description("Specific model identifier (e.g. gpt-5.4-mini). When set and provider is empty, the router uses this as an explicit override; Phase 2 rule: model name must match a provider registry name.")
+      policyName   string  @description("SI Router policy name (balancedChat, strongReasoning, fastCoding, etc). When set and provider/model are empty, the router drives the primary+fallback chain from the named policy.")
+      temperature  float
+      maxTokens    int
+    }
+    voice {
+      provider  string
+      voiceId   string  @description("Canonical voice name from the gender-bucketed catalog (alto / soprano / tenor / baritone / ...). The canonical name is provider-agnostic; the cognition handler resolves it to the active provider's voice id at TTS-time via integration.voice.resolve. Auto-assigned at agent creation and never edited by the user. Empty for legacy agents not yet migrated; the resolver falls back to the provider default in that case.")
+      speed     float
+    }
+    avatar {
+      provider  string
+      avatarId  string
+      quality   string
+    }
+  }
+
+  triggerBehavior {
+    autoJoin           bool  @default("false") @description("Automatically join new spaces?")
+    greetOnJoin        bool  @default("false") @description("Post a brief greeting message when this agent joins a space.")
+    interruptionStyle  enum("polite", "assertive", "passive")  @default("polite") @description("How does the agent handle turn-taking?")
+    speakWhen          enum("asked", "relevant", "always")  @default("asked") @description("When should the agent speak up?")
+  }
+
+  audioControl       enum("always_on", "always_off", "mirror_user")  @default("mirror_user") @description("Per-agent default for whether the Bridge Agent publishes TTS audio for this agent into a Polyphon room. 'always_on' = always speaks aloud; 'always_off' = text-only (response still flows to chat, audio suppressed); 'mirror_user' = matches the owner's mic state (owner toggles mic on -> agent's effective mic is on; owner toggles off -> agent goes silent on the next turn). Default for every new agent (GA + specialists alike) is 'mirror_user' so the user's mic toggle is the single switch for the whole room when alone; the user can still override per-agent via the orb-corner overlay in PresencePanel (writes a v1:cognition:audioOverride row that beats this default).")
+
+  videoControl       enum("always_on", "always_off", "mirror_user")  @default("mirror_user") @description("Per-agent default for whether the voice-agent process publishes lip-synced video (Anam / Simli avatar) for this agent into a LiveKit room. Mirrors audioControl semantics: 'always_on' = always publishes video; 'always_off' = never publishes (audio + chat still flow normally); 'mirror_user' = matches the owner's video state. Default 'mirror_user' for every new agent. Specialists are text-only by design (per Initiative C) -- this field is effectively a no-op on them but kept on the schema for parity with audioControl. The per-(space, agent) override lives at v1:cognition:videoOverride.")
+
+  avatarPersonaId    string  @description("Vendor-issued persona id for lip-synced video. The agent-creation flow uploads a still image to Anam (or Simli when MEMQL_AVATAR_VENDOR=simli); the vendor returns a persona / face id that gets stamped here. Resolved by the voice-agent at session start to instantiate the avatar plugin with the right persona. Empty for legacy agents and any specialist that the user never created an avatar for -- the voice-agent disables the avatar plugin when this is empty, falling back to audio-only.")
+  avatarVendor       enum("anam", "simli")  @description("Which avatar vendor minted avatarPersonaId. Decoupled from the runtime MEMQL_AVATAR_VENDOR (which is a session-wide knob -- future policy-driven) so a persona created against one vendor still rides when the runtime defaults to another: the voice-agent reads this field and instantiates the vendor that minted the persona.")
+
+  identity {
+    identityId       string  @description("Node ID of the v1:identity:identity this agent operates under.")
+    identitySubject  string  @description("Authenticated subject id of the backing identity.")
+    identityEmail    string  @description("Email of the identity for display.")
+    identityType     enum("human", "synthetic")  @description("Type of the backing identity.")
+  }
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}
+
+@version("1.0.0")
+@namespace("agents")
+@visibility("bff", "cognition", "agent", "planner")
+@description("Standing authorization granting an agent permission to trigger Plans of certain kinds without per-Plan user approval. Per Q4 Option B (tiered trust + opt-in autonomy): agent-proactive Plans default to 'requires user approval' (canvas suggestion card -> click Approve to start); the user can graduate a specific agent to standing authorization for specific plan kinds via the 'Approve & always allow this' button on the suggestion card. The grant is per (agentId, planKind, spaceScope) and carries a per-grant token budget cap + an expiry so autonomy is bounded by default.")
+concept agentAuthorization {
+  agentId         string  @required @description("v1:agents:agent.id this grant authorizes.")
+  userId          string  @required @description("v1:identity:user.id of the user who granted the authorization. Only the granting user can revoke.")
+  planKind        string  @required @description("Plan kind this grant covers, OR '*' to cover any kind. Matches v1:planner:plan.kind values.")
+  spaceScope      string  @required @description("Space id this grant is restricted to, OR '*' to cover any space owned by the user. Lets users grant 'Cleo can auto-run analyzeFile in the HR space' without granting workspace-wide.")
+  tokenBudgetCap  int     @description("Per-Plan token budget ceiling enforced when this authorization is consumed. Even auto-approved plans can't blow through tokens beyond this cap. Null = use User.preferences.defaultPlanTokenBudget.")
+  expiresAt       datetime @description("When this grant expires. Null = no expiry (lifetime grant). Default UI proposes 30-day expiry with a renewal prompt before expiration.")
+  active          bool @default("true") @description("Soft-revoke flag. User-revocable from the agent's settings at any time.")
+  computerUseScope enum("", "observe", "interact", "full") @default("") @description("Standing computer_use authorization tier the user has granted this agent (Q9 layer 2). observe = read-only worker calls (screenshot, fs_read, fs_list, fs_stat, http_fetch GET, cursor/display/window-list). full = adds shell exec, fs_write, full HTTP, mouse + keyboard + window_focus. Empty string means computer_use is not authorized for this agent in this scope; dispatch rejects with denied_by_scope. Plans can declare a NARROWER scope at creation time but never wider. NOTE: the `interact` value is a retired tier kept in the enum for backward compatibility with rows written before the simplification; the read path treats it as `full`.")
+}
+
+@version("1.0.0")
+@namespace("agents")
+@visibility("bff", "cognition")
+@description("Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across takeovers so the operator agent can learn the user's app usage patterns and shortcut repeat work.")
+concept operatorMemory {
+  userId  string  @required  @description("ID of the user this memory belongs to. One-to-one with v1:identity:user.")
+
+  entries  []object  @description("Append-only list of memory notes. Each entry is { ts: datetime, kind: string, goal: string, route?: string, summary: string }. The operator agent writes to this list after each successful takeover and reads from it at the start of the next one. Bounded in practice by the agent's own trim rules (most recent N entries).")
+
+  lastUpdatedAt  datetime  @description("Timestamp of the most recent entry. Convenience field; the authoritative order is entries[].ts.")
+
+  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
+}

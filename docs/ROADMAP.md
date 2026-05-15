@@ -163,7 +163,7 @@ that commit's parent:
   -- both already in core, both consumed by the current voice path,
   both must continue to be the source of truth.
 - Per-agent audio + video control + avatar persona fields on
-  `v1:copresent:agent` -- the revived Go agent reads these the
+  `v1:agents:agent` -- the revived Go agent reads these the
   same way the Python agent does today.
 
 **Why we're not doing it now:** Python's LiveKit Agents 1.5 SDK

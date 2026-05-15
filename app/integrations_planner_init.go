@@ -11,7 +11,7 @@ import (
 // setupPlannerIntegration creates and registers the planner
 // integration on a planner-tagged binary. The integration owns
 // Plan / Task lifecycle: subscribes to graph.node.updated events
-// for v1:copresent:plan, dispatches the owning agent when a Plan
+// for v1:planner:plan, dispatches the owning agent when a Plan
 // transitions to running, marks the Plan terminal status when the
 // agent returns.
 //

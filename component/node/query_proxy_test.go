@@ -28,7 +28,7 @@ func TestQueryProxy_ResolveTarget(t *testing.T) {
 		{"concept==v1:cognition:utterance", NodeTypeCognition},
 		{"concept==v1:identity:user", ""},  // handle locally
 		{"concept==v1:data:record", ""},     // handle locally
-		{"concept==v1:copresent:agent", ""},   // handle locally
+		{"concept==v1:agents:agent", ""},   // handle locally
 		{"concept==v1:cluster:node", ""},    // handle locally
 		{"some random query", ""},           // no concept, handle locally
 	}
@@ -47,7 +47,7 @@ func TestQueryProxy_FindPeerForQuery_Local(t *testing.T) {
 	qp := NewQueryProxy(testIdentity(), pm, cr, testLogger())
 
 	// Query with no specific domain should return nil (handle locally)
-	peer, err := qp.FindPeerForQuery(nil, "concept==v1:copresent:agent")
+	peer, err := qp.FindPeerForQuery(nil, "concept==v1:agents:agent")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

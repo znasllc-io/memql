@@ -184,6 +184,44 @@ concept excludePlanner {
 //   - @type("reference"): the row is an alias / pointer to another concept.
 //     The engine requires a @relationship(type="alias"|"equals", ...) in
 //     the body.
+//
+// -----------------------------------------------------------------------------
+//   7a. When to choose @type("reference") -- the canonical rule
+// -----------------------------------------------------------------------------
+//
+// Use @type("reference") ONLY when the product-specific row needs payload
+// fields the canonical concept doesn't have. The reference row is a thin
+// adapter: it carries the alias pointer plus the extension fields, and
+// nothing else.
+//
+// If the product-side row would just be an alias with no extra fields,
+// DO NOT create a reference concept. Drop it entirely and have consumers
+// use the canonical id directly. Empty reference rows are pure overhead:
+// they double the write rate on the concept, double cache churn, and
+// add a join to every combined read for no payload payoff.
+//
+// The decision tree:
+//
+//   Q: Does the product layer need to attach fields the canonical doesn't
+//      and shouldn't carry?
+//
+//      YES -> create @type("reference") with @relationship(type="alias")
+//             pointing at the canonical. Payload = the extension fields
+//             plus the pointer. Examples: a UI display config that only
+//             one product cares about; a per-product authorization grant
+//             on top of a generic agent.
+//
+//      NO  -> the canonical record is sufficient. Author the concept in
+//             its canonical namespace, period. Product code reads the
+//             canonical row directly. Examples: the agent concept after
+//             the 2026-05 namespace cleanup -- no product-specific extension
+//             fields existed, so v1:copresent:agent was retired and
+//             v1:agents:agent became the only home.
+//
+// Corollary: when in doubt, default to "object in the canonical namespace."
+// A future reference concept can always be added later without migrating
+// existing rows; an unnecessary reference concept retired later means
+// migrating every product-side row that pointed at it.
 
 @version("1.0.0")
 @namespace("reference")

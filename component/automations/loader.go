@@ -220,7 +220,7 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 			"  - For queries: see queries/v1/ directory\n" +
 			"  - For mutations: see mutations/v1/ directory\n\n" +
 			"Examples:\n" +
-			"  Instead of: query({ query: \"concept==v1:copresent:agent; ...\" })\n" +
+			"  Instead of: query({ query: \"concept==v1:agents:agent; ...\" })\n" +
 			"  Use: queryActiveAgents({ tier: \"pro\" })\n\n" +
 			"  Instead of: mutation({ concept: \"v1:cognition:space\", ... })\n" +
 			"  Use: mutationCreateSpace({ name: \"My Space\", ... })")

@@ -145,13 +145,13 @@ func TestCandidateLookup_UnresolvedReturnsFalse(t *testing.T) {
 // participant id. Reproduces the "primary id unresolved" bug observed
 // in production where the conductor emitted
 // "ga-...-default:v1:cognition:space:..." instead of the full
-// "si-default:v1:copresent:agent:ga-...-default:v1:cognition:space:..."
+// "si-default:v1:agents:agent:ga-...-default:v1:cognition:space:..."
 // participant id.
 func TestCandidateLookup_SubstringFallbackPrefixStripped(t *testing.T) {
 	candidates := []polyphon.AgentCandidate{
 		{
 			ID:            "agent-sofia-template",
-			ParticipantId: "si-default:v1:copresent:agent:ga-12345abcdef-default:v1:cognition:space:xyz",
+			ParticipantId: "si-default:v1:agents:agent:ga-12345abcdef-default:v1:cognition:space:xyz",
 			Name:          "Sofia",
 		},
 	}
@@ -162,7 +162,7 @@ func TestCandidateLookup_SubstringFallbackPrefixStripped(t *testing.T) {
 	if !ok {
 		t.Fatalf("substring fallback should resolve stripped form, got ok=%v", ok)
 	}
-	if got != "si-default:v1:copresent:agent:ga-12345abcdef-default:v1:cognition:space:xyz" {
+	if got != "si-default:v1:agents:agent:ga-12345abcdef-default:v1:cognition:space:xyz" {
 		t.Errorf("got %q want full participant id", got)
 	}
 }
@@ -170,8 +170,8 @@ func TestCandidateLookup_SubstringFallbackPrefixStripped(t *testing.T) {
 func TestCandidateLookup_SubstringFallbackAmbiguousFails(t *testing.T) {
 	// Two participants whose ids both contain "ga-shared" -> ambiguous
 	candidates := []polyphon.AgentCandidate{
-		{ID: "t1", ParticipantId: "si-default:v1:copresent:agent:ga-shared-suffix-1", Name: "AlphaUniqueName"},
-		{ID: "t2", ParticipantId: "si-default:v1:copresent:agent:ga-shared-suffix-2", Name: "BetaUniqueName"},
+		{ID: "t1", ParticipantId: "si-default:v1:agents:agent:ga-shared-suffix-1", Name: "AlphaUniqueName"},
+		{ID: "t2", ParticipantId: "si-default:v1:agents:agent:ga-shared-suffix-2", Name: "BetaUniqueName"},
 	}
 	lookup := buildCandidateLookup(candidates)
 	got, ok := lookup.resolveId("ga-shared", "", "primary")

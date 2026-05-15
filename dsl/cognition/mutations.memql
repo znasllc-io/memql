@@ -15,7 +15,7 @@ mutation mutationAddAgentToSpace {
   }
   insert participant {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, "v1:copresent:agent"), ":",
+      canonicalId(args.agentId, "v1:agents:agent"), ":",
       canonicalId(args.spaceId, "v1:cognition:space")
     )))
     args.spaceId
@@ -697,7 +697,7 @@ mutation mutationRemoveAgentFromSpace {
   }
   insert participant {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, "v1:copresent:agent"), ":",
+      canonicalId(args.agentId, "v1:agents:agent"), ":",
       canonicalId(args.spaceId, "v1:cognition:space")
     )))
     args.spaceId
@@ -1056,7 +1056,7 @@ mutation mutationSendTextUtterance {
 //
 // The bridge gating order is:
 //   active override (this row) > agent default (audioControl on
-//   v1:copresent:agent) > "always_off" fallback for legacy agents.
+//   v1:agents:agent) > "always_off" fallback for legacy agents.
 //
 // active=false on this row collapses to the agent default without
 // destroying history.
@@ -1075,7 +1075,7 @@ mutation mutationSetAgentAudioOverride {
   insert audioOverride {
     id: concat("audioOverride-", hash(concat(
       canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.agentId, "v1:copresent:agent")
+      canonicalId(args.agentId, "v1:agents:agent")
     )))
     args.spaceId
     args.agentId
@@ -1108,7 +1108,7 @@ mutation mutationSetAgentAudioOverride {
 //
 // The voice-agent gating order is:
 //   active override (this row) > agent default (videoControl on
-//   v1:copresent:agent) > "always_off" fallback for legacy agents.
+//   v1:agents:agent) > "always_off" fallback for legacy agents.
 //
 // active=false on this row collapses to the agent default without
 // destroying history.
@@ -1127,7 +1127,7 @@ mutation mutationSetAgentVideoOverride {
   insert videoOverride {
     id: concat("videoOverride-", hash(concat(
       canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.agentId, "v1:copresent:agent")
+      canonicalId(args.agentId, "v1:agents:agent")
     )))
     args.spaceId
     args.agentId

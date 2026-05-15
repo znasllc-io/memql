@@ -91,7 +91,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	}
 
 	// Use the agent's canonical id (full form
-	// `default:v1:copresent:agent:<short>`) so the agent node + the
+	// `default:v1:agents:agent:<short>`) so the agent node + the
 	// gRPC stream have the real identity to stamp onto downstream
 	// envelopes (ClientToolCall.AgentId in particular). Falls back to
 	// the name only if the id wasn't populated -- shouldn't happen now

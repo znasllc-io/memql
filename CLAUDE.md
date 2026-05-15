@@ -532,7 +532,7 @@ the user. Two DSL builtins expose the catalog: `voicePickForGender`
 "alto" (female); specialists pick from whichever voices are still
 unused by the owner's other agents.
 
-**Per-agent audio + video control.** `v1:copresent:agent.audioControl`
+**Per-agent audio + video control.** `v1:agents:agent.audioControl`
 + `videoControl` (`always_on` | `always_off` | `mirror_user`, default
 `mirror_user` for every new agent) seed the per-channel defaults.
 `v1:cognition:audioOverride` + `videoOverride` carry per-(space, agent)
@@ -544,7 +544,7 @@ under `mirror_user`. Mutations: `mutationSetAgentAudioOverride`,
 `mutationSetAgentVideoOverride`. Queries: `queryAudioOverridesForSpace`,
 `queryVideoOverridesForSpace`.
 
-**Avatar persona.** `v1:copresent:agent.avatarPersonaId` +
+**Avatar persona.** `v1:agents:agent.avatarPersonaId` +
 `avatarVendor` carry the vendor-issued persona / face id minted from a
 still image uploaded via the agent edit modal. Empty for legacy or
 specialist agents -- voice-agent disables the avatar plugin and falls
@@ -664,7 +664,7 @@ document itself is gone per the no-stale-docs convention.
   callers admitted by the registry.
 - **Permission model (Q9):** three layers checked BEFORE dispatch
   -- agent capability flag, standing scope on
-  `v1:copresent:agentAuthorization.computerUseScope` (observe /
+  `v1:agents:agentAuthorization.computerUseScope` (observe /
   interact / full), per-Plan kill switch on
   `v1:identity:user.preferences.computerUseEnabled`. Out-of-scope
   calls transition the calling Plan to `awaitingFeedback` with
@@ -1610,7 +1610,7 @@ so new features add fields/automations without migrations.
 
 **Concepts**:
 
-- `v1:copresent:plan` -- a user-visible unit of work. Carries
+- `v1:planner:plan` -- a user-visible unit of work. Carries
   parentPlanId (sub-plan nesting), kind, status (queued / routing
   / running / paused / awaitingFeedback / needsAgent / succeeded
   / failed / cancelled), goal, ownerAgentId, requestedBy,
@@ -1619,13 +1619,13 @@ so new features add fields/automations without migrations.
   estimate (Q5), tokenBudget / tokenSpent / tokenAllocatedToChildren
   / tokenCapDisabled (Q6), metrics (Q7), pause + feedback +
   chat-anchor bookkeeping.
-- `v1:copresent:task` -- one executable step inside a Plan, never
+- `v1:planner:task` -- one executable step inside a Plan, never
   recursive. Carries phase tag, executionSurface (inProcess /
   containerExecutor) + executorBackend (Q13), metrics, parking
   fields.
-- `v1:copresent:agentAuthorization` -- standing authorization
+- `v1:agents:agentAuthorization` -- standing authorization
   per Q4 tiered-trust model.
-- `v1:copresent:taskState` -- persisted Task working state for
+- `v1:planner:taskState` -- persisted Task working state for
   async parking + planner re-invocation (Q18).
 - `v1:knowledge:document` -- container/manifest for analyzed user
   files (Q8). Owns attached-domain list, validation rollup,
@@ -1674,7 +1674,7 @@ CreateAndCompleteAnalyzePlan` chains:
 Refinement child Plans (kind='refineAnalysis') spawned by the
 front-end Refine action are picked up by the
 `handleRefinementPlan` automation (triggers on
-graph.node.created.*.v1:copresent:plan filtered by
+graph.node.created.*.v1:planner:plan filtered by
 payload.kind=='refineAnalysis'); the automation drives the child
 Plan through queued -> running -> succeeded and emits its own
 plan.completed card. v0.x acknowledges feedback as the result;
