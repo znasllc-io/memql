@@ -7,10 +7,11 @@
 //
 // Subcommands:
 //
-//	decrypt --in <path> --out <path>
-//	         Open a ZNAS envelope. Requires MEMQL_MASTER_KEY in env.
-//	         Used by scripts/dev/lib.sh's require_genesis() to
-//	         produce the temp /tmp/memql-genesis.<pid>.env file.
+//	decrypt --in <path>
+//	         Open a ZNAS envelope. Writes the plaintext to a fresh
+//	         O_EXCL temp file (mode 0600) and prints the path on
+//	         stdout. Requires MEMQL_MASTER_KEY in env. Used by
+//	         scripts/dev/lib.sh's require_genesis().
 //
 //	seed --env-file <path>
 //	         Read the (decrypted) .env file, walk memql's manifest at
@@ -105,8 +106,10 @@ func usage() {
 	fmt.Fprint(os.Stderr, `memQL secrets seed/decrypt tool (internal -- called by scripts/dev/refresh.sh)
 
 Subcommands:
-  decrypt --in <path> --out <path>
-            Open a ZNAS envelope. Requires MEMQL_MASTER_KEY.
+  decrypt --in <path>
+            Open a ZNAS envelope, write plaintext to a fresh temp
+            file (mode 0600), print its path on stdout. Requires
+            MEMQL_MASTER_KEY.
   seed --env-file <path>
             Push manifest-listed entries from a decrypted .env into
             the running memQL. Requires MEMQL_MASTER_KEY.
@@ -185,12 +188,18 @@ func loadEnvFile(path string) (map[string]string, error) {
 // decrypt
 // ---------------------------------------------------------------------
 
+// cmdDecrypt opens a ZNAS envelope and writes the plaintext to a
+// freshly-created temp file in $TMPDIR (or /tmp), printing the path
+// on stdout. Owning the path here -- rather than letting the caller
+// pass --out -- closes a symlink/TOCTOU window: os.CreateTemp uses
+// O_CREAT|O_EXCL so a pre-planted symlink at a predictable PID-based
+// path cannot trick this code into writing the plaintext to an
+// attacker-chosen file.
 func cmdDecrypt(args []string) error {
 	flags := parseFlags(args)
 	in := flags["in"]
-	out := flags["out"]
-	if in == "" || out == "" {
-		return fmt.Errorf("decrypt: --in <path> and --out <path> are required")
+	if in == "" {
+		return fmt.Errorf("decrypt: --in <path> is required")
 	}
 	if os.Getenv(secret.EnvMasterKey) == "" {
 		return fmt.Errorf("decrypt: %s must be set in env", secret.EnvMasterKey)
@@ -203,9 +212,25 @@ func cmdDecrypt(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", in, err)
 	}
-	if err := os.WriteFile(out, plaintext, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", out, err)
+	f, err := os.CreateTemp("", "memql-genesis-*.env")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
 	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return fmt.Errorf("chmod %s: %w", f.Name(), err)
+	}
+	if _, err := f.Write(plaintext); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return fmt.Errorf("write %s: %w", f.Name(), err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return fmt.Errorf("close %s: %w", f.Name(), err)
+	}
+	fmt.Println(f.Name())
 	return nil
 }
 

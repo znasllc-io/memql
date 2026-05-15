@@ -118,13 +118,19 @@ EOF
         exit 0
     fi
 
-    local tmp="/tmp/memql-genesis.$$.env"
-    if ! go run ./scripts/secrets decrypt --in="$path" --out="$tmp"; then
+    # `secrets decrypt` owns the temp-file path (O_EXCL via
+    # os.CreateTemp, mode 0600) so a hostile user can't pre-plant a
+    # symlink at a predictable /tmp/<pid> path. It prints the chosen
+    # path on stdout.
+    local tmp
+    if ! tmp=$(go run ./scripts/secrets decrypt --in="$path"); then
         echo "  Failed to decrypt $path (wrong MEMQL_MASTER_KEY?)" >&2
-        rm -f "$tmp"
         exit 1
     fi
-    chmod 0600 "$tmp"
+    if [ -z "$tmp" ] || [ ! -f "$tmp" ]; then
+        echo "  decrypt did not produce a temp file" >&2
+        exit 1
+    fi
     # Clean up the decrypted plaintext on shell exit (any reason).
     trap "rm -f '$tmp'" EXIT INT TERM
 
@@ -132,14 +138,25 @@ EOF
     # finds the values without us re-encoding them. We deliberately
     # don't `source` the file -- shell interpretation of $-signs /
     # backticks inside API-key values is a footgun. Read each line
-    # and export verbatim instead.
-    local line key value
+    # and export verbatim instead. Matching outer quotes are stripped
+    # the same way scripts/secrets/main.go's loadEnvFile does, so the
+    # shell-exported value (-> docker compose-substituted env) and
+    # the Go-parsed value (-> seeded concept rows) agree on the same
+    # bytes for entries like FOO="bar".
+    local line key value first last
     while IFS= read -r line; do
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
         line="${line#export }"
         [[ "$line" != *"="* ]] && continue
         key="${line%%=*}"
         value="${line#*=}"
+        if [[ ${#value} -ge 2 ]]; then
+            first="${value:0:1}"
+            last="${value: -1}"
+            if [[ ( "$first" == '"' && "$last" == '"' ) || ( "$first" == "'" && "$last" == "'" ) ]]; then
+                value="${value:1:${#value}-2}"
+            fi
+        fi
         export "${key}=${value}"
     done < "$tmp"
 
