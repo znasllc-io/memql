@@ -11,7 +11,7 @@
 concept workerInvocation {
   ownerUserId    string  @required  @description("v1:identity:user.id of the worker's owner. Same as WorkerRegistration.ownerUserId; denormalized so the frontend's per-user invocations query doesn't need to join.")
   workerId       string  @required  @description("v1:worker:registration.id the call dispatched to.")
-  agentId        string  @required  @description("v1:copresent:agent.id the call originated from.")
+  agentId        string  @required  @description("v1:agents:agent.id the call originated from.")
   planId         string  @description("v1:planner:plan.id when the call was part of a plan-task. Empty for ad-hoc agent calls.")
   taskId         string  @description("v1:planner:task.id when the call was part of a plan-task. Empty for ad-hoc agent calls.")
   correlationId  string  @description("Random ID linking this row to the matching v1:identity:auditEvent row when one was emitted (denied-by-policy, scope-elevation, etc).")
@@ -32,7 +32,7 @@ concept workerInvocation {
 
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
   @relationship(type="parent", field="workerId", target="v1:worker:registration", direction="outgoing")
-  @relationship(type="parent", field="agentId", target="v1:copresent:agent", direction="outgoing")
+  @relationship(type="parent", field="agentId", target="v1:agents:agent", direction="outgoing")
   @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
 }
 

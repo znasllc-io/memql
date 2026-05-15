@@ -60,12 +60,12 @@ LiveKit room
 
 ## Concepts
 
-- `v1:copresent:agent.audioControl` / `videoControl` -- per-agent
+- `v1:agents:agent.audioControl` / `videoControl` -- per-agent
   defaults, `always_on` / `always_off` / `mirror_user`. Default
   `mirror_user` for every new agent.
 - `v1:cognition:audioOverride` / `videoOverride` -- per-(space, agent)
   session overrides, beat the agent default.
-- `v1:copresent:agent.avatarPersonaId` / `avatarVendor` -- vendor-
+- `v1:agents:agent.avatarPersonaId` / `avatarVendor` -- vendor-
   issued persona id minted from a still image. Empty disables the
   avatar plugin (voice-agent falls back to audio-only).
 

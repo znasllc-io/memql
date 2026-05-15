@@ -107,7 +107,7 @@ concept spawnEvent {
 @visibility("*")
 @description("Ephemeral result node returned by trainAgent + trainAgentRetryStep capability handlers. Carries the per-run summary (counts of chunks indexed, identity-vector + system-prompt write status, retry-plan ids when the in-handler retry exhausted, elapsed wall-clock). The frontend reads this off the bundle to render the in-card success toast; the same fields also land on the training.completed canvas card for the historical record. Not intended to be queried -- it's a transit container, not a persisted entity. Cache TTL 0 + skipDeleted matches the other Plan/Task lifecycle concepts.")
 concept trainingResult {
-  agentId             string  @required @description("v1:copresent:agent.id this result describes.")
+  agentId             string  @required @description("v1:agents:agent.id this result describes.")
   agentName           string  @description("Display name of the agent at the time of training. Surfaced in toasts + cards so the UI doesn't have to re-fetch.")
   domainsAdded        int     @description("Domains in the new set that weren't on the agent before.")
   domainsRemoved      int     @description("Domains in the old set that aren't in the new set.")

@@ -54,7 +54,7 @@ Produce a structured plan with these fields:
 4. **`globalGuidance`** -- one sentence applying to ALL agents this turn.
 
 5. **`primary`** -- the ONE agent who leads the response. Required object with these fields (every field present, use empty string for "not applicable"):
-   - `agentId` -- the EXACT id string from the `Agents in the room` roster above. Copy it character-for-character including ALL prefixes (`si-default:v1:copresent:agent:...`) and suffixes (`-default:v1:cognition:space:...`). Do NOT shorten, strip, or reformat it. The id may look long and ugly -- that's fine; the dispatch system requires the exact string.
+   - `agentId` -- the EXACT id string from the `Agents in the room` roster above. Copy it character-for-character including ALL prefixes (`si-default:v1:agents:agent:...`) and suffixes (`-default:v1:cognition:space:...`). Do NOT shorten, strip, or reformat it. The id may look long and ugly -- that's fine; the dispatch system requires the exact string.
    - `instruction` -- concrete behavioral. *"Greet warmly, mention the space title, ask what they want to dig into."* Not abstract: ~~"be helpful."~~
    - `brevity` -- `short`, `normal`, `detailed`, or `""`.
    - `acknowledgePrior` -- empty string `""` MOST OF THE TIME. Only populate when an opener nod is conversationally right (explicit user-directed handoff, mid-conversation takeover). Do NOT add it just because there was a prior responder.

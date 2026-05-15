@@ -150,7 +150,7 @@ concept delegation {
   identityId         string  @required  @description("Node ID of the v1:identity:identity granting authority. Through its userId the delegation resolves back to a v1:identity:user.")
   identitySubject    string  @required  @description("authenticated subject id of the delegating identity (denormalized for fast lookup on the auth hot path).")
   identityType       enum("human", "synthetic")  @required  @description("Type of the delegating identity. Separate from v1:identity:identity.identityType (which classifies the credential family); this classifies the principal behind it.")
-  agentId            string  @required  @description("Node ID of the v1:copresent:agent receiving delegated authority.")
+  agentId            string  @required  @description("Node ID of the v1:agents:agent receiving delegated authority.")
   roleCeiling        enum("owner", "admin", "writer", "reader")  @required  @description("Maximum role the agent may assume under this delegation. The engine caps the effective role at RoleAtMost(identity.role, roleCeiling).")
   scopes             []string  @description("Allowed operation scopes. Empty means all operations within the role ceiling. Examples: query:*, mutation:cognition.*.")
   expiresAt          datetime  @description("When this delegation expires. Null means persistent (no expiry).")

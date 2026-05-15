@@ -84,7 +84,7 @@ func ActingAgentRoleFromContext(ctx context.Context) string {
 }
 
 // WithActingAgentId returns a child context that carries the acting
-// agent's id (e.g. "default:v1:copresent:agent:<short-id>"). Used by
+// agent's id (e.g. "default:v1:agents:agent:<short-id>"). Used by
 // the gRPC stream session to stamp ClientToolCall.AgentId so the
 // frontend can attribute UI takeover sessions to the actual driving
 // agent (e.g. show "Briar" in the CoPresent Control Widget transcript

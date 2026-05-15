@@ -16,7 +16,7 @@ the AllowedRoles gate rejected every call.
 
 Root cause was mechanical:
 
-1. The `v1:copresent:agent` concept declares
+1. The `v1:agents:agent` concept declares
    `role enum("specialist", "general_assistant") @default("specialist")`.
 2. The `agentFull` shape projects the concept back to API callers. It
    listed every payload field **except `role`** — an oversight when

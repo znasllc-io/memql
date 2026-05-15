@@ -128,11 +128,11 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 	}
 
 	// Normalise to the canonical id form used by the agent concept's
-	// storage layer: `default:v1:copresent:agent:<short-id>`. If the
+	// storage layer: `default:v1:agents:agent:<short-id>`. If the
 	// caller already passed a fully-qualified id, use it as-is.
 	targetAgentFullId := targetAgentId
-	if !strings.HasPrefix(targetAgentFullId, "default:v1:copresent:agent:") {
-		targetAgentFullId = "default:v1:copresent:agent:" + targetAgentId
+	if !strings.HasPrefix(targetAgentFullId, "default:v1:agents:agent:") {
+		targetAgentFullId = "default:v1:agents:agent:" + targetAgentId
 	}
 
 	if e.Logger != nil {

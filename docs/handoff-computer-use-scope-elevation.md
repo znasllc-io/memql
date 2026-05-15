@@ -263,7 +263,7 @@ Frontend (copresent):
 
 ## Open follow-ups (NOT this handoff's job, but worth knowing)
 
-- `v1:copresent:agentAuthorization` has no `@relationship` on
+- `v1:agents:agentAuthorization` has no `@relationship` on
   `agentId` or `userId`. Auto-canon doesn't fire; values are stored
   as bare slugs. The frontend's `pickGAAuthRow` matcher (in
   `PlanScopeElevationCard.tsx`) compensates with a tolerant

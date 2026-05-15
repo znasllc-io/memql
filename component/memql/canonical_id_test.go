@@ -183,7 +183,7 @@ func TestCanonicalizeIdValue(t *testing.T) {
 	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
 		"v1:identity:user":    {Name: "v1:identity:user", Scope: "global"},
 		"v1:cognition:space":  {Name: "v1:cognition:space"}, // partition-scoped
-		"v1:copresent:agent":  {Name: "v1:copresent:agent"}, // partition-scoped
+		"v1:agents:agent":  {Name: "v1:agents:agent"}, // partition-scoped
 	})
 	ctx := context.Background()
 
@@ -209,8 +209,8 @@ func TestCanonicalizeIdValue(t *testing.T) {
 		{
 			name:        "bare slug for partition concept gets default prefix",
 			value:       "ga-xyz",
-			conceptType: "v1:copresent:agent",
-			want:        "default:v1:copresent:agent:ga-xyz",
+			conceptType: "v1:agents:agent",
+			want:        "default:v1:agents:agent:ga-xyz",
 		},
 		{
 			name:        "already-canonical value is returned as-is",

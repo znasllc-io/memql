@@ -6,16 +6,16 @@
 @version("1.0.0")
 @namespace("cognition")
 @visibility("bff", "cognition")
-@description("Per-(spaceId, agentId) audio control override. Lets a user dial a single agent's TTS publication on / off / mirror_user inside one space without changing the agent's own default (audioControl on v1:copresent:agent). Written by the orb-corner overlay in PresencePanel + the canvas presence widget. Read by the cognition handler before forwarding TTS to the Bridge Agent: an active override beats the agent default; absence falls through to the agent default. id is the deterministic audioOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
+@description("Per-(spaceId, agentId) audio control override. Lets a user dial a single agent's TTS publication on / off / mirror_user inside one space without changing the agent's own default (audioControl on v1:agents:agent). Written by the orb-corner overlay in PresencePanel + the canvas presence widget. Read by the cognition handler before forwarding TTS to the Bridge Agent: an active override beats the agent default; absence falls through to the agent default. id is the deterministic audioOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept audioOverride {
   spaceId   string  @required @description("v1:cognition:space.id this override is scoped to.")
-  agentId   string  @required @description("v1:copresent:agent.id this override targets.")
+  agentId   string  @required @description("v1:agents:agent.id this override targets.")
   setBy     string  @description("v1:identity:user.id of the actor who flipped the override -- the space owner under v1 permission rules. Audited against v1:identity:auditEvent.")
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="agentId", target="v1:copresent:agent", direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
 }
 
 @version("1.0.0")
@@ -173,7 +173,7 @@ concept participant {
   userId  string  @description("External user ID (for human participants).")
   hidden  bool  @default(false)  @description("When true, the participant is present in the space for routing purposes but is never rendered in participant-facing UI (PresencePanel, invite lists, etc.).")
 
-  @relationship(type="interactsWith", field="agentId", target="v1:copresent:agent", direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
   @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
   @relationship(type="interactsWith", field="forUserId", target="v1:identity:user", direction="outgoing")
@@ -397,16 +397,16 @@ concept utterance {
 @version("1.0.0")
 @namespace("cognition")
 @visibility("bff", "cognition")
-@description("Per-(spaceId, agentId) video control override. Lets a user dial a single agent's avatar publication on / off / mirror_user inside one space without changing the agent's own default (videoControl on v1:copresent:agent). Mirrors v1:cognition:audioOverride exactly -- same fields, same id pattern, same write/read paths -- but governs lip-synced video instead of TTS audio. Read by the voice-agent process at session start (Phase 9): an active override beats the agent default; absence falls through to the agent default. id is the deterministic videoOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
+@description("Per-(spaceId, agentId) video control override. Lets a user dial a single agent's avatar publication on / off / mirror_user inside one space without changing the agent's own default (videoControl on v1:agents:agent). Mirrors v1:cognition:audioOverride exactly -- same fields, same id pattern, same write/read paths -- but governs lip-synced video instead of TTS audio. Read by the voice-agent process at session start (Phase 9): an active override beats the agent default; absence falls through to the agent default. id is the deterministic videoOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept videoOverride {
   spaceId   string  @required @description("v1:cognition:space.id this override is scoped to.")
-  agentId   string  @required @description("v1:copresent:agent.id this override targets.")
+  agentId   string  @required @description("v1:agents:agent.id this override targets.")
   setBy     string  @description("v1:identity:user.id of the actor who flipped the override -- the space owner under v1 permission rules. Audited against v1:identity:auditEvent.")
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="agentId", target="v1:copresent:agent", direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
 }
 
 @version("1.0.0")

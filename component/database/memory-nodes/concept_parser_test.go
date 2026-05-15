@@ -34,14 +34,14 @@ concept Agent {
 		t.Fatalf("ParseConceptMemQL failed: %v", err)
 	}
 
-	if concept.Name != "v1:copresent:agent" {
-		t.Errorf("Name = %q, want %q", concept.Name, "v1:copresent:agent")
+	if concept.Name != "v1:agents:agent" {
+		t.Errorf("Name = %q, want %q", concept.Name, "v1:agents:agent")
 	}
 	if concept.Description != "AI agent templates." {
 		t.Errorf("Description = %q, want %q", concept.Description, "AI agent templates.")
 	}
-	if concept.SchemaId != "v1:copresent:agent" {
-		t.Errorf("SchemaId = %q, want %q", concept.SchemaId, "v1:copresent:agent")
+	if concept.SchemaId != "v1:agents:agent" {
+		t.Errorf("SchemaId = %q, want %q", concept.SchemaId, "v1:agents:agent")
 	}
 	if concept.NodeType != NodeTypeObject {
 		t.Errorf("NodeType = %q, want %q", concept.NodeType, NodeTypeObject)
@@ -58,8 +58,8 @@ concept Agent {
 		t.Fatalf("unmarshal schema: %v", err)
 	}
 
-	if schema["$id"] != "v1:copresent:agent" {
-		t.Errorf("schema.$id = %v, want %q", schema["$id"], "v1:copresent:agent")
+	if schema["$id"] != "v1:agents:agent" {
+		t.Errorf("schema.$id = %v, want %q", schema["$id"], "v1:agents:agent")
 	}
 
 	props, ok := schema["properties"].(map[string]any)

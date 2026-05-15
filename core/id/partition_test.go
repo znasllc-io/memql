@@ -29,9 +29,9 @@ func TestParseNodeId(t *testing.T) {
 		},
 		{
 			name:      "partition with long content hash",
-			input:     "steam-prowess:v1:copresent:agent:a9f3b7c2e1d04f8a9b3c5d7e2f1a0b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6",
+			input:     "steam-prowess:v1:agents:agent:a9f3b7c2e1d04f8a9b3c5d7e2f1a0b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6",
 			partition: "steam-prowess",
-			concept:   "v1:copresent:agent",
+			concept:   "v1:agents:agent",
 			shortId:   "a9f3b7c2e1d04f8a9b3c5d7e2f1a0b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6",
 		},
 		{
@@ -166,7 +166,7 @@ func TestHasPartition(t *testing.T) {
 		{"v1:cognition:participant:abc", false},
 		{"abc123", false},
 		{"", false},
-		{"default:v1:copresent:agent:xyz", true},
+		{"default:v1:agents:agent:xyz", true},
 	}
 
 	for _, tt := range tests {

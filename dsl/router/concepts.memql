@@ -9,7 +9,7 @@
 @description("Spend limit for a partition or a specific agent within a partition. The router checks the current-period spend against this cap before every SI call; over-budget calls are refused with a typed error that surfaces in the UI as a clear 'budget reached' state. Rolls over at periodType boundary (UTC day, week, or month).")
 concept budget {
   scope            enum("partition", "agent")  @required  @description("Whether this budget caps the whole partition or a single agent.")
-  scopeId          string  @description("When scope=agent, the v1:copresent:agent id being capped. Empty when scope=partition.")
+  scopeId          string  @description("When scope=agent, the v1:agents:agent id being capped. Empty when scope=partition.")
   periodType       enum("daily", "weekly", "monthly")  @required  @description("Budget window. Resets at UTC midnight / Monday / first-of-month.")
   limitUSD         float   @required  @description("Maximum USD spend allowed during one period. The router refuses calls once ledger totals reach this figure.")
   alertThresholdPct int    @description("Emit an alert event when spend crosses this percentage of the limit (e.g. 80 for early warning). 0 disables early alerts.")

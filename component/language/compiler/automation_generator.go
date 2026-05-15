@@ -1042,7 +1042,7 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// would emit `*ast.CanonicalIdExpr` (the Go %T type name)
 		// into the generated code, which the engine then takes as
 		// the literal arg value -- exactly the leak that produced
-		// `default:v1:copresent:agent:*ast.CanonicalIdExpr` rows in
+		// `default:v1:agents:agent:*ast.CanonicalIdExpr` rows in
 		// the participant table.
 		return fmt.Sprintf("canonicalId(%s, %q)",
 			c.expressionToString(e.Value),
