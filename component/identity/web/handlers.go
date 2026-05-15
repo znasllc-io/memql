@@ -48,7 +48,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 		// These ride through the form as hidden fields and resurface
 		// on POST so handleLoginPost can match the (client_id,
 		// redirect_uri) pair against registered clients.
-		ClientId:    strings.TrimSpace(r.URL.Query().Get("client_id")),
+		ClientID:    strings.TrimSpace(r.URL.Query().Get("client_id")),
 		RedirectURI: strings.TrimSpace(r.URL.Query().Get("redirect_uri")),
 		OAuthState:  strings.TrimSpace(r.URL.Query().Get("state")),
 	}
@@ -347,7 +347,7 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request) {
 		Layout:  s.LayoutData(r, "Error", false, nil, nil),
 		Heading: "Something went wrong",
 		Message: msg,
-		ErrorId: strings.TrimSpace(r.URL.Query().Get("errorId")),
+		ErrorID: strings.TrimSpace(r.URL.Query().Get("errorId")),
 	}
 	s.render(w, r, "error", webtempl.Error(data))
 }

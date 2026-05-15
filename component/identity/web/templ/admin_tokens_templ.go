@@ -13,7 +13,7 @@ import templruntime "github.com/a-h/templ/runtime"
 // cross-referencing user ids.
 type AdminPATRow struct {
 	ID         string
-	UserId     string
+	UserID     string
 	OwnerEmail string
 	Label      string
 	Active     bool
@@ -206,7 +206,7 @@ func adminTokensRow(t AdminPATRow) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(t.UserId)
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(t.UserID)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_tokens.templ`, Line: 73, Col: 39}
 			}

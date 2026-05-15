@@ -54,16 +54,10 @@ WORKDIR /app
 COPY --from=builder /build/memql .
 COPY --from=builder /build/healthcheck .
 
-# Copy necessary directories
-COPY --from=builder /build/automations ./automations
-COPY --from=builder /build/queries ./queries
-COPY --from=builder /build/mutations ./mutations
-COPY --from=builder /build/specs ./specs
-COPY --from=builder /build/concepts ./concepts
-COPY --from=builder /build/prompts ./prompts
-COPY --from=builder /build/providers ./providers
-COPY --from=builder /build/tools ./tools
-COPY --from=builder /build/shapes ./shapes
+# DSL tree is embedded into the binary (see dsl/embed.go); the
+# on-disk copy is kept only so MEMQL_DSL_PATH overrides work from
+# inside the container if anyone wants them.
+COPY --from=builder /build/dsl ./dsl
 COPY --from=builder /build/VERSION ./VERSION
 
 # Expose ports
