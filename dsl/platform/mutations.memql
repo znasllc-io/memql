@@ -287,3 +287,69 @@ mutation mutationUpdatePartition {
     config: coalesce(args.config, {})
   }
 }
+
+@enabled
+@useConcept(missingCapability)
+@description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call mutationBumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
+mutation mutationLogMissingCapability {
+  args {
+    missingId       string  @required
+    kind            string  @required
+    capability      string  @required
+    description     string  @required
+    requestedFromPlanId  string
+    requestedByAgentId   string
+    spaceId         string
+    partitionScope  string
+    firstSeenAt     string  @required
+    exampleGoal     string
+  }
+  insert missingCapability {
+    id: args.missingId
+    args.kind
+    args.capability
+    args.description
+    args.requestedFromPlanId
+    args.requestedByAgentId
+    args.spaceId
+    args.partitionScope
+    args.firstSeenAt
+    lastSeenAt: args.firstSeenAt
+    sightingCount: 1
+    status: "open"
+    exampleGoals: [coalesce(args.exampleGoal, "")]
+  }
+}
+
+@enabled
+@useConcept(missingCapability)
+@description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount, refreshes lastSeenAt, optionally appends to exampleGoals. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
+mutation mutationBumpMissingCapabilitySighting {
+  args {
+    missingId       string  @required
+    sightingCount   int     @required
+    lastSeenAt      string  @required
+    appendGoal      string
+  }
+  update missingCapability {
+    id: args.missingId
+    args.sightingCount
+    args.lastSeenAt
+  }
+}
+
+@enabled
+@useConcept(missingCapability)
+@description("Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.")
+mutation mutationUpdateMissingCapabilityStatus {
+  args {
+    missingId   string  @required
+    status      string  @required
+    resolution  string
+  }
+  update missingCapability {
+    id: args.missingId
+    args.status
+    args.resolution
+  }
+}
