@@ -74,36 +74,76 @@ EOF
     exit 0
 }
 
-# require_master_key extracts the master key from
-# ~/.memql/dev-secrets.yaml via 'go run ./scripts/secrets master-key'
-# and exports it as MEMQL_MASTER_KEY. If the yaml has no masterKey
-# field, prints first-run guidance and exits 0.
-function require_master_key() {
-    local key
-    key=$(go run ./scripts/secrets master-key 2>/dev/null || true)
-    if [ -z "$key" ]; then
+# require_genesis verifies MEMQL_MASTER_KEY is set, locates the
+# operator's genesis.znas (MEMQL_GENESIS_PATH > ~/.memql/genesis.znas),
+# decrypts it to a temp .env, exports every KEY=VALUE into the
+# current shell so docker compose's ${VAR:-} substitutions pick them
+# up, and sets GENESIS_ENV_FILE so callers can pass it to
+# `scripts/secrets seed`. Installs a trap to remove the decrypted
+# temp file on shell exit (any reason).
+#
+# Exits 0 (NOT 1) with guidance when MEMQL_MASTER_KEY or genesis is
+# missing -- the situation is "operator hasn't set things up yet",
+# not "code broken", so make doesn't flag it as a build error.
+function require_genesis() {
+    if [ -z "${MEMQL_MASTER_KEY:-}" ]; then
         cat <<'EOF'
 
-  Looks like this is your first run.
+  MEMQL_MASTER_KEY is not set.
 
-  'make dev-refresh' wipes the local memQL database and restores
-  secrets + variables from your personal yaml at
-  ~/.memql/dev-secrets.yaml. That yaml needs a master encryption
-  key (used to seal secret values) before any of this can run.
+  'make dev-refresh' needs your genesis master key in env to decrypt
+  ~/.memql/genesis.znas. Export it in your shell:
 
-  Please run this first:
+      export MEMQL_MASTER_KEY=<your 64-hex-char key>
 
-      make secrets-init
+  Don't have a genesis yet? Generate one (and a fresh master key):
 
-  It walks you through generating the master key (or pasting one
-  from another machine) and filling in the API keys + variables
-  this dev environment needs. Once that's done, 'make dev-refresh'
-  will work.
+      memql-cockpit genesis init --from <your .env file>
 
 EOF
         exit 0
     fi
-    export MEMQL_MASTER_KEY="$key"
+
+    local path="${MEMQL_GENESIS_PATH:-$HOME/.memql/genesis.znas}"
+    if [ ! -f "$path" ]; then
+        cat <<EOF
+
+  Genesis file not found at: $path
+
+  Either point MEMQL_GENESIS_PATH at your file, or generate one:
+
+      memql-cockpit genesis init --from <your .env file>
+
+EOF
+        exit 0
+    fi
+
+    local tmp="/tmp/memql-genesis.$$.env"
+    if ! go run ./scripts/secrets decrypt --in="$path" --out="$tmp"; then
+        echo "  Failed to decrypt $path (wrong MEMQL_MASTER_KEY?)" >&2
+        rm -f "$tmp"
+        exit 1
+    fi
+    chmod 0600 "$tmp"
+    # Clean up the decrypted plaintext on shell exit (any reason).
+    trap "rm -f '$tmp'" EXIT INT TERM
+
+    # Export every KEY=VALUE so docker compose's ${VAR:-} substitution
+    # finds the values without us re-encoding them. We deliberately
+    # don't `source` the file -- shell interpretation of $-signs /
+    # backticks inside API-key values is a footgun. Read each line
+    # and export verbatim instead.
+    local line key value
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        line="${line#export }"
+        [[ "$line" != *"="* ]] && continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        export "${key}=${value}"
+    done < "$tmp"
+
+    export GENESIS_ENV_FILE="$tmp"
 }
 
 # cleanup_sibling_compose_modes runs `docker compose down
@@ -438,10 +478,18 @@ readonly LIB_NGROK_LOG="/tmp/ngrok-livekit.log"
 # Used by scripts/dev/ngrok-up.sh (interactive, plus restarts
 # services) and scripts/dev/refresh.sh (between docker down + up
 # so services come up with the new URL on first boot).
+function lib_ngrok_install_hint() {
+    case "$(uname -s)" in
+        Darwin) echo "brew install ngrok" ;;
+        Linux)  echo "snap install ngrok  (or download from https://ngrok.com/download)" ;;
+        *)      echo "see https://ngrok.com/download" ;;
+    esac
+}
+
 function lib_refresh_ngrok() {
     if ! command -v ngrok >/dev/null 2>&1; then
         echo "  INFO: ngrok CLI not found -- skipping tunnel refresh."
-        echo "        Install: brew install ngrok, then re-run."
+        echo "        Install: $(lib_ngrok_install_hint), then re-run."
         return 1
     fi
     if ! ngrok config check >/dev/null 2>&1; then
