@@ -14,6 +14,7 @@ import (
 	"github.com/visionarys-io/memql/component/auth"
 	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
 	"github.com/visionarys-io/memql/component/memql"
+	"github.com/visionarys-io/memql/component/memql/taskstamp"
 	"github.com/visionarys-io/memql/component/router"
 	"github.com/visionarys-io/memql/core/common"
 	"github.com/visionarys-io/memql/core/env"
@@ -52,9 +53,10 @@ func looksLikeCanonicalUserId(s string) bool {
 // (component/router), which wraps the chosen provider with observability and
 // writes a v1:router:call ledger row per call.
 type Replier struct {
-	engine MemQLEngine
-	router *router.Router
-	logger *slog.Logger
+	engine  MemQLEngine
+	stamper *taskstamp.Stamper
+	router  *router.Router
+	logger  *slog.Logger
 
 	// ComputerUseStatus, when set, is invoked at prompt-build time
 	// to inject a connected/disconnected line into the agentReply
@@ -104,7 +106,8 @@ func NewReplier(engine MemQLEngine, rtr *router.Router, log *slog.Logger) (*Repl
 	if log == nil {
 		log = logger.New(ComponentName, os.Stdout, resolveLoggerLevel())
 	}
-	return &Replier{engine: engine, router: rtr, logger: log}, nil
+	stamper := taskstamp.New(engine, log)
+	return &Replier{engine: engine, stamper: stamper, router: rtr, logger: log}, nil
 }
 
 // Handle processes one AgentGenerateTurnMsg, emitting deltas into sink as

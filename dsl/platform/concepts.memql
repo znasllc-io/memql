@@ -106,3 +106,26 @@ concept policytrace {
   durationMs   float     @required @description("Wall-clock duration of the top-level evaluation in milliseconds.")
   error        string    @description("Error message captured when the evaluation aborted; empty on success.")
 }
+
+// ---- concepts/v1/platform/missingCapability/concept.memql ----
+
+@version("1.0.0")
+@namespace("platform")
+@scope("global")
+@visibility("bff", "cognition", "agent", "planner")
+@description("A capability the platform itself cannot yet provide -- a missing tool, missing integration, missing liveSource connector kind, missing knowledge domain category, etc. Distinct from v1:cognition:unmetCapability which fires when the chat router can't find a specialist for an utterance: missingCapability fires when even creating the right specialist wouldn't solve the problem because the underlying platform surface doesn't exist. Logged by the Planner Agent during its capability-gap detection step before agent creation. Becomes the product backlog -- 'these are the things the platform can't do yet that users actually want.' Global-scoped so it's visible across tenants for prioritization.")
+concept missingCapability {
+  kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other") @required @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = a brand-new liveConnector implementation kind (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")
+  capability      string  @required @description("Short identifier for the missing thing, e.g. 'sendSlackMessage', 'jira.createIssue', 'erp.inventory.live'. Stable across multiple sightings so duplicate signals collapse onto one row.")
+  description     string  @required @description("Human-readable description: what the platform was being asked to do that it couldn't. Surfaced in the product backlog view.")
+  requestedFromPlanId  string @description("v1:planner:plan.id where the gap was detected. Lets the platform team trace back to 'what was the user trying to accomplish when we hit this wall'.")
+  requestedByAgentId   string @description("v1:agents:agent.id of the agent (typically the Planner Agent) that logged the gap. Empty for system-level detection.")
+  spaceId         string  @description("Optional space scope where the gap was detected. Useful for attributing 'this gap blocked work in space X'.")
+  partitionScope  string  @description("Partition where the gap was detected. Empty = unknown. Helps de-duplicate platform-wide vs tenant-specific gaps.")
+  sightingCount   int     @default("1") @description("How many times this gap has been logged. New sightings of the same (kind, capability) increment rather than creating new rows. Drives 'most-requested capability' prioritization.")
+  firstSeenAt     datetime @description("When the first sighting was logged.")
+  lastSeenAt      datetime @description("When the most recent sighting was logged.")
+  status          enum("open", "in_progress", "resolved", "wontfix") @default("open") @description("Lifecycle. 'open' = logged, nothing done yet. 'in_progress' = the platform team is working on it (manually set). 'resolved' = the capability shipped; the Planner Agent's next sighting will recreate as a fresh row if it still doesn't work. 'wontfix' = explicit dismissal.")
+  resolution      string  @description("Free-text note when status='resolved' or 'wontfix' explaining what shipped (or why we won't ship it).")
+  exampleGoals    []string @description("List of Plan.goal strings that triggered this gap. Capped at the most recent N (engine policy); gives the prioritization view 'real users wanted X, Y, Z'.")
+}

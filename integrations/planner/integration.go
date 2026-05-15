@@ -49,6 +49,10 @@ const ComponentName common.ComponentName = "plannerIntegration"
 // so the integration doesn't import the full engine package.
 type Engine interface {
 	Execute(ctx context.Context, query string) (any, error)
+	// InvokeSI runs a named prompt against its default provider and
+	// returns the assistant response. Used by the Phase 4 Planner
+	// Agent loop to drive structured-output decisions.
+	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
 }
 
 // AgentForwarder is the wire-level interface the planner uses to
@@ -91,6 +95,7 @@ type PlannerIntegration struct {
 	engine         Engine
 	eventBus       *events.Bus
 	agentForwarder AgentForwarder
+	agentLoop      *PlannerAgentLoop
 	logger         *slog.Logger
 	unsubscribes   []func()
 	started        atomic.Bool
@@ -138,6 +143,7 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	if p.logger == nil {
 		p.logger = slog.Default().With("component", ComponentName)
 	}
+	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	return p, nil
 }
 
@@ -173,9 +179,28 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.handlePlanApprovedForExecution,
 			events.WithSubscriberName("planner:plan-execution"),
 		))
+		// Planner Agent loop (Phase 4 of the planner-redesign work).
+		// Subscribes to plan.created so a brand-new Plan triggers the
+		// first agent invocation (decompose -> Plan.phases stamped).
+		// Updates are handled by the agent loop's HandlePlanUpdated --
+		// log-only for now, deeper re-invoke wiring lands in Phase 4b.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.created.*.v1:planner:plan",
+			p.agentLoop.HandlePlanCreated,
+			events.WithSubscriberName("planner:agent-loop-created"),
+		))
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.*.v1:planner:plan",
+			p.agentLoop.HandlePlanUpdated,
+			events.WithSubscriberName("planner:agent-loop-updated"),
+		))
 		p.mu.Unlock()
-		p.logger.Info("planner integration: plan-execution subscription registered",
-			"pattern", "graph.node.updated.*.v1:planner:plan",
+		p.logger.Info("planner integration: subscriptions registered",
+			"patterns", []string{
+				"graph.node.updated.*.v1:planner:plan (scope-elevation)",
+				"graph.node.created.*.v1:planner:plan (agent loop)",
+				"graph.node.updated.*.v1:planner:plan (agent loop)",
+			},
 		)
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,

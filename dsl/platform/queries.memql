@@ -169,3 +169,26 @@ query queryListPartitions {
 query queryUserDefaults {
   filter  globalVariable.active==true; globalVariable.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
+
+@enabled
+@useConcept(missingCapability)
+@description("Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.")
+query queryMissingCapabilitiesByStatus {
+  args {
+    status  string  @required
+  }
+  filter  missingCapability.status==args.status
+  shape   missingCapabilityFull
+}
+
+@enabled
+@useConcept(missingCapability)
+@description("Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call mutationBumpMissingCapabilitySighting instead of creating a duplicate row.")
+query queryMissingCapabilityByKindAndName {
+  args {
+    kind        string  @required
+    capability  string  @required
+  }
+  filter  missingCapability.kind==args.kind; missingCapability.capability==args.capability
+  shape   missingCapabilityFull
+}

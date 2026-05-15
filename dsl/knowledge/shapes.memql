@@ -117,3 +117,22 @@ shape validationEventFull {
   validationEvent.note
   row.createdAt
 }
+
+@row
+@useConcept(knowledgeDomain)
+@description("Knowledge domain projection used by the Trainer Agent dispatch path (Q3 + Q9 of the planner-redesign work). Carries the cadence fields the refresh cron consumes (refreshCadenceDays, lastSeededAt, staleSignalCount) plus the descriptive fields the Planner Agent needs to decide whether a stale signal warrants an immediate refresh vs waiting for the cadence backstop.")
+shape knowledgeDomainFull {
+  row.id
+  knowledgeDomain.name
+  knowledgeDomain.description
+  knowledgeDomain.category
+  knowledgeDomain.active
+  knowledgeDomain.scope
+  knowledgeDomain.ownerId
+  knowledgeDomain.tier
+  knowledgeDomain.source
+  knowledgeDomain.refreshCadenceDays
+  knowledgeDomain.lastSeededAt
+  knowledgeDomain.staleSignalCount
+  knowledgeDomain.predefined
+}

@@ -386,3 +386,32 @@ mutation mutationUpdateSpreadsheetRow {
     args.embeddedAsChunkId
   }
 }
+
+@enabled
+@useConcept(knowledgeDomain)
+@description("Per Q9 event-driven refresh: increment a knowledge domain's staleSignalCount. The Planner Agent calls this when it detects degraded responses citing the domain (low-confidence citations, contradicted-by-fresh-source results, etc.). When staleSignalCount crosses a threshold (the Planner Agent's own policy; default 3), the Planner may spawn a trainSpecialist Plan with mode='refresh' rather than waiting for the cadence backstop.")
+mutation mutationMarkKnowledgeDomainStale {
+  args {
+    domainId           string  @required
+    staleSignalCount   int     @required
+  }
+  update knowledgeDomain {
+    id: args.domainId
+    args.staleSignalCount
+  }
+}
+
+@enabled
+@useConcept(knowledgeDomain)
+@description("Per Q9 refresh path: zero out the staleSignalCount and stamp lastSeededAt to now() after a trainSpecialist Plan with mode='refresh' completes. Idempotent; safe to re-run.")
+mutation mutationResetStaleAfterRefresh {
+  args {
+    domainId       string  @required
+    lastSeededAt   string  @required
+  }
+  update knowledgeDomain {
+    id: args.domainId
+    args.lastSeededAt
+    staleSignalCount: 0
+  }
+}

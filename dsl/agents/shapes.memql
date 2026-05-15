@@ -1,0 +1,20 @@
+// shapes.memql
+//
+// Agent-namespace projections. Companion to the larger agentFull
+// shape that ships in bff-copresent's shapes.memql (full
+// presentation projection for the agent roster UI). Shapes that
+// support the Phase 7 layered-dedupe path live here.
+
+@row
+@useConcept(agent)
+@description("Compact agent projection the layered-dedupe similarity step consumes. Carries only the fields that influence dedupe decisions: identity (id, roleSlug, name, description), capabilities the Planner reasons about (domains, tools, keywords), and the lineage that lets the Planner avoid daisy-chaining extensions (extendedFromAgentId, extensionGoals). Embedding (roleEmbedding) is included so the dedupe-Layer-1 cosine math has the data it needs without a second row fetch.")
+shape agentMinimalForDedupe {
+  row.id
+  agent.name
+  agent.role
+  agent.roleSlug
+  agent.description
+  agent.capabilities
+  agent.lineage
+  agent.roleEmbedding
+}
