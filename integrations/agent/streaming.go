@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/visionarys-io/memql/component/memql/taskstamp"
 	"github.com/visionarys-io/memql/core/common"
 	"github.com/visionarys-io/memql/core/env"
 )
@@ -256,6 +257,21 @@ func (r *Replier) runStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
+	// Install the PlanContext that drives engine-side auto-stamping of
+	// v1:planner:task rows on every tool call (Phase 2 of the
+	// planner-redesign work). When turnCtx.PlanId is empty (chat-driven
+	// turn with no user-initiated Plan), the stamper materializes a
+	// synthetic kind='adHocAction' Plan + semantic Task wrapper on the
+	// first tool call. When turnCtx.PlanId is set (post-approval Plan
+	// dispatch), the stamper attaches tool calls to a freshly-created
+	// semantic wrapper under that Plan. See component/memql/taskstamp/.
+	ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
+		PlanId:      turnCtx.PlanId,
+		AgentId:     turnCtx.AgentId,
+		OwnerUserId: turnCtx.OwnerUserId,
+		SpaceId:     turnCtx.SpaceId,
+	})
+
 	start := time.Now()
 
 	var fullText strings.Builder
@@ -471,7 +487,7 @@ StreamLoop:
 			for _, tc := range turnCalls {
 				args := parseToolArgs(tc.Arguments)
 				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.engine.ExecuteToolByName(ctx, tc.Name, args); execErr != nil {
+				if _, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args); execErr != nil {
 					r.logger.Warn("agent streaming: tool execution failed",
 						"tool", tc.Name, "error", execErr)
 					sink.ToolResult(tc.ID, "", execErr.Error())
@@ -501,7 +517,7 @@ StreamLoop:
 				args = make(map[string]any)
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
-			result, execErr := r.engine.ExecuteToolByName(ctx, tc.Name, args)
+			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)
 			var content string
 			if execErr != nil {
 				r.logger.Warn("agent streaming: tool execution failed",
