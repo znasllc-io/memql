@@ -117,15 +117,20 @@ func (a *App) engineAndBus() {
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 
-	// Kick off the seed materializer in the background. The startup
-	// sweep iterates v1:identity:user to materialize per-user seeds
-	// (GA + Planner + Trainer rows for every existing user) and
-	// subscribes to user-create events for runtime fanout. Done in a
-	// goroutine so app boot doesn't wait on the first query round-trip;
-	// failures are logged and don't crash boot (a cluster with no
-	// users present is the common dev case).
+	// Kick off the seed materializer in the background, but only AFTER
+	// the engine's Ready channel closes -- the engine's database
+	// getter (SetDatabaseGetter) is wired by its PrepareHook during
+	// startDependencies, NOT during Init. If the materializer's
+	// goroutine fires too early it gets "memory engine database not
+	// configured" from every engine.Execute and writes zero rows
+	// (which is exactly the bug the agents-empty cockpit was
+	// reporting). The startup sweep iterates v1:identity:user to
+	// materialize per-user seeds (GA + Planner + Trainer rows for
+	// every existing user) and subscribes to user-create events for
+	// runtime fanout. Failures stay logged and don't crash boot.
 	if sm := a.engine.SeedMaterializer(); sm != nil {
 		go func() {
+			<-a.engine.Ready()
 			if err := sm.Start(context.Background()); err != nil {
 				a.Logger.Warn("seed materializer failed to start",
 					"component", "memql.seedMaterializer", "error", err)
