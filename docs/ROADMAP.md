@@ -180,6 +180,30 @@ repo, no separate Dockerfile family.
 
 ---
 
+## Calendar & agenda
+
+### User tasks / todos with due dates
+
+Deferred from Calendar v1. Calendar events are time blocks ("I will
+be at X from 2-3pm"); user tasks are commitments with deadlines
+("I need to do X by Friday"). They render together in the UI but
+have different schemas: tasks carry `status`, `completedAt`,
+`priority`, optional dependencies, sometimes no time at all.
+Folding them into `v1:calendar:event` via a `kind=task` discriminator
+means every query/handler/prompt has to branch on kind, and the
+naming collides with the existing `v1:planner:task` (Plan-execution
+steps).
+
+Land as its own concept tree -- name TBD but likely `v1:agenda:*`
+or `v1:todo:*`; avoid `v1:tasks:*` to prevent the `v1:planner:task`
+collision.
+
+When it ships, the calendar agent tool grows a combined "agenda"
+query that unions calendar events + due-today tasks at the tool
+layer. Stored separately; presented unified.
+
+---
+
 ## Closed notes (reference only)
 
 The following carry-over notes from prior iterations are either shipped
