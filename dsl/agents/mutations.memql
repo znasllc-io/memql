@@ -1,0 +1,121 @@
+// mutations.memql
+//
+// Agent-namespace mutations -- the platform's canonical write surface
+// for v1:agents:agent + v1:agents:agentAuthorization. Every BFF and
+// every internal seeder writes through these; product-specific mutations
+// (e.g. CoPresent's space-join flow) layer on top, never re-implement
+// the row write.
+
+@enabled
+@useConcept(agent)
+@description("Create a new AI agent template.")
+mutation mutationCreateAgent {
+  args {
+    agentId          string
+    ownerUserId      string
+    name             string  @required
+    description      string
+    personality      string
+    role             string
+    roleSlug         string
+    gender           string
+    audioControl     string
+    videoControl     string
+    avatarPersonaId  string
+    avatarVendor     string
+    capabilities     object
+    avatar           object
+    providerConfig   object
+    triggerBehavior  object
+    active           bool
+    deleted          bool
+  }
+  insert agent {
+    id: args.agentId
+    args.ownerUserId
+    args.name
+    args.description
+    args.personality
+    args.capabilities
+    args.avatar
+    args.providerConfig
+    args.triggerBehavior
+    role: coalesce(args.role, "specialist")
+    roleSlug: coalesce(args.roleSlug, "")
+    gender: coalesce(args.gender, "female")
+    audioControl: coalesce(args.audioControl, "mirror_user")
+    videoControl: coalesce(args.videoControl, "mirror_user")
+    args.avatarPersonaId
+    args.avatarVendor
+    active: coalesce(args.active, true)
+    deleted: coalesce(args.deleted, false)
+  }
+}
+
+@enabled
+@useConcept(agentAuthorization)
+@description("Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.")
+mutation mutationCreateAgentAuthorization {
+  args {
+    authId            string
+    agentId           string  @required
+    userId            string  @required
+    planKind          string  @required
+    spaceScope        string  @required
+    tokenBudgetCap    int
+    expiresAt         string
+    computerUseScope  string
+  }
+  insert agentAuthorization {
+    id: args.authId
+    args.agentId
+    args.userId
+    args.planKind
+    args.spaceScope
+    args.tokenBudgetCap
+    args.expiresAt
+    computerUseScope: coalesce(args.computerUseScope, "")
+    active: true
+  }
+}
+
+@enabled
+@useConcept(agent)
+@description("Soft-delete an agent (active:false, deleted:true).")
+mutation mutationDeleteAgent {
+  args {
+    agentId  string  @required
+  }
+  insert agent {
+    id: args.agentId
+    active: false
+    deleted: true
+  }
+}
+
+@enabled
+@useConcept(agentAuthorization)
+@description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.")
+mutation mutationRevokeAgentAuthorization {
+  args {
+    authId  string  @required
+  }
+  insert agentAuthorization {
+    id: args.authId
+    active: false
+  }
+}
+
+@enabled
+@useConcept(agent)
+@description("Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.")
+mutation mutationUpdateAgent {
+  args {
+    agentId  string  @required
+    payload  object  @required
+  }
+  update agent {
+    id: args.agentId
+    args.payload
+  }
+}

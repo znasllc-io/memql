@@ -1,11 +1,101 @@
 // queries.memql
 //
-// Agent-namespace queries. Today these layer on top of the
-// agent-management queries that still live in
-// memql-bff-copresent/dsl/copresent/queries.memql (queryAgentById +
-// friends). New agent-domain queries needed by Phase 7's layered
-// dedupe land here so the hygiene moves with the planner-redesign
-// work.
+// Agent-namespace queries -- the platform's canonical surface for
+// reading v1:agents:agent + v1:agents:agentAuthorization rows. Every
+// BFF reads through these queries (Cockpit's Agents tab, CoPresent's
+// agent panel, the Planner's dedupe lookup) so adding a new BFF means
+// "wire it up to call queryAllAgents" -- not "re-implement the agent
+// list query."
+
+@enabled
+@useConcept(agent)
+@description("Returns available AI agent templates. Optional filter: groupId")
+query queryActiveAgents {
+  args {
+    groupId  string
+  }
+  filter  traitIsActiveRecord; traitIsNotDeleted; ?.agent.groupIds has args.groupId
+  shape   agentFull
+}
+
+@enabled
+@useConcept(agentAuthorization)
+@description("All active standing authorizations granted by a user, across all agents and plan kinds.")
+query queryAgentAuthorizationsForUser {
+  args {
+    userId  string  @required
+  }
+  filter  agentAuthorization.userId==args.userId; agentAuthorization.active==true
+  shape   agentAuthorizationFull
+}
+
+// queryAgentById - Get Agent by ID
+// ==================================
+//
+// Retrieves an agent concept by its node ID. Returns the agent's
+// configuration including name, personality, provider config,
+// capabilities, and trigger behavior.
+
+@enabled
+@useConcept(agent)
+@description("Get an agent by ID with full configuration.")
+query queryAgentById {
+  args {
+    agentId  string  @required
+  }
+  filter  id==args.agentId
+  shape   agentFull
+}
+
+// queryAgentOwner -- agent's owning-user lookup
+// ==============================================
+//
+// Returns the v1:agents:agent row projected through agentFull,
+// which exposes BOTH `agent.ownerUserId` and `createdBy`. Callers
+// (resolveAgentOwner in app/computer_use_status_agent.go and
+// resolveOwnerForAgent in integrations/agent/replier.go) read
+// ownerUserId first and fall back to createdBy.
+
+@enabled
+@useConcept(agent)
+@description("Resolve an agent's owning-user (ownerUserId / createdBy) by id.")
+query queryAgentOwner {
+  args {
+    agentId  string  @required
+  }
+  filter  id==args.agentId
+  shape   agentFull
+}
+
+// agentRoleSlugsInUse - Query roleSlugs already taken by an agent
+// ================================================================
+//
+// Returns the list of `agent.roleSlug` values currently in use by
+// non-deleted agents in the partition. Used by create-agent UIs to
+// filter out already-taken roles from role pickers.
+
+@enabled
+@useConcept(agent)
+@description("Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.")
+query queryAgentRoleSlugsInUse {
+  filter  traitIsActiveRecord; traitIsNotDeleted
+  shape   agentRoleSlugLite
+}
+
+// allAgents - Query All AI Agent Templates
+// ==========================================
+//
+// Returns all AI agent templates from the v1:agents:agent concept,
+// regardless of active status. Backs the Cockpit Agents tab and any
+// agent-management surface that needs to see active + inactive rows.
+
+@enabled
+@useConcept(agent)
+@description("Returns all AI agent templates regardless of active status.")
+query queryAllAgents {
+  filter  traitIsNotDeleted
+  shape   agentFull
+}
 
 @enabled
 @useConcept(agent)
