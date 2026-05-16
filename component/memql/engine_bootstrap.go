@@ -257,6 +257,19 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 	e.agents = agentRegistry
 
+	// Load DSL-declared seeds. Walks every `seed NAME { ... }` block
+	// across the DSL tree, resolves @templateFile sidecars, and
+	// registers compiled SeedDefinitions in the SeedRegistry. The
+	// SeedMaterializer (follow-up commit) reads from this registry on
+	// engine startup + on v1:identity:user create events to materialize
+	// rows into v1:agents:agent and friends.
+	seedRegistry := NewSeedRegistry()
+	if _, slErr := LoadUnifiedSeeds(e.Logger, seedRegistry); slErr != nil {
+		e.Logger.Warn("unified seed loader returned an error",
+			"component", "memql.engine", "error", slErr)
+	}
+	e.seeds = seedRegistry
+
 	// Wire concept-storage resolvers BEFORE loading providers so a
 	// provider's auth.apiKey="${MEMQL_SI_OPENAI_API_KEY}" picks up the
 	// value from v1:platform:globalSecret if a developer has run

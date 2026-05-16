@@ -299,6 +299,99 @@ func LoadUnifiedAgents(logger *slog.Logger, registry *AgentRegistry, tools *Tool
 	return total, nil
 }
 
+// LoadUnifiedSeeds walks the DSL tree, parses every `seed NAME { ... }`
+// block, compiles each into a SeedDefinition, and registers it. Row
+// materialization is a separate pass owned by the SeedMaterializer
+// (which runs after the database is up and can write rows). This
+// loader is parse + collect only.
+//
+// Files that fail to parse or compile are logged + skipped so a
+// single bad seed doesn't bring down the rest. A registry-upsert
+// failure (duplicate name) is also logged + skipped -- the first
+// definition wins, the second is dropped.
+//
+// Sidecar resolution: when a seed declares @templateFile, the file
+// content is loaded into Body's "systemPrompt" field (if not already
+// declared), mirroring the agent loader's behavior. The materializer
+// passes the body through to the row insert without further sidecar
+// handling.
+func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) {
+	if registry == nil {
+		return 0, fmt.Errorf("seed registry is nil")
+	}
+	tree := memqldsl.Tree()
+	total := 0
+	for _, raw := range baseloader.ReadAll(logger) {
+		for _, slice := range ExtractKeywordSlices(raw.Content, "seed") {
+			origin := "unified:" + raw.Path + ":" + slice.Name
+			decl, err := parseSeedMemQL(origin, []byte(slice.Source))
+			if err != nil {
+				if logger != nil {
+					logger.Debug("memql.unifiedSeedLoader: parse failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
+				}
+				continue
+			}
+			def, err := compileSeedDecl(decl)
+			if err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedSeedLoader: compile failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
+				}
+				continue
+			}
+			def.Origin = origin
+
+			// Resolve @templateFile sidecar -- contents land in the
+			// body under "systemPrompt" (when not already set). This
+			// matches the agent-loader convention; the materializer
+			// just writes whatever's in the body to the row.
+			if def.TemplateFile != "" {
+				if _, alreadySet := def.Body.fields["systemPrompt"]; !alreadySet {
+					dir := path.Dir(raw.Path)
+					tmplPath := path.Join(dir, def.TemplateFile)
+					data, rErr := fs.ReadFile(tree, tmplPath)
+					if rErr != nil {
+						if logger != nil {
+							logger.Warn("memql.unifiedSeedLoader: templateFile resolve failed",
+								"file", raw.Path, "seed", slice.Name, "templateFile", def.TemplateFile,
+								"resolvedTo", tmplPath, "error", rErr)
+						}
+						continue
+					}
+					source := strings.TrimSpace(string(data))
+					if source == "" {
+						if logger != nil {
+							logger.Warn("memql.unifiedSeedLoader: templateFile is empty",
+								"file", raw.Path, "seed", slice.Name, "templateFile", tmplPath)
+						}
+						continue
+					}
+					// Inject systemPrompt at the body's top level so
+					// the materializer's downcast into row payload
+					// includes it like any other field.
+					def.Body.keys = append(def.Body.keys, "systemPrompt")
+					def.Body.fields["systemPrompt"] = seedValue{kind: seedString, str: source}
+				}
+			}
+
+			if err := registry.Upsert(def); err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedSeedLoader: registry upsert failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
+				}
+				continue
+			}
+			total++
+		}
+	}
+	if logger != nil {
+		logger.Info("memql.unifiedSeedLoader: registered",
+			"component", "memql.unifiedSeedLoader", "count", total)
+	}
+	return total, nil
+}
+
 // resolveUnifiedPromptTemplate mirrors resolvePromptDeclTemplate but
 // reads .tmpl sidecars from dsl.Tree() at the prompt's relative
 // path.
