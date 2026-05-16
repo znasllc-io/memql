@@ -1,31 +1,15 @@
 // automations.memql
 //
-// Provisioning automations for the platform's bootstrap agents.
-// Companion to the existing provisionGeneralAssistantOnUserCreate in
-// memql-bff-copresent/dsl/copresent/automations.memql -- those three
-// agents (GA + Planner + Trainer) together form the per-user system
-// agent set per the planner-redesign brainstorm (Q2 + Q3).
+// (Empty.) Per-user agent provisioning is no longer an automation --
+// the SeedMaterializer (component/memql/seed_materializer.go) walks
+// the `seed` declarations in plannerAgent.memql / trainerAgent.memql /
+// generalAssistant.memql at engine startup, and subscribes to
+// graph.node.created.*.v1:identity:user for runtime fanout. The
+// declarations themselves are the source of truth; the materializer
+// turns them into v1:agents:agent rows.
 //
-// All three automations are idempotent. They re-run safely against
-// existing users (the logic checks for an existing agent row by
-// deterministic id before inserting).
-
-@enabled
-@trigger(event="node.created", concept="v1:identity:user", partition="*")
-@description("Materializes the user's Planner Agent on user creation. Idempotent. Per Q2: every user gets a dedicated Planner Agent persona that the planner-service invokes to decompose Plans, dispatch Tasks, and handle retries. Paired with a strong-reasoning provider via the plannerAgent prompt's @defaultProvider.")
-@useLogic(logicProvisionPlannerAgent)
-automation provisionPlannerAgentOnUserCreate {
-  step run {
-    logic logicProvisionPlannerAgent { event: event }
-  }
-}
-
-@enabled
-@trigger(event="node.created", concept="v1:identity:user", partition="*")
-@description("Materializes the user's Trainer Agent on user creation. Idempotent. Per Q3: every user gets a dedicated Trainer Agent persona that the planner-service invokes for trainSpecialist Plans. Web-search + strong-reasoning provider via the trainerAgent prompt's @defaultProvider.")
-@useLogic(logicProvisionTrainerAgent)
-automation provisionTrainerAgentOnUserCreate {
-  step run {
-    logic logicProvisionTrainerAgent { event: event }
-  }
-}
+// Historical:
+//   provisionPlannerAgentOnUserCreate -- replaced by plannerAgent.memql
+//   provisionTrainerAgentOnUserCreate -- replaced by trainerAgent.memql
+//   (provisionGeneralAssistantOnUserCreate lived in copresent and is
+//    deleted there in the companion commit.)

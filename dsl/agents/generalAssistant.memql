@@ -1,35 +1,35 @@
-// generalAssistant -- the per-user General Assistant baseline.
+// generalAssistant -- per-user General Assistant baseline.
 //
-// First DSL agent declaration. Lives at dsl/agents/v1/generalAssistant.memql
-// and is loaded at engine startup by LoadUnifiedAgents into the
-// AgentRegistry. The agent(...) builtin in dsl/agents/builtins.memql
-// resolves the name "generalAssistant" against this declaration.
+// Materialized as one v1:agents:agent row per user by the SeedMaterializer:
+//   - Startup sweep: walks every existing v1:identity:user and writes
+//     `generalAssistant-<userId>`.
+//   - Runtime hook: subscribes to graph.node.created.*.v1:identity:user
+//     and writes the row on signup.
 //
-// @scope("perUser"): once row materialization for perUser agents lands
-// (deferred follow-up), this declaration will replace the
-// provisionGeneralAssistantOnUserCreate automation -- the loader will
-// materialize one v1:agents:agent row per user from this template
-// instead of the automation doing it imperatively. Until then, the
-// declaration only populates the in-memory AgentRegistry; the existing
-// automation continues to handle the row-side per-user provisioning.
+// Replaces the legacy `provisionGeneralAssistantOnUserCreate` automation
+// that lived in memql-bff-copresent. The seed declaration is the single
+// source of truth for the GA template; the materializer's create-only
+// semantics (insert-if-missing by deterministic id) preserve any
+// user-renaming edits across engine restarts.
 //
-// The systemPrompt content lives in templates/generalAssistant.tmpl
-// (per the @templateFile annotation); the loader reads + stamps it.
+// Owner ergonomics:
+//   - `ownerUserId` is stamped automatically by the materializer.
+//   - `agentId` is computed as `generalAssistant-<userId>` (not declared
+//     in the body; @scope("perUser") seeds may not declare an id).
+
+use agents.agent
 
 @version("1.0.0")
-@namespace("agents")
 @scope("perUser")
 @visibility("bff", "cognition", "agent")
 @templateFile("templates/generalAssistant.tmpl")
 @description("Per-user General Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
-agent generalAssistant {
-  role:        "general_assistant"
-  roleSlug:    "general_assistant"
-
+seed generalAssistant {
   name:        "General Assistant"
   description: "Designated fallback when no specialist fits."
   personality: "Friendly, capable, proactive."
-
+  role:        "general_assistant"
+  roleSlug:    "general_assistant"
   gender:      "female"
 
   providerConfig {
@@ -49,22 +49,14 @@ agent generalAssistant {
 
     // tools[] left empty for the Phase 5 baseline. The UI-driving
     // tools the strawman referenced (uiClick, uiNarrate, uiDescribe,
-    // respondToUser) don't exist as memql-core `tool` DSL constructs:
-    // respondToUser is the streaming-tool-loop's sentinel envelope
-    // (not a registered tool); uiClick / uiNarrate / uiDescribe live
-    // in the CoPresent product layer and aren't part of memql core's
-    // DSL tree. When CoPresent grows DSL-declared UI tools, wire them
-    // here as tool("uiClick"), etc.
+    // respondToUser) live in the CoPresent product layer and aren't
+    // part of memql core's tool registry. When CoPresent grows its
+    // own tool declarations, the seed can extend tools here.
     tools:    []
 
     domains:  ["general"]
     keywords: []
   }
-
-  // knowledge bindings left empty for the Phase 5 baseline. Per-user
-  // knowledge domains get attached via UI mutations after the row
-  // is materialized.
-  knowledge: []
 
   triggerBehavior {
     autoJoin:          true
