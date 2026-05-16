@@ -70,9 +70,18 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	if !ok {
 		return
 	}
-	if kind == "adHocAction" || kind == "scopeElevation" {
-		// adHocAction: stamper handles end-to-end. scopeElevation:
-		// existing handlePlanApprovedForExecution path covers it.
+	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
+		// adHocAction: stamper handles end-to-end.
+		// scopeElevation: existing handlePlanApprovedForExecution covers it.
+		// agentInvocation: minted by `agent("name", prompt, spaceId)`
+		//   builtin (integrations/agents). The agents integration owns
+		//   dispatch for this kind; the Planner Agent does NOT try to
+		//   decompose -- the caller named a specific agent.
+		//   END-TO-END WIRING IS A FOLLOW-UP: today the Plan sits in
+		//   queued until the agents integration subscribes to plan-
+		//   created events (requires widening PluginContext to expose
+		//   the EventBus). Documented in
+		//   docs/planning/agent-role-catalog.md.
 		return
 	}
 	if status != "queued" {

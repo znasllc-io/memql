@@ -329,6 +329,18 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 			return nil, err
 		}
 	}
+	// Agent-role lock guard: rejects writes that would remove any id
+	// in the agent's role.lockedDomainIds / lockedToolSlugs from the
+	// proposed capabilities. The role catalog is the source of truth
+	// for "what an agent of role X must always have"; this guard
+	// makes that contract load-bearing on every write path (cockpit
+	// edit, CoPresent edit, GA-driven extend, automation). See
+	// agent_lock_validation.go.
+	if conceptMeta.Name == conceptAgentsAgent {
+		if err := e.validateAgentLockedItems(ctx, payload, mutation.ID, actor); err != nil {
+			return nil, err
+		}
+	}
 
 	// Resolve the partition against the concept's scope. Global-scoped
 	// concepts (@scope("global") in the .memql file) always land in the
