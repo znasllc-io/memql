@@ -11,6 +11,7 @@ import (
 
 	"github.com/visionarys-io/memql/component/auth"
 	"github.com/visionarys-io/memql/component/events"
+	"github.com/visionarys-io/memql/component/provenance"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -228,25 +229,31 @@ func (m *SeedMaterializer) Stop(ctx context.Context) error {
 
 // materializeGlobal writes one row for a @scope("global") seed. The
 // seed body's `id` field provides the row id; remaining body fields
-// flow through to the concept's mutationCreate<ConceptName>.
+// flow through to the concept's mutationCreate<ConceptName>. The
+// per-seed provenance is stamped on ctx here so the engine's row-
+// construction layer can persist {kind: "seed", name: <seedName>}
+// as the row's intrinsic provenance field.
 func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefinition) error {
 	idVal, ok := def.Body.fields["id"]
 	if !ok || idVal.kind != seedString {
 		return fmt.Errorf("global seed %q must declare a string `id` field", def.Name)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
+	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 
 // materializePerUser writes one row for a (perUser seed, user)
 // pair. The row id is `<seedName>-<userId>`; the user id is stamped
 // into `ownerUserId` so owner-keyed lookups resolve immediately.
+// Per-seed provenance is stamped on ctx (see materializeGlobal).
 func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefinition, userId string) error {
 	if userId == "" {
 		return fmt.Errorf("empty userId for per-user seed %q", def.Name)
 	}
 	rowId := def.Name + "-" + userId
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
+	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 
