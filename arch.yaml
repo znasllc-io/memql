@@ -1,0 +1,40 @@
+# Architecture-model declaration for the memql core module. Read by
+# `memql-arch` (cmd/memql-arch) when it walks the workspace. Adoption
+# is opt-in: every field below has a default, so a missing or empty
+# file would still produce a usable model. Filling fields in promotes
+# the labels and metadata that show up in the cockpit's Topology
+# drill-down navigator.
+#
+# Authoritative schema:  component/architecture/extract/archyaml.go
+
+service: memql
+display_name: "memQL Core"
+description: |
+  The core memQL service. Owns the MemQL engine, the DSL loaders,
+  the gRPC + WebSocket surfaces, and every node-type binary (bff /
+  voice / cognition / agent / planner) compiled out of this tree.
+
+# Default `./...` is exactly what we want here. Leaving the field
+# out picks it up automatically; we keep it commented for visibility.
+# roots:
+#   - "./..."
+
+# Generated / vendored sub-trees we don't want polluting the diagram.
+# Currently nothing -- everything under component/ and integrations/
+# is in-scope. Add patterns here as needed.
+# excludes:
+#   - "./component/some-legacy-area/..."
+
+# Explicit cross-service edges the import graph can't see (network
+# calls, queue-mediated handoffs). Auto-derived imports are merged
+# in, so this list only needs the connections that don't show up via
+# `import` alone.
+depends_on:
+  - memql-bff-copresent
+
+# Entrypoint functions the (forthcoming) sequence-diagram extractor
+# should walk forward from. Annotated for context only today; once
+# the sequence pass lands these will drive its starting points.
+entrypoints:
+  - func: "main.main"
+    label: "boot (bff / default build)"

@@ -35,6 +35,8 @@ go.work.sum
 .env
 .env.local
 .env.*
+# Keep the checked-in template that documents the override schema.
+!.env.example
 
 # Cloud Run env reference file (contains secrets - do not commit)
 cloud-run-env.yaml
@@ -60,6 +62,7 @@ bin/
 
 # local environment files
 .env.*
+!.env.example
 *.local
 .gocache/
 
