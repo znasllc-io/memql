@@ -117,6 +117,22 @@ func (a *App) engineAndBus() {
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 
+	// Kick off the seed materializer in the background. The startup
+	// sweep iterates v1:identity:user to materialize per-user seeds
+	// (GA + Planner + Trainer rows for every existing user) and
+	// subscribes to user-create events for runtime fanout. Done in a
+	// goroutine so app boot doesn't wait on the first query round-trip;
+	// failures are logged and don't crash boot (a cluster with no
+	// users present is the common dev case).
+	if sm := a.engine.SeedMaterializer(); sm != nil {
+		go func() {
+			if err := sm.Start(context.Background()); err != nil {
+				a.Logger.Warn("seed materializer failed to start",
+					"component", "memql.seedMaterializer", "error", err)
+			}
+		}()
+	}
+
 	// SI Router: embedded in every SI-calling node. Takes the provider
 	// registry (for lookup + pricing) and the engine (to write
 	// v1:router:call rows via mutationRecordRouterCall). The router is

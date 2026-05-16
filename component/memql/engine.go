@@ -27,9 +27,10 @@ type MemQLEngine struct {
 	functions     *FunctionRegistry
 	tools         *ToolRegistry
 	prompts       *PromptRegistry
-	agents        *AgentRegistry
-	seeds         *SeedRegistry
-	providers     *ProviderRegistry
+	agents          *AgentRegistry
+	seeds           *SeedRegistry
+	seedMaterializer *SeedMaterializer
+	providers       *ProviderRegistry
 	policies      *PolicyRegistry
 	// policyFunctions holds parsed `func (Policy)` definitions
 	// (cross-cutting decision policies under dsl/v1/policies/
@@ -176,6 +177,15 @@ func (e *MemQLEngine) Agents() *AgentRegistry {
 // the startup sweep + on v1:identity:user create events.
 func (e *MemQLEngine) Seeds() *SeedRegistry {
 	return e.seeds
+}
+
+// SeedMaterializer returns the materializer that turns registered
+// seed declarations into rows. Start() should be invoked once the
+// database is up + the engine's Execute path is functional; the
+// callback for runtime user-create events is registered as part of
+// Start.
+func (e *MemQLEngine) SeedMaterializer() *SeedMaterializer {
+	return e.seedMaterializer
 }
 
 // Shapes returns the shape registry.
