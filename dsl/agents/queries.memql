@@ -107,3 +107,22 @@ query queryActiveAgentsForUser {
   filter  payload.ownerUserId==args.ownerUserId; payload.active==true; payload.deleted==false
   shape   agentMinimalForDedupe
 }
+
+@enabled
+@useConcept(agentRole)
+@description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
+query queryAgentRoleBySlug {
+  args {
+    slug  string  @required
+  }
+  filter  payload.slug==args.slug; payload.active==true
+  shape   agentRoleFull
+}
+
+@enabled
+@useConcept(agentRole)
+@description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
+query queryActiveAgentRoles {
+  filter  payload.active==true
+  shape   agentRoleFull
+}

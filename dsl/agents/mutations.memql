@@ -1,10 +1,10 @@
 // mutations.memql
 //
 // Agent-namespace mutations -- the platform's canonical write surface
-// for v1:agents:agent + v1:agents:agentAuthorization. Every BFF and
-// every internal seeder writes through these; product-specific mutations
-// (e.g. CoPresent's space-join flow) layer on top, never re-implement
-// the row write.
+// for v1:agents:agent + v1:agents:agentAuthorization + v1:agents:agentRole.
+// Every BFF and every internal seeder writes through these;
+// product-specific mutations (e.g. CoPresent's space-join flow) layer
+// on top, never re-implement the row write.
 
 @enabled
 @useConcept(agent)
@@ -117,5 +117,49 @@ mutation mutationUpdateAgent {
   update agent {
     id: args.agentId
     args.payload
+  }
+}
+
+@enabled
+@useConcept(agentRole)
+@description("Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.")
+mutation mutationCreateAgentRole {
+  args {
+    agentRoleId             string
+    slug                    string  @required
+    name                    string  @required
+    description             string
+    category                string
+    tier                    string
+    lockedDomainIds         array
+    defaultDomainIds        array
+    availableDomainIds      array
+    lockedToolSlugs         array
+    defaultToolSlugs        array
+    lockedLiveKnowledgeIds  array
+    recommendedPolicySlug   string
+    recommendedGender       string
+    systemPromptHints       string
+    active                  bool
+    predefined              bool
+  }
+  insert agentRole {
+    id: coalesce(args.agentRoleId, args.slug)
+    args.slug
+    args.name
+    args.description
+    category: coalesce(args.category, "professional")
+    tier: coalesce(args.tier, "A")
+    lockedDomainIds: coalesce(args.lockedDomainIds, [])
+    defaultDomainIds: coalesce(args.defaultDomainIds, [])
+    availableDomainIds: coalesce(args.availableDomainIds, [])
+    lockedToolSlugs: coalesce(args.lockedToolSlugs, [])
+    defaultToolSlugs: coalesce(args.defaultToolSlugs, [])
+    lockedLiveKnowledgeIds: coalesce(args.lockedLiveKnowledgeIds, [])
+    args.recommendedPolicySlug
+    args.recommendedGender
+    args.systemPromptHints
+    active: coalesce(args.active, true)
+    predefined: coalesce(args.predefined, false)
   }
 }

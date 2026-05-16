@@ -1,0 +1,137 @@
+// roles/trades.memql
+//
+// Skilled-trades role seeds. Most are Tier A (information / education
+// shape) except those whose practice is licensed in most jurisdictions
+// (electrical) or whose handling regulations are strict (refrigerants).
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("Residential and light-commercial construction: scheduling, subs, permits, scopes of work.")
+seed general_contractor {
+  id:                    "general_contractor"
+  slug:                  "general_contractor"
+  name:                  "General Contractor"
+  description:           "Residential and light-commercial construction: scheduling, subs, permits, scopes of work."
+  category:              "trades"
+  lockedDomainIds:       ["construction_fundamentals"]
+  defaultDomainIds:      ["building_codes", "project_data", "trades_safety", "estimating", "subcontractor_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Residential / commercial electrical: codes, troubleshooting, common installations. Information only -- live electrical work is licensed labor.")
+seed electrician {
+  id:                    "electrician"
+  slug:                  "electrician"
+  name:                  "Electrical Trades"
+  description:           "Residential / commercial electrical: codes, troubleshooting, common installations. Information only -- live electrical work is licensed labor."
+  category:              "trades"
+  tier:                  "B"
+  lockedDomainIds:       ["electrical_trades"]
+  defaultDomainIds:      ["building_codes", "trades_safety", "circuit_design_basics", "electrical_troubleshooting"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  systemPromptHints:     "Provide general electrical information. Live electrical work is dangerous and frequently licensed by jurisdiction; recommend a licensed electrician for any actual work."
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Residential plumbing systems: drain / waste / vent, water supply, fixtures, basic troubleshooting.")
+seed plumber {
+  id:                    "plumber"
+  slug:                  "plumber"
+  name:                  "Plumbing Trades"
+  description:           "Residential plumbing systems: drain / waste / vent, water supply, fixtures, basic troubleshooting."
+  category:              "trades"
+  lockedDomainIds:       ["plumbing_trades"]
+  defaultDomainIds:      ["building_codes", "trades_safety", "diy_repairs", "water_systems"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Heating, ventilation, A/C, refrigeration: principles, sizing, common faults, controls.")
+seed hvac_technician {
+  id:                    "hvac_technician"
+  slug:                  "hvac_technician"
+  name:                  "HVAC Technician"
+  description:           "Heating, ventilation, A/C, refrigeration: principles, sizing, common faults, controls."
+  category:              "trades"
+  lockedDomainIds:       ["hvac_systems"]
+  defaultDomainIds:      ["building_codes", "trades_safety", "energy_efficiency", "refrigerant_handling"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Framing, finish carpentry, cabinetry, joinery; hand and power tools.")
+seed carpenter {
+  id:                    "carpenter"
+  slug:                  "carpenter"
+  name:                  "Carpentry"
+  description:           "Framing, finish carpentry, cabinetry, joinery; hand and power tools."
+  category:              "trades"
+  lockedDomainIds:       ["carpentry"]
+  defaultDomainIds:      ["woodworking", "building_codes", "trades_safety", "joinery_techniques", "diy_repairs"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Passenger-car diagnostics and repair: engine, drivetrain, brakes, electrical, scan tools.")
+seed automotive_mechanic {
+  id:                    "automotive_mechanic"
+  slug:                  "automotive_mechanic"
+  name:                  "Automotive Mechanic"
+  description:           "Passenger-car diagnostics and repair: engine, drivetrain, brakes, electrical, scan tools."
+  category:              "trades"
+  lockedDomainIds:       ["automotive_repair"]
+  defaultDomainIds:      ["vehicle_diagnostics", "trades_safety", "engine_systems", "vehicle_electrical"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Welding processes (MIG / TIG / stick), metallurgy basics, safety, and inspection criteria.")
+seed welder {
+  id:                    "welder"
+  slug:                  "welder"
+  name:                  "Welding"
+  description:           "Welding processes (MIG / TIG / stick), metallurgy basics, safety, and inspection criteria."
+  category:              "trades"
+  lockedDomainIds:       ["welding"]
+  defaultDomainIds:      ["metallurgy_basics", "trades_safety", "weld_inspection"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Landscape design, installation, and maintenance: plants, irrigation, hardscape, seasonal care.")
+seed landscaping_grounds {
+  id:                    "landscaping_grounds"
+  slug:                  "landscaping_grounds"
+  name:                  "Landscaping & Grounds"
+  description:           "Landscape design, installation, and maintenance: plants, irrigation, hardscape, seasonal care."
+  category:              "trades"
+  lockedDomainIds:       ["landscaping"]
+  defaultDomainIds:      ["horticulture", "irrigation_systems", "gardening", "lawn_care"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
