@@ -46,40 +46,21 @@ func newConceptFromDir(dir string) (*Concept, error) {
 	return ParseConceptMemQL(memqlBytes, cleanDir)
 }
 
-// LoadConcepts loads concepts into the global singleton registry,
-// filtering by the compiled node type's @visibility annotation. Concepts
-// with @visibility("*") or no @visibility load on all nodes. Concepts with
-// @visibility("cognition") only load when nodeType is "cognition".
-func LoadConcepts(logger *slog.Logger, nodeType string) error {
-	return loadDefaultRegistry(logger, nodeType)
+// LoadConcepts loads every concept in the embedded tree into the
+// global singleton registry. Every binary loads every concept --
+// the previous per-node @visibility filtering was removed during the
+// genesis cleanup. Functional specialization (which integrations are
+// active, which transports are mounted) stays at the build-tag layer;
+// the DSL surface is uniform across all node types.
+func LoadConcepts(logger *slog.Logger) error {
+	return loadDefaultRegistry(logger)
 }
 
-func loadDefaultRegistry(logger *slog.Logger, nodeType string) error {
+func loadDefaultRegistry(logger *slog.Logger) error {
 	concepts, err := loadAllConcepts(logger)
 	if err != nil {
 		return err
 	}
-
-	// Filter by @visibility annotation. Concepts whose visibility
-	// doesn't include the compiled node type are excluded from the
-	// registry. No annotation = not visible (opt-in model).
-	if nodeType != "" {
-		filtered := make(map[string]*Concept, len(concepts))
-		for name, concept := range concepts {
-			if concept.Visibility.IsVisibleTo(nodeType) {
-				filtered[name] = concept
-			} else {
-				if logger != nil {
-					logger.Debug("concept filtered by @visibility",
-						"concept", name,
-						"nodeType", nodeType,
-					)
-				}
-			}
-		}
-		concepts = filtered
-	}
-
 	ReplaceAll(concepts)
 	return nil
 }

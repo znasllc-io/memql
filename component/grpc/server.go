@@ -58,7 +58,6 @@ type Server struct {
 	scoreEngine       *polyphon.ScoreEngine
 	roomProvider      polyphon.RoomProvider
 	conceptRegistry   memoryNodes.Registry
-	queryProxy        *node.QueryProxy
 	aiForwarder       *AiForwardRouter
 	agentReplier      AgentTurnHandler
 	serviceRef        *serviceRef
@@ -205,7 +204,6 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		roomProvider:    s.roomProvider,
 		conceptRegistry: s.conceptRegistry,
 		accessMW:        accessMW,
-		queryProxy:      s.queryProxy,
 		aiForwarder:     s.aiForwarder,
 		agentReplier:    s.agentReplier,
 	}
@@ -326,16 +324,6 @@ func (s *Server) SetRoomProvider(rp polyphon.RoomProvider) {
 	s.roomProvider = rp
 }
 
-// SetQueryProxy sets the query proxy for cross-node query forwarding.
-// When a client query references a concept owned by another node type,
-// the proxy routes it to the owning node via NodeService.
-func (s *Server) SetQueryProxy(qp *node.QueryProxy) {
-	if s == nil {
-		return
-	}
-	s.queryProxy = qp
-}
-
 // SetConceptRegistry sets the concept registry for metadata queries.
 func (s *Server) SetConceptRegistry(reg memoryNodes.Registry) {
 	if s == nil {
@@ -365,7 +353,6 @@ type service struct {
 	roomProvider    polyphon.RoomProvider
 	conceptRegistry memoryNodes.Registry
 	accessMW        *access.Middleware
-	queryProxy      *node.QueryProxy
 	aiForwarder     *AiForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
 
 	// agentReplier handles AgentGenerateTurnMsg on agent nodes. Non-nil
@@ -1029,23 +1016,6 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	go func() {
 		defer cancel()
 		defer s.activeRequests.Delete(requestId)
-
-		// Cross-node query routing: if the query references a concept
-		// owned by another node type, the QueryProxy identifies the
-		// target and we log the routing decision. The actual forwarding
-		// via NodeService is wired in the bootstrap (Phase 4 follow-up).
-		// For now, queries that would route to a peer fall through to
-		// local execution, which will hit the read-isolation check
-		// (concept not in registry) and return a clear error.
-		if s.service.queryProxy != nil {
-			if target := s.service.queryProxy.ResolveTarget(query); target != "" {
-				s.logger.Debug("query targets remote concept domain",
-					"query", query,
-					"target_node_type", string(target),
-					"request_id", requestId,
-				)
-			}
-		}
 
 		result, err := s.service.executeQuery(ctx, query, clientId)
 		if err != nil {

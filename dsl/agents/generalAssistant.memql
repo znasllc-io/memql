@@ -21,7 +21,6 @@ use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@visibility("bff", "cognition", "agent")
 @templateFile("templates/generalAssistant.tmpl")
 @description("Per-user General Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
 seed generalAssistant {

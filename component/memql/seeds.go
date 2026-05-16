@@ -14,12 +14,10 @@ type SeedDefinition struct {
 	// Unique across all seed files; the registry rejects duplicates.
 	Name string
 
-	// Description, Version, Visibility, TemplateFile are pass-through
-	// values from the corresponding annotations. Visibility is empty
-	// when @visibility wasn't declared (defaults to "all nodes").
+	// Description, Version, TemplateFile are pass-through values
+	// from the corresponding annotations.
 	Description  string
 	Version      string
-	Visibility   []string
 	TemplateFile string
 
 	// UseNamespace + UseConcept are the file-top `use <ns>.<concept>`
@@ -179,7 +177,6 @@ func compileSeedDecl(decl *seedDecl) (*SeedDefinition, error) {
 		Name:         decl.name,
 		Description:  decl.description,
 		Version:      decl.version,
-		Visibility:   decl.visibility,
 		TemplateFile: decl.templateFile,
 		UseNamespace: decl.useNamespace,
 		UseConcept:   decl.useConcept,

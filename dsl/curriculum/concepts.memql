@@ -4,7 +4,6 @@
 
 @version("1.0.0")
 @namespace("curriculum")
-@visibility("bff")
 @description("A guided lesson plan that an agent with the app-control tool set can run. Consumed by the CoPresent Operator on the client and executed segment by segment. The first consumer is the first-login demo (`copresent.welcome.v1`); future consumers are education agents running lessons against CoPresent or other apps.")
 concept curriculum {
   slug  string  @required  @description("Stable machine-readable identifier (e.g., 'copresent.welcome.v1'). Used by the client to subscribe to a specific curriculum irrespective of the node ID.")
@@ -28,7 +27,6 @@ concept curriculum {
 
 @version("1.0.0")
 @namespace("curriculum")
-@visibility("bff")
 @description("One step in a v1:curriculum:curriculum. Carries the GA's narration, the tool calls the GA should consider making, and the options the user can pick to advance the graph. Authoring model is hybrid: a segment has a `goal` and a set of `recommendedSteps` the GA follows by default but may deviate from based on runtime context (e.g., user already created a space, user asked a side question, user is confused). Options carry an explicit `nextSegmentId` when the author knows the route, or a `roleTag` the GA resolves to a concrete target at runtime.")
 concept segment {
   curriculumId  string  @required  @description("ID of the v1:curriculum:curriculum this segment belongs to.")

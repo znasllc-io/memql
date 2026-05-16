@@ -6,7 +6,6 @@
 @version("1.0.0")
 @namespace("platform")
 @scope("global")
-@visibility("*")
 @description("Instance-wide encrypted secret. Lives in the reserved _system partition (via @scope(\"global\")). The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext (base64(nonce||ct)) under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys, OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use v1:platform:partitionSecret; the resolver falls back partition -> global automatically.")
 concept globalSecret {
   name            string    @required  @description("Secret name (uppercase with underscores by convention).")
@@ -23,7 +22,6 @@ concept globalSecret {
 @version("1.0.0")
 @namespace("platform")
 @scope("global")
-@visibility("*")
 @description("Instance-wide plaintext configuration variable. Lives in the reserved _system partition (via @scope(\"global\")) and is visible to every tenant. Used for instance-level defaults like provider names, feature flags, log levels, and tuning knobs. For per-tenant overrides use v1:platform:partitionVariable. For sensitive values use v1:platform:globalSecret.")
 concept globalVariable {
   name         string  @required  @description("Variable name (uppercase with underscores by convention).")
@@ -35,7 +33,6 @@ concept globalVariable {
 @version("1.0.0")
 @namespace("platform")
 @scope("global")
-@visibility("*")
 @description("Data isolation boundary within a database instance. Every node belongs to exactly one partition; queries are auto-scoped, no cross-partition reads. CoPresent surfaces this concept to end users as a 'workspace'. The id is the partition slug (lowercase alphanumeric + inner dashes); displayName is the human-readable label shown in UI. Authorization to operate in a partition is held on v1:identity:partitionAccess grants -- creating a partition does NOT by itself grant access; the caller must also issue a partitionAccess(role=owner) grant for themselves. The atomic two-write wrapper got removed because the MemQL Mutation parser only allows a single insert per body; callers run mutationCreatePartition followed by mutationGrantPartitionAccess as two client-side calls today. Note: the original creator's identity subject is auto-stamped onto every node version as the reserved `createdBy` intrinsic (set from the request actor); we don't redeclare it on this concept's payload schema.")
 concept partition {
   name           string  @required @description("Unique partition slug. Lowercase alphanumeric and inner dashes only, 1-50 chars (DNS-label rules). Used as the concept id, the database PK column value, and the {partition} segment in event topics, so it must be filesystem/URL/topic safe. Renames are forbidden because v1:identity:partitionAccess grants reference this name.")
@@ -63,7 +60,6 @@ concept partition {
 
 @version("1.0.0")
 @namespace("platform")
-@visibility("*")
 @description("Partition-scoped encrypted secret. Holds per-tenant sensitive values (BYOK vendor API keys, per-tenant Twilio/SMTP creds, etc.). Same wire shape as v1:platform:globalSecret, different scope. The cleartext value is NEVER stored -- only a NaCl secretbox ciphertext under MEMQL_MASTER_KEY and a fingerprint. When the partition-scoped resolver (resolveSecret) cannot find a row, it falls back to v1:platform:globalSecret so a tenant's BYOK key wins over the instance default but the instance default is always available.")
 concept partitionSecret {
   name            string    @required  @description("Secret name (uppercase with underscores by convention).")
@@ -81,7 +77,6 @@ concept partitionSecret {
 
 @version("1.0.0")
 @namespace("platform")
-@visibility("*")
 @description("Partition-scoped plaintext configuration variable. Holds per-tenant non-sensitive overrides (default chat provider, default language, feature flags scoped to a single tenant, etc.). Same wire shape as v1:platform:globalVariable, different scope. When the partition-scoped resolver (resolveVariable) cannot find a row, it falls back to v1:platform:globalVariable so a tenant's override wins over the instance default but the instance default is always available.")
 concept partitionVariable {
   name         string  @required  @description("Variable name (uppercase with underscores by convention).")
@@ -112,7 +107,6 @@ concept policytrace {
 @version("1.0.0")
 @namespace("platform")
 @scope("global")
-@visibility("bff", "cognition", "agent", "planner")
 @description("A capability the platform itself cannot yet provide -- a missing tool, missing integration, missing liveSource connector kind, missing knowledge domain category, etc. Distinct from v1:cognition:unmetCapability which fires when the chat router can't find a specialist for an utterance: missingCapability fires when even creating the right specialist wouldn't solve the problem because the underlying platform surface doesn't exist. Logged by the Planner Agent during its capability-gap detection step before agent creation. Becomes the product backlog -- 'these are the things the platform can't do yet that users actually want.' Global-scoped so it's visible across tenants for prioritization.")
 concept missingCapability {
   kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other") @required @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = a brand-new liveConnector implementation kind (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")

@@ -15,7 +15,6 @@ use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@visibility("bff", "planner", "agent")
 @description("Per-user Planner Agent. Platform orchestration persona -- decomposes Plans into Tasks, dispatches to specialists, manages retries.")
 seed plannerAgent {
   name:        "Planner"

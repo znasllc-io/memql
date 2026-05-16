@@ -6,7 +6,6 @@
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Self-service access request placed on the waitlist queue. Created when an unknown email submits the registration form while IDENTITY_REGISTRATION_MODE=approval. Admins triage rows in the admin console: approval mints a v1:identity:invitation and emails a magic link; rejection stamps the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in any partition (typically owners of the cluster) can review the queue.")
 concept accessRequest {
   email             string  @required  @description("Email address the requester wants to register with. Same value flows into the eventual v1:identity:user.primaryEmail on approval.")
@@ -29,7 +28,6 @@ concept accessRequest {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Append-only audit log entry. Captures security-relevant events (auth, identity, authorization, configuration, admin) with actor + target + source attribution. Global scope so any cluster operator can read the full trail. Retention controlled by IDENTITY_AUDIT_LOG_RETENTION_DAYS via the daily auditEventRetentionSweep automation. The prevEventHash field is reserved for future hash-chain tamper-resistance; written but not validated in MVP.")
 concept auditEvent {
   occurredAt      datetime  @required  @description("When the event happened. May lag createdAt by milliseconds because the row is written after the event completes.")
@@ -62,7 +60,6 @@ concept auditEvent {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("One-time OAuth authorization code, RFC 6749 §4.1 style. Minted at /auth/magic-link/consume when the originating magic link carried an oauthCtxJSON (third-party OAuth client flow) and exchanged at /oauth/token for an access + refresh token pair. Single-use, redirect-URI bound, client-ID bound, ~60s TTL. Bound to the specific magic-link row it was minted from so a leaked code cannot be replayed across sessions. Global scope: token redemption is unauthenticated and must work without partition context.")
 concept authCode {
   code                string  @required  @description("Plaintext one-time auth code returned to the OAuth client via redirectURI. Held server-side so the token-exchange handler can verify the presented code value matches; never logged, never surfaced in audit detail. Hash is the lookup key, plaintext is the equality check on redemption.")
@@ -85,7 +82,6 @@ concept authCode {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Bearer-token session record. One row per access token issued by the identity service's magic-link / refresh flow. Looked up on every authenticated request to enforce per-session revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in _system so any partition's middleware can resolve a session.")
 concept authSession {
   userId          string  @description("Owning v1:identity:user. Optional because rows are written at token-issuance time, which can race ahead of the magic-link verifier's user-row insert on first-time logins. Subject is the canonical lookup key.")
@@ -111,7 +107,6 @@ concept authSession {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Runtime-editable cluster settings. Single-row concept (id='cluster') that holds the operator-tunable knobs originally bootstrapped from IDENTITY_* env vars. The first-run wizard (Phase 3) writes this row; the admin app (Phase 6) edits it. Service.LiveConfig() reads from here first and falls back to env so a fresh deployment is functional without any post-bootstrap edits. Global scope so the configuration is reachable from every binary that needs it (identity itself plus future per-node verifier middleware).")
 concept clusterSettings {
   clusterDomain                   string  @description("The deployment-wide hostname suffix the operator entered at /setup (or supplied via IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io, staging.acme.com, acme.com. Every public service URL the cluster builds derives from it: app.<clusterDomain> for the SPA, identity.<clusterDomain> for sign-in, bff.<clusterDomain> for the API, agent.<clusterDomain> for worker registration. Empty before the wizard runs.")
@@ -144,7 +139,6 @@ concept clusterSettings {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Grants an AI agent the right to act through a user's v1:identity:identity for a bounded role ceiling, scope set, and lifetime. Global scope: lives in _system and is readable from any partition so cross-partition agent work does not require per-partition delegation rows.")
 concept delegation {
   identityId         string  @required  @description("Node ID of the v1:identity:identity granting authority. Through its userId the delegation resolves back to a v1:identity:user.")
@@ -165,7 +159,6 @@ concept delegation {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("An account or credential set owned by a v1:identity:user. One user can have many identities: a magic-link verified email, OAuth accounts on external apps, API keys (Personal Access Tokens), or service accounts. Agents borrow identities to act on the user's behalf via v1:identity:delegation. Global scope: lives in _system and is readable from any partition.")
 concept identity {
   active          bool    @default("true")  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
@@ -206,7 +199,6 @@ concept identity {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Token-hashed invitation credential. Maps an invitee (existing user by ID, or external guest by email + token) to an optional product scope hint. The identity layer owns the lifecycle (pending/accepted/expired/cancelled) and the auth primitive; product layers populate spaceId/spaceName and any display-name denormalizations they need. Global-scoped: an unauthenticated /join/<token> resolve has no envelope partition, and even authenticated invitees may live in a different partition than the inviter, so token -> invitation lookup must work without a partition context. Product-side rows that REFERENCE invitations (e.g. v1:copresent:participation) stay partition-scoped on the partition where the work actually happens.")
 concept invitation {
   active        bool                                                                          @description("Whether the invitation is active. Set false to soft-cancel.")
@@ -232,7 +224,6 @@ concept invitation {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Pending magic-link authentication request. One row per /auth/magic-link issuance. The plain token is hashed (SHA-256) before persistence -- only the hash lives here so a database snapshot can never be replayed into a login. Single-use semantics: consumedAt is set atomically on the first successful click and any subsequent click against the same row is rejected. Past expiresAt the row is also rejected. Global scope so the public unauthenticated /auth/magic-link/consume endpoint can resolve the row regardless of which partition the eventual user belongs to.")
 concept magicLinkRequest {
   email           string  @required  @description("Email address the magic link was sent to. Drives the user-lookup / first-time-registration path on consume.")
@@ -251,7 +242,6 @@ concept magicLinkRequest {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("A grant authorizing a v1:identity:user to operate in a specific partition with a given role. The gRPC middleware enforces this on every request (envelope.partition must be in the caller's allowed set, role must be sufficient for the operation). Grants are time-series records keyed by (userId, partition); re-granting the same pair appends a new version so history is preserved. Global scope: lives in _system and is readable from any partition.")
 concept partitionAccess {
   active        bool    @default("true")  @description("Soft-revoke flag. active=false means the grant is ineffective; same pattern as partition draining. Hard-deletion never happens so the audit trail survives.")
@@ -270,7 +260,6 @@ concept partitionAccess {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("A person (or synthetic principal). Owns identities and partition-access grants. Same record across every partition the user can touch. Global scope: lives in _system and is readable from any partition.")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")
@@ -313,7 +302,6 @@ concept user {
 @version("1.0.0")
 @namespace("identity")
 @scope("global")
-@visibility("*")
 @description("Short-lived pairing credential for the computer-use enrollment flow. CoPresent's Settings -> Computer Use 'Connect this computer' card mints a row + plain code (XXXX-XXXX, 8 alphanumeric chars from Crockford's Base32 alphabet). The cockpit wizard on the user's machine redeems the code on the cluster's gRPC stream via Authorization: Pair <code>, the redeem handler stamps redeemedAt + redeemedBy, mints a v1:identity:identity worker_token row owned by the same user, and returns the plain mql_wkr_<...> token + cluster URL to the cockpit. Single-use: a row with non-empty redeemedAt is dead. TTL ~10 minutes (IDENTITY_PAIRING_CODE_TTL_MIN, default 10).")
 concept workerPairingCode {
   ownerUserId  string  @required  @description("v1:identity:user.id who minted the code (and who will own the resulting worker_token + v1:worker:registration). The redeem handler reads this and uses it as the registeredBy for the new worker_token credential.")
@@ -331,7 +319,6 @@ concept workerPairingCode {
 
 @version("1.0.0")
 @namespace("identity")
-@visibility("bff", "cognition")
 @description("Organization group. Users belong to groups; agents are assigned to groups for scoped access control. Created and managed in-app; the externalId field is preserved for any legacy rows that came from a previous external sync source.")
 concept group {
   name         string  @required @description("Display name of the group.")

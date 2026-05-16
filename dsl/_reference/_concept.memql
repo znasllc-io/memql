@@ -151,7 +151,6 @@ concept globalScoped {
 
 @version("1.0.0")
 @namespace("reference")
-@visibility("*")
 @description("Visible to every node type.")
 concept everywhereVisible {
   field string @required
@@ -159,7 +158,6 @@ concept everywhereVisible {
 
 @version("1.0.0")
 @namespace("reference")
-@visibility("bff", "cognition")
 @description("Loaded only on bff and cognition nodes.")
 concept includeListed {
   field string @required
@@ -167,7 +165,6 @@ concept includeListed {
 
 @version("1.0.0")
 @namespace("reference")
-@visibility(!"planner")
 @description("Loaded everywhere except planner.")
 concept excludePlanner {
   field string @required
@@ -475,7 +472,6 @@ concept relationshipExample {
 @version("1.0.0")
 @namespace("cluster")
 @scope("global")
-@visibility("*")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string @required

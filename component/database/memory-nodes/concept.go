@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +19,6 @@ type (
 		FieldSource   string `json:"fieldSource,omitempty"`
 		TargetConcept string `json:"targetConcept"`
 		Direction     string `json:"direction"`
-	}
-
-	// ConceptVisibility controls which node types load a concept.
-	// See @visibility annotation in concept .memql files.
-	ConceptVisibility struct {
-		Wildcard bool     `json:"wildcard,omitempty"` // @visibility("*")
-		Include  []string `json:"include,omitempty"`  // @visibility("cognition", "bff")
-		Exclude  []string `json:"exclude,omitempty"`  // @visibility(!"planner")
 	}
 
 	// Store defines the persistence operations required by concept runtime helpers.
@@ -60,16 +51,6 @@ type (
 		// the concepts/vN/... directory layout.
 		Version string `json:"version,omitempty"`
 
-		// Visibility controls which node types load this concept, declared
-		// via @visibility. Three modes:
-		//   @visibility("*")                -> all node types
-		//   @visibility("cognition", "bff") -> only these node types
-		//   @visibility(!"planner")         -> all except these
-		// No annotation means the concept is not visible to any node
-		// (opt-in model). Artifacts (queries, mutations, automations)
-		// inherit visibility from the concepts they reference.
-		Visibility ConceptVisibility `json:"visibility,omitempty"`
-
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
 
@@ -95,26 +76,6 @@ type (
 		Metadata  json.RawMessage
 	}
 )
-
-// IsVisibleTo reports whether this concept should be loaded by a node
-// of the given type. Zero-value (no annotation) returns false (opt-in).
-func (v ConceptVisibility) IsVisibleTo(nodeType string) bool {
-	if v.Wildcard {
-		return true
-	}
-	if len(v.Include) > 0 {
-		return slices.Contains(v.Include, nodeType)
-	}
-	if len(v.Exclude) > 0 {
-		return !slices.Contains(v.Exclude, nodeType)
-	}
-	return false // no annotation = not visible
-}
-
-// IsZero reports whether no visibility annotation was set.
-func (v ConceptVisibility) IsZero() bool {
-	return !v.Wildcard && len(v.Include) == 0 && len(v.Exclude) == 0
-}
 
 // UnmarshalJSON normalizes relationship definitions authored with either camelCase or snake_case keys.
 // IsGlobal reports whether this concept is global-scoped. Global
