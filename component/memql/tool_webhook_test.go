@@ -19,6 +19,14 @@ func newTestEngineForWebhook(allowedHosts ...string) *MemQLEngine {
 	}
 }
 
+// agentCtxForTest returns a context.Background that carries an
+// acting-agent role -- ExecuteTool's universal agent-only enforcement
+// rejects callers without one. Tests exercise the post-gate code
+// path; the role string is a placeholder.
+func agentCtxForTest() context.Context {
+	return WithActingAgentRole(context.Background(), "specialist")
+}
+
 func TestExecuteWebhookBasicPOST(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
@@ -47,7 +55,7 @@ func TestExecuteWebhookBasicPOST(t *testing.T) {
 		},
 	}
 
-	result, err := e.ExecuteTool(context.Background(), tool, map[string]any{
+	result, err := e.ExecuteTool(agentCtxForTest(), tool, map[string]any{
 		"task": "hello world",
 	})
 	if err != nil {
@@ -80,7 +88,7 @@ func TestExecuteWebhookGET(t *testing.T) {
 		},
 	}
 
-	result, err := e.ExecuteTool(context.Background(), tool, nil)
+	result, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +118,7 @@ func TestExecuteWebhookURLSubstitution(t *testing.T) {
 		},
 	}
 
-	result, err := e.ExecuteTool(context.Background(), tool, map[string]any{
+	result, err := e.ExecuteTool(agentCtxForTest(), tool, map[string]any{
 		"workspace": "agent-sofia",
 	})
 	if err != nil {
@@ -150,7 +158,7 @@ func TestExecuteWebhookBodySubstitution(t *testing.T) {
 		},
 	}
 
-	_, err := e.ExecuteTool(context.Background(), tool, map[string]any{
+	_, err := e.ExecuteTool(agentCtxForTest(), tool, map[string]any{
 		"task":      "write a script",
 		"workspace": "/workspaces/sofia",
 	})
@@ -186,7 +194,7 @@ func TestExecuteWebhookHTTPError(t *testing.T) {
 		},
 	}
 
-	result, err := e.ExecuteTool(context.Background(), tool, nil)
+	result, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err != nil {
 		t.Fatalf("unexpected hard error: %v", err)
 	}
@@ -219,7 +227,7 @@ func TestExecuteWebhookCustomHeaders(t *testing.T) {
 		},
 	}
 
-	_, err := e.ExecuteTool(context.Background(), tool, nil)
+	_, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,7 +256,7 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 		},
 	}
 
-	result, err := e.ExecuteTool(context.Background(), tool, nil)
+	result, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err != nil {
 		t.Fatalf("unexpected error for allowed host: %v", err)
 	}
@@ -267,7 +275,7 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 		},
 	}
 
-	_, err = e2.ExecuteTool(context.Background(), tool2, nil)
+	_, err = e2.ExecuteTool(agentCtxForTest(), tool2, nil)
 	if err == nil {
 		t.Fatalf("expected error for blocked host, got nil")
 	}
@@ -294,7 +302,7 @@ func TestExecuteWebhookDefaultMethodPOST(t *testing.T) {
 		},
 	}
 
-	_, err := e.ExecuteTool(context.Background(), tool, nil)
+	_, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -313,7 +321,7 @@ func TestExecuteWebhookNoURL(t *testing.T) {
 		},
 	}
 
-	_, err := e.ExecuteTool(context.Background(), tool, nil)
+	_, err := e.ExecuteTool(agentCtxForTest(), tool, nil)
 	if err == nil {
 		t.Fatalf("expected error for empty URL")
 	}

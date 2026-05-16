@@ -26,3 +26,16 @@ prompt trainerAgent {
   partition         string  @required @description("Active partition -- new chunks land in this partition.")
   now               string  @required @description("RFC3339 wall-clock.")
 }
+
+@defaultProvider("strongReasoning")
+@templateFile("prompts/agentFactoryAnalyze.tmpl")
+@description("Structured-output prompt invoked by the General Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
+prompt agentFactoryAnalyze {
+  goal              string    @required @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
+  existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {domains, tools}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
+  roleCatalog       []object  @required @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedDomainIds, defaultDomainIds, lockedToolSlugs, defaultToolSlugs, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
+  domainCatalog     []object  @required @description("Compact snapshot of v1:common:knowledgeDomain rows -- [{id, name, category, scope}]. The factory references domain ids by their stable slug-style id.")
+  liveSourceCatalog []object            @description("Compact snapshot of v1:knowledge:liveSource rows -- [{id, name, sourceType, refreshIntervalMs}]. The factory references live-source ids when the role needs streams (inventory, market data, etc.).")
+  toolCatalog       []object  @required @description("Compact snapshot of registered tools -- [{name, description, allowedRoles}]. The factory must pick toolSlugs from this set. Tools whose allowedRoles excludes the chosen roleSlug cannot be selected.")
+  now               string    @required @description("RFC3339 wall-clock.")
+}

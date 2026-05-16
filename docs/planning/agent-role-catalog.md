@@ -1,10 +1,16 @@
 # Agent Role Catalog -- Phase 2 plan
 
-**Status:** Phase 1 shipped on `feature/role-and-knowledge-catalog`
-(catalog + concept + lock semantics). This doc covers Phase 2:
-GA-driven auto-creation, server-side lock enforcement, and the
-cockpit / CoPresent surfaces that consume the catalog. Deletes
-itself when Phase 2 ships, per the no-stale-docs convention.
+**Status:**
+- **Phase 1 shipped** on `feature/role-and-knowledge-catalog` (catalog
+  + concept + lock semantics).
+- **Phase 2 partial** on `feature/agent-factory` (tools-agent-only
+  enforcement, server-side lock validator, async `agent()` contract,
+  factory tool + structured-output prompt). The cockpit / CoPresent
+  UI for the locked-vs-default-vs-available split and the end-to-end
+  async dispatch of `agentInvocation` Plans are the remaining gaps.
+
+Deletes itself when Phase 2 ships in full, per the no-stale-docs
+convention.
 
 ---
 
@@ -72,9 +78,30 @@ agent for you -- they ship with `{N}` mandatory knowledge areas and
 `{M}` mandatory tools. Should I?" The user says yes / no / pick a
 different role.
 
-**Materialization:** on confirmation, a new `mutationCreateAgentFromRole`
-(forthcoming, lives in `dsl/agents/mutations.memql`) writes the
-`v1:agents:agent` row using the role catalog as the template:
+**Materialization (SHIPPED on `feature/agent-factory`):** the
+`ensureAgent` tool in `dsl/agents/tools/ensureAgent.memql`
+(allowed-roles=general_assistant) backs an `ensureAgentForGoal`
+builtin which calls into `integrations/agents.handleEnsureForGoal`.
+That handler:
+
+1. Loads existing agents via `queryActiveAgentsForUser` + the role
+   catalog via `queryActiveAgentRoles`.
+2. Runs the `agentFactoryAnalyze` structured-output prompt
+   (`dsl/agents/prompts/agentFactoryAnalyze.tmpl`) which returns
+   `{action: match|extend|create, targetAgentId?, roleSlug,
+   domainIds, liveSourceIds, toolSlugs, reasoning}`.
+3. Dispatches: `match` returns the existing id; `extend` unions
+   missing capabilities into the target and writes via
+   `mutationUpdateAgent`; `create` composes from role.locked +
+   role.default + analysis additions and writes via
+   `mutationCreateAgent`.
+
+The locked-set composition (no dedicated `mutationCreateAgentFromRole`)
+runs in the factory's Go executor rather than a procedural mutation;
+the GA reads the result and proceeds in the same tool-loop turn.
+
+The earlier design here described a separate `mutationCreateAgentFromRole`
+mutation -- collapsed into the factory tool's Go executor for simplicity:
 
 - `roleSlug` = `agentRole.slug`
 - `capabilities.domains` = union(`lockedDomainIds`, `defaultDomainIds`)
@@ -94,27 +121,63 @@ generalAssistant`, `lineage.extensionGoals = [the conversational
 need that triggered the create]`, so the Q10 layered dedupe path
 can see why it was minted.
 
-### 2. Server-side lock enforcement
+### 2. Server-side lock enforcement (SHIPPED)
 
-`mutationUpdateAgent` runs a new pre-insert validator that loads the
-agent's `agentRole` row by `roleSlug` and checks:
+`component/memql/agent_lock_validation.go` runs a pre-insert validator
+on every `v1:agents:agent` write. It loads the agent's `agentRole`
+row by `roleSlug` (via a direct bun query, with the latest-version
+fallback for partial updates) and checks:
 
 - Every id in `agentRole.lockedDomainIds` is present in the
-  proposed `capabilities.domains`. If one is missing, reject with a
-  typed error `LockedDomainRemoval{ slug, missing }`.
+  proposed `capabilities.domains`. Missing ids yield a typed error
+  listing the role, the lock kind, and the specific missing ids.
 - Every slug in `agentRole.lockedToolSlugs` is present in the
   proposed `capabilities.tools`. Same shape of error.
-- Every id in `agentRole.lockedLiveKnowledgeIds` is present in the
-  proposed live-knowledge attachments.
 
-The enforcement runs on every write path -- the cockpit edit modal,
-the CoPresent edit modal, the GA's `extendAgent` tool, mutations
-issued by automations. There is no "force override" flag at this
-layer: a locked id is locked. Adding new locked ids to the role
-catalog at seed time has the effect of growing every existing
+`lockedLiveKnowledgeIds` enforcement is reserved for the next pass
+(the live-knowledge surface lives in a sibling concept; the same
+pattern applies).
+
+The validator runs on every write path -- the cockpit edit modal,
+the CoPresent edit modal, the factory tool's `extend` path,
+mutations issued by automations. There is no "force override" flag
+at this layer: a locked id is locked. Adding new locked ids to the
+role catalog at seed time has the effect of growing every existing
 agent in that role on the NEXT mutation; we don't retroactively
 mutate-and-write, but we do reject any write that doesn't include
 the new locks.
+
+### 2b. Tools-are-agent-only universal enforcement (SHIPPED)
+
+`ExecuteTool` in `component/memql/tool_execution.go` now hard-rejects
+any caller without an acting-agent role on context. The check runs
+at the top of the entry point so client-execution and non-client
+paths are both covered. Non-agent surfaces (queries, mutations,
+integration capabilities) remain unrestricted; tools specifically
+require an agent caller. The webhook-tool tests stamp a placeholder
+acting-agent role to exercise the post-gate code path.
+
+### 2c. Async `agent()` builtin (SHIPPED)
+
+`dsl/agents/builtins.memql`'s `agent` builtin changed contract:
+`agent(name, prompt, spaceId) -> {planId, agent: {name, role,
+roleSlug}}`. Always async -- mints a `v1:planner:plan` with
+`kind=agentInvocation` in `queued` status via `mutationCreatePlan`
+and returns the planId. Callers subscribe to plan events or
+poll-query for completion.
+
+The PlannerAgentLoop in `integrations/planner/agent_loop.go` skips
+`kind=agentInvocation` Plans -- those are owned by the agents
+integration. **The end-to-end async-dispatch wiring is the last
+remaining piece**: the agents integration needs to subscribe to
+plan-created events for this kind, which requires widening
+`memql.PluginContext` to expose the `EventBus` (or a small
+dependency-injection adjustment in `app/`). Today an `agentInvocation`
+Plan is correctly minted but sits in `queued` until that wiring lands.
+
+For blocking AI calls from DSL, use `si("promptName", args)` -- the
+synchronous structured-output path. `agent()` is for agent-orchestrated
+work that runs through the planner.
 
 Concept-side: the `v1:common:knowledgeDomain.lockedForRoles` field
 is reserved for a domain-side inversion of the role catalog. If

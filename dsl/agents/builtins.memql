@@ -1,44 +1,83 @@
 // Builtins in the agents namespace. Today: one builtin (`agent`)
-// that invokes a DSL-registered agent and returns its reply
-// envelope. See dsl/_reference/_agent.memql for the agent primitive
-// itself and docs/planning/agents-dsl-primitive.md for the phased
-// implementation plan.
+// that asynchronously invokes a DSL-registered agent. See
+// dsl/_reference/_agent.memql for the agent primitive itself and
+// docs/planning/agents-dsl-primitive.md for the phased implementation
+// plan.
 
 // ---- builtin agent --------------------------------------------------
 //
-// Invoke a DSL-registered agent by name. The handler
-// (integrations/agents.invoke) resolves the name against the
-// AgentRegistry populated by LoadUnifiedAgents at engine startup,
-// runs the agent's reply turn, and returns the agent's envelope
-// (response text + citations + agent metadata).
+// Invoke a DSL-registered agent by name to do work. ALWAYS
+// asynchronous: the call creates a v1:planner:plan with
+// kind="agentInvocation", queues it, and returns the plan id
+// immediately. The planner's agent loop picks the Plan up async and
+// drives the agent's tool loop.
 //
 // Callable from any DSL context that supports builtin calls --
-// automations, logic functions, policies. Synchronous from the
-// caller's perspective.
+// automations, logic functions, policies. NEVER blocks.
+//
+// For blocking AI work from DSL, use `si("promptName", args)` --
+// that's the synchronous structured-output path. `agent()` is for
+// agent-orchestrated, tool-using, planner-tracked work; `si()` is
+// for one-shot LLM calls with no tools.
 //
 // Args:
-//   name         The agent's declaration name (e.g. "generalAssistant").
-//                Must match an entry in the AgentRegistry; the handler
-//                returns an error listing the registered names when no
-//                match is found.
-//   utterance    The user's text. Required.
-//   spaceContext Optional bag of space-scoped metadata (spaceId,
-//                participants, etc.) forwarded to the agent. Shape
-//                matches the cognition dispatch path; an empty object
-//                is a valid default for non-space invocations.
-//   history      Optional list of prior turns. Used by the agent's
-//                tool loop when constructing the LLM context.
+//   name     The agent's registry name (e.g. "generalAssistant" --
+//            typically the roleSlug). Must match an entry in the
+//            AgentRegistry; the handler returns an error listing
+//            registered names when no match is found.
+//   prompt   Free-form prompt describing what you want the agent
+//            to do. The agent's tool loop reads this as the user's
+//            instruction; references to entities (attachmentId,
+//            spaceId, etc.) are resolved by the agent's tools via
+//            queries.
+//   spaceId  Required by the planner -- the space the Plan lives in.
+//            Callers without a space context can pass the system
+//            placeholder (a future iteration may relax this).
 //
 // Returns one MemoryNode whose payload is
-//   { response: string, citations: []object, agent: {name, role, roleSlug, scope} }
+//   { planId: string, agent: {name, role, roleSlug} }
+// The caller can subscribe to graph.node.updated.*.v1:planner:plan
+// filtered by id==<planId>, or query the Plan later via
+// queryPlanById, to observe progress + read Plan.output on success.
 
 @enabled
 @executor("integration.agents.invoke")
 @args(profile="object")
-@description("Invoke a DSL-registered agent by name. Returns {response, citations} envelope. See integrations/agents/ for the handler.")
+@description("Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan (kind=agentInvocation) and returns its id. Use si() for blocking LLM calls; agent() is for agent-orchestrated work that runs through the planner.")
 builtin agent {
-  name          string    @required
-  utterance     string    @required
-  spaceContext  object
-  history       []object
+  name     string    @required
+  prompt   string    @required
+  spaceId  string    @required
+}
+
+// ---- builtin ensureAgentForGoal --------------------------------------
+//
+// Factory builtin invoked by the General Assistant's `ensureAgent`
+// tool (dsl/agents/tools/ensureAgent.memql). Resolves a free-form
+// goal into an agent ready to handle it:
+//
+//   - Analyzes the goal via the agentFactoryAnalyze structured-output
+//     prompt against the role catalog + the user's existing agents.
+//   - action="match": returns the existing agent id verbatim.
+//   - action="extend": unions missing locked/relevant domains + tools
+//     onto an existing same-role agent via mutationUpdateAgent, then
+//     returns its id.
+//   - action="create": composes capabilities from the chosen role's
+//     locked + default + analysis-supplied sets and writes a new
+//     v1:agents:agent row via mutationCreateAgent.
+//
+// Returns one MemoryNode whose payload is
+//   { agentId, agentName, roleSlug, action, reasoning }.
+// Synchronous from the caller's perspective -- the factory completes
+// the write before returning so the GA can immediately invoke the
+// resulting agent via `agent("name", "prompt", spaceId)`.
+
+@enabled
+@executor("integration.agents.ensureForGoal")
+@args(profile="object")
+@description("Match-extend-or-create an agent that can handle the given goal. Reads the role + domain + tool catalogs, runs agentFactoryAnalyze, issues the appropriate write, and returns {agentId, action, reasoning}.")
+builtin ensureAgentForGoal {
+  goal         string    @required
+  ownerUserId  string    @required
+  spaceId      string
 }
