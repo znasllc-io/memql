@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/visionarys-io/memql/app"
+	"github.com/visionarys-io/memql/component/genesis"
 	"github.com/visionarys-io/memql/component/server"
 	"github.com/visionarys-io/memql/component/service"
 	"github.com/visionarys-io/memql/core/common"
@@ -34,6 +35,18 @@ var (
 
 func main() {
 	serviceLogger := mustCreateServiceLogger()
+
+	// Layer repo-root /.env on top of whatever the host shell + genesis
+	// envelope already painted into the process environment. Local
+	// dev relies on this to flip knobs (verbose observability, debug
+	// flags, ...) without re-sealing the envelope; production simply
+	// has no .env file and the call is a no-op.
+	if overridden, err := genesis.ApplyLocalOverride("."); err != nil {
+		serviceLogger.Warn("local .env override failed -- continuing with envelope values", "err", err)
+	} else if len(overridden) > 0 {
+		serviceLogger.Info("local .env override applied", "vars", overridden)
+	}
+
 	version := resolveVersionFn()
 
 	application := app.Build(serviceLogger, version, app.Overrides{

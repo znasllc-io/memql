@@ -5,7 +5,10 @@ import (
 	conceptSeeder "github.com/visionarys-io/memql/component/database/memory-nodes/seeder"
 	"github.com/visionarys-io/memql/component/memql"
 	"github.com/visionarys-io/memql/component/node"
+	"github.com/visionarys-io/memql/component/observe"
 	"github.com/visionarys-io/memql/component/server"
+
+	"github.com/uptrace/bun"
 )
 
 // databaseAndConcepts creates the database, loads and validates concepts,
@@ -54,4 +57,17 @@ func (a *App) databaseAndConcepts() {
 	if conceptSeedDep != nil {
 		a.Dependencies = append(a.Dependencies, conceptSeedDep)
 	}
+
+	// Observe runtime: wire the TimescaleDB sink so instrumentation
+	// calls via component/observe land in the code_invocation
+	// hypertable. Closure captures a.db; resolution is lazy at Start
+	// time so the sink doesn't depend on a particular db init order.
+	provider := func() *bun.DB {
+		if a.db == nil {
+			return nil
+		}
+		return a.db.BunDB()
+	}
+	observeSink := observe.NewSinkComponent(a.Logger, provider, observe.TimescaleSinkOptions{Logger: a.Logger}, 0)
+	a.Dependencies = append(a.Dependencies, observeSink)
 }

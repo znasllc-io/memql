@@ -56,6 +56,9 @@ memQL/
 │   ├── config/        Centralized env var loading (Go)
 │   ├── node/          Distributed node system (identity, peer mesh, bootstrap)
 │   ├── memql/dslfs/   MEMQL_DSL_PATH on-disk override / embedded FS picker
+│   ├── architecture/  Auto-generated architecture model (UML/C4 from source)
+│   ├── observe/       Per-invocation observability runtime (FQN-keyed)
+│   ├── genesis/       Sealed env envelope + repo-root .env override (localenv.go)
 │   └── ...            (memql, grpc, events, database, server, auth, etc.)
 ├── core/              Shared utilities (logger, env, id)
 ├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate, admin-preview)
@@ -105,6 +108,7 @@ memQL/
 
 **Operations:**
 - [Environment variables](docs/guides/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
+- [Auto-generated architecture diagrams](docs/architecture/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/genesis/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
 
 **Core concepts:**
 - [Architecture](docs/core/arch.md)
@@ -1433,9 +1437,16 @@ Platform-level metadata (dsl/v1/concepts/v1/platform/)
 ### Cluster Concepts
 Distributed node system metadata (dsl/v1/concepts/v1/cluster/)
 - `v1:cluster:node` -- Registered node in the cluster
-- `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner)
+- `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner). Optional `codeReference` field links this row to its architecture-model service id (consumed by the cockpit's Topology drill-down).
 - `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions (legacy name)
 - `v1:cluster:cluster`, `v1:cluster:database`, `v1:cluster:identityProvider` -- topology bookkeeping
+
+### Observability Concepts
+Runtime side of the architecture framework (dsl/observability/, all `@scope("global")`).
+See [docs/architecture/auto-generated-diagrams.md](docs/architecture/auto-generated-diagrams.md) for the full design.
+- `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
+- `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
+- `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
 
 ### Identity Concepts
 Auth + access metadata (dsl/v1/concepts/v1/identity/, all `@scope("global")`)
