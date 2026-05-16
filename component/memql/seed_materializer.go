@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"unicode"
 
@@ -74,40 +76,68 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 
 	logger := m.engine.Logger
 
+	allSeeds := m.registry.All()
+	perUser := m.registry.PerUser()
+	globalCount := len(allSeeds) - len(perUser)
+
+	if logger != nil {
+		logger.Info("seed materializer: startup sweep starting",
+			"totalSeeds", len(allSeeds),
+			"globalSeeds", globalCount,
+			"perUserSeeds", len(perUser),
+			"perUserNames", seedNames(perUser))
+	}
+
 	// Global seeds first -- they don't depend on user state.
-	for _, def := range m.registry.All() {
+	for _, def := range allSeeds {
 		if def.Scope != "global" {
 			continue
 		}
 		if err := m.materializeGlobal(ctx, def); err != nil {
 			if logger != nil {
-				logger.Warn("seed materializer: global materialization failed",
+				logger.Error("seed materializer: global materialization failed",
 					"seed", def.Name, "concept", def.UseConcept, "error", err)
 			}
 			continue
 		}
+		if logger != nil {
+			logger.Info("seed materializer: global row written",
+				"seed", def.Name, "concept", def.UseConcept)
+		}
 	}
 
 	// Per-user seeds: walk the existing user list and materialize each.
-	perUser := m.registry.PerUser()
 	if len(perUser) > 0 {
 		users, err := m.listUserIds(ctx)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("seed materializer: failed to list users for startup sweep",
+				logger.Error("seed materializer: failed to list users for startup sweep",
 					"error", err)
 			}
 		} else {
+			if logger != nil {
+				logger.Info("seed materializer: per-user sweep",
+					"userCount", len(users),
+					"perUserSeedCount", len(perUser),
+					"rowsToWrite", len(users)*len(perUser))
+			}
+			rowsWritten := 0
 			for _, userId := range users {
 				for _, def := range perUser {
 					if err := m.materializePerUser(ctx, def, userId); err != nil {
 						if logger != nil {
-							logger.Warn("seed materializer: per-user materialization failed",
+							logger.Error("seed materializer: per-user materialization failed",
 								"seed", def.Name, "userId", userId, "error", err)
 						}
 						continue
 					}
+					rowsWritten++
 				}
+			}
+			if logger != nil {
+				logger.Info("seed materializer: per-user sweep complete",
+					"rowsWritten", rowsWritten,
+					"expected", len(users)*len(perUser))
 			}
 		}
 	}
@@ -197,33 +227,122 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 
 // invokeCreateMutation builds the canonical `mutationCreate<Concept>`
 // invocation string and dispatches it through the engine.
+//
+// MemQL mutation calls accept object-literal args with BARE identifier
+// keys (`{key: value, ...}`), not JSON-style quoted keys. Earlier
+// versions of this code passed a raw json.Marshal output and the
+// mutation parser silently rejected the call -- the materializer
+// looked like it ran but no rows landed. renderArgsObject below emits
+// the bare-key form recursively (nested objects, string arrays, etc.).
 func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName string, args map[string]any) error {
 	mutationName := "mutationCreate" + ucFirst(conceptName)
-	argsJSON, err := json.Marshal(args)
+	rendered, err := renderArgsObject(args)
 	if err != nil {
-		return fmt.Errorf("marshal args: %w", err)
+		return fmt.Errorf("render args: %w", err)
 	}
-	query := fmt.Sprintf("%s(%s)", mutationName, string(argsJSON))
+	query := fmt.Sprintf("%s(%s)", mutationName, rendered)
 	if _, err := m.engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("%s: %w", mutationName, err)
 	}
 	return nil
 }
 
-// listUserIds runs queryAllUsers (or its equivalent) to enumerate
-// existing v1:identity:user rows. Returns just the ids -- the
-// materializer doesn't need any other fields.
+// renderArgsObject emits a MemQL object literal with bare identifier
+// keys: `{name: "Sofia", capabilities: {avatar: true, tools: ["uiClick"]}}`.
+// Recurses into nested maps and arrays so the seed body's nested
+// blocks (capabilities, providerConfig, triggerBehavior) round-trip
+// cleanly through the mutation arg parser.
 //
-// Per memql/CLAUDE.md the user concept lives at v1:identity:user
-// (global scope); a generic concept-level query gets us the ids
-// without depending on a product-layer query name.
-func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	// `node(concept=="v1:identity:user")` returns every user row
-	// (engine auto-filters to latest version per id). The shape is
-	// raw row payloads; we just need the row ids.
-	result, err := m.engine.Execute(ctx, `node(concept=="v1:identity:user")`)
+// Keys are emitted in sorted order so failure-mode logs are stable
+// across runs (helpful when diffing a failed materialization).
+func renderArgsObject(args map[string]any) (string, error) {
+	var b strings.Builder
+	b.WriteByte('{')
+
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		if err := renderArgsValue(&b, args[k]); err != nil {
+			return "", fmt.Errorf("field %q: %w", k, err)
+		}
+	}
+	b.WriteByte('}')
+	return b.String(), nil
+}
+
+// renderArgsValue emits one value in MemQL-compatible literal syntax.
+// Scalars (string, int, float, bool) use JSON literal form -- MemQL
+// accepts the same shapes. Maps recurse via renderArgsObject. Arrays
+// emit `[v1, v2, ...]` with each element re-rendered.
+func renderArgsValue(b *strings.Builder, v any) error {
+	switch val := v.(type) {
+	case nil:
+		b.WriteString("null")
+		return nil
+	case map[string]any:
+		s, err := renderArgsObject(val)
+		if err != nil {
+			return err
+		}
+		b.WriteString(s)
+		return nil
+	case []any:
+		b.WriteByte('[')
+		for i, item := range val {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			if err := renderArgsValue(b, item); err != nil {
+				return fmt.Errorf("array[%d]: %w", i, err)
+			}
+		}
+		b.WriteByte(']')
+		return nil
+	}
+	// Scalars: lean on encoding/json for safe quoting + numeric
+	// formatting. MemQL accepts the same literal shapes for
+	// strings ("..."), numbers, and bools.
+	scalar, err := json.Marshal(v)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("marshal scalar: %w", err)
+	}
+	b.Write(scalar)
+	return nil
+}
+
+// seedNames extracts the Name field from a slice of seed defs for
+// log enumeration.
+func seedNames(defs []*SeedDefinition) []string {
+	out := make([]string, 0, len(defs))
+	for _, d := range defs {
+		if d != nil {
+			out = append(out, d.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// listUserIds enumerates existing v1:identity:user rows via the
+// canonical `queryActiveUsers` query (dsl/identity/queries.memql).
+// Using the named query (instead of a raw `node(concept==...)` call)
+// goes through the same path every other reader uses, with proper
+// shape resolution, global-scope handling, and trait filtering --
+// we only materialize per-user agents for active users, not
+// soft-deleted ones.
+func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
+	result, err := m.engine.Execute(ctx, `queryActiveUsers({})`)
+	if err != nil {
+		return nil, fmt.Errorf("queryActiveUsers: %w", err)
 	}
 	return extractRowIds(result), nil
 }
