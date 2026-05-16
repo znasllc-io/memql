@@ -137,6 +137,18 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 		)
 	}
 
+	// Materialization complete -- now refresh the AgentRegistry from
+	// the rows we just wrote (plus any user-created agents already
+	// in the DB). The materialized rows are the canonical source of
+	// truth; the registry is the in-memory cache the agent("name")
+	// builtin reads from.
+	if agentReg := m.engine.Agents(); agentReg != nil {
+		if _, err := agentReg.LoadFromRows(ctx, m.engine, logger); err != nil && logger != nil {
+			logger.Warn("seed materializer: AgentRegistry load failed",
+				"error", err)
+		}
+	}
+
 	m.started = true
 	if logger != nil {
 		logger.Info("seed materializer: startup sweep complete",
