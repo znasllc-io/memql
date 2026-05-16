@@ -1,0 +1,25 @@
+// roles/transportation.memql
+//
+// Transportation role seeds. Currently a single Tier-C aviation
+// educator -- expanded as marine / commercial-driving / rail roles
+// land.
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level.")
+seed commercial_pilot_educator {
+  id:                    "commercial_pilot_educator"
+  slug:                  "commercial_pilot_educator"
+  name:                  "Commercial Pilot Educator"
+  description:           "Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level."
+  category:              "transportation"
+  tier:                  "C"
+  lockedDomainIds:       ["aviation_fundamentals"]
+  defaultDomainIds:      ["aviation_weather", "instrument_flying", "aircraft_systems", "aviation_regulations"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  systemPromptHints:     "Educational only. Never substitute for FAA-approved training or a CFI; always refer the pilot to their flight instructor and the current FARs."
+  predefined:            true
+}
