@@ -41,14 +41,17 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 		t.Logf("builtins: %d", n)
 	}
 
-	// Agents -- no agent files in the tree yet (Phase 5 adds the
-	// generalAssistant declaration), so 0 is the expected count
-	// today. The smoke value is "loader runs without error against
-	// the live tree."
-	agentReg := NewAgentRegistry()
-	if n, err := LoadUnifiedAgents(logger, agentReg, toolReg); err != nil {
-		t.Fatalf("LoadUnifiedAgents: %v", err)
+	// Seeds -- the seed migration replaced `agent X { }` DSL
+	// declarations with `seed X { }`. The smoke value is "loader
+	// runs without error against the live tree."
+	seedReg := NewSeedRegistry()
+	if n, err := LoadUnifiedSeeds(logger, seedReg); err != nil {
+		t.Fatalf("LoadUnifiedSeeds: %v", err)
 	} else {
-		t.Logf("agents: %d", n)
+		t.Logf("seeds: %d", n)
 	}
+
+	// Force-reference toolReg so the legacy import that used to
+	// hand it to LoadUnifiedAgents doesn't become unused.
+	_ = toolReg
 }
