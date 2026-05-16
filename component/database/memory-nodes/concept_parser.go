@@ -103,7 +103,6 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Description:   parsed.description,
 		Scope:         parsed.scope,
 		Version:       parsed.version,
-		Visibility:    parsed.visibility,
 		Relationships: parsed.relationships,
 	}, nil
 }
@@ -116,7 +115,6 @@ type parsedConcept struct {
 	conceptType string
 	scope       string // "" (partition, default) or "global"
 	version     string // @version("vN") override; empty means derived from path
-	visibility  ConceptVisibility
 	properties  []parsedProperty
 	required        []string
 	relationships   []RelationshipDefinition
@@ -282,14 +280,11 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		default:
 			return fmt.Errorf("@scope must be \"partition\" or \"global\", got %q", scope)
 		}
-	case "visibility":
-		// @visibility controls which node types load this concept.
-		// Three modes:
-		//   @visibility("*")                -> all node types (wildcard)
-		//   @visibility("cognition", "bff") -> only these types (include list)
-		//   @visibility(!"planner")         -> all except these (exclude list)
-		// No annotation = concept not visible to any node (opt-in).
-		c.visibility = parseVisibilityAnnotation(attr)
+	// @visibility was removed in the genesis simplification. Every
+	// binary now loads every concept; functional specialization
+	// happens at the build-tag layer (which integrations are active),
+	// not the DSL layer. The parser no longer recognizes @visibility;
+	// the strip-from-files migration removed it from every .memql.
 	case "version":
 		// @version("MAJOR.MINOR.PATCH") -- strict semver. Only the
 		// major segment flows into the concept ID prefix
@@ -324,46 +319,6 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}
 	return nil
-}
-
-// parseVisibilityAnnotation extracts a ConceptVisibility from an
-// @visibility annotation attribute. Supports:
-//   @visibility("*")                -> Wildcard
-//   @visibility("cognition", "bff") -> Include list
-//   @visibility(!"planner")         -> Exclude list (values prefixed with !)
-func parseVisibilityAnnotation(attr *parser.Attribute) ConceptVisibility {
-	if attr == nil || attr.Value == nil {
-		return ConceptVisibility{}
-	}
-
-	switch v := attr.Value.(type) {
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "*" {
-			return ConceptVisibility{Wildcard: true}
-		}
-		if strings.HasPrefix(trimmed, "!") {
-			return ConceptVisibility{Exclude: []string{strings.TrimPrefix(trimmed, "!")}}
-		}
-		return ConceptVisibility{Include: []string{trimmed}}
-	case []string:
-		// Check if all values are exclude (bang-prefixed).
-		var includes, excludes []string
-		for _, s := range v {
-			trimmed := strings.TrimSpace(s)
-			if strings.HasPrefix(trimmed, "!") {
-				excludes = append(excludes, strings.TrimPrefix(trimmed, "!"))
-			} else {
-				includes = append(includes, trimmed)
-			}
-		}
-		if len(excludes) > 0 {
-			return ConceptVisibility{Exclude: excludes}
-		}
-		return ConceptVisibility{Include: includes}
-	}
-
-	return ConceptVisibility{}
 }
 
 // applyPropertyAttribute folds an @annotation into the property

@@ -69,13 +69,12 @@ type seedMemQLParser struct {
 // it against the bound concept's schema.
 type seedDecl struct {
 	// Annotation values
-	name         string   // declaration name (the `seed XXX` identifier)
-	description  string   // @description value
-	namespace    string   // @namespace value
-	version      string   // @version value
-	scope        string   // @scope value: "global" | "perUser" (empty => default policy applied by loader)
-	visibility   []string // @visibility values
-	templateFile string   // @templateFile path (optional; e.g. systemPrompt source for agent seeds)
+	name         string // declaration name (the `seed XXX` identifier)
+	description  string // @description value
+	namespace    string // @namespace value
+	version      string // @version value
+	scope        string // @scope value: "global" | "perUser" (empty => default policy applied by loader)
+	templateFile string // @templateFile path (optional; e.g. systemPrompt source for agent seeds)
 
 	// Use clause -- binds the file's target concept by namespace.concept name.
 	// Loader resolves this to the canonical concept id (e.g. v1:agents:agent).
@@ -260,14 +259,6 @@ func (p *seedMemQLParser) parseDecorator(decl *seedDecl) error {
 		}
 		return nil
 
-	case "visibility":
-		vals, err := p.parseParenStringList()
-		if err != nil {
-			return err
-		}
-		decl.visibility = vals
-		return nil
-
 	case "templateFile":
 		val, err := p.ParseParenString()
 		if err != nil {
@@ -277,7 +268,7 @@ func (p *seedMemQLParser) parseDecorator(decl *seedDecl) error {
 		return nil
 
 	default:
-		return fmt.Errorf("unknown seed annotation @%s (allowed: @version, @namespace, @scope, @visibility, @description, @templateFile, @enabled, @disabled)", name)
+		return fmt.Errorf("unknown seed annotation @%s (allowed: @version, @namespace, @scope, @description, @templateFile, @enabled, @disabled)", name)
 	}
 }
 

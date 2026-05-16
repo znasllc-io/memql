@@ -5,7 +5,6 @@
 
 @version("1.0.0")
 @namespace("memql")
-@visibility("*")
 @description("Automation execution checkpoints for failure recovery and audit history.")
 concept checkpoint {
   automationFingerprint  string  @description("Content-addressed hash of the automation definition for change detection.")

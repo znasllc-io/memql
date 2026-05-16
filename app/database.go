@@ -4,7 +4,6 @@ import (
 	memoryNodesDatabase "github.com/visionarys-io/memql/component/database/memory-nodes"
 	conceptSeeder "github.com/visionarys-io/memql/component/database/memory-nodes/seeder"
 	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/node"
 	"github.com/visionarys-io/memql/component/observe"
 	"github.com/visionarys-io/memql/component/server"
 
@@ -20,7 +19,7 @@ func (a *App) databaseAndConcepts() {
 	}
 	a.db = mnd
 
-	if err := memoryNodesDatabase.LoadConcepts(a.Logger, string(node.CompiledNodeType())); err != nil {
+	if err := memoryNodesDatabase.LoadConcepts(a.Logger); err != nil {
 		a.fatal("failed to load memory node concepts", "error", err)
 	}
 
@@ -30,19 +29,13 @@ func (a *App) databaseAndConcepts() {
 	// both loaders run; their concept IDs assemble identically so
 	// the duplicate registration is a no-op. When the legacy tree
 	// is retired (Pass 3), the LoadConcepts call above goes away.
-	if _, err := memql.LoadUnifiedConcepts(a.Logger, string(node.CompiledNodeType())); err != nil {
+	if _, err := memql.LoadUnifiedConcepts(a.Logger); err != nil {
 		a.Logger.Warn("unified concept loader returned diagnostics; legacy loader covers the gap",
 			"component", "app.database",
 			"error", err)
 	}
 
 	a.registry = memoryNodesDatabase.DefaultRegistry()
-
-	// Note: concept constants validation (ValidateConceptConstants) is
-	// skipped. With @visibility filtering, the registry intentionally
-	// contains a subset of all concepts — missing concepts are expected,
-	// not drift. The concepts are embedded in the binary and can't
-	// diverge from constants at runtime.
 
 	server.RegisterConceptsEndpoint(a.mux, a.registry)
 
