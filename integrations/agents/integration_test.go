@@ -81,7 +81,7 @@ func TestHandleInvoke_ResolvedAgent_ReturnsEnvelope(t *testing.T) {
 		Name:     "alpha",
 		Role:     "general_assistant",
 		RoleSlug: "general_assistant",
-		Scope:    memql.AgentScopePerUser,
+		Scope:    "perUser",
 	}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
