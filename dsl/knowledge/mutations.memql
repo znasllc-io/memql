@@ -206,6 +206,7 @@ mutation mutationCreateKnowledgeDomain {
     description          string
     category             string
     relevantForRoles     array
+    lockedForRoles       array
     requiredByToolSlugs  array
     active               bool
     scope                string
@@ -223,6 +224,7 @@ mutation mutationCreateKnowledgeDomain {
     args.description
     category: coalesce(args.category, "business")
     relevantForRoles: coalesce(args.relevantForRoles, [])
+    lockedForRoles: coalesce(args.lockedForRoles, [])
     requiredByToolSlugs: coalesce(args.requiredByToolSlugs, [])
     active: coalesce(args.active, true)
     scope: coalesce(args.scope, "workspace")

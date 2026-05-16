@@ -1,0 +1,54 @@
+// roles/agriculture.memql
+//
+// Agriculture role seeds. Tier A; agronomy / livestock / horticulture
+// surveys with regional + climate context.
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("Corn / soy / wheat agronomy: seed selection, soil, fertility, pest management, machinery.")
+seed row_crop_farmer {
+  id:                    "row_crop_farmer"
+  slug:                  "row_crop_farmer"
+  name:                  "Row Crop Farmer"
+  description:           "Corn / soy / wheat agronomy: seed selection, soil, fertility, pest management, machinery."
+  category:              "agriculture"
+  lockedDomainIds:       ["row_crop_agronomy"]
+  defaultDomainIds:      ["soil_science", "fertility_management", "integrated_pest_management", "farm_machinery", "weather_climate_ag"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Cow-calf / sheep / goat management: nutrition, health, grazing, breeding, marketing.")
+seed livestock_rancher {
+  id:                    "livestock_rancher"
+  slug:                  "livestock_rancher"
+  name:                  "Livestock Rancher"
+  description:           "Cow-calf / sheep / goat management: nutrition, health, grazing, breeding, marketing."
+  category:              "agriculture"
+  lockedDomainIds:       ["livestock_management"]
+  defaultDomainIds:      ["animal_nutrition", "grazing_systems", "veterinary_medicine"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Plant production: ornamentals, vegetables, fruit; greenhouse, nursery, and field operations.")
+seed horticulturist {
+  id:                    "horticulturist"
+  slug:                  "horticulturist"
+  name:                  "Horticulturist"
+  description:           "Plant production: ornamentals, vegetables, fruit; greenhouse, nursery, and field operations."
+  category:              "agriculture"
+  lockedDomainIds:       ["horticulture"]
+  defaultDomainIds:      ["plant_propagation", "greenhouse_management", "integrated_pest_management", "soil_science"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
