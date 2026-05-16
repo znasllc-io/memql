@@ -42,13 +42,34 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	}
 
 	// Seeds -- the seed migration replaced `agent X { }` DSL
-	// declarations with `seed X { }`. The smoke value is "loader
-	// runs without error against the live tree."
+	// declarations with `seed X { }`. Assert non-zero rather than
+	// log-only: a regression in the loader's file-top `use` clause
+	// handling silently drops every seed (the role catalog under
+	// dsl/agents/roles/ packs many seeds per file sharing one use,
+	// and skipping the clause-injection step is exactly what made
+	// the cockpit's Agents tab empty in the field). The count is
+	// the platform agents (GA + Planner + Trainer) + the role
+	// catalog. A precise count would churn -- "at least a dozen"
+	// is the floor and the only thing we need to guard against.
 	seedReg := NewSeedRegistry()
-	if n, err := LoadUnifiedSeeds(logger, seedReg); err != nil {
+	n, err := LoadUnifiedSeeds(logger, seedReg)
+	if err != nil {
 		t.Fatalf("LoadUnifiedSeeds: %v", err)
-	} else {
-		t.Logf("seeds: %d", n)
+	}
+	t.Logf("seeds: %d", n)
+	if n < 12 {
+		t.Errorf("seed loader registered %d seeds, expected >= 12 (3 platform agents + role catalog). "+
+			"A regression here usually means the file-top `use <ns>.<concept>` clause is being "+
+			"dropped from per-seed slices -- see LoadUnifiedSeeds + fileTopUseClauseRe.", n)
+	}
+
+	// At least one of the platform agent seeds must be present so
+	// the seed migration's contract (per-user GA / Planner /
+	// Trainer rows materialize at startup) doesn't silently break.
+	for _, name := range []string{"generalAssistant", "plannerAgent", "trainerAgent"} {
+		if _, ok := seedReg.Get(name); !ok {
+			t.Errorf("seed registry missing platform seed %q", name)
+		}
 	}
 
 	// Force-reference toolReg so the legacy import that used to

@@ -177,9 +177,14 @@ func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, l
 		return 0, fmt.Errorf("engine is nil")
 	}
 
-	result, err := engine.Execute(ctx, `node(concept=="v1:agents:agent")`)
+	// Use the canonical queryAllAgents (dsl/agents/queries.memql).
+	// The raw `node(concept==...)` shorthand isn't valid query
+	// syntax -- node() requires a JSON object argument. Going
+	// through the named query also gets shape resolution + trait
+	// filtering for free.
+	result, err := engine.Execute(ctx, `queryAllAgents({})`)
 	if err != nil {
-		return 0, fmt.Errorf("query v1:agents:agent rows: %w", err)
+		return 0, fmt.Errorf("queryAllAgents: %w", err)
 	}
 
 	rows := extractRowList(result)
