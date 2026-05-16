@@ -269,6 +269,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			"component", "memql.engine", "error", slErr)
 	}
 	e.seeds = seedRegistry
+	e.seedMaterializer = NewSeedMaterializer(e, e.seeds)
 
 	// Wire concept-storage resolvers BEFORE loading providers so a
 	// provider's auth.apiKey="${MEMQL_SI_OPENAI_API_KEY}" picks up the
