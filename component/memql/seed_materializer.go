@@ -9,8 +9,31 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/visionarys-io/memql/component/auth"
 	"github.com/visionarys-io/memql/component/events"
 )
+
+// seedMaterializerActor is the synthetic actor every materializer
+// mutation runs as. Mutations require an actor (for createdBy
+// stamping); the materializer runs from a Go startup goroutine with
+// no auth context, so we mint one here. The `system:` prefix flips
+// isSystemActor() true downstream so any validators that gate writes
+// on "must be a system actor" let the seed-materializer through.
+const seedMaterializerActor = "system:seedMaterializer"
+
+// systemActorContext wraps ctx with a TokenInfo for the seed
+// materializer's synthetic system actor. Every Execute call the
+// materializer makes goes through this so mutations see a non-empty
+// actor and don't fail with "no actor found in context".
+func systemActorContext(ctx context.Context) context.Context {
+	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+		Subject: seedMaterializerActor,
+		Claims: map[string]any{
+			"sub":  seedMaterializerActor,
+			"role": "system",
+		},
+	})
+}
 
 // SeedMaterializer turns parsed seed declarations into materialized
 // concept rows. Two trigger paths:
@@ -171,9 +194,11 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 	// the rows we just wrote (plus any user-created agents already
 	// in the DB). The materialized rows are the canonical source of
 	// truth; the registry is the in-memory cache the agent("name")
-	// builtin reads from.
+	// builtin reads from. Pass the system-actor ctx so the
+	// underlying queryAllAgents call doesn't fail on the empty
+	// actor.
 	if agentReg := m.engine.Agents(); agentReg != nil {
-		if _, err := agentReg.LoadFromRows(ctx, m.engine, logger); err != nil && logger != nil {
+		if _, err := agentReg.LoadFromRows(systemActorContext(ctx), m.engine, logger); err != nil && logger != nil {
 			logger.Warn("seed materializer: AgentRegistry load failed",
 				"error", err)
 		}
@@ -234,6 +259,11 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 // mutation parser silently rejected the call -- the materializer
 // looked like it ran but no rows landed. renderArgsObject below emits
 // the bare-key form recursively (nested objects, string arrays, etc.).
+//
+// The ctx gets wrapped in systemActorContext before Execute so the
+// mutation's createdBy stamp resolves to the synthetic
+// system:seedMaterializer actor instead of failing with "no actor
+// found in context".
 func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName string, args map[string]any) error {
 	mutationName := "mutationCreate" + ucFirst(conceptName)
 	rendered, err := renderArgsObject(args)
@@ -241,7 +271,7 @@ func (m *SeedMaterializer) invokeCreateMutation(ctx context.Context, conceptName
 		return fmt.Errorf("render args: %w", err)
 	}
 	query := fmt.Sprintf("%s(%s)", mutationName, rendered)
-	if _, err := m.engine.Execute(ctx, query); err != nil {
+	if _, err := m.engine.Execute(systemActorContext(ctx), query); err != nil {
 		return fmt.Errorf("%s: %w", mutationName, err)
 	}
 	return nil
@@ -339,8 +369,13 @@ func seedNames(defs []*SeedDefinition) []string {
 // shape resolution, global-scope handling, and trait filtering --
 // we only materialize per-user agents for active users, not
 // soft-deleted ones.
+//
+// systemActorContext is required because queryActiveUsers's
+// underlying executor stamps an actor on the request envelope; an
+// empty actor produces a "no actor found in context" failure even
+// for read paths that touch global concepts.
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	result, err := m.engine.Execute(ctx, `queryActiveUsers({})`)
+	result, err := m.engine.Execute(systemActorContext(ctx), `queryActiveUsers({})`)
 	if err != nil {
 		return nil, fmt.Errorf("queryActiveUsers: %w", err)
 	}
