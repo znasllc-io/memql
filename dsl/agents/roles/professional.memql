@@ -1,0 +1,388 @@
+// roles/professional.memql
+//
+// Professional (white-collar business) role seeds. One v1:agents:agentRole
+// catalog row per `seed`. Materialized by the SeedMaterializer at engine
+// startup; idempotent. predefined=true marks each row as locked in the
+// catalog manager UI.
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate.")
+seed general_assistant {
+  id:                    "general_assistant"
+  slug:                  "general_assistant"
+  name:                  "General Assistant"
+  description:           "The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate."
+  category:              "professional"
+  tier:                  "A"
+  lockedDomainIds:       ["copresent_ui", "copresent_conversation", "computer_use"]
+  defaultDomainIds:      ["strategic_planning", "stakeholder_communications", "technical_documentation"]
+  lockedToolSlugs:       ["respondToUser"]
+  defaultToolSlugs:      ["uiClick", "uiNarrate", "uiDescribe", "uiAskUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the corporate level.")
+seed accounting_finance {
+  id:                    "accounting_finance"
+  slug:                  "accounting_finance"
+  name:                  "Accounting & Finance"
+  description:           "Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the corporate level."
+  category:              "professional"
+  tier:                  "B"
+  lockedDomainIds:       ["accounting_principles", "financial_data"]
+  defaultDomainIds:      ["tax_regulations", "budgeting_forecasting", "payroll_benefits", "contracts_agreements"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  systemPromptHints:     "Provide general accounting and finance information. For tax advice specific to a person's situation, recommend a CPA or licensed tax professional."
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Recruiting, onboarding, employee relations, benefits administration, and organizational design.")
+seed human_resources {
+  id:                    "human_resources"
+  slug:                  "human_resources"
+  name:                  "Human Resources"
+  description:           "Recruiting, onboarding, employee relations, benefits administration, and organizational design."
+  category:              "professional"
+  tier:                  "B"
+  lockedDomainIds:       ["employee_records", "talent_acquisition"]
+  defaultDomainIds:      ["labor_law", "training_development", "organizational_design", "payroll_benefits", "performance_assessment"]
+  lockedToolSlugs:       ["respondToUser"]
+  defaultToolSlugs:      ["email.send"]
+  recommendedPolicySlug: "balancedChat"
+  systemPromptHints:     "Provide general HR guidance. For employment-law questions specific to a jurisdiction or case, recommend a labor lawyer."
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Customer-facing support: ticket triage, account questions, SLA tracking, and escalation paths.")
+seed customer_service {
+  id:                    "customer_service"
+  slug:                  "customer_service"
+  name:                  "Customer Service"
+  description:           "Customer-facing support: ticket triage, account questions, SLA tracking, and escalation paths."
+  category:              "professional"
+  lockedDomainIds:       ["customer_relations", "service_level_agreements"]
+  defaultDomainIds:      ["product_catalog", "ticket_management", "quality_metrics", "sales_pipeline", "training_development"]
+  lockedToolSlugs:       ["respondToUser"]
+  defaultToolSlugs:      ["email.send"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Defect tracking, inspection workflows, compliance audits, and process-improvement metrics.")
+seed quality_assurance {
+  id:                    "quality_assurance"
+  slug:                  "quality_assurance"
+  name:                  "Quality Assurance"
+  description:           "Defect tracking, inspection workflows, compliance audits, and process-improvement metrics."
+  category:              "professional"
+  lockedDomainIds:       ["quality_metrics"]
+  defaultDomainIds:      ["product_catalog", "process_optimization", "technical_documentation", "regulatory_compliance", "service_level_agreements", "data_analysis", "research_methodology"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Pipeline management, lead generation, campaign analytics, and brand positioning.")
+seed sales_marketing {
+  id:                    "sales_marketing"
+  slug:                  "sales_marketing"
+  name:                  "Sales & Marketing"
+  description:           "Pipeline management, lead generation, campaign analytics, and brand positioning."
+  category:              "professional"
+  lockedDomainIds:       ["sales_pipeline", "customer_relations"]
+  defaultDomainIds:      ["marketing_analytics", "brand_strategy", "lead_generation", "product_catalog", "contracts_agreements", "data_analysis", "stakeholder_communications"]
+  lockedToolSlugs:       ["respondToUser"]
+  defaultToolSlugs:      ["email.send"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("End-user IT help, ticket triage, software / hardware / network troubleshooting, account management.")
+seed it_support {
+  id:                    "it_support"
+  slug:                  "it_support"
+  name:                  "IT Support"
+  description:           "End-user IT help, ticket triage, software / hardware / network troubleshooting, account management."
+  category:              "professional"
+  lockedDomainIds:       ["technical_documentation", "ticket_management"]
+  defaultDomainIds:      ["network_infrastructure", "cybersecurity", "software_development", "cloud_platforms", "process_optimization", "vendor_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Process improvement, vendor management, logistics, inventory, and operational risk.")
+seed operations {
+  id:                    "operations"
+  slug:                  "operations"
+  name:                  "Operations"
+  description:           "Process improvement, vendor management, logistics, inventory, and operational risk."
+  category:              "professional"
+  lockedDomainIds:       ["process_optimization"]
+  defaultDomainIds:      ["logistics_distribution", "vendor_management", "inventory_supply_chain", "quality_metrics", "product_catalog", "budgeting_forecasting", "risk_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Plans, milestones, deliverables, stakeholder communications, and project-level risk.")
+seed project_management {
+  id:                    "project_management"
+  slug:                  "project_management"
+  name:                  "Project Management"
+  description:           "Plans, milestones, deliverables, stakeholder communications, and project-level risk."
+  category:              "professional"
+  lockedDomainIds:       ["project_data"]
+  defaultDomainIds:      ["process_optimization", "budgeting_forecasting", "stakeholder_communications", "risk_management", "quality_metrics", "vendor_management", "data_analysis", "organizational_design"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Experimental design, statistical analysis, innovation portfolios, and IP management for R&D groups.")
+seed research_development {
+  id:                    "research_development"
+  slug:                  "research_development"
+  name:                  "Research & Development"
+  description:           "Experimental design, statistical analysis, innovation portfolios, and IP management for R&D groups."
+  category:              "professional"
+  lockedDomainIds:       ["research_methodology", "data_analysis"]
+  defaultDomainIds:      ["innovation_management", "technical_documentation", "intellectual_property", "product_catalog", "software_development", "budgeting_forecasting"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Corporate L&D: curriculum design, performance assessment, instructional design, and learning analytics.")
+seed training_education {
+  id:                    "training_education"
+  slug:                  "training_education"
+  name:                  "Training & Education"
+  description:           "Corporate L&D: curriculum design, performance assessment, instructional design, and learning analytics."
+  category:              "professional"
+  lockedDomainIds:       ["curriculum_design", "training_development"]
+  defaultDomainIds:      ["performance_assessment", "employee_records", "organizational_design", "data_analysis", "technical_documentation", "stakeholder_communications"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Calendar, correspondence, travel coordination, meeting prep, and inbox triage for a busy executive.")
+seed executive_assistant {
+  id:                    "executive_assistant"
+  slug:                  "executive_assistant"
+  name:                  "Executive Assistant"
+  description:           "Calendar, correspondence, travel coordination, meeting prep, and inbox triage for a busy executive."
+  category:              "professional"
+  lockedDomainIds:       ["stakeholder_communications"]
+  defaultDomainIds:      ["executive_calendar", "travel_planning", "meeting_management", "personal_finance"]
+  lockedToolSlugs:       ["respondToUser"]
+  defaultToolSlugs:      ["email.send"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("SQL, dashboards, A/B testing, descriptive + diagnostic analytics, and stakeholder-friendly insights.")
+seed data_analyst {
+  id:                    "data_analyst"
+  slug:                  "data_analyst"
+  name:                  "Data Analyst"
+  description:           "SQL, dashboards, A/B testing, descriptive + diagnostic analytics, and stakeholder-friendly insights."
+  category:              "professional"
+  lockedDomainIds:       ["data_analysis"]
+  defaultDomainIds:      ["data_visualization", "experimental_design", "sql_databases", "business_intelligence", "research_methodology", "data_engineering"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("ML model design, statistical modeling, feature engineering, and experiment design.")
+seed data_scientist {
+  id:                    "data_scientist"
+  slug:                  "data_scientist"
+  name:                  "Data Scientist"
+  description:           "ML model design, statistical modeling, feature engineering, and experiment design."
+  category:              "professional"
+  lockedDomainIds:       ["machine_learning", "data_analysis", "research_methodology"]
+  defaultDomainIds:      ["deep_learning", "experimental_design", "statistical_modeling", "data_engineering", "python_programming"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Pipelines, warehouses, lake-houses, streaming systems, schema design, and data-quality tooling.")
+seed data_engineer {
+  id:                    "data_engineer"
+  slug:                  "data_engineer"
+  name:                  "Data Engineer"
+  description:           "Pipelines, warehouses, lake-houses, streaming systems, schema design, and data-quality tooling."
+  category:              "professional"
+  lockedDomainIds:       ["data_engineering"]
+  defaultDomainIds:      ["sql_databases", "cloud_platforms", "etl_pipelines", "streaming_systems", "data_warehouse_design", "data_governance"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Backend / full-stack engineering: API design, system architecture, code review, debugging, and refactoring.")
+seed software_engineer {
+  id:                    "software_engineer"
+  slug:                  "software_engineer"
+  name:                  "Software Engineer"
+  description:           "Backend / full-stack engineering: API design, system architecture, code review, debugging, and refactoring."
+  category:              "professional"
+  lockedDomainIds:       ["software_development"]
+  defaultDomainIds:      ["api_design", "system_architecture", "version_control", "testing_strategy", "code_review", "design_patterns", "cybersecurity"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "fastCoding"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Web UIs, accessibility, state management, performance, and design-system implementation.")
+seed frontend_engineer {
+  id:                    "frontend_engineer"
+  slug:                  "frontend_engineer"
+  name:                  "Frontend Engineer"
+  description:           "Web UIs, accessibility, state management, performance, and design-system implementation."
+  category:              "professional"
+  lockedDomainIds:       ["software_development", "frontend_development"]
+  defaultDomainIds:      ["ux_principles", "accessibility", "css_styling", "javascript_typescript", "performance_optimization", "design_systems"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "fastCoding"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("CI/CD, infrastructure-as-code, observability, incident response, and platform reliability.")
+seed devops_engineer {
+  id:                    "devops_engineer"
+  slug:                  "devops_engineer"
+  name:                  "DevOps Engineer"
+  description:           "CI/CD, infrastructure-as-code, observability, incident response, and platform reliability."
+  category:              "professional"
+  lockedDomainIds:       ["cloud_platforms", "infrastructure_as_code"]
+  defaultDomainIds:      ["cybersecurity", "container_orchestration", "observability_monitoring", "incident_response", "ci_cd_pipelines", "site_reliability"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "fastCoding"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("AppSec, threat modeling, vulnerability triage, incident response, and security architecture.")
+seed security_engineer {
+  id:                    "security_engineer"
+  slug:                  "security_engineer"
+  name:                  "Security Engineer"
+  description:           "AppSec, threat modeling, vulnerability triage, incident response, and security architecture."
+  category:              "professional"
+  tier:                  "B"
+  lockedDomainIds:       ["cybersecurity"]
+  defaultDomainIds:      ["application_security", "threat_modeling", "incident_response", "cryptography_basics", "vulnerability_management", "identity_access_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "strongReasoning"
+  systemPromptHints:     "Provide general security information. For incident response specific to a breach or active threat, recommend engaging a qualified security responder."
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Roadmap, customer interviews, prioritization frameworks, OKRs, and cross-functional rollout.")
+seed product_manager {
+  id:                    "product_manager"
+  slug:                  "product_manager"
+  name:                  "Product Manager"
+  description:           "Roadmap, customer interviews, prioritization frameworks, OKRs, and cross-functional rollout."
+  category:              "professional"
+  lockedDomainIds:       ["product_management"]
+  defaultDomainIds:      ["strategic_planning", "data_analysis", "ux_principles", "stakeholder_communications", "user_research", "prioritization_frameworks"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("API docs, runbooks, knowledge-base articles, release notes, and developer onboarding content.")
+seed technical_writer {
+  id:                    "technical_writer"
+  slug:                  "technical_writer"
+  name:                  "Technical Writer"
+  description:           "API docs, runbooks, knowledge-base articles, release notes, and developer onboarding content."
+  category:              "professional"
+  lockedDomainIds:       ["technical_writing"]
+  defaultDomainIds:      ["technical_documentation", "documentation_systems", "content_strategy", "english_grammar_style"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Requirements elicitation, process mapping, stakeholder facilitation, and impact analysis.")
+seed business_analyst {
+  id:                    "business_analyst"
+  slug:                  "business_analyst"
+  name:                  "Business Analyst"
+  description:           "Requirements elicitation, process mapping, stakeholder facilitation, and impact analysis."
+  category:              "professional"
+  lockedDomainIds:       ["business_analysis"]
+  defaultDomainIds:      ["data_analysis", "process_optimization", "stakeholder_communications", "requirements_engineering", "process_modeling"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Procurement, supplier scorecards, S&OP, demand planning, and logistics performance.")
+seed supply_chain_manager {
+  id:                    "supply_chain_manager"
+  slug:                  "supply_chain_manager"
+  name:                  "Supply Chain Manager"
+  description:           "Procurement, supplier scorecards, S&OP, demand planning, and logistics performance."
+  category:              "professional"
+  lockedDomainIds:       ["inventory_supply_chain"]
+  defaultDomainIds:      ["logistics_distribution", "vendor_management", "demand_planning", "procurement_sourcing", "risk_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}

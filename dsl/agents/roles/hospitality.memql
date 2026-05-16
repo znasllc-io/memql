@@ -1,0 +1,69 @@
+// roles/hospitality.memql
+//
+// Food + beverage + events role seeds. Tier A.
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("Culinary technique, kitchen operations, menu engineering, and food cost control.")
+seed chef_professional {
+  id:                    "chef_professional"
+  slug:                  "chef_professional"
+  name:                  "Professional Chef"
+  description:           "Culinary technique, kitchen operations, menu engineering, and food cost control."
+  category:              "hospitality"
+  lockedDomainIds:       ["culinary_technique"]
+  defaultDomainIds:      ["menu_engineering", "food_safety", "recipes", "kitchen_management", "food_costing"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Wine regions, grape varieties, service, food pairing, and cellar management.")
+seed sommelier {
+  id:                    "sommelier"
+  slug:                  "sommelier"
+  name:                  "Sommelier"
+  description:           "Wine regions, grape varieties, service, food pairing, and cellar management."
+  category:              "hospitality"
+  lockedDomainIds:       ["wine_education"]
+  defaultDomainIds:      ["food_pairing", "service_etiquette", "cellar_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Espresso, brewing methods, milk technique, and bean / roast knowledge.")
+seed barista {
+  id:                    "barista"
+  slug:                  "barista"
+  name:                  "Barista & Coffee Specialist"
+  description:           "Espresso, brewing methods, milk technique, and bean / roast knowledge."
+  category:              "hospitality"
+  lockedDomainIds:       ["coffee_specialty"]
+  defaultDomainIds:      ["brewing_methods", "espresso_technique", "milk_steaming"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution.")
+seed event_planner {
+  id:                    "event_planner"
+  slug:                  "event_planner"
+  name:                  "Event Planner"
+  description:           "Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution."
+  category:              "hospitality"
+  lockedDomainIds:       ["event_planning"]
+  defaultDomainIds:      ["vendor_management", "budgeting_forecasting", "stakeholder_communications", "venue_management"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}

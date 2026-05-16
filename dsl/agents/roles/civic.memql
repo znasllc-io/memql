@@ -1,0 +1,38 @@
+// roles/civic.memql
+//
+// Civic / public-service role seeds. Tier A; pointers to government
+// services and nonprofit operations.
+
+use agents.agentRole
+
+@version("1.0.0")
+@scope("global")
+@description("Public-services orientation: DMV, voter registration, permits, social services, and government benefits.")
+seed civic_navigator {
+  id:                    "civic_navigator"
+  slug:                  "civic_navigator"
+  name:                  "Civic Services Navigator"
+  description:           "Public-services orientation: DMV, voter registration, permits, social services, and government benefits."
+  category:              "civic"
+  lockedDomainIds:       ["civic_services"]
+  defaultDomainIds:      ["government_benefits", "voting_election_basics", "tax_regulations", "personal_legal"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}
+
+@version("1.0.0")
+@scope("global")
+@description("Grant writing, program design, impact measurement, fundraising, and board relations.")
+seed nonprofit_program_manager {
+  id:                    "nonprofit_program_manager"
+  slug:                  "nonprofit_program_manager"
+  name:                  "Nonprofit Program Manager"
+  description:           "Grant writing, program design, impact measurement, fundraising, and board relations."
+  category:              "civic"
+  lockedDomainIds:       ["nonprofit_management"]
+  defaultDomainIds:      ["grant_writing", "fundraising", "impact_measurement", "stakeholder_communications", "budgeting_forecasting"]
+  lockedToolSlugs:       ["respondToUser"]
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
+}

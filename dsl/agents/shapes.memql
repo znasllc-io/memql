@@ -81,3 +81,26 @@ shape agentMinimalForDedupe {
   agent.lineage
   agent.roleEmbedding
 }
+
+@row
+@useConcept(agentRole)
+@description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the lock + default lists for the materialization step; recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
+shape agentRoleFull {
+  row.id
+  agentRole.slug
+  agentRole.name
+  agentRole.description
+  agentRole.category
+  agentRole.tier
+  agentRole.lockedDomainIds
+  agentRole.defaultDomainIds
+  agentRole.availableDomainIds
+  agentRole.lockedToolSlugs
+  agentRole.defaultToolSlugs
+  agentRole.lockedLiveKnowledgeIds
+  agentRole.recommendedPolicySlug
+  agentRole.recommendedGender
+  agentRole.systemPromptHints
+  agentRole.active
+  agentRole.predefined
+}
