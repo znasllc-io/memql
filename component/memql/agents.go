@@ -1,6 +1,9 @@
 package memql
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -176,6 +179,235 @@ func (r *AgentRegistry) Upsert(def *AgentDefinition) error {
 	defer r.mu.Unlock()
 	r.byName[def.Name] = def
 	return nil
+}
+
+// Clear empties the registry. Used by the row-backed loader so a
+// re-sweep starts from a clean state without leaving stale entries.
+func (r *AgentRegistry) Clear() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName = make(map[string]*AgentDefinition)
+}
+
+// LoadFromRows populates the registry by scanning v1:agents:agent
+// rows out of the database. Each row becomes one AgentDefinition,
+// keyed by the row's roleSlug (universally unique per partition,
+// human-readable, distinct from per-user row ids).
+//
+// This is the canonical post-seed-migration source of truth: the
+// SeedMaterializer writes rows, the row IS the agent, and the
+// registry is a thin in-memory cache built from those rows.
+// Replaces the prior path where the registry was populated by
+// parsing `agent X { }` DSL declarations -- those are now `seed X { }`
+// declarations consumed by the materializer.
+//
+// Idempotent: Clear()'s the registry before loading so a re-run
+// reflects the latest row set without stale entries.
+//
+// Returns the number of definitions registered + any error from the
+// underlying row query (in which case the registry is left empty so
+// callers see a deterministic "not registered" rather than a partial
+// load).
+func (r *AgentRegistry) LoadFromRows(ctx context.Context, engine *MemQLEngine, logger *slog.Logger) (int, error) {
+	if r == nil {
+		return 0, fmt.Errorf("agent registry is nil")
+	}
+	if engine == nil {
+		return 0, fmt.Errorf("engine is nil")
+	}
+
+	result, err := engine.Execute(ctx, `node(concept=="v1:agents:agent")`)
+	if err != nil {
+		return 0, fmt.Errorf("query v1:agents:agent rows: %w", err)
+	}
+
+	rows := extractRowList(result)
+	r.Clear()
+
+	registered := 0
+	skipped := 0
+	for _, row := range rows {
+		def, ok := agentDefinitionFromRow(row)
+		if !ok {
+			skipped++
+			continue
+		}
+		// Key by roleSlug (per-partition unique). Falls back to row
+		// id if roleSlug is empty -- rare, but defensible.
+		key := def.RoleSlug
+		if key == "" {
+			key = def.Name
+		}
+		if key == "" {
+			skipped++
+			continue
+		}
+		def.Name = key
+		r.mu.Lock()
+		r.byName[key] = def
+		r.mu.Unlock()
+		registered++
+	}
+
+	if logger != nil {
+		logger.Info("memql.agentRegistry: loaded from rows",
+			"component", "memql.agentRegistry",
+			"registered", registered,
+			"skipped", skipped)
+	}
+	return registered, nil
+}
+
+// extractRowList walks an engine.Execute result and returns the row
+// maps. Handles the two shapes the engine returns: a top-level []any
+// of row maps, or a {"nodes":[...]} wrapper.
+func extractRowList(result any) []map[string]any {
+	if result == nil {
+		return nil
+	}
+	var rows []any
+	switch v := result.(type) {
+	case []any:
+		rows = v
+	case map[string]any:
+		if nodes, ok := v["nodes"].([]any); ok {
+			rows = nodes
+		} else {
+			rows = []any{v}
+		}
+	default:
+		return nil
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// agentDefinitionFromRow builds an AgentDefinition from a single
+// v1:agents:agent row map. The materialized row's payload mirrors
+// what mutationCreateAgent stamped (which in turn came from the
+// seed body), so this is a near-direct field mapping.
+//
+// Returns ok=false when the row lacks the minimum fields (id +
+// either roleSlug or name) -- such rows aren't usefully invokable
+// as agents.
+func agentDefinitionFromRow(row map[string]any) (*AgentDefinition, bool) {
+	if row == nil {
+		return nil, false
+	}
+	payload := row
+	if p, ok := row["payload"].(map[string]any); ok && p != nil {
+		payload = p
+	}
+
+	id, _ := row["id"].(string)
+	if id == "" {
+		if pid, ok := payload["id"].(string); ok {
+			id = pid
+		}
+	}
+	name := getStringField(payload, "name")
+	roleSlug := getStringField(payload, "roleSlug")
+	if name == "" && roleSlug == "" && id == "" {
+		return nil, false
+	}
+
+	def := &AgentDefinition{
+		Name:        name,
+		Description: getStringField(payload, "description"),
+		Role:        getStringField(payload, "role"),
+		RoleSlug:    roleSlug,
+		DisplayName: name,
+		Personality: getStringField(payload, "personality"),
+		Gender:      getStringField(payload, "gender"),
+
+		AudioControl: getStringField(payload, "audioControl"),
+		VideoControl: getStringField(payload, "videoControl"),
+
+		Origin: "row:" + id,
+	}
+
+	// providerConfig.llm.*
+	if pc, ok := payload["providerConfig"].(map[string]any); ok && pc != nil {
+		if llm, ok := pc["llm"].(map[string]any); ok && llm != nil {
+			def.LLMProvider = getStringField(llm, "provider")
+			def.LLMModel = getStringField(llm, "model")
+			def.LLMPolicyName = getStringField(llm, "policyName")
+			if v, ok := llm["temperature"].(float64); ok {
+				def.LLMTemperature = v
+				def.LLMTempSet = true
+			}
+			if v, ok := llm["maxTokens"].(float64); ok {
+				def.LLMMaxTokens = int(v)
+				def.LLMMaxTokSet = true
+			}
+		}
+	}
+
+	// capabilities.*
+	if cap, ok := payload["capabilities"].(map[string]any); ok && cap != nil {
+		def.CapAvatar, _ = cap["avatar"].(bool)
+		def.CapLipSync, _ = cap["lipSync"].(bool)
+		def.CapVision, _ = cap["vision"].(bool)
+		def.CapVoiceToVoice, _ = cap["voiceToVoice"].(bool)
+		def.CapClaw, _ = cap["claw"].(bool)
+		def.CapClawWorkspace = getStringField(cap, "clawWorkspace")
+		def.CapDomains = getStringArrayField(cap, "domains")
+		def.CapKeywords = getStringArrayField(cap, "keywords")
+		for _, toolName := range getStringArrayField(cap, "tools") {
+			def.CapTools = append(def.CapTools, AgentToolRef{Name: toolName})
+		}
+	}
+
+	// triggerBehavior.*
+	if tb, ok := payload["triggerBehavior"].(map[string]any); ok && tb != nil {
+		def.TBAutoJoin, _ = tb["autoJoin"].(bool)
+		def.TBGreetOnJoin, _ = tb["greetOnJoin"].(bool)
+		def.TBInterruptionStyle = getStringField(tb, "interruptionStyle")
+		def.TBSpeakWhen = getStringField(tb, "speakWhen")
+	}
+
+	return def, true
+}
+
+// getStringField pulls a string field from a row payload map, with
+// the empty string as the zero value.
+func getStringField(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// getStringArrayField pulls a []string from a row payload's []any
+// slot. Non-string entries are silently skipped.
+func getStringArrayField(m map[string]any, key string) []string {
+	if m == nil {
+		return nil
+	}
+	arr, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // compileAgentDecl lowers a parsed agentDecl into an AgentDefinition.
