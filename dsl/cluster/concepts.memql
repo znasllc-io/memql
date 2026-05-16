@@ -86,6 +86,7 @@ concept nodeType {
   image         string  @description("Container image reference for this node type (e.g. gcr.io/project/memql-cognition:latest).")
   capabilities  []string  @description("Expected capability FQNs that nodes of this type should expose.")
   defaultLabels object  @description("Default labels applied to spawned instances of this type.")
+  codeReference string  @description("Optional architecture-model node id (model.Node.ID, e.g. 'service:memql') linking this node type to its code-side identity. Cockpit's Topology view uses this to bridge the live cluster grid and the architecture-model drill-down: selecting a live node finds the matching code-side service and jumps the navigator to that drill point.")
 }
 
 @version("1.0.0")

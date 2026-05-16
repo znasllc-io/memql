@@ -13,6 +13,7 @@ import (
 	"github.com/visionarys-io/memql/component/events"
 	"github.com/visionarys-io/memql/component/memql"
 	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
+	"github.com/visionarys-io/memql/component/observe"
 	"github.com/visionarys-io/memql/component/router"
 )
 
@@ -86,6 +87,12 @@ func (a *App) engineAndBus() {
 	// Wire bus and event bus to engine
 	a.engine.SetWiring(a.wiring)
 	a.engine.SetEventBus(a.eventBus)
+
+	// Bridge codeProfile concept events into the observe runtime's
+	// per-FQN cache. Subscribes immediately; lifecycle is owned by
+	// the dependency chain so Stop() removes the subscription on
+	// shutdown.
+	a.Dependencies = append(a.Dependencies, observe.NewCodeProfileSubscriber(a.Logger, a.eventBus))
 
 	// Create automation scheduler (creates its own logger via common.NewLogger)
 	a.automationLoader = automations.NewLoader(automations.LoaderOptions{
