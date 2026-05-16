@@ -28,6 +28,7 @@ type MemQLEngine struct {
 	tools         *ToolRegistry
 	prompts       *PromptRegistry
 	agents        *AgentRegistry
+	seeds         *SeedRegistry
 	providers     *ProviderRegistry
 	policies      *PolicyRegistry
 	// policyFunctions holds parsed `func (Policy)` definitions
@@ -168,6 +169,13 @@ func (e *MemQLEngine) Prompts() *PromptRegistry {
 // executor to resolve agent names to their compiled AgentDefinition.
 func (e *MemQLEngine) Agents() *AgentRegistry {
 	return e.agents
+}
+
+// Seeds returns the seed registry populated by LoadUnifiedSeeds at
+// engine startup. The SeedMaterializer reads from this registry on
+// the startup sweep + on v1:identity:user create events.
+func (e *MemQLEngine) Seeds() *SeedRegistry {
+	return e.seeds
 }
 
 // Shapes returns the shape registry.
