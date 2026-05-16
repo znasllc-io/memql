@@ -1,0 +1,53 @@
+// trainerAgent -- per-user Trainer Agent.
+//
+// Materialized as one v1:agents:agent row per user by the SeedMaterializer
+// (deterministic id `trainerAgent-<userId>`). Replaces the legacy
+// `provisionTrainerAgentOnUserCreate` automation + logic in
+// dsl/agents/automations.memql (deleted in this commit).
+//
+// Per the planner-redesign brainstorm (Q3): every user gets a dedicated
+// Trainer Agent persona that the planner-service invokes for
+// trainSpecialist Plans -- web-search-grounded knowledge distillation for
+// specialist domains. Strong-reasoning provider via the streamClaudeOpus
+// policy. Not user-facing in chat.
+
+use agents.agent
+
+@version("1.0.0")
+@scope("perUser")
+@visibility("bff", "planner", "agent")
+@description("Per-user Trainer Agent. Platform training persona -- web-search-grounded knowledge distillation for specialist domains.")
+seed trainerAgent {
+  name:        "Trainer"
+  description: "Platform training agent -- web-search-grounded knowledge distillation for specialist domains. Not user-facing in chat."
+  personality: "Reads more than writes. Authoritative sources first. Cites everything."
+  role:        "specialist"
+  roleSlug:    "system_trainer"
+  gender:      "female"
+
+  providerConfig {
+    llm {
+      provider: "streamClaudeOpus"
+    }
+  }
+
+  capabilities {
+    avatar:       false
+    lipSync:      false
+    vision:       false
+    voiceToVoice: false
+    claw:         false
+    domains:      []
+    keywords:     []
+    tools:        []
+  }
+
+  triggerBehavior {
+    autoJoin:    false
+    greetOnJoin: false
+    speakWhen:   "asked"
+  }
+
+  audioControl: "always_off"
+  videoControl: "always_off"
+}
