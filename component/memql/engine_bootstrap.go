@@ -239,22 +239,14 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
-	// Load DSL-declared agents. Walks dsl/agents/v1/**/*.memql,
-	// resolves @templateFile sidecars, cross-validates tool refs
-	// against the ToolRegistry, and registers compiled
-	// AgentDefinitions in the AgentRegistry. The agent(name, args)
-	// builtin (Phase 4) reads from this registry at invocation time.
-	//
-	// Row materialization (one v1:agents:agent row per @scope("global")
-	// agent in _system, one row per user for @scope("perUser")) is a
-	// separate concern that lands in a follow-up commit -- the registry
-	// alone is enough for the builtin path. See
-	// docs/planning/agents-dsl-primitive.md.
+	// AgentRegistry is now row-backed (populated by
+	// AgentRegistry.LoadFromRows at the end of the SeedMaterializer's
+	// startup sweep -- see app/engine.go). The legacy
+	// LoadUnifiedAgents path that walked `agent X { }` declarations
+	// has been removed; every platform agent is a `seed X { }`
+	// declaration in dsl/agents/ and the materialized v1:agents:agent
+	// rows are the registry's source of truth.
 	agentRegistry := NewAgentRegistry()
-	if _, ulErr := LoadUnifiedAgents(e.Logger, agentRegistry, toolRegistry); ulErr != nil {
-		e.Logger.Warn("unified agent loader returned an error",
-			"component", "memql.engine", "error", ulErr)
-	}
 	e.agents = agentRegistry
 
 	// Load DSL-declared seeds. Walks every `seed NAME { ... }` block
