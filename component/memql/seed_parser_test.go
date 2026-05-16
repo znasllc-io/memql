@@ -47,7 +47,6 @@ use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@visibility("bff", "cognition", "agent")
 @templateFile("templates/generalAssistant.tmpl")
 @description("Per-user General Assistant baseline.")
 seed generalAssistant {
@@ -92,9 +91,6 @@ seed generalAssistant {
 	}
 	if decl.templateFile != "templates/generalAssistant.tmpl" {
 		t.Errorf("templateFile = %q", decl.templateFile)
-	}
-	if got := []string{"bff", "cognition", "agent"}; !equalStrings(decl.visibility, got) {
-		t.Errorf("visibility = %v, want %v", decl.visibility, got)
 	}
 
 	// Top-level scalars
@@ -191,14 +187,3 @@ func TestParseSeedMemQL_Rejects(t *testing.T) {
 	}
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

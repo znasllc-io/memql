@@ -29,7 +29,7 @@ func TestLoadUnifiedConcepts_RegistersFromNewTree(t *testing.T) {
 	// per-file warning messages the loader emits for files that
 	// can't be parsed via the full rewriter chain.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	count, err := LoadUnifiedConcepts(logger, "")
+	count, err := LoadUnifiedConcepts(logger)
 	if err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}

@@ -233,6 +233,18 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 		node.Metadata = metaBytes
 	}
 
+	// Stamp provenance from the Go context (engine-stamped intrinsic;
+	// see component/provenance). The context-carried value is set by
+	// the originating writer -- SeedMaterializer, automation step
+	// runner, gRPC mutation handler, etc. NOT NULL: writes without
+	// provenance are bugs, rejected here at the row-construction
+	// layer.
+	provBytes, provErr := provenanceJSONFromContext(ctx)
+	if provErr != nil {
+		return Node{}, fmt.Errorf("concept %q: %w", c.Name, provErr)
+	}
+	node.Provenance = provBytes
+
 	if strings.TrimSpace(node.CreatedBy) == "" {
 		return Node{}, fmt.Errorf("actor is required")
 	}
@@ -300,6 +312,15 @@ func (c *Concept) Delete(ctx context.Context, store Store, params DeleteParams) 
 		Schema:    schemaBytes,
 		Payload:   payloadBytes,
 	}
+
+	// Same provenance-stamping rule as inserts (see Create).
+	// Tombstone-as-version preserves attribution of who/what deleted
+	// each row in the per-version history.
+	provBytes, provErr := provenanceJSONFromContext(ctx)
+	if provErr != nil {
+		return Node{}, fmt.Errorf("concept %q delete: %w", c.Name, provErr)
+	}
+	node.Provenance = provBytes
 
 	if err := store.InsertMemoryNode(ctx, node); err != nil {
 		return Node{}, err
