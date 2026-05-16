@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"path"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -199,11 +200,30 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	return total, nil
 }
 
+// fileTopUseClauseRe matches a `use <namespace>.<concept>` line
+// anchored at column 0 (with optional leading whitespace). Each seed
+// file is expected to declare its target concept once at the top;
+// the loader extracts it and re-injects into every per-seed slice
+// before parsing (ExtractKeywordSlices walks the slice preamble back
+// from the seed line through annotations + comments, which stops
+// short of the `use` line -- so we have to carry it forward
+// ourselves).
+var fileTopUseClauseRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
+
 // LoadUnifiedSeeds walks the DSL tree, parses every `seed NAME { ... }`
 // block, compiles each into a SeedDefinition, and registers it. Row
 // materialization is a separate pass owned by the SeedMaterializer
 // (which runs after the database is up and can write rows). This
 // loader is parse + collect only.
+//
+// File shape: each `.memql` file may contain a single file-top
+// `use <namespace>.<concept>` clause that binds every `seed NAME { }`
+// block in the file to the same target concept. This is the
+// canonical authoring pattern -- the role catalog under
+// dsl/agents/roles/ packs dozens of seeds per file sharing one use
+// clause, and the platform agents (generalAssistant.memql etc.)
+// share the same one-use-many-seeds convention even when the count
+// is one.
 //
 // Files that fail to parse or compile are logged + skipped so a
 // single bad seed doesn't bring down the rest. A registry-upsert
@@ -222,12 +242,23 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
+		// Extract the file-top `use <ns>.<concept>` clause once per
+		// file. Each per-seed slice doesn't include it (the
+		// ExtractKeywordSlices preamble walk-back stops at the
+		// blank line before the seed's annotation cluster), so we
+		// re-inject it into every slice we parse.
+		useLine := ""
+		if m := fileTopUseClauseRe.FindStringSubmatch(raw.Content); len(m) == 3 {
+			useLine = "use " + m[1] + "." + m[2] + "\n"
+		}
+
 		for _, slice := range ExtractKeywordSlices(raw.Content, "seed") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
-			decl, err := parseSeedMemQL(origin, []byte(slice.Source))
+			source := useLine + slice.Source
+			decl, err := parseSeedMemQL(origin, []byte(source))
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedSeedLoader: parse failed",
+					logger.Warn("memql.unifiedSeedLoader: parse failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				continue
