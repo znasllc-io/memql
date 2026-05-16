@@ -1,0 +1,41 @@
+// ensureAgent -- the General Assistant's agent factory tool.
+//
+// Restricted to the GA via @allowedRoles. Invoked when a conversation
+// reveals a need that no existing agent fits cleanly. The tool's
+// handler analyzes the goal against the v1:agents:agentRole catalog
+// and the user's existing agents, then matches / extends / creates as
+// appropriate.
+//
+// Three outcomes:
+//   - match:  an existing agent already fits; return its id unchanged.
+//   - extend: an existing agent's roleSlug matches; the tool unions
+//             missing domains + tools onto it (locked items are
+//             preserved by the mutationUpdateAgent lock validator).
+//   - create: no existing agent fits; the tool composes capabilities
+//             from the chosen role's locked + default sets plus
+//             analysis-supplied additions, and writes a new
+//             v1:agents:agent row.
+//
+// The handler is `integration.agents.ensureForGoal` (declared as a
+// builtin in dsl/agents/builtins.memql so the @handler dispatch
+// resolves it like any other registered function). Synchronous from
+// the caller's perspective: the GA gets the agent id back in its
+// tool-loop turn and can invoke that agent via `agent("name",
+// "prompt", spaceId)` on the next iteration.
+//
+// Why this is a tool and not a builtin the GA calls directly:
+// per the tools-are-agent-only boundary, ALL agent capabilities go
+// through the tool surface so AllowedRoles + the universal agent-
+// context gate apply uniformly. Builtins underneath are the
+// implementation; tools are the contract.
+
+@enabled
+@handler(type="function", name="ensureAgentForGoal")
+@executionTime("medium")
+@allowedRoles("general_assistant")
+@description("Ensure an agent exists that can handle the given goal. Matches an existing agent, extends one with missing capabilities, or creates a new specialist from the role catalog. Returns {agentId, action, reasoning}.")
+tool ensureAgent {
+  goal         string  @required @description("Free-form description of what the user wants done. The factory's structured-output analysis reads this verbatim to pick the role + domains + tools.")
+  ownerUserId  string  @required @description("v1:identity:user.id of the user the resulting agent will be owned by. Used to scope the existing-agent lookup and to stamp the created agent's ownerUserId. The GA pulls this from its conversation context.")
+  spaceId      string  @description("Optional space context. Forwarded to the analysis prompt so the result accounts for what's already in the space; not required by the underlying writes since v1:agents:agent rows are not space-scoped.")
+}

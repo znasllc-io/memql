@@ -275,25 +275,42 @@ func formatToolValidationError(toolName string, err error) error {
 
 // ExecuteTool executes a tool definition with the provided arguments.
 // This is the shared execution path for internal callers (cognition) and gRPC.
+//
+// Tools are an agent-only invocation surface. Every entry point that
+// reaches this function MUST stamp an acting-agent role onto ctx
+// (via WithActingAgentRole). Callers that need to do non-agent work
+// at the engine layer should use queries, mutations, or integration
+// capabilities directly -- not tools. This boundary keeps "tools"
+// meaningful as the orchestration surface agents reason about and
+// makes the role-based AllowedRoles gate load-bearing on every path.
+//
+// The enforcement is a hard reject (returns an error) rather than a
+// log-only warning so non-agent callers fail loudly during development
+// instead of silently bypassing the contract.
 func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[string]any) (*ToolCallResult, error) {
 	if tool == nil {
 		return nil, fmt.Errorf("tool is nil")
+	}
+
+	// Universal agent-only enforcement. Without an acting-agent role
+	// on ctx, the call is by definition not from an agent and the
+	// tool layer rejects it. The role string is what AllowedRoles
+	// downstream checks against; absence of a role here means there
+	// is no agent at all.
+	callerRole := ActingAgentRoleFromContext(ctx)
+	if callerRole == "" {
+		return nil, fmt.Errorf("tool %q: tools are agent-only -- no acting agent on context. Use queries, mutations, or integration capabilities for non-agent paths", tool.Name)
+	}
+	if !tool.IsAllowedForRole(callerRole) {
+		return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, callerRole)
 	}
 
 	// Client-executed tools: the tool body lives in the connected
 	// client (browser / app). Delegate to the ClientToolInvoker
 	// carried on ctx -- typically the BFF streamSession that owns the
 	// originating request. The invoker handles the ClientToolCall <->
-	// ClientToolResult round-trip.
-	//
-	// Role gate: if ctx carries an acting-agent role, enforce
-	// tool.AllowedRoles the same way handleCallTool does, so agents
-	// calling through ExecuteTool can't bypass the role gate.
+	// ClientToolResult round-trip. Role gate already enforced above.
 	if tool.ClientExecution {
-		role := ActingAgentRoleFromContext(ctx)
-		if !tool.IsAllowedForRole(role) {
-			return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, role)
-		}
 		invoker := ClientToolInvokerFromContext(ctx)
 		if invoker == nil {
 			return nil, fmt.Errorf("tool %q requires client execution but no ClientToolInvoker is attached to the context", tool.Name)
@@ -304,7 +321,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 				argsJSON = string(b)
 			}
 		}
-		return invoker.InvokeClientTool(ctx, tool.Name, argsJSON, role)
+		return invoker.InvokeClientTool(ctx, tool.Name, argsJSON, callerRole)
 	}
 
 	// If no handler is defined, return tool info as a text response.
