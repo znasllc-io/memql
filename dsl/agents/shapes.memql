@@ -1,9 +1,72 @@
 // shapes.memql
 //
-// Agent-namespace projections. Companion to the larger agentFull
-// shape that ships in bff-copresent's shapes.memql (full
-// presentation projection for the agent roster UI). Shapes that
-// support the Phase 7 layered-dedupe path live here.
+// Agent-namespace projections. Houses the full presentation shape
+// (agentFull) consumed by every BFF that lists agents, the authoritive
+// agentAuthorizationFull projection for the standing-grants surface,
+// and the dedupe-step shapes the planner uses.
+
+@row
+@useConcept(agentAuthorization)
+@description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
+shape agentAuthorizationFull {
+  row.id
+  agentAuthorization.agentId
+  agentAuthorization.userId
+  agentAuthorization.planKind
+  agentAuthorization.spaceScope
+  agentAuthorization.computerUseScope
+  agentAuthorization.tokenBudgetCap
+  agentAuthorization.expiresAt
+  agentAuthorization.active
+  row.createdAt
+}
+
+// Comprehensive agent projection with all configuration fields.
+//
+// Owner fields:
+//
+//   - payload.ownerUserId -- explicit "who owns this agent" pointer
+//     stamped on the create mutation. Required for auto-seeded
+//     agents (the GA, provisioned at engine startup whose actor is
+//     `system:seed:...`, not the user) so owner-keyed lookups
+//     resolve to a real user id.
+//   - createdBy -- engine-auto-stamped from the request actor at
+//     insert time. For user-created specialists this IS the user,
+//     so resolveAgentOwner / scanCreatedBy fall back to it after
+//     ownerUserId.
+
+@row
+@useConcept(agent)
+@description("Comprehensive agent projection with all configuration fields")
+shape agentFull {
+  row.id
+  agent.ownerUserId
+  agent.name
+  agent.description
+  agent.personality
+  agent.systemPrompt
+  agent.role
+  agent.roleSlug
+  agent.capabilities
+  agent.avatar
+  agent.providerConfig
+  agent.triggerBehavior
+  agent.groupIds
+  agent.active
+  agent.deleted
+  agent.audioControl
+  agent.gender
+  row.createdAt
+  row.createdBy
+}
+
+@row
+@useConcept(agent)
+@description("Minimal agent projection used by queryAgentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
+shape agentRoleSlugLite {
+  row.id
+  agent.roleSlug
+}
 
 @row
 @useConcept(agent)

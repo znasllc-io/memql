@@ -199,93 +199,86 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	return total, nil
 }
 
-// LoadUnifiedAgents walks the new tree, extracts every `agent NAME
-// { ... }` block, resolves its @templateFile sidecar against the
-// unified FS, validates tool references against the supplied
-// ToolRegistry, and registers the result via AgentRegistry.Upsert.
+// LoadUnifiedSeeds walks the DSL tree, parses every `seed NAME { ... }`
+// block, compiles each into a SeedDefinition, and registers it. Row
+// materialization is a separate pass owned by the SeedMaterializer
+// (which runs after the database is up and can write rows). This
+// loader is parse + collect only.
 //
-// Cross-reference validation behavior:
-//   - tool("name") refs that don't resolve against the ToolRegistry
-//     are reported as load-time errors (with the agent file path +
-//     the unresolved tool name); the agent is skipped so a typo
-//     can't bring down the whole load. Other agents continue to load.
-//   - knowledgeDomain("name") refs are NOT validated here -- knowledge
-//     domains are runtime concept rows (v1:common:knowledgeDomain),
-//     not DSL constructs. Resolution happens at invocation time
-//     inside the agent(...) builtin (Phase 4).
+// Files that fail to parse or compile are logged + skipped so a
+// single bad seed doesn't bring down the rest. A registry-upsert
+// failure (duplicate name) is also logged + skipped -- the first
+// definition wins, the second is dropped.
 //
-// Agents can't use the generic baseloader helper directly because the
-// per-slice work (template sidecar resolution + tool cross-ref
-// validation) needs the raw file's directory path + the ToolRegistry.
-// Kept inline for that reason.
-func LoadUnifiedAgents(logger *slog.Logger, registry *AgentRegistry, tools *ToolRegistry) (int, error) {
+// Sidecar resolution: when a seed declares @templateFile, the file
+// content is loaded into Body's "systemPrompt" field (if not already
+// declared), mirroring the agent loader's behavior. The materializer
+// passes the body through to the row insert without further sidecar
+// handling.
+func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) {
 	if registry == nil {
-		return 0, fmt.Errorf("agent registry is nil")
+		return 0, fmt.Errorf("seed registry is nil")
 	}
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
-		for _, slice := range ExtractKeywordSlices(raw.Content, "agent") {
+		for _, slice := range ExtractKeywordSlices(raw.Content, "seed") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
-			decl, err := parseAgentMemQL(origin, []byte(slice.Source))
+			decl, err := parseSeedMemQL(origin, []byte(slice.Source))
 			if err != nil {
 				if logger != nil {
-					logger.Debug("memql.unifiedAgentLoader: parse failed",
-						"file", raw.Path, "agent", slice.Name, "error", err)
+					logger.Debug("memql.unifiedSeedLoader: parse failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				continue
 			}
-			def, err := compileAgentDecl(decl)
+			def, err := compileSeedDecl(decl)
 			if err != nil {
 				if logger != nil {
-					logger.Warn("memql.unifiedAgentLoader: compile failed",
-						"file", raw.Path, "agent", slice.Name, "error", err)
+					logger.Warn("memql.unifiedSeedLoader: compile failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				continue
 			}
 			def.Origin = origin
 
-			// Resolve @templateFile sidecar (required when declared).
+			// Resolve @templateFile sidecar -- contents land in the
+			// body under "systemPrompt" (when not already set). This
+			// matches the agent-loader convention; the materializer
+			// just writes whatever's in the body to the row.
 			if def.TemplateFile != "" {
-				dir := path.Dir(raw.Path)
-				tmplPath := path.Join(dir, def.TemplateFile)
-				data, rErr := fs.ReadFile(tree, tmplPath)
-				if rErr != nil {
-					if logger != nil {
-						logger.Warn("memql.unifiedAgentLoader: templateFile resolve failed",
-							"file", raw.Path, "agent", slice.Name, "templateFile", def.TemplateFile,
-							"resolvedTo", tmplPath, "error", rErr)
+				if _, alreadySet := def.Body.fields["systemPrompt"]; !alreadySet {
+					dir := path.Dir(raw.Path)
+					tmplPath := path.Join(dir, def.TemplateFile)
+					data, rErr := fs.ReadFile(tree, tmplPath)
+					if rErr != nil {
+						if logger != nil {
+							logger.Warn("memql.unifiedSeedLoader: templateFile resolve failed",
+								"file", raw.Path, "seed", slice.Name, "templateFile", def.TemplateFile,
+								"resolvedTo", tmplPath, "error", rErr)
+						}
+						continue
 					}
-					continue
-				}
-				source := strings.TrimSpace(string(data))
-				if source == "" {
-					if logger != nil {
-						logger.Warn("memql.unifiedAgentLoader: templateFile is empty",
-							"file", raw.Path, "agent", slice.Name, "templateFile", tmplPath)
+					source := strings.TrimSpace(string(data))
+					if source == "" {
+						if logger != nil {
+							logger.Warn("memql.unifiedSeedLoader: templateFile is empty",
+								"file", raw.Path, "seed", slice.Name, "templateFile", tmplPath)
+						}
+						continue
 					}
-					continue
-				}
-				def.SystemPrompt = source
-			}
-
-			// Cross-ref validate tool refs against the registry. A typo
-			// here is the most common authoring error; surfacing it
-			// loud avoids silent runtime "tool not found" later.
-			if tools != nil {
-				if unresolved := validateAgentToolRefs(def, tools); len(unresolved) > 0 {
-					if logger != nil {
-						logger.Warn("memql.unifiedAgentLoader: unresolved tool refs",
-							"file", raw.Path, "agent", slice.Name, "unresolved", unresolved)
-					}
-					continue
+					// Inject systemPrompt at the body's top level so
+					// the materializer's downcast into row payload
+					// includes it like any other field.
+					def.Body.keys = append(def.Body.keys, "systemPrompt")
+					def.Body.fields["systemPrompt"] = seedValue{kind: seedString, str: source}
 				}
 			}
 
 			if err := registry.Upsert(def); err != nil {
 				if logger != nil {
-					logger.Warn("memql.unifiedAgentLoader: registry upsert failed",
-						"file", raw.Path, "agent", slice.Name, "error", err)
+					logger.Warn("memql.unifiedSeedLoader: registry upsert failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				continue
 			}
@@ -293,8 +286,8 @@ func LoadUnifiedAgents(logger *slog.Logger, registry *AgentRegistry, tools *Tool
 		}
 	}
 	if logger != nil {
-		logger.Info("memql.unifiedAgentLoader: registered",
-			"component", "memql.unifiedAgentLoader", "count", total)
+		logger.Info("memql.unifiedSeedLoader: registered",
+			"component", "memql.unifiedSeedLoader", "count", total)
 	}
 	return total, nil
 }
