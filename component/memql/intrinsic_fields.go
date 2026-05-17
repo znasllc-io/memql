@@ -12,6 +12,11 @@ const (
 	intrinsicFieldCreatedAt
 	intrinsicFieldCreatedBy
 	intrinsicFieldPartition
+	// intrinsicFieldProvenance is the engine-stamped origin metadata
+	// (see component/provenance). Unlike the other intrinsics it is a
+	// JSON object and supports nested paths (provenance.kind,
+	// provenance.name, provenance.trigger, provenance.via).
+	intrinsicFieldProvenance
 )
 
 type intrinsicFieldInfo struct {
@@ -50,6 +55,11 @@ var intrinsicFieldRegistry = map[string]intrinsicFieldInfo{
 		kind:      intrinsicFieldPartition,
 		canonical: "partition",
 		column:    "partition",
+	},
+	"provenance": {
+		kind:      intrinsicFieldProvenance,
+		canonical: "provenance",
+		column:    "provenance",
 	},
 }
 

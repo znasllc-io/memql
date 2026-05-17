@@ -50,6 +50,21 @@ func toAPIMemoryNode(node *memorynodes.MemoryNode) (*memqlv1.MemoryNode, error) 
 		return nil, err
 	}
 
+	// Expose row provenance via the existing Metadata struct so shape
+	// templates can project `row.provenance` and the cockpit can render
+	// it without needing a proto regen for a dedicated field. Stored
+	// under metadata["provenance"] as {kind, name, trigger, via}.
+	var metadataStruct *structpb.Struct
+	if len(node.Provenance) > 0 {
+		provObj := map[string]any{}
+		if err := json.Unmarshal(node.Provenance, &provObj); err == nil && len(provObj) > 0 {
+			metaMap := map[string]any{"provenance": provObj}
+			if s, err := structpb.NewStruct(metaMap); err == nil {
+				metadataStruct = s
+			}
+		}
+	}
+
 	return &memqlv1.MemoryNode{
 		Id:        node.ID,
 		Concept:   node.Concept,
@@ -58,5 +73,6 @@ func toAPIMemoryNode(node *memorynodes.MemoryNode) (*memqlv1.MemoryNode, error) 
 		Type:      node.Type,
 		Schema:    schema,
 		Payload:   payloadStruct,
+		Metadata:  metadataStruct,
 	}, nil
 }
