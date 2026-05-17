@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 )
 
@@ -125,6 +127,28 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 		"planId", planId, "kind", kind, "status", status)
 }
 
+// systemPlannerActor is the synthetic subject the planner integration
+// stamps on its Execute calls so engine validators that gate writes
+// on actor presence (mutationActor in component/memql/executor.go)
+// don't reject the loop with "no actor found in context". Mirrors the
+// seed materializer's systemActorContext pattern.
+const systemPlannerActor = "system:planner"
+
+// systemActorContext wraps ctx with a TokenInfo so engine.Execute
+// calls from the planner agent loop carry a non-empty actor. Used
+// uniformly by loadPlan / loadTasks / loadSpecialists / the mutation
+// helpers so every engine roundtrip from this file sees the same
+// system identity.
+func systemActorContext(ctx context.Context) context.Context {
+	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+		Subject: systemPlannerActor,
+		Claims: map[string]any{
+			"sub":  systemPlannerActor,
+			"role": "system",
+		},
+	})
+}
+
 // maxPlannerIterations caps how many times we'll re-invoke the
 // plannerAgent for a single Plan inside one event-driven cycle.
 // Loop-style actions (decompose, createSpecialist, extendSpecialist)
@@ -172,7 +196,7 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 		specialists = nil
 	}
 
-	resp, err := l.engine.InvokeSI(ctx, "plannerAgent", map[string]any{
+	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", map[string]any{
 		"plan":        plan,
 		"tasks":       tasks,
 		"specialists": specialists,
@@ -282,7 +306,7 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q})`,
 		goal, ownerUserId, spaceId,
 	)
-	res, err := l.engine.Execute(ctx, call)
+	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
 		return l.markPlanFailed(ctx, planId,
 			fmt.Sprintf("ensureAgentForGoal failed: %v", err))
@@ -347,7 +371,7 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 		`mutationUpdatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
 		planId, agentId,
 	)
-	_, err := l.engine.Execute(ctx, q)
+	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
@@ -361,7 +385,7 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 // a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
 	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
-	res, err := l.engine.Execute(ctx, q)
+	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +409,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 
 func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[string]any, error) {
 	q := fmt.Sprintf(`queryTasksForPlan({planId:%q})`, planId)
-	res, err := l.engine.Execute(ctx, q)
+	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +426,7 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 		return nil, nil
 	}
 	q := fmt.Sprintf(`queryActiveAgentsForUser({ownerUserId:%q})`, ownerUserId)
-	res, err := l.engine.Execute(ctx, q)
+	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +528,7 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 		`mutationUpdatePlanStatus({planId:%q, status:"running", phases:%s})`,
 		planId, string(phasesJSON),
 	)
-	_, err = l.engine.Execute(ctx, q)
+	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
@@ -522,7 +546,7 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 		`mutationCreateSemanticTask({taskId:%q, planId:%q, kind:%q, seq:0, logicalStepId:%q, attemptNumber:1, agentId:%q, phase:%q, input:%s})`,
 		taskId, planId, task.Kind, logicalStepId, task.AgentId, task.Phase, string(inputJSON),
 	)
-	if _, err := l.engine.Execute(ctx, q); err != nil {
+	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		return err
 	}
 	// Stamp the Plan to running with the task's agent. The existing
@@ -534,7 +558,7 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 		`mutationUpdatePlanStatus({planId:%q, status:"running", ownerAgentId:%q})`,
 		planId, task.AgentId,
 	)
-	_, err = l.engine.Execute(ctx, q2)
+	_, err = l.engine.Execute(systemActorContext(ctx), q2)
 	return err
 }
 
@@ -547,7 +571,7 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
-	_, err = l.engine.Execute(ctx, q)
+	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
@@ -556,7 +580,7 @@ func (l *PlannerAgentLoop) markPlanFailed(ctx context.Context, planId, errorMess
 		`mutationUpdatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
-	_, err := l.engine.Execute(ctx, q)
+	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
@@ -577,7 +601,7 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:%q, feedbackRequest:%s})`,
 		planId, reason, string(fbReqJSON),
 	)
-	_, err = l.engine.Execute(ctx, q)
+	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
