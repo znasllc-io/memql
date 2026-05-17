@@ -1,0 +1,60 @@
+// shapes.memql
+//
+// Shapes for the planner domain. Moved here from
+// memql-bff-copresent/dsl/copresent/shapes.memql on 2026-05-17 as
+// part of the "all plan / task DSL belongs in core" cleanup -- the
+// planner is a node type (build tag planner, see app/integrations_planner_init.go)
+// and its data shapes have to be uniformly available on every binary
+// that loads concepts, not just on the copresent BFF.
+
+@row
+@useConcept(plan)
+@description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps and the per-kind input/output blobs.")
+shape planFull {
+  row.id
+  plan.spaceId
+  plan.kind
+  plan.status
+  plan.goal
+  plan.ownerAgentId
+  plan.requestedBy
+  plan.input
+  plan.output
+  plan.errorMessage
+  plan.startedAt
+  plan.completedAt
+  plan.cancelledBy
+  row.createdAt
+  row.createdBy
+}
+
+@row
+@useConcept(task)
+@description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations.")
+shape taskFull {
+  row.id
+  task.planId
+  task.kind
+  task.status
+  task.seq
+  task.input
+  task.output
+  task.errorMessage
+  task.startedAt
+  task.completedAt
+  row.createdAt
+  row.createdBy
+}
+
+@row
+@useConcept(taskState)
+@description("TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused / awaitingFeedback Task is resumed.")
+shape taskStateFull {
+  row.id
+  taskState.taskId
+  taskState.workingMemory
+  taskState.reasoningChain
+  taskState.toolCallHistory
+  taskState.pendingSubPlanIds
+  row.createdAt
+}
