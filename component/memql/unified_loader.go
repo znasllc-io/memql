@@ -35,8 +35,10 @@ import (
 // ID from its @version + @namespace + declaration name, and
 // registers them in the supplied memoryNodes registry.
 //
-// nodeType filters by @visibility (matching the legacy LoadConcepts
-// behavior); pass "" to load every concept regardless.
+// Every binary loads every concept -- the per-node @visibility
+// filtering this loader used to do was removed during the genesis
+// cleanup. Build tags still gate runtime integrations; DSL surface
+// is uniform across all node types.
 //
 // Returns the number of concepts loaded + any errors accumulated
 // across files. Concepts that fail to build are skipped with a
@@ -49,7 +51,7 @@ import (
 // file's source text for `concept ... { }` blocks and parses each
 // in isolation. This bypasses the rewriter limitation and gets
 // us to full concept coverage from the new tree.
-func LoadUnifiedConcepts(logger *slog.Logger, nodeType string) (int, error) {
+func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
@@ -105,10 +107,6 @@ func LoadUnifiedConcepts(logger *slog.Logger, nodeType string) (int, error) {
 				continue
 			}
 
-			if nodeType != "" && !concept.Visibility.IsVisibleTo(nodeType) {
-				continue
-			}
-
 			concepts[id] = concept
 		}
 	}
@@ -121,8 +119,7 @@ func LoadUnifiedConcepts(logger *slog.Logger, nodeType string) (int, error) {
 	if logger != nil {
 		logger.Info("unified loader: registered concepts",
 			"component", "memql.unifiedLoader",
-			"count", len(concepts),
-			"nodeType", nodeType)
+			"count", len(concepts))
 	}
 
 	return len(concepts), nil

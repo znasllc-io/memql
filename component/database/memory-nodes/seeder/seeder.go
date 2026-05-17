@@ -17,6 +17,7 @@ import (
 
 	"github.com/visionarys-io/memql/component/database"
 	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	"github.com/visionarys-io/memql/component/provenance"
 	"github.com/visionarys-io/memql/core/id"
 )
 
@@ -182,8 +183,13 @@ func (r *Runner) applyConceptSeed(ctx context.Context, bunDB *bun.DB, concept *m
 			partition = id.SystemPartition
 		}
 
-		// Insert the record (either new or updated version)
-		if _, err := concept.Create(ctx, r.store, memoryNodes.CreateParams{
+		// Insert the record (either new or updated version). Stamp
+		// system-bootstrap provenance so the row's intrinsic
+		// reflects the legacy seed.memql sidecar path (distinct
+		// from the new `seed` DSL primitive in dsl/agents/ etc.).
+		seedCtx := provenance.ContextWithProvenance(ctx,
+			provenance.System("conceptSeeder:"+concept.Name))
+		if _, err := concept.Create(seedCtx, r.store, memoryNodes.CreateParams{
 			Partition: partition,
 			Actor:     recordActor,
 			Payload:   seedPayload,

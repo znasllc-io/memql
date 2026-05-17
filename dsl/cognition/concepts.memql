@@ -5,7 +5,6 @@
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("bff", "cognition")
 @description("Per-(spaceId, agentId) audio control override. Lets a user dial a single agent's TTS publication on / off / mirror_user inside one space without changing the agent's own default (audioControl on v1:agents:agent). Written by the orb-corner overlay in PresencePanel + the canvas presence widget. Read by the cognition handler before forwarding TTS to the Bridge Agent: an active override beats the agent default; absence falls through to the agent default. id is the deterministic audioOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept audioOverride {
   spaceId   string  @required @description("v1:cognition:space.id this override is scoped to.")
@@ -20,7 +19,6 @@ concept audioOverride {
 
 @version("1.0.0")
 @namespace("cognition:text")
-@visibility("cognition", "bff")
 @description("A streaming text chunk emitted incrementally during AI response generation. The frontend subscribes to creation events and accumulates chunks into a real-time message.")
 concept chunk {
   done  bool  @required  @description("Whether this is the final chunk.")
@@ -36,7 +34,6 @@ concept chunk {
 
 @version("1.0.0")
 @namespace("cognition:client:tool")
-@visibility("bff", "cognition", "agent")
 @description("Ephemeral request envelope for a client-executed tool call bridging cluster nodes. Inserted by cognition's client-tool relay when the agent node emits a ClientToolCall that needs to reach a browser stream on BFF. The browser (via its client-tool relay bridge) subscribes to these events, dispatches the tool, and inserts a matching v1:cognition:client:tool:response. Records are not retained -- once the response arrives the pair is a no-op for future consumers. Lives under v1:cognition because the relay is a cognition-level concern (mediating between the agent loop and the browser stream); consuming products need not define their own variant.")
 concept clientToolRequest {
   callId  string  @required  @description("UUID correlating this request with its eventual v1:cognition:client:tool:response. Matches the ClientToolCall.call_id the agent emitted.")
@@ -58,7 +55,6 @@ concept clientToolRequest {
 
 @version("1.0.0")
 @namespace("cognition:client:tool")
-@visibility("bff", "cognition", "agent")
 @description("Ephemeral response envelope paired with a v1:cognition:client:tool:request. Inserted by the browser after it dispatches the tool via the client-tool relay bridge. Cognition subscribes to these events, matches on callId, wraps the payload in a ClientToolResult MemqlClientMessage and forwards it to the agent node via AiForwardRequest so the parked agent tool-loop waiter unblocks.")
 concept clientToolResponse {
   callId  string  @required  @description("UUID matching the v1:cognition:client:tool:request this response fulfils.")
@@ -76,7 +72,6 @@ concept clientToolResponse {
 
 @version("1.0.0")
 @namespace("cognition:space")
-@visibility("cognition", "bff")
 @description("Queryable runtime context snapshot for a space (participants, sessions, media activity). Intended to improve AI turn-taking and provide UI context.")
 concept context {
   computedAt  datetime  @required  @description("When this snapshot was computed.")
@@ -117,7 +112,6 @@ concept context {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("bff", "cognition")
 @description("Per-(spaceId, userId) mic state record. The CoPresent MediaControls footer writes this on every mic toggle so the cognition handler can resolve mirror_user audio control: when the user mutes, mirror_user agents skip TTS publish on their next turn; when the user unmutes, they speak. id is the deterministic micState:<spaceId>:<userId> so the latest toggle wins at read time without growing a per-click history. Distinct from v1:cognition:participant.presence -- that record carries SI-side state (thinking / responding / etc) and we don't want mic toggles in the same versioned chain.")
 concept micState {
   spaceId    string  @required @description("v1:cognition:space.id this state is scoped to.")
@@ -131,7 +125,6 @@ concept micState {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff")
 @description("Phase 8 of the chat-architecture plan. Append-only audit + tuning corpus for the misroute safety net. One row per classifier call that fired the soft post-send Move prompt; the row records the original classifier output, the user's action (move / dismiss / timeout), and the involved utterance ids so prompt tuners can replay and re-score in offline analysis.")
 concept misroutefeedback {
   spaceId         string  @required  @description("Space the misroute happened in.")
@@ -151,7 +144,6 @@ concept misroutefeedback {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff")
 @description("A human or SI participant instance within a space.")
 concept participant {
   agentId  string  @description("ID of the agent template (for SI participants).")
@@ -183,7 +175,6 @@ concept participant {
 
 @version("1.0.0")
 @namespace("cognition:participant")
-@visibility("cognition", "bff")
 @description("UI-friendly presence snapshot for a participant (especially AI). Used to show current agent status such as thinking/responding/waiting.")
 concept presence {
   intent {
@@ -208,7 +199,6 @@ concept presence {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff", "agent")
 @description("A single multi-modal contribution to a per-user PRIVATE conversation thread inside a space. Mirrors v1:cognition:utterance field-for-field but adds the required forUserId, which scopes the row to exactly one human's Team tab. forUserId is server-stamped at insert time -- callers cannot supply it. The subscription rewriter forces a per-caller forUserId predicate on every read pattern that targets this concept; cross-user reads are physically impossible from any non-elevated client.")
 concept privateutterance {
   forUserId  string  @required  @description("v1:identity:user.id this private utterance is scoped to. Server-stamped from the authenticated caller's identity at insert time; client-supplied values from non-elevated actors are overridden. Every row of this concept has a non-empty forUserId -- the engine pre-insert guard enforces it.")
@@ -255,7 +245,6 @@ concept privateutterance {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff")
 @description("Real-time interaction state tracking device + stream + activity for a participant in a space. Audio capability is gated by the user's mic toggle (humanInput.microphoneEnabled) plus the agent's audioControl mode -- there is NO tier ceiling anymore. Whether voice flows in / out of the room is purely a function of who has their mic open and which agents are configured to publish TTS.")
 concept session {
   aiOutput {
@@ -280,7 +269,6 @@ concept session {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff")
 @type("collection")
 @description("Persistent rooms where humans and AI assistants meet, converse, and interact. Every space is a multi-participant room with a bounded capacity for humans and for agents -- there is no longer a 1:1 vs group distinction.")
 concept space {
@@ -316,7 +304,6 @@ concept space {
 
 @version("1.0.0")
 @namespace("cognition:turn")
-@visibility("cognition", "bff")
 @description("Tracks conversation turn-taking state including who is speaking and AI participation permissions.")
 concept state {
   aiAnalysisJSON  string  @description("Raw JSON string with richer analysis output (internal/debug/UI).")
@@ -348,7 +335,6 @@ concept state {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("cognition", "bff", "agent")
 @description("A single multi-modal contribution to the conversation stream.")
 concept utterance {
   action {
@@ -396,7 +382,6 @@ concept utterance {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("bff", "cognition")
 @description("Per-(spaceId, agentId) video control override. Lets a user dial a single agent's avatar publication on / off / mirror_user inside one space without changing the agent's own default (videoControl on v1:agents:agent). Mirrors v1:cognition:audioOverride exactly -- same fields, same id pattern, same write/read paths -- but governs lip-synced video instead of TTS audio. Read by the voice-agent process at session start (Phase 9): an active override beats the agent default; absence falls through to the agent default. id is the deterministic videoOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
 concept videoOverride {
   spaceId   string  @required @description("v1:cognition:space.id this override is scoped to.")
@@ -411,7 +396,6 @@ concept videoOverride {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("bff")
 @description("Rolled-up guardrail health metrics for a time window. Written by the rollupGuardrailHealth automation from v1:cognition:unmetCapability rows; advisory-only signal for tuning the fit-score threshold and identifying missing specialist domains. One row per rollup run.")
 concept guardrailHealth {
   periodStart             datetime  @required  @description("Start of the rollup window (inclusive).")
@@ -439,7 +423,6 @@ concept guardrailHealth {
 
 @version("1.0.0")
 @namespace("cognition")
-@visibility("bff")
 @description("A single instance of the cognition router determining that no agent in a space could meet the user's request -- either the general assistant stepped in as fallback (specialist_gap) or nobody could help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by the guardrail health rollup for product-level insight into missing capabilities.")
 concept unmetCapability {
   spaceId          string   @required  @description("ID of the space the utterance occurred in.")

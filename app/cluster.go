@@ -72,11 +72,6 @@ func (a *App) cluster() {
 	}
 
 	if peerMgr != nil {
-		qp := node.NewQueryProxy(nodeIdentity, peerMgr, nil, a.Logger)
-		if a.grpcServer != nil {
-			a.grpcServer.SetQueryProxy(qp)
-		}
-
 		if nodeIdentity.Type == node.NodeTypeBFF {
 			// BFF-side forwarding: create the router, plug it into the
 			// gRPC AI handlers, and point the parent connector at it

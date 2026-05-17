@@ -24,6 +24,15 @@ type (
 		Schema        json.RawMessage `bun:"type:JSONB,notnull" json:"schema"`
 		Payload       json.RawMessage `bun:"type:JSONB,notnull" json:"payload"`
 		Metadata      json.RawMessage `bun:"type:JSONB,notnull,default:'{}'" json:"metadata,omitempty"`
+
+		// Provenance is engine-stamped per-version metadata describing
+		// where this row came from -- seed name, mutation name,
+		// originating automation + trigger event, etc. NOT NULL: the
+		// mutation executor rejects writes whose Go context carries no
+		// provenance.Provenance value, so every row that ever lands
+		// has a real attribution. See component/provenance for the
+		// shape + helpers.
+		Provenance json.RawMessage `bun:"type:JSONB,notnull" json:"provenance"`
 	}
 
 	SecretMemoryNode struct {
@@ -37,5 +46,8 @@ type (
 		Schema        json.RawMessage `bun:"type:JSONB,notnull" json:"schema"`
 		Payload       json.RawMessage `bun:"type:JSONB,notnull" json:"payload"`
 		Metadata      json.RawMessage `bun:"type:JSONB,notnull,default:'{}'" json:"metadata,omitempty"`
+
+		// Provenance: same shape + contract as on MemoryNode.
+		Provenance json.RawMessage `bun:"type:JSONB,notnull" json:"provenance"`
 	}
 )

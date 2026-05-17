@@ -26,13 +26,12 @@
 // =============================================================================
 //
 // Every annotation goes above the `concept` keyword. The full author surface
-// is six annotations -- nothing else is recognized.
+// is five annotations -- nothing else is recognized.
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
 //   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
 //   @scope("partition"|"global") Partition scope. Default: partition-scoped.
-//   @visibility(...)             Which node types load this concept.
 //   @type("object"|"collection"|"reference")  Default: object.
 //
 // Other annotations are rejected at load time with
@@ -136,45 +135,7 @@ concept globalScoped {
 }
 
 // =============================================================================
-//   6. @visibility -- which node types load this concept
-// =============================================================================
-//
-//   - Opt-in model: omitting @visibility entirely means the concept is
-//     loaded by NO node. This makes visibility explicit at every concept.
-//   - Three forms:
-//       @visibility("*")                       -- every node loads it
-//       @visibility("bff", "cognition")        -- only these (include list)
-//       @visibility(!"planner")                -- everything except these
-//   - Artifacts (queries, mutations, automations) inherit visibility from
-//     the concepts they reference. A query that touches a concept the
-//     local node can't load is itself unloaded.
-
-@version("1.0.0")
-@namespace("reference")
-@visibility("*")
-@description("Visible to every node type.")
-concept everywhereVisible {
-  field string @required
-}
-
-@version("1.0.0")
-@namespace("reference")
-@visibility("bff", "cognition")
-@description("Loaded only on bff and cognition nodes.")
-concept includeListed {
-  field string @required
-}
-
-@version("1.0.0")
-@namespace("reference")
-@visibility(!"planner")
-@description("Loaded everywhere except planner.")
-concept excludePlanner {
-  field string @required
-}
-
-// =============================================================================
-//   7. @type -- object (default) | collection | reference
+//   6. @type -- object (default) | collection | reference
 // =============================================================================
 //
 //   - @type("object") (default): the row is a self-contained record.
@@ -186,7 +147,7 @@ concept excludePlanner {
 //     the body.
 //
 // -----------------------------------------------------------------------------
-//   7a. When to choose @type("reference") -- the canonical rule
+//   6a. When to choose @type("reference") -- the canonical rule
 // -----------------------------------------------------------------------------
 //
 // Use @type("reference") ONLY when the product-specific row needs payload
@@ -251,7 +212,7 @@ concept referenceExample {
 }
 
 // =============================================================================
-//   8. Field types
+//   7. Field types
 // =============================================================================
 //
 //   The supported scalar types:
@@ -285,7 +246,7 @@ concept fieldTypes {
 }
 
 // =============================================================================
-//   9. Field-level annotations
+//   8. Field-level annotations
 // =============================================================================
 //
 // Every field accepts a subset of:
@@ -334,7 +295,7 @@ concept fieldAnnotations {
 }
 
 // =============================================================================
-//   10. Variant fields (discriminated unions)
+//   9. Variant fields (discriminated unions)
 // =============================================================================
 //
 //   A `@variant(discriminator="kind")` field declares a value whose shape
@@ -369,7 +330,7 @@ concept variantExample {
 }
 
 // =============================================================================
-//   11. Nested object fields
+//   10. Nested object fields
 // =============================================================================
 //
 //   A field can introduce a nested object by declaring a body block under
@@ -391,7 +352,7 @@ concept nestedExample {
 }
 
 // =============================================================================
-//   12. Body-level @relationship decorators
+//   11. Body-level @relationship decorators
 // =============================================================================
 //
 //   A concept body can declare zero or more @relationship decorators that
@@ -440,7 +401,7 @@ concept relationshipExample {
 }
 
 // =============================================================================
-//   13. Reserved fields -- do not declare these
+//   12. Reserved fields -- do not declare these
 // =============================================================================
 //
 // The engine auto-stamps these intrinsic fields on every row. Authors must
@@ -459,7 +420,7 @@ concept relationshipExample {
 // `concept==v1:cognition:participant`). Insert mutations don't supply them.
 
 // =============================================================================
-//   14. @scope("global") concepts -- the special _system partition
+//   13. @scope("global") concepts -- the special _system partition
 // =============================================================================
 //
 // Global concepts are reserved for infrastructure metadata that every
@@ -475,7 +436,6 @@ concept relationshipExample {
 @version("1.0.0")
 @namespace("cluster")
 @scope("global")
-@visibility("*")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string @required

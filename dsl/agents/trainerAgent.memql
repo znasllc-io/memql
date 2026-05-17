@@ -15,7 +15,6 @@ use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@visibility("bff", "planner", "agent")
 @description("Per-user Trainer Agent. Platform training persona -- web-search-grounded knowledge distillation for specialist domains.")
 seed trainerAgent {
   name:        "Trainer"

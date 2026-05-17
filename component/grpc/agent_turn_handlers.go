@@ -110,6 +110,11 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	// Use the stream's context so an aborted peer connection cancels the
 	// replier too.
 	ctx := s.stream.Context()
+	// Re-hydrate cross-node provenance: AgentGenerateTurn typically
+	// arrives via AiForward from cognition. Any row the agent tool
+	// loop writes (utterances, tool side-effects) stamps the caller's
+	// provenance instead of a fresh agent-side default.
+	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 	// Attach this session as the ClientToolInvoker so the agent loop's
 	// engine.ExecuteTool can round-trip client_execution tools back to
 	// the originating browser. Also attach the acting agent's
