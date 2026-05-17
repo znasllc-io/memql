@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +19,6 @@ type (
 		FieldSource   string `json:"fieldSource,omitempty"`
 		TargetConcept string `json:"targetConcept"`
 		Direction     string `json:"direction"`
-	}
-
-	// ConceptVisibility controls which node types load a concept.
-	// See @visibility annotation in concept .memql files.
-	ConceptVisibility struct {
-		Wildcard bool     `json:"wildcard,omitempty"` // @visibility("*")
-		Include  []string `json:"include,omitempty"`  // @visibility("cognition", "bff")
-		Exclude  []string `json:"exclude,omitempty"`  // @visibility(!"planner")
 	}
 
 	// Store defines the persistence operations required by concept runtime helpers.
@@ -60,16 +51,6 @@ type (
 		// the concepts/vN/... directory layout.
 		Version string `json:"version,omitempty"`
 
-		// Visibility controls which node types load this concept, declared
-		// via @visibility. Three modes:
-		//   @visibility("*")                -> all node types
-		//   @visibility("cognition", "bff") -> only these node types
-		//   @visibility(!"planner")         -> all except these
-		// No annotation means the concept is not visible to any node
-		// (opt-in model). Artifacts (queries, mutations, automations)
-		// inherit visibility from the concepts they reference.
-		Visibility ConceptVisibility `json:"visibility,omitempty"`
-
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
 
@@ -95,26 +76,6 @@ type (
 		Metadata  json.RawMessage
 	}
 )
-
-// IsVisibleTo reports whether this concept should be loaded by a node
-// of the given type. Zero-value (no annotation) returns false (opt-in).
-func (v ConceptVisibility) IsVisibleTo(nodeType string) bool {
-	if v.Wildcard {
-		return true
-	}
-	if len(v.Include) > 0 {
-		return slices.Contains(v.Include, nodeType)
-	}
-	if len(v.Exclude) > 0 {
-		return !slices.Contains(v.Exclude, nodeType)
-	}
-	return false // no annotation = not visible
-}
-
-// IsZero reports whether no visibility annotation was set.
-func (v ConceptVisibility) IsZero() bool {
-	return !v.Wildcard && len(v.Include) == 0 && len(v.Exclude) == 0
-}
 
 // UnmarshalJSON normalizes relationship definitions authored with either camelCase or snake_case keys.
 // IsGlobal reports whether this concept is global-scoped. Global
@@ -232,6 +193,9 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 		now = params.Clock().UTC()
 	}
 
+	if err := c.validateShortId(nodeId); err != nil {
+		return Node{}, fmt.Errorf("concept %q: %w", c.Name, err)
+	}
 	storageId := c.storageId(partition, nodeId)
 	if storageId == "" {
 		return Node{}, fmt.Errorf("concept storage id is required")
@@ -271,6 +235,18 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 		}
 		node.Metadata = metaBytes
 	}
+
+	// Stamp provenance from the Go context (engine-stamped intrinsic;
+	// see component/provenance). The context-carried value is set by
+	// the originating writer -- SeedMaterializer, automation step
+	// runner, gRPC mutation handler, etc. NOT NULL: writes without
+	// provenance are bugs, rejected here at the row-construction
+	// layer.
+	provBytes, provErr := provenanceJSONFromContext(ctx)
+	if provErr != nil {
+		return Node{}, fmt.Errorf("concept %q: %w", c.Name, provErr)
+	}
+	node.Provenance = provBytes
 
 	if strings.TrimSpace(node.CreatedBy) == "" {
 		return Node{}, fmt.Errorf("actor is required")
@@ -339,6 +315,15 @@ func (c *Concept) Delete(ctx context.Context, store Store, params DeleteParams) 
 		Schema:    schemaBytes,
 		Payload:   payloadBytes,
 	}
+
+	// Same provenance-stamping rule as inserts (see Create).
+	// Tombstone-as-version preserves attribution of who/what deleted
+	// each row in the per-version history.
+	provBytes, provErr := provenanceJSONFromContext(ctx)
+	if provErr != nil {
+		return Node{}, fmt.Errorf("concept %q delete: %w", c.Name, provErr)
+	}
+	node.Provenance = provBytes
 
 	if err := store.InsertMemoryNode(ctx, node); err != nil {
 		return Node{}, err
@@ -541,6 +526,54 @@ func (c *Concept) validate(variant string, payload any) error {
 		return err
 	}
 	return schema.Validate(payload)
+}
+
+// validateShortId catches the class of bug where a caller hands in
+// a colon-bearing compound string as the "shortId" -- the storage
+// layer's HasPartition() check then misclassifies the first segment
+// as a partition name and stores the malformed id without prepending
+// {partition}:{concept}:. Bugs landed twice (seed materializer +
+// checkpoint writer); this gate makes the next one fail loudly at
+// insert time instead of silently in the DB. See
+// docs/core/identifiers.md ("Anti-patterns").
+//
+// Three legitimate shapes for nodeId:
+//
+//  1. Bare shortId with no colons -- the engine prepends
+//     {partition}:{concept}:. ANY shortId containing ':' falls
+//     through to one of the other two shapes and must be qualified.
+//  2. Concept-prefixed: starts with c.Name+":". The engine prepends
+//     {partition}:.
+//  3. Fully qualified: ParseNodeId succeeds AND the parsed concept
+//     matches c.Name. Used by dispatch-site composers (see
+//     composeReplyId in cognition for the canonical example).
+//
+// Anything else is a caller bug.
+func (c *Concept) validateShortId(nodeId string) error {
+	if c == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(nodeId)
+	if trimmed == "" {
+		return nil // empty handled downstream
+	}
+	// Shape (1): bare, no colons -> ok.
+	if !strings.ContainsRune(trimmed, ':') {
+		return nil
+	}
+	// Shape (2): concept-prefixed.
+	if strings.HasPrefix(trimmed, c.Name+":") {
+		return nil
+	}
+	// Shape (3): fully qualified.
+	_, parsedConcept, _, err := id.ParseNodeId(trimmed)
+	if err == nil && parsedConcept == c.Name {
+		return nil
+	}
+	return fmt.Errorf(
+		"shortId %q must be a bare slug/UUID (no colons), the concept-prefixed form (%q), or a fully-qualified id whose concept is %q; got something else (see docs/core/identifiers.md)",
+		trimmed, c.Name+":<short>", c.Name,
+	)
 }
 
 func (c *Concept) storageId(partition, nodeId string) string {

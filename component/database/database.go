@@ -1050,7 +1050,7 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	}
 
 	if d.config.migrations != nil {
-		migrator := migrate.NewMigrator(bunDB, d.config.migrations)
+		migrator := migrate.NewMigrator(bunDB, d.config.migrations, migrate.WithMarkAppliedOnSuccess(true))
 		if err := migrator.Init(runCtx); err != nil {
 			d.Logger.Error("failed to initialize migrations", "error", err)
 		} else {

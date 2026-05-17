@@ -11,6 +11,8 @@ import (
 
 	"github.com/visionarys-io/memql/component/auth"
 	"github.com/visionarys-io/memql/component/events"
+	"github.com/visionarys-io/memql/component/provenance"
+	"github.com/visionarys-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -228,25 +230,43 @@ func (m *SeedMaterializer) Stop(ctx context.Context) error {
 
 // materializeGlobal writes one row for a @scope("global") seed. The
 // seed body's `id` field provides the row id; remaining body fields
-// flow through to the concept's mutationCreate<ConceptName>.
+// flow through to the concept's mutationCreate<ConceptName>. The
+// per-seed provenance is stamped on ctx here so the engine's row-
+// construction layer can persist {kind: "seed", name: <seedName>}
+// as the row's intrinsic provenance field.
 func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefinition) error {
 	idVal, ok := def.Body.fields["id"]
 	if !ok || idVal.kind != seedString {
 		return fmt.Errorf("global seed %q must declare a string `id` field", def.Name)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
+	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 
 // materializePerUser writes one row for a (perUser seed, user)
 // pair. The row id is `<seedName>-<userId>`; the user id is stamped
 // into `ownerUserId` so owner-keyed lookups resolve immediately.
+// Per-seed provenance is stamped on ctx (see materializeGlobal).
 func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefinition, userId string) error {
 	if userId == "" {
 		return fmt.Errorf("empty userId for per-user seed %q", def.Name)
 	}
-	rowId := def.Name + "-" + userId
+	// Build the row's shortId from the user's SHORT id (the part
+	// after the canonical {partition}:{concept}: prefix), not the
+	// full canonical id. Concatenating with the full id produced
+	// non-canonical compound ids like
+	// "trainerAgent-_system:v1:identity:user:user-30bf..." that
+	// then defeated the storage layer's HasPartition() check and
+	// stored without the proper {partition}:{concept}: prefix.
+	// See docs/core/identifiers.md.
+	shortUserId := userId
+	if _, _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
+		shortUserId = parsed
+	}
+	rowId := def.Name + "-" + shortUserId
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
+	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 

@@ -31,9 +31,58 @@ import (
 	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
 	"github.com/visionarys-io/memql/component/node"
 	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/visionarys-io/memql/component/provenance"
 	"github.com/visionarys-io/memql/core/common"
 	"github.com/visionarys-io/memql/integrations/stt"
 )
+
+// contextWithEnvelopeProvenance attaches the envelope's
+// MemqlClientMessage.Provenance proto field (set by cross-node
+// forwarders) onto ctx so the engine's auto-stamping path uses it
+// instead of inferring a default. No-op when the envelope didn't
+// carry provenance.
+func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) context.Context {
+	if envelope == nil {
+		return ctx
+	}
+	pb := envelope.GetProvenance()
+	if pb == nil {
+		return ctx
+	}
+	p := provenance.Provenance{
+		Kind:    provenance.Kind(pb.GetKind()),
+		Name:    pb.GetName(),
+		Trigger: pb.GetTrigger(),
+		Via:     pb.GetVia(),
+	}
+	if p.IsZero() {
+		return ctx
+	}
+	if err := p.Validate(); err != nil {
+		return ctx
+	}
+	return provenance.ContextWithProvenance(ctx, p)
+}
+
+// stampEnvelopeProvenance copies the caller-ctx provenance into the
+// envelope before it's serialized + shipped to another node. Called
+// by cross-node forwarders (proxyAi). No-op if ctx carries no
+// provenance.
+func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) {
+	if envelope == nil {
+		return
+	}
+	p := provenance.FromContext(ctx)
+	if p.IsZero() {
+		return
+	}
+	envelope.Provenance = &memqlv1.Provenance{
+		Kind:    string(p.Kind),
+		Name:    p.Name,
+		Trigger: p.Trigger,
+		Via:     p.Via,
+	}
+}
 
 const (
 	ComponentName  = common.ComponentName("memqlGRPCServer")
@@ -58,7 +107,6 @@ type Server struct {
 	scoreEngine       *polyphon.ScoreEngine
 	roomProvider      polyphon.RoomProvider
 	conceptRegistry   memoryNodes.Registry
-	queryProxy        *node.QueryProxy
 	aiForwarder       *AiForwardRouter
 	agentReplier      AgentTurnHandler
 	serviceRef        *serviceRef
@@ -205,7 +253,6 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		roomProvider:    s.roomProvider,
 		conceptRegistry: s.conceptRegistry,
 		accessMW:        accessMW,
-		queryProxy:      s.queryProxy,
 		aiForwarder:     s.aiForwarder,
 		agentReplier:    s.agentReplier,
 	}
@@ -326,16 +373,6 @@ func (s *Server) SetRoomProvider(rp polyphon.RoomProvider) {
 	s.roomProvider = rp
 }
 
-// SetQueryProxy sets the query proxy for cross-node query forwarding.
-// When a client query references a concept owned by another node type,
-// the proxy routes it to the owning node via NodeService.
-func (s *Server) SetQueryProxy(qp *node.QueryProxy) {
-	if s == nil {
-		return
-	}
-	s.queryProxy = qp
-}
-
 // SetConceptRegistry sets the concept registry for metadata queries.
 func (s *Server) SetConceptRegistry(reg memoryNodes.Registry) {
 	if s == nil {
@@ -365,7 +402,6 @@ type service struct {
 	roomProvider    polyphon.RoomProvider
 	conceptRegistry memoryNodes.Registry
 	accessMW        *access.Middleware
-	queryProxy      *node.QueryProxy
 	aiForwarder     *AiForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
 
 	// agentReplier handles AgentGenerateTurnMsg on agent nodes. Non-nil
@@ -1013,6 +1049,12 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		ctx = memqlengine.ContextWithPartition(ctx, partition)
 	}
 
+	// Re-hydrate cross-node provenance: when this envelope arrived via
+	// proxyAi / AiForward (BFF -> worker), stampEnvelopeProvenance put
+	// the caller's provenance on envelope.Metadata. We attach it to ctx
+	// so engine.Execute uses it instead of stamping a fresh default.
+	ctx = contextWithEnvelopeProvenance(ctx, envelope)
+
 	s.activeRequests.Store(requestId, cancel)
 
 	// Extract clientId for optimistic update reconciliation
@@ -1029,23 +1071,6 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	go func() {
 		defer cancel()
 		defer s.activeRequests.Delete(requestId)
-
-		// Cross-node query routing: if the query references a concept
-		// owned by another node type, the QueryProxy identifies the
-		// target and we log the routing decision. The actual forwarding
-		// via NodeService is wired in the bootstrap (Phase 4 follow-up).
-		// For now, queries that would route to a peer fall through to
-		// local execution, which will hit the read-isolation check
-		// (concept not in registry) and return a clear error.
-		if s.service.queryProxy != nil {
-			if target := s.service.queryProxy.ResolveTarget(query); target != "" {
-				s.logger.Debug("query targets remote concept domain",
-					"query", query,
-					"target_node_type", string(target),
-					"request_id", requestId,
-				)
-			}
-		}
 
 		result, err := s.service.executeQuery(ctx, query, clientId)
 		if err != nil {
@@ -1294,6 +1319,11 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	}
 
 	ctx := s.stream.Context()
+	// Re-hydrate cross-node provenance for tool calls that arrived via
+	// proxyAi / AiForward. Any row this tool writes via the engine will
+	// stamp the originating caller's provenance instead of a fresh
+	// per-tool default.
+	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 	args := msg.GetArguments()
 
 	// Client-executed tool: emit ClientToolCall, park until ClientToolResult

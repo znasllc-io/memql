@@ -4,7 +4,6 @@
 
 @version("1.0.0")
 @namespace("planner")
-@visibility("bff", "cognition", "agent", "planner")
 @description("A user-visible unit of work the planner orchestrates. Per the v1 brainstorm Q1 (Option D): Plan + Task model where Plans CAN nest via parentPlanId, Tasks always belong to one Plan and never recurse. Plans are the user mental anchor (the thing the user dropped a file for, asked a question about, or kicked off as a workflow); Tasks are the engineer-facing decomposition. Lifecycle covers queued / routing / running (with sub-states for paused / awaitingFeedback / needsAgent), succeeded / failed / cancelled. The planner emits Tasks per Q3's outline+per-phase incremental strategy: the Plan's `phases` array carries the coarse outline, Tasks emerge per phase with a phase tag.")
 concept plan {
   spaceId             string  @required @description("v1:cognition:space.id this Plan belongs to. Tasks page is per-space; estimation buckets and budget rollups scope to the space.")
@@ -46,7 +45,6 @@ concept plan {
 
 @version("1.0.0")
 @namespace("planner")
-@visibility("*")
 @description("A scheduled or recurring background task assigned to an agent for a specific user. Defines what the agent should do periodically (e.g. 'every Monday morning summarize last week's marketing performance') without the user having to ask each time. The reactive-collaboration phase 3 surface; pairs with the heartbeat-driven topic listener for ad-hoc dispatch and the action utterance lane for surfacing results. Per-user-per-agent today; per-space scoping is a future extension.")
 concept standingTask {
   name           string    @required @description("Human-readable task name (e.g. 'Weekly marketing summary'). Shown in admin / settings UIs.")
@@ -63,7 +61,6 @@ concept standingTask {
 
 @version("1.0.0")
 @namespace("planner")
-@visibility("bff", "cognition", "agent", "planner")
 @description("One executable step inside a Plan. Two flavors discriminated by `category`: 'semantic' rows are what the Planner Agent decomposes a Plan into (one per logical step); 'toolInvocation' rows are auto-stamped by the engine on every tool call an agent makes (one per call). Tool-call rows attach to their executing semantic row via `parentTaskId`, giving one level of recursion -- semantic Tasks never have a `parentTaskId`, tool-call Tasks always do. Sub-goal nesting still happens at the Plan level via `parentPlanId` (Q1); the recursion here is purely mechanical record-keeping. Per Q13 each Task declares its executionSurface so the planner can route inProcess work to the agent node and containerExecutor work to NemoClaw / homegrown sandboxes.")
 concept task {
   planId            string  @required @description("v1:planner:plan.id this Task belongs to. Every Task -- semantic or toolInvocation -- lives under exactly one Plan, even ad-hoc tool calls in chat (which get a synthetic single-Task Plan of kind=adHocAction).")
@@ -94,7 +91,6 @@ concept task {
 
 @version("1.0.0")
 @namespace("planner")
-@visibility("bff", "agent", "planner")
 @description("Persisted working state of a Task that's parked awaiting user feedback (or has been paused mid-execution). The async-parking + planner re-invocation model from Q18: when an agent calls requestUserFeedback, the agent's process exits cleanly after persisting its working state; when the user responds, the planner re-invokes the agent with this state as bootstrap context. Same machinery powers Pause/Resume (Q12) and refinement-Plan parent-Task resumption (Q9). Per Task; written when the Task transitions to awaitingFeedback / paused; read on resume.")
 concept taskState {
   taskId            string  @required @description("v1:planner:task.id this state belongs to. One row per (taskId, persisted-version-seq); the planner reads the latest on resume.")

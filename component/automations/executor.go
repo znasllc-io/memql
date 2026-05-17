@@ -11,6 +11,7 @@ import (
 	"github.com/visionarys-io/memql/component/auth"
 	"github.com/visionarys-io/memql/component/events"
 	"github.com/visionarys-io/memql/component/memql"
+	"github.com/visionarys-io/memql/component/provenance"
 	"github.com/visionarys-io/memql/core/id"
 )
 
@@ -247,6 +248,18 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	// Inject system actor for automation execution
 	// This allows automations to execute mutations without user authentication
 	ctx = contextWithSystemActor(ctx, automation.Name)
+
+	// Stamp Automation provenance on every row this run writes. The
+	// engine reads this off ctx and stores it on the row intrinsic
+	// (see component/provenance). Trigger = the event topic that
+	// fired the automation, or "cron"/"manual" when no event.
+	trigger := "manual"
+	if triggeringEvent != nil {
+		trigger = triggeringEvent.Topic
+	} else if triggeredBy != "" {
+		trigger = triggeredBy
+	}
+	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
 	exec := NewExecution(automation.Name, triggeredBy)
 	evaluator := NewEvaluator()

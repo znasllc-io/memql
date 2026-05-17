@@ -4,7 +4,6 @@
 
 @version("1.0.0")
 @namespace("common")
-@visibility("bff", "cognition")
 @description("A file attachment uploaded to a space, with extracted transcription.")
 concept attachment {
   fileName  string  @required  @description("Original filename of the uploaded file.")
@@ -22,7 +21,6 @@ concept attachment {
 
 @version("1.0.0")
 @namespace("common")
-@visibility("bff", "cognition")
 @description("Audio, video, image, and document assets referenced by utterances.")
 concept media {
   dimensions {

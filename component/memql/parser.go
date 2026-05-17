@@ -3400,6 +3400,23 @@ func validateFieldReference(ref *FieldReference) error {
 			return fmt.Errorf("intrinsic field %q does not support nested paths", first)
 		}
 		return nil
+	case "provenance":
+		// provenance is a JSON-object intrinsic; nested paths address
+		// the engine-stamped fields (kind, name, trigger, via). Bare
+		// `provenance` returns the whole object.
+		if len(ref.Parts) > 2 {
+			return fmt.Errorf("provenance paths support one level (e.g. provenance.kind); got %q", ref.Raw)
+		}
+		if len(ref.Parts) == 2 {
+			sub := strings.ToLower(strings.TrimSpace(ref.Parts[1]))
+			switch sub {
+			case "kind", "name", "trigger", "via":
+				// allowed
+			default:
+				return fmt.Errorf("provenance field %q is not supported (kind|name|trigger|via)", ref.Parts[1])
+			}
+		}
+		return nil
 	case "caller":
 		// caller.X (auth-context reference) on the LHS of a comparison
 		// is valid inside context-spec bodies — `caller.role == "admin"`,
@@ -3418,7 +3435,7 @@ func validateFieldReference(ref *FieldReference) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("field %q must start with payload., meta., caller., or an intrinsic like id/concept/type/createdAt/createdBy", ref.Raw)
+		return fmt.Errorf("field %q must start with payload., meta., caller., or an intrinsic like id/concept/type/createdAt/createdBy/provenance", ref.Raw)
 	}
 
 	if len(ref.Parts) == 1 {
@@ -3464,7 +3481,7 @@ func isSpecReferenceCandidate(name string) bool {
 		return false
 	}
 	switch strings.ToLower(trimmed) {
-	case "payload", "meta", "concept", "id", "type", "createdat", "createdby", "schema":
+	case "payload", "meta", "concept", "id", "type", "createdat", "createdby", "schema", "provenance":
 		return false
 	}
 	return specNamePattern.MatchString(trimmed)

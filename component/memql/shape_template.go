@@ -679,6 +679,25 @@ func extractNodeFieldValue(node *memqlv1.MemoryNode, ref FieldReference) any {
 		}
 		// Navigate the path: payload.profile.displayName -> ["payload", "profile", "displayName"]
 		return navigatePath(payload, ref.Parts[1:])
+	case "provenance":
+		// Provenance is a first-class proto field. Bare `row.provenance`
+		// returns the whole {kind, name, trigger, via} object;
+		// `row.provenance.kind` etc. returns a leaf string.
+		pb := node.GetProvenance()
+		if pb == nil {
+			return nil
+		}
+		prov := map[string]any{"kind": pb.GetKind(), "name": pb.GetName()}
+		if t := pb.GetTrigger(); t != "" {
+			prov["trigger"] = t
+		}
+		if v := pb.GetVia(); v != "" {
+			prov["via"] = v
+		}
+		if len(ref.Parts) == 1 {
+			return prov
+		}
+		return navigatePath(prov, ref.Parts[1:])
 	default:
 		// Unknown field
 		return nil
@@ -786,6 +805,17 @@ func buildNodeProjection(node *memqlv1.MemoryNode, refs []FieldReference) map[st
 		case "schema":
 			if node.Schema != nil {
 				result["schema"] = cloneJSONSchemaDocument(node.Schema)
+			}
+		case "provenance":
+			if pb := node.GetProvenance(); pb != nil {
+				prov := map[string]any{"kind": pb.GetKind(), "name": pb.GetName()}
+				if t := pb.GetTrigger(); t != "" {
+					prov["trigger"] = t
+				}
+				if v := pb.GetVia(); v != "" {
+					prov["via"] = v
+				}
+				result["provenance"] = prov
 			}
 		}
 	}

@@ -671,6 +671,12 @@ func (s *streamSession) proxyAi(envelope *memqlv1.MemqlClientMessage, requestId 
 	claims := s.forwardedAuthClaims()
 	partition := extractPartitionFromEnvelope(envelope)
 
+	// Carry caller provenance across the hop so any rows the worker
+	// writes (tool calls, agent-turn side effects) stamp the same
+	// originating context. Receiver-side handlers re-hydrate via
+	// contextWithEnvelopeProvenance at handler entry.
+	stampEnvelopeProvenance(ctx, envelope)
+
 	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, claims, partition, envelope)
 	if err != nil {
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())

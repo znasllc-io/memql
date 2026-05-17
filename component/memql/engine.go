@@ -15,6 +15,7 @@ import (
 	concept "github.com/visionarys-io/memql/component/database/memory-nodes"
 	"github.com/visionarys-io/memql/component/events"
 	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	"github.com/visionarys-io/memql/component/provenance"
 	"github.com/visionarys-io/memql/core/common"
 )
 
@@ -374,6 +375,14 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 		if len(plan.Mutations) > 1 {
 			return nil, fmt.Errorf("multiple insert() / update() mutations in a single MemQL query are not supported yet")
 		}
+		// Default provenance for raw insert()/update() calls -- not
+		// wrapped in a named mutation, so attribute as a direct
+		// engine-level insert against the concept. Higher-level
+		// callers (e.g. tests that build a plan directly) should
+		// stamp provenance themselves before reaching this branch.
+		if provenance.FromContext(ctx).IsZero() {
+			ctx = provenance.ContextWithProvenance(ctx, provenance.Direct("rawInsert:"+plan.Mutations[0].Concept))
+		}
 		return e.executeMutation(ctx, plan.Mutations[0])
 	}
 
@@ -495,6 +504,18 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	mutation, err := e.renderMutationTemplate(ctx, fn.MutationTemplate, args)
 	if err != nil {
 		return nil, fmt.Errorf("function %q: %w", fn.Name, err)
+	}
+
+	// Stamp default provenance on ctx if the caller didn't already
+	// supply one. The default {kind: "mutation", name: <mutationName>}
+	// captures the actual named mutation that executed -- meaningful
+	// attribution for direct calls (cockpit, web UI, CLI) without
+	// requiring every gRPC handler to thread it explicitly. Higher-
+	// level callers (SeedMaterializer, automation step runner) wrap
+	// ctx with provenance.Seed / provenance.Automation BEFORE
+	// Execute, so their more-specific intent wins here.
+	if provenance.FromContext(ctx).IsZero() {
+		ctx = provenance.ContextWithProvenance(ctx, provenance.Mutation(fn.Name))
 	}
 
 	// Dispatch on Kind: insert appends a fresh full-payload row;

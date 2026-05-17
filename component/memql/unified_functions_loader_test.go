@@ -14,7 +14,7 @@ import (
 func TestLoadUnifiedFunctions_RegistersFromNewTree(t *testing.T) {
 	// Need concepts loaded first so @useConcept resolution works.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if _, err := LoadUnifiedConcepts(logger, ""); err != nil {
+	if _, err := LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
 
