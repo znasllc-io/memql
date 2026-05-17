@@ -400,7 +400,16 @@ docker-planner:
 # up the stack, and seeds manifest-listed entries into the running
 # memQL cluster as concept rows.
 
-.PHONY: db-purge dev-fresh dev-refresh dev-status
+.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps
+
+## Install + verify every build-time tool the dev workflow needs:
+## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
+## missing) plus go / docker / mkcert (verified only -- printed
+## install hint if missing). Idempotent. Run before 'make generate'
+## or after a fresh clone. Wired into 'make dev-refresh' so first-
+## time clones aren't surprised by a missing protoc.
+install-deps:
+	@bash scripts/dev/install-deps.sh
 
 ## Wipe ALL local memQL data (docker compose down -v + up -d). The
 ## next dev-refresh will re-seed from ~/.memql/genesis.znas.
@@ -513,8 +522,9 @@ help:
 	@echo "  Authoring of env vars / secrets is in memql-cockpit (see"
 	@echo "  'memql-cockpit genesis init'). The targets below operate on"
 	@echo "  the cluster + the decrypted genesis."
+	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, mkcert)"
 	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make dev-refresh               Decrypt genesis -> wipe -> restart -> seed (single-command testing flow)"
+	@echo "  make dev-refresh               Verify deps -> decrypt genesis -> wipe -> restart -> seed"
 	@echo "                                 (dev-fresh works as an alias)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
 	@echo ""
