@@ -5,9 +5,9 @@ package app
 import (
 	"context"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/integrations/cognition"
-	embeddingIntegration "github.com/visionarys-io/memql/integrations/embedding"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/integrations/cognition"
+	embeddingIntegration "github.com/znasllc-io/memql/integrations/embedding"
 )
 
 // setupCognitionIntegration creates and registers the cognition integration

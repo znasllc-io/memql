@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // bareDottedIdentifier returns true when s looks like a dotted reference

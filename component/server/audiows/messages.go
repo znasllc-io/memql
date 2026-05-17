@@ -1,6 +1,6 @@
 package audiows
 
-import "github.com/visionarys-io/memql/integrations/stt"
+import "github.com/znasllc-io/memql/integrations/stt"
 
 // AudioMessage represents an incoming message from the client.
 type AudioMessage struct {

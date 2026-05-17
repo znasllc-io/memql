@@ -3,9 +3,9 @@ package memql
 import (
 	"strings"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // shouldDropPrivateUtteranceForCaller is the per-event isolation gate for

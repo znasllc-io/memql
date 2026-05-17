@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/provenance"
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // systemActorPrefix is the prefix for system-generated actor identifiers.

@@ -1,7 +1,7 @@
 package extract
 
 import (
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 // ExtractCluster prepends a synthetic cluster root and parents every

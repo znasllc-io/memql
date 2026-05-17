@@ -17,7 +17,7 @@ import (
 	"regexp"
 	"strings"
 
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // FunctionSlice is one extracted function declaration with its

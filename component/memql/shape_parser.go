@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // parseShapeMemQL parses a .memql shape definition file and returns a

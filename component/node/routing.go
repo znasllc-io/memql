@@ -3,7 +3,7 @@ package node
 import (
 	"sync"
 
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // RoutingRule determines how an event should be forwarded to peers.

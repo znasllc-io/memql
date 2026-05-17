@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // TestResolveAttribute_TriggerOnSugarEmits5SegmentPattern guards against the

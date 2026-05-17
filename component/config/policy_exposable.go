@@ -15,7 +15,7 @@ package config
 import (
 	"strings"
 
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
 )
 
 // PolicyConfigField describes one exposed configuration entry.

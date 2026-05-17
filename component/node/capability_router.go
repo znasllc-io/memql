@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 const (

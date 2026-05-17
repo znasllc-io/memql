@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/component/auth"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 // EngineExecutor is the narrow interface the NodeStatusWriter needs on the

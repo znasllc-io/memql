@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql/baseregistry"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseregistry"
 )
 
 // Pass 3 of the DSL restructure migration: the legacy walk over

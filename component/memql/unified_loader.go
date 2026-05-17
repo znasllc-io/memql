@@ -24,10 +24,10 @@ import (
 	"io"
 	"log/slog"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	languageAst "github.com/visionarys-io/memql/component/language/ast"
-	"github.com/visionarys-io/memql/component/memql/dslfs"
-	memqldsl "github.com/visionarys-io/memql/dsl"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // LoadUnifiedConcepts walks the unified DSL tree at dsl.Tree(),

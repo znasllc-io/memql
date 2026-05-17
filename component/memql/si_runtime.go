@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 type siRuntime struct {

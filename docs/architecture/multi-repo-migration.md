@@ -34,8 +34,8 @@
 
 ### 0.1 The user
 
-- **Name:** Jose Sanz. **Email:** `jsanz@visionarys.io`.
-- **Company:** Visionarys.
+- **Name:** Jose Sanz. **Email:** `jsanz@znasllc.io`.
+- **Company:** Znasllc.
 - **Role:** product owner / lead engineer for the whole stack. Reviews everything before push.
 - **Communication:** voice-to-text dictation often produces transcription artifacts; read for intent.
 - **Preferences:** **no emojis** in any output. Professional, concise language.
@@ -136,7 +136,7 @@ Every build/run/test command is a Makefile target in the relevant repo. Multi-st
                           ▼
 ┌───────────────────────────────────────────────────────────────┐
 │ Core memql (one repo)                                         │
-│   github.com/visionarys-io/memql                              │
+│   github.com/znasllc-io/memql                              │
 │   - Engine, gRPC server, plug-in registry                     │
 │   - Identity service, agent / voice / cognition / planner     │
 │     node-type binaries                                        │
@@ -182,17 +182,17 @@ These are settled in the brainstorm. Don't relitigate without explicit user appr
 
 | Repo | Go module path | Type |
 |---|---|---|
-| `memql` | `github.com/visionarys-io/memql` | Core library + non-BFF node binaries |
+| `memql` | `github.com/znasllc-io/memql` | Core library + non-BFF node binaries |
 | `copresent` | n/a (TS) | Frontend |
-| `copresent-bff` | `github.com/visionarys-io/copresent-bff` | BFF for copresent |
-| `memql-cockpit` | `github.com/visionarys-io/memql-cockpit` | TUI client |
-| `memql-cockpit-bff` | `github.com/visionarys-io/memql-cockpit-bff` | BFF for cockpit |
+| `copresent-bff` | `github.com/znasllc-io/copresent-bff` | BFF for copresent |
+| `memql-cockpit` | `github.com/znasllc-io/memql-cockpit` | TUI client |
+| `memql-cockpit-bff` | `github.com/znasllc-io/memql-cockpit-bff` | BFF for cockpit |
 | `portal` | n/a (TS) | Frontend (future) |
-| `portal-bff` | `github.com/visionarys-io/portal-bff` | BFF for portal (future) |
+| `portal-bff` | `github.com/znasllc-io/portal-bff` | BFF for portal (future) |
 
 ### 2.3 Plug-in registration as the integration mechanism
 
-Each BFF's `cmd/main.go` imports `github.com/visionarys-io/memql` as the application framework, plus its own client-specific packages that register at `init()` via `memql.RegisterPlugin`. The BFF binary is a thin wrapper that wires everything together.
+Each BFF's `cmd/main.go` imports `github.com/znasllc-io/memql` as the application framework, plus its own client-specific packages that register at `init()` via `memql.RegisterPlugin`. The BFF binary is a thin wrapper that wires everything together.
 
 Memql core exposes:
 
@@ -500,10 +500,10 @@ It's a strict Go-only client with no `.memql` files of its own. The extraction i
 
 ### 7.3 Steps
 
-1. Create the new repo: `~/projects/memql-cockpit/`. `git init`, `go mod init github.com/visionarys-io/memql-cockpit`.
+1. Create the new repo: `~/projects/memql-cockpit/`. `git init`, `go mod init github.com/znasllc-io/memql-cockpit`.
 2. Copy `cmd/memql-cockpit/` and `cli/` (the TUI library) from memql to the new repo.
-3. Add `require github.com/visionarys-io/memql v<current>` to the new go.mod, plus all the transitive deps.
-4. Update import paths in the moved files: `github.com/visionarys-io/memql/cli/...` becomes either still `memql/cli/...` (if cli stays in core — probably no, it's TUI-specific) or `github.com/visionarys-io/memql-cockpit/cli/...`.
+3. Add `require github.com/znasllc-io/memql v<current>` to the new go.mod, plus all the transitive deps.
+4. Update import paths in the moved files: `github.com/znasllc-io/memql/cli/...` becomes either still `memql/cli/...` (if cli stays in core — probably no, it's TUI-specific) or `github.com/znasllc-io/memql-cockpit/cli/...`.
 5. Move the Makefile cockpit targets to the new repo.
 6. Move CI workflow for cockpit binaries to the new repo.
 7. Move `deploy/launchd/` and `deploy/systemd/` cockpit-related files.
@@ -568,7 +568,7 @@ app/integrations_bff.go              app/integrations.go            (the integra
 
 ```
 copresent-bff/
-├── go.mod                          require github.com/visionarys-io/memql v<X>
+├── go.mod                          require github.com/znasllc-io/memql v<X>
 ├── go.sum
 ├── Makefile                        with `build`, `dev`, `test` targets
 ├── cmd/
@@ -609,8 +609,8 @@ import (
     "log/slog"
     "os"
 
-    "github.com/visionarys-io/memql"
-    _ "github.com/visionarys-io/copresent-bff/app"  // side-effect: registers plug-ins
+    "github.com/znasllc-io/memql"
+    _ "github.com/znasllc-io/copresent-bff/app"  // side-effect: registers plug-ins
 )
 
 func main() {
@@ -637,7 +637,7 @@ The plug-in registration in `copresent-bff/app/integrations.go` calls `memql.Reg
 
 1. Create `~/projects/copresent-bff/`. `git init`, `go mod init`.
 2. Move all client-specific files per the audit (Phase 1) using `git mv` from inside memql, then re-add in copresent-bff.
-3. Update import paths inside the moved Go files: `github.com/visionarys-io/memql/integrations/copresent/...` → `github.com/visionarys-io/copresent-bff/integrations/copresent/...`.
+3. Update import paths inside the moved Go files: `github.com/znasllc-io/memql/integrations/copresent/...` → `github.com/znasllc-io/copresent-bff/integrations/copresent/...`.
 4. Rewrite the moved files' package declarations if they need to change.
 5. Add `embed.go` with the appropriate `//go:embed` directives.
 6. Add `app/integrations.go` that calls `memql.RegisterPlugin` at init.

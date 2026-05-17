@@ -3,7 +3,7 @@
 package app
 
 import (
-	"github.com/visionarys-io/memql/component/server/polyphonws"
+	"github.com/znasllc-io/memql/component/server/polyphonws"
 )
 
 // wirePolyphonPrewarm is a no-op on binaries without cognition. The

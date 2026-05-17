@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/component/memql/baseloader"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
 // LoadUnifiedFunctions walks the unified DSL tree, extracts every

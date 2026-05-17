@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/memql/baseregistry"
+	"github.com/znasllc-io/memql/component/memql/baseregistry"
 )
 
 var (

@@ -346,8 +346,8 @@ package <name>
 import (
     "context"
     "encoding/json"
-    memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-    "github.com/visionarys-io/memql/component/memql"
+    memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+    "github.com/znasllc-io/memql/component/memql"
 )
 
 type Integration struct{ /* ...deps... */ }
@@ -376,7 +376,7 @@ func (i *Integration) handleDoThing(ctx context.Context, args map[string]any, _ 
 // integrations/<name>/plugin.go
 package <name>
 
-import "github.com/visionarys-io/memql/component/memql"
+import "github.com/znasllc-io/memql/component/memql"
 
 func init() {
     memql.RegisterPlugin("<name>", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {

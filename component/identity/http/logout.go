@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
 // handleLogout revokes the current session (the one tied to the

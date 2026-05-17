@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/secret"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // RcAction describes what happened to a shell rc file after a sync.

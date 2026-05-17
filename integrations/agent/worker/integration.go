@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
-	workerservice "github.com/visionarys-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
 // Integration registers the agent-side worker capabilities with the

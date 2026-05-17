@@ -1,7 +1,7 @@
 package router
 
 import (
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 func init() {

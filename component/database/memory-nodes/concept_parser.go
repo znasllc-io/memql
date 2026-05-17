@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"strings"
 
-	languageAst "github.com/visionarys-io/memql/component/language/ast"
-	"github.com/visionarys-io/memql/component/language/parser"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // ParseConceptMemQL parses a concept.memql file into a *Concept using

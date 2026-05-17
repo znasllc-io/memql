@@ -38,7 +38,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	langparser "github.com/visionarys-io/memql/component/language/parser"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 type rewriter func([]byte) ([]byte, error)

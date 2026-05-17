@@ -14,8 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/integrations/voice"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/integrations/voice"
 )
 
 // TTSClient implements polyphon.TTSProvider using Deepgram's `/v1/speak`

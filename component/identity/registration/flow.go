@@ -10,7 +10,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity"
 )
 
 // Action enumerates what the issuer should do for a given email under

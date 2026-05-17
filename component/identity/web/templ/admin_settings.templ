@@ -193,7 +193,7 @@ templ AdminSettings(data AdminSettingsData) {
 						<option value="lax" selected?={ data.Form.RefreshCookieSameSite == "lax" }>Lax (same-site self-hosted)</option>
 						<option value="none" selected?={ data.Form.RefreshCookieSameSite == "none" }>None (cross-site SaaS)</option>
 					</select>
-					<span class="help">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.visionarys.io). Effective: { data.Form.EffectiveSameSiteLabel }</span>
+					<span class="help">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.znasllc.io). Effective: { data.Form.EffectiveSameSiteLabel }</span>
 				</div>
 				<button type="submit" class="btn btn-primary" data-pending-label="Saving...">Save settings</button>
 			</form>

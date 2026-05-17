@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // PlannerAgentLoop owns the structured-output cycle that drives every

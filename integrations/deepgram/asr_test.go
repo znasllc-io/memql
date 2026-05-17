@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // newTestStream builds a deepgramASRStream with no real WebSocket --

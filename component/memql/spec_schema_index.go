@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	concept "github.com/visionarys-io/memql/component/database/memory-nodes"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 type schemaIndex struct {

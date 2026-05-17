@@ -1,4 +1,4 @@
-module github.com/visionarys-io/memql
+module github.com/znasllc-io/memql
 
 go 1.26.1
 

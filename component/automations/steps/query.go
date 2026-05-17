@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // QueryExecutor executes MemQL queries and mutations.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
 )
 
 // adminCookieName mirrors component/identity/admin.adminCookieName.

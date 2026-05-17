@@ -3,8 +3,8 @@ package cognition
 import (
 	"strings"
 
-	"github.com/visionarys-io/memql/core/env"
-	"github.com/visionarys-io/memql/integrations"
+	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/integrations"
 )
 
 // CognitionEnvKeys defines the environment variable keys for Cognition logging configuration.

@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/visionarys-io/memql/component/bus"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/bus"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // SetWiring configures the bus wiring for channel-based communication.

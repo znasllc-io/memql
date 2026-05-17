@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 // FunctionExecutor invokes MemQL functions.

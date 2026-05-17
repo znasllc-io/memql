@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	workerservice "github.com/visionarys-io/memql/component/worker"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
 // EngineStore is the production Store implementation. Reads + writes

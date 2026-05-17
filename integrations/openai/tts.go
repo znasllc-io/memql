@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/integrations/audio"
 )
 
 const ttsEndpoint = "https://api.openai.com/v1/audio/speech"

@@ -75,7 +75,7 @@ id, _ = chain.Next(engine.FromString("action 2"), engine)
 The salt is configured via environment variable:
 
 ```
-MEMORY_NODES_VISIONARYS_LAB_CONTENTID_SALT=your-deployment-salt
+MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT=your-deployment-salt
 ```
 
 Different salts produce different IDs for the same payload, enabling environment isolation.

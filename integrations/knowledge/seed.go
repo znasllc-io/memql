@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // StandardDomain is a seed record for a knowledge domain shipped with

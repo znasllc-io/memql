@@ -81,7 +81,7 @@ gcloud config set account memql-deploy@fast-fire-486523-f3.iam.gserviceaccount.c
 ### Switch to Personal Account
 
 ```bash
-gcloud config set account google_cloud@visionarys.io
+gcloud config set account google_cloud@znasllc.io
 ```
 
 ### Switch to Frontend Service Account

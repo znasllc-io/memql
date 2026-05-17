@@ -14,9 +14,9 @@ import (
 	"log/slog"
 	"strings"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/secret"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // Integration implements memql.IntegrationProvider for router admin

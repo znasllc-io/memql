@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/language/ast"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // FunctionMutationTemplate is a compiled representation of a mutation function body.

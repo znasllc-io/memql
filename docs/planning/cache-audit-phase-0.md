@@ -61,7 +61,7 @@ Numbers are written periodically (every 5 minutes when the cache is non-empty) a
 
 ### 3. ~~Concept cache (`component/cache/cache.go`)~~ — DEAD CODE
 
-This file exists in the tree but has zero consumers in the build (`grep -r '"github.com/visionarys-io/memql/component/cache"' --include='*.go'` returns nothing). The `Cache` and `CachedMemoryNodeStore` types are not referenced by anything.
+This file exists in the tree but has zero consumers in the build (`grep -r '"github.com/znasllc-io/memql/component/cache"' --include='*.go'` returns nothing). The `Cache` and `CachedMemoryNodeStore` types are not referenced by anything.
 
 It looks like an older caching layer that got designed but never wired up, or one that got replaced by the result cache + per-concept Ristretto and never removed. No instrumentation needed; flagged for cleanup as a separate follow-up (delete the file, save 600 LOC of confusion for the next reader).
 

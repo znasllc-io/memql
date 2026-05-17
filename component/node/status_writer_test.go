@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 // stubExecutor records every MemQL query passed to Execute so tests can

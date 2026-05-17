@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // validateAndStampPrivateUtterancePayload is the engine pre-insert guard for

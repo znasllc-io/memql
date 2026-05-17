@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/visionarys-io/memql/component/language/ast"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestCanonicalizeRelationshipComparisons exercises the engine's

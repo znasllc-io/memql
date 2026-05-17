@@ -11,8 +11,8 @@ import (
 	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/language/ast"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, payloadCache map[string]map[string]any) (bool, error) {

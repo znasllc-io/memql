@@ -5,7 +5,7 @@ description = "memql realtime voice + video pipeline (LiveKit Agents 1.5, Deepgr
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-authors = [{ name = "Visionarys", email = "engineering@visionarys.io" }]
+authors = [{ name = "Znasllc", email = "engineering@znasllc.io" }]
 
 dependencies = [
     "livekit-agents>=1.5.0",

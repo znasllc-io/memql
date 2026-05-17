@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 
-	memqlgrpc "github.com/visionarys-io/memql/component/grpc"
-	"github.com/visionarys-io/memql/component/identity/verifier"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/memql/sense"
-	"github.com/visionarys-io/memql/component/server"
-	"github.com/visionarys-io/memql/component/server/memqlws"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity/verifier"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/memqlws"
 )
 
 // transportBase creates the gRPC server, WebSocket bridge, and gateway middleware.

@@ -8,8 +8,8 @@ package agent
 import (
 	"context"
 
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // ComponentName identifies this package in logs and environment lookups.

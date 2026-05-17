@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 func (e *MemQLEngine) evaluateRelationshipExpression(ctx context.Context, expr *RelationshipExpression, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {

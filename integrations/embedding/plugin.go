@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // init self-registers the embedding integration as a plug-in. Always on:

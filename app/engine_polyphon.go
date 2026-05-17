@@ -2,7 +2,7 @@
 
 package app
 
-import "github.com/visionarys-io/memql/component/polyphon"
+import "github.com/znasllc-io/memql/component/polyphon"
 
 // initPolyphonScoreEngine creates the Polyphon cognition for turn-taking
 // decisions. Only compiled for cognition and standalone builds.

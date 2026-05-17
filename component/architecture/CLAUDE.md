@@ -116,8 +116,8 @@ go run ./cmd/memql-arch --root .. --out component/architecture/embedded/topology
 
 ```go
 import (
-    "github.com/visionarys-io/memql/component/architecture/embedded"
-    "github.com/visionarys-io/memql/component/architecture/model"
+    "github.com/znasllc-io/memql/component/architecture/embedded"
+    "github.com/znasllc-io/memql/component/architecture/model"
 )
 
 m, err := embedded.Load()

@@ -53,7 +53,7 @@ import (
 // Wikipedia's API policy asks for a contact / project identifier
 // so abusive callers can be rate-limited / contacted; we identify
 // ourselves as memQL with the project URL.
-const wikipediaUserAgent = "memQL/1.0 (https://github.com/visionarys-io/memql; knowledge-seeder)"
+const wikipediaUserAgent = "memQL/1.0 (https://github.com/znasllc-io/memql; knowledge-seeder)"
 
 // wikipediaSummaryAPI is the REST API endpoint that returns a
 // page summary -- title, extract (plain-text intro), description.

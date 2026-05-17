@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/logger"
+	"github.com/znasllc-io/memql/component/auth"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // ComponentName identifies this package in logs.

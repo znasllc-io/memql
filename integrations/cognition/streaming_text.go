@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // generateTextStreaming renders the score engineReply.v1 prompt and streams the

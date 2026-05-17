@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // Compile-time interface compliance check.

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 const colorReset = "\033[0m"

@@ -1,8 +1,8 @@
 package liveknowledge
 
 import (
-	"github.com/visionarys-io/memql/component/memql"
-	lk "github.com/visionarys-io/memql/component/memql/liveknowledge"
+	"github.com/znasllc-io/memql/component/memql"
+	lk "github.com/znasllc-io/memql/component/memql/liveknowledge"
 )
 
 // init self-registers the liveknowledge integration as a plug-in.

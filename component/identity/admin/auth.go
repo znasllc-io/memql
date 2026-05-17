@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/identity"
 )
 
 // adminCookieName is the cookie that carries the JWT for an

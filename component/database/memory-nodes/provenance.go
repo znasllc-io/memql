@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/component/provenance"
 )
 
 // provenanceJSONFromContext pulls the provenance.Provenance value

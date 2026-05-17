@@ -1,6 +1,6 @@
 package node
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // PlannerBootstrap creates dependencies for a Planner node.
 // Planner nodes handle task planning and orchestration.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 type fakeExecutor struct {

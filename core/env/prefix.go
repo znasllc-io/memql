@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // EnvPrefixForComponent converts a component name (which may be camelCase, kebab-case, etc.)

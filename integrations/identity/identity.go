@@ -9,7 +9,7 @@
 package identity
 
 import (
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // IdentityIntegration exposes delegation operations as DSL-callable

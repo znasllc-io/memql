@@ -493,7 +493,7 @@ func AdminSettings(data AdminSettingsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, ">None (cross-site SaaS)</option></select> <span class=\"help\">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.visionarys.io). Effective: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, ">None (cross-site SaaS)</option></select> <span class=\"help\">Lax suits app.acme.com + identity.acme.com (single eTLD+1) and avoids Safari ITP. None is needed when the SPA + identity live on different eTLD+1s (app.copresent.ai + auth.znasllc.io). Effective: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

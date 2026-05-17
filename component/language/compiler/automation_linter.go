@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // lintAutomationSteps contains automation-specific lints so they stay isolated

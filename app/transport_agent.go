@@ -6,11 +6,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/visionarys-io/memql/component/fileprocessor"
-	"github.com/visionarys-io/memql/component/server"
-	"github.com/visionarys-io/memql/component/server/audiows"
-	"github.com/visionarys-io/memql/integrations/gcs"
-	"github.com/visionarys-io/memql/integrations/stt"
+	"github.com/znasllc-io/memql/component/fileprocessor"
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/audiows"
+	"github.com/znasllc-io/memql/integrations/gcs"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // transportAgent sets up transport for an agent node.

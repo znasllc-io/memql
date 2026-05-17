@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // ErrNoWorkerAvailable indicates dispatch found no online worker

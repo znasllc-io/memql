@@ -8,7 +8,7 @@ import (
 	grpcMetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
-	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
+	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 )
 
 // extractRequestMeta extracts transport-level metadata from a gRPC stream context.

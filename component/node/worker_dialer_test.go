@@ -3,7 +3,7 @@ package node
 import (
 	"testing"
 
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 func TestParseWorkerPeers_Empty(t *testing.T) {

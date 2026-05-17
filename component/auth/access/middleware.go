@@ -16,7 +16,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

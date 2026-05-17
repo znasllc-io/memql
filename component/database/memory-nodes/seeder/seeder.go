@@ -15,10 +15,10 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/visionarys-io/memql/component/database"
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/provenance"
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/component/database"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 var payloadPathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)

@@ -3,7 +3,7 @@ package sense
 import (
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Tokenize returns semantic tokens for syntax highlighting.

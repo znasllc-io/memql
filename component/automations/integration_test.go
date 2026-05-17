@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // TestEvaluatorWithEventData verifies the evaluator can access event data.

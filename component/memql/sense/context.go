@@ -3,7 +3,7 @@ package sense
 import (
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // ContextKind describes the syntactic context at a cursor position.

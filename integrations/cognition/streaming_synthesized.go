@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // streamResult holds the output of a streaming call.

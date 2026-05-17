@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/abuse"
-	"github.com/visionarys-io/memql/component/identity/admin"
-	"github.com/visionarys-io/memql/component/identity/emailsender"
-	httpidentity "github.com/visionarys-io/memql/component/identity/http"
-	"github.com/visionarys-io/memql/component/identity/magiclink"
-	"github.com/visionarys-io/memql/component/identity/pat"
-	"github.com/visionarys-io/memql/component/identity/refresh"
-	identityweb "github.com/visionarys-io/memql/component/identity/web"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/admin"
+	"github.com/znasllc-io/memql/component/identity/emailsender"
+	httpidentity "github.com/znasllc-io/memql/component/identity/http"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity/pat"
+	"github.com/znasllc-io/memql/component/identity/refresh"
+	identityweb "github.com/znasllc-io/memql/component/identity/web"
 )
 
 // newSSOAuthCode mints a plaintext URL-safe base64 code + its
