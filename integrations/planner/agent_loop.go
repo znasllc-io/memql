@@ -196,6 +196,19 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 		specialists = nil
 	}
 
+	// The plannerAgent prompt's input JSON schema declares
+	// `specialists` and `tasks` as arrays; a nil Go slice serializes
+	// to `null`, which fails JSON-schema validation
+	// ('expected array, but got null'). Default to empty slices so a
+	// brand-new Plan with no tasks + no existing agents still passes
+	// the schema gate.
+	if tasks == nil {
+		tasks = []map[string]any{}
+	}
+	if specialists == nil {
+		specialists = []map[string]any{}
+	}
+
 	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", map[string]any{
 		"plan":        plan,
 		"tasks":       tasks,
