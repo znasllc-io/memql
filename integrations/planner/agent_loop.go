@@ -310,36 +310,29 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 }
 
 // extractAgentFactoryResult digs the {agentId, action} fields out of
-// the ensureAgentForGoal builtin's return. The engine wraps integration
-// results as a MemoryNode-shaped value; the factory's payload is
-// {agentId, agentName, roleSlug, action, reasoning} per
-// dsl/agents/builtins.memql.
+// the ensureAgentForGoal builtin's return. The engine wraps results
+// in {bundle: {nodes: [...]}} envelopes (same shape queryPlanById
+// returns); we route through plannerExtractRows to normalize to a
+// flat row slice, then pluck the factory-specific fields off the
+// first row's top-level or payload.
 func extractAgentFactoryResult(res any) (agentId, action string) {
-	switch v := res.(type) {
-	case map[string]any:
-		// Direct payload map.
-		if id, ok := v["agentId"].(string); ok {
+	rows := plannerExtractRows(res)
+	if len(rows) == 0 {
+		return "", ""
+	}
+	row := rows[0]
+	if id, ok := row["agentId"].(string); ok {
+		agentId = id
+	}
+	if a, ok := row["action"].(string); ok {
+		action = a
+	}
+	if p, ok := row["payload"].(map[string]any); ok {
+		if id, ok := p["agentId"].(string); ok && agentId == "" {
 			agentId = id
 		}
-		if a, ok := v["action"].(string); ok {
+		if a, ok := p["action"].(string); ok && action == "" {
 			action = a
-		}
-		// Or wrapped inside `payload`.
-		if p, ok := v["payload"].(map[string]any); ok {
-			if id, ok := p["agentId"].(string); ok && agentId == "" {
-				agentId = id
-			}
-			if a, ok := p["action"].(string); ok && action == "" {
-				action = a
-			}
-		}
-	case []map[string]any:
-		if len(v) > 0 {
-			return extractAgentFactoryResult(v[0])
-		}
-	case []any:
-		if len(v) > 0 {
-			return extractAgentFactoryResult(v[0])
 		}
 	}
 	return agentId, action
@@ -442,16 +435,34 @@ func plannerExtractRows(raw any) []map[string]any {
 func plannerRowsFromLoose(v any) []map[string]any {
 	switch x := v.(type) {
 	case map[string]any:
-		if rows, ok := x["rows"].([]any); ok {
-			return plannerCastRows(rows)
-		}
-		if result, ok := x["result"].(map[string]any); ok {
-			if rows, ok := result["rows"].([]any); ok {
-				return plannerCastRows(rows)
+		// Engine-emitted shape today: {bundle: {nodes: [...]}}. The
+		// diagnostic we logged on the failing reproducer surfaced this:
+		// the rawResponse was a non-empty bundle that the extractor
+		// silently dropped because it only knew about top-level keys.
+		if bundle, ok := x["bundle"].(map[string]any); ok {
+			if nodes, ok := bundle["nodes"].([]any); ok {
+				return plannerCastRows(nodes)
 			}
 		}
-		if nodes, ok := x["nodes"].([]any); ok {
-			return plannerCastRows(nodes)
+		// Other shapes the engine produces under different builders.
+		// Keep them so this extractor works against every working path
+		// for future-proofing.
+		for _, key := range []string{"nodes", "rows", "items", "results", "data"} {
+			if arr, ok := x[key].([]any); ok {
+				return plannerCastRows(arr)
+			}
+		}
+		if result, ok := x["result"].(map[string]any); ok {
+			for _, key := range []string{"rows", "nodes"} {
+				if arr, ok := result[key].([]any); ok {
+					return plannerCastRows(arr)
+				}
+			}
+			if bundle, ok := result["bundle"].(map[string]any); ok {
+				if nodes, ok := bundle["nodes"].([]any); ok {
+					return plannerCastRows(nodes)
+				}
+			}
 		}
 	case []any:
 		return plannerCastRows(x)
