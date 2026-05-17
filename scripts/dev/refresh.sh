@@ -125,8 +125,21 @@ function step6_restore_knowledge() {
 # Entry
 # -----------------------------------------------------------------
 
+function step0_install_deps() {
+    # Idempotent + fast when everything's already installed; only the
+    # first run on a new machine actually does work. See
+    # scripts/dev/install-deps.sh -- installs protoc + protoc-gen-go
+    # plugins, verifies go/docker/mkcert are present.
+    echo "[0/6] Verifying dev dependencies..."
+    bash "${SCRIPT_DIR}/install-deps.sh" >/dev/null || {
+        echo "  ERROR: dependency check failed. Run 'make install-deps' for the full diagnostic."
+        exit 1
+    }
+}
+
 function main() {
     check_docker
+    step0_install_deps
     step1_load_genesis
     step2_export_running_state
     step3_wipe_and_restart
