@@ -163,6 +163,27 @@ These are the band-aids this doc exists to prevent:
 - **Mixing canonical and bare ids in the same field across rows.**
   Pick one and document it on the field's `@description`.
 
+- **Building a "shortId" by gluing in another row's full
+  canonical id.** This produced two landed bugs:
+  - The seed materializer wrote per-user agent rows with shortIds
+    like `trainerAgent-_system:v1:identity:user:user-30bf...` by
+    concatenating `def.Name + "-" + userId` where `userId` was the
+    full canonical id. The result has a colon, so the storage
+    layer's `HasPartition()` returns true and the row gets stored
+    without the engine-prepended `{partition}:{concept}:`.
+    Strip the user's id down to its shortId first (use
+    `id.ParseNodeId`), then concatenate: `def.Name + "-" + shortUserId`.
+  - The checkpoint writer wrote `"checkpoint:" + executionId` as
+    the shortId, duplicating the concept name inside the id.
+    Concept is already in the canonical position; the shortId
+    should be just `executionId`.
+
+  As of 2026-05-17 `Concept.Create` rejects writes whose nodeId
+  doesn't match one of the three legitimate shapes -- bare slug
+  with no colons, concept-prefixed (`v1:x:y:<short>`), or fully
+  qualified (`{partition}:v1:x:y:<short>`). See
+  `validateShortId` in `component/database/memory-nodes/concept.go`.
+
 The CoPresent frontend has a `stripConceptPrefix` helper for the
 remaining legitimate cases (extracting a short id for a
 short-channel-key, debug labels, etc.) -- see
