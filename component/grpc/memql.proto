@@ -18,11 +18,36 @@ service MemqlService {
 // Envelopes
 // -----------------------------------------------------------------------------
 
+// Provenance is the engine-stamped origin metadata stored as an
+// intrinsic on every MemoryNodes row. Carried on the envelope so
+// cross-node forwarders (proxyAi / AiForward / NodeService) can
+// propagate the caller's originating attribution across hops --
+// otherwise a row written on the receiver gets stamped with the
+// receiver's default Mutation(name) and loses the "kicked off by
+// seed X / automation Y / etc." context.
+//
+// `kind` is a closed enum (engine-validated): seed | mutation |
+// automation | direct | system | migration. See
+// component/provenance/provenance.go for the Go-side canonical
+// values + validator.
+message Provenance {
+  string kind    = 1;
+  string name    = 2;
+  string trigger = 3;
+  string via     = 4;
+}
+
 message MemqlClientMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
   string partition = 4;
+  // Caller-stamped provenance for cross-node propagation. When set,
+  // the receiver re-hydrates ctx so any rows the request writes are
+  // attributed to the originator, not the receiver's default. When
+  // unset the engine's auto-stamping path applies (Mutation /
+  // Direct defaults).
+  Provenance provenance = 100;
 
   oneof payload {
     ClientHello client_hello = 10;
@@ -459,6 +484,11 @@ message MemoryNode {
   google.protobuf.Struct schema = 7;
   string partition = 8;
   google.protobuf.Struct metadata = 9;
+  // Engine-stamped origin metadata; intrinsic alongside id /
+  // created_by / created_at. Required on every row at the DB layer
+  // (NOT NULL JSONB column). See message Provenance above for shape
+  // and component/provenance for the canonical Go values + validator.
+  Provenance provenance = 10;
 }
 
 message GraphEdge {

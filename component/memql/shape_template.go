@@ -680,24 +680,22 @@ func extractNodeFieldValue(node *memqlv1.MemoryNode, ref FieldReference) any {
 		// Navigate the path: payload.profile.displayName -> ["payload", "profile", "displayName"]
 		return navigatePath(payload, ref.Parts[1:])
 	case "provenance":
-		// Provenance is plumbed via metadata["provenance"] (see
-		// toAPIMemoryNode). Bare `row.provenance` returns the whole
-		// {kind, name, trigger, via} object; `row.provenance.kind` etc.
-		// returns a leaf string.
-		if node.Metadata == nil {
+		// Provenance is a first-class proto field. Bare `row.provenance`
+		// returns the whole {kind, name, trigger, via} object;
+		// `row.provenance.kind` etc. returns a leaf string.
+		pb := node.GetProvenance()
+		if pb == nil {
 			return nil
 		}
-		meta := structToMap(node.Metadata)
-		provAny, ok := meta["provenance"]
-		if !ok {
-			return nil
+		prov := map[string]any{"kind": pb.GetKind(), "name": pb.GetName()}
+		if t := pb.GetTrigger(); t != "" {
+			prov["trigger"] = t
 		}
-		prov, _ := provAny.(map[string]any)
-		if prov == nil {
-			return nil
+		if v := pb.GetVia(); v != "" {
+			prov["via"] = v
 		}
 		if len(ref.Parts) == 1 {
-			return cloneValue(prov)
+			return prov
 		}
 		return navigatePath(prov, ref.Parts[1:])
 	default:
@@ -809,12 +807,15 @@ func buildNodeProjection(node *memqlv1.MemoryNode, refs []FieldReference) map[st
 				result["schema"] = cloneJSONSchemaDocument(node.Schema)
 			}
 		case "provenance":
-			if node.Metadata != nil {
-				if meta := structToMap(node.Metadata); meta != nil {
-					if prov, ok := meta["provenance"]; ok {
-						result["provenance"] = cloneValue(prov)
-					}
+			if pb := node.GetProvenance(); pb != nil {
+				prov := map[string]any{"kind": pb.GetKind(), "name": pb.GetName()}
+				if t := pb.GetTrigger(); t != "" {
+					prov["trigger"] = t
 				}
+				if v := pb.GetVia(); v != "" {
+					prov["via"] = v
+				}
+				result["provenance"] = prov
 			}
 		}
 	}

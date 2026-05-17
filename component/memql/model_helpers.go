@@ -50,29 +50,36 @@ func toAPIMemoryNode(node *memorynodes.MemoryNode) (*memqlv1.MemoryNode, error) 
 		return nil, err
 	}
 
-	// Expose row provenance via the existing Metadata struct so shape
-	// templates can project `row.provenance` and the cockpit can render
-	// it without needing a proto regen for a dedicated field. Stored
-	// under metadata["provenance"] as {kind, name, trigger, via}.
-	var metadataStruct *structpb.Struct
+	// Expose the engine-stamped provenance intrinsic on the wire as a
+	// first-class field (matches its first-class status at the DB
+	// layer -- NOT NULL column with GIN index). Closed-enum kinds
+	// (see component/provenance).
+	var provPb *memqlv1.Provenance
 	if len(node.Provenance) > 0 {
-		provObj := map[string]any{}
-		if err := json.Unmarshal(node.Provenance, &provObj); err == nil && len(provObj) > 0 {
-			metaMap := map[string]any{"provenance": provObj}
-			if s, err := structpb.NewStruct(metaMap); err == nil {
-				metadataStruct = s
+		var pv struct {
+			Kind    string `json:"kind"`
+			Name    string `json:"name"`
+			Trigger string `json:"trigger,omitempty"`
+			Via     string `json:"via,omitempty"`
+		}
+		if err := json.Unmarshal(node.Provenance, &pv); err == nil && pv.Kind != "" {
+			provPb = &memqlv1.Provenance{
+				Kind:    pv.Kind,
+				Name:    pv.Name,
+				Trigger: pv.Trigger,
+				Via:     pv.Via,
 			}
 		}
 	}
 
 	return &memqlv1.MemoryNode{
-		Id:        node.ID,
-		Concept:   node.Concept,
-		CreatedAt: timestamppb.New(node.CreatedAt),
-		CreatedBy: node.CreatedBy,
-		Type:      node.Type,
-		Schema:    schema,
-		Payload:   payloadStruct,
-		Metadata:  metadataStruct,
+		Id:         node.ID,
+		Concept:    node.Concept,
+		CreatedAt:  timestamppb.New(node.CreatedAt),
+		CreatedBy:  node.CreatedBy,
+		Type:       node.Type,
+		Schema:     schema,
+		Payload:    payloadStruct,
+		Provenance: provPb,
 	}, nil
 }
