@@ -273,15 +273,15 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 			"createSpecialist: plan is missing goal or requestedBy; cannot run factory")
 	}
 
-	args, err := json.Marshal(map[string]any{
-		"goal":        goal,
-		"ownerUserId": ownerUserId,
-		"spaceId":     spaceId,
-	})
-	if err != nil {
-		return l.markPlanFailed(ctx, planId, fmt.Sprintf("createSpecialist: marshal args: %v", err))
-	}
-	call := fmt.Sprintf("ensureAgentForGoal(%s)", string(args))
+	// MemQL function-call args take bare-identifier keys, not JSON
+	// quoted keys. json.Marshal would produce quoted keys and the
+	// parser would silently drop the args, so we build the call
+	// literal by hand. %q quotes the string values per MemQL string
+	// syntax.
+	call := fmt.Sprintf(
+		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q})`,
+		goal, ownerUserId, spaceId,
+	)
 	res, err := l.engine.Execute(ctx, call)
 	if err != nil {
 		return l.markPlanFailed(ctx, planId,
@@ -346,18 +346,15 @@ func extractAgentFactoryResult(res any) (agentId, action string) {
 }
 
 // assignOwnerAgent writes a Plan-status update setting ownerAgentId
-// without changing the status. Mutation re-validates against the Plan
-// concept; we just want the in-place merge of ownerAgentId.
+// and transitioning the Plan to routing. Mutation re-validates against
+// the Plan concept; we just want the in-place merge of ownerAgentId.
+// Bare-identifier keys per MemQL function-call syntax.
 func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId string) error {
-	args, err := json.Marshal(map[string]any{
-		"planId":       planId,
-		"status":       "routing",
-		"ownerAgentId": agentId,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = l.engine.Execute(ctx, fmt.Sprintf("mutationUpdatePlanStatus(%s)", string(args)))
+	q := fmt.Sprintf(
+		`mutationUpdatePlanStatus({planId:%q, status:"routing", ownerAgentId:%q})`,
+		planId, agentId,
+	)
+	_, err := l.engine.Execute(ctx, q)
 	return err
 }
 
@@ -370,7 +367,12 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 // support -- the engine's only entry point for reading a concept is
 // a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`queryPlanById({"planId": %q})`, planId)
+	// Note the call-shape: {planId:%q}, NOT {"planId":%q}. The MemQL
+	// parser expects bare-identifier object keys; quoting the key
+	// makes the query parse to an empty result set silently instead
+	// of erroring out. Same pattern plan_execution.go and the agent-
+	// worker's store.go use against this function.
+	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -383,7 +385,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 }
 
 func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`queryTasksForPlan({"planId": %q})`, planId)
+	q := fmt.Sprintf(`queryTasksForPlan({planId:%q})`, planId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -400,7 +402,7 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 	if ownerUserId == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`queryActiveAgentsForUser({"ownerUserId": %q})`, ownerUserId)
+	q := fmt.Sprintf(`queryActiveAgentsForUser({ownerUserId:%q})`, ownerUserId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
@@ -461,6 +463,15 @@ func plannerCastRows(items []any) []map[string]any {
 	return out
 }
 
+// stampPhases, insertDispatchedTask, markPlanSucceeded, markPlanFailed,
+// and escalateAwaitingFeedback all call DSL mutation functions via
+// engine.Execute. MemQL's call syntax requires BARE-identifier object
+// keys, not JSON-style quoted keys -- a quoted key silently drops the
+// argument from the parse without erroring, which is exactly the
+// failure mode that left an earlier set of Plans stuck in queued. See
+// plan_execution.go for the canonical call shape and worker/store.go
+// for the same pattern against queryPlanById.
+
 func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outline []phaseOutline) error {
 	if len(outline) == 0 {
 		return l.markPlanFailed(ctx, planId, "planner emitted empty decompose outline")
@@ -469,8 +480,11 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 	if err != nil {
 		return err
 	}
+	// Values may be JSON literals (objects/arrays/numbers) -- those
+	// stay JSON-quoted because MemQL's value syntax accepts JSON
+	// literals; only the KEY needs to be a bare identifier.
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %q, "status": "running", "phases": %s})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"running", phases:%s})`,
 		planId, string(phasesJSON),
 	)
 	_, err = l.engine.Execute(ctx, q)
@@ -488,18 +502,19 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 		inputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationCreateSemanticTask({"taskId": %q, "planId": %q, "kind": %q, "seq": 0, "logicalStepId": %q, "attemptNumber": 1, "agentId": %q, "phase": %q, "input": %s})`,
+		`mutationCreateSemanticTask({taskId:%q, planId:%q, kind:%q, seq:0, logicalStepId:%q, attemptNumber:1, agentId:%q, phase:%q, input:%s})`,
 		taskId, planId, task.Kind, logicalStepId, task.AgentId, task.Phase, string(inputJSON),
 	)
 	if _, err := l.engine.Execute(ctx, q); err != nil {
 		return err
 	}
-	// Stamp the Plan to routing -> running so the existing scope-
-	// elevation re-dispatch path picks it up. Stretch goal in Phase 4b:
-	// fire a direct AgentForwarder.ForwardContinuation here so the
-	// specialist starts work immediately, not on the next event cycle.
+	// Stamp the Plan to running with the task's agent. The existing
+	// scope-elevation re-dispatch path picks it up from here. Phase
+	// 4b stretch goal: fire AgentForwarder.ForwardContinuation
+	// directly so the specialist starts immediately rather than on
+	// the next event tick.
 	q2 := fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %q, "status": "running", "ownerAgentId": %q})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"running", ownerAgentId:%q})`,
 		planId, task.AgentId,
 	)
 	_, err = l.engine.Execute(ctx, q2)
@@ -512,7 +527,7 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %q, "status": "succeeded", "output": %s, "completedAt": %q})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"succeeded", output:%s, completedAt:%q})`,
 		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err = l.engine.Execute(ctx, q)
@@ -521,7 +536,7 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 
 func (l *PlannerAgentLoop) markPlanFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %q, "status": "failed", "errorMessage": %q, "completedAt": %q})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"failed", errorMessage:%q, completedAt:%q})`,
 		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
 	)
 	_, err := l.engine.Execute(ctx, q)
@@ -542,7 +557,7 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({"planId": %q, "status": "awaitingFeedback", "feedbackReason": %q, "feedbackRequest": %s})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:%q, feedbackRequest:%s})`,
 		planId, reason, string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(ctx, q)
