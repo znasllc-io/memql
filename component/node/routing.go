@@ -59,6 +59,18 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.*.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.created.*.v1:cognition:*", TargetType: ""},
 		{Pattern: "graph.node.updated.*.v1:cognition:*", TargetType: ""},
+		// Planner graph events: BFF owns the writes (mutationCreatePlan
+		// fires on BFF), the planner-tagged binary subscribes
+		// graph.node.created.*.v1:planner:plan in its
+		// PlannerAgentLoop.HandlePlanCreated. Without this forward
+		// rule, default-deny in the mesh meant the planner node never
+		// saw plan-creation events from the BFF -- the user-cockpit's
+		// submitted plans showed status=queued in the DB forever
+		// because no subscriber was listening on the right node.
+		// Broadcast so any planner-tagged peer in the mesh hears it.
+		{Pattern: "graph.node.created.*.v1:planner:*", TargetType: ""},
+		{Pattern: "graph.node.updated.*.v1:planner:*", TargetType: ""},
+		{Pattern: "graph.node.deleted.*.v1:planner:*", TargetType: ""},
 		{Pattern: "cognition.response.audio", TargetType: NodeTypeVoice},
 	}
 
