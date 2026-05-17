@@ -1,0 +1,228 @@
+// queries.memql
+//
+// Planner-namespace queries. Moved here from
+// memql-bff-copresent/dsl/copresent/queries.memql on 2026-05-17 as
+// part of the "all plan / task DSL belongs in core" cleanup -- the
+// planner is a core node type (see app/integrations_planner_init.go,
+// built with -tags planner) and its read surface has to be uniformly
+// available on every binary that loads concepts.
+
+// queryAllPlans
+// =============
+//
+// Returns every Plan in the active partition, regardless of space.
+// Backs the global Tasks panel (?panel=tasks) -- previously the panel
+// was scoped to a single space via queryPlansForSpace, which made
+// users miss work running in other spaces and confused the model
+// "tasks belong to a space, not to the user." Tasks ARE global to
+// the user's partition; the per-space pinning is a UI convenience,
+// not a data boundary.
+//
+// Sort follows the concept default (newest first by createdAt). The
+// frontend groups by status and sorts current-space rows to the top
+// of each group at render time -- the backend stays simple.
+//
+// No arguments -- partition isolation comes from the request envelope.
+//
+// Returns: Array of plan records (planFull shape).
+
+@enabled
+@useConcept(plan)
+@description("Every Plan in the active partition. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
+func (Query) queryAllPlans(ctx any) (any, error) {
+  // The shape() form requires at least one filter expression after
+  // `concept;` -- a true bare `shape(concept, "shapeName")` is not
+  // an established pattern in this repo. The earlier draft used
+  // `traitIsNotDeleted`, mirroring queryAllAgents, but that spec
+  // checks `plan.deleted!=true` -- Agents declare a `deleted`
+  // field and Plans do not, so the predicate failed for every row
+  // and the panel rendered empty. Same trap for traitIsActiveRecord
+  // (Plans don't carry `active` either).
+  //
+  // `plan.spaceId!=""` is the right tautological filter for
+  // Plans: spaceId is @required on the concept, so every row
+  // matches. Verified against a live BFF: queryAllPlans() returns
+  // the same row count as queryPlansForSpace() summed across spaces.
+  ctx.output = shape(
+    concept;
+    plan.spaceId!="",
+    "planFull"
+  )
+  return ctx, nil
+}
+
+@enabled
+@useConcept(plan)
+@description("Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.")
+query queryAwaitingFeedbackPlansPastTimeout {
+  filter  plan.status=="awaitingFeedback"; plan.feedbackRequest.timeoutAt < now()
+  shape   planFull
+}
+
+// queryDueTrainAgentRetryPlans
+// ============================
+//
+// Returns ALL queued trainAgentRetryStep Plans. The training
+// integration's poll loop filters them in Go by
+// input.nextAttemptAt < time.Now() before running each one.
+//
+// (We can't push the time filter into the query: memQL's comparison
+// evaluator doesn't accept now() as a literal RHS -- TimestampExprFunc
+// is unsupported in normalizeScalarValue. See
+// component/memql/executor.go:1456. Keeping the filter in Go is
+// fine because there are at most a handful of queued retry-Plans
+// at a time -- the backoff schedule (5min / 30min / 2h) bounds the
+// queue size to one row per failed step per training run, none of
+// which is read-bound.)
+//
+// The poll loop wakes every 60s; this query result is therefore
+// at most a one-row-per-failed-training-step set.
+
+@enabled
+@useConcept(plan)
+@description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
+query queryDueTrainAgentRetryPlans {
+  filter  plan.kind=="trainAgentRetryStep"; plan.status=="queued"
+  shape   planFull
+}
+
+// queryHistoricalPlanMetrics
+// ==========================
+//
+// Returns succeeded Plans of a given kind with their metrics rollup,
+// scoped to a time window. Used by the estimation system to build
+// the historical curve per (planKind) bucket.
+//
+// Estimation logic per Q5: blend the LLM heuristic seed with the
+// historical curve weighted by sample size:
+//   weight = min(1, sampleSize / N_threshold)
+//   p50 = (1 - weight) * heuristic.p50 + weight * historical.p50
+// Same for p90. As the bucket grows, the heuristic's contribution
+// fades.
+
+@enabled
+@useConcept(plan)
+@description("Succeeded Plans of a kind, with metrics, for estimation bucket queries.")
+query queryHistoricalPlanMetrics {
+  args {
+    planKind  string  @required
+  }
+  filter  plan.kind==args.planKind; plan.status=="succeeded"
+  shape   planFull
+}
+
+// queryPlanById
+// =============
+//
+// Single Plan lookup. Used by the canvas card when it needs the
+// latest Plan state for live status updates.
+//
+// Arguments:
+//   planId (string, required) - The Plan id to fetch.
+//
+// Returns:
+//   Single plan record (planFull shape) or empty array if missing.
+
+@enabled
+@useConcept(plan)
+@description("Single Plan by id.")
+query queryPlanById {
+  args {
+    planId  string  @required
+  }
+  filter  id==args.planId
+  shape   planFull
+}
+
+// queryPlansForSpace
+// ==================
+//
+// Returns every Plan in a space, regardless of status. The Tasks page
+// groups client-side by status (Active / Done) and applies a visual
+// filter for the Done window (default 7 days, per the v1 design).
+// Sort order follows the concept default (newest first by createdAt);
+// the frontend re-orders within each group as needed.
+//
+// Arguments:
+//   spaceId (string, required) - The cognition space whose Plans to read.
+//
+// Returns:
+//   Array of plan records (planFull shape).
+
+@enabled
+@useConcept(plan)
+@description("All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.")
+query queryPlansForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  plan.spaceId==args.spaceId
+  shape   planFull
+}
+
+// queryRunningTrainAgentPlans
+// ===========================
+//
+// Returns every Plan currently in `running` for kind `trainAgent`.
+// Backs the Training Studio's "this agent is being trained right
+// now" lock: the frontend filters the result by the agent slot's
+// id (extracted from `plan.input.agentId` on each row) and
+// disables Studio interactions when a match is found.
+//
+// Why no agentId filter on the server: memQL queries don't yet
+// support nested-object paths like `plan.input.agentId` in the
+// where clause -- the bound list of in-flight training Plans is
+// at most a handful (one per concurrent training run across the
+// tenant), so client-side filtering by agent is cheap.
+//
+// trainAgent's lifecycle is queued (millisecond window in
+// beginPlan) -> running (the bulk of the ~90s pipeline) -> one of
+// {succeeded, failed, cancelled}. We filter only on `running`
+// because (a) the queued window is too short to matter for the
+// lock, and (b) memQL has no OR operator so a single status
+// filter is the cleanest path.
+
+@enabled
+@useConcept(plan)
+@description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
+query queryRunningTrainAgentPlans {
+  filter  plan.kind=="trainAgent"; plan.status=="running"
+  shape   planFull
+}
+
+@enabled
+@useConcept(taskState)
+@description("Latest persisted state for a Task (planner reads this on resume).")
+query queryTaskStateById {
+  args {
+    taskId  string  @required
+  }
+  filter  taskState.taskId==args.taskId
+  shape   taskStateFull
+}
+
+// queryTasksForPlan
+// =================
+//
+// All Tasks belonging to a Plan, in seq order (the planner emits
+// Tasks with monotonically increasing seq; v0.1 executes them
+// sequentially). Used by the Tasks-page expand-drawer when a Plan
+// row is clicked, and by the planner itself when checking whether
+// the next Task is ready to start.
+//
+// Arguments:
+//   planId (string, required) - The parent Plan id.
+//
+// Returns:
+//   Array of task records (taskFull shape).
+
+@enabled
+@useConcept(task)
+@description("All Tasks for a Plan, in seq order.")
+query queryTasksForPlan {
+  args {
+    planId  string  @required
+  }
+  filter  task.planId==args.planId
+  shape   taskFull
+}
