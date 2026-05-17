@@ -63,6 +63,13 @@ func (a *App) transportBase() {
 		// surface-pin stays the same.
 		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, voiceAgentSharedToken(), a.Logger)
 		a.grpcServer.SetStreamInterceptor(voiceAgentChecked)
+		// Hand the verifier to the gRPC server so the in-stream
+		// rotation handler (RotateAuthMsg) can re-verify a refreshed
+		// bearer against the same JWKS + audience + issuer the
+		// interceptor enforces at stream open. Without this the
+		// handler responds with error="verifier_unconfigured" and
+		// the cockpit falls back to reconnect-with-fresh-token.
+		a.grpcServer.SetVerifier(a.identityVerifier)
 	} else {
 		// verifierRequired=false branch (identity binary). Operator
 		// is the only admit path; everything else is rejected.
