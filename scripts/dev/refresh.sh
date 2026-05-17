@@ -46,6 +46,19 @@ function step2_export_running_state() {
 }
 
 function step3_wipe_and_restart() {
+    echo "[3/6] Wiping cockpit's cached credentials for 'local'..."
+    # The cluster DB wipe below invalidates any owner identity that
+    # was registered against the previous boot. Leaving the cached
+    # token in place causes memql-cockpit to silently fail the dial
+    # post-refresh (token's expiry isn't yet reached, so cockpit
+    # treats it as valid and skips the login prompt; server rejects
+    # silently; user sees "Connecting to..." forever).
+    #
+    # Only the 'local' cluster's credentials are touched -- other
+    # clusters the user has logged in to (staging, etc.) are
+    # unaffected.
+    rm -f "${HOME}/.memql/credentials/local.json"
+
     echo "[3/6] Cleaning up containers from sibling compose modes..."
     cleanup_sibling_compose_modes
     nuke_stray_memql_containers
