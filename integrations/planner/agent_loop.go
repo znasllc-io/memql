@@ -367,11 +367,6 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 // support -- the engine's only entry point for reading a concept is
 // a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	// Note the call-shape: {planId:%q}, NOT {"planId":%q}. The MemQL
-	// parser expects bare-identifier object keys; quoting the key
-	// makes the query parse to an empty result set silently instead
-	// of erroring out. Same pattern plan_execution.go and the agent-
-	// worker's store.go use against this function.
 	q := fmt.Sprintf(`queryPlanById({planId:%q})`, planId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
@@ -379,6 +374,17 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 	}
 	rows := plannerExtractRows(res)
 	if len(rows) == 0 {
+		// Dump the raw response shape so we can see whether the
+		// engine returned an empty result (filter mismatch / partition
+		// scope issue) vs. a non-empty result in an unexpected shape
+		// our extractor doesn't recognize.
+		rawJSON, _ := json.Marshal(res)
+		raw := string(rawJSON)
+		if len(raw) > 500 {
+			raw = raw[:500] + "...(truncated)"
+		}
+		l.logger.Warn("planner agent loop: queryPlanById returned no rows",
+			"planId", planId, "query", q, "rawResponse", raw)
 		return nil, fmt.Errorf("plan %s not found", planId)
 	}
 	return rows[0], nil
