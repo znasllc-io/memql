@@ -3,8 +3,8 @@ package memql
 import (
 	"encoding/json"
 
-	concept "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql/sense"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
 // SenseAdapter implements sense.RegistryProvider by reading from the MemQLEngine registries.

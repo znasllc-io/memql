@@ -3,8 +3,8 @@
 package app
 
 import (
-	"github.com/visionarys-io/memql/component/server/polyphonws"
-	"github.com/visionarys-io/memql/integrations/cognition"
+	"github.com/znasllc-io/memql/component/server/polyphonws"
+	"github.com/znasllc-io/memql/integrations/cognition"
 )
 
 // wirePolyphonPrewarm connects the polyphon prewarm HTTP endpoint to

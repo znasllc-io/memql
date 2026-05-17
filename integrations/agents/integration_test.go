@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 func TestNew_NilRegistryReturnsNil(t *testing.T) {

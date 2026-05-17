@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/integrations/audio"
 	"nhooyr.io/websocket"
 )
 

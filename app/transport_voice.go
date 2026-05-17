@@ -5,9 +5,9 @@ package app
 import (
 	"net/http"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/component/server"
-	"github.com/visionarys-io/memql/component/server/polyphonws"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/polyphonws"
 )
 
 // wirePolyphonEndpoints registers the Polyphon multi-agent voice HTTP endpoints

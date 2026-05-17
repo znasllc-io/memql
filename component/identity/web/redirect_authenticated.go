@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity"
 )
 
 // MintSSOAuthCodeFunc mints a one-time OAuth auth code from an

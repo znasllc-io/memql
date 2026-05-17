@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package visionarys.memql.v1;
+package znasllc.memql.v1;
 
-option go_package = "github.com/visionarys-io/memql/grpc/gen;memqlv1";
+option go_package = "github.com/znasllc-io/memql/grpc/gen;memqlv1";
 
 //go:generate protoc --proto_path=. --go_out=gen --go_opt=paths=source_relative --go-grpc_out=gen --go-grpc_opt=paths=source_relative memql.proto
 
@@ -1545,7 +1545,7 @@ message RevokeAllSessionsResult {
 // identityType="worker_token".
 //
 // Server-side scope: the gRPC stream interceptor admits these
-// tokens ONLY on /visionarys.memql.worker.v1.WorkerService/* paths
+// tokens ONLY on /znasllc.memql.worker.v1.WorkerService/* paths
 // and rejects them on every other RPC.
 
 // CreateWorkerTokenMsg mints a fresh worker token. Caller-supplied

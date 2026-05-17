@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // Engine is the narrow engine surface the router needs to write

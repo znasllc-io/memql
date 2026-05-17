@@ -11,7 +11,7 @@ import (
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 // ExtractCalls runs static call-graph analysis over the workspace and

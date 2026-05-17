@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
-	webtempl "github.com/visionarys-io/memql/component/identity/web/templ"
+	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
 const (
@@ -64,7 +64,7 @@ func main() {
 	layout := func(title, path string, scripts ...string) webtempl.LayoutData {
 		return webtempl.LayoutData{
 			Title:             title,
-			BrandName:         "Visionarys",
+			BrandName:         "Znasllc",
 			BrandPrimaryColor: "#0433ff",
 			Year:              time.Now().UTC().Year(),
 			NavLinks:          nav,
@@ -78,15 +78,15 @@ func main() {
 	fmtTime := func(t time.Time) string { return t.Format("2026-01-02 15:04:05 UTC") }
 
 	auditEvents := []webtempl.AdminAuditView{
-		{ID: "ev-1", OccurredAt: fmtTime(now.Add(-2 * time.Minute)), Category: "auth", Action: "magic_link_issued", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
-		{ID: "ev-2", OccurredAt: fmtTime(now.Add(-5 * time.Minute)), Category: "auth", Action: "session_started", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
-		{ID: "ev-3", OccurredAt: fmtTime(now.Add(-12 * time.Minute)), Category: "admin", Action: "user_role_changed", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", TargetID: "user-abc123", TargetEmail: "ops@acme.com", Outcome: "success", SourceIP: "10.0.0.42"},
+		{ID: "ev-1", OccurredAt: fmtTime(now.Add(-2 * time.Minute)), Category: "auth", Action: "magic_link_issued", ActorEmail: "jsanz@znasllc.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
+		{ID: "ev-2", OccurredAt: fmtTime(now.Add(-5 * time.Minute)), Category: "auth", Action: "session_started", ActorEmail: "jsanz@znasllc.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
+		{ID: "ev-3", OccurredAt: fmtTime(now.Add(-12 * time.Minute)), Category: "admin", Action: "user_role_changed", ActorEmail: "jsanz@znasllc.io", ActorRole: "owner", TargetID: "user-abc123", TargetEmail: "ops@acme.com", Outcome: "success", SourceIP: "10.0.0.42"},
 		{ID: "ev-4", OccurredAt: fmtTime(now.Add(-45 * time.Minute)), Category: "auth", Action: "magic_link_verify_failed", Outcome: "failure", FailureReason: "expired", SourceIP: "203.0.113.7"},
-		{ID: "ev-5", OccurredAt: fmtTime(now.Add(-2 * time.Hour)), Category: "configuration", Action: "settings_updated", ActorEmail: "jsanz@visionarys.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
+		{ID: "ev-5", OccurredAt: fmtTime(now.Add(-2 * time.Hour)), Category: "configuration", Action: "settings_updated", ActorEmail: "jsanz@znasllc.io", ActorRole: "owner", Outcome: "success", SourceIP: "10.0.0.42"},
 	}
 
 	users := []webtempl.AdminUserView{
-		{ID: "user-1", DisplayName: "Jose Sanz", PrimaryEmail: "jsanz@visionarys.io", Role: "owner", Internal: true, Active: true, CreatedAt: "2026-04-15 09:12:03 UTC"},
+		{ID: "user-1", DisplayName: "Jose Sanz", PrimaryEmail: "jsanz@znasllc.io", Role: "owner", Internal: true, Active: true, CreatedAt: "2026-04-15 09:12:03 UTC"},
 		{ID: "user-2", DisplayName: "Ops Bot", PrimaryEmail: "ops@acme.com", Role: "admin", Internal: true, Active: true, CreatedAt: "2026-04-19 14:33:51 UTC"},
 		{ID: "user-3", DisplayName: "Alex Reader", PrimaryEmail: "alex@partner.io", Role: "reader", Active: true, CreatedAt: "2026-04-22 11:07:12 UTC"},
 		{ID: "user-4", DisplayName: "Suspended Sam", PrimaryEmail: "sam@partner.io", Role: "writer", SuspendedAt: "2026-04-30 18:01:00 UTC", SuspendedReason: "credential reuse", CreatedAt: "2026-04-25 08:22:00 UTC"},
@@ -139,7 +139,7 @@ func main() {
 			// behavior where env-var defaults don't leak into the
 			// settings form; only operator-saved values appear.
 			RegistrationMode:    "waitlist",
-			InternalDomains:     "visionarys.io",
+			InternalDomains:     "znasllc.io",
 			InternalDefaultRole: "owner",
 		},
 	}))
@@ -149,9 +149,9 @@ func main() {
 		TotalCount:  3,
 		ActiveCount: 2,
 		Tokens: []webtempl.AdminPATRow{
-			{ID: "pat-1", UserID: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "laptop CLI", Active: true, LastUsedAt: fmtTime(now.Add(-15 * time.Minute)), CreatedAt: fmtTime(now.Add(-21 * 24 * time.Hour))},
+			{ID: "pat-1", UserID: "user-1", OwnerEmail: "jsanz@znasllc.io", Label: "laptop CLI", Active: true, LastUsedAt: fmtTime(now.Add(-15 * time.Minute)), CreatedAt: fmtTime(now.Add(-21 * 24 * time.Hour))},
 			{ID: "pat-2", UserID: "user-2", OwnerEmail: "ops@acme.com", Label: "ci-runner", Active: true, LastUsedAt: fmtTime(now.Add(-3 * time.Hour)), CreatedAt: fmtTime(now.Add(-7 * 24 * time.Hour))},
-			{ID: "pat-3", UserID: "user-1", OwnerEmail: "jsanz@visionarys.io", Label: "old laptop", Active: false, LastUsedAt: "", CreatedAt: fmtTime(now.Add(-90 * 24 * time.Hour))},
+			{ID: "pat-3", UserID: "user-1", OwnerEmail: "jsanz@znasllc.io", Label: "old laptop", Active: false, LastUsedAt: "", CreatedAt: fmtTime(now.Add(-90 * 24 * time.Hour))},
 		},
 	}))
 
@@ -164,7 +164,7 @@ func main() {
 	publicLayout := func(title string) webtempl.LayoutData {
 		return webtempl.LayoutData{
 			Title:             title,
-			BrandName:         "Visionarys",
+			BrandName:         "Znasllc",
 			BrandPrimaryColor: "#0433ff",
 			Year:              time.Now().UTC().Year(),
 			NavLinks:          publicNav,
@@ -187,7 +187,7 @@ func main() {
 		Mode:               "domain_restricted",
 		Stage:              "waitlist_signup",
 		PrefillEmail:       "alex@partner.io",
-		AllowedDomainsHint: "visionarys.io",
+		AllowedDomainsHint: "znasllc.io",
 		Flash:              &webtempl.Flash{Kind: "info", Message: "Your email isn't in this cluster's allowed-domain list. You can join the waitlist instead — the operator will follow up."},
 	}))
 	render(filepath.Join(outDir, "login-needs-invite.html"), webtempl.Login(webtempl.LoginData{

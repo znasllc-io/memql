@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

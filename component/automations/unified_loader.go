@@ -18,7 +18,7 @@ import (
 	"regexp"
 	"strings"
 
-	memqldsl "github.com/visionarys-io/memql/dsl"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // automationStructHeader matches the opening of an `automation

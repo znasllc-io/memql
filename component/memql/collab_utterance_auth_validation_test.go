@@ -3,7 +3,7 @@ package memql
 import (
 	"testing"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 func TestHasElevatedWriteRole(t *testing.T) {

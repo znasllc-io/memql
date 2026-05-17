@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/memql/dslfs"
-	"github.com/visionarys-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/component/memql/dslimports"
 )
 
 // TestUnifiedTreeLoadsClean verifies the unified domain-first tree

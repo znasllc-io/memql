@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 func TestEmitConceptCardExecutor_RequiresConfig(t *testing.T) {

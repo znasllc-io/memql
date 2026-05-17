@@ -13,8 +13,8 @@ import (
 	"os"
 	"strings"
 
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	"github.com/visionarys-io/memql/core/common"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 const ComponentName = common.ComponentName("config")

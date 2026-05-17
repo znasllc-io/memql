@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Diagnose returns errors and warnings for a MemQL source document.

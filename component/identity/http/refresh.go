@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
 // refreshRequest is the body of POST /auth/refresh. The refresh token
@@ -219,7 +219,7 @@ func clearRefreshCookie(w http.ResponseWriter, baseURL, sameSiteOverride string)
 //     - "none": the cookie rides on every cross-site request as
 //       long as Secure is set. Required for true cross-site
 //       deployments where the SPA and identity service live under
-//       different eTLD+1s (app.copresent.ai + auth.visionarys.io).
+//       different eTLD+1s (app.copresent.ai + auth.znasllc.io).
 //       Browsers (especially Safari) treat the cookie as
 //       third-party and apply ITP / cross-site-tracking rules.
 //

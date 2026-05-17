@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // parseToolMemQL parses a .memql tool definition file and returns Tool definitions.

@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/visionarys-io/memql/component/bus"
-	"github.com/visionarys-io/memql/component/events"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/events"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // BootstrapContext provides the shared dependencies that all node bootstraps need.

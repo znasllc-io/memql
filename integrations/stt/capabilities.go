@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // STTIntegration wraps a StreamingProvider as an IntegrationProvider for

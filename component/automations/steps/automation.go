@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 // AutomationExecutor invokes other automations.

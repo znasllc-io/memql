@@ -30,9 +30,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // authSessionSummary is the minimal projection the session handlers

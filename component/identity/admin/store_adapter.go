@@ -34,9 +34,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	identityweb "github.com/visionarys-io/memql/component/identity/web"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/identity"
+	identityweb "github.com/znasllc-io/memql/component/identity/web"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // LiveSettingsReader implements identityweb.LiveSettings by reading

@@ -20,7 +20,7 @@ package extract
 import (
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 // Options controls one run of the extractor.

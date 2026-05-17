@@ -1,6 +1,6 @@
 package email
 
-import "github.com/visionarys-io/memql/component/memql"
+import "github.com/znasllc-io/memql/component/memql"
 
 // init self-registers the email integration as a plug-in.
 //

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // validateDeclaredUsage walks a function definition's `@use*(...)`

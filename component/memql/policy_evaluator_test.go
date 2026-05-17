@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // Phase 3 smoke tests for the policy evaluator. Build a registry by

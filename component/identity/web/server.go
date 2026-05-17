@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
-	"github.com/visionarys-io/memql/component/identity"
-	webtempl "github.com/visionarys-io/memql/component/identity/web/templ"
+	"github.com/znasllc-io/memql/component/identity"
+	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
 // LiveSettings is the read-side of the runtime-editable cluster

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	webtempl "github.com/visionarys-io/memql/component/identity/web/templ"
+	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
 func nowNano() int64 { return time.Now().UnixNano() }

@@ -1,6 +1,6 @@
 package node
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // BFFBootstrap creates dependencies for a BFF (Backend For Frontend) node.
 // BFF nodes serve domain-specific frontends.

@@ -9,7 +9,7 @@ package parser
 // the parser.<Type> surface via type aliases so the ~25 existing
 // consumer files keep compiling unchanged.
 
-import "github.com/visionarys-io/memql/component/language/ast"
+import "github.com/znasllc-io/memql/component/language/ast"
 
 // Interface aliases (require Go 1.24+; we are on 1.26.1).
 type (

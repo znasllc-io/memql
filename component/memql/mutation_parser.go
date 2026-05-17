@@ -17,8 +17,8 @@ package memql
 import (
 	"fmt"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // allowedMutationAnnotations enumerates the annotations a

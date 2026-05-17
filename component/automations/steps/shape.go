@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 // ShapeExecutor transforms data using shape templates.

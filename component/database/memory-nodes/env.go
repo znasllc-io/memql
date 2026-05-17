@@ -3,7 +3,7 @@ package memoryNodes
 import (
 	"strings"
 
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 type (
@@ -27,7 +27,7 @@ type (
 const envPrefix = "MEMORY_NODES"
 
 var defaultEnvKeys = EnvKeys{
-	ContentIdSalt: "VISIONARYS_LAB_CONTENTID_SALT",
+	ContentIdSalt: "ZNASLLC_LAB_CONTENTID_SALT",
 }
 
 // LoadDefaultEnvOptions loads EnvOptions using the default prefix.

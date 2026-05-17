@@ -273,7 +273,7 @@ type Config struct {
 	// BaseURL is the public origin the identity service is reachable
 	// at. Used as the JWT `iss` claim, in redirect targets, and in
 	// links emitted into magic-link / invitation emails.
-	// Env: IDENTITY_BASE_URL (e.g. "https://auth.visionarys.io")
+	// Env: IDENTITY_BASE_URL (e.g. "https://auth.znasllc.io")
 	BaseURL string
 
 	// JWTAudience is the value placed in the JWT `aud` claim.

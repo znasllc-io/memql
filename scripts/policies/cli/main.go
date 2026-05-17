@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/memql/dslfs"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
 
 // To run the engine-side validation we exercise loadPolicyFunctions

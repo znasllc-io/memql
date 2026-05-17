@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // AuthClaimKey is the claims-map key under which the worker stream

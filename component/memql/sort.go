@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 type (

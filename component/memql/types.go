@@ -3,7 +3,7 @@ package memql
 import (
 	"time"
 
-	"github.com/visionarys-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // AttributeMap stores arbitrary key/value arguments discovered in query stages.

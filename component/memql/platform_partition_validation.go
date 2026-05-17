@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // validatePlatformPartitionPayload runs pre-insert checks on rows

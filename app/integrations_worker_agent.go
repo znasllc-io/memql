@@ -5,10 +5,10 @@ package app
 import (
 	"errors"
 
-	memqlgrpc "github.com/visionarys-io/memql/component/grpc"
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/worker"
-	agentworker "github.com/visionarys-io/memql/integrations/agent/worker"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/worker"
+	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
 )
 
 // setupWorkerService stands up the WorkerService gRPC surface, the

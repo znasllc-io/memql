@@ -1,11 +1,11 @@
 package app
 
 import (
-	memoryNodesDatabase "github.com/visionarys-io/memql/component/database/memory-nodes"
-	conceptSeeder "github.com/visionarys-io/memql/component/database/memory-nodes/seeder"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/observe"
-	"github.com/visionarys-io/memql/component/server"
+	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
+	conceptSeeder "github.com/znasllc-io/memql/component/database/memory-nodes/seeder"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/observe"
+	"github.com/znasllc-io/memql/component/server"
 
 	"github.com/uptrace/bun"
 )

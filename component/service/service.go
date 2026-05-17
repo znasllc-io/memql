@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 type (

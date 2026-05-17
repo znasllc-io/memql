@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // handleConceptsList returns metadata for all registered concepts and available event topics.

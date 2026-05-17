@@ -1,6 +1,6 @@
 package node
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // VoiceBootstrap creates dependencies for a Voice node.
 // Voice nodes handle the audio I/O pipeline: ASR, TTS, LiveKit.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/visionarys-io/memql/component/identity/verifier"
-	"github.com/visionarys-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/identity/verifier"
+	"github.com/znasllc-io/memql/component/server"
 )
 
 // configAndAuth loads service configuration, initializes the per-node

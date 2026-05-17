@@ -11,15 +11,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/visionarys-io/memql/component/identity/workertoken"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/identity/workertoken"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/worker"
 )
 
 // workerServicePathPrefix is the gRPC method-path prefix exposed by
 // WorkerService. The interceptor uses it to gate worker-token usage
 // to that single service.
-const workerServicePathPrefix = "/visionarys.memql.worker.v1.WorkerService/"
+const workerServicePathPrefix = "/znasllc.memql.worker.v1.WorkerService/"
 
 // NewWorkerAwareStreamInterceptor wraps `base` and recognizes worker
 // tokens (Authorization: Worker mql_wkr_<token> OR a Bearer header

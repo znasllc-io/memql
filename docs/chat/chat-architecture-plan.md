@@ -35,8 +35,8 @@
 
 ### 0.1 The user
 
-- **Name:** Jose Sanz. **Email:** `jsanz@visionarys.io`.
-- **Company:** Visionarys.
+- **Name:** Jose Sanz. **Email:** `jsanz@znasllc.io`.
+- **Company:** Znasllc.
 - **Role:** product owner / lead engineer for the whole stack. Reviews everything before push.
 - **Communication:** voice-to-text dictation often produces transcription artifacts; read for intent.
 - **Preferences:** **no emojis** in any output. Professional, concise language.

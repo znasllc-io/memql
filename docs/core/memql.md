@@ -859,7 +859,7 @@ insert("v1:lead", payload={"name": "John", "email": "john@example.com"})
 -- This creates a new version of the same record, not a duplicate
 ```
 
-The generated ID is a 64-character hexadecimal SHA256 hash. An optional server-side salt (configured via `MEMORY_NODES_VISIONARYS_LAB_CONTENTID_SALT`) can be added for deployment isolation.
+The generated ID is a 64-character hexadecimal SHA256 hash. An optional server-side salt (configured via `MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT`) can be added for deployment isolation.
 
 **Note:** Explicit `id` parameters always take precedence over content-addressed derivation.
 

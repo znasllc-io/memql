@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/automations"
-	"github.com/visionarys-io/memql/component/bus"
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // AutomationLister loads automation definitions for validation (e.g., checking

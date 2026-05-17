@@ -1,8 +1,8 @@
 package memoryNodes
 
 import (
-	"github.com/visionarys-io/memql/component/database"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/database"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 type MemoryNodesDatabase struct {

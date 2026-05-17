@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/registration"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/registration"
 )
 
 // Sentinel errors callers can branch on. The HTTP layer translates

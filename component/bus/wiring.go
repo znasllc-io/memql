@@ -1,7 +1,7 @@
 package bus
 
 import (
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
 )
 
 // Channel name constants used for config overrides and telemetry identification.

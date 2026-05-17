@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // handlePolyphonRoomToken generates a LiveKit room token for a browser participant.

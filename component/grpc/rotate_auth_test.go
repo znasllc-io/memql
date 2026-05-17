@@ -23,10 +23,10 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/verifier"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/verifier"
 )
 
 // captureStream is the minimum MemqlService_StreamServer that the

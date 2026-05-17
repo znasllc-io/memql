@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // observedStreamWithTools wraps a ChatStreamWithToolsProvider. It starts

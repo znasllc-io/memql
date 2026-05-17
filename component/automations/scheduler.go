@@ -9,10 +9,10 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/visionarys-io/memql/component/bus"
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // Scheduler manages scheduled automation execution.

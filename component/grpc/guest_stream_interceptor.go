@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // GuestAuthClaimKey is the claims-map key the guest-auth path injects

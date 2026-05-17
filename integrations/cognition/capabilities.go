@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/polyphon"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // IntegrationName returns the stable identifier for this integration.

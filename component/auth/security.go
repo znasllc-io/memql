@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // TokenInfo represents structured token information extracted from JWT claims.

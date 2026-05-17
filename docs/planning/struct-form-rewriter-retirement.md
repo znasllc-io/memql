@@ -4,7 +4,7 @@
 work needs coordinated grammar + AST + evaluator changes that don't
 fit in a single coherent commit.
 
-**Last landed:** [`daaec10`](https://github.com/visionarys-io/memql/commit/daaec10)
+**Last landed:** [`daaec10`](https://github.com/znasllc-io/memql/commit/daaec10)
 consolidated the five rewriter files
 (`query_rewrite.go` / `mutation_rewrite.go` / `logic_rewrite.go` /
 `automation_rewrite.go` / `args_rewrite.go` plus `normalise_all.go`,

@@ -3,7 +3,7 @@ package cognition
 import (
 	"testing"
 
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // TestSubscriptionPatternsMatchEmittedTopics is the regression guard for the

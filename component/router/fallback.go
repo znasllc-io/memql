@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // fallbackStreamWithTools walks a provider chain on CallChatStreamWithTools.

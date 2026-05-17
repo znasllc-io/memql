@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // AgentSuggestSchemaJSON is the JSON Schema handed to the structured

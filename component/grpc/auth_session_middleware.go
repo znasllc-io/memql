@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // authCookieName mirrors the cookie name shared between the identity
