@@ -1,15 +1,19 @@
 // mutations.memql
 //
-// Planner mutations. These were historically inline-constructed strings
-// passed to engine.Execute from Go; the engine resolves them as DSL
-// functions when defined here, matching the resolution path used by
-// every other namespace's mutations.
+// Planner-namespace mutations. The planner is a core node type (build
+// tag planner; see app/integrations_planner_init.go). Its write
+// surface is owned here so every binary that loads concepts can
+// resolve the full plan / task / taskState mutation API regardless of
+// which product layer (copresent or otherwise) is wired in on top.
 //
-// Mutations defined elsewhere (memql-bff-copresent/dsl/copresent/mutations.memql):
-//   mutationCreatePlan, mutationCreateTask, mutationUpdatePlanStatus,
-//   mutationUpdateTaskStatus. Those work today by global trailing-segment
-//   @useConcept resolution and are NOT redefined here. New mutations
-//   needed for Phase 2 auto-stamping land in this file.
+// History: mutationCreatePlan / mutationCreateTask / mutationUpdatePlanStatus
+// / mutationUpdateTaskStatus / mutationPersistTaskState /
+// mutationCreateScopeElevationPlan were originally authored in
+// memql-bff-copresent/dsl/copresent/mutations.memql. They moved
+// here on 2026-05-17 because the BFF binary the cockpit connects to
+// can't be guaranteed to have copresent in its DSL graph -- and the
+// Planner tab's queryAllPlans / mutationCreatePlan calls were
+// failing with "function not found" as a result.
 
 @enabled
 @useConcept(plan)
@@ -111,5 +115,286 @@ mutation mutationCompleteToolInvocation {
     args.toolResult
     args.errorMessage
     completedAt: coalesce(args.completedAt, now())
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Plan / Task mutations moved from copresent on 2026-05-17.
+//
+// These were originally authored in memql-bff-copresent/dsl/copresent/
+// mutations.memql but the planner is a core node type (build tag
+// planner, see app/integrations_planner_init.go); its write surface
+// has to be uniformly available on every binary that loads
+// concepts, not gated behind copresent being in the import graph.
+// The user-cockpit's Planner tab calls these directly, and reproducing
+// the "function not found" gating message every 3 seconds was the
+// concrete symptom that surfaced the layering bug.
+// -----------------------------------------------------------------------------
+
+// mutationCreatePlan -- single write path for Plan creation.
+// Status defaults to 'queued' so the routePlanOnQueue automation
+// fires immediately. Optional fields accept the full v1 surface
+// (parentPlanId for sub-plans, triggerSource for tiered trust,
+// chatAnchorMessageId for chat completion lines, tokenBudget +
+// pauseExtendsDeadline for budget/deadline overrides).
+
+@enabled
+@useConcept(plan)
+@description("Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.")
+mutation mutationCreatePlan {
+  args {
+    planId                string
+    spaceId               string  @required
+    parentPlanId          string
+    kind                  string  @required
+    goal                  string  @required
+    requestedBy           string  @required
+    triggerSource         string
+    authorizedBy          string
+    input                 object  @required
+    refinementContext     object
+    tokenBudget           int
+    pauseExtendsDeadline  bool
+    chatAnchorMessageId   string
+  }
+  insert plan {
+    id: args.planId
+    args.spaceId
+    args.parentPlanId
+    args.kind
+    status: "queued"
+    args.goal
+    args.requestedBy
+    triggerSource: coalesce(args.triggerSource, "user.explicit")
+    args.authorizedBy
+    args.input
+    args.refinementContext
+    args.tokenBudget
+    pauseExtendsDeadline: coalesce(args.pauseExtendsDeadline, false)
+    args.chatAnchorMessageId
+  }
+}
+
+// mutationCreateScopeElevationPlan
+// =================================
+//
+// Single write path for scope-elevation Plan creation. Distinct
+// from mutationCreatePlan (which writes status='queued' for the
+// normal planner pickup path) -- this mutation lands the Plan
+// directly in awaitingFeedback / scope_elevation_required so the
+// emitScopeElevationCanvasCard automation fires and the card
+// shows up on the canvas without going through the routing /
+// running lifecycle first.
+//
+// Triggered by:
+//   - integrations/agent/worker/integration.go:handleRequestScope,
+//     in turn invoked by the agent's `requestComputerUseScope`
+//     tool when an LLM-decided computer_use task needs a scope
+//     the agent doesn't currently have.
+//
+// Resulting state:
+//   status              = "awaitingFeedback"
+//   feedbackReason      = "scope_elevation_required"
+//   computerUseScope    = the requested scope (observe / interact / full)
+//   feedbackRequest     = { question, kind: "choice", options: [{label, value}, ...] }
+//                         where the question is the agent's intent + summary
+//                         and options offer the requested scope down to "deny".
+//
+// On user approval (frontend):
+//   1. mutationUpdateAgentAuthScope on the GA's authorization row
+//      with the chosen scope (full / interact / observe).
+//   2. mutationUpdatePlanStatus(planId, status='succeeded') so the
+//      Plan terminates and the card converts to its post-approval
+//      shape.
+//
+// On deny: mutationUpdatePlanStatus(planId, status='cancelled').
+
+@enabled
+@useConcept(plan)
+@description("Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.")
+mutation mutationCreateScopeElevationPlan {
+  args {
+    planId          string  @required
+    agentId         string  @required
+    ownerUserId     string  @required
+    spaceId         string
+    intent          string  @required
+    summary         string  @required
+    requestedScope  string  @required
+  }
+  insert plan {
+    id: args.planId
+    kind: "scopeElevation"
+    status: "awaitingFeedback"
+    feedbackReason: "scope_elevation_required"
+    computerUseScope: args.requestedScope
+    goal: args.intent
+    ownerAgentId: args.agentId
+    requestedBy: args.ownerUserId
+    triggerSource: "agent.proactive"
+    args.spaceId
+    input: {
+        intent: args.intent,
+        summary: args.summary,
+        args.requestedScope
+      }
+    feedbackRequest: {
+        question: args.intent,
+        kind: "choice",
+        options: [
+          {label: concat("Allow with ", args.requestedScope, " scope"), value: args.requestedScope},
+          {label: "Deny", value: "deny"}
+        ]
+      }
+  }
+}
+
+@enabled
+@useConcept(task)
+@description("Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.")
+mutation mutationCreateTask {
+  args {
+    taskId            string
+    planId            string  @required
+    kind              string  @required
+    seq               int     @required
+    phase             string
+    executionSurface  string
+    executorBackend   string
+    input             object  @required
+  }
+  insert task {
+    id: args.taskId
+    args.planId
+    args.kind
+    status: "queued"
+    args.seq
+    args.phase
+    executionSurface: coalesce(args.executionSurface, "inProcess")
+    args.executorBackend
+    args.input
+  }
+}
+
+@enabled
+@useConcept(taskState)
+@description("Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.")
+mutation mutationPersistTaskState {
+  args {
+    stateId            string
+    taskId             string  @required
+    workingMemory      object
+    reasoningChain     string
+    toolCallHistory    object
+    pendingSubPlanIds  object
+  }
+  insert taskState {
+    id: args.stateId
+    args.taskId
+    args.workingMemory
+    args.reasoningChain
+    args.toolCallHistory
+    args.pendingSubPlanIds
+  }
+}
+
+// mutationUpdatePlanStatus -- partial Plan status transition.
+// Bumps payload.status; optional args land any additional state the
+// transition produces (assigned agent, output, error, lifecycle
+// timestamps, pause/feedback bookkeeping, recommendationCardId,
+// metrics rollups, estimate refresh, token spend updates, etc.).
+//
+// Uses update() (read-merge-validate-write) instead of insert() so
+// the caller doesn't have to re-pass every @required field on the
+// Plan concept (spaceId, kind, goal, requestedBy, triggerSource,
+// input). The engine reads the latest existing row, splats the
+// supplied fields on top, validates the merged payload against the
+// concept schema, and appends the merged row -- queries keep
+// resolving by createdAt-desc so the new row wins.
+
+@enabled
+@useConcept(plan)
+@description("Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row.")
+mutation mutationUpdatePlanStatus {
+  args {
+    planId                    string  @required
+    status                    string  @required
+    ownerAgentId              string
+    output                    object
+    errorMessage              string
+    startedAt                 string
+    completedAt               string
+    cancelledBy               string
+    pausedAt                  string
+    totalPausedMs             int
+    feedbackRequest           object
+    feedbackResponse          object
+    feedbackReason            string
+    recommendationCardId      string
+    phases                    object
+    estimate                  object
+    estimatedAt               string
+    tokenSpent                int
+    tokenAllocatedToChildren  int
+    metrics                   object
+    computerUseScope          string
+  }
+  update plan {
+    id: args.planId
+    args.status
+    args.ownerAgentId
+    args.output
+    args.errorMessage
+    args.startedAt
+    args.completedAt
+    args.cancelledBy
+    args.pausedAt
+    args.totalPausedMs
+    args.feedbackRequest
+    args.feedbackResponse
+    args.feedbackReason
+    args.recommendationCardId
+    args.phases
+    args.estimate
+    args.estimatedAt
+    args.tokenSpent
+    args.tokenAllocatedToChildren
+    args.metrics
+    args.computerUseScope
+  }
+}
+
+// mutationUpdateTaskStatus -- partial Task status transition.
+// Partial-update via update() so the caller doesn't have to re-pass
+// the Task concept's @required fields (planId, kind, seq,
+// executionSurface, input). The engine reads the latest existing
+// row by id, splats the supplied fields on top, validates the
+// merged payload, and appends the merged row.
+
+@enabled
+@useConcept(task)
+@description("Update a Task's status with optional output / error / lifecycle / metrics / parking fields. Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row.")
+mutation mutationUpdateTaskStatus {
+  args {
+    taskId              string  @required
+    status              string  @required
+    output              object
+    errorMessage        string
+    startedAt           string
+    completedAt         string
+    parkedAt            string
+    parkedAtCheckpoint  string
+    metrics             object
+  }
+  update task {
+    id: args.taskId
+    args.status
+    args.output
+    args.errorMessage
+    args.startedAt
+    args.completedAt
+    args.parkedAt
+    args.parkedAtCheckpoint
+    args.metrics
   }
 }
