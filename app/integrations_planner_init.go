@@ -5,7 +5,7 @@ package app
 import (
 	"context"
 
-	"github.com/visionarys-io/memql/integrations/planner"
+	"github.com/znasllc-io/memql/integrations/planner"
 )
 
 // setupPlannerIntegration creates and registers the planner

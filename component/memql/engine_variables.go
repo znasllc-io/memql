@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/visionarys-io/memql/component/secret"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 func (e *MemQLEngine) ResolveVariable(ctx context.Context, name string) (string, error) {

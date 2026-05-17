@@ -3,7 +3,7 @@ package memql
 import (
 	"strings"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // scopeGraphPatternToPartition narrows a graph-event subscription

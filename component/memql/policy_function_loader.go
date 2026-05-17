@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // PolicyFunctionRegistry holds the parsed `func (Policy)` definitions

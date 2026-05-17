@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/integrations/stt"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // fakeStreamingSession implements stt.StreamingSession for tests.

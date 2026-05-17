@@ -3,7 +3,7 @@
 package worker
 
 import (
-	workerservice "github.com/visionarys-io/memql/component/worker"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
 // ScopeRequirement describes the capability + scope tier an action

@@ -20,20 +20,21 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/auth/access"
-	"github.com/visionarys-io/memql/component/bus"
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/memql/sense"
-	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
-	"github.com/visionarys-io/memql/component/node"
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/component/provenance"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/integrations/stt"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth/access"
+	"github.com/znasllc-io/memql/component/bus"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity/verifier"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/sense"
+	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
+	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // contextWithEnvelopeProvenance attaches the envelope's
@@ -111,6 +112,11 @@ type Server struct {
 	agentReplier      AgentTurnHandler
 	serviceRef        *serviceRef
 	extraRegistrars   []func(*grpc.Server)
+	// tokenVerifier honors RotateAuthMsg on open streams. Set by
+	// SetVerifier during app bootstrap; nil on nodes that don't run
+	// an identity verifier (rotation responds with
+	// error="verifier_unconfigured" instead of crashing).
+	tokenVerifier *verifier.Verifier
 }
 
 // serviceRef holds the service instance constructed during Run() so
@@ -255,6 +261,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		accessMW:        accessMW,
 		aiForwarder:     s.aiForwarder,
 		agentReplier:    s.agentReplier,
+		verifier:        s.tokenVerifier,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
 	if s.serviceRef != nil {
@@ -319,6 +326,20 @@ func (s *Server) SetEventBus(bus *events.Bus) {
 		return
 	}
 	s.eventBus = bus
+}
+
+// SetVerifier wires the per-node JWT verifier used by the in-stream
+// auth-rotation path (RotateAuthMsg). Set during app bootstrap from
+// the same *verifier.Verifier the stream interceptor uses, so a token
+// the interceptor would accept at stream-open is also accepted by a
+// mid-stream rotate. Nodes that don't run an identity verifier leave
+// this nil; RotateAuthMsg comes back with error="verifier_unconfigured"
+// instead of crashing the stream.
+func (s *Server) SetVerifier(v *verifier.Verifier) {
+	if s == nil {
+		return
+	}
+	s.tokenVerifier = v
 }
 
 // SetSTTProvider wires the speech-to-text provider used by AI transcription.
@@ -403,6 +424,7 @@ type service struct {
 	conceptRegistry memoryNodes.Registry
 	accessMW        *access.Middleware
 	aiForwarder     *AiForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
+	verifier        *verifier.Verifier // re-verifies presented tokens for in-stream rotation; nil on no-auth nodes
 
 	// agentReplier handles AgentGenerateTurnMsg on agent nodes. Non-nil
 	// only on agent binaries (set via Server.SetAgentReplier during app
@@ -827,6 +849,117 @@ func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	return s.access
 }
 
+// handleRotateAuth swaps the bearer on a live stream. Re-verifies the
+// presented token through the same verifier the interceptor uses at
+// stream-open, then -- on success -- replaces the session's identity
+// and reloads the partition ACL atomically.
+//
+// Semantics:
+//   - The stream stays open in EVERY branch. Even on a hard reject,
+//     the existing identity remains in effect; the client owns the
+//     decision to retry / log out / re-login.
+//   - Reply is always a RotateAuthResult correlated to the request's
+//     message_id, so the client's SendAndWait pattern unblocks
+//     regardless of outcome.
+//   - The new identity is durable for the rest of the stream. There
+//     is no rollback path -- a successful rotation supersedes the
+//     stream-open identity permanently.
+func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.RotateAuthMsg) error {
+	correlationId := envelope.GetMessageId()
+	reply := func(ok bool, errCode, errDesc string) error {
+		return s.sendServerMessage(correlationId, &memqlv1.MemqlServerMessage{
+			Payload: &memqlv1.MemqlServerMessage_RotateAuthResult{
+				RotateAuthResult: &memqlv1.RotateAuthResult{
+					Ok:               ok,
+					Error:            errCode,
+					ErrorDescription: errDesc,
+				},
+			},
+		})
+	}
+
+	v := s.service.verifier
+	if v == nil {
+		return reply(false, "verifier_unconfigured", "this node was not started with a JWT verifier; cannot honor RotateAuth")
+	}
+	token := strings.TrimSpace(msg.GetAccessToken())
+	if token == "" {
+		return reply(false, "invalid_token", "access_token is required")
+	}
+
+	// Verify against the same JWKS / issuer / audience the stream
+	// interceptor enforces. Pass the stream's context so JWKS refresh
+	// gets cancelled if the client hangs up mid-verify.
+	vc, err := v.VerifyBearer(s.stream.Context(), token)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Info("rotate_auth: token verification failed",
+				"subject", s.identity.Subject, "error", err)
+		}
+		return reply(false, "invalid_token", err.Error())
+	}
+
+	// Build the new UserIdentity off a synthetic context the verifier's
+	// AttachToContext populates -- this routes through the same
+	// auth.BuildTokenInfo path the interceptor uses, so the rotated
+	// identity matches what a fresh stream would have seen.
+	tempCtx := verifier.AttachToContext(context.Background(), vc)
+	newIdentity, identityErr := auth.UserIdentityFromContext(tempCtx)
+	if identityErr != nil {
+		// Should not happen -- VerifyBearer success implies non-empty
+		// claims -- but treat it as a hard reject rather than swap to
+		// an unknown identity.
+		if s.logger != nil {
+			s.logger.Warn("rotate_auth: identity build from verified claims failed",
+				"subject", s.identity.Subject, "error", identityErr)
+		}
+		return reply(false, "invalid_token", "verified claims did not yield an identity: "+identityErr.Error())
+	}
+
+	// Reload the partition ACL under the lock. If LoadAccessFromClaims
+	// errors we DO NOT swap the identity -- leaving the session in a
+	// half-rotated state (new identity, old ACL) is worse than failing
+	// the rotate. The client can retry.
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+
+	if mw := s.service.accessMW; mw != nil {
+		newAccess, err := mw.LoadAccessFromClaims(s.stream.Context(), vc.ClaimsMap)
+		if err != nil {
+			if errors.Is(err, access.ErrUserNotProvisioned) {
+				// Same fallback path ensureAccess takes -- the user
+				// row may legitimately not exist yet; derive the ACL
+				// from the verified claims.
+				newAccess = access.FallbackFromClaims(vc.ClaimsMap)
+			} else {
+				if s.logger != nil {
+					s.logger.Warn("rotate_auth: access reload failed; rotation rejected",
+						"subject", newIdentity.Subject, "error", err)
+				}
+				return reply(false, "access_load_failed", err.Error())
+			}
+		}
+		s.access = newAccess
+		s.accessLoaded = true
+	} else {
+		// No access middleware (test paths / no-DB builds). Clear the
+		// cache; downstream code that needs an ACL will hit
+		// ensureAccess and fall through to the claims-derived ACL.
+		s.access = access.FallbackFromClaims(vc.ClaimsMap)
+		s.accessLoaded = true
+	}
+
+	prevSubject := s.identity.Subject
+	s.identity = newIdentity
+
+	if s.logger != nil {
+		s.logger.Info("rotate_auth: identity swapped",
+			"previousSubject", prevSubject,
+			"newSubject", newIdentity.Subject)
+	}
+	return reply(true, "", "")
+}
+
 // partitionCheckRequired reports whether a given message payload should
 // go through the partition-ACL check before dispatch. Handshake and
 // control messages skip it; everything that touches data or events
@@ -871,7 +1004,12 @@ func partitionCheckRequired(payload any) bool {
 		*memqlv1.MemqlClientMessage_VoiceAgentSessionEnd,
 		*memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript,
 		*memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript,
-		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest:
+		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest,
+		// RotateAuth is a session-control envelope; the new token
+		// IS the auth check. Routing it through the partition-ACL
+		// gate would race against the very swap the handler is
+		// about to perform.
+		*memqlv1.MemqlClientMessage_RotateAuth:
 		return false
 	default:
 		return true
@@ -960,6 +1098,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// (core policies are server-internal and never reachable here).
 	case *memqlv1.MemqlClientMessage_EvaluatePolicy:
 		return s.handleEvaluatePolicy(envelope, payload.EvaluatePolicy)
+	// In-stream bearer rotation -- swap the session's identity +
+	// partition ACL without dropping the stream. Lives next to the
+	// other control-plane handlers so long-lived clients (cockpit)
+	// can keep the in-flight bearer aligned with their background
+	// refresh-token rotation. See handleRotateAuth.
+	case *memqlv1.MemqlClientMessage_RotateAuth:
+		return s.handleRotateAuth(envelope, payload.RotateAuth)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)

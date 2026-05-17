@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/visionarys-io/memql/component/polyphon"
-	openaivoice "github.com/visionarys-io/memql/integrations/openai"
+	"github.com/znasllc-io/memql/component/polyphon"
+	openaivoice "github.com/znasllc-io/memql/integrations/openai"
 )
 
 // OpenAIRealtimeProvider adapts openai.ASRClient (which uses the OpenAI

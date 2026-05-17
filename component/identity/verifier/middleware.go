@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // MiddlewareOptions configures HTTPMiddleware.

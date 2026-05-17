@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/a-h/templ"
-	"github.com/visionarys-io/memql/component/identity"
-	identityweb "github.com/visionarys-io/memql/component/identity/web"
-	webtempl "github.com/visionarys-io/memql/component/identity/web/templ"
+	"github.com/znasllc-io/memql/component/identity"
+	identityweb "github.com/znasllc-io/memql/component/identity/web"
+	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
 // AdminServer hosts the /admin/* operator surface. Mounted onto the

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/worker"
-	"github.com/visionarys-io/memql/integrations/agent"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/integrations/agent"
 )
 
 // computerUseStatusFn builds the agent.Replier hook that resolves

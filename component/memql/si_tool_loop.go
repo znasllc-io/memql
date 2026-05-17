@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // InvokeSIChatWithTools renders the prompt template and runs a bounded tool-calling loop

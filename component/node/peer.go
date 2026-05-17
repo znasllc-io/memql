@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 const (

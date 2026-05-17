@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 
-	memqlgrpc "github.com/visionarys-io/memql/component/grpc"
-	"github.com/visionarys-io/memql/component/identity/verifier"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/memql/sense"
-	"github.com/visionarys-io/memql/component/server"
-	"github.com/visionarys-io/memql/component/server/memqlws"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity/verifier"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/memqlws"
 )
 
 // transportBase creates the gRPC server, WebSocket bridge, and gateway middleware.
@@ -63,6 +63,13 @@ func (a *App) transportBase() {
 		// surface-pin stays the same.
 		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, voiceAgentSharedToken(), a.Logger)
 		a.grpcServer.SetStreamInterceptor(voiceAgentChecked)
+		// Hand the verifier to the gRPC server so the in-stream
+		// rotation handler (RotateAuthMsg) can re-verify a refreshed
+		// bearer against the same JWKS + audience + issuer the
+		// interceptor enforces at stream open. Without this the
+		// handler responds with error="verifier_unconfigured" and
+		// the cockpit falls back to reconnect-with-fresh-token.
+		a.grpcServer.SetVerifier(a.identityVerifier)
 	} else {
 		// verifierRequired=false branch (identity binary). Operator
 		// is the only admit path; everything else is rejected.

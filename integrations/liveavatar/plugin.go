@@ -1,6 +1,6 @@
 package liveavatar
 
-import "github.com/visionarys-io/memql/component/memql"
+import "github.com/znasllc-io/memql/component/memql"
 
 // init self-registers the LiveAvatar integration as a plug-in. The
 // API key + avatar/voice configuration are resolved lazily at request

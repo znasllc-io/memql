@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // parseSpecMemQL parses a single `.memql` source fragment containing

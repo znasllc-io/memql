@@ -25,8 +25,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/visionarys-io/memql/component/architecture/extract"
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/extract"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 func main() {

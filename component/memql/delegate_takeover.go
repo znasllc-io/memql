@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	appprofiles "github.com/visionarys-io/memql/app-profiles"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	appprofiles "github.com/znasllc-io/memql/app-profiles"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // executeDelegateTakeover is the handler dispatched by ExecuteTool when

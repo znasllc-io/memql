@@ -11,7 +11,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	memqldsl "github.com/visionarys-io/memql/dsl"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // PromptTemplate represents a compiled prompt definition.

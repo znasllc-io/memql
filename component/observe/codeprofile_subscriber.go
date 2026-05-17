@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // CodeProfileSubscriberComponent is the bus-side ComponentName.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // ResumeOptions configures resume behavior.

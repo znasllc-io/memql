@@ -40,7 +40,7 @@ The install script:
    (`memql-cockpit-darwin-arm64` or `memql-cockpit-gui-darwin-arm64`).
 2. Writes `~/.memql/worker.yaml` with the token + cluster URL.
 3. Drops a LaunchAgent at
-   `~/Library/LaunchAgents/com.visionarys.memql-cockpit-worker.plist`
+   `~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist`
    and `launchctl load`s it.
 
 The first time you run the GUI variant, macOS will prompt for
@@ -49,8 +49,8 @@ Settings → Privacy & Security). Approve both, then re-run the
 service:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.visionarys.memql-cockpit-worker.plist
-launchctl load   ~/Library/LaunchAgents/com.visionarys.memql-cockpit-worker.plist
+launchctl unload ~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist
+launchctl load   ~/Library/LaunchAgents/com.znasllc.memql-cockpit-worker.plist
 ```
 
 For an interactive walkthrough that probes both permissions,

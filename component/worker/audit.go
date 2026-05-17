@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/visionarys-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity"
 )
 
 // IdentityAuditor bridges worker.AuditEvent into the identity audit

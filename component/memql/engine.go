@@ -10,13 +10,13 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/visionarys-io/memql/component"
-	"github.com/visionarys-io/memql/component/bus"
-	concept "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/provenance"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/component/bus"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.

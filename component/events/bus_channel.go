@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/visionarys-io/memql/component/bus"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/component/bus"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
 )
 
 // RunWithChannel reads EventPublish messages from the bus channel and

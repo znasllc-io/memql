@@ -3,7 +3,7 @@ package server
 import (
 	"sync"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 type dependencyHealthStatus struct {

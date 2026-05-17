@@ -1,6 +1,6 @@
 package node
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // CognitionBootstrap creates dependencies for a Cognition node.
 // Cognition nodes handle voice turn-taking and conversation management.

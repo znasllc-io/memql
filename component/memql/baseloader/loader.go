@@ -16,8 +16,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/visionarys-io/memql/component/memql/dslfs"
-	memqldsl "github.com/visionarys-io/memql/dsl"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // RawFile is the (path, content) pair every loader iterates over.

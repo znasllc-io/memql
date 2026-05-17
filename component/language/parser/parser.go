@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // Parser converts tokens into an AST.

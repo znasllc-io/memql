@@ -10,8 +10,8 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/docs"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/docs"
 )
 
 func (e *MemQLEngine) initBuiltinExecutorHandlers() error {

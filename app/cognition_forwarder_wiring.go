@@ -3,8 +3,8 @@
 package app
 
 import (
-	memqlgrpc "github.com/visionarys-io/memql/component/grpc"
-	"github.com/visionarys-io/memql/integrations/cognition"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/integrations/cognition"
 )
 
 // attachAgentForwarderToCognition installs the agent-turn forwarder onto

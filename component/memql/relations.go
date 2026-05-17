@@ -3,7 +3,7 @@ package memql
 import (
 	"strings"
 
-	concept "github.com/visionarys-io/memql/component/database/memory-nodes"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // RelationshipDefinition reuses the concept-level structure for engine consumption.

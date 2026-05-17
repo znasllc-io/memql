@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

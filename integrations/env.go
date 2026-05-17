@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 // IntegrationEnvKeys defines the environment variable keys for integration configuration.

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/bus"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/component/bus"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -22,8 +22,8 @@ import (
 	"log/slog"
 	"strings"
 
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/component/memql/baseloader"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
 // LoadUnifiedPolicies walks the unified tree, extracts every

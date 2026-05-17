@@ -519,7 +519,7 @@ insert("v1:space", payload={"name": "A", "uuid": "..."})
 
 #### Server-Side Salt
 
-A deployment-specific salt can be configured via `MEMORY_NODES_VISIONARYS_LAB_CONTENTID_SALT` to ensure IDs are unique across environments. The salt is set on concepts during registration via `Concept.SetContentIdSalt()`.
+A deployment-specific salt can be configured via `MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT` to ensure IDs are unique across environments. The salt is set on concepts during registration via `Concept.SetContentIdSalt()`.
 
 ---
 

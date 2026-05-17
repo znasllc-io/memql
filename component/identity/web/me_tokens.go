@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/pat"
-	webtempl "github.com/visionarys-io/memql/component/identity/web/templ"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/pat"
+	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
 // PATAdapter is the narrow port the web package uses to drive PAT

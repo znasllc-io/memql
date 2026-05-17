@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
 )
 
 // magicLinkRequest is the JSON body POST /auth/magic-link expects.

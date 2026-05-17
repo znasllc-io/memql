@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/automations"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // formatDuration returns a human-readable duration string in milliseconds.

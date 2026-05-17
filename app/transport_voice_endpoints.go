@@ -3,7 +3,7 @@
 package app
 
 import (
-	"github.com/visionarys-io/memql/integrations/stt"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // transportVoiceEndpoints sets up transport for a voice node.

@@ -10,9 +10,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/integrations"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations"
 )
 
 // fakeStreamProvider satisfies common.ChatStreamWithToolsProvider. Each call

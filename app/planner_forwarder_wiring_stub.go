@@ -2,7 +2,7 @@
 
 package app
 
-import memqlgrpc "github.com/visionarys-io/memql/component/grpc"
+import memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 
 // attachAgentForwarderToPlanner is a no-op on binaries that don't
 // include the planner integration. The real wiring lives in

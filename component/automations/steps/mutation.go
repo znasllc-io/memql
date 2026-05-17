@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // MutationExecutor executes MemQL mutation (insert) steps.

@@ -14,10 +14,10 @@ import (
 	"io/fs"
 	"sort"
 
-	languageAst "github.com/visionarys-io/memql/component/language/ast"
-	languageCompiler "github.com/visionarys-io/memql/component/language/compiler"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/component/memql/dslfs"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
 
 // Compile-time guarantee that the ast alias still exists.

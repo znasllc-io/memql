@@ -3,7 +3,7 @@ package cognition
 import (
 	"testing"
 
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 func TestExtractUtteranceFromEventReadsFlattenedSource(t *testing.T) {

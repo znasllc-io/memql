@@ -8,9 +8,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/node"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/node"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 func testLogger() *slog.Logger {

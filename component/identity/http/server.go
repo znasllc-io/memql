@@ -1,6 +1,6 @@
 // Package http hosts the HTTP handlers identity binaries serve. The
 // package is named generically so callers import it as
-// httpidentity "github.com/visionarys-io/memql/component/identity/http".
+// httpidentity "github.com/znasllc-io/memql/component/identity/http".
 //
 // Routes mounted by Server.Mount:
 //
@@ -23,10 +23,10 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/abuse"
-	"github.com/visionarys-io/memql/component/identity/magiclink"
-	"github.com/visionarys-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
 // Server bundles the dependencies the handlers need. Constructed once

@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/language/compiler"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/compiler"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // builtinFunctionDefinition represents the JSON schema for builtin function files.

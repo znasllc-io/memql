@@ -3,7 +3,7 @@ package steps
 import (
 	"testing"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 // TestResolveArgValueRef_ResolvesTopLevelCoalesce locks in that a plain

@@ -1,7 +1,7 @@
 package events
 
 import (
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // ToProtoEventKind converts an events.Kind to the proto EventKind.

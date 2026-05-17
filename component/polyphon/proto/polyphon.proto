@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package polyphon;
 
-option go_package = "github.com/visionarys-io/memql/component/polyphon/proto";
+option go_package = "github.com/znasllc-io/memql/component/polyphon/proto";
 
 // PolyphonScoreEngine is the gRPC service exposed by memQL (Cloud Run)
 // for the Bridge Agent (GKE) to communicate with the score engine.

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/integrations/deepgram"
-	openaivoice "github.com/visionarys-io/memql/integrations/openai"
-	"github.com/visionarys-io/memql/integrations/stt"
+	"github.com/znasllc-io/memql/integrations/deepgram"
+	openaivoice "github.com/znasllc-io/memql/integrations/openai"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // parseEnvIntDefaultZero reads a non-negative integer env var, returning

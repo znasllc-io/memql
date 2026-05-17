@@ -29,11 +29,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	identifier "github.com/visionarys-io/memql/core/id"
-	"github.com/visionarys-io/memql/integrations/email"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	identifier "github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // Default lifetime of a fresh guest-invite token when the caller

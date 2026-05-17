@@ -1,9 +1,9 @@
 package node
 
 import (
-	"github.com/visionarys-io/memql/component/bus"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	"github.com/visionarys-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/bus"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/component/events"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

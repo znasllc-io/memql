@@ -14,14 +14,14 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/id"
-	"github.com/visionarys-io/memql/integrations/voice"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/voice"
 )
 
 // humanUtteranceDebounce is how long the handler waits after receiving a

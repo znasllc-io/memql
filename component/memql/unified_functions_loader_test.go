@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestLoadUnifiedFunctions_RegistersFromNewTree verifies the unified

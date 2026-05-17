@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing/fstest"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/language/ast"
-	"github.com/visionarys-io/memql/component/language/compiler"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/compiler"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 var inlineStepBlockPattern = regexp.MustCompile(`:=\s*(query|mutation|shape|webhook|event|publishEvent)\s*(if\s+[^{]+)?\{`)

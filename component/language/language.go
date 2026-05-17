@@ -5,12 +5,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/visionarys-io/memql/component"
-	"github.com/visionarys-io/memql/component/language/compiler"
-	"github.com/visionarys-io/memql/component/language/parser"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
-	"github.com/visionarys-io/memql/core/logger"
+	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/component/language/compiler"
+	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 const (

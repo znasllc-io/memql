@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/visionarys-io/memql/app"
-	"github.com/visionarys-io/memql/component/genesis"
-	"github.com/visionarys-io/memql/component/server"
-	"github.com/visionarys-io/memql/component/service"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/logger"
+	"github.com/znasllc-io/memql/app"
+	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/service"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 const (

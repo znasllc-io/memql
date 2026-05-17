@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/events"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // ConceptMetadata is the JSON representation of a single concept in the API response.

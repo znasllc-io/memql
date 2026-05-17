@@ -3,7 +3,7 @@ package liveknowledge
 import (
 	"context"
 
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // engineAdapter wraps the PluginContext.Engine (a narrow

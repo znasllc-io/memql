@@ -1,6 +1,6 @@
 package router
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // EstimateMessageTokens returns a rough token count for a chat message
 // array using a four-characters-per-token heuristic. It is deliberately

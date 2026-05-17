@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/polyphon"
 	"nhooyr.io/websocket"
 )
 

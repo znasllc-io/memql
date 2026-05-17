@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // EngineExecutor is the narrow interface this package depends on for

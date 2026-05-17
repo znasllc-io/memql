@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 func parseForTest(t *testing.T, src string) *parser.File {

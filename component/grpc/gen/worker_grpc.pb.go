@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkerService_Stream_FullMethodName = "/visionarys.memql.worker.v1.WorkerService/Stream"
+	WorkerService_Stream_FullMethodName = "/znasllc.memql.worker.v1.WorkerService/Stream"
 )
 
 // WorkerServiceClient is the client API for WorkerService service.
@@ -112,7 +112,7 @@ type WorkerService_StreamServer = grpc.BidiStreamingServer[WorkerClientMessage, 
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var WorkerService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "visionarys.memql.worker.v1.WorkerService",
+	ServiceName: "znasllc.memql.worker.v1.WorkerService",
 	HandlerType: (*WorkerServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
