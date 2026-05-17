@@ -125,9 +125,36 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 		"planId", planId, "kind", kind, "status", status)
 }
 
-// invokeAndDispatch performs one loop iteration: load Plan state,
-// call the plannerAgent prompt, parse the decision, dispatch.
+// maxPlannerIterations caps how many times we'll re-invoke the
+// plannerAgent for a single Plan inside one event-driven cycle.
+// Loop-style actions (decompose, createSpecialist, extendSpecialist)
+// transition the Plan to a new state and then re-enter the loop so
+// the LLM sees the updated context and emits the next decision.
+// The cap stops a misbehaving model from spinning forever; in
+// practice an end-to-end run is "decompose -> createSpecialist (maybe)
+// -> dispatchTask" which is 2-3 iterations.
+const maxPlannerIterations = 5
+
+// invokeAndDispatch performs one or more loop iterations: load Plan
+// state, call the plannerAgent prompt, parse the decision, dispatch.
+// Loop-extending actions (decompose / createSpecialist) recurse into
+// invokeAndDispatchIter so the same Plan gets the next decision in
+// the same event-cycle instead of parking until a future trigger.
 func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string) error {
+	return l.invokeAndDispatchIter(ctx, planId, 0)
+}
+
+func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId string, iter int) error {
+	if iter >= maxPlannerIterations {
+		// Park the plan rather than fail it -- the user can resume on
+		// the next trigger. Keeps a stuck LLM from killing a Plan
+		// outright when it might just need a fresh context.
+		l.logger.Warn("planner agent loop: iteration cap reached; escalating",
+			"planId", planId, "iter", iter)
+		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
+			fmt.Sprintf("Planner reached the per-cycle iteration cap (%d) without converging. Resume to retry.", maxPlannerIterations))
+	}
+
 	plan, err := l.loadPlan(ctx, planId)
 	if err != nil {
 		return fmt.Errorf("load plan %s: %w", planId, err)
@@ -161,17 +188,29 @@ func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string)
 		return l.markPlanFailed(ctx, planId, fmt.Sprintf("planner decision parse failed: %v", err))
 	}
 
-	return l.dispatchDecision(ctx, planId, decision)
+	l.logger.Info("planner agent loop: dispatching decision",
+		"planId", planId, "action", decision.Action, "iter", iter)
+	return l.dispatchDecision(ctx, planId, decision, iter)
 }
 
-// dispatchDecision routes the Planner Agent's structured-output decision
-// to its corresponding engine action. The Phase 4 surface covers the
-// simplest actions; richer ones (createSpecialist, extendSpecialist,
-// spawnTrainingPlan) log + escalate until their supporting phases ship.
-func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, d plannerDecision) error {
+// dispatchDecision routes the Planner Agent's structured-output
+// decision to its corresponding engine action. Loop-extending actions
+// (decompose / createSpecialist / extendSpecialist) re-invoke the
+// planner with iter+1 so the LLM picks up where it left off in the
+// same event cycle. Terminal actions (markPlanSucceeded / Failed /
+// escalate) and dispatchTask park the Plan for the next external
+// trigger.
+func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, d plannerDecision, iter int) error {
 	switch d.Action {
 	case "decompose":
-		return l.stampPhases(ctx, planId, d.PlanOutline)
+		if err := l.stampPhases(ctx, planId, d.PlanOutline); err != nil {
+			return err
+		}
+		// Re-invoke so the planner picks the first concrete action
+		// (createSpecialist / dispatchTask) given the freshly-stamped
+		// phases. Without this the Plan would sit at queued with
+		// phases set but no Tasks created.
+		return l.invokeAndDispatchIter(ctx, planId, iter+1)
 	case "dispatchTask":
 		return l.insertDispatchedTask(ctx, planId, d.Task)
 	case "markPlanSucceeded":
@@ -180,18 +219,146 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		return l.markPlanFailed(ctx, planId, d.ErrorMessage)
 	case "escalate":
 		return l.escalateAwaitingFeedback(ctx, planId, d.FeedbackReason, d.Question)
-	case "createSpecialist", "extendSpecialist", "spawnTrainingPlan", "retry":
-		// Phase 4 stub: the supporting plumbing ships in 6 / 7. For
-		// now, escalate so the user is in the loop rather than the
-		// Planner spinning silently.
-		l.logger.Info("planner agent loop: decision deferred to a later phase; escalating",
+	case "createSpecialist", "extendSpecialist":
+		// The plannerAgent prompt distinguishes createSpecialist from
+		// extendSpecialist (the latter prefers Q10's layered dedupe),
+		// but both resolve to the same handler from our perspective:
+		// the ensureAgentForGoal factory builtin reads the role + agent
+		// catalogs and picks match-vs-extend-vs-create on its own. We
+		// pass the Plan's goal verbatim; the factory does the matching.
+		return l.ensureSpecialistForPlan(ctx, planId, iter)
+	case "spawnTrainingPlan", "retry":
+		// Still parked. spawnTrainingPlan minted a kind=trainSpecialist
+		// child Plan; the Trainer Agent picks that up via its own loop
+		// once it ships. retry handling needs the failure-context
+		// surface that the agent worker emits, which isn't wired yet.
+		l.logger.Info("planner agent loop: decision deferred; escalating",
 			"planId", planId, "action", d.Action)
 		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
-			fmt.Sprintf("Planner emitted '%s' which is not yet supported. Manual intervention required.", d.Action))
+			fmt.Sprintf("Planner emitted '%s' which is not yet supported end-to-end. Manual intervention required.", d.Action))
 	default:
 		return l.markPlanFailed(ctx, planId,
 			fmt.Sprintf("planner emitted unknown action %q", d.Action))
 	}
+}
+
+// ensureSpecialistForPlan resolves the Plan's goal into an agent
+// (match / extend / create) via the ensureAgentForGoal factory
+// builtin, then re-invokes the planner so it can dispatch a Task to
+// the resulting specialist on the next iteration.
+//
+// The factory itself is the integration.agents.ensureForGoal handler
+// in integrations/agents/factory.go -- it reads the role catalog +
+// the user's existing agents, runs the agentFactoryAnalyze
+// structured-output prompt to pick a role / domains / tools, and
+// writes via mutationCreateAgent or mutationUpdateAgent. Returns
+// {agentId, action, reasoning} on a synthetic in-flight MemoryNode.
+//
+// We call it directly from Go rather than through the GA's
+// ensureAgent tool because (a) the tool's @allowedRoles is
+// "general_assistant" by design (it's a GA-only surface in chat),
+// and (b) the planner integration has full engine access -- routing
+// through the LLM's tool loop would add an unnecessary round trip
+// when the planner has already decided this is the right action.
+func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId string, iter int) error {
+	plan, err := l.loadPlan(ctx, planId)
+	if err != nil {
+		return fmt.Errorf("load plan %s: %w", planId, err)
+	}
+	goal := getString(plan, "goal")
+	ownerUserId := getString(plan, "requestedBy")
+	spaceId := getString(plan, "spaceId")
+	if goal == "" || ownerUserId == "" {
+		return l.markPlanFailed(ctx, planId,
+			"createSpecialist: plan is missing goal or requestedBy; cannot run factory")
+	}
+
+	args, err := json.Marshal(map[string]any{
+		"goal":        goal,
+		"ownerUserId": ownerUserId,
+		"spaceId":     spaceId,
+	})
+	if err != nil {
+		return l.markPlanFailed(ctx, planId, fmt.Sprintf("createSpecialist: marshal args: %v", err))
+	}
+	call := fmt.Sprintf("ensureAgentForGoal(%s)", string(args))
+	res, err := l.engine.Execute(ctx, call)
+	if err != nil {
+		return l.markPlanFailed(ctx, planId,
+			fmt.Sprintf("ensureAgentForGoal failed: %v", err))
+	}
+
+	agentId, factoryAction := extractAgentFactoryResult(res)
+	if agentId == "" {
+		return l.markPlanFailed(ctx, planId,
+			"ensureAgentForGoal returned no agentId; cannot proceed")
+	}
+	l.logger.Info("planner agent loop: factory resolved specialist",
+		"planId", planId, "agentId", agentId, "factoryAction", factoryAction, "iter", iter)
+
+	// Stamp the agent onto the Plan so the next loadSpecialists call
+	// includes it in the LLM's candidate set, and so consumers querying
+	// the Plan see the assignment.
+	if err := l.assignOwnerAgent(ctx, planId, agentId); err != nil {
+		l.logger.Warn("planner agent loop: ownerAgentId update failed; continuing",
+			"planId", planId, "agentId", agentId, "error", err)
+	}
+
+	// Re-invoke so the planner picks dispatchTask now that the
+	// specialist exists.
+	return l.invokeAndDispatchIter(ctx, planId, iter+1)
+}
+
+// extractAgentFactoryResult digs the {agentId, action} fields out of
+// the ensureAgentForGoal builtin's return. The engine wraps integration
+// results as a MemoryNode-shaped value; the factory's payload is
+// {agentId, agentName, roleSlug, action, reasoning} per
+// dsl/agents/builtins.memql.
+func extractAgentFactoryResult(res any) (agentId, action string) {
+	switch v := res.(type) {
+	case map[string]any:
+		// Direct payload map.
+		if id, ok := v["agentId"].(string); ok {
+			agentId = id
+		}
+		if a, ok := v["action"].(string); ok {
+			action = a
+		}
+		// Or wrapped inside `payload`.
+		if p, ok := v["payload"].(map[string]any); ok {
+			if id, ok := p["agentId"].(string); ok && agentId == "" {
+				agentId = id
+			}
+			if a, ok := p["action"].(string); ok && action == "" {
+				action = a
+			}
+		}
+	case []map[string]any:
+		if len(v) > 0 {
+			return extractAgentFactoryResult(v[0])
+		}
+	case []any:
+		if len(v) > 0 {
+			return extractAgentFactoryResult(v[0])
+		}
+	}
+	return agentId, action
+}
+
+// assignOwnerAgent writes a Plan-status update setting ownerAgentId
+// without changing the status. Mutation re-validates against the Plan
+// concept; we just want the in-place merge of ownerAgentId.
+func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId string) error {
+	args, err := json.Marshal(map[string]any{
+		"planId":       planId,
+		"status":       "routing",
+		"ownerAgentId": agentId,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = l.engine.Execute(ctx, fmt.Sprintf("mutationUpdatePlanStatus(%s)", string(args)))
+	return err
 }
 
 // --- engine helpers -------------------------------------------------------
