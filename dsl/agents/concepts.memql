@@ -9,7 +9,8 @@
 
 @version("1.0.0")
 @namespace("agents")
-@description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings.")
+@scope("global")
+@description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings. Global-scoped: lives in _system alongside v1:identity:user, since per-user platform agents (generalAssistant, plannerAgent, trainerAgent) are infrastructure that every tenant sees the same way -- keyed by ownerUserId payload field, addressed canonically as _system:v1:agents:agent:<seedName>-<userShortId>.")
 concept agent {
   ownerUserId     string  @description("Canonical owning-user pointer. Distinct from the engine-auto-stamped `createdBy` column: createdBy carries the request actor at insert time, which is the user when the agent is created via the Create Agent modal but is the system actor (`system:automation:provisionGeneralAssistantOnUserCreate`) when the GA is auto-seeded by the provisioning automation. Owner-keyed lookups (Computer Use status, worker dispatch routing, agent-context auto-injection for worker tools) read this field first and fall back to createdBy.")
   name            string  @required @description("Display name of the agent.")

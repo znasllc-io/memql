@@ -12,6 +12,7 @@ import (
 	"github.com/visionarys-io/memql/component/auth"
 	"github.com/visionarys-io/memql/component/events"
 	"github.com/visionarys-io/memql/component/provenance"
+	"github.com/visionarys-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -251,7 +252,19 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 	if userId == "" {
 		return fmt.Errorf("empty userId for per-user seed %q", def.Name)
 	}
-	rowId := def.Name + "-" + userId
+	// Build the row's shortId from the user's SHORT id (the part
+	// after the canonical {partition}:{concept}: prefix), not the
+	// full canonical id. Concatenating with the full id produced
+	// non-canonical compound ids like
+	// "trainerAgent-_system:v1:identity:user:user-30bf..." that
+	// then defeated the storage layer's HasPartition() check and
+	// stored without the proper {partition}:{concept}: prefix.
+	// See docs/core/identifiers.md.
+	shortUserId := userId
+	if _, _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
+		shortUserId = parsed
+	}
+	rowId := def.Name + "-" + shortUserId
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)

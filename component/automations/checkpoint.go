@@ -50,8 +50,12 @@ func SaveCheckpoint(ctx context.Context, engine *memql.MemQLEngine, checkpoint *
 		checkpoint.ExpiresAt = checkpoint.SavedAt.Add(DefaultCheckpointTTL)
 	}
 
-	// Build checkpoint ID for easy lookup
-	checkpointId := fmt.Sprintf("checkpoint:%s", checkpoint.ExecutionId)
+	// Use executionId as the bare shortId. The engine prepends
+	// {partition}:{concept}: so the stored id is
+	// "_system:v1:memql:checkpoint:<executionId>". Don't prepend
+	// "checkpoint:" here -- that duplicates the concept name and
+	// produces non-canonical ids per docs/core/identifiers.md.
+	checkpointId := checkpoint.ExecutionId
 
 	// Serialize the checkpoint to JSON
 	payloadJSON, err := json.Marshal(checkpoint)
