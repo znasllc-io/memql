@@ -363,53 +363,102 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 
 // --- engine helpers -------------------------------------------------------
 
+// loadPlan resolves a Plan by id via the queryPlanById DSL function.
+// The function lives in core's dsl/planner/queries.memql (moved there
+// from copresent on 2026-05-17). Earlier versions of this method used
+// a `from(v1:planner:plan) ?.id==X` syntax that the engine doesn't
+// support -- the engine's only entry point for reading a concept is
+// a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`from(v1:planner:plan) ?.id==%q limit 1`, planId)
+	q := fmt.Sprintf(`queryPlanById({"planId": %q})`, planId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	rows, ok := res.([]map[string]any)
-	if !ok || len(rows) == 0 {
+	rows := plannerExtractRows(res)
+	if len(rows) == 0 {
 		return nil, fmt.Errorf("plan %s not found", planId)
 	}
 	return rows[0], nil
 }
 
 func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`from(v1:planner:task) ?.payload.planId==%q select *`, planId)
+	q := fmt.Sprintf(`queryTasksForPlan({"planId": %q})`, planId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	rows, ok := res.([]map[string]any)
-	if !ok {
-		return nil, nil
-	}
-	return rows, nil
+	return plannerExtractRows(res), nil
 }
 
 func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]any) ([]map[string]any, error) {
-	// v1: load every active agent owned by the user that requested
-	// this Plan. Later phases narrow to "agents visible in this
-	// space," exclude system_ roleSlugs from candidates, etc.
+	// Load every active agent owned by the user that requested this
+	// Plan. Same DSL function the agent factory uses for its dedupe
+	// lookup, so the candidate set the planner sees matches what the
+	// factory's analysis would consider for match-or-extend.
 	ownerUserId := getString(plan, "requestedBy")
 	if ownerUserId == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(
-		`from(v1:agents:agent) ?.payload.ownerUserId==%q;payload.active==true select *`,
-		ownerUserId,
-	)
+	q := fmt.Sprintf(`queryActiveAgentsForUser({"ownerUserId": %q})`, ownerUserId)
 	res, err := l.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
 	}
-	rows, ok := res.([]map[string]any)
-	if !ok {
-		return nil, nil
+	return plannerExtractRows(res), nil
+}
+
+// plannerExtractRows pulls a slice of row-maps out of an engine.Execute
+// return value. The engine wraps query results in one of several
+// shapes (a bare slice, a {rows: []} envelope, a {result: {rows: []}}
+// envelope, a {nodes: []} envelope); the JSON-roundtrip walk here
+// tolerates all of them. Same approach the agents integration uses
+// in factory.go's extractRowsFromExecuteResult -- duplicated here so
+// the planner doesn't take a dependency on the agents package's
+// internal helpers.
+func plannerExtractRows(raw any) []map[string]any {
+	if raw == nil {
+		return nil
 	}
-	return rows, nil
+	rawJSON, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var loose any
+	if err := json.Unmarshal(rawJSON, &loose); err != nil {
+		return nil
+	}
+	return plannerRowsFromLoose(loose)
+}
+
+func plannerRowsFromLoose(v any) []map[string]any {
+	switch x := v.(type) {
+	case map[string]any:
+		if rows, ok := x["rows"].([]any); ok {
+			return plannerCastRows(rows)
+		}
+		if result, ok := x["result"].(map[string]any); ok {
+			if rows, ok := result["rows"].([]any); ok {
+				return plannerCastRows(rows)
+			}
+		}
+		if nodes, ok := x["nodes"].([]any); ok {
+			return plannerCastRows(nodes)
+		}
+	case []any:
+		return plannerCastRows(x)
+	}
+	return nil
+}
+
+func plannerCastRows(items []any) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outline []phaseOutline) error {
