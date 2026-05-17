@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	componentAuth "github.com/visionarys-io/memql/component/auth"
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	componentAuth "github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // handleCreateDelegation creates a new delegation grant from an identity to an agent.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // fingerprintEngine is the shared engine for automation fingerprinting.

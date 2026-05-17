@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // findCallerValue walks the expression tree and returns the Value of

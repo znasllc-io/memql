@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // Turn mode constants for the guardrail routing decision. Carried on

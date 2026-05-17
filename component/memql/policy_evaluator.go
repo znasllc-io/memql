@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	"github.com/visionarys-io/memql/component/config"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/auth"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/component/config"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // jsonMarshal is a thin wrapper that swallows errors — for trace

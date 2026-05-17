@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/visionarys-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
 // LoadUnifiedSpecs walks dsl.Tree() and registers every spec + trait

@@ -1,6 +1,6 @@
 package node
 
-import "github.com/visionarys-io/memql/core/common"
+import "github.com/znasllc-io/memql/core/common"
 
 // AgentBootstrap creates dependencies for an Agent node.
 // Agent nodes perform task execution and AI work.

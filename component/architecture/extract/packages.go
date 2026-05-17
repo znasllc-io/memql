@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 // ServicePlan pairs a module directory with its arch.yaml. The
@@ -16,7 +16,7 @@ import (
 type ServicePlan struct {
 	ModuleDir string
 	Arch      *ArchYAML
-	// ModulePath is the Go module path (e.g. "github.com/visionarys-io/memql"),
+	// ModulePath is the Go module path (e.g. "github.com/znasllc-io/memql"),
 	// resolved by the package loader. Used to identify which loaded
 	// packages "belong" to this service for the Contains edge.
 	ModulePath string

@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	componentAuth "github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/memql"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	componentAuth "github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // AuthIntegration exposes auth/identity operations as DSL-callable capabilities.

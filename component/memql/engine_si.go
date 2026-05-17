@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 func (e *MemQLEngine) Integrations() *IntegrationRegistry {

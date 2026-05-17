@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/memql/taskstamp"
-	"github.com/visionarys-io/memql/component/router"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
-	"github.com/visionarys-io/memql/core/logger"
+	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/taskstamp"
+	"github.com/znasllc-io/memql/component/router"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // looksLikeCanonicalUserId returns true when s looks like a

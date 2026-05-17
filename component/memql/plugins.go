@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/uptrace/bun"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // PluginContext is the narrow Go surface that self-registering integration

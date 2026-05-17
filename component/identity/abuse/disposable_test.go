@@ -13,7 +13,7 @@ func TestIsDisposable(t *testing.T) {
 		{"USER@MAILINATOR.COM", true}, // case-insensitive
 		{"user@gmail.com", false},
 		{"user@example.com", false},
-		{"user@visionarys.io", false},
+		{"user@znasllc.io", false},
 		{"malformed", false},
 		{"", false},
 		{"missing-domain@", false},

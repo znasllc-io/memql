@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package visionarys.memql.worker.v1;
+package znasllc.memql.worker.v1;
 
-option go_package = "github.com/visionarys-io/memql/grpc/gen;memqlv1";
+option go_package = "github.com/znasllc-io/memql/grpc/gen;memqlv1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";

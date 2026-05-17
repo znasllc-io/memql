@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/visionarys-io/memql/component/bus"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/bus"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

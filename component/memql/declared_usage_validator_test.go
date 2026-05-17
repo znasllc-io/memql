@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // Tests for the declared-must-be-used validator (Phase G.3.g pt 4).

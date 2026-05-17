@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"time"
 
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
-	lk "github.com/visionarys-io/memql/component/memql/liveknowledge"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	lk "github.com/znasllc-io/memql/component/memql/liveknowledge"
 )
 
 // LiveKnowledgeIntegration exposes Live Knowledge query dispatch to

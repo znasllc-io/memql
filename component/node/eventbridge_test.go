@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/component/events"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

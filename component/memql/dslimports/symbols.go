@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	languageAst "github.com/visionarys-io/memql/component/language/ast"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
 )
 
 // Cross-file symbol resolution for the new import model

@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MemqlService_Stream_FullMethodName = "/visionarys.memql.v1.MemqlService/Stream"
+	MemqlService_Stream_FullMethodName = "/znasllc.memql.v1.MemqlService/Stream"
 )
 
 // MemqlServiceClient is the client API for MemqlService service.
@@ -102,7 +102,7 @@ type MemqlService_StreamServer = grpc.BidiStreamingServer[MemqlClientMessage, Me
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var MemqlService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "visionarys.memql.v1.MemqlService",
+	ServiceName: "znasllc.memql.v1.MemqlService",
 	HandlerType: (*MemqlServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{

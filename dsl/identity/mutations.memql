@@ -895,7 +895,7 @@ mutation mutationCreateWorkerPairingCode {
 //
 // Worker tokens are server-side-scoped: the gRPC stream
 // interceptor admits them ONLY on WorkerService paths
-// (/visionarys.memql.worker.v1.WorkerService/...) and rejects them
+// (/znasllc.memql.worker.v1.WorkerService/...) and rejects them
 // on every other RPC. usableByAgents stays false unconditionally
 // -- a worker token identifies a machine, not a delegated agent
 // principal.

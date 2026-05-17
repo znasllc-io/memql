@@ -31,7 +31,7 @@ import (
 	_ "embed"
 	"bytes"
 
-	"github.com/visionarys-io/memql/component/architecture/model"
+	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
 //go:generate go run ../../../cmd/memql-arch --root ../../../.. --out topology.model.json --calls

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/memql"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 var (

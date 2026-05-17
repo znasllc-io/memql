@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 type (

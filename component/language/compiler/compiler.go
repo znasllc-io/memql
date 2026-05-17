@@ -4,7 +4,7 @@
 package compiler
 
 import (
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 type (

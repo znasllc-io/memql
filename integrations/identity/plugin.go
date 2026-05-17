@@ -1,6 +1,6 @@
 package identity
 
-import "github.com/visionarys-io/memql/component/memql"
+import "github.com/znasllc-io/memql/component/memql"
 
 // init self-registers the identity integration as a plug-in. Always on.
 func init() {

@@ -3,7 +3,7 @@ package database
 import (
 	"slices"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 type PostgresDatabase struct {

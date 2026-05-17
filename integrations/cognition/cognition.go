@@ -14,13 +14,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/polyphon"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
-	"github.com/visionarys-io/memql/core/logger"
-	"github.com/visionarys-io/memql/integrations"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/logger"
+	"github.com/znasllc-io/memql/integrations"
 	"golang.org/x/sync/singleflight"
 )
 

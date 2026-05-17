@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package visionarys.memql.v1;
+package znasllc.memql.v1;
 
-option go_package = "github.com/visionarys-io/memql/grpc/gen;memqlv1";
+option go_package = "github.com/znasllc-io/memql/grpc/gen;memqlv1";
 
 //go:generate protoc --proto_path=. --go_out=gen --go_opt=paths=source_relative --go-grpc_out=gen --go-grpc_opt=paths=source_relative memql.proto
 
@@ -183,6 +183,15 @@ message MemqlClientMessage {
     // anything else is rejected with POLICY_NOT_FRONTEND_VISIBLE so
     // a UI cannot reach into core/auth or core/partition decisions.
     EvaluatePolicyMsg evaluate_policy = 70;
+    // RotateAuth -- swap the bearer token on a live stream without
+    // tearing it down. Long-lived stream clients (memql-cockpit
+    // most notably) call this from their background token-refresh
+    // path so admin-side revocation / access changes propagate to
+    // an in-flight session in O(seconds) rather than O(stream
+    // lifetime). The server re-verifies the presented token, reloads
+    // the partition ACL, and swaps streamSession.identity + .access
+    // atomically. See handleRotateAuth.
+    RotateAuthMsg rotate_auth = 71;
   }
 }
 
@@ -273,6 +282,15 @@ message MemqlServerMessage {
     // string for the typical rejection cases (unknown policy, not
     // frontend-visible, tier mismatch, runtime error).
     EvaluatePolicyResult evaluate_policy_result = 110;
+    // RotateAuth reply (see RotateAuthMsg). `ok=true` means the new
+    // bearer was accepted; subsequent envelopes on this stream are
+    // checked against the rotated identity. `ok=false` carries an
+    // RFC-6749-shaped error / error_description ("invalid_token",
+    // "verifier_unconfigured", "access_load_failed") so the client
+    // can decide whether to retry or fall back to a fresh dial.
+    // The stream remains open in either case -- a rejected rotation
+    // does NOT tear down the existing session.
+    RotateAuthResult rotate_auth_result = 111;
   }
 }
 
@@ -1527,7 +1545,7 @@ message RevokeAllSessionsResult {
 // identityType="worker_token".
 //
 // Server-side scope: the gRPC stream interceptor admits these
-// tokens ONLY on /visionarys.memql.worker.v1.WorkerService/* paths
+// tokens ONLY on /znasllc.memql.worker.v1.WorkerService/* paths
 // and rejects them on every other RPC.
 
 // CreateWorkerTokenMsg mints a fresh worker token. Caller-supplied
@@ -1816,4 +1834,43 @@ message EvaluatePolicyResult {
   //   POLICY_RUNTIME_ERROR        -- evaluation errored
   string error_code = 4;
   string error_message = 5;
+}
+
+// -----------------------------------------------------------------------------
+// In-stream bearer rotation
+// -----------------------------------------------------------------------------
+
+// RotateAuthMsg presents a freshly-minted access token on an
+// already-open stream. The server re-verifies it with the per-node
+// JWT verifier and, on success, swaps the streamSession's identity
+// and partition ACL atomically. Used by long-lived stream clients
+// (memql-cockpit) to keep the in-flight bearer aligned with their
+// background refresh-token rotation, so admin-side revocation lands
+// in O(seconds) on the live session instead of waiting for the next
+// stream drop. The refresh token itself stays client-side; this RPC
+// only carries the new access token.
+message RotateAuthMsg {
+  string access_token = 1;
+}
+
+// RotateAuthResult is the per-request reply for a RotateAuthMsg.
+//   - ok=true:  identity and access have been swapped on this stream;
+//               every subsequent envelope is checked against the new
+//               identity.
+//   - ok=false: the new token was rejected (see error / error_description).
+//               The existing identity remains in effect; the stream is
+//               NOT torn down so the client has time to fall back to
+//               a fresh login on its own schedule.
+//
+// error values mirror RFC-6749 where applicable:
+//   - "invalid_token"           token did not validate (expired, wrong
+//                               aud/iss, missing kid, signature mismatch)
+//   - "verifier_unconfigured"   the node was started without a verifier;
+//                               rotation cannot be honored here
+//   - "access_load_failed"      verification passed but the partition
+//                               ACL reload errored; identity unchanged
+message RotateAuthResult {
+  bool ok = 1;
+  string error = 2;
+  string error_description = 3;
 }

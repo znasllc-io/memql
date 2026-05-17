@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // parseProviderMemQL parses a .memql provider definition file and

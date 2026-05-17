@@ -50,8 +50,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"gopkg.in/yaml.v3"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/secret"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // manifestEntry mirrors one row in scripts/secrets/manifest.yaml.

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/visionarys-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/bus"
 )
 
 // SetWiring configures the bus wiring for channel-based communication.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Hover returns information about the symbol at a position.

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/visionarys-io/memql/component/secret"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 func TestParseEnvFile_Basic(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/id"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // CheckpointConcept is the MemQL concept name for execution checkpoints.

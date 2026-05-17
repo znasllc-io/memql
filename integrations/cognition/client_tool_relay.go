@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // client_tool_relay.go

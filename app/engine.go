@@ -6,15 +6,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
-	automationSteps "github.com/visionarys-io/memql/component/automations/steps"
-	"github.com/visionarys-io/memql/component"
-	"github.com/visionarys-io/memql/component/bus"
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/memql"
-	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
-	"github.com/visionarys-io/memql/component/observe"
-	"github.com/visionarys-io/memql/component/router"
+	"github.com/znasllc-io/memql/component/automations"
+	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
+	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
+	"github.com/znasllc-io/memql/component/observe"
+	"github.com/znasllc-io/memql/component/router"
 )
 
 // engineAndBus creates the MemQL engine, sets up the component bus wiring,

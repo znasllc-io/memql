@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/visionarys-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // ContextWithSystemActor stamps the synthetic system actor onto a

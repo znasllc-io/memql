@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/auth"
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
-	"github.com/visionarys-io/memql/component/config"
+	"github.com/znasllc-io/memql/component/auth"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/component/config"
 )
 
 // EvaluateSpec runs a context-spec (Kind == SpecKindContext) and

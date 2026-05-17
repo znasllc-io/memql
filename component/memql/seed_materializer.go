@@ -9,10 +9,10 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/events"
-	"github.com/visionarys-io/memql/component/provenance"
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer

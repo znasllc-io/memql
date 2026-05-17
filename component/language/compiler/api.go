@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // CompileFile reads a .memql file and compiles it to the appropriate output format.

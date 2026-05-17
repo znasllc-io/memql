@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/node"
-	"github.com/visionarys-io/memql/integrations/stt"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // transcribeStream is the per-request worker-side state for a streaming

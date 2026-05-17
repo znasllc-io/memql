@@ -19,8 +19,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/visionarys-io/memql/component/memql/baseloader"
-	memqldsl "github.com/visionarys-io/memql/dsl"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 

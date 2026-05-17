@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/workerpairing"
-	"github.com/visionarys-io/memql/component/identity/workertoken"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/workerpairing"
+	"github.com/znasllc-io/memql/component/identity/workertoken"
 )
 
 // defaultPairingCodeTTL mirrors the previous gRPC default. Operators

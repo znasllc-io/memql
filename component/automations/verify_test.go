@@ -3,7 +3,7 @@ package automations
 import (
 	"testing"
 
-	"github.com/visionarys-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 func TestVerifyExecutionChain_ValidChain(t *testing.T) {

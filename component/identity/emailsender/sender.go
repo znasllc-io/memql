@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/identity"
-	"github.com/visionarys-io/memql/component/identity/magiclink"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/integrations/email"
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/magiclink"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // EngineEmailSender satisfies magiclink.Sender by resolving the email

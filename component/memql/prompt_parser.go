@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/memql/baseparser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // parsePromptMemQL parses a .memql prompt definition file and returns

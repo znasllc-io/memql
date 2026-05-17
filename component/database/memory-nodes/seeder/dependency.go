@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
-	"github.com/visionarys-io/memql/core/logger"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // ComponentName identifies the concept seeder in logs and environment variable lookups.

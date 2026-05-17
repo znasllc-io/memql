@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // KnowledgeSuggestSchemaJSON is the JSON Schema enforced on knowledge

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // generateVoiceStreaming drives a streaming agent LLM call, accumulates

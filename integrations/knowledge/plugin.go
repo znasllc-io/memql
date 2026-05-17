@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // init self-registers the knowledge integration as an always-on plug-in.

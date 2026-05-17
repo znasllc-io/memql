@@ -3,8 +3,8 @@
 package fileprocessor
 
 import (
-	fp "github.com/visionarys-io/memql/component/fileprocessor"
-	"github.com/visionarys-io/memql/component/memql"
+	fp "github.com/znasllc-io/memql/component/fileprocessor"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // init self-registers the file-processing integration as a plug-in. Not

@@ -20,8 +20,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/sashabaranov/go-openai"
 
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/integrations/audio"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/audio"
 )
 
 const envDefaultProvider = "MEMQL_DEFAULT_PROVIDER"

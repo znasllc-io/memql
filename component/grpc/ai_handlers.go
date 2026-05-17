@@ -12,12 +12,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/component/server/sihttp"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/integrations/agent"
-	"github.com/visionarys-io/memql/integrations/stt"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/server/sihttp"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/agent"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // generateErrorId creates a short unique error ID for tracing across logs.

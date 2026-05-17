@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // maxStreamingToolLoopIterations caps the number of model turns in a streaming

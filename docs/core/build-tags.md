@@ -108,7 +108,7 @@ app/
 Each binary knows its compiled type via `node.CompiledNodeType()`. For tagged binaries, this takes precedence over the `MEMQL_NODE_TYPE` env var. For the default (BFF) binary, the env var is still respected as a fallback.
 
 ```go
-import "github.com/visionarys-io/memql/component/node"
+import "github.com/znasllc-io/memql/component/node"
 
 compiled := node.CompiledNodeType()
 // default binary → NodeTypeBFF

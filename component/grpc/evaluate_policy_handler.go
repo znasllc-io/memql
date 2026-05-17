@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	memqlengine "github.com/visionarys-io/memql/component/memql"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // handleEvaluatePolicy answers an EvaluatePolicyMsg by dispatching

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // AudioEngineAdapter wraps MemQLEngine to satisfy audiows.MemQLExecutor.

@@ -125,7 +125,7 @@ Stop drains the buffer (with deadline) and reinstalls the default slog sink so a
 ```go
 //memql:observe verbose redact=password
 func (h *Handler) Login(ctx context.Context, user, password string) (err error) {
-    defer observe.Method(ctx, "method:github.com/visionarys-io/memql/component/auth.(*Handler).Login").
+    defer observe.Method(ctx, "method:github.com/znasllc-io/memql/component/auth.(*Handler).Login").
         Args(observe.Arg("user", user), observe.Arg("password", password)).
         End(&err)
     ...

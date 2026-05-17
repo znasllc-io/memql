@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 func New(componentName common.ComponentName, writer io.Writer, level slog.Level) *slog.Logger {

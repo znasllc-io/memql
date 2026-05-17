@@ -5,8 +5,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/visionarys-io/memql/component/memql"
-	"github.com/visionarys-io/memql/core/common"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // materializePlugins iterates plug-ins registered at init time via

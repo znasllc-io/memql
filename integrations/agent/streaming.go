@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/memql/taskstamp"
-	"github.com/visionarys-io/memql/core/common"
-	"github.com/visionarys-io/memql/core/env"
+	"github.com/znasllc-io/memql/component/memql/taskstamp"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 // defaultMaxStreamingToolLoopIterations is the built-in cap when no

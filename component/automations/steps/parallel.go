@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 // ParallelExecutor executes multiple steps concurrently.

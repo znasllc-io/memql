@@ -21,7 +21,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // directivesInBodyRule flags calls to sort() / paginate() / asOf() /

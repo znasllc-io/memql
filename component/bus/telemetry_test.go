@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	busv1 "github.com/visionarys-io/memql/component/bus/gen"
+	busv1 "github.com/znasllc-io/memql/component/bus/gen"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

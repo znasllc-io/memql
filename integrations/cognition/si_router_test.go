@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // TestBuildRoutingSchema verifies the schema produced for structured

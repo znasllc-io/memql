@@ -14,11 +14,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/google/uuid"
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/events"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/node"
-	nodev1 "github.com/visionarys-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/node"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 // -----------------------------------------------------------------------------

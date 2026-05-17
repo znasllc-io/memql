@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	languageParser "github.com/visionarys-io/memql/component/language/parser"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // ConceptResolver resolves symbolic concept references in a parsed .memql file

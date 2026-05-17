@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	memoryNodes "github.com/visionarys-io/memql/component/database/memory-nodes"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // Presence states are intentionally UI-friendly and stable.

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/events"
-	memqlgrpc "github.com/visionarys-io/memql/component/grpc"
-	"github.com/visionarys-io/memql/component/node"
-	"github.com/visionarys-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/events"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/component/server"
 )
 
 // cluster wires distributed node components via bootstrap strategy and emits

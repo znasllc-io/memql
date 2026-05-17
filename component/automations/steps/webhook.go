@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/visionarys-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations"
 )
 
 const defaultHTTPTimeout = 30 * time.Second

@@ -10,9 +10,9 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/visionarys-io/memql/component/auth"
-	memorynodes "github.com/visionarys-io/memql/component/database/memory-nodes"
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 type builtinExecutorHandler func(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error)

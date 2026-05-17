@@ -29,7 +29,7 @@ package router
 import (
 	"time"
 
-	"github.com/visionarys-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // ResolveRequest carries the attribution and selection inputs for one

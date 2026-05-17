@@ -226,7 +226,7 @@ server {
 
 # -----------------------------------------------------------------
 # BFF -- two protocols on one host:
-#   - gRPC paths (/visionarys.memql.*) -> grpc_pass
+#   - gRPC paths (/znasllc.memql.*) -> grpc_pass
 #   - everything else (HTTP, WS bridge) -> proxy_pass
 # -----------------------------------------------------------------
 server {
@@ -239,7 +239,7 @@ server {
     ssl_certificate_key /etc/nginx/certs/dev.key;
 
     # gRPC -- MemqlService.Stream, NodeService.Stream.
-    location ~ ^/visionarys\.memql\. {
+    location ~ ^/znasllc\.memql\. {
         # Variable-based upstream -- forces nginx to use the
         # runtime resolver instead of the config-load DNS cache,
         # so a `docker compose up -d --build bff` doesn't strand
@@ -286,7 +286,7 @@ server {
     ssl_certificate     /etc/nginx/certs/dev.crt;
     ssl_certificate_key /etc/nginx/certs/dev.key;
 
-    location ~ ^/visionarys\.memql\. {
+    location ~ ^/znasllc\.memql\. {
         # Variable-based upstream -- the load-bearing fix for the
         # worker.register stale-IP bug. Without this, every
         # `docker compose up -d --build agent` left nginx pointing

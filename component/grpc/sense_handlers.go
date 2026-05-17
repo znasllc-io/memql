@@ -3,8 +3,8 @@ package memql
 import (
 	"google.golang.org/grpc/codes"
 
-	memqlv1 "github.com/visionarys-io/memql/component/grpc/gen"
-	"github.com/visionarys-io/memql/component/memql/sense"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
 // handleSenseTokenize handles SenseTokenizeMsg requests.

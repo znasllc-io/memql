@@ -11,8 +11,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/visionarys-io/memql/component/auth"
-	"github.com/visionarys-io/memql/component/identity/pat"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/identity/pat"
 )
 
 // Source identifies which credential family produced the claims.

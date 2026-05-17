@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/visionarys-io/memql/component/secret"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // ReconcileAction describes what ReconcileMasterKey did to a slice

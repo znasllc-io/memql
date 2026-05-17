@@ -89,7 +89,7 @@ gcloud run deploy
 
 1. **Clone repository**
    ```bash
-   git clone https://github.com/visionarys-io/memql.git
+   git clone https://github.com/znasllc-io/memql.git
    cd memql
    ```
 
@@ -292,7 +292,7 @@ backwards-compat shims; fix both memQL and the consumer at once.
 
 ## License
 
-Proprietary - Visionarys.io
+Proprietary - Znasllc.io
 
 ---
 

@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	langparser "github.com/visionarys-io/memql/component/language/parser"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // QueryPlan represents the parsed structure of a MemQL expression.
