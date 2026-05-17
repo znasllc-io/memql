@@ -344,5 +344,5 @@ func (db *TimescaleDBDatabase) Migrator() (*migrate.Migrator, error) {
 		return nil, fmt.Errorf("no migrations registered")
 	}
 
-	return migrate.NewMigrator(bunDB, migrations), nil
+	return migrate.NewMigrator(bunDB, migrations, migrate.WithMarkAppliedOnSuccess(true)), nil
 }

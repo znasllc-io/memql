@@ -31,9 +31,64 @@ import (
 	nodeMetadata "github.com/visionarys-io/memql/component/metadata"
 	"github.com/visionarys-io/memql/component/node"
 	"github.com/visionarys-io/memql/component/polyphon"
+	"github.com/visionarys-io/memql/component/provenance"
 	"github.com/visionarys-io/memql/core/common"
 	"github.com/visionarys-io/memql/integrations/stt"
 )
+
+// envelopeProvenanceMetaKey is the well-known envelope.Metadata key
+// carrying the JSON-encoded provenance struct across the wire. Used
+// by cross-node forwarders (proxyAi etc.) so the receiver can re-stamp
+// the same provenance on any row the forwarded call writes.
+//
+// Cheaper than a proto field: avoids a wire-format regen and the
+// map<string,string> envelope is already preserved across the
+// byte-envelope hop used by AiForwardRequest.
+const envelopeProvenanceMetaKey = "x-provenance"
+
+// contextWithEnvelopeProvenance attaches provenance from the envelope's
+// metadata (cross-node hop) onto ctx so the engine's auto-stamping path
+// uses it instead of inferring a default. No-op if the metadata entry
+// is absent or fails to parse.
+func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) context.Context {
+	if envelope == nil {
+		return ctx
+	}
+	raw := strings.TrimSpace(envelope.GetMetadata()[envelopeProvenanceMetaKey])
+	if raw == "" {
+		return ctx
+	}
+	var p provenance.Provenance
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return ctx
+	}
+	if err := p.Validate(); err != nil {
+		return ctx
+	}
+	return provenance.ContextWithProvenance(ctx, p)
+}
+
+// stampEnvelopeProvenance copies the caller-ctx provenance into the
+// envelope's metadata before the envelope is serialized + shipped to
+// another node. Called by cross-node forwarders (proxyAi). No-op if
+// ctx carries no provenance.
+func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) {
+	if envelope == nil {
+		return
+	}
+	p := provenance.FromContext(ctx)
+	if p.IsZero() {
+		return
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return
+	}
+	if envelope.Metadata == nil {
+		envelope.Metadata = map[string]string{}
+	}
+	envelope.Metadata[envelopeProvenanceMetaKey] = string(raw)
+}
 
 const (
 	ComponentName  = common.ComponentName("memqlGRPCServer")
@@ -1000,6 +1055,12 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		ctx = memqlengine.ContextWithPartition(ctx, partition)
 	}
 
+	// Re-hydrate cross-node provenance: when this envelope arrived via
+	// proxyAi / AiForward (BFF -> worker), stampEnvelopeProvenance put
+	// the caller's provenance on envelope.Metadata. We attach it to ctx
+	// so engine.Execute uses it instead of stamping a fresh default.
+	ctx = contextWithEnvelopeProvenance(ctx, envelope)
+
 	s.activeRequests.Store(requestId, cancel)
 
 	// Extract clientId for optimistic update reconciliation
@@ -1264,6 +1325,11 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	}
 
 	ctx := s.stream.Context()
+	// Re-hydrate cross-node provenance for tool calls that arrived via
+	// proxyAi / AiForward. Any row this tool writes via the engine will
+	// stamp the originating caller's provenance instead of a fresh
+	// per-tool default.
+	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 	args := msg.GetArguments()
 
 	// Client-executed tool: emit ClientToolCall, park until ClientToolResult

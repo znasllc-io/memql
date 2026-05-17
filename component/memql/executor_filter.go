@@ -266,6 +266,16 @@ func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExp
 		}
 	}
 
+	if strings.EqualFold(field, "provenance") {
+		// `provenance` (bare) compares the entire JSON object — not
+		// supported as a filter target. Authors compare on a leaf
+		// (provenance.kind, .name, .trigger, .via).
+		if len(expr.Field.Parts) < 2 {
+			return compiledExpression{}, fmt.Errorf("provenance filters require a leaf path (e.g. provenance.kind)")
+		}
+		return compileProvenanceComparison(expr.Field.Parts[1], expr.Operator, expr.Value)
+	}
+
 	if strings.EqualFold(field, "payload") {
 		if len(expr.Field.Parts) < 2 {
 			return compiledExpression{}, fmt.Errorf("payload field must include a property path (e.g., payload.status)")
@@ -755,6 +765,52 @@ func compileCreatedByComparison(op ComparisonOperator, value any) (compiledExpre
 		}, nil
 	default:
 		return compiledExpression{}, fmt.Errorf("operator %q is not supported for createdBy filters", op)
+	}
+}
+
+// compileProvenanceComparison pushes a `provenance.<leaf> <op> <value>`
+// filter down to a JSONB text-extract over the row's provenance
+// intrinsic. Only the four engine-defined leaves are admitted:
+// kind, name, trigger, via. All string-valued.
+func compileProvenanceComparison(leaf string, op ComparisonOperator, value any) (compiledExpression, error) {
+	leaf = strings.ToLower(strings.TrimSpace(leaf))
+	switch leaf {
+	case "kind", "name", "trigger", "via":
+	default:
+		return compiledExpression{}, fmt.Errorf("provenance.%s is not a supported leaf (kind|name|trigger|via)", leaf)
+	}
+	switch op {
+	case OpEq, OpNe:
+		s, err := ensureString(value)
+		if err != nil {
+			return compiledExpression{}, fmt.Errorf("provenance.%s comparison requires a string: %w", leaf, err)
+		}
+		sqlOp, err := sqlOperatorForComparison(op)
+		if err != nil {
+			return compiledExpression{}, err
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("(provenance->>'%s' %s ?)", leaf, sqlOp),
+			args: []any{s},
+		}, nil
+	case OpIn, OpOut:
+		values, err := ensureStringSlice(value)
+		if err != nil {
+			return compiledExpression{}, fmt.Errorf("provenance.%s comparison requires string collection: %w", leaf, err)
+		}
+		if len(values) == 0 {
+			return compiledExpression{}, fmt.Errorf("provenance.%s list must include at least one value", leaf)
+		}
+		operator := "IN"
+		if op == OpOut {
+			operator = "NOT IN"
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("(provenance->>'%s' %s (?))", leaf, operator),
+			args: []any{bun.In(values)},
+		}, nil
+	default:
+		return compiledExpression{}, fmt.Errorf("operator %q is not supported for provenance filters", op)
 	}
 }
 
