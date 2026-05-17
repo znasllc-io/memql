@@ -36,30 +36,26 @@ import (
 	"github.com/visionarys-io/memql/integrations/stt"
 )
 
-// envelopeProvenanceMetaKey is the well-known envelope.Metadata key
-// carrying the JSON-encoded provenance struct across the wire. Used
-// by cross-node forwarders (proxyAi etc.) so the receiver can re-stamp
-// the same provenance on any row the forwarded call writes.
-//
-// Cheaper than a proto field: avoids a wire-format regen and the
-// map<string,string> envelope is already preserved across the
-// byte-envelope hop used by AiForwardRequest.
-const envelopeProvenanceMetaKey = "x-provenance"
-
-// contextWithEnvelopeProvenance attaches provenance from the envelope's
-// metadata (cross-node hop) onto ctx so the engine's auto-stamping path
-// uses it instead of inferring a default. No-op if the metadata entry
-// is absent or fails to parse.
+// contextWithEnvelopeProvenance attaches the envelope's
+// MemqlClientMessage.Provenance proto field (set by cross-node
+// forwarders) onto ctx so the engine's auto-stamping path uses it
+// instead of inferring a default. No-op when the envelope didn't
+// carry provenance.
 func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) context.Context {
 	if envelope == nil {
 		return ctx
 	}
-	raw := strings.TrimSpace(envelope.GetMetadata()[envelopeProvenanceMetaKey])
-	if raw == "" {
+	pb := envelope.GetProvenance()
+	if pb == nil {
 		return ctx
 	}
-	var p provenance.Provenance
-	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+	p := provenance.Provenance{
+		Kind:    provenance.Kind(pb.GetKind()),
+		Name:    pb.GetName(),
+		Trigger: pb.GetTrigger(),
+		Via:     pb.GetVia(),
+	}
+	if p.IsZero() {
 		return ctx
 	}
 	if err := p.Validate(); err != nil {
@@ -69,9 +65,9 @@ func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlC
 }
 
 // stampEnvelopeProvenance copies the caller-ctx provenance into the
-// envelope's metadata before the envelope is serialized + shipped to
-// another node. Called by cross-node forwarders (proxyAi). No-op if
-// ctx carries no provenance.
+// envelope before it's serialized + shipped to another node. Called
+// by cross-node forwarders (proxyAi). No-op if ctx carries no
+// provenance.
 func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) {
 	if envelope == nil {
 		return
@@ -80,14 +76,12 @@ func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientM
 	if p.IsZero() {
 		return
 	}
-	raw, err := json.Marshal(p)
-	if err != nil {
-		return
+	envelope.Provenance = &memqlv1.Provenance{
+		Kind:    string(p.Kind),
+		Name:    p.Name,
+		Trigger: p.Trigger,
+		Via:     p.Via,
 	}
-	if envelope.Metadata == nil {
-		envelope.Metadata = map[string]string{}
-	}
-	envelope.Metadata[envelopeProvenanceMetaKey] = string(raw)
 }
 
 const (
