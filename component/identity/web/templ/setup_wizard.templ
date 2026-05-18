@@ -20,6 +20,19 @@ type SetupWizardData struct {
 	PrefillRegistrationDomains string
 	PrefillNotifyEmails        string
 	PrefillMode                string
+
+	// OAuth code-flow context threaded from /login. When a relying-
+	// party (e.g. memql-cockpit) initiated the sign-in by opening
+	// /login?return_to=<loopback>, the redirect from /login to /setup
+	// preserves return_to, /setup renders it as a hidden form field,
+	// and /setup POST passes it through pickOAuthCtx + IssueMagicLink
+	// so the magic-link click lands the user back at the cockpit's
+	// loopback callback instead of /admin/. Empty when setup was
+	// reached directly (admin-web flow).
+	ReturnTo    string
+	ClientID    string
+	RedirectURI string
+	OAuthState  string
 }
 
 // Flash is the standard alert payload reused across pages.
@@ -43,6 +56,18 @@ templ SetupWizard(data SetupWizardData) {
 				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
 			}
 			<form method="POST" action="/setup" data-submit-once>
+				if data.ReturnTo != "" {
+					<input type="hidden" name="return_to" value={ data.ReturnTo }/>
+				}
+				if data.ClientID != "" {
+					<input type="hidden" name="client_id" value={ data.ClientID }/>
+				}
+				if data.RedirectURI != "" {
+					<input type="hidden" name="redirect_uri" value={ data.RedirectURI }/>
+				}
+				if data.OAuthState != "" {
+					<input type="hidden" name="state" value={ data.OAuthState }/>
+				}
 				<h2>Cluster domain <span class="text-danger">*</span></h2>
 				<div class="form-row">
 					<label for="domain">Domain</label>

@@ -47,7 +47,7 @@ type RelationshipNode struct {
 
 // Parse converts a MemQL query string into a QueryPlan.
 func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
-	if !e.initialized {
+	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
 
