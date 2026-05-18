@@ -15,15 +15,22 @@ package memql
 //
 // Two capability-slug expansions live here today:
 //
-//   - copresent_control -- expands into uiClick / uiType / etc., the
-//                          tools that drive the CoPresent SPA.
-//   - computer_use      -- expands into workerHost / workerComputer
-//                          (already stored as primitives by the
-//                          frontend's toolsToSlugs fan-out, but kept
-//                          here for the backend-only `workerStatus`
-//                          which IS NOT in the frontend's bundle list
-//                          -- expanding it server-side means existing
-//                          agents pick it up without re-saving).
+//   - copresent_control       -- expands into uiClick / uiType / etc.,
+//                                the tools that drive the CoPresent SPA.
+//   - computer_use_headless   -- expands into workerHost + the cross-
+//                                cutting trio (workerStatus,
+//                                requestComputerUseScope, canvasPublish).
+//                                Shell / fs / http on the user's machine.
+//   - computer_use_embodied   -- expands into workerComputer + the same
+//                                cross-cutting trio. Mouse / keyboard /
+//                                screenshot on the user's machine.
+//
+// The two computer-use slugs replaced a single legacy `computer_use`
+// slug on 2026-05-17. Splitting by mode lets the headless slice be
+// served by a sandbox backend in the future without dragging the
+// embodied (GUI-only) tools along. Authorization (scope grants, kill
+// switch, knowledge domain) is still unified under the "computer
+// use" concept because both modes act on the user's machine.
 //
 // If additional capability bundles get added in the future, add
 // their names here and the expansion picks them up automatically.
@@ -65,33 +72,44 @@ var OperatorPrimitiveNames = []string{
 	"similarTo",
 }
 
-// WorkerCapabilityNames is the canonical list of tool names served
-// to agents that hold the `computer_use` capability slug. The
-// frontend's toolsToSlugs already fans `computer_use` out into
-// workerHost + workerComputer at save time, but it omits
-// `workerStatus`, `requestComputerUseScope`, and `canvasPublish` --
-// internal-only / cross-cutting tools the user shouldn't see as
-// separate UI chips. Listing them here means every agent with
-// computer_use gets them in their LLM-visible tool list
-// automatically, with no migration of stored records.
-//
-// `canvasPublish` is included because a computer_use-capable agent
-// needs a way to surface "what I just did" cards on the canvas
-// after a successful workerHost / workerComputer call -- the user
+// workerCrossCuttingNames are the tools shared by both computer-use
+// modes: status (live availability check), scope elevation (per-task
+// approval flow), and canvas publish (surface "what I just did"
+// cards after a worker call). Every computer-use-capable agent
+// needs these regardless of which mode it's using -- the user
 // expects a task-done card showing the actual outcome (file
-// created, command output, etc.), not just a chat-line "I did it."
-//
-// Keep this in sync with tools/v1/agent/worker/*.memql +
-// tools/v1/copresent/canvas/toolCanvasPublish.memql. See
-// ExpandCapabilitySlugs for the expansion logic that consumes
-// this list.
-var WorkerCapabilityNames = []string{
-	"workerHost",
-	"workerComputer",
+// created, command output, screenshot taken, etc.), not just a
+// chat-line "I did it."
+var workerCrossCuttingNames = []string{
 	"workerStatus",
 	"requestComputerUseScope",
 	"canvasPublish",
 }
+
+// WorkerHeadlessCapabilityNames is the canonical tool list served
+// to agents that hold `computer_use_headless`: shell / fs / http
+// on the user's machine, plus the cross-cutting trio. Future
+// sandbox capability will parallel this one (same headless verbs,
+// different backend); the embodied slug is the GUI-only sibling.
+//
+// Keep in sync with tools/v1/agent/worker/workerHost.memql +
+// tools/v1/copresent/canvas/toolCanvasPublish.memql.
+var WorkerHeadlessCapabilityNames = append(
+	[]string{"workerHost"},
+	workerCrossCuttingNames...,
+)
+
+// WorkerEmbodiedCapabilityNames is the canonical tool list served
+// to agents that hold `computer_use_embodied`: mouse / keyboard /
+// screenshot on the user's machine, plus the cross-cutting trio.
+// Mode-exclusive -- no sandbox analogue exists since the agent
+// needs a real display.
+//
+// Keep in sync with tools/v1/agent/worker/workerComputer.memql.
+var WorkerEmbodiedCapabilityNames = append(
+	[]string{"workerComputer"},
+	workerCrossCuttingNames...,
+)
 
 // capabilitySlugs maps high-level capability slugs to the concrete
 // tool names they expand to. The zero slug list (empty inner slice)
@@ -99,8 +117,9 @@ var WorkerCapabilityNames = []string{
 // edge case we don't currently use but the expander handles
 // gracefully.
 var capabilitySlugs = map[string][]string{
-	"copresent_control": OperatorPrimitiveNames,
-	"computer_use":      WorkerCapabilityNames,
+	"copresent_control":      OperatorPrimitiveNames,
+	"computer_use_headless":  WorkerHeadlessCapabilityNames,
+	"computer_use_embodied":  WorkerEmbodiedCapabilityNames,
 }
 
 // ExpandCapabilitySlugs takes a raw tool list from an Agent record

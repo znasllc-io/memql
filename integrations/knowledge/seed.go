@@ -218,7 +218,7 @@ var standardDomains = []StandardDomain{
 	{ID: "computer_use", Name: "Computer Use", Category: "internal",
 		Description: "Operational manual for the Computer Use capability: tool surfaces (workerHost / workerComputer), scope tiers (observe / full), per-task approval flow (requestComputerUseScope -> canvas card -> Allow / Deny), post-approval execution semantics, and the planner's success-vs-failure detection. Auto-attached to any agent given the Computer Use capability so the generic prompt template stays agnostic.",
 		RelevantForRoles:    []string{"general_assistant", "accounting_finance", "human_resources", "customer_service", "quality_assurance", "sales_marketing", "it_support", "legal_compliance", "operations", "project_management", "research_development", "training_education", "personal_finance_advisor", "household_manager", "parenting_coach", "health_wellness_coach", "meal_planning_chef", "travel_planner", "creative_companion", "learning_companion", "relationships_social", "pet_care_specialist", "home_improvement_diy", "personal_legal_advisor", "mindfulness_coach", "entertainment_curator", "senior_care_advisor", "real_estate_advisor"},
-		RequiredByToolSlugs: []string{"computer_use"},
+		RequiredByToolSlugs: []string{"computer_use_headless", "computer_use_embodied"},
 	},
 
 	// --- CoPresent Conversation -------------------------------------------
