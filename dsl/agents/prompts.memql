@@ -4,9 +4,9 @@
 // platform-bootstrapped agents (Planner, Trainer) carry on their
 // providerConfig. The bodies live in prompts/<name>.tmpl.
 
-@defaultProvider("streamClaudeOpus")
+@defaultProvider("reasoningClaudeOpus")
 @templateFile("prompts/plannerAgent.tmpl")
-@description("System prompt for the user's Planner Agent -- the orchestrator persona that owns Plan decomposition, Task dispatch, retry decisions, and escalation to the user. Paired with a strong-reasoning model by default (streamClaudeOpus). Invoked by the planner-service on every Plan loop iteration. Output contract: one structured-output decision per turn (decompose / dispatchTask / retry / createSpecialist / extendSpecialist / spawnTrainingPlan / escalate / markPlanSucceeded / markPlanFailed).")
+@description("System prompt for the user's Planner Agent -- the orchestrator persona that owns Plan decomposition, Task dispatch, retry decisions, and escalation to the user. Paired with Claude Opus 4.6 + extended thinking (reasoningClaudeOpus) so the model reasons over the plan + specialists + phase state before emitting each structured-output action. Invoked by the planner-service on every Plan loop iteration. Output contract: one structured-output decision per turn (decompose / dispatchTask / retry / createSpecialist / extendSpecialist / spawnTrainingPlan / escalate / markPlanSucceeded / markPlanFailed).")
 prompt plannerAgent {
   plan          object  @required @description("Current v1:planner:plan row with goal, phases, status, tokenBudget, tokenSpent, retryThreshold.")
   tasks         []object         @description("All v1:planner:task rows under this plan, semantic + toolInvocation, sorted by createdAt. Lets the Planner see what's been attempted and what's still queued.")
