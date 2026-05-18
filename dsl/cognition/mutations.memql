@@ -98,6 +98,7 @@ mutation mutationCreateDailySpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.name
     args.dailyDateKey
     kind: "daily"
@@ -225,6 +226,7 @@ mutation mutationCreateSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.name
     args.description
     args.purpose
