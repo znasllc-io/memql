@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -27,7 +28,41 @@ const (
 	defaultHTTPTimeout = 30 * time.Second
 	maxHTTPTimeout     = 120 * time.Second
 	maxHTTPRespBytes   = 5 << 20 // 5 MiB cap on http_fetch response
+	httpDialTimeout    = 10 * time.Second
+	httpMaxRedirects   = 10
 )
+
+// httpFetchClient is the scoped http.Client used by handleHTTPFetch.
+// Bounded transport (dial / TLS / response-header timeouts) and a
+// hard cap on redirects so a misbehaving server can't run an agent's
+// per-call budget out. Independent of http.DefaultClient so the
+// limits stay tight and predictable; sharing the default client
+// would let any future package change its Transport out from under
+// us.
+//
+// Per-call deadline is still set by the context the handler passes
+// to NewRequestWithContext (defaultHTTPTimeout / maxHTTPTimeout),
+// which bounds the OVERALL call including read time. Transport-level
+// timeouts here are tighter guards on individual phases.
+var httpFetchClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   httpDialTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   httpDialTimeout,
+		ResponseHeaderTimeout: httpDialTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       60 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= httpMaxRedirects {
+			return fmt.Errorf("stopped after %d redirects", httpMaxRedirects)
+		}
+		return nil
+	},
+}
 
 // dispatchResult is the wire shape returned by every handler.
 // Marshalled to JSON for the tool loop.
@@ -305,7 +340,7 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 	for k, v := range stringMap(args["headers"]).asMap() {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpFetchClient.Do(req)
 	if err != nil {
 		return errResult("http_fetch", "request_failed", err.Error())
 	}

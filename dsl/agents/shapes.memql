@@ -97,6 +97,7 @@ shape agentRoleFull {
   agentRole.availableDomainIds
   agentRole.lockedToolSlugs
   agentRole.defaultToolSlugs
+  agentRole.forbiddenToolSlugs
   agentRole.lockedLiveKnowledgeIds
   agentRole.recommendedPolicySlug
   agentRole.recommendedGender
