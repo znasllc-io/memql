@@ -166,6 +166,7 @@ type agentSnapshot struct {
 	Id           string
 	Name         string
 	RoleSlug     string
+	Kind         string // "system" | "user" -- read from agent.kind so loadExistingAgents can filter platform infrastructure out of the dedupe candidate pool
 	Domains      []string
 	Tools        []string
 	OwnerUserId  string
@@ -196,6 +197,11 @@ type roleSnapshot struct {
 // failures (no engine, query error, no rows) yield an empty slice
 // so the analysis prompt still runs and `action: "create"` is
 // always achievable.
+//
+// Rows whose `kind` is "system" (MemQL Planner, MemQL Trainer, etc.)
+// are filtered out: they are platform infrastructure, never valid
+// match/extend dedupe targets for a user goal. The schema default
+// is "user" so legacy rows pre-dating the kind field are kept.
 func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string) []agentSnapshot {
 	query := fmt.Sprintf(`queryActiveAgentsForUser({ownerUserId: %q})`, ownerUserId)
 	raw, err := i.engine.Execute(ctx, query)
@@ -207,6 +213,9 @@ func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string
 	for _, row := range rows {
 		s, ok := agentSnapshotFromRow(row)
 		if !ok {
+			continue
+		}
+		if s.Kind == "system" {
 			continue
 		}
 		s.OwnerUserId = ownerUserId
@@ -436,6 +445,7 @@ func agentSnapshotFromRow(row map[string]any) (agentSnapshot, bool) {
 	}
 	name, _ := payload["name"].(string)
 	roleSlug, _ := payload["roleSlug"].(string)
+	kind, _ := payload["kind"].(string)
 	if id == "" {
 		return agentSnapshot{}, false
 	}
@@ -449,6 +459,7 @@ func agentSnapshotFromRow(row map[string]any) (agentSnapshot, bool) {
 		Id:           id,
 		Name:         name,
 		RoleSlug:     roleSlug,
+		Kind:         kind,
 		Domains:      domains,
 		Tools:        tools,
 		Capabilities: caps,
