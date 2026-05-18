@@ -24,13 +24,23 @@ package memql
 //   - computer_use_embodied   -- expands into workerComputer + the same
 //                                cross-cutting trio. Mouse / keyboard /
 //                                screenshot on the user's machine.
+//   - workbench_use           -- expands into workbenchHost + canvasPublish.
+//                                Sandboxed Linux execution per-Plan in the
+//                                cluster. Universal: every agent has it
+//                                by default. No scope-request tool (no
+//                                blast radius to gate against) and no
+//                                status tool (the workbench is a cluster
+//                                service, not a remote process that can
+//                                disconnect).
 //
 // The two computer-use slugs replaced a single legacy `computer_use`
 // slug on 2026-05-17. Splitting by mode lets the headless slice be
-// served by a sandbox backend in the future without dragging the
-// embodied (GUI-only) tools along. Authorization (scope grants, kill
-// switch, knowledge domain) is still unified under the "computer
-// use" concept because both modes act on the user's machine.
+// served by the workbench backend without dragging the embodied
+// (GUI-only) tools along. Authorization (scope grants, kill switch,
+// knowledge domain) is still unified under the "computer use"
+// concept because both modes act on the user's machine. workbench_use
+// is a sibling, not a child -- it's the safer default for headless
+// work and runs entirely inside the cluster.
 //
 // If additional capability bundles get added in the future, add
 // their names here and the expansion picks them up automatically.
@@ -111,6 +121,25 @@ var WorkerEmbodiedCapabilityNames = append(
 	workerCrossCuttingNames...,
 )
 
+// WorkbenchCapabilityNames is the canonical tool list served to
+// agents that hold `workbench_use`: headless shell / fs / http
+// operations against a sandboxed per-Plan Linux environment in
+// the cluster, plus canvasPublish so the agent can surface
+// "what I just did" cards (file written, command output) after
+// a successful workbenchHost call.
+//
+// Universal capability -- expected to be default-on for every
+// agent. No status tool (the workbench is a cluster service,
+// not a process that can disconnect), no scope-request tool
+// (no host blast radius to gate against; the workspace is
+// torn down with the Plan).
+//
+// Keep in sync with the workbenchHost tool definition.
+var WorkbenchCapabilityNames = []string{
+	"workbenchHost",
+	"canvasPublish",
+}
+
 // capabilitySlugs maps high-level capability slugs to the concrete
 // tool names they expand to. The zero slug list (empty inner slice)
 // is valid — it means "this capability provides no extra tools", an
@@ -120,6 +149,7 @@ var capabilitySlugs = map[string][]string{
 	"copresent_control":      OperatorPrimitiveNames,
 	"computer_use_headless":  WorkerHeadlessCapabilityNames,
 	"computer_use_embodied":  WorkerEmbodiedCapabilityNames,
+	"workbench_use":          WorkbenchCapabilityNames,
 }
 
 // ExpandCapabilitySlugs takes a raw tool list from an Agent record

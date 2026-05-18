@@ -1,0 +1,34 @@
+// concepts.memql -- workbench namespace
+//
+// The workbench is a sandboxed Linux environment per Plan, where
+// agents can run shell commands, read / write files, and fetch
+// HTTP without touching the user's machine. It is the default
+// first choice for any headless work (the computer-use surface is
+// the fallback when the workbench cannot do the job, e.g. macOS-
+// only tooling).
+//
+// Lifetime model:
+//   - Per-Task CONTAINER (ephemeral compute): a fresh process /
+//     namespace for each Task run.
+//   - Per-Plan WORKSPACE (persistent filesystem): one directory
+//     tree per Plan, mounted into every container that runs under
+//     it. Outlasts individual Tasks. Released when the parent Plan
+//     reaches a terminal status.
+//
+// This concept tracks the workspace lifetime. Compute (container)
+// state is in-process on the agent node and not persisted.
+
+@version("1.0.0")
+@namespace("workbench")
+@description("Per-Plan workbench workspace. Tracks the persistent filesystem mounted into every per-Task container running under the Plan. Created lazily on first workbenchHost call; released when the parent Plan transitions to a terminal status (succeeded / failed / cancelled). Universal authorization -- no scope grants, no kill switch, no per-agent gating; the workbench is sandboxed inside the cluster and the blast radius is contained to the per-Plan directory tree.")
+concept workspace {
+  planId          string  @required @description("v1:planner:plan.id this workspace belongs to. One workspace per Plan; the unique key.")
+  status          enum("provisioned", "released") @required @default("provisioned") @description("Lifecycle. provisioned = workspace directory exists and is mountable. released = Plan reached terminal, directory torn down.")
+  storageRoot     string  @required @description("Absolute path to the workspace's root directory on the workbench node's local filesystem. Implementation default: /var/lib/memql/workbenches/{planId}/. Per-Plan isolation is filesystem-level; cgroup / user-namespace isolation is per-call.")
+  createdAt       datetime @required @description("When the workspace was first provisioned. Plan creation does NOT provision -- the first workbenchHost call does.")
+  lastUsedAt      datetime @description("Bumped on every successful workbenchHost dispatch. Backs idle-detection metrics; not used to drive teardown (teardown is Plan-terminal-driven).")
+  releasedAt      datetime @description("When the workspace was released and the directory torn down. Empty for status=provisioned.")
+  releasedReason  enum("", "plan_terminal", "explicit", "ttl_expired") @default("") @description("Discriminator for status=released rows. plan_terminal = the releaseWorkbenchOnPlanTerminal automation fired. explicit = an admin / mutation explicitly released. ttl_expired = future ttl-driven sweep.")
+
+  @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
+}

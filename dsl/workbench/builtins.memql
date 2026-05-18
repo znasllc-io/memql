@@ -1,0 +1,19 @@
+// builtins.memql -- workbench namespace
+//
+// Builtins bridge MemQL tool calls to the Go integration handlers.
+// The tool surface in dsl/copresent/tools.memql references
+// @handler(type="function", name="workbenchDispatchHost"); that
+// name resolves to this builtin, which forwards to the workbench
+// integration's `dispatchHost` capability.
+
+@enabled
+@executor("integration.workbench.dispatchHost")
+@args(profile="object")
+@description("Dispatch a workbenchHost.<action> call to the per-Plan workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.")
+builtin workbenchDispatchHost {
+  action   string  @required
+  args     object
+  planId   string
+  agentId  string
+  taskId   string
+}

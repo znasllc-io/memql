@@ -1,0 +1,30 @@
+// logic.memql -- workbench namespace
+//
+// Imperative bodies for workbench automations. The DSL parser
+// requires logic to live as a separate construct from its parent
+// automation.
+
+@useQuery(queryWorkspaceForPlan)
+@useMutation(mutationReleaseWorkspace)
+@description("Imperative body of automation releaseWorkspaceOnPlanTerminal. On every plan update, check the new status; if terminal AND a workspace exists for the planId AND it is still provisioned, mark it released so the workbench integration tears down the on-disk directory.")
+logic logicReleaseWorkspaceOnPlanTerminal {
+  args {
+    event object @required
+  }
+  body {
+    status := coalesce(args.event.node.payload.status, "")
+    planId := coalesce(args.event.node.id, "")
+    release := if (status == "succeeded" or status == "failed" or status == "cancelled") and planId != "" {
+      workspaces := queryWorkspaceForPlan({ planId: planId })
+      for item := range workspaces.Nodes() {
+        flip := if item.payload.status == "provisioned" {
+          mutationReleaseWorkspace({
+            workspaceId: item.id,
+            reason: "plan_terminal"
+          })
+        }
+      }
+    }
+    ctx.output = planId
+  }
+}

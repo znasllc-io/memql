@@ -1,0 +1,60 @@
+// mutations.memql -- workbench namespace
+//
+// Lifecycle mutations for v1:workbench:workspace rows. Called by
+// the workbench integration on the agent node; not user-facing.
+//
+// Idempotency: provisionWorkspace is the only path that creates a
+// row. The integration calls it once per Plan lazily on first
+// dispatch; if a row already exists, the call is a no-op at the
+// Go level (the integration short-circuits before invoking the
+// mutation). The release path is similarly single-write.
+
+@enabled
+@useConcept(workspace)
+@description("Create the v1:workbench:workspace row for a Plan on first workbenchHost call. Storage root is supplied by the workbench integration which has already created the directory on disk.")
+mutation mutationProvisionWorkspace {
+  args {
+    workspaceId  string  @required @description("Synthesized id, typically `{planId}` since one workspace per Plan.")
+    planId       string  @required
+    storageRoot  string  @required
+  }
+  insert workspace {
+    id: args.workspaceId
+    args.planId
+    status: "provisioned"
+    args.storageRoot
+    createdAt: now
+    lastUsedAt: now
+    releasedAt: ""
+    releasedReason: ""
+  }
+}
+
+@enabled
+@useConcept(workspace)
+@description("Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per successful workbenchHost call.")
+mutation mutationTouchWorkspace {
+  args {
+    workspaceId  string  @required
+  }
+  update {
+    id: args.workspaceId
+    lastUsedAt: now
+  }
+}
+
+@enabled
+@useConcept(workspace)
+@description("Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.")
+mutation mutationReleaseWorkspace {
+  args {
+    workspaceId  string  @required
+    reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired") @description("Why the workspace was released. Drives the released-row audit trail.")
+  }
+  update {
+    id: args.workspaceId
+    status: "released"
+    releasedAt: now
+    releasedReason: args.reason
+  }
+}

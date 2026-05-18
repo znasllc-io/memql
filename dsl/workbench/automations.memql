@@ -1,0 +1,18 @@
+// automations.memql -- workbench namespace
+//
+// Workspace lifecycle is driven by the parent Plan's terminal
+// status. When a Plan reaches succeeded / failed / cancelled, the
+// workbench workspace is released and its filesystem state is
+// torn down. The Go integration owns the on-disk teardown; this
+// automation flips the concept's lifecycle bit and emits the
+// event the integration listens for.
+
+@enabled
+@trigger(event="graph.node.updated.*.v1:planner:plan")
+@description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists. The releaseWorkspace mutation flips the concept row; the workbench integration consumes the resulting graph.node.updated event and removes the on-disk directory tree.")
+@useLogic(logicReleaseWorkspaceOnPlanTerminal)
+automation releaseWorkspaceOnPlanTerminal {
+  step run {
+    logic releaseWorkspaceOnPlanTerminal { event: event }
+  }
+}
