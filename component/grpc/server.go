@@ -1797,7 +1797,7 @@ func (s *streamSession) guardClientToolArgs(toolName, argsJSON string) (string, 
 			)
 		}
 		return "", fmt.Errorf(
-			`uiAskUser requires an "options" array with 2 or 3 concrete, actionable suggestions. Got %d. Retry this call with options populated -- e.g. for a Name field: ["Pick a random name for me","Zeus","Aria"]; for a Role field: ["IT Support","General Assistant","Customer Service"]. If the answer is genuinely open-ended, include one "Pick for me"/"You decide" option plus two concrete examples. The prompt card renders these as click-to-pick pills above the free-form input -- without them the user gets a bare text input, which is the failure mode this validation is guarding against`,
+			`uiAskUser requires an "options" array with 2 or 3 concrete, actionable suggestions. Got %d. Retry this call with options populated -- e.g. for a Name field: ["Pick a random name for me","Zeus","Aria"]; for a Role field: ["IT Support","Assistant","Customer Service"]. If the answer is genuinely open-ended, include one "Pick for me"/"You decide" option plus two concrete examples. The prompt card renders these as click-to-pick pills above the free-form input -- without them the user gets a bare text input, which is the failure mode this validation is guarding against`,
 			valid,
 		)
 	}

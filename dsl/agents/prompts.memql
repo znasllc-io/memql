@@ -29,7 +29,7 @@ prompt trainerAgent {
 
 @defaultProvider("strongReasoning")
 @templateFile("prompts/agentFactoryAnalyze.tmpl")
-@description("Structured-output prompt invoked by the General Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
+@description("Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
 prompt agentFactoryAnalyze {
   goal              string    @required @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
   existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {domains, tools}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")

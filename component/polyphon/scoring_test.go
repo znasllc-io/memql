@@ -510,22 +510,22 @@ func TestSpeakWhenAlwaysFloor(t *testing.T) {
 	})
 }
 
-// TestGeneralAssistantNoSilentFloor pins the design choice that the
-// heuristic scorer does NOT boost general_assistant agents with a silent
+// TestAssistantNoSilentFloor pins the design choice that the
+// heuristic scorer does NOT boost assistant agents with a silent
 // +N floor. Before, a "personal_assistant_floor" factor forced the general
 // assistant above the response threshold on questions and greetings
-// whenever no specialist cleared it, which caused the general assistant
+// whenever no specialist cleared it, which caused the assistant
 // to dominate in multi-agent spaces even when specialists were a mild
-// match. That decision ("fall back to general assistant when nothing
+// match. That decision ("fall back to assistant when nothing
 // else fits") is now owned by the cognitionRouting SI prompt, which can
 // reason about it explicitly with full context, not a silent number.
-func TestGeneralAssistantNoSilentFloor(t *testing.T) {
+func TestAssistantNoSilentFloor(t *testing.T) {
 	scorer := NewScorer(DefaultScoringWeights(), DefaultTurnPolicy())
 
 	paAgent := AgentCandidate{
 		ID:        "agent-pa",
 		Name:      "Aria",
-		Role:      "general_assistant",
+		Role:      "assistant",
 		SpeakWhen: "relevant",
 	}
 	financeAgent := AgentCandidate{
@@ -552,7 +552,7 @@ func TestGeneralAssistantNoSilentFloor(t *testing.T) {
 		}
 	})
 
-	t.Run("specialist still outscores general assistant when domain matches", func(t *testing.T) {
+	t.Run("specialist still outscores assistant when domain matches", func(t *testing.T) {
 		candidates := []AgentCandidate{paAgent, financeAgent}
 		utterance := Utterance{Text: "Rex, help me with the budget and revenue expense profit forecast"}
 		scores := scorer.ScoreAll(candidates, utterance, nil)
@@ -574,7 +574,7 @@ func TestGeneralAssistantNoSilentFloor(t *testing.T) {
 		}
 	})
 
-	t.Run("general assistant scores low on pure acknowledgments", func(t *testing.T) {
+	t.Run("assistant scores low on pure acknowledgments", func(t *testing.T) {
 		candidates := []AgentCandidate{paAgent, financeAgent}
 		scores := scorer.ScoreAll(candidates, Utterance{Text: "ok"}, nil)
 
@@ -607,7 +607,7 @@ func TestConversationalThread(t *testing.T) {
 	weights.ConversationalThread = 15.0 // explicit override: factor disabled by default
 	scorer := NewScorer(weights, DefaultTurnPolicy())
 
-	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "general_assistant", SpeakWhen: "relevant"}
+	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "assistant", SpeakWhen: "relevant"}
 	lyra := AgentCandidate{ID: "agent-lyra", Name: "Lyra", Role: "customer_success", SpeakWhen: "relevant",
 		Domains: []string{"support", "onboarding"}, Keywords: []string{"customer", "ticket"}}
 
@@ -904,7 +904,7 @@ func TestScoreDomainRelevance_KeywordFallback(t *testing.T) {
 func TestHeartbeatEvaluator(t *testing.T) {
 	evaluator := NewDefaultHeartbeatEvaluator()
 
-	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "general_assistant"}
+	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "assistant"}
 	lyra := AgentCandidate{ID: "agent-lyra", Name: "Lyra", Role: "customer_success"}
 	candidates := []AgentCandidate{aria, lyra}
 
@@ -928,7 +928,7 @@ func TestHeartbeatEvaluator(t *testing.T) {
 			t.Errorf("expected type re-engage, got %s", action.Type)
 		}
 		if action.AgentName != "Aria" {
-			t.Errorf("expected general assistant Aria, got %s", action.AgentName)
+			t.Errorf("expected assistant Aria, got %s", action.AgentName)
 		}
 	})
 

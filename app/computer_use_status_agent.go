@@ -178,7 +178,7 @@ func standingComputerUseScope(ctx context.Context, engine *memqlengine.MemQLEngi
 // unresolved" log line that killed Computer Use prompt awareness.
 //
 // Why ownerUserId exists alongside createdBy: when the GA is
-// auto-seeded by provisionGeneralAssistantOnUserCreate, the
+// auto-seeded by provisionAssistantOnUserCreate, the
 // automation runs with `system:automation:<name>` as the actor, so
 // createdBy gets stamped with that system actor and the lookup
 // against the user-keyed worker registry would never match. The

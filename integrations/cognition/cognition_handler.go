@@ -1001,7 +1001,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// streaming tool loop:
 	//
 	//   - escalation_notice  (router wants a refusal, not action)
-	//   - fallback_attempt   (general assistant stretching;
+	//   - fallback_attempt   (assistant stretching;
 	//                         answer from knowledge, don't tool-call)
 	//
 	// Earlier this also gated on `toolsNeeded=false`, but the router
@@ -1605,7 +1605,7 @@ func (c *CognitionIntegration) buildAgentCandidates(ctx context.Context, siParti
 		expandedDomains := polyphon.ExpandDomains(domains)
 
 		// Role: prefer the concept's declared role field (specialist vs
-		// general_assistant) over the legacy description-parsed role. The
+		// assistant) over the legacy description-parsed role. The
 		// guardrail router keys off the enum value directly, so empty role
 		// falls back to a description-derived label for the prompt only.
 		role := strings.TrimSpace(agent.Role)
@@ -1902,7 +1902,7 @@ const reactiveDispatchCooldown = 90 * time.Second
 
 // parseAgentRole extracts the agent role from the structured description.
 // Description format: "{Gender} {RoleLabel} specialist -- {Styles}"
-// Returns the role slug (e.g., "general_assistant") or empty string if not parsable.
+// Returns the role slug (e.g., "assistant") or empty string if not parsable.
 func parseAgentRole(description string) string {
 	d := strings.TrimSpace(description)
 	if d == "" {
@@ -1910,7 +1910,7 @@ func parseAgentRole(description string) string {
 	}
 	// Map of role labels (as they appear in descriptions) to role slugs.
 	roleMap := map[string]string{
-		"general assistant":       "general_assistant",
+		"assistant":       "assistant",
 		"accounting & finance":    "accounting_finance",
 		"data & analytics":        "data_analytics",
 		"engineering & technology": "engineering_technology",
@@ -2778,7 +2778,7 @@ func chimeInContentAngle(agent *agentPayload) string {
 	// to perspective phrasing). Fall back to first-listed domain.
 	role := strings.TrimSpace(agent.Role)
 	switch role {
-	case "general_assistant":
+	case "assistant":
 		return "give the general / orienting angle -- what's the high-level take, not the specialist deep-dive"
 	case "it_support", "engineering_technology":
 		return "give the IT / technical angle"

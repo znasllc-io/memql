@@ -15,7 +15,7 @@ func (Policy) avatarVendorChoice(ctx any) string {
 @fallback("stream54Pro")
 @fallback("streamGeminiPro")
 @maxLatencyMs(60000)
-@preferredRole("general_assistant")
+@preferredRole("assistant")
 @preferredRole("specialist")
 @description("Default chat policy for non-operator agents. Claude Sonnet 4.6 primary, GPT-5.4 Pro as cross-vendor fallback, Gemini Pro as tertiary safety net. Was previously Mini-primary, which produced too many hedged + un-cited replies (the LLM smoothed RAG'd specifics into generic platitudes); the floor for agent replies is now Sonnet-class regardless of role. Use cheapestCapable / lowLatencyVoice for paths that legitimately need Mini-class speed/cost tradeoffs (batch, voice).")
 policy balancedChat { }

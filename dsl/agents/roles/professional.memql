@@ -10,10 +10,10 @@ use agents.agentRole
 @version("1.0.0")
 @scope("global")
 @description("The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate.")
-seed general_assistant {
-  id:                    "general_assistant"
-  slug:                  "general_assistant"
-  name:                  "General Assistant"
+seed assistant {
+  id:                    "assistant"
+  slug:                  "assistant"
+  name:                  "Assistant"
   description:           "The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate."
   category:              "professional"
   tier:                  "A"

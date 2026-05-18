@@ -21,7 +21,7 @@ type AgentDefinition struct {
 	// ("row:<row-id>" after the seed migration).
 	Name        string
 	Description string
-	Role        string // "specialist" | "general_assistant"
+	Role        string // "specialist" | "assistant"
 	RoleSlug    string
 	DisplayName string
 	Personality string

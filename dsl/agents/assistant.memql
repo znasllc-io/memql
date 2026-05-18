@@ -1,12 +1,12 @@
-// generalAssistant -- per-user General Assistant baseline.
+// assistant -- per-user Assistant baseline.
 //
 // Materialized as one v1:agents:agent row per user by the SeedMaterializer:
 //   - Startup sweep: walks every existing v1:identity:user and writes
-//     `generalAssistant-<userId>`.
+//     `assistant-<userId>`.
 //   - Runtime hook: subscribes to graph.node.created.*.v1:identity:user
 //     and writes the row on signup.
 //
-// Replaces the legacy `provisionGeneralAssistantOnUserCreate` automation
+// Replaces the legacy `provisionAssistantOnUserCreate` automation
 // that lived in memql-bff-copresent. The seed declaration is the single
 // source of truth for the GA template; the materializer's create-only
 // semantics (insert-if-missing by deterministic id) preserve any
@@ -14,21 +14,21 @@
 //
 // Owner ergonomics:
 //   - `ownerUserId` is stamped automatically by the materializer.
-//   - `agentId` is computed as `generalAssistant-<userId>` (not declared
+//   - `agentId` is computed as `assistant-<userId>` (not declared
 //     in the body; @scope("perUser") seeds may not declare an id).
 
 use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@templateFile("templates/generalAssistant.tmpl")
-@description("Per-user General Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
-seed generalAssistant {
-  name:        "General Assistant"
+@templateFile("templates/assistant.tmpl")
+@description("Per-user Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
+seed assistant {
+  name:        "Assistant"
   description: "Designated fallback when no specialist fits."
   personality: "Friendly, capable, proactive."
-  role:        "general_assistant"
-  roleSlug:    "general_assistant"
+  role:        "assistant"
+  roleSlug:    "assistant"
   gender:      "female"
 
   providerConfig {

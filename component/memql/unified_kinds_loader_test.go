@@ -66,7 +66,7 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	// At least one of the platform agent seeds must be present so
 	// the seed migration's contract (per-user GA / Planner /
 	// Trainer rows materialize at startup) doesn't silently break.
-	for _, name := range []string{"generalAssistant", "plannerAgent", "trainerAgent"} {
+	for _, name := range []string{"assistant", "plannerAgent", "trainerAgent"} {
 		if _, ok := seedReg.Get(name); !ok {
 			t.Errorf("seed registry missing platform seed %q", name)
 		}

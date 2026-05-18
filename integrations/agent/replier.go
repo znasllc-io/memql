@@ -369,7 +369,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// RAG: retrieve top-K knowledge chunks for the agent's declared
 	// domains, keyed on the user's most recent message as the query.
 	// Mirrors delegate_takeover.go's up-front retrieval so direct
-	// takeovers (the user's general_assistant driving UI without
+	// takeovers (the user's assistant driving UI without
 	// going through delegation) also see app-knowledge in their prompt.
 	//
 	// Server-side contract: if the agent has copresent_control (i.e.

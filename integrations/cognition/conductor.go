@@ -132,7 +132,7 @@ type AgentParticipationDirective struct {
 	SkipHandoffOpener bool
 
 	// SkipSelfIntro -- when true, the prompt should NOT introduce the
-	// agent ("I'm Sofia, your general assistant"). Set when
+	// agent ("I'm Sofia, your assistant"). Set when
 	// agentIsKnownToUser is true.
 	SkipSelfIntro bool
 

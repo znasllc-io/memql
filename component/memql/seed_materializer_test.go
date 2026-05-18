@@ -14,8 +14,8 @@ import (
 
 func TestRenderArgsObject_BareKeysScalarValues(t *testing.T) {
 	got, err := renderArgsObject(map[string]any{
-		"agentId":     "generalAssistant-user-abc",
-		"name":        "General Assistant",
+		"agentId":     "assistant-user-abc",
+		"name":        "Assistant",
 		"active":      true,
 		"deleted":     false,
 		"description": "Has a \"quote\" in it",
@@ -24,7 +24,7 @@ func TestRenderArgsObject_BareKeysScalarValues(t *testing.T) {
 		t.Fatalf("renderArgsObject: %v", err)
 	}
 	// Keys are sorted alphabetically for log-diff stability.
-	want := `{active: true, agentId: "generalAssistant-user-abc", deleted: false, description: "Has a \"quote\" in it", name: "General Assistant"}`
+	want := `{active: true, agentId: "assistant-user-abc", deleted: false, description: "Has a \"quote\" in it", name: "Assistant"}`
 	if got != want {
 		t.Errorf("got:  %s\nwant: %s", got, want)
 	}
@@ -99,28 +99,28 @@ func TestRenderArgsObject_NilValue(t *testing.T) {
 func TestBuildArgsFromBody_PerUserStampsConceptIdAndOwner(t *testing.T) {
 	body := seedBlock{
 		fields: map[string]seedValue{
-			"name": {kind: seedString, str: "General Assistant"},
-			"role": {kind: seedString, str: "general_assistant"},
+			"name": {kind: seedString, str: "Assistant"},
+			"role": {kind: seedString, str: "assistant"},
 		},
 	}
 	body.keys = []string{"name", "role"}
 
-	args := buildArgsFromBody(body, "agent", "generalAssistant-user-jose", "user-jose")
+	args := buildArgsFromBody(body, "agent", "assistant-user-jose", "user-jose")
 
 	// The synthetic id field uses the conceptName+Id convention.
-	if args["agentId"] != "generalAssistant-user-jose" {
-		t.Errorf("agentId = %v, want generalAssistant-user-jose", args["agentId"])
+	if args["agentId"] != "assistant-user-jose" {
+		t.Errorf("agentId = %v, want assistant-user-jose", args["agentId"])
 	}
 	// ownerUserId is stamped from the user context.
 	if args["ownerUserId"] != "user-jose" {
 		t.Errorf("ownerUserId = %v, want user-jose", args["ownerUserId"])
 	}
 	// Body fields pass through by name.
-	if args["name"] != "General Assistant" {
-		t.Errorf("name = %v, want General Assistant", args["name"])
+	if args["name"] != "Assistant" {
+		t.Errorf("name = %v, want Assistant", args["name"])
 	}
-	if args["role"] != "general_assistant" {
-		t.Errorf("role = %v, want general_assistant", args["role"])
+	if args["role"] != "assistant" {
+		t.Errorf("role = %v, want assistant", args["role"])
 	}
 }
 

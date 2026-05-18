@@ -440,7 +440,7 @@ func TestResponseDelay(t *testing.T) {
 func TestClarifyingQuestionContinuation(t *testing.T) {
 	scorer := NewScorer(DefaultScoringWeights(), DefaultTurnPolicy())
 
-	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "general_assistant", SpeakWhen: "relevant"}
+	aria := AgentCandidate{ID: "agent-aria", Name: "Aria", Role: "assistant", SpeakWhen: "relevant"}
 	lyra := AgentCandidate{ID: "agent-lyra", Name: "Lyra", Role: "customer_success", SpeakWhen: "relevant",
 		Domains: []string{"support"}, Keywords: []string{"ticket"}}
 	candidates := []AgentCandidate{aria, lyra}
