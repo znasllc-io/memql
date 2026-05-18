@@ -182,6 +182,12 @@ type roleSnapshot struct {
 	DefaultDomainIds      []string
 	LockedToolSlugs       []string
 	DefaultToolSlugs      []string
+	// ForbiddenToolSlugs is the role's explicit opt-out list -- tool
+	// slugs the agent factory MUST NOT grant even when its default
+	// behavior would. Today the agentFactoryAnalyze prompt grants
+	// workbench_use universally; a role with workbench_use here
+	// suppresses that default. Empty for almost every role.
+	ForbiddenToolSlugs    []string
 	RecommendedPolicySlug string
 	SystemPromptHints     string
 }
@@ -467,6 +473,7 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 		DefaultDomainIds:      stringSliceFromAny(payload["defaultDomainIds"]),
 		LockedToolSlugs:       stringSliceFromAny(payload["lockedToolSlugs"]),
 		DefaultToolSlugs:      stringSliceFromAny(payload["defaultToolSlugs"]),
+		ForbiddenToolSlugs:    stringSliceFromAny(payload["forbiddenToolSlugs"]),
 		RecommendedPolicySlug: stringField(payload, "recommendedPolicySlug"),
 		SystemPromptHints:     stringField(payload, "systemPromptHints"),
 	}, true
@@ -570,14 +577,15 @@ func roleCatalogForPrompt(roles []roleSnapshot) []map[string]any {
 	out := make([]map[string]any, 0, len(roles))
 	for _, r := range roles {
 		out = append(out, map[string]any{
-			"slug":             r.Slug,
-			"name":             r.Name,
-			"category":         r.Category,
-			"tier":             r.Tier,
-			"lockedDomainIds":  r.LockedDomainIds,
-			"defaultDomainIds": r.DefaultDomainIds,
-			"lockedToolSlugs":  r.LockedToolSlugs,
-			"defaultToolSlugs": r.DefaultToolSlugs,
+			"slug":               r.Slug,
+			"name":               r.Name,
+			"category":           r.Category,
+			"tier":               r.Tier,
+			"lockedDomainIds":    r.LockedDomainIds,
+			"defaultDomainIds":   r.DefaultDomainIds,
+			"lockedToolSlugs":    r.LockedToolSlugs,
+			"defaultToolSlugs":   r.DefaultToolSlugs,
+			"forbiddenToolSlugs": r.ForbiddenToolSlugs,
 		})
 	}
 	return out

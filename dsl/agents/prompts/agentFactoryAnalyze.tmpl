@@ -63,11 +63,16 @@ Tool registry (name + description + allowedRoles):
      roleSlug.
 7. Workbench + computer-use selection (the headless-execution
    surface ladder):
-   - ALWAYS include `workbench_use` in toolSlugs (it's the universal
-     sandboxed Linux working environment for any headless task --
-     writing files, running shell commands, fetching URLs in the
-     cluster; no user-machine access required). The only reason to
-     omit it is when the role explicitly forbids it (rare).
+   - Include `workbench_use` in toolSlugs BY DEFAULT (it's the
+     universal sandboxed Linux working environment for any headless
+     task -- writing files, running shell commands, fetching URLs
+     in the cluster; no user-machine access required).
+   - EXCEPTION: if the chosen role's `forbiddenToolSlugs` contains
+     a slug, do NOT grant it. The role's catalog entry is the
+     authority on whether a given capability is appropriate; this
+     override applies to workbench_use AND any other default /
+     recommended slug. Empty forbiddenToolSlugs (the common case)
+     means "no opt-outs, apply defaults."
    - ADDITIONALLY include `computer_use_headless` ONLY when the goal
      specifically calls for headless work on the user's OWN machine:
      files at specific paths under the user's home directory, shell
@@ -84,6 +89,11 @@ Tool registry (name + description + allowedRoles):
      -- they're scoped to actions on the user's machine which the
      user must approve per-task; granting them when not needed pulls
      the agent into approval flows for nothing.
+   - When forbiddenToolSlugs blocks workbench_use AND the goal
+     genuinely needs headless work, escalate to the appropriate
+     computer_use_* slug if the goal supports it, otherwise produce
+     a `reasoning` that explains why the role can't take the goal
+     as-is (the caller will fall back to a different role).
 8. reasoning: one or two sentences explaining the decision. Keep it
    crisp; this is for audit + cockpit display, not narration.
 
