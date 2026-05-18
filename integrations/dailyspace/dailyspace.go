@@ -19,15 +19,22 @@
 //
 //	rolloverAllUsers({})     -- hourly cron entry point. Walks every
 //	                            active user with preferences.dailySpaceEnabled
-//	                            != false, ensures today's daily, and archives
-//	                            or saves yesterday's per the user's
-//	                            preferences.dailySpaceRolloverAction.
+//	                            != false and ensures today's daily for
+//	                            each. Archive/save of yesterday's daily
+//	                            per preferences.dailySpaceRolloverAction
+//	                            is deferred to a sibling PR (needs a
+//	                            queryDailySpacesForUser query that does
+//	                            not exist yet) -- the visibility problem
+//	                            the operator flagged is fully addressed
+//	                            by the synchronous ensureForUser path
+//	                            firing on user-create + auth-session;
+//	                            this cron is the long-session safety net.
 //
-// Both capabilities run under the same system actor the seed
-// materializer uses (system:seedMaterializer-class subject; declared
-// below) so their mutation calls satisfy the engine's actor-required
-// gate without leaking the calling user's privileges into the
-// rollover sweep.
+// Both capabilities run under a synthetic `system:dailyspaceAutomation`
+// actor (distinct from the seed materializer's `system:seedMaterializer`
+// for audit clarity) so their mutation calls satisfy the engine's
+// actor-required gate without leaking the calling user's privileges
+// into the rollover sweep.
 package dailyspace
 
 import (
@@ -309,11 +316,12 @@ func systemActorContext(ctx context.Context) context.Context {
 	})
 }
 
-// extractRows handles the two shapes the engine's Execute return
-// takes: Bundle.Nodes for raw concept queries (returns []*MemoryNode
-// via reflection) and Data for shape-wrapped queries (returns
-// []map[string]any directly). Both paths land in a uniform
-// []map[string]any with payload fields at the top level.
+// extractRows normalizes the engine's Execute return into a uniform
+// []map[string]any with payload fields at the top level. Three shapes
+// land here in practice: the slice form ([]map[string]any) the shape-
+// wrapped query paths return directly, the []any heterogeneous list
+// the legacy paths produce, and the {bundle: {nodes: [...]}} envelope
+// the raw concept queries wrap their nodes in.
 //
 // Mirrors integrations/agents/factory.go's extractRowsFromExecuteResult
 // minus the MemoryNode round-trip -- we never need the intrinsic
