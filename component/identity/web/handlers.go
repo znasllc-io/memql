@@ -15,10 +15,22 @@ func nowNano() int64 { return time.Now().UnixNano() }
 // handleRoot redirects bare / to /login (or /setup if pre-bootstrap).
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if s.preBootstrap(r) {
-		http.Redirect(w, r, "/setup", http.StatusFound)
+		http.Redirect(w, r, withQuery("/setup", r.URL.RawQuery), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, "/login", http.StatusFound)
+	http.Redirect(w, r, withQuery("/login", r.URL.RawQuery), http.StatusFound)
+}
+
+// withQuery appends a non-empty raw query string to a base path. Used
+// when one handler redirects to another and we want to preserve the
+// caller's OAuth context (return_to / client_id / redirect_uri /
+// state) through the hop — e.g. /login → /setup on a pre-bootstrap
+// cluster, so the wizard can pass it on to the magic-link issuer.
+func withQuery(path, rawQuery string) string {
+	if rawQuery == "" {
+		return path
+	}
+	return path + "?" + rawQuery
 }
 
 // handleLoginGet renders the email-first login form. Pre-bootstrap
@@ -33,7 +45,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 // "you need an invite" form — they just get their magic link.
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	if s.preBootstrap(r) {
-		http.Redirect(w, r, "/setup", http.StatusFound)
+		http.Redirect(w, r, withQuery("/setup", r.URL.RawQuery), http.StatusFound)
 		return
 	}
 	settings := s.snapshotSettings(r)
@@ -99,7 +111,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		// Belt-and-suspenders: the Issuer also enforces this. The web
 		// pre-check just gives a nicer UX (redirect-to-setup) instead of
 		// rendering a generic error page.
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, withQuery("/setup", r.URL.RawQuery), http.StatusSeeOther)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -423,6 +435,16 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 		PrefillRegistrationDomains: registrationDomains,
 		PrefillNotifyEmails:        strings.Join(bs.NotifyEmails, ", "),
 		PrefillMode:                mode,
+		// OAuth context threaded from /login (or directly from a
+		// relying-party-driven /setup hit). The form re-emits these as
+		// hidden fields so /setup POST can call pickOAuthCtx and pass
+		// the resolved client into IssueMagicLink — making the magic-
+		// link click land at the cockpit's loopback callback instead
+		// of /admin/.
+		ReturnTo:    strings.TrimSpace(r.URL.Query().Get("return_to")),
+		ClientID:    strings.TrimSpace(r.URL.Query().Get("client_id")),
+		RedirectURI: strings.TrimSpace(r.URL.Query().Get("redirect_uri")),
+		OAuthState:  strings.TrimSpace(r.URL.Query().Get("state")),
 	}
 	s.render(w, r, "setup_wizard", webtempl.SetupWizard(data))
 }
@@ -490,17 +512,45 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	// yet) and the bootstrap-state gate (clusterSettings was just written
 	// above; the issuer would race its own stamp otherwise).
 	if s.IssueMagicLink != nil {
-		// Wizard owner-mint -- always lands in /admin/, no relying
-		// party in scope. Bootstrap=true is the trust marker; we
-		// don't pick a client at all.
-		if err := s.IssueMagicLink(r.Context(), IssueMagicLinkInput{
+		// Wizard owner-mint. Two callers reach here:
+		//   1. Admin web /setup with no relying-party in scope --
+		//      AdminSession=true, the click lands in /admin/.
+		//   2. A relying-party-initiated /setup (e.g. memql-cockpit
+		//      hit /login on a pre-bootstrap cluster, which redirected
+		//      to /setup with return_to preserved). The wizard re-
+		//      emits the OAuth context as hidden fields; pickOAuthCtx
+		//      matches return_to against registered clients. When a
+		//      client matches we issue the magic link with the OAuth
+		//      callback in scope (AdminSession=false), so /auth/complete
+		//      bounces the user back to the cockpit's loopback callback
+		//      with an auth code -- letting the cockpit complete its
+		//      login automatically, no second "press L" round.
+		// Bootstrap=true in BOTH cases -- it's the trust marker that
+		// bypasses the registration-mode gate and the "cluster not
+		// bootstrapped" gate.
+		formReturnTo := strings.TrimSpace(r.PostForm.Get("return_to"))
+		formClientId := strings.TrimSpace(r.PostForm.Get("client_id"))
+		formRedirectURI := strings.TrimSpace(r.PostForm.Get("redirect_uri"))
+		formOAuthState := strings.TrimSpace(r.PostForm.Get("state"))
+		clientId, redirectURI, oauthState, clientMatched := s.pickOAuthCtx(formClientId, formRedirectURI, formReturnTo, formOAuthState)
+		issue := IssueMagicLinkInput{
 			Email:        in.OwnerEmail,
-			State:        "setup",
+			ClientId:     clientId,
+			RedirectURI:  redirectURI,
+			State:        oauthState,
 			SourceIP:     clientIP(r),
 			UserAgent:    r.Header.Get("User-Agent"),
 			Bootstrap:    true,
-			AdminSession: true,
-		}); err != nil && s.Logger != nil {
+			AdminSession: !clientMatched,
+		}
+		if !clientMatched {
+			// Preserve the pre-existing "setup" state marker on the
+			// admin-only path so audit logs / verifier traces still
+			// distinguish wizard-issued links from regular admin
+			// sign-ins.
+			issue.State = "setup"
+		}
+		if err := s.IssueMagicLink(r.Context(), issue); err != nil && s.Logger != nil {
 			s.Logger.Warn("identity-web: wizard issue magic link failed",
 				"error", err, "email", in.OwnerEmail)
 		}
