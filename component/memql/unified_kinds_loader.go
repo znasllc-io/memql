@@ -71,9 +71,21 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 // json.Unmarshal the MemQL provider syntax and silently failed every
 // slice. Result: every node booted with providers=0 and every SI
 // call returned `provider "<name>" not available` -- including the
-// planner agent loop's plannerAgent invocation. The fix is one line
-// (parseProviderConfigs -> parseProviderMemQL) plus the slice
-// wrapping below.
+// planner agent loop's plannerAgent invocation.
+//
+// Each parsed config also gets a CLIENT instantiated via newSIProvider
+// before the registry entry is written. Without that step the
+// registry holds the Config but Available stays false and the SI
+// runtime rejects every lookup with "provider <name> not available"
+// (see si_runtime.go's entry.Available check). The legacy
+// loadSIProviders walked the providers and called newSIProvider; that
+// step was lost when Pass 3 of the DSL restructure retired the
+// legacy walk. Re-attaching it here keeps the unified-loader path
+// self-contained.
+//
+// @base providers (vendor-level entries with no concrete model, used
+// only for @extends inheritance) are registered with Available=false
+// on purpose: they're metadata, not callable.
 func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("provider registry is nil")
@@ -95,7 +107,32 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 			return []*ProviderConfig{cfg}, nil
 		},
 		func(cfg *ProviderConfig) error {
-			registry.setEntry(&ProviderConfigEntry{Config: *cfg})
+			entry := &ProviderConfigEntry{Config: *cfg}
+			// @base entries (vendor-level inheritance roots) are
+			// declared without a model + only used as extension
+			// targets. They have no callable client; register them
+			// with Available=false so name-lookup still resolves but
+			// no SI runtime path tries to invoke them.
+			if cfg.Base {
+				registry.setEntry(entry)
+				return nil
+			}
+			client, clientErr := newSIProvider(*cfg)
+			if clientErr != nil {
+				// Construction failure (missing auth, unsupported
+				// type, etc.) -- stash the error on the entry so
+				// debug tooling can surface it, but don't break the
+				// load. Other providers should still register.
+				entry.err = clientErr
+				if logger != nil {
+					logger.Warn("memql.unifiedProviderLoader: provider client construction failed; registered as unavailable",
+						"provider", cfg.Name, "type", cfg.Type, "error", clientErr)
+				}
+			} else {
+				entry.Client = client
+				entry.Available = true
+			}
+			registry.setEntry(entry)
 			return nil
 		},
 	)
