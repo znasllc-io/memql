@@ -207,6 +207,7 @@ concept session {
 @type("collection")
 @description("Persistent rooms where humans and AI assistants meet, converse, and interact. Every space is a multi-participant room with a bounded capacity for humans and for agents -- there is no longer a 1:1 vs group distinction.")
 concept space {
+  ownerUserId  string  @required  @description("v1:identity:user.id of the space owner. The owner is the human whose assistant is wired into the space (the only AI presence that speaks to humans). Stamped at create time from the request actor; the @relationship below pins the parent.")
   active  bool  @default("true")  @description("Whether the space is active. Set to false for soft delete.")
   archivedAt  datetime  @description("When the space was archived. Only set on rows whose status flipped to 'archived'. Cleared when the space is restored to active or saved.")
   expiresAt  datetime  @description("Concrete deadline at which the purge cron hard-deletes this archived space. Stamped at archive time as archivedAt + User.preferences.archiveRetentionDays. Re-stamped on retention-setting changes so a 30->60 bump extends currently-archived spaces. The cron query is a plain `payload.expiresAt < now` comparison -- no per-row user lookup needed.")
@@ -232,6 +233,7 @@ concept space {
   turnStateId  string  @description("ID of the turn state owned by this space.")
   utteranceIds  []string  @description("IDs of utterances in this space.")
 
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
   @relationship(type="contains", field="participantIds", target="v1:cognition:participant", direction="outgoing")
   @relationship(type="owns", field="turnStateId", target="v1:cognition:turn:state", direction="outgoing")
   @relationship(type="contains", field="utteranceIds", target="v1:cognition:utterance", direction="outgoing")
