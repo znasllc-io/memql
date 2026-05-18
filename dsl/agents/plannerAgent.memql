@@ -26,7 +26,16 @@ seed plannerAgent {
 
   providerConfig {
     llm {
-      provider: "streamClaudeOpus"
+      // Claude Opus 4.6 + extended thinking. The reasoning surface
+      // is exactly what the planner's decompose / createSpecialist /
+      // dispatchTask decision tree needs -- the model reasons over
+      // its goal + existing specialists + phase outline before
+      // emitting the structured-output action. See
+      // dsl/providers/providers.memql for the provider definition;
+      // the anthropicStreamProvider in component/memql/si_providers.go
+      // injects the thinking config into every MessageNewParams call
+      // path.
+      provider: "reasoningClaudeOpus"
     }
   }
 
