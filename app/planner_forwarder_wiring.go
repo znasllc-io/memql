@@ -14,7 +14,7 @@ import (
 // node. The default build and the planner build are the only
 // callsites; other binaries have the stub from
 // planner_forwarder_wiring_stub.go.
-func (a *App) attachAgentForwarderToPlanner(fwd *memqlgrpc.AiForwardRouter) {
+func (a *App) attachAgentForwarderToPlanner(fwd *memqlgrpc.SIForwardRouter) {
 	if a.plannerIntegration == nil {
 		return
 	}

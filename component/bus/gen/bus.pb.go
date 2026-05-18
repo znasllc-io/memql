@@ -2097,9 +2097,9 @@ type ConfigSnapshot struct {
 	EngineMaxWindow        int32 `protobuf:"varint,11,opt,name=engine_max_window,json=engineMaxWindow,proto3" json:"engine_max_window,omitempty"`
 	EngineStepCacheEnabled bool  `protobuf:"varint,12,opt,name=engine_step_cache_enabled,json=engineStepCacheEnabled,proto3" json:"engine_step_cache_enabled,omitempty"`
 	// AI
-	AiOpenaiApiKey    string `protobuf:"bytes,20,opt,name=ai_openai_api_key,json=aiOpenaiApiKey,proto3" json:"ai_openai_api_key,omitempty"`
-	AiOpenaiProjectId string `protobuf:"bytes,21,opt,name=ai_openai_project_id,json=aiOpenaiProjectId,proto3" json:"ai_openai_project_id,omitempty"`
-	AiDefaultProvider string `protobuf:"bytes,22,opt,name=ai_default_provider,json=aiDefaultProvider,proto3" json:"ai_default_provider,omitempty"`
+	SIOpenaiApiKey    string `protobuf:"bytes,20,opt,name=si_openai_api_key,json=aiOpenaiApiKey,proto3" json:"si_openai_api_key,omitempty"`
+	SIOpenaiProjectId string `protobuf:"bytes,21,opt,name=si_openai_project_id,json=aiOpenaiProjectId,proto3" json:"si_openai_project_id,omitempty"`
+	SIDefaultProvider string `protobuf:"bytes,22,opt,name=si_default_provider,json=aiDefaultProvider,proto3" json:"si_default_provider,omitempty"`
 	// Server
 	GrpcAddress    string `protobuf:"bytes,30,opt,name=grpc_address,json=grpcAddress,proto3" json:"grpc_address,omitempty"`
 	HttpAddress    string `protobuf:"bytes,31,opt,name=http_address,json=httpAddress,proto3" json:"http_address,omitempty"`
@@ -2215,21 +2215,21 @@ func (x *ConfigSnapshot) GetEngineStepCacheEnabled() bool {
 
 func (x *ConfigSnapshot) GetAiOpenaiApiKey() string {
 	if x != nil {
-		return x.AiOpenaiApiKey
+		return x.SIOpenaiApiKey
 	}
 	return ""
 }
 
 func (x *ConfigSnapshot) GetAiOpenaiProjectId() string {
 	if x != nil {
-		return x.AiOpenaiProjectId
+		return x.SIOpenaiProjectId
 	}
 	return ""
 }
 
 func (x *ConfigSnapshot) GetAiDefaultProvider() string {
 	if x != nil {
-		return x.AiDefaultProvider
+		return x.SIDefaultProvider
 	}
 	return ""
 }

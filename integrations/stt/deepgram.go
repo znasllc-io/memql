@@ -29,7 +29,7 @@ func NewDeepgramProvider(asr *deepgram.ASRClient, logger *slog.Logger) *Deepgram
 }
 
 // Name returns the provider identifier used in log lines and
-// AiTranscribeStreamComplete payloads.
+// SITranscribeStreamComplete payloads.
 func (p *DeepgramProvider) Name() string { return "deepgram" }
 
 // StartStream opens a streaming transcription session against

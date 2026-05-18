@@ -61,9 +61,9 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 		MessageId:   "resp-1",
 		CorrelateTo: "req-42",
 		Payload: &memqlv1.MemqlServerMessage_AiChatResult{
-			AiChatResult: &memqlv1.AiChatResult{
+			SIChatResult: &memqlv1.SIChatResult{
 				RequestId: "req-42",
-				Message: &memqlv1.AiChatMessage{
+				Message: &memqlv1.SIChatMessage{
 					Role:    "assistant",
 					Content: "hello",
 				},
@@ -75,7 +75,7 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 		t.Fatalf("marshal server msg: %v", err)
 	}
 
-	router.Dispatch(&nodev1.AiForwardResponse{
+	router.Dispatch(&nodev1.SIForwardResponse{
 		RequestId:      "req-42",
 		MemqlServerMsg: raw,
 		Done:           true,
@@ -122,7 +122,7 @@ func TestAiForwardRouter_DispatchOrphanedResponse(t *testing.T) {
 	router := NewAiForwardRouter(peerMgr, testLogger())
 
 	// No inflight entry. Dispatch should be a no-op.
-	router.Dispatch(&nodev1.AiForwardResponse{
+	router.Dispatch(&nodev1.SIForwardResponse{
 		RequestId: "does-not-exist",
 		Done:      true,
 	})
@@ -224,17 +224,17 @@ func TestAiForwardRouter_ForwardContinuation_PeerWithoutConnection(t *testing.T)
 }
 
 // TestIsTerminalServerPayload_StreamComplete verifies the terminal
-// marker includes AiTranscribeStreamComplete so the BFF's inflight
+// marker includes SITranscribeStreamComplete so the BFF's inflight
 // closes on the stream's final message.
 func TestIsTerminalServerPayload_StreamComplete(t *testing.T) {
 	complete := &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{}
 	if !isTerminalServerPayload(complete) {
-		t.Error("AiTranscribeStreamComplete should be terminal")
+		t.Error("SITranscribeStreamComplete should be terminal")
 	}
 
 	// Delta must remain non-terminal (many Deltas flow before Complete).
 	delta := &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{}
 	if isTerminalServerPayload(delta) {
-		t.Error("AiTranscribeStreamDelta must not be terminal")
+		t.Error("SITranscribeStreamDelta must not be terminal")
 	}
 }

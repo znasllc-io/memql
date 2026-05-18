@@ -67,7 +67,7 @@ func contextWithEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlC
 
 // stampEnvelopeProvenance copies the caller-ctx provenance into the
 // envelope before it's serialized + shipped to another node. Called
-// by cross-node forwarders (proxyAi). No-op if ctx carries no
+// by cross-node forwarders (proxySI). No-op if ctx carries no
 // provenance.
 func stampEnvelopeProvenance(ctx context.Context, envelope *memqlv1.MemqlClientMessage) {
 	if envelope == nil {
@@ -108,7 +108,7 @@ type Server struct {
 	scoreEngine       *polyphon.ScoreEngine
 	roomProvider      polyphon.RoomProvider
 	conceptRegistry   memoryNodes.Registry
-	aiForwarder       *AiForwardRouter
+	aiForwarder       *SIForwardRouter
 	agentReplier      AgentTurnHandler
 	serviceRef        *serviceRef
 	extraRegistrars   []func(*grpc.Server)
@@ -127,26 +127,26 @@ type serviceRef struct {
 }
 
 // SetAiForwarder installs the BFF-side outbound forwarder. On BFF
-// builds the bootstrap phase creates an AiForwardRouter pointing at
+// builds the bootstrap phase creates an SIForwardRouter pointing at
 // PeerManager and installs it here; AI/voice handlers route every
 // aiChat / aiSpeech / aiTranscribe / aiSuggest / listTools / callTool
 // request through the forwarder to the matching worker node. Workers
 // leave this nil and handle AI requests directly from their local
 // providers.
-func (s *Server) SetAiForwarder(r *AiForwardRouter) {
+func (s *Server) SetAiForwarder(r *SIForwardRouter) {
 	if s == nil {
 		return
 	}
 	s.aiForwarder = r
 }
 
-// AiForwardHandler returns a worker-side handler that delegates to the
+// SIForwardHandler returns a worker-side handler that delegates to the
 // internal gRPC service. The service is constructed lazily in Run();
 // callers can retrieve this shim at bootstrap time and install it on
 // the NodeServer -- the shim resolves to the real handler once Run()
 // has populated the service reference. On BFF binaries the handler is
 // never invoked because the worker-side dispatch path isn't triggered.
-func (s *Server) AiForwardHandler() node.AiForwardHandler {
+func (s *Server) SIForwardHandler() node.SIForwardHandler {
 	if s == nil {
 		return nil
 	}
@@ -423,7 +423,7 @@ type service struct {
 	roomProvider    polyphon.RoomProvider
 	conceptRegistry memoryNodes.Registry
 	accessMW        *access.Middleware
-	aiForwarder     *AiForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
+	aiForwarder     *SIForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
 	verifier        *verifier.Verifier // re-verifies presented tokens for in-stream rotation; nil on no-auth nodes
 
 	// agentReplier handles AgentGenerateTurnMsg on agent nodes. Non-nil
@@ -445,7 +445,7 @@ type service struct {
 	// result can arrive on a different stream than the one that sent
 	// the original ClientToolCall -- this is required for the cluster
 	// relay path where Cognition bridges the call via graph events and
-	// sends the result back as a fresh AiForwardRequest (which lands
+	// sends the result back as a fresh SIForwardRequest (which lands
 	// on a NEW forwardedStream, not the one that is still waiting on
 	// the agent node).
 	clientToolMu      sync.Mutex
@@ -1044,19 +1044,19 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	case *memqlv1.MemqlClientMessage_ClientToolResult:
 		return s.handleClientToolResult(envelope, payload.ClientToolResult)
 	case *memqlv1.MemqlClientMessage_AiChat:
-		return s.handleAiChat(envelope, payload.AiChat)
+		return s.handleAiChat(envelope, payload.SIChat)
 	case *memqlv1.MemqlClientMessage_AiSpeech:
-		return s.handleAiSpeech(envelope, payload.AiSpeech)
+		return s.handleAiSpeech(envelope, payload.SISpeech)
 	case *memqlv1.MemqlClientMessage_AiTranscribe:
-		return s.handleAiTranscribe(envelope, payload.AiTranscribe)
+		return s.handleAiTranscribe(envelope, payload.SITranscribe)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
-		return s.handleAiTranscribeStreamStart(envelope, payload.AiTranscribeStreamStart)
+		return s.handleAiTranscribeStreamStart(envelope, payload.SITranscribeStreamStart)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
-		return s.handleAiTranscribeStreamChunk(envelope, payload.AiTranscribeStreamChunk)
+		return s.handleAiTranscribeStreamChunk(envelope, payload.SITranscribeStreamChunk)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
-		return s.handleAiTranscribeStreamEnd(envelope, payload.AiTranscribeStreamEnd)
+		return s.handleAiTranscribeStreamEnd(envelope, payload.SITranscribeStreamEnd)
 	case *memqlv1.MemqlClientMessage_AiSuggest:
-		return s.handleAiSuggest(envelope, payload.AiSuggest)
+		return s.handleAiSuggest(envelope, payload.SISuggest)
 	// MemQL Sense -- language intelligence
 	case *memqlv1.MemqlClientMessage_SenseTokenize:
 		return s.handleSenseTokenize(envelope, payload.SenseTokenize)
@@ -1180,7 +1180,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	}
 
 	// Re-hydrate cross-node provenance: when this envelope arrived via
-	// proxyAi / AiForward (BFF -> worker), stampEnvelopeProvenance put
+	// proxySI / SIForward (BFF -> worker), stampEnvelopeProvenance put
 	// the caller's provenance on envelope.Metadata. We attach it to ctx
 	// so engine.Execute uses it instead of stamping a fresh default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
@@ -1367,8 +1367,8 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxyAi(nodeTargetForListTools()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForListTools())
+	if s.shouldProxySI(nodeTargetForListTools()) {
+		return s.proxySI(envelope, requestId, nodeTargetForListTools())
 	}
 
 	if s.service.engine == nil {
@@ -1421,8 +1421,8 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 		return s.sendToolError(envelope.GetMessageId(), requestId, "tool name is required")
 	}
 
-	if s.shouldProxyAi(nodeTargetForCallTool()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForCallTool())
+	if s.shouldProxySI(nodeTargetForCallTool()) {
+		return s.proxySI(envelope, requestId, nodeTargetForCallTool())
 	}
 
 	// Allow any authenticated user to call tools (user, manager, admin, owner)
@@ -1450,7 +1450,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 
 	ctx := s.stream.Context()
 	// Re-hydrate cross-node provenance for tool calls that arrived via
-	// proxyAi / AiForward. Any row this tool writes via the engine will
+	// proxySI / SIForward. Any row this tool writes via the engine will
 	// stamp the originating caller's provenance instead of a fresh
 	// per-tool default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
@@ -1486,7 +1486,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 }
 
 // handleClientToolResult is invoked when the connected client (direct
-// browser session, or the cluster relay arriving as an AiForwardRequest
+// browser session, or the cluster relay arriving as an SIForwardRequest
 // continuation) returns the result of a ClientToolCall we emitted
 // earlier. Looks up the service-scoped waiter by call_id and delivers
 // the result so the parked tool call can return on whichever session
