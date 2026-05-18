@@ -90,52 +90,82 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	if registry == nil {
 		return 0, fmt.Errorf("provider registry is nil")
 	}
-	return baseloader.LoadMany[ProviderConfig](
-		logger,
-		"memql.unifiedProviderLoader",
-		"provider",
-		baseloader.ReadAll(logger),
-		extractAdapter,
-		func(origin string, raw []byte) ([]*ProviderConfig, error) {
-			cfg, err := parseProviderMemQL(origin, raw)
+
+	// Two-pass load. Pass 1 registers every @base provider so the
+	// inheritance lookup in pass 2 can find them regardless of file
+	// order. Pass 2 walks every non-base provider, fills in fields
+	// the child left empty (Type / Auth) from its @extends parent,
+	// then instantiates the SDK client via newSIProvider. The single-
+	// pass loader fails when the file places bases after their
+	// children (which dsl/providers/providers.memql does today --
+	// `openai` is at line 379 but children like audio15 / chat54
+	// land at lines 27..) because the resolver runs before the base
+	// is in the registry.
+	//
+	// baseloader.LoadMany doesn't support multi-pass, so we walk the
+	// files ourselves and call extractAdapter / parseProviderMemQL
+	// inline.
+	files := baseloader.ReadAll(logger)
+	type parsedProvider struct {
+		cfg    *ProviderConfig
+		origin string
+	}
+	all := make([]parsedProvider, 0, 64)
+	for _, raw := range files {
+		for _, slice := range extractAdapter(raw.Content, "provider") {
+			cfg, err := parseProviderMemQL(raw.Path+":"+slice.Name, []byte(slice.Source))
 			if err != nil {
-				return nil, err
+				if logger != nil {
+					logger.Debug("memql.unifiedProviderLoader: parse failed",
+						"file", raw.Path, "provider", slice.Name, "error", err)
+				}
+				continue
 			}
 			if cfg == nil {
-				return nil, nil
+				continue
 			}
-			return []*ProviderConfig{cfg}, nil
-		},
-		func(cfg *ProviderConfig) error {
-			entry := &ProviderConfigEntry{Config: *cfg}
-			// @base entries (vendor-level inheritance roots) are
-			// declared without a model + only used as extension
-			// targets. They have no callable client; register them
-			// with Available=false so name-lookup still resolves but
-			// no SI runtime path tries to invoke them.
-			if cfg.Base {
-				registry.setEntry(entry)
-				return nil
+			all = append(all, parsedProvider{cfg: cfg, origin: raw.Path + ":" + slice.Name})
+		}
+	}
+
+	// Pass 1: register bases. Available=false on purpose; their only
+	// role is to be the target of @extends inheritance.
+	for _, p := range all {
+		if !p.cfg.Base {
+			continue
+		}
+		registry.setEntry(&ProviderConfigEntry{Config: *p.cfg})
+	}
+
+	// Pass 2: resolve extends + instantiate client + register child.
+	total := 0
+	for _, p := range all {
+		if p.cfg.Base {
+			total++ // bases count toward "registered" even though they're not callable
+			continue
+		}
+		entry := &ProviderConfigEntry{Config: *p.cfg}
+		resolveProviderExtends(&entry.Config, registry)
+		client, clientErr := newSIProvider(entry.Config)
+		if clientErr != nil {
+			entry.err = clientErr
+			if logger != nil {
+				logger.Warn("memql.unifiedProviderLoader: provider client construction failed; registered as unavailable",
+					"provider", entry.Config.Name, "type", entry.Config.Type, "error", clientErr)
 			}
-			client, clientErr := newSIProvider(*cfg)
-			if clientErr != nil {
-				// Construction failure (missing auth, unsupported
-				// type, etc.) -- stash the error on the entry so
-				// debug tooling can surface it, but don't break the
-				// load. Other providers should still register.
-				entry.err = clientErr
-				if logger != nil {
-					logger.Warn("memql.unifiedProviderLoader: provider client construction failed; registered as unavailable",
-						"provider", cfg.Name, "type", cfg.Type, "error", clientErr)
-				}
-			} else {
-				entry.Client = client
-				entry.Available = true
-			}
-			registry.setEntry(entry)
-			return nil
-		},
-	)
+		} else {
+			entry.Client = client
+			entry.Available = true
+		}
+		registry.setEntry(entry)
+		total++
+	}
+
+	if logger != nil {
+		logger.Info("memql.unifiedProviderLoader: registered",
+			"keyword", "provider", "count", total)
+	}
+	return total, nil
 }
 
 // LoadUnifiedTools walks the new tree, parses every `tool NAME
@@ -390,4 +420,54 @@ func resolveUnifiedPromptTemplate(decl *promptDecl, memqlPath string, tree fs.FS
 		return decl.templateSource, nil
 	}
 	return "", fmt.Errorf("prompt %q: template or templateFile is required", decl.name)
+}
+
+// resolveProviderExtends fills in fields a child provider didn't
+// declare explicitly by copying from the @extends base. The DSL
+// convention is "base carries vendor-wide auth + the canonical
+// @type; children pin a model and override params." Without this
+// step, children that omit @type (most of them) boot with Type=""
+// and newSIProvider rejects with "unsupported provider type" --
+// and children that omit auth (every one of them) fail with
+// "missing auth.apiKey".
+//
+// Only fields the child left empty get filled. An explicit
+// declaration on the child always wins -- @extends is inheritance,
+// not override.
+//
+// File-order assumption: the base must be registered before the
+// child. providers.memql keeps bases at the top of each vendor
+// block, so the linear loader walk satisfies this naturally. A
+// future split that disturbs the ordering would surface as
+// "missing auth.apiKey" on the first call after rebuild; in that
+// case the fix is either re-ordering the file or doing a two-pass
+// resolve (bases first, then children).
+func resolveProviderExtends(cfg *ProviderConfig, registry *ProviderRegistry) {
+	if cfg == nil || registry == nil {
+		return
+	}
+	parentName := strings.TrimSpace(cfg.Extends)
+	if parentName == "" {
+		return
+	}
+	parent, ok := registry.Entry(parentName)
+	if !ok || parent == nil {
+		return
+	}
+	if cfg.Type == "" {
+		cfg.Type = parent.Config.Type
+	}
+	if len(cfg.Auth) == 0 && len(parent.Config.Auth) > 0 {
+		cfg.Auth = make(map[string]string, len(parent.Config.Auth))
+		for k, v := range parent.Config.Auth {
+			cfg.Auth[k] = v
+		}
+	} else if len(parent.Config.Auth) > 0 {
+		// Merge: parent fields the child didn't supply.
+		for k, v := range parent.Config.Auth {
+			if _, exists := cfg.Auth[k]; !exists {
+				cfg.Auth[k] = v
+			}
+		}
+	}
 }
