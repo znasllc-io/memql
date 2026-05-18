@@ -52,7 +52,7 @@ var AgentCardSummarySchemaJSON = json.RawMessage(`{
 // aiSuggest({domain: "agentCardSummary", payload: ...}).
 type AgentCardSummaryInput struct {
 	Name        string
-	Role        string // "general_assistant" or "specialist"
+	Role        string // "assistant" or "specialist"
 	RoleSlug    string // "it_support" / "accounting_finance" / etc.
 	Description string
 	Personality string

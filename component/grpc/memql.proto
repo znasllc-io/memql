@@ -1130,7 +1130,7 @@ message ActingAgentIdentity {
   string description = 3;
   string personality = 4;     // inline persona block
   string system_prompt = 5;   // additional system instructions
-  // Guardrail-routing role. One of: "specialist", "general_assistant".
+  // Guardrail-routing role. One of: "specialist", "assistant".
   // Empty string defaults to specialist on the consumer side.
   string role = 6;
   repeated string domains = 7;
@@ -1156,9 +1156,9 @@ message AgentTurnRoutingContext {
   // Guardrail turn mode set by the cognition router. Drives the three
   // branches in the agentReply template:
   //   "answer"            -- specialist in scope; answer normally.
-  //   "fallback_attempt"  -- general assistant stretching on a soft gap;
+  //   "fallback_attempt"  -- assistant stretching on a soft gap;
   //                          try with general knowledge, flag uncertainty.
-  //   "escalation_notice" -- general assistant cannot help (hard gap);
+  //   "escalation_notice" -- assistant cannot help (hard gap);
   //                          acknowledge + flag for humans, do not attempt
   //                          the substantive answer.
   // Empty string defaults to "answer" on the consumer side.
@@ -1614,7 +1614,7 @@ message RevokeWorkerTokenResult {
 // inside memql, with the partition / actor / forUserId server-stamped.
 //
 // Specialists are NEVER voice. The voice-agent only ever publishes
-// for the General Assistant in a space. Specialist replies that the
+// for the Assistant in a space. Specialist replies that the
 // cognition handler dispatches alongside the GA's response land in
 // chat via the normal agent dispatch path; they never reach the
 // voice-agent.
@@ -1626,7 +1626,7 @@ message RevokeWorkerTokenResult {
 message VoiceAgentSessionStart {
   string request_id = 1;
   string space_id = 2;      // v1:cognition:space.id
-  string ga_agent_id = 3;   // v1:agents:agent.id of the General Assistant
+  string ga_agent_id = 3;   // v1:agents:agent.id of the Assistant
   string room_name = 4;     // LiveKit room name
   // Optional: identity hint for the avatar vendor. Currently
   // 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the
@@ -1688,11 +1688,9 @@ message VoiceAgentPartialAck {
 }
 
 // VoiceAgentFinalTranscript carries the user's final utterance.
-// Memql inserts the canonical chat row -- v1:cognition:utterance
-// for the group thread, v1:cognition:privateUtterance for the
-// team thread (decided by thread_context). Memql server-stamps
-// partition, createdBy, forUserId; the voice-agent provides only
-// content + speaker context.
+// Memql inserts the canonical chat row (v1:cognition:utterance)
+// and server-stamps partition + createdBy; the voice-agent provides
+// only content + speaker context.
 message VoiceAgentFinalTranscript {
   string request_id = 1;
   string space_id = 2;
@@ -1713,7 +1711,7 @@ message VoiceAgentFinalAck {
   string error_message = 6;
 }
 
-// VoiceAgentTurnRequest asks memql to drive the General Assistant
+// VoiceAgentTurnRequest asks memql to drive the Assistant
 // for one turn. Memql runs the conductor (GA-always-primary on
 // voice triggers), then the GA's agent tool loop, and streams
 // the GA's response prose back via VoiceAgentTurnDelta. Tools

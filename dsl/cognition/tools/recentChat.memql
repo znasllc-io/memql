@@ -1,0 +1,41 @@
+// recentChat -- read-only space-chat + space-context lens
+// ========================================================
+//
+// The assistant's window into the space's single utterance stream
+// plus space metadata. Read-only.
+//
+// Five operations selected via the discriminator `operation`:
+//
+//   readRecent({count?})                 -- last N utterances
+//   readByKeyword({keyword})             -- recent utterances
+//                                            containing a substring
+//   readByTime({fromTime, toTime})       -- utterances in an
+//                                            ISO-8601 window
+//   getSpaceContext()                    -- title, purpose,
+//                                            architecture, status
+//   listParticipants()                   -- humans + agents
+//                                            currently active
+//
+// Single-chat architecture: every space has one v1:cognition:utterance
+// stream visible to all participants. The handler reads only that
+// concept.
+//
+// CITATION:
+//   When the assistant quotes a returned utterance in their reply,
+//   attach citations[].kind = "utterance" with the utteranceId so
+//   the frontend renders a click-to-jump chip in the chat panel.
+
+@enabled
+@handler(type="function", name="recentChat")
+@requires("recent_chat")
+@executionTime("fast")
+@description("Read recent space-chat content + space context. Read-only. The assistant's window into the space's utterance stream.")
+tool recentChat {
+  spaceId    string  @required @description("v1:cognition:space.id of the active space. Auto-injected by the agent runtime; LLM should NOT supply this.")
+  agentId    string  @description("Calling agent id. Auto-injected by the agent runtime.")
+  operation  string  @required @enum("readRecent", "readByKeyword", "readByTime", "getSpaceContext", "listParticipants") @description("Which read operation to dispatch. readRecent and readByKeyword are the most common; getSpaceContext and listParticipants are useful when the assistant needs to reason about who is here / what the space is for.")
+  count      int     @description("readRecent: how many recent utterances (default 20, max 100).")
+  keyword    string  @description("readByKeyword: substring (case-insensitive) to match against utterance text.")
+  fromTime   string  @description("readByTime: ISO-8601 inclusive lower bound.")
+  toTime     string  @description("readByTime: ISO-8601 inclusive upper bound.")
+}

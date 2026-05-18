@@ -28,9 +28,9 @@ import (
 //	use agents.agent
 //
 //	@scope("perUser")
-//	seed generalAssistant {
-//	  name:        "General Assistant"
-//	  role:        "general_assistant"
+//	seed assistant {
+//	  name:        "Assistant"
+//	  role:        "assistant"
 //	  providerConfig {
 //	    llm {
 //	      policyName: "balancedChat"

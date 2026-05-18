@@ -309,7 +309,7 @@ var fileTopUseClauseRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za
 // block in the file to the same target concept. This is the
 // canonical authoring pattern -- the role catalog under
 // dsl/agents/roles/ packs dozens of seeds per file sharing one use
-// clause, and the platform agents (generalAssistant.memql etc.)
+// clause, and the platform agents (assistant.memql etc.)
 // share the same one-use-many-seeds convention even when the count
 // is one.
 //

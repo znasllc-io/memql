@@ -10,10 +10,8 @@ import "fmt"
 
 // Cognition domain concepts (v1:cognition:*)
 const (
-	ConceptCognitionMisrouteFeedback    = "v1:cognition:misrouteFeedback"
 	ConceptCognitionParticipant         = "v1:cognition:participant"
 	ConceptCognitionParticipantPresence = "v1:cognition:participant:presence"
-	ConceptCognitionPrivateUtterance    = "v1:cognition:privateUtterance"
 	ConceptCognitionSession             = "v1:cognition:session"
 	ConceptCognitionSpace               = "v1:cognition:space"
 	ConceptCognitionSpaceContext        = "v1:cognition:space:context"
@@ -84,10 +82,8 @@ const (
 func AllFilesystemConcepts() []string {
 	return []string{
 		// cognition
-		ConceptCognitionMisrouteFeedback,
 		ConceptCognitionParticipant,
 		ConceptCognitionParticipantPresence,
-		ConceptCognitionPrivateUtterance,
 		ConceptCognitionSession,
 		ConceptCognitionSpace,
 		ConceptCognitionSpaceContext,

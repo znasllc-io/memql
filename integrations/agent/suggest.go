@@ -13,7 +13,7 @@ import (
 // listed in agentSuggestSystemPrompt, gives the model provider-enforced
 // shape (OpenAI's strict mode uses constrained decoding), and keeps
 // PostProcessAgentSuggestion as a sanity pass for values we can't
-// express in JSON Schema cleanly (e.g. coercing 'general_assistant'
+// express in JSON Schema cleanly (e.g. coercing 'assistant'
 // out of role suggestions and ensuring core tools end up in the list).
 //
 // Kept as a literal so the runtime cost is a single parse. Exported so
@@ -97,7 +97,7 @@ const agentSuggestSystemPrompt = `Configure an AI agent from a user description.
 
 Required fields:
 - name: single word (e.g. Aria, Atlas, Nova, Felix, Jade, Penny)
-- role: one of: accounting_finance, human_resources, customer_service, quality_assurance, sales_marketing, it_support, legal_compliance, operations, project_management, research_development, training_education. DO NOT suggest general_assistant -- every user is auto-provisioned exactly one General Assistant already (a per-user singleton), so the create-agent flow rejects that role.
+- role: one of: accounting_finance, human_resources, customer_service, quality_assurance, sales_marketing, it_support, legal_compliance, operations, project_management, research_development, training_education. DO NOT suggest assistant -- every user is auto-provisioned exactly one Assistant already (a per-user singleton), so the create-agent flow rejects that role.
 - gender: "male" or "female" (default: female)
 - personalityStyles: 2-4 from: friendly, professional, assertive, empathetic, analytical, creative, patient, concise
 - knowledgeDomains: 3-6 relevant domains. Pick from the catalog the user implied; "business_administration" is the org-wide baseline domain a specialist can opt into when general business literacy is part of the role.
@@ -143,8 +143,8 @@ func BuildAgentSuggestMessages(description string, existingAgents []ExistingAgen
 // defaults (core tools, name without spaces, valid role). The
 // business_administration knowledge domain is no longer force-added
 // here -- it's a regular catalog domain specialists can opt into and
-// it's auto-attached + locked only on the General Assistant via
-// provisionGeneralAssistant. Forcing it on every suggested specialist
+// it's auto-attached + locked only on the Assistant via
+// provisionAssistant. Forcing it on every suggested specialist
 // (the previous behaviour) shipped extra training-time embedding work
 // the user never asked for.
 func PostProcessAgentSuggestion(suggestion map[string]any, existingAgents []ExistingAgent) {
@@ -172,14 +172,14 @@ func PostProcessAgentSuggestion(suggestion map[string]any, existingAgents []Exis
 		return
 	}
 
-	// Coerce general_assistant away. The JSON Schema enum excludes it,
+	// Coerce assistant away. The JSON Schema enum excludes it,
 	// so OpenAI's strict structured-output path cannot emit it; this
 	// is a defense-in-depth fallback for non-strict providers (and
 	// future schema drift). GA is reserved for the auto-provisioned
-	// per-user Sofia created by provisionGeneralAssistantOnUserCreate;
+	// per-user Sofia created by provisionAssistantOnUserCreate;
 	// the frontend picker also excludes it and would render an
 	// undefined value if the suggestion slipped through.
-	if role, ok := s["role"].(string); ok && role == "general_assistant" {
+	if role, ok := s["role"].(string); ok && role == "assistant" {
 		s["role"] = "customer_service"
 	}
 

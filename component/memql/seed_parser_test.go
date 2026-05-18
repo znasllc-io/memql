@@ -47,13 +47,13 @@ use agents.agent
 
 @version("1.0.0")
 @scope("perUser")
-@templateFile("templates/generalAssistant.tmpl")
-@description("Per-user General Assistant baseline.")
-seed generalAssistant {
-  name:        "General Assistant"
+@templateFile("templates/assistant.tmpl")
+@description("Per-user Assistant baseline.")
+seed assistant {
+  name:        "Assistant"
   description: "Designated fallback when no specialist fits."
-  role:        "general_assistant"
-  roleSlug:    "general_assistant"
+  role:        "assistant"
+  roleSlug:    "assistant"
   gender:      "female"
 
   providerConfig {
@@ -83,18 +83,18 @@ seed generalAssistant {
 		t.Fatalf("parse failed: %v", err)
 	}
 
-	if decl.name != "generalAssistant" {
+	if decl.name != "assistant" {
 		t.Errorf("name = %q", decl.name)
 	}
 	if decl.scope != "perUser" {
 		t.Errorf("scope = %q, want perUser", decl.scope)
 	}
-	if decl.templateFile != "templates/generalAssistant.tmpl" {
+	if decl.templateFile != "templates/assistant.tmpl" {
 		t.Errorf("templateFile = %q", decl.templateFile)
 	}
 
 	// Top-level scalars
-	if got := decl.body.fields["name"].str; got != "General Assistant" {
+	if got := decl.body.fields["name"].str; got != "Assistant" {
 		t.Errorf("body.name = %q", got)
 	}
 

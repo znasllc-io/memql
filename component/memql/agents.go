@@ -21,7 +21,7 @@ type AgentDefinition struct {
 	// ("row:<row-id>" after the seed migration).
 	Name        string
 	Description string
-	Role        string // "specialist" | "general_assistant"
+	Role        string // "specialist" | "assistant"
 	RoleSlug    string
 	Kind        string // "system" | "user" -- platform infrastructure vs user-facing. Read directly from the row's `kind` field. Cognition routing skips Kind=="system" agents from utterance dispatch candidates; the agent factory skips them from match/extend dedupe targets.
 	DisplayName string
