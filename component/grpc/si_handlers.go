@@ -39,9 +39,9 @@ func (s *streamSession) sendAiError(requestId, correlate string, message string,
 }
 
 // handleAiChat handles non-streaming and streaming chat requests.
-func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiChatMsg) error {
+func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SIChatMsg) error {
 	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "ai_chat request missing")
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_chat request missing")
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
@@ -50,10 +50,10 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	// worker peer of the configured target type (Agent by default).
 	// The wire protocol back to the client is unchanged -- responses
 	// arrive as standard MemqlServerMessage payloads on the same
-	// bidirectional stream. shouldProxyAi short-circuits to false on
+	// bidirectional stream. shouldProxySI short-circuits to false on
 	// worker binaries so they execute locally.
-	if s.shouldProxyAi(nodeTargetForChat()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForChat())
+	if s.shouldProxySI(nodeTargetForChat()) {
+		return s.proxySI(envelope, requestId, nodeTargetForChat())
 	}
 
 	if s.service.engine == nil {
@@ -117,9 +117,9 @@ func (s *streamSession) handleAiChatNonStream(requestId, correlate string, messa
 
 	_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_AiChatResult{
-			AiChatResult: &memqlv1.AiChatResult{
+			SIChatResult: &memqlv1.SIChatResult{
 				RequestId: requestId,
-				Message: &memqlv1.AiChatMessage{
+				Message: &memqlv1.SIChatMessage{
 					Role:    "assistant",
 					Content: result,
 				},
@@ -165,11 +165,11 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 			fullContent.WriteString(chunk.Content)
 			_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_AiChunk{
-					AiChunk: &memqlv1.AiStreamChunk{
+					SIChunk: &memqlv1.SIStreamChunk{
 						StreamId:  requestId,
 						RequestId: requestId,
 						Index:     idx,
-						Chunk:     &memqlv1.AiStreamChunk_TextDelta{TextDelta: chunk.Content},
+						Chunk:     &memqlv1.SIStreamChunk_TextDelta{TextDelta: chunk.Content},
 						Done:      chunk.Done,
 					},
 				},
@@ -180,9 +180,9 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 		if chunk.Done {
 			_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_AiChatResult{
-					AiChatResult: &memqlv1.AiChatResult{
+					SIChatResult: &memqlv1.SIChatResult{
 						RequestId: requestId,
-						Message: &memqlv1.AiChatMessage{
+						Message: &memqlv1.SIChatMessage{
 							Role:    "assistant",
 							Content: fullContent.String(),
 						},
@@ -194,15 +194,15 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 }
 
 // handleAiSpeech handles text-to-speech requests.
-func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiSpeechMsg) error {
+func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SISpeechMsg) error {
 	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "ai_speech request missing")
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_speech request missing")
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxyAi(nodeTargetForSpeech()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForSpeech())
+	if s.shouldProxySI(nodeTargetForSpeech()) {
+		return s.proxySI(envelope, requestId, nodeTargetForSpeech())
 	}
 
 	if s.service.engine == nil {
@@ -246,7 +246,7 @@ func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_AiSpeechResult{
-				AiSpeechResult: &memqlv1.AiSpeechResult{
+				SISpeechResult: &memqlv1.SISpeechResult{
 					RequestId: requestId,
 					Audio:     audioBytes,
 					Format:    format,
@@ -259,15 +259,15 @@ func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg
 }
 
 // handleAiTranscribe handles speech-to-text requests.
-func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiTranscribeMsg) error {
+func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SITranscribeMsg) error {
 	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "ai_transcribe request missing")
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_transcribe request missing")
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	if s.shouldProxyAi(nodeTargetForTranscribe()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForTranscribe())
+	if s.shouldProxySI(nodeTargetForTranscribe()) {
+		return s.proxySI(envelope, requestId, nodeTargetForTranscribe())
 	}
 
 	if s.service.sttProvider == nil {
@@ -322,7 +322,7 @@ func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage,
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_AiTranscribeResult{
-				AiTranscribeResult: &memqlv1.AiTranscribeResult{
+				SITranscribeResult: &memqlv1.SITranscribeResult{
 					RequestId: requestId,
 					Text:      text,
 				},
@@ -334,9 +334,9 @@ func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage,
 }
 
 // handleAiSuggest handles AI suggestion requests for spaces, agents, and groups.
-func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiSuggestMsg) error {
+func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SISuggestMsg) error {
 	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "ai_suggest request missing")
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_suggest request missing")
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
@@ -346,8 +346,8 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "domain is required")
 	}
 
-	if s.shouldProxyAi(nodeTargetForSuggest()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForSuggest())
+	if s.shouldProxySI(nodeTargetForSuggest()) {
+		return s.proxySI(envelope, requestId, nodeTargetForSuggest())
 	}
 
 	if s.service.engine == nil {
@@ -622,7 +622,7 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 			Payload: &memqlv1.MemqlServerMessage_AiSuggestResult{
-				AiSuggestResult: &memqlv1.AiSuggestResult{
+				SISuggestResult: &memqlv1.SISuggestResult{
 					RequestId: requestId,
 					Domain:    domain,
 					Result:    resultStruct,
@@ -652,7 +652,7 @@ func sttFormatFromMIME(mimeType string) string {
 // chat provider when available, falling back to the regular suggest
 // chat provider. The HTTP handlers in component/server/sihttp/ go
 // through a sibling helper with the same contract; this one lives
-// here so the gRPC AiSuggestMsg path doesn't need to import sihttp
+// here so the gRPC SISuggestMsg path doesn't need to import sihttp
 // just for the plumbing.
 func callSuggestWithSchema(
 	ctx context.Context,

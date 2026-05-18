@@ -98,7 +98,7 @@ func ParseWorkerPeers(raw string) []WorkerTarget {
 
 // WorkerDialer opens outbound NodeService streams from a BFF to each
 // worker-type peer so that the BFF can push NodeClientMessage envelopes
-// (AiForwardRequest / AiForwardCancel, and later capability /
+// (SIForwardRequest / SIForwardCancel, and later capability /
 // event-forward messages) through them.
 //
 // The dial set is reconciled from two sources:
@@ -118,7 +118,7 @@ func ParseWorkerPeers(raw string) []WorkerTarget {
 // Each active dial owns a *peerConnection (the same type ParentConnector
 // uses). On NodeWelcome we register the peer as monitored in
 // PeerManager and bind the *peerConnection onto its PeerEntry so
-// AiForwardRouter / EventBridge / CapabilityRouter can find it.
+// SIForwardRouter / EventBridge / CapabilityRouter can find it.
 //
 // WorkerDialer is BFF-only -- workers themselves never dial peers in
 // this topology. Callers that are not BFF should not construct one.
@@ -147,12 +147,12 @@ type WorkerDialer struct {
 	unsubs  []func()
 	trigger chan struct{} // buffered(1); non-nil once run() has started
 
-	// AI forwarding response sink. Every AiForwardResponse arriving on a
+	// AI forwarding response sink. Every SIForwardResponse arriving on a
 	// managed connection is dispatched here; on non-BFF binaries or
 	// before SetAiForwardResponseSink is called the messages are
 	// dropped (the router on the BFF is the only legitimate consumer).
 	sinkMu               sync.RWMutex
-	aiForwardSink        AiForwardResponseSink
+	aiForwardSink        SIForwardResponseSink
 	workbenchForwardSink WorkbenchForwardResponseSink
 }
 
@@ -251,10 +251,10 @@ func (wd *WorkerDialer) allowDialType(t NodeType) bool {
 }
 
 // SetAiForwardResponseSink installs the sink that receives
-// AiForwardResponse messages arriving on our managed connections.
+// SIForwardResponse messages arriving on our managed connections.
 // Called during bootstrap on BFF binaries; workers leave this nil.
 // Thread-safe; may be called at any time.
-func (wd *WorkerDialer) SetAiForwardResponseSink(sink AiForwardResponseSink) {
+func (wd *WorkerDialer) SetAiForwardResponseSink(sink SIForwardResponseSink) {
 	if wd == nil {
 		return
 	}
@@ -618,7 +618,7 @@ func (wd *WorkerDialer) shutdownEntry(entry *dialEntry) {
 // handleServerMessage is the onMessage callback for each managed
 // connection. We mirror the relevant handling in parent_connector.go
 // (register peer on welcome, absorb peer introductions, route
-// AiForwardResponse into the sink).
+// SIForwardResponse into the sink).
 func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeServerMessage) {
 	if msg == nil {
 		return
@@ -693,7 +693,7 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 		sink := wd.aiForwardSink
 		wd.sinkMu.RUnlock()
 		if sink != nil {
-			sink.Dispatch(payload.AiForwardResponse)
+			sink.Dispatch(payload.SIForwardResponse)
 		}
 
 	case *nodev1.NodeServerMessage_WorkbenchForwardResponse:

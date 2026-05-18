@@ -17,7 +17,7 @@ import (
 // out of role suggestions and ensuring core tools end up in the list).
 //
 // Kept as a literal so the runtime cost is a single parse. Exported so
-// the gRPC AiSuggestMsg handler has one canonical schema for agent
+// the gRPC SISuggestMsg handler has one canonical schema for agent
 // suggestions across the cluster.
 var AgentSuggestSchemaJSON = json.RawMessage(`{
   "type": "object",

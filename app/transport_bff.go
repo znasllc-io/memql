@@ -6,8 +6,8 @@ package app
 // the HTTP server (for ws upgrade + the auth / attachment exceptions),
 // and any BFF-specific domain endpoints added by product branches.
 // SI operations (chat, speech, transcribe, agent/space/group suggest)
-// live on MemqlService.Stream via AiChatMsg / AiSpeechMsg / AiTranscribeMsg /
-// AiSuggestMsg and are proxied across nodes by AiForwardRouter.
+// live on MemqlService.Stream via SIChatMsg / SISpeechMsg / SITranscribeMsg /
+// SISuggestMsg and are proxied across nodes by SIForwardRouter.
 //
 // Polyphon: the BFF also wires the LiveKit room provider so browsers
 // can fetch a room token (PolyphonRoomTokenMsg) directly from the
