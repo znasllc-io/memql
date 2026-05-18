@@ -117,7 +117,32 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 				registry.setEntry(entry)
 				return nil
 			}
-			client, clientErr := newSIProvider(*cfg)
+			// Resolve @extends inheritance. The DSL pattern is:
+			//
+			//   @base @type("Anthropic")
+			//   provider anthropic { auth { apiKey env(...) } }
+			//
+			//   @extends("anthropic") @type("AnthropicStream") @model("...")
+			//   provider streamClaudeOpus { params { ... } }
+			//
+			// Children typically declare their own @type / @model
+			// (since the base is wire-shape generic and the child
+			// pins the specific API path), but they ALMOST NEVER
+			// re-declare auth -- the env() placeholders live on the
+			// base. Without inheritance the child boots with empty
+			// auth and newSIProvider rejects it with "missing
+			// auth.apiKey". Same for the Type field on children that
+			// don't bother to redeclare @type (e.g. chat53Latest
+			// only sets @extends("openai") + @model).
+			//
+			// File-order matters here: the base must register before
+			// any child that extends it. The DSL tree's providers.memql
+			// keeps bases at the top of each vendor block, so the
+			// linear walk works -- but if a future split breaks that
+			// invariant, this lookup returns nothing and the child
+			// fails to construct (matching the old behavior).
+			resolveProviderExtends(&entry.Config, registry)
+			client, clientErr := newSIProvider(entry.Config)
 			if clientErr != nil {
 				// Construction failure (missing auth, unsupported
 				// type, etc.) -- stash the error on the entry so
@@ -126,7 +151,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 				entry.err = clientErr
 				if logger != nil {
 					logger.Warn("memql.unifiedProviderLoader: provider client construction failed; registered as unavailable",
-						"provider", cfg.Name, "type", cfg.Type, "error", clientErr)
+						"provider", entry.Config.Name, "type", entry.Config.Type, "error", clientErr)
 				}
 			} else {
 				entry.Client = client
@@ -390,4 +415,54 @@ func resolveUnifiedPromptTemplate(decl *promptDecl, memqlPath string, tree fs.FS
 		return decl.templateSource, nil
 	}
 	return "", fmt.Errorf("prompt %q: template or templateFile is required", decl.name)
+}
+
+// resolveProviderExtends fills in fields a child provider didn't
+// declare explicitly by copying from the @extends base. The DSL
+// convention is "base carries vendor-wide auth + the canonical
+// @type; children pin a model and override params." Without this
+// step, children that omit @type (most of them) boot with Type=""
+// and newSIProvider rejects with "unsupported provider type" --
+// and children that omit auth (every one of them) fail with
+// "missing auth.apiKey".
+//
+// Only fields the child left empty get filled. An explicit
+// declaration on the child always wins -- @extends is inheritance,
+// not override.
+//
+// File-order assumption: the base must be registered before the
+// child. providers.memql keeps bases at the top of each vendor
+// block, so the linear loader walk satisfies this naturally. A
+// future split that disturbs the ordering would surface as
+// "missing auth.apiKey" on the first call after rebuild; in that
+// case the fix is either re-ordering the file or doing a two-pass
+// resolve (bases first, then children).
+func resolveProviderExtends(cfg *ProviderConfig, registry *ProviderRegistry) {
+	if cfg == nil || registry == nil {
+		return
+	}
+	parentName := strings.TrimSpace(cfg.Extends)
+	if parentName == "" {
+		return
+	}
+	parent, ok := registry.Entry(parentName)
+	if !ok || parent == nil {
+		return
+	}
+	if cfg.Type == "" {
+		cfg.Type = parent.Config.Type
+	}
+	if len(cfg.Auth) == 0 && len(parent.Config.Auth) > 0 {
+		cfg.Auth = make(map[string]string, len(parent.Config.Auth))
+		for k, v := range parent.Config.Auth {
+			cfg.Auth[k] = v
+		}
+	} else if len(parent.Config.Auth) > 0 {
+		// Merge: parent fields the child didn't supply.
+		for k, v := range parent.Config.Auth {
+			if _, exists := cfg.Auth[k]; !exists {
+				cfg.Auth[k] = v
+			}
+		}
+	}
 }
