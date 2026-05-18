@@ -21,11 +21,11 @@ func TestIntegrationName(t *testing.T) {
 	}
 }
 
-func TestCapabilities_InvokeAndEnsureForGoal(t *testing.T) {
+func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	caps := i.Capabilities()
-	if len(caps) != 2 {
-		t.Fatalf("Capabilities count: got %d want 2 (invoke + ensureForGoal)", len(caps))
+	if len(caps) != 3 {
+		t.Fatalf("Capabilities count: got %d want 3 (invoke + ensureForGoal + askSpecialist)", len(caps))
 	}
 	byName := make(map[string]bool, len(caps))
 	for _, c := range caps {
@@ -51,12 +51,22 @@ func TestCapabilities_InvokeAndEnsureForGoal(t *testing.T) {
 				}
 			}
 		}
+		if c.Name == "askSpecialist" {
+			for _, key := range []string{"role", "query"} {
+				if _, ok := c.ArgsSchema[key]; !ok {
+					t.Errorf("askSpecialist ArgsSchema missing %q", key)
+				}
+			}
+		}
 	}
 	if !byName["invoke"] {
 		t.Error("missing 'invoke' capability")
 	}
 	if !byName["ensureForGoal"] {
 		t.Error("missing 'ensureForGoal' capability")
+	}
+	if !byName["askSpecialist"] {
+		t.Error("missing 'askSpecialist' capability")
 	}
 }
 
