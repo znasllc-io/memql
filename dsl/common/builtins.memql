@@ -754,3 +754,27 @@ builtin voiceResolve {
   voiceId   string  @required
   provider  string
 }
+
+// ---- queries/v1/common/builtin/builtinDateKeyInTimezone.memql ----
+
+// builtinDateKeyInTimezone -- IANA-timezone YYYY-MM-DD date key.
+//
+// Computes the calendar date in the given IANA timezone (e.g.
+// "America/Los_Angeles"). Returns one row whose payload is
+// `{dateKey: "2026-05-18", tzUsed: "America/Los_Angeles"}`. Falls
+// back to UTC on empty / unparseable timezone -- the handler never
+// errors on a bad tz string, so the daily-space automations always
+// get *some* date back instead of crashing on a typo'd user pref.
+//
+// Daily-space automations (provisionDailySpaceOnUserCreate,
+// ensureDailySpaceOnLogin, rolloverDailySpace) call this to compute
+// the dateKey portion of the deterministic space id
+// `daily-<userHash>-<dateKey>`.
+
+@enabled
+@executor("integration.timeutil.dateKeyInTimezone")
+@description("Compute today's YYYY-MM-DD date key in the given IANA timezone. Falls back to UTC on empty/invalid timezone.")
+builtin dateKeyInTimezone {
+  timezone  string
+  now       string
+}
