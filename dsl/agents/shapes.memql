@@ -47,6 +47,7 @@ shape agentFull {
   agent.systemPrompt
   agent.role
   agent.roleSlug
+  agent.kind
   agent.capabilities
   agent.avatar
   agent.providerConfig
@@ -76,6 +77,7 @@ shape agentMinimalForDedupe {
   agent.name
   agent.role
   agent.roleSlug
+  agent.kind
   agent.description
   agent.capabilities
   agent.lineage

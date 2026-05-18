@@ -1572,6 +1572,17 @@ func (c *CognitionIntegration) buildAgentCandidates(ctx context.Context, siParti
 			continue
 		}
 
+		// Platform-infrastructure agents (MemQL Planner, MemQL Trainer
+		// and any other kind=="system" entries) must never be candidates
+		// for utterance routing. They're invoked directly by the
+		// planner service, not by the conductor / router. Defensive --
+		// the seeds set autoJoin=false so they shouldn't reach this
+		// pool anyway, but a stray join (manual add, future bug)
+		// must not turn them into routing targets.
+		if agent.Kind == "system" {
+			continue
+		}
+
 		speakWhen := ""
 		if agent.TriggerBehavior != nil {
 			if sw, ok := agent.TriggerBehavior["speakWhen"].(string); ok {
