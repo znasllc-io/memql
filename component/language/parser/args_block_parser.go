@@ -56,13 +56,38 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	name := p.current.Literal
 	p.advance()
 
-	if !p.check(TokenIdentifier) {
+	// Accept either a bare type (`object`, `string`, ...) or an array
+	// shorthand (`[]object`, `[]string`, ...). The shorthand is
+	// translated to {Type: "array", Items: {Type: <inner>}} so the
+	// existing validator path -- which already understands Type=array
+	// + Items -- handles it without further changes.
+	var (
+		typ      string
+		itemType string
+	)
+	if p.check(TokenBracketOpen) {
+		p.advance() // consume `[`
+		if !p.check(TokenBracketClose) {
+			return nil, newParseErrorf(&p.current, "expected `]` after `[` in args field %q array shorthand", name)
+		}
+		p.advance() // consume `]`
+		if !p.check(TokenIdentifier) {
+			return nil, newParseErrorf(&p.current, "expected element type after `[]` in args field %q", name)
+		}
+		itemType = p.current.Literal
+		p.advance()
+		typ = "array"
+	} else if p.check(TokenIdentifier) {
+		typ = p.current.Literal
+		p.advance()
+	} else {
 		return nil, newParseErrorf(&p.current, "expected type after field name %q in args block", name)
 	}
-	typ := p.current.Literal
-	p.advance()
 
 	field := &ArgsField{Name: name, Type: typ, Optional: true}
+	if itemType != "" {
+		field.Items = &ArgsField{Type: itemType}
+	}
 
 	for p.check(TokenAt) {
 		p.advance() // consume `@`
