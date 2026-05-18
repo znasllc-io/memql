@@ -64,6 +64,16 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 // NAME { ... }` block, and upserts into the registry. Provider files
 // bundle a vendor base + all its models in one file, so the parser
 // returns a slice (handled by baseloader.LoadMany).
+//
+// Providers ride the MemQL-DSL parser (parseProviderMemQL), not the
+// legacy JSON path (parseProviderConfigs). Until 2026-05-17 this
+// loader called parseProviderConfigs by mistake, which tried to
+// json.Unmarshal the MemQL provider syntax and silently failed every
+// slice. Result: every node booted with providers=0 and every SI
+// call returned `provider "<name>" not available` -- including the
+// planner agent loop's plannerAgent invocation. The fix is one line
+// (parseProviderConfigs -> parseProviderMemQL) plus the slice
+// wrapping below.
 func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("provider registry is nil")
@@ -75,15 +85,14 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 		baseloader.ReadAll(logger),
 		extractAdapter,
 		func(origin string, raw []byte) ([]*ProviderConfig, error) {
-			cfgs, err := parseProviderConfigs(origin, raw)
+			cfg, err := parseProviderMemQL(origin, raw)
 			if err != nil {
 				return nil, err
 			}
-			out := make([]*ProviderConfig, len(cfgs))
-			for i := range cfgs {
-				out[i] = &cfgs[i]
+			if cfg == nil {
+				return nil, nil
 			}
-			return out, nil
+			return []*ProviderConfig{cfg}, nil
 		},
 		func(cfg *ProviderConfig) error {
 			registry.setEntry(&ProviderConfigEntry{Config: *cfg})
