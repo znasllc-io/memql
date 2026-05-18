@@ -15,7 +15,7 @@ import (
 
 // AgentForwarder is the narrow interface cognition uses to ship an
 // AgentGenerateTurnMsg to an agent peer. Satisfied by
-// memqlgrpc.AiForwardRouter on cognition binaries; injected via
+// memqlgrpc.SIForwardRouter on cognition binaries; injected via
 // SetAgentForwarder at bootstrap.
 type AgentForwarder interface {
 	Forward(

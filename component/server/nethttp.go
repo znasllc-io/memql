@@ -740,7 +740,7 @@ func PolyphonPreloadPaths() []string {
 
 // AIHTTPPaths used to return the legacy /si/* HTTP endpoints. All of
 // them have been retired in favour of MemqlService.Stream with
-// AiChatMsg / AiSpeechMsg / AiTranscribeMsg / AiSuggestMsg. The
+// SIChatMsg / SISpeechMsg / SITranscribeMsg / SISuggestMsg. The
 // function stays as an empty stub so callers that walked the list
 // compile without fanning out to every call site; the auth middleware
 // just gets an empty list now.

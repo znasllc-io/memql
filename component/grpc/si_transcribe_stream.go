@@ -34,7 +34,7 @@ type transcribeStream struct {
 	// direct-client path this is streamSession.sendServerMessage wrapped
 	// in a function that preserves correlate_to; on the forwarded path
 	// it is forwardedStream.Send, which re-wraps each
-	// MemqlServerMessage into an AiForwardResponse. Using the SAME
+	// MemqlServerMessage into an SIForwardResponse. Using the SAME
 	// send for deltas and the final Complete preserves ordering and
 	// lets isTerminalServerPayload close the inflight only on Complete.
 	send func(*memqlv1.MemqlServerMessage) error
@@ -62,11 +62,11 @@ type transcribeStream struct {
 // Subsequent Chunk / End envelopes find the session by request_id.
 func (s *streamSession) handleAiTranscribeStreamStart(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.AiTranscribeStreamStart,
+	msg *memqlv1.SITranscribeStreamStart,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
-			"ai_transcribe_stream_start request missing")
+			"si_transcribe_stream_start request missing")
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
@@ -74,8 +74,8 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// BFF short-circuit: open a forwarded stream to a Voice worker.
 	// The Chunk/End envelopes will land on BFF later and flow through
 	// ForwardContinuation on the same inflight entry.
-	if s.shouldProxyAi(nodeTargetForTranscribe()) {
-		return s.proxyAi(envelope, requestId, nodeTargetForTranscribe())
+	if s.shouldProxySI(nodeTargetForTranscribe()) {
+		return s.proxySI(envelope, requestId, nodeTargetForTranscribe())
 	}
 
 	// Local path: open the STT session here.
@@ -142,11 +142,11 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 // streaming session identified by request_id.
 func (s *streamSession) handleAiTranscribeStreamChunk(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.AiTranscribeStreamChunk,
+	msg *memqlv1.SITranscribeStreamChunk,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
-			"ai_transcribe_stream_chunk request missing")
+			"si_transcribe_stream_chunk request missing")
 	}
 	requestId := strings.TrimSpace(msg.GetRequestId())
 	if requestId == "" {
@@ -157,7 +157,7 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 	// BFF proxy: forward the chunk to the same worker Start opened a
 	// stream on. If no inflight exists, the start never went through
 	// (or already closed) -- surface that as InvalidArgument.
-	if s.shouldProxyAi(nodeTargetForTranscribe()) {
+	if s.shouldProxySI(nodeTargetForTranscribe()) {
 		if !s.service.aiForwarder.HasInflight(requestId) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
@@ -196,11 +196,11 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 // emitting Complete.
 func (s *streamSession) handleAiTranscribeStreamEnd(
 	envelope *memqlv1.MemqlClientMessage,
-	msg *memqlv1.AiTranscribeStreamEnd,
+	msg *memqlv1.SITranscribeStreamEnd,
 ) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument,
-			"ai_transcribe_stream_end request missing")
+			"si_transcribe_stream_end request missing")
 	}
 	requestId := strings.TrimSpace(msg.GetRequestId())
 	if requestId == "" {
@@ -209,9 +209,9 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 	}
 
 	// BFF proxy: forward End to the same worker; the worker will emit
-	// AiTranscribeStreamComplete (or close silently on cancel) and the
+	// SITranscribeStreamComplete (or close silently on cancel) and the
 	// BFF's inflight entry closes on the terminal response.
-	if s.shouldProxyAi(nodeTargetForTranscribe()) {
+	if s.shouldProxySI(nodeTargetForTranscribe()) {
 		if !s.service.aiForwarder.HasInflight(requestId) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
@@ -239,7 +239,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 		cancelMsg := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
 			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
-				AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
+				SITranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
 					RequestId:  requestId,
 					Text:       "",
 					DurationMs: time.Since(ts.startTime).Milliseconds(),
@@ -291,7 +291,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 	complete := &memqlv1.MemqlServerMessage{
 		CorrelateTo: ts.correlate,
 		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
-			AiTranscribeStreamComplete: &memqlv1.AiTranscribeStreamComplete{
+			SITranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
 				RequestId:  requestId,
 				Text:       text,
 				DurationMs: durationMs,
@@ -315,7 +315,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 }
 
 // pumpDeltas drains the STT provider's interim result channel and
-// relays each as an AiTranscribeStreamDelta. Exits when the provider
+// relays each as an SITranscribeStreamDelta. Exits when the provider
 // closes its Receive channel (Finalize / Close). Duplicate consecutive
 // texts are skipped: providers that emit accumulated text would
 // otherwise send the same final sentence again on every "utterance
@@ -342,7 +342,7 @@ func (ts *transcribeStream) pumpDeltas(logger interface {
 		delta := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
 			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
-				AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
+				SITranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
 					RequestId:  ts.requestId,
 					Text:       text,
 					IsFinal:    result.IsFinal,

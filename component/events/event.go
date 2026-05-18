@@ -94,7 +94,7 @@ func (k Kind) String() string {
 	case KindGraphUpdate:
 		return "graph_update"
 	case KindAIEvent:
-		return "ai_event"
+		return "si_event"
 	case KindNodeCreated:
 		return "node_created"
 	case KindNodeDeleted:
@@ -104,11 +104,11 @@ func (k Kind) String() string {
 	case KindQueryExecuted:
 		return "query_executed"
 	case KindAICompletionStarted:
-		return "ai_completion_started"
+		return "si_completion_started"
 	case KindAICompletionFinished:
-		return "ai_completion_finished"
+		return "si_completion_finished"
 	case KindAICompletionError:
-		return "ai_completion_error"
+		return "si_completion_error"
 	case KindSessionOpened:
 		return "session_opened"
 	case KindSessionClosed:

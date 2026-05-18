@@ -94,11 +94,11 @@ type App struct {
 	// Phase 6: cluster
 	nodeIdentity *node.Identity
 
-	// agentForwarder is the AiForwardRouter used on cognition binaries
+	// agentForwarder is the SIForwardRouter used on cognition binaries
 	// to forward AgentGenerateTurnMsg to agent peers. Nil on all other
 	// node types (BFF uses its own aiForwarder on grpcServer for a
 	// different forwarding flow).
-	agentForwarder *memqlgrpc.AiForwardRouter
+	agentForwarder *memqlgrpc.SIForwardRouter
 
 	// cognitionIntegration is stashed here so cluster.go can inject
 	// the agent-turn forwarder after creating it. Stored as `any` to

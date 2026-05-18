@@ -30,8 +30,8 @@ type NodeServer struct {
 	peerManager              *PeerManager
 	readyCh                  chan struct{}
 	queryExecutor            QueryExecutor
-	aiForwardHandler         AiForwardHandler
-	aiForwardResponse        AiForwardResponseSink
+	aiForwardHandler         SIForwardHandler
+	aiForwardResponse        SIForwardResponseSink
 	workbenchForwardHandler  WorkbenchForwardHandler
 	workbenchForwardResponse WorkbenchForwardResponseSink
 	eventInbound             EventInbound
@@ -49,7 +49,7 @@ func (s *NodeServer) SetQueryExecutor(e QueryExecutor) {
 
 // SetAiForwardHandler installs the worker-side AI/voice request handler.
 // Called during bootstrap on Voice / Agent binaries; BFF leaves nil.
-func (s *NodeServer) SetAiForwardHandler(h AiForwardHandler) {
+func (s *NodeServer) SetAiForwardHandler(h SIForwardHandler) {
 	if s == nil {
 		return
 	}
@@ -57,11 +57,11 @@ func (s *NodeServer) SetAiForwardHandler(h AiForwardHandler) {
 }
 
 // SetAiForwardResponseSink installs the BFF-side response sink for
-// inbound AiForwardResponse messages received over direct peer-to-peer
+// inbound SIForwardResponse messages received over direct peer-to-peer
 // connections the BFF accepts (not just the outbound parent connection;
 // some topologies have the BFF on the server side of the NodeService
 // handshake). Called during bootstrap on BFF binaries.
-func (s *NodeServer) SetAiForwardResponseSink(sink AiForwardResponseSink) {
+func (s *NodeServer) SetAiForwardResponseSink(sink SIForwardResponseSink) {
 	if s == nil {
 		return
 	}
