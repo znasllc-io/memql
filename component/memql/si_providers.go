@@ -2082,9 +2082,11 @@ func (p *anthropicProvider) CallVision(ctx context.Context, prompt string, image
 // ============================================================================
 
 type anthropicStreamProvider struct {
-	client anthropic.Client
-	model  string
-	params map[string]any
+	client  anthropic.Client
+	model   string
+	name    string
+	pricing Pricing
+	params  map[string]any
 }
 
 // Compile-time interface assertions
@@ -2104,9 +2106,11 @@ func newAnthropicStreamProvider(cfg ProviderConfig) (SIProvider, error) {
 		option.WithHTTPClient(streamingHTTPClient()),
 	)
 	return &anthropicStreamProvider{
-		client: client,
-		model:  cfg.Model,
-		params: cfg.Params,
+		client:  client,
+		model:   cfg.Model,
+		name:    cfg.Name,
+		pricing: cfg.Pricing(),
+		params:  cfg.Params,
 	}, nil
 }
 
@@ -2283,12 +2287,59 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 	chunks := make(chan StreamChunk, 100)
 	go func() {
 		defer close(chunks)
+		// Track usage so we can log a single per-call summary line
+		// with token + cost numbers. Same pattern as
+		// CallChatStreamWithTools; surfacing the same data on the
+		// simpler InvokeSI path so callers like the planner (which
+		// goes through Call -> CallStream, not the tools variant)
+		// also produce a grep-able cost line per LLM round trip.
+		var (
+			usageInput         int64
+			usageCacheCreation int64
+			usageCacheRead     int64
+			usageOutput        int64
+		)
 		for stream.Next() {
 			event := stream.Current()
-			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
-				chunks <- StreamChunk{Content: event.Delta.Text}
+			switch event.Type {
+			case "message_start":
+				u := event.Message.Usage
+				usageInput = u.InputTokens
+				usageCacheCreation = u.CacheCreationInputTokens
+				usageCacheRead = u.CacheReadInputTokens
+			case "message_delta":
+				u := event.Usage
+				usageOutput = u.OutputTokens
+				if u.CacheCreationInputTokens > 0 {
+					usageCacheCreation = u.CacheCreationInputTokens
+				}
+				if u.CacheReadInputTokens > 0 {
+					usageCacheRead = u.CacheReadInputTokens
+				}
+			case "content_block_delta":
+				if event.Delta.Type == "text_delta" {
+					chunks <- StreamChunk{Content: event.Delta.Text}
+				}
 			}
 		}
+		// Log usage + cost. Computed cost relies on the provider's
+		// declared Pricing (cfg.Pricing()); when pricing isn't
+		// configured CostFor returns zeros, which is fine -- the
+		// token counts alone tell the operator what was spent.
+		_, _, _, totalUSD := p.pricing.CostFor(
+			int(usageInput+usageCacheCreation),
+			int(usageOutput),
+			int(usageCacheRead),
+		)
+		slog.Info("anthropic stream: usage",
+			"provider", p.name,
+			"model", p.model,
+			"input_tokens", usageInput,
+			"output_tokens", usageOutput,
+			"cache_creation_tokens", usageCacheCreation,
+			"cache_read_tokens", usageCacheRead,
+			"cost_usd", totalUSD,
+		)
 		if err := stream.Err(); err != nil {
 			chunks <- StreamChunk{Error: err, Done: true}
 			return
