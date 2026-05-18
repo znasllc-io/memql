@@ -23,6 +23,7 @@ type AgentDefinition struct {
 	Description string
 	Role        string // "specialist" | "general_assistant"
 	RoleSlug    string
+	Kind        string // "system" | "user" -- platform infrastructure vs user-facing. Read directly from the row's `kind` field. Cognition routing skips Kind=="system" agents from utterance dispatch candidates; the agent factory skips them from match/extend dedupe targets.
 	DisplayName string
 	Personality string
 	Gender      string // "female" | "male"
@@ -289,6 +290,7 @@ func agentDefinitionFromRow(row map[string]any) (*AgentDefinition, bool) {
 		Description: getStringField(payload, "description"),
 		Role:        getStringField(payload, "role"),
 		RoleSlug:    roleSlug,
+		Kind:        getStringField(payload, "kind"),
 		DisplayName: name,
 		Personality: getStringField(payload, "personality"),
 		Gender:      getStringField(payload, "gender"),

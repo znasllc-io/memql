@@ -17,11 +17,12 @@ use agents.agent
 @scope("perUser")
 @description("Per-user Planner Agent. Platform orchestration persona -- decomposes Plans into Tasks, dispatches to specialists, manages retries.")
 seed plannerAgent {
-  name:        "Planner"
+  name:        "MemQL Planner"
   description: "Platform orchestration agent -- decomposes Plans into Tasks, dispatches to specialists, manages retries. Not user-facing in chat."
   personality: "Deliberate, lean, evidence-driven. Never chatty."
   role:        "specialist"
   roleSlug:    "system_planner"
+  kind:        "system"
   gender:      "female"
 
   providerConfig {
