@@ -70,9 +70,20 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	//                          without a relying-party in scope
 	// Both flags are server-stamped at issue time and decoded from
 	// the magic-link row's oauthCtx; neither is request-derived.
-	// Both should land in /admin/, not bounce through an OAuth SPA
-	// callback.
-	if res.Bootstrap || res.AdminSession {
+	//
+	// Subtlety: a Bootstrap link can ALSO carry an OAuth client +
+	// redirect URI when /setup was reached from a relying-party-
+	// driven /login (the cockpit case: it opens /login with
+	// return_to=<loopback>, the pre-bootstrap branch redirects to
+	// /setup preserving the query string, the wizard re-emits the
+	// OAuth context as hidden fields, and IssueMagicLink stamps
+	// clientId/redirectURI/state into the row's oauthCtx). For
+	// those, we want the click to land at the cockpit's loopback
+	// callback (`code=...&state=...`) so the cockpit can finish its
+	// login automatically -- not /admin/. The presence of a non-
+	// empty RedirectURI on the VerifyResult is the discriminator;
+	// when it's set we fall through to buildClientCallback below.
+	if (res.Bootstrap || res.AdminSession) && res.RedirectURI == "" {
 		if err := s.startAdminSession(w, r, res); err != nil {
 			eid := generateErrorId()
 			if s.Logger != nil {
