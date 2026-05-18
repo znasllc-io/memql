@@ -125,25 +125,6 @@ concept micState {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("Phase 8 of the chat-architecture plan. Append-only audit + tuning corpus for the misroute safety net. One row per classifier call that fired the soft post-send Move prompt; the row records the original classifier output, the user's action (move / dismiss / timeout), and the involved utterance ids so prompt tuners can replay and re-score in offline analysis.")
-concept misroutefeedback {
-  spaceId         string  @required  @description("Space the misroute happened in.")
-  forUserId       string  @required  @description("User who composed the message.")
-  originalThread  enum("group", "private")  @required  @description("Tab the user composed in.")
-  intendedThread  enum("group", "private")  @required  @description("Classifier's call.")
-  confidence      float   @required  @description("Classifier confidence [0, 1].")
-  why             string  @description("Classifier's short rationale.")
-  message         string  @required  @description("The message text. Stored so prompt tuners can replay; cap on the calling code at ~2KB to keep this concept's rows small.")
-  utteranceId     string  @description("If the message landed (0.6-0.85 soft path), the row id of the source utterance. Empty when the >=0.85 hard path blocked the send entirely.")
-  movedToId       string  @description("If the user clicked [Move], the row id of the target-thread utterance the move action created. Empty otherwise.")
-  userAction      enum("moved", "dismissed", "timeout", "blocked")  @required  @description("What the user did: 'moved' = clicked [Move]; 'dismissed' = clicked away / typed something else within the 10s window; 'timeout' = the 10s window expired with no action; 'blocked' = the >=0.85 hard path showed the modal and the user picked one direction (the modal's [Send to <other>] vs [Send here anyway] decision lives in subsequent rows; the initial blocked event is the one captured here).")
-
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="forUserId", target="v1:identity:user", direction="outgoing")
-}
-
-@version("1.0.0")
-@namespace("cognition")
 @description("A human or SI participant instance within a space.")
 concept participant {
   agentId  string  @description("ID of the agent template (for SI participants).")
@@ -155,7 +136,7 @@ concept participant {
   }
   displayName  string  @required  @description("Display name shown in the UI.")
   forUserId  string  @description("v1:identity:user.id this SI participant belongs to (which human's team is this agent on?). Required on every SI participant inserted by the agent-roster mutations -- humans bring their own agents into their own private team chat, never each other's. Empty for human participants. The engine pre-insert guard enforces non-empty forUserId on SI participants and validates it matches the authenticated caller (non-elevated callers cannot land an agent on someone else's team). Used by the per-user-per-space 3-cap and by Phase 6's discussion-mode dispatch loop to find the per-user agent set.")
-  isGroupGA  bool  @default(false)  @description("True only on the owner's General Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinSI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
+  isGroupGA  bool  @default(false)  @description("True only on the owner's Assistant when it sits in the space's group context. The owner's GA is the only AI in group chat; specialists stay in per-user team chats. The participant guard rejects status='left' inserts on isGroupGA=true rows from non-elevated callers, so the GA cannot be removed from the group via the Roster tab. Set by the autoJoinSI automation on space creation (Phase 1.5) and never via the agent-roster mutations.")
   isGuest  bool  @default(false)  @description("Whether this participant joined via a guest invite (external, no CoPresent account).")
   joinedAt  datetime  @description("When the participant joined the space.")
   leftAt  datetime  @description("When the participant left the space.")
@@ -199,52 +180,6 @@ concept presence {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("A single multi-modal contribution to a per-user PRIVATE conversation thread inside a space. Mirrors v1:cognition:utterance field-for-field but adds the required forUserId, which scopes the row to exactly one human's Team tab. forUserId is server-stamped at insert time -- callers cannot supply it. The subscription rewriter forces a per-caller forUserId predicate on every read pattern that targets this concept; cross-user reads are physically impossible from any non-elevated client.")
-concept privateutterance {
-  forUserId  string  @required  @description("v1:identity:user.id this private utterance is scoped to. Server-stamped from the authenticated caller's identity at insert time; client-supplied values from non-elevated actors are overridden. Every row of this concept has a non-empty forUserId -- the engine pre-insert guard enforces it.")
-  action {
-    idempotencyKey  string  @description("Optional idempotency key to allow safe retries.")
-    payload  object  @description("JSON-serializable action payload (object).")
-    schemaVersion  int  @description("Schema version for the action payload.")
-    type  string  @description("Action type identifier (e.g., 'form.submit').")
-  }
-  analysis {
-    entities  []object  @description("Extracted entities.")
-    intent  string  @description("Detected intent or action.")
-    mentionedParticipants  []string  @description("IDs of participants mentioned.")
-    sentiment  string  @description("Detected sentiment.")
-    shouldSIRespond  bool  @description("Hint for turn-taking: should SI respond?")
-  }
-  audioId  string  @description("ID of associated audio media asset.")
-  citations  []object  @description("Source citations for the utterance text. Each item has shape {domainId, matchedPhrase} -- the frontend wraps each matchedPhrase in the rendered text with a clickable chip linking to the named knowledge domain. Populated by cognition from the agent's respondToUser envelope. The 'group_thread_utterance' citation kind is also valid here for replies that quote group content via the copresentConversation tool.")
-  retrieved  []object  @description("RAG retrieval audit -- the full chunk pool the agent's replier surfaced to the LLM BEFORE the model decided what to cite. Each item has shape {domainId, sourceRef, similarity, textPreview, citation}. Distinct from `citations`: `citations` names what the model used; `retrieved` names what the model SAW.")
-  duration  int  @description("Duration in milliseconds (for audio/video).")
-  participantId  string  @required  @description("ID of the participant who created this utterance.")
-  participantType  enum("human", "si", "system")  @description("Type of participant (denormalized from participant for filtering).")
-  replyToId  string  @description("ID of utterance this is replying to (for threading). May reference either a v1:cognition:utterance or another v1:cognition:privateUtterance.")
-  source {
-    avatarProvider  string  @description("Avatar video provider used (e.g., heygen, simli).")
-    inputMethod  enum("typed", "stt", "realtimeVoice")  @description("How the human created this utterance.")
-    outputMethod  enum("text", "tts", "realtimeVoice", "avatarVideo")  @description("How the SI delivered this utterance.")
-    pipeline  string  @description("Source pipeline label, e.g. \"polyphon\" for utterances created by the bridge agent's STT path.")
-    sttProvider  string  @description("Speech-to-text provider used.")
-    ttsProvider  string  @description("Text-to-speech provider used.")
-  }
-  spaceId  string  @required  @description("ID of the space this utterance belongs to.")
-  text  string  @description("Text content (transcribed or typed).")
-  timestamps {
-    words  []object
-  }
-  utteranceType  enum("speech", "text", "action", "system")  @required  @description("Type of utterance.")
-  videoId  string  @description("ID of associated video media asset.")
-
-  @relationship(type="interactsWith", field="participantId", target="v1:cognition:participant", direction="outgoing")
-  @relationship(type="parent", field="forUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-}
-
-@version("1.0.0")
-@namespace("cognition")
 @description("Real-time interaction state tracking device + stream + activity for a participant in a space. Audio capability is gated by the user's mic toggle (humanInput.microphoneEnabled) plus the agent's audioControl mode -- there is NO tier ceiling anymore. Whether voice flows in / out of the room is purely a function of who has their mic open and which agents are configured to publish TTS.")
 concept session {
   aiOutput {
@@ -272,6 +207,7 @@ concept session {
 @type("collection")
 @description("Persistent rooms where humans and AI assistants meet, converse, and interact. Every space is a multi-participant room with a bounded capacity for humans and for agents -- there is no longer a 1:1 vs group distinction.")
 concept space {
+  ownerUserId  string  @required  @description("v1:identity:user.id of the space owner. The owner is the human whose assistant is wired into the space (the only AI presence that speaks to humans). Stamped at create time from the request actor; the @relationship below pins the parent.")
   active  bool  @default("true")  @description("Whether the space is active. Set to false for soft delete.")
   archivedAt  datetime  @description("When the space was archived. Only set on rows whose status flipped to 'archived'. Cleared when the space is restored to active or saved.")
   expiresAt  datetime  @description("Concrete deadline at which the purge cron hard-deletes this archived space. Stamped at archive time as archivedAt + User.preferences.archiveRetentionDays. Re-stamped on retention-setting changes so a 30->60 bump extends currently-archived spaces. The cron query is a plain `payload.expiresAt < now` comparison -- no per-row user lookup needed.")
@@ -281,9 +217,9 @@ concept space {
   name  string  @required  @description("Display name of the space.")
   participantIds  []string  @description("IDs of participants in this space.")
   maxHumans  int  @default("5")  @description("Maximum number of human participants allowed in this space. Enforced at join time.")
-  maxAgents  int  @default("3")  @description("Maximum number of AI agent participants allowed in this space, inclusive of the owner's auto-joined general assistant. Enforced at join time.")
+  maxAgents  int  @default("3")  @description("Maximum number of AI agent participants allowed in this space, inclusive of the owner's auto-joined assistant. Enforced at join time.")
   scheduledAt  datetime  @description("When the space is scheduled to start (if status is 'scheduled').")
-  selectedAgentIds  []string  @description("Specialist agent IDs the creator picked at creation time, joined in addition to the creator's general assistant by the autoJoinSI automation.")
+  selectedAgentIds  []string  @description("Specialist agent IDs the creator picked at creation time, joined in addition to the creator's assistant by the autoJoinSI automation.")
   settings {
     autoTranscribe  bool  @default("true")  @description("Whether to automatically transcribe audio.")
     defaultAITier  enum("text", "speechToText", "voiceToVoice", "voiceAvatar", "voiceVision")  @default("text")  @description("Default interaction tier for AI participants.")
@@ -291,12 +227,13 @@ concept space {
   }
   spaceType  enum("employeeCheckin", "advocatePortal", "handoffSession", "<nil>")  @description("Type of HR space for mode-specific AI behavior.")
   status  enum("active", "saved", "archived", "scheduled")  @default("active")  @description("Current lifecycle status of the space. Active = working space (default). Saved = manually preserved by the user; never auto-deleted. Archived = hidden from the active list and on a retention countdown to hard-delete (see archivedAt + User.preferences.archiveRetentionDays). Scheduled = future-dated meeting.")
-  kind  enum("regular", "daily")  @default("regular")  @description("Space kind. 'regular' is the user-created default. 'daily' is a per-user singleton automatically provisioned every day; pinned at the top of the active list, private to the user + their general assistant, and rolled over by the rolloverDailySpace cron.")
-  private  bool  @default("false")  @description("When true, the space is private to its creator and their general assistant -- no other users / agents can join. Daily spaces always set this to true.")
+  kind  enum("regular", "daily")  @default("regular")  @description("Space kind. 'regular' is the user-created default. 'daily' is a per-user singleton automatically provisioned every day; pinned at the top of the active list, private to the user + their assistant, and rolled over by the rolloverDailySpace cron.")
+  private  bool  @default("false")  @description("When true, the space is private to its creator and their assistant -- no other users / agents can join. Daily spaces always set this to true.")
   dailyDateKey  string  @description("YYYY-MM-DD date stamp for daily spaces, computed in the user's local timezone at provisioning time. Used to make the space id idempotent (daily-{userHash}-{dateKey}) so a duplicate provision is a no-op. Empty for non-daily spaces.")
   turnStateId  string  @description("ID of the turn state owned by this space.")
   utteranceIds  []string  @description("IDs of utterances in this space.")
 
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
   @relationship(type="contains", field="participantIds", target="v1:cognition:participant", direction="outgoing")
   @relationship(type="owns", field="turnStateId", target="v1:cognition:turn:state", direction="outgoing")
   @relationship(type="contains", field="utteranceIds", target="v1:cognition:utterance", direction="outgoing")
@@ -403,7 +340,7 @@ concept guardrailHealth {
   generatedAt             datetime  @required  @description("When this rollup was produced.")
 
   totalUnmet              int  @required  @default("0")  @description("Total v1:cognition:unmetCapability rows in the window.")
-  specialistGapCount      int  @required  @default("0")  @description("Rows with severity=specialist_gap -- general assistant absorbed the turn.")
+  specialistGapCount      int  @required  @default("0")  @description("Rows with severity=specialist_gap -- assistant absorbed the turn.")
   fullGapCount            int  @required  @default("0")  @description("Rows with severity=full_gap -- no agent could help.")
 
   belowThresholdCount     int  @default("0")  @description("Triggered by the fit-score gate.")
@@ -423,16 +360,16 @@ concept guardrailHealth {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("A single instance of the cognition router determining that no agent in a space could meet the user's request -- either the general assistant stepped in as fallback (specialist_gap) or nobody could help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by the guardrail health rollup for product-level insight into missing capabilities.")
+@description("A single instance of the cognition router determining that no agent in a space could meet the user's request -- either the assistant stepped in as fallback (specialist_gap) or nobody could help (full_gap). Emitted by cognition via the cognition.capability.unmet event and consumed by the guardrail health rollup for product-level insight into missing capabilities.")
 concept unmetCapability {
   spaceId          string   @required  @description("ID of the space the utterance occurred in.")
   utteranceId      string   @description("ID of the triggering human utterance.")
   utterance        string   @description("Text of the user's request that no agent could meet.")
   speakerName      string   @description("Display name of the human who spoke.")
 
-  severity         enum("specialist_gap", "full_gap")  @required  @description("specialist_gap: general assistant absorbed the turn as fallback (we lacked a specialist). full_gap: even the general assistant could not help / no general assistant in the room.")
-  turnMode         enum("answer", "fallback_attempt", "escalation_notice")  @description("Turn mode the router chose. answer = specialist stretch absorbed it; fallback_attempt = general assistant stretched on a knowledge gap; escalation_notice = general assistant refused and flagged.")
-  trigger          enum("below_threshold", "handoff_chain_cap", "no_fit_no_fallback", "router_escalated", "router_fallback")  @required  @description("Why the unmet event fired: threshold gate, chain cap, missing general assistant, or router-initiated.")
+  severity         enum("specialist_gap", "full_gap")  @required  @description("specialist_gap: assistant absorbed the turn as fallback (we lacked a specialist). full_gap: even the assistant could not help / no assistant in the room.")
+  turnMode         enum("answer", "fallback_attempt", "escalation_notice")  @description("Turn mode the router chose. answer = specialist stretch absorbed it; fallback_attempt = assistant stretched on a knowledge gap; escalation_notice = assistant refused and flagged.")
+  trigger          enum("below_threshold", "handoff_chain_cap", "no_fit_no_fallback", "router_escalated", "router_fallback")  @required  @description("Why the unmet event fired: threshold gate, chain cap, missing assistant, or router-initiated.")
 
   topFitScore      float   @description("Router's fit score for the chosen agent (0..1). Low scores indicate nobody was a strong match.")
   routedAgentId    string  @description("ID of the agent the router ultimately routed to (may be empty when no agent was selected).")

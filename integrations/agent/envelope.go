@@ -59,7 +59,7 @@ const CitationKindKnowledge = "knowledge"
 
 // CitationKindGroupThreadUtterance is the chat-architecture Phase 5
 // citation kind: the agent quoted a specific utterance from the GROUP
-// thread (read via the copresentConversation tool) into their per-user
+// thread (read via the recentChat tool) into their per-user
 // TEAM-tab reply. Frontend renders this as a click-to-jump chip that
 // scrolls the Group tab to the source utterance. UtteranceId identifies
 // the source row.

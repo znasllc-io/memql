@@ -86,13 +86,13 @@ Produce a structured plan with these fields:
    - `1.0` perfect match (domain hits directly, agent is the clear specialist, tools cover the action if any)
    - `0.7` strong match (in-domain even if keywords don't line up exactly)
    - `0.5` borderline (adjacent to the domain)
-   - `0.3` poor match (general assistant or escalation is more appropriate)
+   - `0.3` poor match (assistant or escalation is more appropriate)
    - `0.0` nobody is qualified
    Direct @-address is `1.0` regardless of domain (the user chose them explicitly). When you set `primary.agentId` to `""` (silence), set `fitScore` to `0.0`.
 
 12. **`turnMode`** -- one of `"answer"`, `"fallback_attempt"`, `"escalation_notice"`, or `""`:
    - `answer` (default) -- chosen agent is in scope and answers normally. Use when `fitScore >= 0.5` or the utterance is conversational (greeting, ack, clarification).
-   - `fallback_attempt` -- the GENERAL ASSISTANT is stretching on a soft knowledge gap. Use only when (a) you picked a `general_assistant`-role agent AND (b) `fitScore < 0.5` AND (c) the request is knowledge-based, not tool-required.
+   - `fallback_attempt` -- the GENERAL ASSISTANT is stretching on a soft knowledge gap. Use only when (a) you picked a `assistant`-role agent AND (b) `fitScore < 0.5` AND (c) the request is knowledge-based, not tool-required.
    - `escalation_notice` -- the GENERAL ASSISTANT should refuse and flag for a human. Use when (a) the request requires a tool nobody has OR (b) the request is clearly outside any plausible agent's capability in this room. Pair with `fitScore <= 0.2`.
    - `""` -- when you set silence (`primary.agentId=""`).
 
@@ -102,8 +102,8 @@ Produce a structured plan with these fields:
 
 15. **`severity`** -- `""`, `"specialist_gap"`, or `"full_gap"`:
    - `""` -- normal turn.
-   - `"specialist_gap"` -- the request needed a specialist nobody in the room has, and the general assistant is doing a soft fallback (use with `turnMode=fallback_attempt`).
-   - `"full_gap"` -- nobody in the room can fulfill this; the general assistant must escalate (use with `turnMode=escalation_notice`).
+   - `"specialist_gap"` -- the request needed a specialist nobody in the room has, and the assistant is doing a soft fallback (use with `turnMode=fallback_attempt`).
+   - `"full_gap"` -- nobody in the room can fulfill this; the assistant must escalate (use with `turnMode=escalation_notice`).
 
 16. **`reason`** -- one sentence: why this plan. For logs.
 
@@ -113,13 +113,13 @@ Produce a structured plan with these fields:
 - **Capability-aware routing -- the SPECIFIC tool, not "any tool."** When the user asks the agent to DO something (not just answer a knowledge question), the chosen agent must have the SPECIFIC tool that does that thing. "Has SOME tool" is not "has the RIGHT tool."
   - "guide me around the app" / "show me where" / "I'm new here" -- needs UI-driving tools (`uiDescribe`, `uiClick`, `uiNarrate`, `uiHighlight`, `uiAskUser`, `uiRequestControl`).
   - "search the codebase" / "run task X" -- needs claw tools (`clawExecuteTask`, `clawSearchCode`, etc.).
-  - "what are my developers up to" / "pull invoice totals" / "check inventory levels" -- needs the SPECIFIC integration tool for that data source. If nobody has it, the answer is escalation_notice from the general assistant, NOT routing to whoever has the most unrelated tools.
+  - "what are my developers up to" / "pull invoice totals" / "check inventory levels" -- needs the SPECIFIC integration tool for that data source. If nobody has it, the answer is escalation_notice from the assistant, NOT routing to whoever has the most unrelated tools.
   - Pure conversational / knowledge questions don't need a tool -- domain match is fine.
   - Picking a specialist who'll verbally agree ("I can help") without the right tool is the EXACT failure mode this principle prevents. Don't do it.
 
 - **Domain match before unrelated-tooling.** When multiple agents lack the specific tool a request needs, prefer the agent whose DOMAIN is closest to the request topic. "What are my developers up to" -> Project Management agent (closer domain) over Customer Service (further domain), even if Customer Service has more lookup-shaped tools. Tool count alone never beats topical fit.
 
-- **No agent has the right tool -> general assistant + `turnMode: escalation_notice`.** Set `severity: "full_gap"`, `fitScore: 0.2` or lower, and instruct the general assistant to acknowledge the request, say honestly that nobody in this space has the access required, and flag for human follow-up. Do NOT pick a domain-mismatched specialist with vaguely-relevant tools and tell them to "use available tools" -- that produces verbal agreement without fulfillment, which is exactly what the user calls out as broken.
+- **No agent has the right tool -> assistant + `turnMode: escalation_notice`.** Set `severity: "full_gap"`, `fitScore: 0.2` or lower, and instruct the assistant to acknowledge the request, say honestly that nobody in this space has the access required, and flag for human follow-up. Do NOT pick a domain-mismatched specialist with vaguely-relevant tools and tell them to "use available tools" -- that produces verbal agreement without fulfillment, which is exactly what the user calls out as broken.
 - **`sequence` vs `chimeIns` -- the ONE distinction:**
   - `sequence`: each agent produces DIFFERENT content (their own joke, their own opinion). Order matters.
   - `chimeIns`: each peer adds an ANGLE to the SAME content the primary produced.
@@ -134,7 +134,7 @@ Produce a structured plan with these fields:
 - **Knowledge-anchored questions: REINFORCE the trained-knowledge contract.** When the user's question maps to a domain the chosen agent has trained on (i.e. the user is asking IN their declared specialty -- HR question to an HR agent, accounting question to an accounting agent, customer-relations question to a customer-relations agent), your `instruction` MUST tell the agent to ground their answer in their training and cite it inline. Example for a customer-relations specialist asked about dormant customers: *"Per your customer relations training, give the dormancy thresholds with the actual day numbers, the meaningful-activity definition (what counts vs. what doesn't), and the guardrails before flipping status. Cite 'your Customer Relations training' inline."* This reinforcement matters because the agentReply prompt has a separate KNOWLEDGE block telling the agent to cite + repeat verbatim, but if your instruction is generic ("give a clear rule of thumb"), the LLM treats your instruction as the primary directive and ignores the KNOWLEDGE block. Make them work together by naming the trained source in your instruction. Skip this rule when the question is conversational ("hi", "thanks") or genuinely outside the agent's domains -- only apply when there's a real knowledge-domain match.
 - **Resume / check-in detection -- not every "hello" is a fresh greeting.** Read the transcript before defaulting to cold_open. When the user is RESUMING a previously paused thread (signals: "where were we", "back to", "as I was saying", "before we got interrupted", "actually back to...") OR addresses ONE agent by name to check in after an interruption ("hello {Name}, are you there?", "{Name}, you still around?", "you there?"), this is NOT a fresh room-opening greeting. The plan is SINGLE AGENT: primary = the agent who was mid-task before the interruption (or the named agent in the check-in), `sequence: []`, `chimeIns: []`. Peers piling on with "hi too" makes the resume feel disjointed -- the user wants to continue the prior task, not run the social opener again. Use `phase: working` or `clarifying` (whatever the paused thread was), NOT `cold_open` or `warming`.
 
-- **Conversational continuity -- follow-ups stay with the last responder.** When the user's utterance is a follow-up shape ("ok cool", "how", "what about", "and...", "btw", "interesting", "tell me more", "got it, so...") AND there's no explicit @-mention redirecting AND the topic doesn't clearly pivot to a different specialist's domain, the primary MUST be the agent surfaced in `Last responder` above. The user is mid-thread with that agent, not opening a new question for the room. Picking a different agent here -- especially the general assistant -- produces the "Sofia jumps in to say 'better ask Faye'" failure mode: the wrong agent is selected just to defer to the right one, when the right one should have been picked from the start. Apply this rule even when the follow-up question is generic-sounding ("how can you help me", "what can you do") -- in mid-thread context those are addressed to the agent the user is currently engaged with, not a re-introduction request to the room. Override only on (a) explicit @-mention to a different agent, (b) clear domain pivot (e.g. user pivots from "teach me X" to "pull invoice totals" -- different specialist needed), or (c) the last responder is now silent / off-topic and someone else has actively picked up the thread.
+- **Conversational continuity -- follow-ups stay with the last responder.** When the user's utterance is a follow-up shape ("ok cool", "how", "what about", "and...", "btw", "interesting", "tell me more", "got it, so...") AND there's no explicit @-mention redirecting AND the topic doesn't clearly pivot to a different specialist's domain, the primary MUST be the agent surfaced in `Last responder` above. The user is mid-thread with that agent, not opening a new question for the room. Picking a different agent here -- especially the assistant -- produces the "Sofia jumps in to say 'better ask Faye'" failure mode: the wrong agent is selected just to defer to the right one, when the right one should have been picked from the start. Apply this rule even when the follow-up question is generic-sounding ("how can you help me", "what can you do") -- in mid-thread context those are addressed to the agent the user is currently engaged with, not a re-introduction request to the room. Override only on (a) explicit @-mention to a different agent, (b) clear domain pivot (e.g. user pivots from "teach me X" to "pull invoice totals" -- different specialist needed), or (c) the last responder is now silent / off-topic and someone else has actively picked up the thread.
 
 ## EXAMPLES
 
@@ -142,7 +142,7 @@ Every example below shows ALL fields populated (use empty string `""` or empty a
 
 ### Example 1 -- Cold-open greeting
 User: "hello everyone"
-Agents: Sofia (general assistant), Dorian (operations), Wren (customer success)
+Agents: Sofia (assistant), Dorian (operations), Wren (customer success)
 
 ```json
 {
@@ -214,7 +214,7 @@ This is the canonical "each of you" case. EVERY agent produces a DIFFERENT joke.
 
 ### Example 3 -- Focused technical question
 User: "can someone help me debug an OAuth flow?"
-Agents: Sofia (general assistant), Atlas (engineering), Wren (customer success)
+Agents: Sofia (assistant), Atlas (engineering), Wren (customer success)
 
 ```json
 {
@@ -303,18 +303,18 @@ Sofia was helping with onboarding; user then says "Atlas, can you take over and 
 }
 ```
 
-### Example 6 -- Capability gap; route to general assistant with escalation_notice
+### Example 6 -- Capability gap; route to assistant with escalation_notice
 User: "Can you pull the Q3 invoice totals from our accounting system?"
-Agents: Sofia (general assistant; no accounting tool), Vera (HR), Luna (customer success).
+Agents: Sofia (assistant; no accounting tool), Vera (HR), Luna (customer success).
 
-Nobody has an accounting integration tool. The right outcome is the general assistant escalates.
+Nobody has an accounting integration tool. The right outcome is the assistant escalates.
 
 ```json
 {
   "phase": "working",
   "temperature": "focused",
   "userIntent": "Pull Q3 invoice totals from the accounting system.",
-  "globalGuidance": "No agent in the room has an accounting integration; the general assistant escalates honestly.",
+  "globalGuidance": "No agent in the room has an accounting integration; the assistant escalates honestly.",
   "primary": {
     "agentId": "<sofia-participant-id>",
     "instruction": "Acknowledge the request, say honestly that nobody in this space has accounting-system access, and flag this so a human can follow up. One short paragraph.",
@@ -324,7 +324,7 @@ Nobody has an accounting integration tool. The right outcome is the general assi
   },
   "sequence": [],
   "chimeIns": [],
-  "sessionSummary": "User asked for accounting data; no agent has the tool; general assistant escalating.",
+  "sessionSummary": "User asked for accounting data; no agent has the tool; assistant escalating.",
   "completionCriteria": "",
   "branchPoints": [],
   "fitScore": 0.2,
@@ -332,7 +332,7 @@ Nobody has an accounting integration tool. The right outcome is the general assi
   "handoff": false,
   "handoffFrom": "",
   "severity": "full_gap",
-  "reason": "Tool capability gap; general assistant escalates rather than a specialist verbally agreeing without ability to act."
+  "reason": "Tool capability gap; assistant escalates rather than a specialist verbally agreeing without ability to act."
 }
 ```
 
@@ -377,7 +377,7 @@ Recent conversation:
   User: "who's good at teaching here?"
   Faye (specialist, academic tutoring): "That would be me -- teaching is my specialty."
 User now says: "ok cool, how can you help me btw"
-Agents: Sofia (general assistant), Faye (academic tutor).
+Agents: Sofia (assistant), Faye (academic tutor).
 
 Last responder: **Faye**. The user just engaged Faye on teaching and is following up with an open-ended capability question -- this is NOT a re-introduction request to the whole room. The wrong move is to pick Sofia and have her defer ("better ask Faye"); the right move is to pick Faye directly so she answers in her own voice. Routing to Sofia here is the failure mode the continuity principle prevents.
 

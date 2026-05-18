@@ -27,9 +27,20 @@ prompt trainerAgent {
   now               string  @required @description("RFC3339 wall-clock.")
 }
 
+@defaultProvider("chat54Mini")
+@templateFile("prompts/askSpecialist.tmpl")
+@description("Structured-output prompt the assistant invokes via the askSpecialist tool. The specialist returns ONE JSON object: {response, rationale?, confidence, needsMore?}. The assistant then paraphrases the response into a human-facing reply. Specialists never write utterances themselves.")
+prompt askSpecialist {
+  specialistName        string  @required @description("Display name of the specialist agent.")
+  specialistDescription string  @required @description("Short description of the specialist's role/domain.")
+  specialistSystemPrompt string           @description("The specialist's custom system prompt, if set. Composed in front of the structured-output contract.")
+  query                 string  @required @description("The assistant's query to the specialist -- what it wants the specialist to answer/decide.")
+  context               object           @description("Optional conversation context the assistant attaches: recent utterances, attachments, prior specialist findings.")
+}
+
 @defaultProvider("strongReasoning")
 @templateFile("prompts/agentFactoryAnalyze.tmpl")
-@description("Structured-output prompt invoked by the General Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
+@description("Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
 prompt agentFactoryAnalyze {
   goal              string    @required @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
   existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {domains, tools}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")

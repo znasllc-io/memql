@@ -93,8 +93,8 @@ func endsWithQuestionMark(text string) bool {
 //   - FitScore carries the router's fit score for the chosen agent.
 //   - TurnMode tells the agent which branch of the reply template to render:
 //     "answer" for a specialist in scope, "fallback_attempt" for the
-//     general assistant stretching on a soft gap, "escalation_notice" for
-//     the general assistant delivering a refuse-and-flag message.
+//     assistant stretching on a soft gap, "escalation_notice" for
+//     the assistant delivering a refuse-and-flag message.
 //   - Severity is populated when the outcome represents an unmet capability:
 //     "specialist_gap" when a fallback_attempt absorbed the turn, "full_gap"
 //     when escalation_notice fires or no agent could handle it.
@@ -328,7 +328,7 @@ func (c *CognitionIntegration) routeWithSI(
 	// Deterministic fast path: skip the LLM when there's an unambiguous
 	// @-address to a single agent. Avoids a class of prompt-failure modes
 	// where the small router model misreads "hello @Jade" as a space-wide
-	// greeting and routes to the general assistant. The fit gate doesn't
+	// greeting and routes to the assistant. The fit gate doesn't
 	// apply here -- a direct @-address is the user's explicit choice --
 	// but we still record handoff-chain depth for the session.
 	if fp := tryFastPathRoute(utterance, candidates, session); fp != nil {
@@ -376,7 +376,7 @@ func (c *CognitionIntegration) routeWithSI(
 		// tool to do the work (e.g., "guide me around the app" needs
 		// uiDescribe/uiClick/uiNarrate -- only the agent who has
 		// those tools should be picked; otherwise route to the
-		// general assistant with turnMode=escalation_notice).
+		// assistant with turnMode=escalation_notice).
 		if tools := extractRouterToolList(cand.Capabilities); len(tools) > 0 {
 			toolsAny := make([]any, len(tools))
 			for i, t := range tools {
@@ -604,7 +604,7 @@ func (c *CognitionIntegration) routeWithSI(
 	}
 
 	// Apply guardrail post-processing: threshold gate, handoff-chain cap,
-	// and fallback routing to the general assistant when warranted.
+	// and fallback routing to the assistant when warranted.
 	return c.applyGuardrails(ctx, base, candidates, session, utterance), nil
 }
 
@@ -624,7 +624,7 @@ func normalizeTurnMode(raw string) string {
 }
 
 // applyGuardrails runs the post-routing gate: enforces the fit-score
-// threshold, caps the handoff chain, picks the general assistant when
+// threshold, caps the handoff chain, picks the assistant when
 // appropriate, and emits a cognition.capability.unmet event when a
 // fallback/escalation/silence-with-no-fit happens. Returns the adjusted
 // outcome (may be the unchanged base).
@@ -640,10 +640,10 @@ func (c *CognitionIntegration) applyGuardrails(
 	// Detect the designated general-assistant candidate, if any, by matching
 	// the Role field on the AgentCandidate. Build-time cognition does not
 	// ship role on the candidate yet -- the responder's agentPayload carries
-	// it -- so we treat the first candidate with Role=="general_assistant"
-	// OR a case-insensitive match on the Name pattern "general assistant"
+	// it -- so we treat the first candidate with Role=="assistant"
+	// OR a case-insensitive match on the Name pattern "assistant"
 	// as the fallback.
-	generalAssistant := findGeneralAssistant(candidates)
+	assistant := findAssistant(candidates)
 
 	// Handoff-chain cap: the router wants another handoff, but we have
 	// already been bouncing between agents. Force escalation so the user
@@ -658,7 +658,7 @@ func (c *CognitionIntegration) applyGuardrails(
 				"chainDepth", chainDepth, "cap", handoffChainCap,
 				"chosenAgent", base.Winner.AgentName)
 		}
-		escalated := c.routeToGeneralAssistant(base, generalAssistant, turnModeEscalationNotice, severityFullGap,
+		escalated := c.routeToAssistant(base, assistant, turnModeEscalationNotice, severityFullGap,
 			fmt.Sprintf("Handoff chain cap reached (%d hops); escalating.", chainDepth))
 		c.emitUnmetCapability(ctx, escalated, candidates, utterance, "handoff_chain_cap")
 		c.recordHandoffOutcome(session, escalated)
@@ -666,11 +666,11 @@ func (c *CognitionIntegration) applyGuardrails(
 	}
 
 	// Fit-score threshold gate: the router scored the chosen agent as a
-	// poor match. Fall through to the general assistant if one exists,
+	// poor match. Fall through to the assistant if one exists,
 	// otherwise emit silence + unmet-capability event.
 	if base.FitScore > 0 && base.FitScore < threshold {
-		if generalAssistant != nil && !strings.EqualFold(generalAssistant.ID, base.Winner.AgentId) {
-			// The router already handed off to the general assistant? If
+		if assistant != nil && !strings.EqualFold(assistant.ID, base.Winner.AgentId) {
+			// The router already handed off to the assistant? If
 			// so, the turnMode it picked (fallback_attempt / escalation_notice)
 			// stands; otherwise we force fallback_attempt (soft gap --
 			// stretch first, only escalate when the GA itself decides it
@@ -683,14 +683,14 @@ func (c *CognitionIntegration) applyGuardrails(
 			if mode == turnModeEscalationNotice {
 				severity = severityFullGap
 			}
-			adjusted := c.routeToGeneralAssistant(base, generalAssistant, mode, severity,
+			adjusted := c.routeToAssistant(base, assistant, mode, severity,
 				fmt.Sprintf("No specialist met the fit threshold (score=%.2f < %.2f); routing to %s.",
-					base.FitScore, threshold, generalAssistant.Name))
+					base.FitScore, threshold, assistant.Name))
 			c.emitUnmetCapability(ctx, adjusted, candidates, utterance, "below_threshold")
 			c.recordHandoffOutcome(session, adjusted)
 			return adjusted
 		}
-		// No general assistant to fall through to: stay silent but emit
+		// No assistant to fall through to: stay silent but emit
 		// the signal so product can surface it.
 		silent := &routingOutcome{
 			Respond:  false,
@@ -698,7 +698,7 @@ func (c *CognitionIntegration) applyGuardrails(
 			TurnMode: turnModeAnswer,
 			Severity: severityFullGap,
 			Winner: &polyphon.AgentScore{
-				Reason: fmt.Sprintf("No agent fits (top score %.2f < %.2f) and no general assistant in space.",
+				Reason: fmt.Sprintf("No agent fits (top score %.2f < %.2f) and no assistant in space.",
 					base.FitScore, threshold),
 			},
 		}
@@ -727,15 +727,15 @@ func (c *CognitionIntegration) applyGuardrails(
 	return base
 }
 
-// routeToGeneralAssistant swaps the outcome's winner to the general
+// routeToAssistant swaps the outcome's winner to the general
 // assistant candidate, sets turnMode + severity, and records the handoff
 // metadata so the agent template renders the right branch.
-func (c *CognitionIntegration) routeToGeneralAssistant(
+func (c *CognitionIntegration) routeToAssistant(
 	base *routingOutcome,
 	ga *polyphon.AgentCandidate,
 	turnMode, severity, reason string,
 ) *routingOutcome {
-	// If no general assistant, fall back to silence.
+	// If no assistant, fall back to silence.
 	if ga == nil {
 		return &routingOutcome{
 			Respond:  false,
@@ -784,13 +784,13 @@ func (c *CognitionIntegration) routeToGeneralAssistant(
 	}
 }
 
-// findGeneralAssistant returns the candidate in this space marked as the
+// findAssistant returns the candidate in this space marked as the
 // general-assistant fallback, or nil when none is present. Match is on
-// AgentCandidate.Role == "general_assistant" (case-insensitive).
-func findGeneralAssistant(candidates []polyphon.AgentCandidate) *polyphon.AgentCandidate {
+// AgentCandidate.Role == "assistant" (case-insensitive).
+func findAssistant(candidates []polyphon.AgentCandidate) *polyphon.AgentCandidate {
 	for i := range candidates {
 		role := strings.TrimSpace(strings.ToLower(candidates[i].Role))
-		if role == "general_assistant" {
+		if role == "assistant" {
 			return &candidates[i]
 		}
 	}
@@ -1012,12 +1012,12 @@ func buildRoutingSchema(candidates []polyphon.AgentCandidate) json.RawMessage {
 			},
 			"fitScore": map[string]any{
 				"type":        "number",
-				"description": "0..1 fit score for the chosen agent. 1.0 = perfect specialist match, 0.5 = borderline, 0.2 = the general assistant stretching, 0.0 = nobody in the room can help. Score against the agent's declared domains, keywords, and tools, not general capability.",
+				"description": "0..1 fit score for the chosen agent. 1.0 = perfect specialist match, 0.5 = borderline, 0.2 = the assistant stretching, 0.0 = nobody in the room can help. Score against the agent's declared domains, keywords, and tools, not general capability.",
 			},
 			"turnMode": map[string]any{
 				"type":        "string",
 				"enum":        []string{turnModeAnswer, turnModeFallbackAttempt, turnModeEscalationNotice},
-				"description": "Guardrail turn mode. 'answer' when the chosen agent is a specialist with a strong fit; 'fallback_attempt' when the general assistant is stretching on a soft knowledge gap; 'escalation_notice' when the general assistant should refuse and flag (hard tool/capability gap). Use 'answer' by default.",
+				"description": "Guardrail turn mode. 'answer' when the chosen agent is a specialist with a strong fit; 'fallback_attempt' when the assistant is stretching on a soft knowledge gap; 'escalation_notice' when the assistant should refuse and flag (hard tool/capability gap). Use 'answer' by default.",
 			},
 		},
 	}
@@ -1122,7 +1122,7 @@ var reasonDirectivePatterns = []struct{ prefix, suffix string }{
 //
 // Why do this: the chat-router model sometimes generates a correct
 // reasoning chain but fills in the agentName field with the wrong
-// value (often defaulting to the general assistant). The reason
+// value (often defaulting to the assistant). The reason
 // field is where the real decision lives, so we trust it when we
 // can parse it deterministically.
 func reconcileRoutingWithReason(routing *routingResult, candidates []polyphon.AgentCandidate) (polyphon.AgentCandidate, bool) {

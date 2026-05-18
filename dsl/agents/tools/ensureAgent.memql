@@ -1,4 +1,4 @@
-// ensureAgent -- the General Assistant's agent factory tool.
+// ensureAgent -- the Assistant's agent factory tool.
 //
 // Restricted to the GA via @allowedRoles. Invoked when a conversation
 // reveals a need that no existing agent fits cleanly. The tool's
@@ -32,7 +32,7 @@
 @enabled
 @handler(type="function", name="ensureAgentForGoal")
 @executionTime("medium")
-@allowedRoles("general_assistant")
+@allowedRoles("assistant")
 @description("Ensure an agent exists that can handle the given goal. Matches an existing agent, extends one with missing capabilities, or creates a new specialist from the role catalog. Returns {agentId, action, reasoning}.")
 tool ensureAgent {
   goal         string  @required @description("Free-form description of what the user wants done. The factory's structured-output analysis reads this verbatim to pick the role + domains + tools.")

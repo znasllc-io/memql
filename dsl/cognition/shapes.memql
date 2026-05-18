@@ -47,29 +47,6 @@ shape participantFull {
 }
 
 @row
-@useConcept(privateUtterance)
-@description("Comprehensive private-utterance projection mirroring utteranceFull plus forUserId.")
-shape privateUtteranceFull {
-  row.id
-  privateUtterance.spaceId
-  privateUtterance.forUserId
-  privateUtterance.participantId
-  privateUtterance.utteranceType
-  privateUtterance.text
-  privateUtterance.action
-  privateUtterance.audioId
-  privateUtterance.videoId
-  privateUtterance.duration
-  privateUtterance.replyToId
-  privateUtterance.timestamps
-  privateUtterance.analysis
-  privateUtterance.source
-  privateUtterance.citations
-  privateUtterance.retrieved
-  row.createdAt
-}
-
-@row
 @useConcept(session)
 @description("Comprehensive session projection with device + stream state")
 shape sessionFull {

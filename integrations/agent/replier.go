@@ -369,7 +369,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// RAG: retrieve top-K knowledge chunks for the agent's declared
 	// domains, keyed on the user's most recent message as the query.
 	// Mirrors delegate_takeover.go's up-front retrieval so direct
-	// takeovers (the user's general_assistant driving UI without
+	// takeovers (the user's assistant driving UI without
 	// going through delegation) also see app-knowledge in their prompt.
 	//
 	// Server-side contract: if the agent has copresent_control (i.e.
@@ -415,7 +415,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	if wa, _ := data["workbenchAvailable"].(bool); wa {
 		domains = ensureDomain(domains, "workbench")
 	}
-	// copresent_conversation auto-attach mirrors the copresent_ui /
+	// recent_chat auto-attach mirrors the copresent_ui /
 	// computer_use pattern: tool requires domain, domain doesn't require
 	// tool. Phase 5 of the chat-architecture plan -- every agent that
 	// is dispatching for a non-empty spaceId is acting as a space
@@ -423,7 +423,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// direct interactions (no spaceId) skip the domain so we don't pay
 	// retrieval cost when chat-thread context is irrelevant.
 	if strings.TrimSpace(msg.SpaceId) != "" {
-		domains = ensureDomain(domains, "copresent_conversation")
+		domains = ensureDomain(domains, "recent_chat")
 	}
 	if len(domains) > 0 {
 		if query := latestUserQuery(msg); query != "" {
@@ -1803,7 +1803,7 @@ var appStructureDomainIds = map[string]bool{
 	"copresent_ui":           true,
 	"computer_use":           true,
 	"workbench":              true,
-	"copresent_conversation": true,
+	"recent_chat": true,
 }
 
 func isAppStructureDomain(domainId string) bool {

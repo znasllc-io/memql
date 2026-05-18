@@ -353,18 +353,6 @@ query queryParticipantSession {
   shape   sessionFull
 }
 
-func (Query) queryPrivateUtterancesForUser(ctx any) (any, error) {
-  ctx.output = shape(
-    concept;
-    ?.privateUtterance.spaceId==args.spaceId;
-    ?.privateUtterance.forUserId==args.forUserId;
-    ?.privateUtterance.participantId==args.participantId;
-    ?.privateUtterance.utteranceType==args.utteranceType,
-    "privateUtteranceFull"
-  )
-  return ctx, nil
-}
-
 // ---- queries/v1/cognition/savedSpaces.memql ----
 
 // savedSpaces - Query Saved Spaces

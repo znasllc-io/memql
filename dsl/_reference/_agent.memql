@@ -10,7 +10,7 @@
 // startup + on user-create events.
 //
 // See:
-//   - dsl/agents/generalAssistant.memql     -- canonical seed example
+//   - dsl/agents/assistant.memql     -- canonical seed example
 //   - dsl/agents/plannerAgent.memql         -- another seed example
 //   - dsl/agents/trainerAgent.memql         -- another seed example
 //   - dsl/agents/builtins.memql             -- the agent(name, args) builtin

@@ -180,9 +180,9 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 	}
 
 	// Role from the target record drives operator-tool gating via
-	// AllowedRoles. Default to general_assistant if the record
+	// AllowedRoles. Default to assistant if the record
 	// somehow lacks a role.
-	targetRole := stringFromRecord(targetRecord, "role", "general_assistant")
+	targetRole := stringFromRecord(targetRecord, "role", "assistant")
 
 	assistant := map[string]any{
 		"id":   targetAgentId,

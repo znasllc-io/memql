@@ -98,7 +98,7 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 				priorIsGroupGA, _ := prior["isGroupGA"].(bool)
 				if priorIsGroupGA {
 					return fmt.Errorf(
-						"v1:cognition:participant: owner General Assistant cannot be removed via the Roster tab")
+						"v1:cognition:participant: owner Assistant cannot be removed via the Roster tab")
 				}
 			}
 		}

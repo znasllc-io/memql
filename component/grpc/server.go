@@ -724,21 +724,6 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 		s.logger.Debug("handleBusEvent received", "topic", event.Topic, "kind", event.Kind.String())
 	}
 
-	// Per-user isolation for v1:cognition:privateUtterance graph events.
-	// The pre-insert guard server-stamps forUserId on every row; this is
-	// the symmetric read-side gate that drops events whose forUserId does
-	// not match the caller. Cluster owners bypass. See
-	// subscription_privateUtterance.go for the rationale.
-	if shouldDropPrivateUtteranceForCaller(event, s.identity.Subject, s.currentAccess()) {
-		if s.logger != nil {
-			s.logger.Debug("private-utterance event filtered for non-owner caller",
-				"topic", event.Topic,
-				"caller", s.identity.Subject,
-			)
-		}
-		return
-	}
-
 	payload := event.Payload
 	if payload == nil {
 		payload = make(map[string]any)
@@ -1797,7 +1782,7 @@ func (s *streamSession) guardClientToolArgs(toolName, argsJSON string) (string, 
 			)
 		}
 		return "", fmt.Errorf(
-			`uiAskUser requires an "options" array with 2 or 3 concrete, actionable suggestions. Got %d. Retry this call with options populated -- e.g. for a Name field: ["Pick a random name for me","Zeus","Aria"]; for a Role field: ["IT Support","General Assistant","Customer Service"]. If the answer is genuinely open-ended, include one "Pick for me"/"You decide" option plus two concrete examples. The prompt card renders these as click-to-pick pills above the free-form input -- without them the user gets a bare text input, which is the failure mode this validation is guarding against`,
+			`uiAskUser requires an "options" array with 2 or 3 concrete, actionable suggestions. Got %d. Retry this call with options populated -- e.g. for a Name field: ["Pick a random name for me","Zeus","Aria"]; for a Role field: ["IT Support","Assistant","Customer Service"]. If the answer is genuinely open-ended, include one "Pick for me"/"You decide" option plus two concrete examples. The prompt card renders these as click-to-pick pills above the free-form input -- without them the user gets a bare text input, which is the failure mode this validation is guarding against`,
 			valid,
 		)
 	}

@@ -1,0 +1,40 @@
+// askSpecialist -- the assistant's bridge to specialist agents
+// =============================================================
+//
+// The assistant calls this tool when it needs a specialist's
+// structured answer to a question. The handler:
+//
+//   1. Resolves the specialist by roleSlug (e.g. "human_resources",
+//      "accounting_finance"). Errors if no agent with that role is
+//      registered, or if the resolved agent isn't a specialist.
+//
+//   2. Invokes the askSpecialist structured-output prompt with the
+//      specialist's persona + the assistant's query. The specialist
+//      returns ONE JSON object:
+//
+//        {
+//          "response":   string,              -- the answer
+//          "rationale":  string?,             -- short justification
+//          "confidence": number 0..1,         -- self-assessed
+//          "needsMore":  []string?            -- what would help
+//        }
+//
+//   3. Returns the structured response. The assistant reads
+//      `response` and paraphrases it into a human-facing reply. If
+//      confidence < 0.6 or needsMore is non-empty, the assistant may
+//      ask the human for clarification before acting on the answer.
+//
+// HARD RULE: specialists never publish utterances themselves. Only
+// the assistant speaks to humans. This tool is the ONLY channel
+// between the assistant and specialists.
+
+@enabled
+@handler(type="function", name="askSpecialist")
+@allowedRoles("assistant")
+@executionTime("medium")
+@description("Query a specialist agent for a structured answer. Returns {response, rationale?, confidence, needsMore?}. Use this when a question falls outside the assistant's domain and a specialist agent (HR, finance, etc.) should answer. The assistant paraphrases the result into the human reply.")
+tool askSpecialist {
+  role     string  @required @description("Specialist roleSlug -- the canonical identifier (e.g. accounting_finance, human_resources, it_support, legal_compliance). Must match an existing specialist agent in the partition.")
+  query    string  @required @description("What you want the specialist to answer. Phrase it as a clear question or task statement. Include relevant constraints from the conversation; the specialist does NOT see the chat directly.")
+  context  object  @description("Optional conversation context: recent utterances, attachments referenced, prior specialist findings. Helps the specialist ground its answer without exposing it to the whole chat.")
+}

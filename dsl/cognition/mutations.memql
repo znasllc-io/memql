@@ -98,6 +98,7 @@ mutation mutationCreateDailySpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.name
     args.dailyDateKey
     kind: "daily"
@@ -225,6 +226,7 @@ mutation mutationCreateSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.name
     args.description
     args.purpose
@@ -510,160 +512,6 @@ mutation mutationLeaveSpace {
   }
 }
 
-// ---- mutations/v1/cognition/moveGroupToPrivate.memql ----
-
-// moveGroupToPrivate
-// ==================
-//
-// Phase 8 of the chat-architecture plan. The misroute Move action's
-// "Group -> Team" path. Symmetric to movePrivateToGroup. Lands a copy
-// of a group utterance in the caller's private (Team) thread. The
-// engine pre-insert guard server-stamps forUserId from the
-// authenticated caller -- a non-elevated caller cannot move a group
-// utterance into another user's Team thread.
-//
-// As with movePrivateToGroup, this mutation does NOT delete the
-// source group row. The cognition handler pairs the two sides of the
-// move; this mutation is intentionally minimal.
-
-@enabled
-@useConcept(privateUtterance)
-@description("Insert a copy of a group-thread utterance into the caller's private thread. forUserId is server-stamped; original group row is NOT deleted.")
-mutation mutationMoveGroupToPrivate {
-  args {
-    newUtteranceId     string
-    spaceId            string  @required
-    participantId      string  @required
-    text               string  @required
-    source             object
-    originalTimestamp  string
-  }
-  insert privateUtterance {
-    id: coalesce(
-      args.newUtteranceId,
-      concat("moved-gp-", hash(concat(
-        canonicalId(args.spaceId, "v1:cognition:space"), ":",
-        canonicalId(args.participantId, "v1:cognition:participant"), ":",
-        coalesce(args.originalTimestamp, timestamp()), ":",
-        args.text
-      )))
-    )
-    args.spaceId
-    args.participantId
-    participantType: "human"
-    utteranceType: "text"
-    args.text
-    args.source
-  }
-}
-
-// ---- mutations/v1/cognition/movePrivateToGroup.memql ----
-
-// movePrivateToGroup
-// ==================
-//
-// Phase 8 of the chat-architecture plan. The misroute Move action's
-// "Team -> Group" path: the user just sent a message in their Team
-// tab, the classifier flagged 0.6-0.85 confidence that it actually
-// belonged in Group, the user clicked [Move]. This mutation lands a
-// new utterance in the GROUP thread carrying the same content + the
-// original timestamp.
-//
-// IMPORTANT -- the original v1:cognition:privateUtterance row is NOT
-// deleted by this mutation; it remains in the user's private thread.
-// The cognition handler that wraps this call is the one that pairs
-// movePrivateToGroup with a soft-delete on the private row (a new
-// version with utteranceType='system' carrying a "moved-to-group"
-// marker, since memQL is append-only and we don't actually purge the
-// row). Decoupling the two operations keeps the mutations themselves
-// trivial and lets future workflows (e.g., a "copy to group without
-// removing from team" affordance) reuse half of this pair.
-//
-// Caller:
-//   - The chat panel's MisroutePostSendPrompt component on [Move].
-//   - Server-side: the cognition handler responding to a "move
-//     utterance" RPC carrying source utterance + target thread.
-
-@enabled
-@useConcept(utterance)
-@description("Insert a copy of a private-thread utterance into the group thread. Original private row is NOT deleted by this mutation; the calling layer pairs this with a soft-delete on the private side.")
-mutation mutationMovePrivateToGroup {
-  args {
-    newUtteranceId     string
-    spaceId            string  @required
-    participantId      string  @required
-    text               string  @required
-    source             object
-    originalTimestamp  string
-  }
-  insert utterance {
-    id: coalesce(
-      args.newUtteranceId,
-      concat("moved-pg-", hash(concat(
-        canonicalId(args.spaceId, "v1:cognition:space"), ":",
-        canonicalId(args.participantId, "v1:cognition:participant"), ":",
-        coalesce(args.originalTimestamp, timestamp()), ":",
-        args.text
-      )))
-    )
-    args.spaceId
-    args.participantId
-    participantType: "human"
-    utteranceType: "text"
-    args.text
-    args.source
-  }
-}
-
-// ---- mutations/v1/cognition/recordMisrouteFeedback.memql ----
-
-// recordMisrouteFeedback
-// ======================
-//
-// Phase 8 of the chat-architecture plan. Stores one row of the
-// misroute classifier's audit + tuning corpus per soft-prompt firing
-// (or hard-block firing). The cognition handler calls this after the
-// classifier returns and the user takes (or doesn't take) action.
-
-@enabled
-@useConcept(misrouteFeedback)
-@description("Append a v1:cognition:misrouteFeedback row recording the classifier's call + the user's response (moved / dismissed / timeout / blocked).")
-mutation mutationRecordMisrouteFeedback {
-  args {
-    feedbackId      string
-    spaceId         string  @required
-    forUserId       string
-    originalThread  string  @required
-    intendedThread  string  @required
-    confidence      float   @required
-    why             string
-    message         string  @required
-    utteranceId     string
-    movedToId       string
-    userAction      string  @required
-  }
-  insert misrouteFeedback {
-    id: coalesce(
-      args.feedbackId,
-      concat("misroute-", hash(concat(
-        args.spaceId, ":",
-        timestamp(), ":",
-        args.message
-      )))
-    )
-    args.spaceId
-    args.forUserId
-    args.originalThread
-    args.intendedThread
-    args.confidence
-    args.why
-    args.message
-    args.utteranceId
-    args.movedToId
-    args.userAction
-  }
-}
-
 // ---- mutations/v1/cognition/removeAgentFromSpace.memql ----
 
 // removeAgentFromSpace
@@ -847,51 +695,6 @@ mutation mutationSendActionUtterance {
         schemaVersion: coalesce(args.action.schemaVersion, 1),
         idempotencyKey: args.action.idempotencyKey
       }
-  }
-}
-
-// ---- mutations/v1/cognition/sendPrivateUtterance.memql ----
-
-// sendPrivateUtterance
-// ====================
-//
-// Inserts a new utterance into a user's PRIVATE conversation thread inside
-// a space (the "Team" tab in the chat UI).
-//
-// Phase 1.2 of the chat-architecture plan. Mirrors mutationSendTextUtterance
-// field-for-field but inserts into v1:cognition:privateUtterance, not
-// v1:cognition:utterance.
-//
-// forUserId is server-stamped at the engine layer
-// (validateAndStampPrivateUtterancePayload). Non-elevated callers cannot
-// supply it; elevated callers (system / owner / developer / admin) MAY pass
-// `forUserId` to write on behalf of a specific user (e.g., the discussion-
-// mode dispatcher in Phase 6). The engine guard rejects rows where the
-// resolved forUserId is empty.
-
-@enabled
-@useConcept(privateUtterance)
-@description("Create a private text utterance scoped to the caller's Team tab in a space.")
-mutation mutationSendPrivateUtterance {
-  args {
-    utteranceId      string
-    spaceId          string  @required
-    participantId    string  @required
-    participantType  string
-    text             string  @required
-    replyToId        string
-    source           object
-    forUserId        string
-  }
-  insert privateUtterance {
-    args.spaceId
-    args.participantId
-    participantType: coalesce(args.participantType, "human")
-    utteranceType: "text"
-    args.text
-    args.replyToId
-    args.source
-    args.forUserId
   }
 }
 
