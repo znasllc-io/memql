@@ -16,7 +16,7 @@ seed elementary_school_tutor {
   category:              "education"
   lockedDomainIds:       ["elementary_pedagogy"]
   defaultDomainIds:      ["early_literacy", "elementary_math", "child_development", "classroom_management"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -32,7 +32,7 @@ seed middle_school_tutor {
   category:              "education"
   lockedDomainIds:       ["middle_school_pedagogy"]
   defaultDomainIds:      ["prealgebra_algebra", "study_skills", "child_development", "english_grammar_style"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -48,7 +48,7 @@ seed high_school_tutor {
   category:              "education"
   lockedDomainIds:       ["high_school_pedagogy"]
   defaultDomainIds:      ["algebra", "geometry_trigonometry", "biology", "chemistry", "physics_high_school", "english_literature", "world_history", "us_history", "study_skills"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -64,7 +64,7 @@ seed test_prep_coach {
   category:              "education"
   lockedDomainIds:       ["test_prep_strategy"]
   defaultDomainIds:      ["sat_act_content", "gre_gmat_content", "study_skills"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -80,7 +80,7 @@ seed math_tutor_calculus {
   category:              "education"
   lockedDomainIds:       ["calculus"]
   defaultDomainIds:      ["precalculus", "linear_algebra", "math_problem_solving"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -96,7 +96,7 @@ seed language_tutor_spanish {
   category:              "education"
   lockedDomainIds:       ["spanish_language"]
   defaultDomainIds:      ["spanish_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -112,7 +112,7 @@ seed language_tutor_mandarin {
   category:              "education"
   lockedDomainIds:       ["mandarin_chinese"]
   defaultDomainIds:      ["chinese_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -128,7 +128,7 @@ seed language_tutor_french {
   category:              "education"
   lockedDomainIds:       ["french_language"]
   defaultDomainIds:      ["french_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -144,7 +144,7 @@ seed history_educator {
   category:              "education"
   lockedDomainIds:       ["world_history"]
   defaultDomainIds:      ["us_history", "european_history", "ancient_history", "historiography"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -160,7 +160,7 @@ seed philosophy_educator {
   category:              "education"
   lockedDomainIds:       ["philosophy"]
   defaultDomainIds:      ["ethics", "logic", "epistemology", "metaphysics", "philosophy_history"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }

@@ -1,0 +1,15 @@
+// shapes.memql -- workbench namespace
+
+@row
+@useConcept(workspace)
+@description("Full projection of a v1:workbench:workspace row. Used by queryWorkspaceForPlan (the integration's existence-check) and queryProvisionedWorkspaces (inventory).")
+shape workspaceFull {
+  row.id
+  workspace.planId
+  workspace.status
+  workspace.storageRoot
+  workspace.createdAt
+  workspace.lastUsedAt
+  workspace.releasedAt
+  workspace.releasedReason
+}

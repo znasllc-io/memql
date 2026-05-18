@@ -1,0 +1,32 @@
+// logic.memql -- workbench namespace
+//
+// Imperative bodies for workbench automations. The DSL parser
+// requires logic to live as a separate construct from its parent
+// automation.
+
+@useQuery(queryWorkspaceForPlan)
+@useMutation(mutationReleaseWorkspace)
+@useBuiltin(workbenchTeardownDirectory)
+@description("Imperative body of automation releaseWorkspaceOnPlanTerminal. On every plan update, check the new status; if terminal AND a workspace exists for the planId AND it is still provisioned, flip the concept row AND call the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally when status is terminal even if no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.")
+logic logicReleaseWorkspaceOnPlanTerminal {
+  args {
+    event object @required
+  }
+  body {
+    status := coalesce(args.event.node.payload.status, "")
+    planId := coalesce(args.event.node.id, "")
+    release := if (status == "succeeded" or status == "failed" or status == "cancelled") and planId != "" {
+      workspaces := queryWorkspaceForPlan({ planId: planId })
+      for item := range workspaces.Nodes() {
+        flip := if item.payload.status == "provisioned" {
+          mutationReleaseWorkspace({
+            workspaceId: item.id,
+            reason: "plan_terminal"
+          })
+        }
+      }
+      teardown := workbenchTeardownDirectory({ planId: planId })
+    }
+    ctx.output = planId
+  }
+}

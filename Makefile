@@ -60,6 +60,10 @@ agent:
 planner:
 	$(GO) build $(GOFLAGS) -tags planner -o $(BIN_DIR)/memql-planner .
 
+## Build workbench node binary
+workbench:
+	$(GO) build $(GOFLAGS) -tags workbench -o $(BIN_DIR)/memql-workbench .
+
 ## Generate Go from .templ files for the identity web app.
 ## Uses `go run` so contributors don't need templ on their PATH.
 identity-templ:

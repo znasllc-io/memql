@@ -17,7 +17,7 @@ seed physics_educator {
   category:              "scientific"
   lockedDomainIds:       ["physics"]
   defaultDomainIds:      ["classical_mechanics", "electromagnetism", "thermodynamics", "quantum_mechanics", "calculus"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -33,7 +33,7 @@ seed chemistry_educator {
   category:              "scientific"
   lockedDomainIds:       ["chemistry"]
   defaultDomainIds:      ["organic_chemistry", "inorganic_chemistry", "physical_chemistry", "biochemistry"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -49,7 +49,7 @@ seed biology_educator {
   category:              "scientific"
   lockedDomainIds:       ["biology"]
   defaultDomainIds:      ["cell_biology", "molecular_biology", "genetics", "ecology", "evolution"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -65,7 +65,7 @@ seed astronomy_educator {
   category:              "scientific"
   lockedDomainIds:       ["astronomy"]
   defaultDomainIds:      ["astrophysics", "cosmology", "planetary_science"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -81,7 +81,7 @@ seed geology_educator {
   category:              "scientific"
   lockedDomainIds:       ["geology"]
   defaultDomainIds:      ["mineralogy", "plate_tectonics", "earth_history"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

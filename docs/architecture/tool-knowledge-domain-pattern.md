@@ -1,7 +1,9 @@
 # Tool ↔ Knowledge Domain Pattern
 
 **Status:** Established. Pattern shipped 2026-04-x with `copresent_ui`;
-extended 2026-05-08 to `computer_use`.
+extended 2026-05-08 to `computer_use`; further extended 2026-05-17
+to the `workbench` domain (the sandboxed first-choice headless
+surface).
 
 ## Problem
 
@@ -165,10 +167,11 @@ training, where they can be tuned per agent and per workspace.
 
 ## Concrete instances
 
-| Capability slug      | Domain id        | Seed corpus var               | Auto-attach signal in replier.go |
-|----------------------|------------------|-------------------------------|----------------------------------|
-| `copresent_control`  | `copresent_ui`   | `copresentUISeedCorpus`       | `operatorEnabled` truthy          |
-| `computer_use`       | `computer_use`   | `computerUseSeedCorpus`       | `computerUseStatus` non-empty    |
+| Capability slug              | Domain id        | Seed corpus var               | Auto-attach signal in replier.go      |
+|------------------------------|------------------|-------------------------------|----------------------------------------|
+| `copresent_control`          | `copresent_ui`   | `copresentUISeedCorpus`       | `operatorEnabled` truthy                |
+| `computer_use_*` (split)     | `computer_use`   | `computerUseSeedCorpus`       | `computerUseStatus` non-empty           |
+| `workbench_use`              | `workbench`      | `workbenchSeedCorpus`         | `workbenchAvailable` truthy (i.e. agent's expanded tool list carries `workbenchHost`) |
 
 ## Why it works
 
@@ -180,7 +183,7 @@ training, where they can be tuned per agent and per workspace.
   new id, old version purged on next re-ingest).
 - **RAG does the right work.** Only chunks relevant to the user's
   current message land in the prompt. A "what's the weather?" turn
-  doesn't pay for `computer_use` knowledge tokens; an "open Mail
+  doesn't pay for `computer_use` / `workbench` knowledge tokens; an "open Mail
   and ..." turn does.
 - **Per-agent overrides have a clean home.** Training pipeline
   attaches private domains; the standard seed isn't touched.

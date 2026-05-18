@@ -218,7 +218,26 @@ var standardDomains = []StandardDomain{
 	{ID: "computer_use", Name: "Computer Use", Category: "internal",
 		Description: "Operational manual for the Computer Use capability: tool surfaces (workerHost / workerComputer), scope tiers (observe / full), per-task approval flow (requestComputerUseScope -> canvas card -> Allow / Deny), post-approval execution semantics, and the planner's success-vs-failure detection. Auto-attached to any agent given the Computer Use capability so the generic prompt template stays agnostic.",
 		RelevantForRoles:    []string{"general_assistant", "accounting_finance", "human_resources", "customer_service", "quality_assurance", "sales_marketing", "it_support", "legal_compliance", "operations", "project_management", "research_development", "training_education", "personal_finance_advisor", "household_manager", "parenting_coach", "health_wellness_coach", "meal_planning_chef", "travel_planner", "creative_companion", "learning_companion", "relationships_social", "pet_care_specialist", "home_improvement_diy", "personal_legal_advisor", "mindfulness_coach", "entertainment_curator", "senior_care_advisor", "real_estate_advisor"},
-		RequiredByToolSlugs: []string{"computer_use"},
+		RequiredByToolSlugs: []string{"computer_use_headless", "computer_use_embodied"},
+	},
+
+	// --- Workbench --------------------------------------------------------
+	// Operational manual for the workbench capability. Mirrors the
+	// computer_use entry pattern: tool requires domain, domain doesn't
+	// require tool. Universal capability -- the workbench is the
+	// default first choice for any headless work and is on by default
+	// for every agent, so the domain is broadly RelevantForRoles.
+	//
+	// The chunks teach the agent: WHEN to use the workbench vs
+	// computer-use (workbench is Linux + sandboxed; computer-use is
+	// the user's actual machine + might be macOS), how workspaces
+	// persist across calls within a Plan, and how to handle the
+	// "this needs Xcode" kind of failure (declare the limitation in
+	// respondToUser so the planner can re-route with computer-use).
+	{ID: "workbench", Name: "Workbench", Category: "internal",
+		Description: "Operational manual for the Workbench capability: per-Plan sandboxed Linux workspace, the workbenchHost tool surface (exec / fs_read / fs_write / fs_list / fs_stat / http_fetch), persistence semantics (workspace outlasts individual Tasks; torn down at Plan terminal), the prefer-workbench-over-computer-use guidance, and the failure pattern when the agent discovers the workbench can't do the job (e.g. needs macOS / Xcode). Auto-attached to any agent given the workbench capability.",
+		RelevantForRoles:    []string{"general_assistant", "accounting_finance", "human_resources", "customer_service", "quality_assurance", "sales_marketing", "it_support", "legal_compliance", "operations", "project_management", "research_development", "training_education", "personal_finance_advisor", "household_manager", "parenting_coach", "health_wellness_coach", "meal_planning_chef", "travel_planner", "creative_companion", "learning_companion", "relationships_social", "pet_care_specialist", "home_improvement_diy", "personal_legal_advisor", "mindfulness_coach", "entertainment_curator", "senior_care_advisor", "real_estate_advisor"},
+		RequiredByToolSlugs: []string{"workbench_use"},
 	},
 
 	// --- CoPresent Conversation -------------------------------------------
@@ -1698,6 +1717,37 @@ var computerUseSeedCorpus = []struct {
 	},
 }
 
+// workbenchSeedCorpus is the operational manual for the `workbench_use`
+// capability. Universal capability (every agent has it by default).
+// Same shape as computerUseSeedCorpus -- chunks lead with a topic
+// anchor and stay self-contained so RAG retrieval lands the right
+// chunk for a given query.
+var workbenchSeedCorpus = []struct {
+	SourceRef string
+	Text      string
+}{
+	{
+		SourceRef: "workbench:overview",
+		Text: `The Workbench is your default working environment for any HEADLESS task -- writing files, running shell commands, fetching URLs from the open web. It is a per-Plan sandboxed Linux directory in the cluster; YOU drive it, the user does not see it as a filesystem they can browse, and nothing on the user's machine is touched. Reach for the workbench FIRST for any "do this task and produce a file / output" work. Computer Use (` + "`workerHost`" + ` / ` + "`workerComputer`" + `) is the FALLBACK -- use it only when the workbench cannot do the job (the task needs macOS-only tooling like Xcode, the user wants you to drive a GUI app on their machine, or the user explicitly asked you to work on a file already on their computer). The single tool surface for the workbench is ` + "`workbenchHost`" + `, discriminated by an ` + "`action`" + ` field. When you mention this skill to the user, you can call it "the workbench" or just describe what you're doing ("I'll write the report to a file"). The wire name ` + "`workbenchHost`" + ` is internal -- don't surface it.`,
+	},
+	{
+		SourceRef: "workbench:actions",
+		Text: `The ` + "`workbenchHost`" + ` tool's ` + "`action`" + ` field discriminates six operations, all targeting the per-Plan workspace: ` + "`exec`" + ` runs a shell command (args ` + "`{cmd, cwd?, env?, stdin?, timeoutSec?}`" + `); ` + "`fs_read`" + ` reads a file as text (args ` + "`{path, maxBytes?}`" + `); ` + "`fs_write`" + ` writes a file, auto-creating parent directories (args ` + "`{path, content, mode?}`" + `); ` + "`fs_list`" + ` enumerates entries in a directory (args ` + "`{path}`" + `); ` + "`fs_stat`" + ` returns size / mode / mtime / isDir / exists (args ` + "`{path}`" + `); ` + "`http_fetch`" + ` makes an HTTP request from the workbench (args ` + "`{url, method?, headers?, body?, timeoutSec?}`" + `). All paths are RELATIVE to the workspace root; absolute paths (` + "`/etc/passwd`" + `) and ` + "`..`" + ` traversal are rejected. Prefer ` + "`fs_write`" + ` for producing a structured deliverable (the user can later retrieve the file via the cockpit); prefer ` + "`exec`" + ` for "do this then capture the output" work where the file artifact isn't the goal.`,
+	},
+	{
+		SourceRef: "workbench:environment",
+		Text: `The workbench runs LINUX, not macOS. Write your shell with ` + "`apt`" + ` / ` + "`pip`" + ` / ` + "`npm`" + ` rather than ` + "`brew`" + `. The workspace starts empty -- no user files, no user environment variables, no home directory. There is no ` + "`/etc`" + ` to inspect, no ` + "`~/Library`" + ` to read, no ` + "`/Applications`" + ` to launch. The cwd defaults to the workspace root; if you need a subdirectory, create it with ` + "`fs_write`" + ` (parent dirs auto-create) or ` + "`exec`" + ` ` + "`mkdir -p`" + ` and then pass ` + "`cwd`" + ` to subsequent exec calls. Available tooling includes common Unix utilities and the runtimes seeded by the workbench image -- assume curl / git / a Python interpreter / a Node interpreter are present; verify with ` + "`which X`" + ` if uncertain. Anything you ` + "`apt install`" + ` mid-Plan stays for subsequent calls within the same Plan because the workspace persists.`,
+	},
+	{
+		SourceRef: "workbench:persistence",
+		Text: `The workspace persists for the LIFE of the parent Plan. A file you ` + "`fs_write`" + ` on Task 1 is still there when Task 2 ` + "`fs_read`" + `s it -- this is how agents collaborate on the same Plan without re-persisting through chat. Use this: write notes to ` + "`notes.md`" + `, scratch files to ` + "`tmp/`" + `, deliverables to a clean filename at the workspace root. When the parent Plan reaches a terminal status (succeeded / failed / cancelled), the workspace is torn down and the files go away -- if you want the user to have any of them, surface them via ` + "`canvasPublish`" + ` (kind=document with the file contents as markdown, or kind=card pointing at the artifact) BEFORE the Plan ends. Don't assume the user will go fetch a file from a workspace they can't browse.`,
+	},
+	{
+		SourceRef: "workbench:failureFallback",
+		Text: `When the workbench can't do the job (the task genuinely requires macOS / Xcode / a GUI app on the user's machine / a file the user has locally), DON'T silently switch to computer-use. The clean signal: end your turn with a ` + "`respondToUser`" + ` that names the limitation concretely ("I can't build the iOS app from the workbench -- that needs Xcode on a Mac. To do this we'd need to use Computer Use to drive your machine."). The planner sees the turn outcome and decides whether to re-route the task with computer-use capabilities granted. Same pattern for ambiguous failures: an ` + "`exec`" + ` that exits with a missing-binary error is a "workbench can't do this" signal -- surface it honestly rather than retrying with random variations. If you have BOTH workbench_use and computer_use slugs, the prompt will tell you; in that case you can choose at call time, but still prefer workbench first.`,
+	},
+}
+
 // copresentConversationSeedCorpus is the operational manual for the
 // two-thread chat model (Phase 5 of the chat-architecture plan).
 // Ingested into the copresent_conversation domain at startup. Each
@@ -1862,6 +1912,12 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 		computerUseEntries = append(computerUseEntries, seedEntry{SourceRef: e.SourceRef, Text: e.Text})
 	}
 	ingestCorpus("computer_use", computerUseEntries)
+
+	workbenchEntries := make([]seedEntry, 0, len(workbenchSeedCorpus))
+	for _, e := range workbenchSeedCorpus {
+		workbenchEntries = append(workbenchEntries, seedEntry{SourceRef: e.SourceRef, Text: e.Text})
+	}
+	ingestCorpus("workbench", workbenchEntries)
 
 	conversationEntries := make([]seedEntry, 0, len(copresentConversationSeedCorpus))
 	for _, e := range copresentConversationSeedCorpus {

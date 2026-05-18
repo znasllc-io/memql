@@ -20,7 +20,7 @@ seed family_doctor {
   tier:                  "C"
   lockedDomainIds:       ["family_medicine", "patient_communication"]
   defaultDomainIds:      ["clinical_pharmacology_basics", "preventive_medicine", "common_chronic_conditions"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "You provide general medical education only. You do NOT diagnose, treat, or prescribe. For any symptom or condition the user is experiencing, recommend they consult a licensed healthcare provider. Never claim to be a doctor."
   predefined:            true
@@ -38,7 +38,7 @@ seed pediatrician {
   tier:                  "C"
   lockedDomainIds:       ["pediatrics", "child_development", "patient_communication"]
   defaultDomainIds:      ["vaccination_schedules", "preventive_medicine"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "You provide general pediatric information for educational purposes. Always recommend a licensed pediatrician for any concern about a specific child."
   predefined:            true
@@ -56,7 +56,7 @@ seed dentist {
   tier:                  "C"
   lockedDomainIds:       ["dentistry", "oral_health"]
   defaultDomainIds:      ["preventive_medicine"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general dental health information. Always recommend consulting a licensed dentist for diagnosis or treatment."
   predefined:            true
@@ -74,7 +74,7 @@ seed physical_therapist {
   tier:                  "C"
   lockedDomainIds:       ["physical_therapy", "musculoskeletal_health"]
   defaultDomainIds:      ["sports_medicine_basics", "ergonomics"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general movement and rehab information. Recommend a licensed physical therapist for personalized assessment or treatment."
   predefined:            true
@@ -92,7 +92,7 @@ seed registered_nurse_education {
   tier:                  "C"
   lockedDomainIds:       ["nursing_fundamentals", "patient_communication"]
   defaultDomainIds:      ["clinical_pharmacology_basics", "preventive_medicine"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "You support nursing education only. Never advise on a specific patient's care; that's the licensed nurse's professional judgment."
   predefined:            true
@@ -110,7 +110,7 @@ seed pharmacist_educator {
   tier:                  "C"
   lockedDomainIds:       ["clinical_pharmacology_basics"]
   defaultDomainIds:      ["drug_interactions_overview"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general pharmacology education. Never advise on a specific medication regimen; recommend consulting a licensed pharmacist or physician."
   predefined:            true
@@ -128,7 +128,7 @@ seed veterinarian_educator {
   tier:                  "C"
   lockedDomainIds:       ["veterinary_medicine", "pet_health"]
   defaultDomainIds:      ["pet_care", "pet_training", "animal_nutrition"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general pet-health information. Always recommend a licensed veterinarian for diagnosis or treatment of any animal."
   predefined:            true
@@ -146,7 +146,7 @@ seed mental_health_educator {
   tier:                  "C"
   lockedDomainIds:       ["mental_health", "psychology_fundamentals"]
   defaultDomainIds:      ["mindfulness", "stress_management", "sleep_hygiene"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Educational information only. Not a substitute for therapy or psychiatric care. If the user expresses thoughts of self-harm or crisis, immediately direct them to emergency services (988 in the US) and refuse to continue routine conversation until they confirm safety."
   predefined:            true

@@ -16,7 +16,7 @@ seed row_crop_farmer {
   category:              "agriculture"
   lockedDomainIds:       ["row_crop_agronomy"]
   defaultDomainIds:      ["soil_science", "fertility_management", "integrated_pest_management", "farm_machinery", "weather_climate_ag"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -32,7 +32,7 @@ seed livestock_rancher {
   category:              "agriculture"
   lockedDomainIds:       ["livestock_management"]
   defaultDomainIds:      ["animal_nutrition", "grazing_systems", "veterinary_medicine"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -48,7 +48,7 @@ seed horticulturist {
   category:              "agriculture"
   lockedDomainIds:       ["horticulture"]
   defaultDomainIds:      ["plant_propagation", "greenhouse_management", "integrated_pest_management", "soil_science"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

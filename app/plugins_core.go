@@ -29,4 +29,5 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/training"
 	_ "github.com/znasllc-io/memql/integrations/voice"
+	_ "github.com/znasllc-io/memql/integrations/workbench"
 )

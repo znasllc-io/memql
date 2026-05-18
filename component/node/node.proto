@@ -36,6 +36,8 @@ message NodeClientMessage {
     QueryForward query_forward = 60;
     AiForwardRequest ai_forward_request = 70;
     AiForwardCancel ai_forward_cancel = 71;
+    WorkbenchForwardRequest workbench_forward_request = 80;
+    WorkbenchForwardCancel workbench_forward_cancel = 81;
   }
 }
 
@@ -57,6 +59,7 @@ message NodeServerMessage {
     NodeShutdown node_shutdown = 50;
     QueryResponse query_response = 60;
     AiForwardResponse ai_forward_response = 70;
+    WorkbenchForwardResponse workbench_forward_response = 80;
   }
 }
 
@@ -250,6 +253,57 @@ message AiForwardResponse {
 // the request (stream closed, explicit cancel message). The worker
 // should stop producing responses for `request_id` and clean up.
 message AiForwardCancel {
+  string request_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Workbench forwarding
+// ---------------------------------------------------------------------------
+//
+// WorkbenchForwardRequest carries an agent's workbenchHost.<action>
+// dispatch from the agent node to the workbench node that holds the
+// per-Plan workspace. Single round-trip semantics (no streaming);
+// the agent's tool loop waits synchronously for the response.
+//
+// Unlike AiForward, this is a structured envelope (not a byte-wrapped
+// MemqlClientMessage) because the workbench surface is a flat
+// integration capability, not a gRPC message type. Args are encoded
+// as JSON to keep the wire shape stable across action-specific arg
+// variants without exploding the proto with one oneof per action.
+//
+// `auth` carries the originating principal's claims (subject, email,
+// role) so the workbench node can reconstruct the actor context;
+// `partition` is the tenant partition so multi-tenant workbench
+// deployments scope correctly.
+message WorkbenchForwardRequest {
+  string request_id = 1;
+  map<string, string> auth = 2;
+  string partition = 3;
+  string plan_id = 4;
+  string action = 5;
+  bytes args_json = 6;
+  string agent_id = 7;
+  string task_id = 8;
+  // Optional timeout hint; the workbench node clamps to its own caps.
+  int32 timeout_sec = 9;
+}
+
+// WorkbenchForwardResponse carries the dispatch result back to the
+// agent node. `payload_json` is the JSON-marshalled dispatchResult
+// shape ({ok, action, payload, errorCode, errorMessage}) the local
+// path returns. Single message per request_id; no streaming.
+message WorkbenchForwardResponse {
+  string request_id = 1;
+  bytes payload_json = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+// WorkbenchForwardCancel mirrors AiForwardCancel. The agent's tool
+// loop fires it when the LLM call upstream is cancelled before the
+// workbench finishes; the workbench should stop in-flight work
+// for the request_id and free resources (kill exec, abort http_fetch).
+message WorkbenchForwardCancel {
   string request_id = 1;
 }
 

@@ -61,7 +61,30 @@ Tool registry (name + description + allowedRoles):
    - Add tools from the registry that directly support the goal.
    - Reject tools whose allowedRoles does not include the chosen
      roleSlug.
-7. reasoning: one or two sentences explaining the decision. Keep it
+7. Workbench + computer-use selection (the headless-execution
+   surface ladder):
+   - ALWAYS include `workbench_use` in toolSlugs (it's the universal
+     sandboxed Linux working environment for any headless task --
+     writing files, running shell commands, fetching URLs in the
+     cluster; no user-machine access required). The only reason to
+     omit it is when the role explicitly forbids it (rare).
+   - ADDITIONALLY include `computer_use_headless` ONLY when the goal
+     specifically calls for headless work on the user's OWN machine:
+     files at specific paths under the user's home directory, shell
+     commands that need to run in the user's environment, anything
+     that explicitly says "on my computer" / "in my Documents" /
+     "in my home directory".
+   - ADDITIONALLY include `computer_use_embodied` ONLY when the goal
+     specifically calls for GUI / mouse / keyboard / screenshot work
+     on the user's machine: driving a native app outside CoPresent
+     (Xcode, Photoshop, etc.), taking screenshots, automating UI
+     flows on the user's screen.
+   - Preference order is workbench FIRST, computer-use only when
+     unavoidable. Never grant the computer_use_* slugs "just in case"
+     -- they're scoped to actions on the user's machine which the
+     user must approve per-task; granting them when not needed pulls
+     the agent into approval flows for nothing.
+8. reasoning: one or two sentences explaining the decision. Keep it
    crisp; this is for audit + cockpit display, not narration.
 
 # Output

@@ -17,7 +17,7 @@ seed general_contractor {
   category:              "trades"
   lockedDomainIds:       ["construction_fundamentals"]
   defaultDomainIds:      ["building_codes", "project_data", "trades_safety", "estimating", "subcontractor_management"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -34,7 +34,7 @@ seed electrician {
   tier:                  "B"
   lockedDomainIds:       ["electrical_trades"]
   defaultDomainIds:      ["building_codes", "trades_safety", "circuit_design_basics", "electrical_troubleshooting"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general electrical information. Live electrical work is dangerous and frequently licensed by jurisdiction; recommend a licensed electrician for any actual work."
   predefined:            true
@@ -51,7 +51,7 @@ seed plumber {
   category:              "trades"
   lockedDomainIds:       ["plumbing_trades"]
   defaultDomainIds:      ["building_codes", "trades_safety", "diy_repairs", "water_systems"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -67,7 +67,7 @@ seed hvac_technician {
   category:              "trades"
   lockedDomainIds:       ["hvac_systems"]
   defaultDomainIds:      ["building_codes", "trades_safety", "energy_efficiency", "refrigerant_handling"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -83,7 +83,7 @@ seed carpenter {
   category:              "trades"
   lockedDomainIds:       ["carpentry"]
   defaultDomainIds:      ["woodworking", "building_codes", "trades_safety", "joinery_techniques", "diy_repairs"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -99,7 +99,7 @@ seed automotive_mechanic {
   category:              "trades"
   lockedDomainIds:       ["automotive_repair"]
   defaultDomainIds:      ["vehicle_diagnostics", "trades_safety", "engine_systems", "vehicle_electrical"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -115,7 +115,7 @@ seed welder {
   category:              "trades"
   lockedDomainIds:       ["welding"]
   defaultDomainIds:      ["metallurgy_basics", "trades_safety", "weld_inspection"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -131,7 +131,7 @@ seed landscaping_grounds {
   category:              "trades"
   lockedDomainIds:       ["landscaping"]
   defaultDomainIds:      ["horticulture", "irrigation_systems", "gardening", "lawn_care"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

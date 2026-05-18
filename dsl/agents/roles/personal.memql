@@ -19,7 +19,7 @@ seed personal_finance_advisor {
   tier:                  "B"
   lockedDomainIds:       ["personal_finance", "personal_budgeting"]
   defaultDomainIds:      ["personal_taxes", "personal_investing", "personal_insurance", "estate_planning_personal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general financial education. Always recommend a licensed financial planner / CPA / attorney for personalized advice on taxes, investments, or estate planning."
   predefined:            true
@@ -36,7 +36,7 @@ seed household_manager {
   category:              "personal"
   lockedDomainIds:       ["household_maintenance"]
   defaultDomainIds:      ["home_inventory", "household_chores", "personal_finance", "personal_budgeting"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -52,7 +52,7 @@ seed parenting_coach {
   category:              "personal"
   lockedDomainIds:       ["parenting", "child_development"]
   defaultDomainIds:      ["school_education_personal", "nutrition", "mental_health"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -69,7 +69,7 @@ seed health_wellness_coach {
   tier:                  "B"
   lockedDomainIds:       ["nutrition", "fitness"]
   defaultDomainIds:      ["mental_health", "sleep_hygiene", "mindfulness", "medical_records_personal", "stress_management"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general wellness information. Always recommend a licensed healthcare provider for personal medical or mental-health concerns."
   predefined:            true
@@ -87,7 +87,7 @@ seed fitness_coach {
   tier:                  "B"
   lockedDomainIds:       ["fitness", "exercise_science"]
   defaultDomainIds:      ["nutrition", "sleep_hygiene", "stretching_mobility", "strength_training"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general fitness information. Always recommend consulting a doctor before starting a new exercise program and a certified trainer for personalized programming."
   predefined:            true
@@ -104,7 +104,7 @@ seed running_coach {
   category:              "personal"
   lockedDomainIds:       ["running_training"]
   defaultDomainIds:      ["fitness", "exercise_science", "race_nutrition", "injury_prevention_running"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -120,7 +120,7 @@ seed yoga_instructor {
   category:              "personal"
   lockedDomainIds:       ["yoga_practice"]
   defaultDomainIds:      ["meditation", "anatomy_basics", "mindfulness", "yoga_philosophy"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -137,7 +137,7 @@ seed strength_coach {
   tier:                  "B"
   lockedDomainIds:       ["strength_training"]
   defaultDomainIds:      ["exercise_science", "fitness", "injury_prevention_running", "powerlifting"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -153,7 +153,7 @@ seed meal_planning_chef {
   category:              "personal"
   lockedDomainIds:       ["recipes", "meal_planning"]
   defaultDomainIds:      ["dietary_restrictions", "nutrition", "food_safety"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -169,7 +169,7 @@ seed travel_planner {
   category:              "personal"
   lockedDomainIds:       ["travel_planning"]
   defaultDomainIds:      ["travel_documents", "restaurant_dining", "personal_finance", "destination_research"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -185,7 +185,7 @@ seed learning_companion {
   category:              "personal"
   lockedDomainIds:       ["learning_methods"]
   defaultDomainIds:      ["language_learning", "online_courses", "book_summaries", "personal_growth", "study_skills"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -202,7 +202,7 @@ seed relationships_social {
   tier:                  "B"
   lockedDomainIds:       ["relationships_communication"]
   defaultDomainIds:      ["life_events_celebrations", "gifts", "conflict_resolution"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general communication and relationship information. For serious relationship distress or mental-health concerns, recommend a licensed therapist or counselor."
   predefined:            true
@@ -219,7 +219,7 @@ seed pet_care_specialist {
   category:              "personal"
   lockedDomainIds:       ["pet_care"]
   defaultDomainIds:      ["pet_training", "pet_health", "animal_nutrition"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -235,7 +235,7 @@ seed home_improvement_diy {
   category:              "personal"
   lockedDomainIds:       ["diy_repairs"]
   defaultDomainIds:      ["gardening", "sustainability", "home_inventory", "household_maintenance"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -251,7 +251,7 @@ seed mindfulness_coach {
   category:              "personal"
   lockedDomainIds:       ["mindfulness"]
   defaultDomainIds:      ["journaling", "personal_growth", "mental_health", "meditation"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -267,7 +267,7 @@ seed entertainment_curator {
   category:              "personal"
   lockedDomainIds:       ["entertainment_media"]
   defaultDomainIds:      ["music_appreciation", "book_summaries", "restaurant_dining", "film_appreciation"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -284,7 +284,7 @@ seed senior_care_advisor {
   tier:                  "B"
   lockedDomainIds:       ["elder_care"]
   defaultDomainIds:      ["end_of_life_planning", "medical_records_personal", "estate_planning_personal", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general information. Always recommend licensed practitioners for medical care, estate attorneys for legal documents, and certified eldercare advisors for personal situations."
   predefined:            true
@@ -302,7 +302,7 @@ seed real_estate_advisor {
   tier:                  "B"
   lockedDomainIds:       ["real_estate_listings"]
   defaultDomainIds:      ["mortgage_shopping", "neighborhood_research", "home_inspection", "property_taxes", "lease_agreements", "closing_process", "personal_finance", "personal_taxes"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general real estate information. Recommend a licensed realtor, attorney, or lender for any actual transaction."
   predefined:            true

@@ -28,6 +28,12 @@ const (
 
 	// NodeTypeVoice handles the audio I/O pipeline (ASR, TTS, LiveKit).
 	NodeTypeVoice NodeType = "voice"
+
+	// NodeTypeWorkbench hosts the sandboxed per-Plan Linux working
+	// environment. Receives WorkbenchForwardRequest envelopes on
+	// NodeService.Stream and dispatches to the local workbench
+	// integration. Agent nodes are the typical client.
+	NodeTypeWorkbench NodeType = "workbench"
 )
 
 // ValidNodeTypes is the set of recognized node types.
@@ -37,6 +43,7 @@ var ValidNodeTypes = map[NodeType]bool{
 	NodeTypePlanner:   true,
 	NodeTypeBFF:       true,
 	NodeTypeVoice:     true,
+	NodeTypeWorkbench: true,
 }
 
 // Identity holds the runtime identity of this node.
