@@ -20,18 +20,6 @@ prompt cognitionDiscussionDispatch {
 }
 
 @defaultProvider("chat54Mini")
-@templateFile("prompts/cognitionMisrouteCheck.tmpl")
-@description("Phase 8 of the chat-architecture plan. Classifies whether an outgoing chat message belongs in the tab the user is composing in (Group vs Team) given the conversation context. Returns intendedThread + confidence + why so the chat panel can render the confidence-tiered UX (>=0.85 hard pre-send modal; 0.6-0.85 soft post-send Move prompt; <0.6 silent). Cheap small-model call; runs server-side from the SendUtterance / SendPrivateUtterance handlers when User.preferences.misrouteSafetyEnabled is true.")
-prompt cognitionMisrouteCheck {
-  currentTab      string    @required @description("Which tab the user is composing in: 'group' or 'private'.")
-  message         string    @required @description("The text the user is about to send.")
-  spaceContext    object              @description("Space title, purpose, architecture, status -- for grounding the classifier on the kind of room this is.")
-  participants    []object            @description("Active humans + agents in the space, with displayName + participantKind.")
-  recentGroup     []object            @description("Last few group-thread utterances (most recent first), {speakerName, content}.")
-  recentPrivate   []object            @description("Last few private-thread utterances for THIS user (most recent first), {speakerName, content}.")
-}
-
-@defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionPlanTriage.tmpl")
 @description("Per Q10: classify whether the latest chat message warrants spawning a Plan (background work) or can be answered inline. Returns needsPlan + suggested planKind + planHint with the recommended owning agent + confidence + reasoning. Cheap small-model call; runs alongside the existing nextSpeaker routing decision so the chat agent's reply path can branch on the result without modifying the established turn-taking prompt.")
 prompt cognitionPlanTriage {

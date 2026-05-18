@@ -510,55 +510,6 @@ mutation mutationLeaveSpace {
   }
 }
 
-// ---- mutations/v1/cognition/recordMisrouteFeedback.memql ----
-
-// recordMisrouteFeedback
-// ======================
-//
-// Phase 8 of the chat-architecture plan. Stores one row of the
-// misroute classifier's audit + tuning corpus per soft-prompt firing
-// (or hard-block firing). The cognition handler calls this after the
-// classifier returns and the user takes (or doesn't take) action.
-
-@enabled
-@useConcept(misrouteFeedback)
-@description("Append a v1:cognition:misrouteFeedback row recording the classifier's call + the user's response (moved / dismissed / timeout / blocked).")
-mutation mutationRecordMisrouteFeedback {
-  args {
-    feedbackId      string
-    spaceId         string  @required
-    forUserId       string
-    originalThread  string  @required
-    intendedThread  string  @required
-    confidence      float   @required
-    why             string
-    message         string  @required
-    utteranceId     string
-    movedToId       string
-    userAction      string  @required
-  }
-  insert misrouteFeedback {
-    id: coalesce(
-      args.feedbackId,
-      concat("misroute-", hash(concat(
-        args.spaceId, ":",
-        timestamp(), ":",
-        args.message
-      )))
-    )
-    args.spaceId
-    args.forUserId
-    args.originalThread
-    args.intendedThread
-    args.confidence
-    args.why
-    args.message
-    args.utteranceId
-    args.movedToId
-    args.userAction
-  }
-}
-
 // ---- mutations/v1/cognition/removeAgentFromSpace.memql ----
 
 // removeAgentFromSpace
