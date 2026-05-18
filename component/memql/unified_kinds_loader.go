@@ -146,6 +146,18 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 		}
 		entry := &ProviderConfigEntry{Config: *p.cfg}
 		resolveProviderExtends(&entry.Config, registry)
+		resolvedAuth, authErr := resolveAuthPlaceholders(entry.Config.Auth)
+		if authErr != nil {
+			entry.err = authErr
+			if logger != nil {
+				logger.Warn("memql.unifiedProviderLoader: auth resolution failed; registered as unavailable",
+					"provider", entry.Config.Name, "error", authErr)
+			}
+			registry.setEntry(entry)
+			total++
+			continue
+		}
+		entry.Config.Auth = resolvedAuth
 		client, clientErr := newSIProvider(entry.Config)
 		if clientErr != nil {
 			entry.err = clientErr

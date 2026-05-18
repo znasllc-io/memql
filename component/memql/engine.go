@@ -337,7 +337,7 @@ func (e *MemQLEngine) emitQueryExecutedEvent(startTime time.Time, result *Execut
 func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult, error) {
 	startTime := time.Now()
 
-	if !e.initialized {
+	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
 	db := e.database()
