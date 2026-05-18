@@ -99,7 +99,7 @@ query queryAllAgents {
 
 @enabled
 @useConcept(agent)
-@description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. System-bootstrap agents (roleSlug starts with 'system_') are intentionally INCLUDED -- the dedupe layer treats them like any other candidate. The createSpecialist code path filters them out separately after similarity scoring so they never get proposed as extension targets.")
+@description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
 query queryActiveAgentsForUser {
   args {
     ownerUserId  string  @required
