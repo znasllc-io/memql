@@ -71,7 +71,9 @@ func (i *Integration) handleExec(ctx context.Context, ws *workspace, args map[st
 	c.Stdout = stdout
 	c.Stderr = stderr
 
+	startedAt := time.Now()
 	runErr := c.Run()
+	durationMs := time.Since(startedAt).Milliseconds()
 	exitCode := 0
 	signal := ""
 	if runErr != nil {
@@ -102,7 +104,7 @@ func (i *Integration) handleExec(ctx context.Context, ws *workspace, args map[st
 			"stdoutTrunc":   stdout.truncated,
 			"stderr":        stderr.String(),
 			"stderrTrunc":   stderr.truncated,
-			"durationMs":    0,
+			"durationMs":    durationMs,
 			"workspaceRoot": ws.rootPath,
 			"cwd":           cwd,
 		},
