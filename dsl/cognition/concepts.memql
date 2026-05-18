@@ -125,25 +125,6 @@ concept micState {
 
 @version("1.0.0")
 @namespace("cognition")
-@description("Phase 8 of the chat-architecture plan. Append-only audit + tuning corpus for the misroute safety net. One row per classifier call that fired the soft post-send Move prompt; the row records the original classifier output, the user's action (move / dismiss / timeout), and the involved utterance ids so prompt tuners can replay and re-score in offline analysis.")
-concept misroutefeedback {
-  spaceId         string  @required  @description("Space the misroute happened in.")
-  forUserId       string  @required  @description("User who composed the message.")
-  originalThread  enum("group", "private")  @required  @description("Tab the user composed in.")
-  intendedThread  enum("group", "private")  @required  @description("Classifier's call.")
-  confidence      float   @required  @description("Classifier confidence [0, 1].")
-  why             string  @description("Classifier's short rationale.")
-  message         string  @required  @description("The message text. Stored so prompt tuners can replay; cap on the calling code at ~2KB to keep this concept's rows small.")
-  utteranceId     string  @description("If the message landed (0.6-0.85 soft path), the row id of the source utterance. Empty when the >=0.85 hard path blocked the send entirely.")
-  movedToId       string  @description("If the user clicked [Move], the row id of the target-thread utterance the move action created. Empty otherwise.")
-  userAction      enum("moved", "dismissed", "timeout", "blocked")  @required  @description("What the user did: 'moved' = clicked [Move]; 'dismissed' = clicked away / typed something else within the 10s window; 'timeout' = the 10s window expired with no action; 'blocked' = the >=0.85 hard path showed the modal and the user picked one direction (the modal's [Send to <other>] vs [Send here anyway] decision lives in subsequent rows; the initial blocked event is the one captured here).")
-
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="forUserId", target="v1:identity:user", direction="outgoing")
-}
-
-@version("1.0.0")
-@namespace("cognition")
 @description("A human or SI participant instance within a space.")
 concept participant {
   agentId  string  @description("ID of the agent template (for SI participants).")
