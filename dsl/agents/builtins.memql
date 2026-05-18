@@ -50,6 +50,27 @@ builtin agent {
   spaceId  string    @required
 }
 
+// ---- builtin askSpecialist ------------------------------------------
+//
+// Synchronous specialist query. The assistant calls this via the
+// askSpecialist tool when it wants a specialist's structured answer
+// to a question. Resolves the specialist by roleSlug, invokes the
+// askSpecialist structured-output prompt, returns the JSON response.
+//
+// Specialists never speak to humans directly; their reply lives in
+// the tool result. The assistant paraphrases response.response into
+// the human-facing reply.
+
+@enabled
+@executor("integration.agents.askSpecialist")
+@args(profile="object")
+@description("Synchronously query a specialist agent by role. Returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant translates response to a human reply.")
+builtin askSpecialist {
+  role     string  @required
+  query    string  @required
+  context  object
+}
+
 // ---- builtin ensureAgentForGoal --------------------------------------
 //
 // Factory builtin invoked by the Assistant's `ensureAgent`

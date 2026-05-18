@@ -101,6 +101,16 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"spaceId":     "string",
 			},
 		},
+		{
+			Name:        "askSpecialist",
+			Description: "Synchronously query a specialist agent by role. Resolves the specialist by roleSlug, invokes the askSpecialist structured-output prompt with the specialist's persona + the assistant's query, and returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant paraphrases the response into the human-facing reply.",
+			Handler:     i.handleAskSpecialist,
+			ArgsSchema: map[string]string{
+				"role":    "string -- specialist roleSlug (e.g. accounting_finance, human_resources)",
+				"query":   "string -- what the assistant wants the specialist to answer",
+				"context": "object (optional) -- conversation context attached by the assistant",
+			},
+		},
 	}
 }
 
@@ -183,6 +193,103 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		Payload:   payloadBytes,
 	}
 	return []memorynodes.MemoryNode{node}, nil
+}
+
+// askSpecialistResponseSchema enforces the specialist's JSON output
+// contract. Specialists answer the assistant in this shape; the
+// assistant paraphrases `response` into the human-facing reply.
+var askSpecialistResponseSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["response", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "response":   {"type": "string"},
+    "rationale":  {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "needsMore":  {"type": "array", "items": {"type": "string"}}
+  }
+}`)
+
+// handleAskSpecialist is the synchronous specialist-query executor.
+//
+//	args["role"]    string  required -- specialist roleSlug
+//	args["query"]   string  required -- the assistant's question
+//	args["context"] object  optional -- conversation context
+//
+// Returns ONE MemoryNode whose payload is the specialist's structured
+// JSON response. The assistant's tool loop reads `response` and
+// paraphrases it into the human reply.
+func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil || i.agents == nil {
+		return nil, fmt.Errorf("askSpecialist: agents integration not initialized")
+	}
+	if i.engine == nil {
+		return nil, fmt.Errorf("askSpecialist: engine handle missing")
+	}
+
+	role, _ := args["role"].(string)
+	if role == "" {
+		return nil, fmt.Errorf("askSpecialist: 'role' argument is required (specialist roleSlug)")
+	}
+	query, _ := args["query"].(string)
+	if query == "" {
+		return nil, fmt.Errorf("askSpecialist(%q): 'query' argument is required", role)
+	}
+	contextArg, _ := args["context"].(map[string]any)
+
+	def, ok := i.agents.Get(role)
+	if !ok || def == nil {
+		return nil, fmt.Errorf("askSpecialist(%q): no agent registered with that role (loaded: %v)", role, i.agents.Names())
+	}
+	if def.Role != "specialist" {
+		return nil, fmt.Errorf("askSpecialist(%q): target agent has role=%q, not specialist", role, def.Role)
+	}
+
+	data := map[string]any{
+		"specialistName":         def.Name,
+		"specialistDescription":  def.Description,
+		"specialistSystemPrompt": def.SystemPrompt,
+		"query":                  query,
+	}
+	if contextArg != nil {
+		data["context"] = contextArg
+	}
+
+	raw, err := i.engine.InvokeSIStructured(
+		ctx,
+		"askSpecialist",
+		data,
+		"askSpecialistResponse",
+		askSpecialistResponseSchema,
+		true,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("askSpecialist(%q): invoke prompt: %w", role, err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, fmt.Errorf("askSpecialist(%q): parse response: %w (raw: %s)", role, err, raw)
+	}
+
+	envelope := map[string]any{
+		"role":     role,
+		"name":     def.Name,
+		"response": parsed,
+	}
+	payloadBytes, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("askSpecialist(%q): marshal envelope: %w", role, err)
+	}
+
+	return []memorynodes.MemoryNode{{
+		ID:        fmt.Sprintf("askSpecialist-envelope:%s:%d", role, time.Now().UnixNano()),
+		Concept:   envelopeConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		CreatedBy: systemActorId,
+		Payload:   payloadBytes,
+	}}, nil
 }
 
 // createInvocationPlan mints the v1:planner:plan row. The planner

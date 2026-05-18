@@ -71,6 +71,16 @@ func (e *MemQLEngine) validateCognitionUtteranceWriteAuthorization(ctx context.C
 		if !isSystemActor(identity, actor) {
 			return fmt.Errorf("only system actors may write %s utterances", participantType)
 		}
+		// Specialists never speak to humans directly. Their replies
+		// flow through the assistant via the askSpecialist tool.
+		if participantType == "si" {
+			agentId := strings.TrimSpace(stringFromAny(participantPayload["agentId"]))
+			if agentId != "" {
+				if role, err := e.getAgentRole(ctx, agentId); err == nil && role == "specialist" {
+					return fmt.Errorf("specialist agents may not publish utterances directly; use the askSpecialist tool from the assistant")
+				}
+			}
+		}
 		return nil
 	}
 
@@ -150,6 +160,35 @@ func matchesAuthenticatedIdentity(participantUserId, actor string, identity auth
 		}
 	}
 	return false
+}
+
+// getAgentRole returns the role ("specialist" or "assistant") for
+// the agent row with the given id, looking up the latest version.
+// Returns "" when the agent is not found or the role field is absent.
+func (e *MemQLEngine) getAgentRole(ctx context.Context, agentId string) (string, error) {
+	db := e.database()
+	if db == nil {
+		return "", fmt.Errorf("memory engine database not configured")
+	}
+	var node memorynodes.MemoryNode
+	err := db.NewSelect().
+		Model(&node).
+		Where("id = ?", agentId).
+		Where("concept = ?", "v1:agents:agent").
+		OrderExpr(`"createdAt" DESC`).
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("load agent %q: %w", agentId, err)
+	}
+	payload := make(map[string]any)
+	if err := json.Unmarshal(node.Payload, &payload); err != nil {
+		return "", fmt.Errorf("decode agent %q payload: %w", agentId, err)
+	}
+	return strings.TrimSpace(stringFromAny(payload["role"])), nil
 }
 
 func isTranscriptOnlyUtterance(payload map[string]any) bool {
