@@ -1,0 +1,24 @@
+// Builtins in the cognition namespace.
+
+// ---- builtin recentChat --------------------------------------------
+//
+// Read recent utterances + space context. Wires the recentChat tool
+// to the chat integration's handler (integration.chat.recentChat).
+//
+// Single-chat architecture: every space has one v1:cognition:utterance
+// stream. This builtin reads only that concept; there is no per-user
+// private thread.
+
+@enabled
+@executor("integration.chat.recentChat")
+@args(profile="object")
+@description("Read recent utterances + space context. Five operations: readRecent / readByKeyword / readByTime / getSpaceContext / listParticipants.")
+builtin recentChat {
+  spaceId    string  @required
+  agentId    string
+  operation  string  @required
+  count      int
+  keyword    string
+  fromTime   string
+  toTime     string
+}
