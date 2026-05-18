@@ -724,21 +724,6 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 		s.logger.Debug("handleBusEvent received", "topic", event.Topic, "kind", event.Kind.String())
 	}
 
-	// Per-user isolation for v1:cognition:privateUtterance graph events.
-	// The pre-insert guard server-stamps forUserId on every row; this is
-	// the symmetric read-side gate that drops events whose forUserId does
-	// not match the caller. Cluster owners bypass. See
-	// subscription_privateUtterance.go for the rationale.
-	if shouldDropPrivateUtteranceForCaller(event, s.identity.Subject, s.currentAccess()) {
-		if s.logger != nil {
-			s.logger.Debug("private-utterance event filtered for non-owner caller",
-				"topic", event.Topic,
-				"caller", s.identity.Subject,
-			)
-		}
-		return
-	}
-
 	payload := event.Payload
 	if payload == nil {
 		payload = make(map[string]any)

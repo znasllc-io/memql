@@ -1688,11 +1688,9 @@ message VoiceAgentPartialAck {
 }
 
 // VoiceAgentFinalTranscript carries the user's final utterance.
-// Memql inserts the canonical chat row -- v1:cognition:utterance
-// for the group thread, v1:cognition:privateUtterance for the
-// team thread (decided by thread_context). Memql server-stamps
-// partition, createdBy, forUserId; the voice-agent provides only
-// content + speaker context.
+// Memql inserts the canonical chat row (v1:cognition:utterance)
+// and server-stamps partition + createdBy; the voice-agent provides
+// only content + speaker context.
 message VoiceAgentFinalTranscript {
   string request_id = 1;
   string space_id = 2;

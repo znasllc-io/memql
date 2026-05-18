@@ -13,7 +13,6 @@ const (
 	ConceptCognitionMisrouteFeedback    = "v1:cognition:misrouteFeedback"
 	ConceptCognitionParticipant         = "v1:cognition:participant"
 	ConceptCognitionParticipantPresence = "v1:cognition:participant:presence"
-	ConceptCognitionPrivateUtterance    = "v1:cognition:privateUtterance"
 	ConceptCognitionSession             = "v1:cognition:session"
 	ConceptCognitionSpace               = "v1:cognition:space"
 	ConceptCognitionSpaceContext        = "v1:cognition:space:context"
@@ -87,7 +86,6 @@ func AllFilesystemConcepts() []string {
 		ConceptCognitionMisrouteFeedback,
 		ConceptCognitionParticipant,
 		ConceptCognitionParticipantPresence,
-		ConceptCognitionPrivateUtterance,
 		ConceptCognitionSession,
 		ConceptCognitionSpace,
 		ConceptCognitionSpaceContext,

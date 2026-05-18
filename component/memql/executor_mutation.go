@@ -311,16 +311,6 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 			return nil, err
 		}
 	}
-	// Server-stamp forUserId on every private-utterance write. The two-
-	// thread chat model rests on this guard: a non-elevated caller cannot
-	// land a private utterance in someone else's thread because the
-	// stamper overwrites whatever forUserId they sent with their own
-	// authenticated subject. See validateAndStampPrivateUtterancePayload.
-	if conceptMeta.Name == memorynodes.ConceptCognitionPrivateUtterance {
-		if err := validateAndStampPrivateUtterancePayload(ctx, payload, actor); err != nil {
-			return nil, err
-		}
-	}
 	// SI-participant guard: server-stamps forUserId, enforces per-user
 	// 3-cap, and protects the pinned owner GA from removal. Skips human
 	// participants. See validateAndStampParticipantPayload.
