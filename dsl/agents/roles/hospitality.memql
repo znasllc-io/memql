@@ -15,7 +15,7 @@ seed chef_professional {
   category:              "hospitality"
   lockedDomainIds:       ["culinary_technique"]
   defaultDomainIds:      ["menu_engineering", "food_safety", "recipes", "kitchen_management", "food_costing"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -31,7 +31,7 @@ seed sommelier {
   category:              "hospitality"
   lockedDomainIds:       ["wine_education"]
   defaultDomainIds:      ["food_pairing", "service_etiquette", "cellar_management"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -47,7 +47,7 @@ seed barista {
   category:              "hospitality"
   lockedDomainIds:       ["coffee_specialty"]
   defaultDomainIds:      ["brewing_methods", "espresso_technique", "milk_steaming"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -63,7 +63,7 @@ seed event_planner {
   category:              "hospitality"
   lockedDomainIds:       ["event_planning"]
   defaultDomainIds:      ["vendor_management", "budgeting_forecasting", "stakeholder_communications", "venue_management"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

@@ -18,7 +18,7 @@ seed commercial_pilot_educator {
   tier:                  "C"
   lockedDomainIds:       ["aviation_fundamentals"]
   defaultDomainIds:      ["aviation_weather", "instrument_flying", "aircraft_systems", "aviation_regulations"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Educational only. Never substitute for FAA-approved training or a CFI; always refer the pilot to their flight instructor and the current FARs."
   predefined:            true

@@ -1,0 +1,24 @@
+// queries.memql -- workbench namespace
+//
+// Read paths for v1:workbench:workspace rows. The integration uses
+// queryWorkspaceForPlan as the existence-check before the lazy
+// provision path.
+
+@enabled
+@useConcept(workspace)
+@description("Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call mutationProvisionWorkspace on the first workbenchHost dispatch.")
+query queryWorkspaceForPlan {
+  args {
+    planId  string  @required
+  }
+  filter  workspace.planId==args.planId
+  shape   workspaceFull
+}
+
+@enabled
+@useConcept(workspace)
+@description("List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.")
+query queryProvisionedWorkspaces {
+  filter  workspace.status=="provisioned"
+  shape   workspaceFull
+}

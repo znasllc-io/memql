@@ -151,8 +151,9 @@ type WorkerDialer struct {
 	// managed connection is dispatched here; on non-BFF binaries or
 	// before SetAiForwardResponseSink is called the messages are
 	// dropped (the router on the BFF is the only legitimate consumer).
-	sinkMu        sync.RWMutex
-	aiForwardSink AiForwardResponseSink
+	sinkMu               sync.RWMutex
+	aiForwardSink        AiForwardResponseSink
+	workbenchForwardSink WorkbenchForwardResponseSink
 }
 
 // dialEntry tracks a single active outbound dial. The conn is owned by
@@ -259,6 +260,20 @@ func (wd *WorkerDialer) SetAiForwardResponseSink(sink AiForwardResponseSink) {
 	}
 	wd.sinkMu.Lock()
 	wd.aiForwardSink = sink
+	wd.sinkMu.Unlock()
+}
+
+// SetWorkbenchForwardResponseSink installs the sink that receives
+// WorkbenchForwardResponse messages arriving on our managed
+// connections. Called during agent-node bootstrap when cluster-mode
+// workbench forwarding is enabled; other node types leave nil.
+// Thread-safe; may be called at any time.
+func (wd *WorkerDialer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardResponseSink) {
+	if wd == nil {
+		return
+	}
+	wd.sinkMu.Lock()
+	wd.workbenchForwardSink = sink
 	wd.sinkMu.Unlock()
 }
 
@@ -679,6 +694,14 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 		wd.sinkMu.RUnlock()
 		if sink != nil {
 			sink.Dispatch(payload.AiForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkbenchForwardResponse:
+		wd.sinkMu.RLock()
+		sink := wd.workbenchForwardSink
+		wd.sinkMu.RUnlock()
+		if sink != nil {
+			sink.Dispatch(payload.WorkbenchForwardResponse)
 		}
 	}
 }

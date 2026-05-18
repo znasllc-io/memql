@@ -1,0 +1,34 @@
+// builtins.memql -- workbench namespace
+//
+// Builtins bridge MemQL tool calls to the Go integration handlers.
+// The tool surface in dsl/copresent/tools.memql references
+// @handler(type="function", name="workbenchDispatchHost"); that
+// name resolves to this builtin, which forwards to the workbench
+// integration's `dispatchHost` capability.
+
+@enabled
+@executor("integration.workbench.dispatchHost")
+@args(profile="object")
+@description("Dispatch a workbenchHost.<action> call to the per-Plan workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.")
+builtin workbenchDispatchHost {
+  action   string  @required
+  args     object
+  planId   string
+  agentId  string
+  taskId   string
+}
+
+// workbenchTeardownDirectory -- on-disk teardown of a per-Plan
+// workspace. Called from the releaseWorkspaceOnPlanTerminal logic
+// alongside mutationReleaseWorkspace (which flips the lifecycle
+// bit on the concept row). The integration removes the directory
+// tree under MEMQL_WORKBENCH_ROOT/{planId}/. Idempotent: a Plan
+// that never provisioned a workspace is a no-op.
+
+@enabled
+@executor("integration.workbench.teardownDirectory")
+@args(profile="object")
+@description("Remove the on-disk workbench workspace directory for a Plan. Idempotent. Called by the releaseWorkspaceOnPlanTerminal automation after the concept row has been flipped to released.")
+builtin workbenchTeardownDirectory {
+  planId  string  @required
+}

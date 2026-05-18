@@ -633,7 +633,7 @@ the agent used no trained sources, citations is an empty array.
 - **Agent capability:** `claw` flag on agent concept enables coding tools
 - **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (in `dsl/v1/tools/v1/claw/`)
 
-### Workers (computer_use)
+### Workers (computer_use_headless / computer_use_embodied)
 
 The "workers" feature lets agents drive the user's own machine
 via a tool surface: shell exec, filesystem, HTTP fetch, and (under
@@ -642,8 +642,23 @@ the implementation plan have shipped (see
 [docs/workers/runbook.md](docs/workers/runbook.md)); the plan
 document itself is gone per the no-stale-docs convention.
 
-- **Agent capability:** `computer_use` flag on the agent (parallel
-  to `claw` and `copresent_control`).
+The legacy umbrella slug `computer_use` was split into two
+mode-specific slugs on 2026-05-17 so the headless slice (shell /
+fs / http on the user's machine) and the embodied slice (GUI on
+the user's machine) can be granted independently. Authorization
+(scope grants, kill switch, knowledge domain) stays unified --
+both modes act on the user's machine, so the consent is one
+decision. See `component/memql/operator_caps.go` for the slug
+expansion map. The sandboxed first-choice surface for headless
+work is the Workbench, documented in the next section.
+
+- **Agent capabilities (split slugs):**
+  - `computer_use_headless` -- expands to `workerHost` + the
+    cross-cutting trio (`workerStatus`, `requestComputerUseScope`,
+    `canvasPublish`). Shell / fs / http on the user's machine.
+  - `computer_use_embodied` -- expands to `workerComputer` + the
+    same cross-cutting trio. Mouse / keyboard / screenshot on the
+    user's machine.
 - **Tools:** `workerHost` (HEADLESS) and `workerComputer` (GUI),
   both discriminated-union tools under `dsl/v1/tools/v1/agent/worker/`.
 - **Gateway:** `WorkerService.Stream` gRPC service on the agent
@@ -688,6 +703,71 @@ document itself is gone per the no-stale-docs convention.
 - **Install:** `scripts/install/install-{mac,linux}.sh` install
   the binary, write `~/.memql/worker.yaml`, and register a
   LaunchAgent / user-systemd service.
+
+### Workbench (workbench_use)
+
+The "workbench" is the default first-choice surface for any
+HEADLESS work an agent needs to do -- writing files, running
+shell commands, fetching URLs. It is a per-Plan sandboxed Linux
+working directory in the cluster; the agent drives it, the user
+does not see it as a filesystem they can browse, and nothing on
+the user's machine is touched. Computer-use (the user's machine)
+is the FALLBACK for headless work the workbench cannot do
+(macOS-only tooling, GUI control, files already on the user's
+computer).
+
+See [docs/workbench/runbook.md](docs/workbench/runbook.md) for the
+MVP test path and [docs/workbench/production.md](docs/workbench/production.md)
+for the cluster-mode + Cloud Run deployment plan (deferred until
+production cutover).
+
+- **Agent capability:** `workbench_use` slug. Universal --
+  injected into every role's `lockedToolSlugs` so newly-created
+  agents always have it. No scope grants, no kill switch, no
+  per-agent gating; the blast radius is contained to the per-Plan
+  directory tree.
+- **Tools:** `workbenchHost` (discriminated by `action`: exec /
+  fs_read / fs_write / fs_list / fs_stat / http_fetch). Lives in
+  `dsl/copresent/tools.memql`; the wire path goes through the
+  `workbenchDispatchHost` builtin in `dsl/workbench/builtins.memql`
+  to `integration.workbench.dispatchHost`.
+- **Per-Plan workspace:** filesystem state lives under
+  `MEMQL_WORKBENCH_ROOT/{planId}/` (default
+  `/var/lib/memql/workbenches/`). Lazy-provisioned on first call.
+  Persists across calls within a Plan so multi-Task agents can
+  share files; torn down on Plan terminal status via the
+  `releaseWorkspaceOnPlanTerminal` automation calling the
+  `workbenchTeardownDirectory` builtin.
+- **Concept:** `v1:workbench:workspace` -- per-Plan row carrying
+  status (provisioned / released), storageRoot, lifecycle
+  timestamps. Defined in `dsl/workbench/concepts.memql`. The
+  current MVP integration does not write the concept row from Go
+  (lifecycle tracking is in-process + on-disk); the cross-node
+  version exercises it.
+- **Modes:**
+  - **Single-node (MVP, default):** the agent node runs the
+    workbench integration in-process. Workspaces live on the agent
+    container's disk. Toggle: `MEMQL_WORKBENCH_REMOTE` unset or
+    falsy.
+  - **Cluster mode (future production):** a dedicated `workbench`
+    node-type binary (`make workbench`) hosts the workspaces.
+    Agent nodes route via `NodeService.Stream`
+    (`WorkbenchForwardRequest` / `WorkbenchForwardResponse`).
+    Toggle: `MEMQL_WORKBENCH_REMOTE=1` on agent nodes +
+    `MEMQL_WORKER_PEERS=workbench=<addr>` for the dialer. See
+    `docs/workbench/production.md`.
+- **Routing preference:** the agent's prompt template
+  (`dsl/copresent/prompts/agentReply.tmpl`) and the workbench
+  knowledge domain (5 chunks in
+  `integrations/knowledge/seed.go`) instruct the agent to prefer
+  workbench over computer-use whenever both are available, and
+  to surface a "workbench can't do this -- needs computer use"
+  message when it hits a Linux/macOS or sandbox/host limitation
+  rather than silently retrying.
+- **Knowledge domain:** `workbench` -- auto-attached via
+  `replier.go` when the agent's expanded tool list includes
+  `workbenchHost`. Treated as a system-owned domain (no audible
+  citations) per `appStructureDomainIds`.
 
 ---
 

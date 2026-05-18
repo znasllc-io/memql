@@ -111,6 +111,43 @@ sees everything for "default". Tighten:
 
 ---
 
+## Workbench production deployment
+
+### Cut the workbench over to its own Cloud Run node
+
+The workbench capability (the sandboxed per-Plan Linux environment
+agents drive for headless work) ships in two modes. The MVP path
+runs the workbench in-process on the agent node and is the active
+default; the cluster-mode path runs the dedicated `workbench`
+node-type binary (`make workbench`) and routes via
+`NodeService.Stream` to a Cloud Run service backed by GCS-FUSE.
+
+The cluster-mode code is committed and tested -- builds, proto,
+routers, handlers, service yaml, docker-compose entries all in
+place -- but is not yet active anywhere. Cross this bridge when
+the production cutover lands. Step-by-step plan in
+[docs/workbench/production.md](workbench/production.md): bucket
+provisioning, image build, deploy, agent env flip, rollback.
+
+Items inside this work that may need decisions when picked up
+again:
+
+- **Base image choice.** Alpine vs distroless+busybox vs
+  Ubuntu-minimal. Preinstall set (`curl`, `git`, Python, Node)
+  must match what the workbench knowledge corpus promises agents
+  will find.
+- **Per-Plan disk quota.** The current design has global size
+  caps but no per-Plan quota; a runaway agent could fill the
+  bucket.
+- **`http_fetch` egress policy.** Today unrestricted; pre-prod
+  decision needed on allowlist vs deny-by-default + agent opt-in.
+- **Audit telemetry shape.** No equivalent of
+  `v1:worker:invocation` for workbench calls; decide whether
+  the sandbox needs the same per-call logging or just aggregate
+  metrics.
+- **Frontend visibility.** No UI for inspecting Plan workspaces
+  today. Add a Plan-detail pane if user feedback demands it.
+
 ## Voice pipeline
 
 ### Replace Python voice-agent with a revived Go voice agent

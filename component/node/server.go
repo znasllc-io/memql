@@ -22,17 +22,19 @@ const (
 // communication. It implements common.Dependency.
 type NodeServer struct {
 	address           string
-	logger            *slog.Logger
-	lifecycle         common.Lifecycle
-	listener          net.Listener
-	grpcServer        *grpc.Server
-	identity          *Identity
-	peerManager       *PeerManager
-	readyCh           chan struct{}
-	queryExecutor     QueryExecutor
-	aiForwardHandler  AiForwardHandler
-	aiForwardResponse AiForwardResponseSink
-	eventInbound      EventInbound
+	logger                   *slog.Logger
+	lifecycle                common.Lifecycle
+	listener                 net.Listener
+	grpcServer               *grpc.Server
+	identity                 *Identity
+	peerManager              *PeerManager
+	readyCh                  chan struct{}
+	queryExecutor            QueryExecutor
+	aiForwardHandler         AiForwardHandler
+	aiForwardResponse        AiForwardResponseSink
+	workbenchForwardHandler  WorkbenchForwardHandler
+	workbenchForwardResponse WorkbenchForwardResponseSink
+	eventInbound             EventInbound
 }
 
 // SetQueryExecutor installs the executor consulted for inbound
@@ -76,6 +78,27 @@ func (s *NodeServer) SetEventInbound(h EventInbound) {
 		return
 	}
 	s.eventInbound = h
+}
+
+// SetWorkbenchForwardHandler installs the workbench-node-side handler
+// invoked for inbound WorkbenchForwardRequest messages. Called during
+// bootstrap on workbench binaries; other node types leave nil.
+func (s *NodeServer) SetWorkbenchForwardHandler(h WorkbenchForwardHandler) {
+	if s == nil {
+		return
+	}
+	s.workbenchForwardHandler = h
+}
+
+// SetWorkbenchForwardResponseSink installs the agent-side response
+// sink for inbound WorkbenchForwardResponse messages received over
+// direct peer-to-peer connections. Called during bootstrap on agent
+// binaries when cluster-mode workbench forwarding is enabled.
+func (s *NodeServer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardResponseSink) {
+	if s == nil {
+		return
+	}
+	s.workbenchForwardResponse = sink
 }
 
 // NewNodeServer constructs a NodeService gRPC server.
@@ -172,13 +195,15 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 	)
 
 	svc := &nodeService{
-		logger:            s.logger,
-		identity:          s.identity,
-		peerManager:       s.peerManager,
-		queryExecutor:     s.queryExecutor,
-		aiForwardHandler:  s.aiForwardHandler,
-		aiForwardResponse: s.aiForwardResponse,
-		eventInbound:      s.eventInbound,
+		logger:                   s.logger,
+		identity:                 s.identity,
+		peerManager:              s.peerManager,
+		queryExecutor:            s.queryExecutor,
+		aiForwardHandler:         s.aiForwardHandler,
+		aiForwardResponse:        s.aiForwardResponse,
+		workbenchForwardHandler:  s.workbenchForwardHandler,
+		workbenchForwardResponse: s.workbenchForwardResponse,
+		eventInbound:             s.eventInbound,
 	}
 	nodev1.RegisterNodeServiceServer(s.grpcServer, svc)
 

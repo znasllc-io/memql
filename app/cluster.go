@@ -161,6 +161,28 @@ func (a *App) cluster() {
 					a.attachAgentForwarderToPlanner(forwarder)
 				}
 			}
+
+			// Workbench forwarding (cluster-mode optional). Mirrors the
+			// cognition/planner -> agent pattern but for workbench peers:
+			//
+			//   * On agent binaries when MEMQL_WORKBENCH_REMOTE is set:
+			//     create a workbench.ForwardRouter, install it as the
+			//     response sink on every inbound channel, install the
+			//     dialer narrowed to NodeTypeWorkbench peers, and wire
+			//     the router into the local workbench integration so its
+			//     dispatch handler delegates to it.
+			//
+			//   * On workbench binaries: install the workbench-side
+			//     ForwardHandler on NodeServer so inbound
+			//     WorkbenchForwardRequest envelopes dispatch into the
+			//     local Integration's exec/fs/http handlers.
+			//
+			// All wiring is best-effort -- a missing integration / engine
+			// / nodeServer logs and continues without breaking the boot
+			// path. The default (single-node) mode keeps working because
+			// the integration falls back to local dispatch when the
+			// router returns ErrNoWorkbenchPeer.
+			a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 		}
 	}
 

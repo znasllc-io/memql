@@ -15,7 +15,7 @@ seed graphic_designer {
   category:              "creative"
   lockedDomainIds:       ["graphic_design"]
   defaultDomainIds:      ["typography", "color_theory", "brand_strategy", "layout_design", "design_systems"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -31,7 +31,7 @@ seed ux_designer {
   category:              "creative"
   lockedDomainIds:       ["ux_principles"]
   defaultDomainIds:      ["user_research", "accessibility", "design_systems", "prototyping_tools", "interaction_design", "visual_design"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -47,7 +47,7 @@ seed fiction_writer {
   category:              "creative"
   lockedDomainIds:       ["creative_writing", "fiction_craft"]
   defaultDomainIds:      ["story_structure", "character_development", "english_grammar_style", "publishing_industry"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -63,7 +63,7 @@ seed screenwriter {
   category:              "creative"
   lockedDomainIds:       ["screenwriting"]
   defaultDomainIds:      ["story_structure", "dialogue_craft", "film_industry", "tv_industry"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -79,7 +79,7 @@ seed songwriter {
   category:              "creative"
   lockedDomainIds:       ["songwriting"]
   defaultDomainIds:      ["music_theory", "lyric_writing", "music_production_basics"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -95,7 +95,7 @@ seed music_theory_teacher {
   category:              "creative"
   lockedDomainIds:       ["music_theory"]
   defaultDomainIds:      ["ear_training", "music_history", "composition_fundamentals", "music_pedagogy"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -111,7 +111,7 @@ seed photographer {
   category:              "creative"
   lockedDomainIds:       ["photography"]
   defaultDomainIds:      ["composition_principles", "lighting_techniques", "photo_editing", "camera_systems"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -127,7 +127,7 @@ seed video_editor {
   category:              "creative"
   lockedDomainIds:       ["video_editing"]
   defaultDomainIds:      ["video_production", "color_grading_basics", "audio_post", "post_workflow"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -143,7 +143,7 @@ seed illustrator {
   category:              "creative"
   lockedDomainIds:       ["illustration"]
   defaultDomainIds:      ["drawing_fundamentals", "color_theory", "digital_illustration_tools"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -159,7 +159,7 @@ seed game_designer {
   category:              "creative"
   lockedDomainIds:       ["game_design"]
   defaultDomainIds:      ["game_mechanics", "level_design", "game_narrative", "playtesting"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -175,7 +175,7 @@ seed creative_companion {
   category:              "creative"
   lockedDomainIds:       ["creative_arts"]
   defaultDomainIds:      ["music_appreciation", "photography", "personal_growth", "journaling"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

@@ -14,6 +14,18 @@ func (e *MemQLEngine) Integrations() *IntegrationRegistry {
 	return e.integrations
 }
 
+// IntegrationByName returns the registered IntegrationProvider with
+// the supplied name, or nil if no such provider was registered. Used
+// by node-type-specific wiring (e.g. cluster_workbench.go on the
+// agent / workbench builds) to grab a typed handle on a plug-in
+// instance after the engine has materialized it.
+func (e *MemQLEngine) IntegrationByName(name string) IntegrationProvider {
+	if e == nil || e.integrations == nil {
+		return nil
+	}
+	return e.integrations.Provider(name)
+}
+
 // RegisterIntegration registers an IntegrationProvider, making its capabilities
 // callable as builtin functions from the MemQL DSL. This is safe to call after
 // engine startup (integrations start at order 160, after the engine).

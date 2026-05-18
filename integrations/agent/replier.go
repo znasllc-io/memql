@@ -353,6 +353,19 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 		}
 	}
 
+	// Workbench availability is a flat bool: the agent's expanded
+	// tool list has workbenchHost iff it holds the workbench_use slug.
+	// Universal capability -- on by default for most agents -- but we
+	// still gate the prompt block on the tool's presence so an agent
+	// explicitly stripped of workbench_use doesn't see workbench
+	// guidance it can't act on.
+	for _, name := range toolNames {
+		if name == "workbenchHost" {
+			data["workbenchAvailable"] = true
+			break
+		}
+	}
+
 	// RAG: retrieve top-K knowledge chunks for the agent's declared
 	// domains, keyed on the user's most recent message as the query.
 	// Mirrors delegate_takeover.go's up-front retrieval so direct
@@ -392,6 +405,15 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// capability themselves.
 	if cu, _ := data["computerUseStatus"].(string); cu != "" {
 		domains = ensureDomain(domains, "computer_use")
+	}
+	// Workbench mirrors the same pattern. When the agent's expanded
+	// tool list carries workbenchHost (the slug-expansion product of
+	// workbench_use), attach the workbench knowledge domain so the
+	// operational manual chunks are retrievable. workbenchAvailable
+	// is set by toolNamesIncludeWorkbench below as a signal of the
+	// slug being held; this domain attach mirrors that signal.
+	if wa, _ := data["workbenchAvailable"].(bool); wa {
+		domains = ensureDomain(domains, "workbench")
 	}
 	// copresent_conversation auto-attach mirrors the copresent_ui /
 	// computer_use pattern: tool requires domain, domain doesn't require
@@ -1780,6 +1802,7 @@ func citeNothing(_ map[string]any, _ string) string {
 var appStructureDomainIds = map[string]bool{
 	"copresent_ui":           true,
 	"computer_use":           true,
+	"workbench":              true,
 	"copresent_conversation": true,
 }
 
