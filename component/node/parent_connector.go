@@ -35,15 +35,15 @@ type ParentConnector struct {
 	conn                 *peerConnection
 	cancel               context.CancelFunc
 	parentNodeId         string                       // learned from NodeWelcome
-	aiForwardSink        AiForwardResponseSink        // optional, set on BFF binaries
+	aiForwardSink        SIForwardResponseSink        // optional, set on BFF binaries
 	workbenchForwardSink WorkbenchForwardResponseSink // optional, set on agent binaries in cluster mode
 	eventInbound         EventInbound                 // republishes parent-pushed events onto local bus
 }
 
-// SetAiForwardResponseSink registers a sink for AiForwardResponse
+// SetAiForwardResponseSink registers a sink for SIForwardResponse
 // messages received over the parent connection. Called during bootstrap
 // on BFF binaries. Workers leave this nil.
-func (pc *ParentConnector) SetAiForwardResponseSink(sink AiForwardResponseSink) {
+func (pc *ParentConnector) SetAiForwardResponseSink(sink SIForwardResponseSink) {
 	if pc == nil {
 		return
 	}
@@ -235,7 +235,7 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 		sink := pc.aiForwardSink
 		pc.mu.Unlock()
 		if sink != nil {
-			sink.Dispatch(payload.AiForwardResponse)
+			sink.Dispatch(payload.SIForwardResponse)
 		}
 
 	case *nodev1.NodeServerMessage_WorkbenchForwardResponse:

@@ -155,7 +155,7 @@ func mapEventKind(kind string) events.Kind {
 		return events.KindMessage
 	case "graph_update":
 		return events.KindGraphUpdate
-	case "ai_event":
+	case "si_event":
 		return events.KindAIEvent
 	default:
 		return events.KindMessage

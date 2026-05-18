@@ -13,7 +13,7 @@ import (
 // know who the original caller was so it can enforce the same ACLs the BFF
 // would have.
 //
-// The wire uses a proto map<string, string> (see AiForwardRequest.auth in
+// The wire uses a proto map<string, string> (see SIForwardRequest.auth in
 // component/node/node.proto). These helpers pack the BFF-side UserIdentity
 // into that map and rebuild a TokenInfo on the worker side.
 

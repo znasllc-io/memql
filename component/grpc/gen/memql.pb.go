@@ -370,7 +370,7 @@ func (VoiceAgentTurnRequest_ThreadContext) EnumDescriptor() ([]byte, []int) {
 
 // Provenance is the engine-stamped origin metadata stored as an
 // intrinsic on every MemoryNodes row. Carried on the envelope so
-// cross-node forwarders (proxyAi / AiForward / NodeService) can
+// cross-node forwarders (proxySI / SIForward / NodeService) can
 // propagate the caller's originating attribution across hops --
 // otherwise a row written on the receiver gets stamped with the
 // receiver's default Mutation(name) and loses the "kicked off by
@@ -651,30 +651,30 @@ func (x *MemqlClientMessage) GetCallTool() *CallToolMsg {
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiChat() *AiChatMsg {
+func (x *MemqlClientMessage) GetAiChat() *SIChatMsg {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiChat); ok {
-		return x.AiChat
+		return x.SIChat
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiSpeech() *AiSpeechMsg {
+func (x *MemqlClientMessage) GetAiSpeech() *SISpeechMsg {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiSpeech); ok {
-		return x.AiSpeech
+		return x.SISpeech
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribe() *AiTranscribeMsg {
+func (x *MemqlClientMessage) GetAiTranscribe() *SITranscribeMsg {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribe); ok {
-		return x.AiTranscribe
+		return x.SITranscribe
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiSuggest() *AiSuggestMsg {
+func (x *MemqlClientMessage) GetAiSuggest() *SISuggestMsg {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiSuggest); ok {
-		return x.AiSuggest
+		return x.SISuggest
 	}
 	return nil
 }
@@ -798,23 +798,23 @@ func (x *MemqlClientMessage) GetMyAccess() *MyAccessMsg {
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamStart() *AiTranscribeStreamStart {
+func (x *MemqlClientMessage) GetAiTranscribeStreamStart() *SITranscribeStreamStart {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamStart); ok {
-		return x.AiTranscribeStreamStart
+		return x.SITranscribeStreamStart
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamChunk() *AiTranscribeStreamChunk {
+func (x *MemqlClientMessage) GetAiTranscribeStreamChunk() *SITranscribeStreamChunk {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamChunk); ok {
-		return x.AiTranscribeStreamChunk
+		return x.SITranscribeStreamChunk
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamEnd() *AiTranscribeStreamEnd {
+func (x *MemqlClientMessage) GetAiTranscribeStreamEnd() *SITranscribeStreamEnd {
 	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamEnd); ok {
-		return x.AiTranscribeStreamEnd
+		return x.SITranscribeStreamEnd
 	}
 	return nil
 }
@@ -984,19 +984,19 @@ type MemqlClientMessage_CallTool struct {
 
 type MemqlClientMessage_AiChat struct {
 	// AI operations
-	AiChat *AiChatMsg `protobuf:"bytes,18,opt,name=ai_chat,json=aiChat,proto3,oneof"`
+	SIChat *SIChatMsg `protobuf:"bytes,18,opt,name=si_chat,json=aiChat,proto3,oneof"`
 }
 
 type MemqlClientMessage_AiSpeech struct {
-	AiSpeech *AiSpeechMsg `protobuf:"bytes,19,opt,name=ai_speech,json=aiSpeech,proto3,oneof"`
+	SISpeech *SISpeechMsg `protobuf:"bytes,19,opt,name=si_speech,json=aiSpeech,proto3,oneof"`
 }
 
 type MemqlClientMessage_AiTranscribe struct {
-	AiTranscribe *AiTranscribeMsg `protobuf:"bytes,20,opt,name=ai_transcribe,json=aiTranscribe,proto3,oneof"`
+	SITranscribe *SITranscribeMsg `protobuf:"bytes,20,opt,name=si_transcribe,json=aiTranscribe,proto3,oneof"`
 }
 
 type MemqlClientMessage_AiSuggest struct {
-	AiSuggest *AiSuggestMsg `protobuf:"bytes,21,opt,name=ai_suggest,json=aiSuggest,proto3,oneof"`
+	SISuggest *SISuggestMsg `protobuf:"bytes,21,opt,name=si_suggest,json=aiSuggest,proto3,oneof"`
 }
 
 type MemqlClientMessage_IdentityCreate struct {
@@ -1076,23 +1076,23 @@ type MemqlClientMessage_AiTranscribeStreamStart struct {
 	// Streaming transcription (multi-message, keyed by request_id).
 	// Start opens a provider session; Chunk pushes audio bytes; End
 	// closes the session (or cancels). Server replies with repeated
-	// AiTranscribeStreamDelta + final AiTranscribeStreamComplete.
-	AiTranscribeStreamStart *AiTranscribeStreamStart `protobuf:"bytes,41,opt,name=ai_transcribe_stream_start,json=aiTranscribeStreamStart,proto3,oneof"`
+	// SITranscribeStreamDelta + final SITranscribeStreamComplete.
+	SITranscribeStreamStart *SITranscribeStreamStart `protobuf:"bytes,41,opt,name=si_transcribe_stream_start,json=aiTranscribeStreamStart,proto3,oneof"`
 }
 
 type MemqlClientMessage_AiTranscribeStreamChunk struct {
-	AiTranscribeStreamChunk *AiTranscribeStreamChunk `protobuf:"bytes,42,opt,name=ai_transcribe_stream_chunk,json=aiTranscribeStreamChunk,proto3,oneof"`
+	SITranscribeStreamChunk *SITranscribeStreamChunk `protobuf:"bytes,42,opt,name=si_transcribe_stream_chunk,json=aiTranscribeStreamChunk,proto3,oneof"`
 }
 
 type MemqlClientMessage_AiTranscribeStreamEnd struct {
-	AiTranscribeStreamEnd *AiTranscribeStreamEnd `protobuf:"bytes,43,opt,name=ai_transcribe_stream_end,json=aiTranscribeStreamEnd,proto3,oneof"`
+	SITranscribeStreamEnd *SITranscribeStreamEnd `protobuf:"bytes,43,opt,name=si_transcribe_stream_end,json=aiTranscribeStreamEnd,proto3,oneof"`
 }
 
 type MemqlClientMessage_AgentGenerateTurn struct {
-	// Agent turn generation (cognition -> agent via NodeService.AiForwardRequest).
+	// Agent turn generation (cognition -> agent via NodeService.SIForwardRequest).
 	// Agent node handles this message exactly as if a client had connected
 	// directly; cognition wraps the serialized MemqlClientMessage in a
-	// NodeClientMessage{AiForwardRequest} and ships it over the inter-node
+	// NodeClientMessage{SIForwardRequest} and ships it over the inter-node
 	// stream. Streamed replies come back as AgentGenerateTurnDelta (N)
 	// followed by AgentGenerateTurnComplete (1).
 	AgentGenerateTurn *AgentGenerateTurnMsg `protobuf:"bytes,44,opt,name=agent_generate_turn,json=agentGenerateTurn,proto3,oneof"`
@@ -1489,9 +1489,9 @@ func (x *MemqlServerMessage) GetEvent() *EventNotification {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiChunk() *AiStreamChunk {
+func (x *MemqlServerMessage) GetAiChunk() *SIStreamChunk {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiChunk); ok {
-		return x.AiChunk
+		return x.SIChunk
 	}
 	return nil
 }
@@ -1517,30 +1517,30 @@ func (x *MemqlServerMessage) GetCallToolResult() *CallToolResult {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiChatResult() *AiChatResult {
+func (x *MemqlServerMessage) GetAiChatResult() *SIChatResult {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiChatResult); ok {
-		return x.AiChatResult
+		return x.SIChatResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiSpeechResult() *AiSpeechResult {
+func (x *MemqlServerMessage) GetAiSpeechResult() *SISpeechResult {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiSpeechResult); ok {
-		return x.AiSpeechResult
+		return x.SISpeechResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeResult() *AiTranscribeResult {
+func (x *MemqlServerMessage) GetAiTranscribeResult() *SITranscribeResult {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeResult); ok {
-		return x.AiTranscribeResult
+		return x.SITranscribeResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiSuggestResult() *AiSuggestResult {
+func (x *MemqlServerMessage) GetAiSuggestResult() *SISuggestResult {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiSuggestResult); ok {
-		return x.AiSuggestResult
+		return x.SISuggestResult
 	}
 	return nil
 }
@@ -1636,16 +1636,16 @@ func (x *MemqlServerMessage) GetMyAccessResult() *MyAccessResult {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeStreamDelta() *AiTranscribeStreamDelta {
+func (x *MemqlServerMessage) GetAiTranscribeStreamDelta() *SITranscribeStreamDelta {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeStreamDelta); ok {
-		return x.AiTranscribeStreamDelta
+		return x.SITranscribeStreamDelta
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeStreamComplete() *AiTranscribeStreamComplete {
+func (x *MemqlServerMessage) GetAiTranscribeStreamComplete() *SITranscribeStreamComplete {
 	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeStreamComplete); ok {
-		return x.AiTranscribeStreamComplete
+		return x.SITranscribeStreamComplete
 	}
 	return nil
 }
@@ -1811,7 +1811,7 @@ type MemqlServerMessage_Event struct {
 }
 
 type MemqlServerMessage_AiChunk struct {
-	AiChunk *AiStreamChunk `protobuf:"bytes,30,opt,name=ai_chunk,json=aiChunk,proto3,oneof"`
+	SIChunk *SIStreamChunk `protobuf:"bytes,30,opt,name=si_chunk,json=aiChunk,proto3,oneof"`
 }
 
 type MemqlServerMessage_Heartbeat struct {
@@ -1829,19 +1829,19 @@ type MemqlServerMessage_CallToolResult struct {
 
 type MemqlServerMessage_AiChatResult struct {
 	// AI results
-	AiChatResult *AiChatResult `protobuf:"bytes,55,opt,name=ai_chat_result,json=aiChatResult,proto3,oneof"`
+	SIChatResult *SIChatResult `protobuf:"bytes,55,opt,name=si_chat_result,json=aiChatResult,proto3,oneof"`
 }
 
 type MemqlServerMessage_AiSpeechResult struct {
-	AiSpeechResult *AiSpeechResult `protobuf:"bytes,56,opt,name=ai_speech_result,json=aiSpeechResult,proto3,oneof"`
+	SISpeechResult *SISpeechResult `protobuf:"bytes,56,opt,name=si_speech_result,json=aiSpeechResult,proto3,oneof"`
 }
 
 type MemqlServerMessage_AiTranscribeResult struct {
-	AiTranscribeResult *AiTranscribeResult `protobuf:"bytes,57,opt,name=ai_transcribe_result,json=aiTranscribeResult,proto3,oneof"`
+	SITranscribeResult *SITranscribeResult `protobuf:"bytes,57,opt,name=si_transcribe_result,json=aiTranscribeResult,proto3,oneof"`
 }
 
 type MemqlServerMessage_AiSuggestResult struct {
-	AiSuggestResult *AiSuggestResult `protobuf:"bytes,58,opt,name=ai_suggest_result,json=aiSuggestResult,proto3,oneof"`
+	SISuggestResult *SISuggestResult `protobuf:"bytes,58,opt,name=si_suggest_result,json=aiSuggestResult,proto3,oneof"`
 }
 
 type MemqlServerMessage_IdentityResult struct {
@@ -1902,14 +1902,14 @@ type MemqlServerMessage_MyAccessResult struct {
 }
 
 type MemqlServerMessage_AiTranscribeStreamDelta struct {
-	// Streaming transcription replies (see AiTranscribeStreamStart).
+	// Streaming transcription replies (see SITranscribeStreamStart).
 	// Delta fires repeatedly with the full accumulated text; Complete
 	// is the terminal message carrying the final transcript.
-	AiTranscribeStreamDelta *AiTranscribeStreamDelta `protobuf:"bytes,81,opt,name=ai_transcribe_stream_delta,json=aiTranscribeStreamDelta,proto3,oneof"`
+	SITranscribeStreamDelta *SITranscribeStreamDelta `protobuf:"bytes,81,opt,name=si_transcribe_stream_delta,json=aiTranscribeStreamDelta,proto3,oneof"`
 }
 
 type MemqlServerMessage_AiTranscribeStreamComplete struct {
-	AiTranscribeStreamComplete *AiTranscribeStreamComplete `protobuf:"bytes,82,opt,name=ai_transcribe_stream_complete,json=aiTranscribeStreamComplete,proto3,oneof"`
+	SITranscribeStreamComplete *SITranscribeStreamComplete `protobuf:"bytes,82,opt,name=si_transcribe_stream_complete,json=aiTranscribeStreamComplete,proto3,oneof"`
 }
 
 type MemqlServerMessage_AgentGenerateTurnDelta struct {
@@ -2758,7 +2758,7 @@ func (x *EventNotification) GetPayload() *structpb.Struct {
 	return nil
 }
 
-type AiStreamChunk struct {
+type SIStreamChunk struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -2769,15 +2769,15 @@ type AiStreamChunk struct {
 	Index     int64  `protobuf:"varint,4,opt,name=index,proto3" json:"index,omitempty"`
 	// Types that are assignable to Chunk:
 	//
-	//	*AiStreamChunk_TextDelta
-	//	*AiStreamChunk_JsonDelta
-	//	*AiStreamChunk_Metadata
+	//	*SIStreamChunk_TextDelta
+	//	*SIStreamChunk_JsonDelta
+	//	*SIStreamChunk_Metadata
 	Chunk isAiStreamChunk_Chunk `protobuf_oneof:"chunk"`
 	Done  bool                  `protobuf:"varint,20,opt,name=done,proto3" json:"done,omitempty"`
 }
 
-func (x *AiStreamChunk) Reset() {
-	*x = AiStreamChunk{}
+func (x *SIStreamChunk) Reset() {
+	*x = SIStreamChunk{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[14]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2785,13 +2785,13 @@ func (x *AiStreamChunk) Reset() {
 	}
 }
 
-func (x *AiStreamChunk) String() string {
+func (x *SIStreamChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiStreamChunk) ProtoMessage() {}
+func (*SIStreamChunk) ProtoMessage() {}
 
-func (x *AiStreamChunk) ProtoReflect() protoreflect.Message {
+func (x *SIStreamChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[14]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2803,68 +2803,68 @@ func (x *AiStreamChunk) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiStreamChunk.ProtoReflect.Descriptor instead.
-func (*AiStreamChunk) Descriptor() ([]byte, []int) {
+// Deprecated: Use SIStreamChunk.ProtoReflect.Descriptor instead.
+func (*SIStreamChunk) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *AiStreamChunk) GetStreamId() string {
+func (x *SIStreamChunk) GetStreamId() string {
 	if x != nil {
 		return x.StreamId
 	}
 	return ""
 }
 
-func (x *AiStreamChunk) GetProvider() string {
+func (x *SIStreamChunk) GetProvider() string {
 	if x != nil {
 		return x.Provider
 	}
 	return ""
 }
 
-func (x *AiStreamChunk) GetRequestId() string {
+func (x *SIStreamChunk) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiStreamChunk) GetIndex() int64 {
+func (x *SIStreamChunk) GetIndex() int64 {
 	if x != nil {
 		return x.Index
 	}
 	return 0
 }
 
-func (m *AiStreamChunk) GetChunk() isAiStreamChunk_Chunk {
+func (m *SIStreamChunk) GetChunk() isAiStreamChunk_Chunk {
 	if m != nil {
 		return m.Chunk
 	}
 	return nil
 }
 
-func (x *AiStreamChunk) GetTextDelta() string {
-	if x, ok := x.GetChunk().(*AiStreamChunk_TextDelta); ok {
+func (x *SIStreamChunk) GetTextDelta() string {
+	if x, ok := x.GetChunk().(*SIStreamChunk_TextDelta); ok {
 		return x.TextDelta
 	}
 	return ""
 }
 
-func (x *AiStreamChunk) GetJsonDelta() *structpb.Struct {
-	if x, ok := x.GetChunk().(*AiStreamChunk_JsonDelta); ok {
+func (x *SIStreamChunk) GetJsonDelta() *structpb.Struct {
+	if x, ok := x.GetChunk().(*SIStreamChunk_JsonDelta); ok {
 		return x.JsonDelta
 	}
 	return nil
 }
 
-func (x *AiStreamChunk) GetMetadata() *structpb.Struct {
-	if x, ok := x.GetChunk().(*AiStreamChunk_Metadata); ok {
+func (x *SIStreamChunk) GetMetadata() *structpb.Struct {
+	if x, ok := x.GetChunk().(*SIStreamChunk_Metadata); ok {
 		return x.Metadata
 	}
 	return nil
 }
 
-func (x *AiStreamChunk) GetDone() bool {
+func (x *SIStreamChunk) GetDone() bool {
 	if x != nil {
 		return x.Done
 	}
@@ -2875,23 +2875,23 @@ type isAiStreamChunk_Chunk interface {
 	isAiStreamChunk_Chunk()
 }
 
-type AiStreamChunk_TextDelta struct {
+type SIStreamChunk_TextDelta struct {
 	TextDelta string `protobuf:"bytes,10,opt,name=text_delta,json=textDelta,proto3,oneof"`
 }
 
-type AiStreamChunk_JsonDelta struct {
+type SIStreamChunk_JsonDelta struct {
 	JsonDelta *structpb.Struct `protobuf:"bytes,11,opt,name=json_delta,json=jsonDelta,proto3,oneof"`
 }
 
-type AiStreamChunk_Metadata struct {
+type SIStreamChunk_Metadata struct {
 	Metadata *structpb.Struct `protobuf:"bytes,12,opt,name=metadata,proto3,oneof"`
 }
 
-func (*AiStreamChunk_TextDelta) isAiStreamChunk_Chunk() {}
+func (*SIStreamChunk_TextDelta) isAiStreamChunk_Chunk() {}
 
-func (*AiStreamChunk_JsonDelta) isAiStreamChunk_Chunk() {}
+func (*SIStreamChunk_JsonDelta) isAiStreamChunk_Chunk() {}
 
-func (*AiStreamChunk_Metadata) isAiStreamChunk_Chunk() {}
+func (*SIStreamChunk_Metadata) isAiStreamChunk_Chunk() {}
 
 type Result struct {
 	state         protoimpl.MessageState
@@ -3997,19 +3997,19 @@ func (x *ClientToolResult) GetErrorMessage() string {
 	return ""
 }
 
-type AiChatMsg struct {
+type SIChatMsg struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
 	RequestId string           `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Messages  []*AiChatMessage `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
+	Messages  []*SIChatMessage `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
 	Provider  string           `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
 	Stream    bool             `protobuf:"varint,4,opt,name=stream,proto3" json:"stream,omitempty"`
 }
 
-func (x *AiChatMsg) Reset() {
-	*x = AiChatMsg{}
+func (x *SIChatMsg) Reset() {
+	*x = SIChatMsg{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[29]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4017,13 +4017,13 @@ func (x *AiChatMsg) Reset() {
 	}
 }
 
-func (x *AiChatMsg) String() string {
+func (x *SIChatMsg) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiChatMsg) ProtoMessage() {}
+func (*SIChatMsg) ProtoMessage() {}
 
-func (x *AiChatMsg) ProtoReflect() protoreflect.Message {
+func (x *SIChatMsg) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[29]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4035,40 +4035,40 @@ func (x *AiChatMsg) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiChatMsg.ProtoReflect.Descriptor instead.
-func (*AiChatMsg) Descriptor() ([]byte, []int) {
+// Deprecated: Use SIChatMsg.ProtoReflect.Descriptor instead.
+func (*SIChatMsg) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{29}
 }
 
-func (x *AiChatMsg) GetRequestId() string {
+func (x *SIChatMsg) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiChatMsg) GetMessages() []*AiChatMessage {
+func (x *SIChatMsg) GetMessages() []*SIChatMessage {
 	if x != nil {
 		return x.Messages
 	}
 	return nil
 }
 
-func (x *AiChatMsg) GetProvider() string {
+func (x *SIChatMsg) GetProvider() string {
 	if x != nil {
 		return x.Provider
 	}
 	return ""
 }
 
-func (x *AiChatMsg) GetStream() bool {
+func (x *SIChatMsg) GetStream() bool {
 	if x != nil {
 		return x.Stream
 	}
 	return false
 }
 
-type AiChatMessage struct {
+type SIChatMessage struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4078,8 +4078,8 @@ type AiChatMessage struct {
 	Name    string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 }
 
-func (x *AiChatMessage) Reset() {
-	*x = AiChatMessage{}
+func (x *SIChatMessage) Reset() {
+	*x = SIChatMessage{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4087,13 +4087,13 @@ func (x *AiChatMessage) Reset() {
 	}
 }
 
-func (x *AiChatMessage) String() string {
+func (x *SIChatMessage) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiChatMessage) ProtoMessage() {}
+func (*SIChatMessage) ProtoMessage() {}
 
-func (x *AiChatMessage) ProtoReflect() protoreflect.Message {
+func (x *SIChatMessage) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[30]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4105,43 +4105,43 @@ func (x *AiChatMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiChatMessage.ProtoReflect.Descriptor instead.
-func (*AiChatMessage) Descriptor() ([]byte, []int) {
+// Deprecated: Use SIChatMessage.ProtoReflect.Descriptor instead.
+func (*SIChatMessage) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{30}
 }
 
-func (x *AiChatMessage) GetRole() string {
+func (x *SIChatMessage) GetRole() string {
 	if x != nil {
 		return x.Role
 	}
 	return ""
 }
 
-func (x *AiChatMessage) GetContent() string {
+func (x *SIChatMessage) GetContent() string {
 	if x != nil {
 		return x.Content
 	}
 	return ""
 }
 
-func (x *AiChatMessage) GetName() string {
+func (x *SIChatMessage) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-type AiChatResult struct {
+type SIChatResult struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
 	RequestId string         `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Message   *AiChatMessage `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Message   *SIChatMessage `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 }
 
-func (x *AiChatResult) Reset() {
-	*x = AiChatResult{}
+func (x *SIChatResult) Reset() {
+	*x = SIChatResult{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[31]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4149,13 +4149,13 @@ func (x *AiChatResult) Reset() {
 	}
 }
 
-func (x *AiChatResult) String() string {
+func (x *SIChatResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiChatResult) ProtoMessage() {}
+func (*SIChatResult) ProtoMessage() {}
 
-func (x *AiChatResult) ProtoReflect() protoreflect.Message {
+func (x *SIChatResult) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[31]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4167,26 +4167,26 @@ func (x *AiChatResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiChatResult.ProtoReflect.Descriptor instead.
-func (*AiChatResult) Descriptor() ([]byte, []int) {
+// Deprecated: Use SIChatResult.ProtoReflect.Descriptor instead.
+func (*SIChatResult) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{31}
 }
 
-func (x *AiChatResult) GetRequestId() string {
+func (x *SIChatResult) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiChatResult) GetMessage() *AiChatMessage {
+func (x *SIChatResult) GetMessage() *SIChatMessage {
 	if x != nil {
 		return x.Message
 	}
 	return nil
 }
 
-type AiSpeechMsg struct {
+type SISpeechMsg struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4198,8 +4198,8 @@ type AiSpeechMsg struct {
 	Provider  string `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
 }
 
-func (x *AiSpeechMsg) Reset() {
-	*x = AiSpeechMsg{}
+func (x *SISpeechMsg) Reset() {
+	*x = SISpeechMsg{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[32]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4207,13 +4207,13 @@ func (x *AiSpeechMsg) Reset() {
 	}
 }
 
-func (x *AiSpeechMsg) String() string {
+func (x *SISpeechMsg) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiSpeechMsg) ProtoMessage() {}
+func (*SISpeechMsg) ProtoMessage() {}
 
-func (x *AiSpeechMsg) ProtoReflect() protoreflect.Message {
+func (x *SISpeechMsg) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[32]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4225,47 +4225,47 @@ func (x *AiSpeechMsg) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiSpeechMsg.ProtoReflect.Descriptor instead.
-func (*AiSpeechMsg) Descriptor() ([]byte, []int) {
+// Deprecated: Use SISpeechMsg.ProtoReflect.Descriptor instead.
+func (*SISpeechMsg) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{32}
 }
 
-func (x *AiSpeechMsg) GetRequestId() string {
+func (x *SISpeechMsg) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiSpeechMsg) GetInput() string {
+func (x *SISpeechMsg) GetInput() string {
 	if x != nil {
 		return x.Input
 	}
 	return ""
 }
 
-func (x *AiSpeechMsg) GetVoice() string {
+func (x *SISpeechMsg) GetVoice() string {
 	if x != nil {
 		return x.Voice
 	}
 	return ""
 }
 
-func (x *AiSpeechMsg) GetFormat() string {
+func (x *SISpeechMsg) GetFormat() string {
 	if x != nil {
 		return x.Format
 	}
 	return ""
 }
 
-func (x *AiSpeechMsg) GetProvider() string {
+func (x *SISpeechMsg) GetProvider() string {
 	if x != nil {
 		return x.Provider
 	}
 	return ""
 }
 
-type AiSpeechResult struct {
+type SISpeechResult struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4275,8 +4275,8 @@ type AiSpeechResult struct {
 	Format    string `protobuf:"bytes,3,opt,name=format,proto3" json:"format,omitempty"`
 }
 
-func (x *AiSpeechResult) Reset() {
-	*x = AiSpeechResult{}
+func (x *SISpeechResult) Reset() {
+	*x = SISpeechResult{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[33]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4284,13 +4284,13 @@ func (x *AiSpeechResult) Reset() {
 	}
 }
 
-func (x *AiSpeechResult) String() string {
+func (x *SISpeechResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiSpeechResult) ProtoMessage() {}
+func (*SISpeechResult) ProtoMessage() {}
 
-func (x *AiSpeechResult) ProtoReflect() protoreflect.Message {
+func (x *SISpeechResult) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[33]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4302,33 +4302,33 @@ func (x *AiSpeechResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiSpeechResult.ProtoReflect.Descriptor instead.
-func (*AiSpeechResult) Descriptor() ([]byte, []int) {
+// Deprecated: Use SISpeechResult.ProtoReflect.Descriptor instead.
+func (*SISpeechResult) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *AiSpeechResult) GetRequestId() string {
+func (x *SISpeechResult) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiSpeechResult) GetAudio() []byte {
+func (x *SISpeechResult) GetAudio() []byte {
 	if x != nil {
 		return x.Audio
 	}
 	return nil
 }
 
-func (x *AiSpeechResult) GetFormat() string {
+func (x *SISpeechResult) GetFormat() string {
 	if x != nil {
 		return x.Format
 	}
 	return ""
 }
 
-type AiTranscribeMsg struct {
+type SITranscribeMsg struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4338,8 +4338,8 @@ type AiTranscribeMsg struct {
 	MimeType  string `protobuf:"bytes,3,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
 }
 
-func (x *AiTranscribeMsg) Reset() {
-	*x = AiTranscribeMsg{}
+func (x *SITranscribeMsg) Reset() {
+	*x = SITranscribeMsg{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[34]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4347,13 +4347,13 @@ func (x *AiTranscribeMsg) Reset() {
 	}
 }
 
-func (x *AiTranscribeMsg) String() string {
+func (x *SITranscribeMsg) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeMsg) ProtoMessage() {}
+func (*SITranscribeMsg) ProtoMessage() {}
 
-func (x *AiTranscribeMsg) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeMsg) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[34]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4365,33 +4365,33 @@ func (x *AiTranscribeMsg) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeMsg.ProtoReflect.Descriptor instead.
-func (*AiTranscribeMsg) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeMsg.ProtoReflect.Descriptor instead.
+func (*SITranscribeMsg) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *AiTranscribeMsg) GetRequestId() string {
+func (x *SITranscribeMsg) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeMsg) GetAudio() string {
+func (x *SITranscribeMsg) GetAudio() string {
 	if x != nil {
 		return x.Audio
 	}
 	return ""
 }
 
-func (x *AiTranscribeMsg) GetMimeType() string {
+func (x *SITranscribeMsg) GetMimeType() string {
 	if x != nil {
 		return x.MimeType
 	}
 	return ""
 }
 
-type AiTranscribeResult struct {
+type SITranscribeResult struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4400,8 +4400,8 @@ type AiTranscribeResult struct {
 	Text      string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 }
 
-func (x *AiTranscribeResult) Reset() {
-	*x = AiTranscribeResult{}
+func (x *SITranscribeResult) Reset() {
+	*x = SITranscribeResult{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[35]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4409,13 +4409,13 @@ func (x *AiTranscribeResult) Reset() {
 	}
 }
 
-func (x *AiTranscribeResult) String() string {
+func (x *SITranscribeResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeResult) ProtoMessage() {}
+func (*SITranscribeResult) ProtoMessage() {}
 
-func (x *AiTranscribeResult) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeResult) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[35]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4427,19 +4427,19 @@ func (x *AiTranscribeResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeResult.ProtoReflect.Descriptor instead.
-func (*AiTranscribeResult) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeResult.ProtoReflect.Descriptor instead.
+func (*SITranscribeResult) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{35}
 }
 
-func (x *AiTranscribeResult) GetRequestId() string {
+func (x *SITranscribeResult) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeResult) GetText() string {
+func (x *SITranscribeResult) GetText() string {
 	if x != nil {
 		return x.Text
 	}
@@ -4449,7 +4449,7 @@ func (x *AiTranscribeResult) GetText() string {
 // Streaming transcription: Start / Chunk / End (client -> server).
 // All messages in a stream share the same request_id. Opening two
 // streams with the same request_id is an error.
-type AiTranscribeStreamStart struct {
+type SITranscribeStreamStart struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4462,8 +4462,8 @@ type AiTranscribeStreamStart struct {
 	Provider     string `protobuf:"bytes,6,opt,name=provider,proto3" json:"provider,omitempty"`                             // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default. Stage 2 of the Deepgram migration adds "deepgram".
 }
 
-func (x *AiTranscribeStreamStart) Reset() {
-	*x = AiTranscribeStreamStart{}
+func (x *SITranscribeStreamStart) Reset() {
+	*x = SITranscribeStreamStart{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[36]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4471,13 +4471,13 @@ func (x *AiTranscribeStreamStart) Reset() {
 	}
 }
 
-func (x *AiTranscribeStreamStart) String() string {
+func (x *SITranscribeStreamStart) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeStreamStart) ProtoMessage() {}
+func (*SITranscribeStreamStart) ProtoMessage() {}
 
-func (x *AiTranscribeStreamStart) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeStreamStart) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[36]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4489,54 +4489,54 @@ func (x *AiTranscribeStreamStart) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeStreamStart.ProtoReflect.Descriptor instead.
-func (*AiTranscribeStreamStart) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeStreamStart.ProtoReflect.Descriptor instead.
+func (*SITranscribeStreamStart) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{36}
 }
 
-func (x *AiTranscribeStreamStart) GetRequestId() string {
+func (x *SITranscribeStreamStart) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamStart) GetFormat() string {
+func (x *SITranscribeStreamStart) GetFormat() string {
 	if x != nil {
 		return x.Format
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamStart) GetSampleRate() int32 {
+func (x *SITranscribeStreamStart) GetSampleRate() int32 {
 	if x != nil {
 		return x.SampleRate
 	}
 	return 0
 }
 
-func (x *AiTranscribeStreamStart) GetChannels() int32 {
+func (x *SITranscribeStreamStart) GetChannels() int32 {
 	if x != nil {
 		return x.Channels
 	}
 	return 0
 }
 
-func (x *AiTranscribeStreamStart) GetLanguageHint() string {
+func (x *SITranscribeStreamStart) GetLanguageHint() string {
 	if x != nil {
 		return x.LanguageHint
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamStart) GetProvider() string {
+func (x *SITranscribeStreamStart) GetProvider() string {
 	if x != nil {
 		return x.Provider
 	}
 	return ""
 }
 
-type AiTranscribeStreamChunk struct {
+type SITranscribeStreamChunk struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4545,8 +4545,8 @@ type AiTranscribeStreamChunk struct {
 	Audio     []byte `protobuf:"bytes,2,opt,name=audio,proto3" json:"audio,omitempty"` // raw audio bytes in the format declared by Start
 }
 
-func (x *AiTranscribeStreamChunk) Reset() {
-	*x = AiTranscribeStreamChunk{}
+func (x *SITranscribeStreamChunk) Reset() {
+	*x = SITranscribeStreamChunk{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[37]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4554,13 +4554,13 @@ func (x *AiTranscribeStreamChunk) Reset() {
 	}
 }
 
-func (x *AiTranscribeStreamChunk) String() string {
+func (x *SITranscribeStreamChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeStreamChunk) ProtoMessage() {}
+func (*SITranscribeStreamChunk) ProtoMessage() {}
 
-func (x *AiTranscribeStreamChunk) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeStreamChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[37]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4572,26 +4572,26 @@ func (x *AiTranscribeStreamChunk) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeStreamChunk.ProtoReflect.Descriptor instead.
-func (*AiTranscribeStreamChunk) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeStreamChunk.ProtoReflect.Descriptor instead.
+func (*SITranscribeStreamChunk) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *AiTranscribeStreamChunk) GetRequestId() string {
+func (x *SITranscribeStreamChunk) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamChunk) GetAudio() []byte {
+func (x *SITranscribeStreamChunk) GetAudio() []byte {
 	if x != nil {
 		return x.Audio
 	}
 	return nil
 }
 
-type AiTranscribeStreamEnd struct {
+type SITranscribeStreamEnd struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4600,8 +4600,8 @@ type AiTranscribeStreamEnd struct {
 	Cancel    bool   `protobuf:"varint,2,opt,name=cancel,proto3" json:"cancel,omitempty"` // true = abort without emitting Complete
 }
 
-func (x *AiTranscribeStreamEnd) Reset() {
-	*x = AiTranscribeStreamEnd{}
+func (x *SITranscribeStreamEnd) Reset() {
+	*x = SITranscribeStreamEnd{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[38]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4609,13 +4609,13 @@ func (x *AiTranscribeStreamEnd) Reset() {
 	}
 }
 
-func (x *AiTranscribeStreamEnd) String() string {
+func (x *SITranscribeStreamEnd) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeStreamEnd) ProtoMessage() {}
+func (*SITranscribeStreamEnd) ProtoMessage() {}
 
-func (x *AiTranscribeStreamEnd) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeStreamEnd) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[38]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4627,19 +4627,19 @@ func (x *AiTranscribeStreamEnd) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeStreamEnd.ProtoReflect.Descriptor instead.
-func (*AiTranscribeStreamEnd) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeStreamEnd.ProtoReflect.Descriptor instead.
+func (*SITranscribeStreamEnd) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{38}
 }
 
-func (x *AiTranscribeStreamEnd) GetRequestId() string {
+func (x *SITranscribeStreamEnd) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamEnd) GetCancel() bool {
+func (x *SITranscribeStreamEnd) GetCancel() bool {
 	if x != nil {
 		return x.Cancel
 	}
@@ -4650,7 +4650,7 @@ func (x *AiTranscribeStreamEnd) GetCancel() bool {
 // Delta carries the full accumulated text so far (not incremental
 // tokens) so the client can set the input field directly on each
 // event. is_final=true marks the last Delta before Complete.
-type AiTranscribeStreamDelta struct {
+type SITranscribeStreamDelta struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4661,8 +4661,8 @@ type AiTranscribeStreamDelta struct {
 	Confidence float32 `protobuf:"fixed32,4,opt,name=confidence,proto3" json:"confidence,omitempty"` // optional, 0.0-1.0
 }
 
-func (x *AiTranscribeStreamDelta) Reset() {
-	*x = AiTranscribeStreamDelta{}
+func (x *SITranscribeStreamDelta) Reset() {
+	*x = SITranscribeStreamDelta{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[39]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4670,13 +4670,13 @@ func (x *AiTranscribeStreamDelta) Reset() {
 	}
 }
 
-func (x *AiTranscribeStreamDelta) String() string {
+func (x *SITranscribeStreamDelta) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeStreamDelta) ProtoMessage() {}
+func (*SITranscribeStreamDelta) ProtoMessage() {}
 
-func (x *AiTranscribeStreamDelta) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeStreamDelta) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[39]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4688,40 +4688,40 @@ func (x *AiTranscribeStreamDelta) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeStreamDelta.ProtoReflect.Descriptor instead.
-func (*AiTranscribeStreamDelta) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeStreamDelta.ProtoReflect.Descriptor instead.
+func (*SITranscribeStreamDelta) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{39}
 }
 
-func (x *AiTranscribeStreamDelta) GetRequestId() string {
+func (x *SITranscribeStreamDelta) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamDelta) GetText() string {
+func (x *SITranscribeStreamDelta) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamDelta) GetIsFinal() bool {
+func (x *SITranscribeStreamDelta) GetIsFinal() bool {
 	if x != nil {
 		return x.IsFinal
 	}
 	return false
 }
 
-func (x *AiTranscribeStreamDelta) GetConfidence() float32 {
+func (x *SITranscribeStreamDelta) GetConfidence() float32 {
 	if x != nil {
 		return x.Confidence
 	}
 	return 0
 }
 
-type AiTranscribeStreamComplete struct {
+type SITranscribeStreamComplete struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4732,8 +4732,8 @@ type AiTranscribeStreamComplete struct {
 	Provider   string `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"` // provider name, e.g. "openai-realtime", "openai-whisper". Stage 2 of the Deepgram migration adds "deepgram".
 }
 
-func (x *AiTranscribeStreamComplete) Reset() {
-	*x = AiTranscribeStreamComplete{}
+func (x *SITranscribeStreamComplete) Reset() {
+	*x = SITranscribeStreamComplete{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[40]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4741,13 +4741,13 @@ func (x *AiTranscribeStreamComplete) Reset() {
 	}
 }
 
-func (x *AiTranscribeStreamComplete) String() string {
+func (x *SITranscribeStreamComplete) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiTranscribeStreamComplete) ProtoMessage() {}
+func (*SITranscribeStreamComplete) ProtoMessage() {}
 
-func (x *AiTranscribeStreamComplete) ProtoReflect() protoreflect.Message {
+func (x *SITranscribeStreamComplete) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[40]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4759,40 +4759,40 @@ func (x *AiTranscribeStreamComplete) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiTranscribeStreamComplete.ProtoReflect.Descriptor instead.
-func (*AiTranscribeStreamComplete) Descriptor() ([]byte, []int) {
+// Deprecated: Use SITranscribeStreamComplete.ProtoReflect.Descriptor instead.
+func (*SITranscribeStreamComplete) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{40}
 }
 
-func (x *AiTranscribeStreamComplete) GetRequestId() string {
+func (x *SITranscribeStreamComplete) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamComplete) GetText() string {
+func (x *SITranscribeStreamComplete) GetText() string {
 	if x != nil {
 		return x.Text
 	}
 	return ""
 }
 
-func (x *AiTranscribeStreamComplete) GetDurationMs() int64 {
+func (x *SITranscribeStreamComplete) GetDurationMs() int64 {
 	if x != nil {
 		return x.DurationMs
 	}
 	return 0
 }
 
-func (x *AiTranscribeStreamComplete) GetProvider() string {
+func (x *SITranscribeStreamComplete) GetProvider() string {
 	if x != nil {
 		return x.Provider
 	}
 	return ""
 }
 
-type AiSuggestMsg struct {
+type SISuggestMsg struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4802,8 +4802,8 @@ type AiSuggestMsg struct {
 	Payload   *structpb.Struct `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 }
 
-func (x *AiSuggestMsg) Reset() {
-	*x = AiSuggestMsg{}
+func (x *SISuggestMsg) Reset() {
+	*x = SISuggestMsg{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[41]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4811,13 +4811,13 @@ func (x *AiSuggestMsg) Reset() {
 	}
 }
 
-func (x *AiSuggestMsg) String() string {
+func (x *SISuggestMsg) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiSuggestMsg) ProtoMessage() {}
+func (*SISuggestMsg) ProtoMessage() {}
 
-func (x *AiSuggestMsg) ProtoReflect() protoreflect.Message {
+func (x *SISuggestMsg) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[41]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4829,33 +4829,33 @@ func (x *AiSuggestMsg) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiSuggestMsg.ProtoReflect.Descriptor instead.
-func (*AiSuggestMsg) Descriptor() ([]byte, []int) {
+// Deprecated: Use SISuggestMsg.ProtoReflect.Descriptor instead.
+func (*SISuggestMsg) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{41}
 }
 
-func (x *AiSuggestMsg) GetRequestId() string {
+func (x *SISuggestMsg) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiSuggestMsg) GetDomain() string {
+func (x *SISuggestMsg) GetDomain() string {
 	if x != nil {
 		return x.Domain
 	}
 	return ""
 }
 
-func (x *AiSuggestMsg) GetPayload() *structpb.Struct {
+func (x *SISuggestMsg) GetPayload() *structpb.Struct {
 	if x != nil {
 		return x.Payload
 	}
 	return nil
 }
 
-type AiSuggestResult struct {
+type SISuggestResult struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -4865,8 +4865,8 @@ type AiSuggestResult struct {
 	Result    *structpb.Struct `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
 }
 
-func (x *AiSuggestResult) Reset() {
-	*x = AiSuggestResult{}
+func (x *SISuggestResult) Reset() {
+	*x = SISuggestResult{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_memql_proto_msgTypes[42]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4874,13 +4874,13 @@ func (x *AiSuggestResult) Reset() {
 	}
 }
 
-func (x *AiSuggestResult) String() string {
+func (x *SISuggestResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AiSuggestResult) ProtoMessage() {}
+func (*SISuggestResult) ProtoMessage() {}
 
-func (x *AiSuggestResult) ProtoReflect() protoreflect.Message {
+func (x *SISuggestResult) ProtoReflect() protoreflect.Message {
 	mi := &file_memql_proto_msgTypes[42]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4892,26 +4892,26 @@ func (x *AiSuggestResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AiSuggestResult.ProtoReflect.Descriptor instead.
-func (*AiSuggestResult) Descriptor() ([]byte, []int) {
+// Deprecated: Use SISuggestResult.ProtoReflect.Descriptor instead.
+func (*SISuggestResult) Descriptor() ([]byte, []int) {
 	return file_memql_proto_rawDescGZIP(), []int{42}
 }
 
-func (x *AiSuggestResult) GetRequestId() string {
+func (x *SISuggestResult) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *AiSuggestResult) GetDomain() string {
+func (x *SISuggestResult) GetDomain() string {
 	if x != nil {
 		return x.Domain
 	}
 	return ""
 }
 
-func (x *AiSuggestResult) GetResult() *structpb.Struct {
+func (x *SISuggestResult) GetResult() *structpb.Struct {
 	if x != nil {
 		return x.Result
 	}
@@ -11554,7 +11554,7 @@ func (x *VoiceAgentTurnRequest) GetThread() VoiceAgentTurnRequest_ThreadContext 
 // phrase starts synthesizing before the full response is ready.
 //
 // text_delta is the incremental chunk -- DO NOT pass the full
-// accumulated text. (Contrast with AiTranscribeStreamDelta which
+// accumulated text. (Contrast with SITranscribeStreamDelta which
 // is full-accumulated; that's an ASR ergonomic.)
 type VoiceAgentTurnDelta struct {
 	state         protoimpl.MessageState
@@ -14203,7 +14203,7 @@ var file_memql_proto_goTypes = []any{
 	(*SubscribeMsg)(nil),                     // 16: znasllc.memql.v1.SubscribeMsg
 	(*UnsubscribeMsg)(nil),                   // 17: znasllc.memql.v1.UnsubscribeMsg
 	(*EventNotification)(nil),                // 18: znasllc.memql.v1.EventNotification
-	(*AiStreamChunk)(nil),                    // 19: znasllc.memql.v1.AiStreamChunk
+	(*SIStreamChunk)(nil),                    // 19: znasllc.memql.v1.SIStreamChunk
 	(*Result)(nil),                           // 20: znasllc.memql.v1.Result
 	(*ResultMeta)(nil),                       // 21: znasllc.memql.v1.ResultMeta
 	(*QueryError)(nil),                       // 22: znasllc.memql.v1.QueryError
@@ -14218,20 +14218,20 @@ var file_memql_proto_goTypes = []any{
 	(*ToolResultContent)(nil),                // 31: znasllc.memql.v1.ToolResultContent
 	(*ClientToolCall)(nil),                   // 32: znasllc.memql.v1.ClientToolCall
 	(*ClientToolResult)(nil),                 // 33: znasllc.memql.v1.ClientToolResult
-	(*AiChatMsg)(nil),                        // 34: znasllc.memql.v1.AiChatMsg
-	(*AiChatMessage)(nil),                    // 35: znasllc.memql.v1.AiChatMessage
-	(*AiChatResult)(nil),                     // 36: znasllc.memql.v1.AiChatResult
-	(*AiSpeechMsg)(nil),                      // 37: znasllc.memql.v1.AiSpeechMsg
-	(*AiSpeechResult)(nil),                   // 38: znasllc.memql.v1.AiSpeechResult
-	(*AiTranscribeMsg)(nil),                  // 39: znasllc.memql.v1.AiTranscribeMsg
-	(*AiTranscribeResult)(nil),               // 40: znasllc.memql.v1.AiTranscribeResult
-	(*AiTranscribeStreamStart)(nil),          // 41: znasllc.memql.v1.AiTranscribeStreamStart
-	(*AiTranscribeStreamChunk)(nil),          // 42: znasllc.memql.v1.AiTranscribeStreamChunk
-	(*AiTranscribeStreamEnd)(nil),            // 43: znasllc.memql.v1.AiTranscribeStreamEnd
-	(*AiTranscribeStreamDelta)(nil),          // 44: znasllc.memql.v1.AiTranscribeStreamDelta
-	(*AiTranscribeStreamComplete)(nil),       // 45: znasllc.memql.v1.AiTranscribeStreamComplete
-	(*AiSuggestMsg)(nil),                     // 46: znasllc.memql.v1.AiSuggestMsg
-	(*AiSuggestResult)(nil),                  // 47: znasllc.memql.v1.AiSuggestResult
+	(*SIChatMsg)(nil),                        // 34: znasllc.memql.v1.SIChatMsg
+	(*SIChatMessage)(nil),                    // 35: znasllc.memql.v1.SIChatMessage
+	(*SIChatResult)(nil),                     // 36: znasllc.memql.v1.SIChatResult
+	(*SISpeechMsg)(nil),                      // 37: znasllc.memql.v1.SISpeechMsg
+	(*SISpeechResult)(nil),                   // 38: znasllc.memql.v1.SISpeechResult
+	(*SITranscribeMsg)(nil),                  // 39: znasllc.memql.v1.SITranscribeMsg
+	(*SITranscribeResult)(nil),               // 40: znasllc.memql.v1.SITranscribeResult
+	(*SITranscribeStreamStart)(nil),          // 41: znasllc.memql.v1.SITranscribeStreamStart
+	(*SITranscribeStreamChunk)(nil),          // 42: znasllc.memql.v1.SITranscribeStreamChunk
+	(*SITranscribeStreamEnd)(nil),            // 43: znasllc.memql.v1.SITranscribeStreamEnd
+	(*SITranscribeStreamDelta)(nil),          // 44: znasllc.memql.v1.SITranscribeStreamDelta
+	(*SITranscribeStreamComplete)(nil),       // 45: znasllc.memql.v1.SITranscribeStreamComplete
+	(*SISuggestMsg)(nil),                     // 46: znasllc.memql.v1.SISuggestMsg
+	(*SISuggestResult)(nil),                  // 47: znasllc.memql.v1.SISuggestResult
 	(*IdentityCreateMsg)(nil),                // 48: znasllc.memql.v1.IdentityCreateMsg
 	(*IdentityUpdateMsg)(nil),                // 49: znasllc.memql.v1.IdentityUpdateMsg
 	(*IdentityListMsg)(nil),                  // 50: znasllc.memql.v1.IdentityListMsg
@@ -14344,10 +14344,10 @@ var file_memql_proto_depIdxs = []int32{
 	11,  // 7: znasllc.memql.v1.MemqlClientMessage.ack:type_name -> znasllc.memql.v1.AckMsg
 	26,  // 8: znasllc.memql.v1.MemqlClientMessage.list_tools:type_name -> znasllc.memql.v1.ListToolsMsg
 	29,  // 9: znasllc.memql.v1.MemqlClientMessage.call_tool:type_name -> znasllc.memql.v1.CallToolMsg
-	34,  // 10: znasllc.memql.v1.MemqlClientMessage.ai_chat:type_name -> znasllc.memql.v1.AiChatMsg
-	37,  // 11: znasllc.memql.v1.MemqlClientMessage.ai_speech:type_name -> znasllc.memql.v1.AiSpeechMsg
-	39,  // 12: znasllc.memql.v1.MemqlClientMessage.ai_transcribe:type_name -> znasllc.memql.v1.AiTranscribeMsg
-	46,  // 13: znasllc.memql.v1.MemqlClientMessage.ai_suggest:type_name -> znasllc.memql.v1.AiSuggestMsg
+	34,  // 10: znasllc.memql.v1.MemqlClientMessage.si_chat:type_name -> znasllc.memql.v1.SIChatMsg
+	37,  // 11: znasllc.memql.v1.MemqlClientMessage.si_speech:type_name -> znasllc.memql.v1.SISpeechMsg
+	39,  // 12: znasllc.memql.v1.MemqlClientMessage.si_transcribe:type_name -> znasllc.memql.v1.SITranscribeMsg
+	46,  // 13: znasllc.memql.v1.MemqlClientMessage.si_suggest:type_name -> znasllc.memql.v1.SISuggestMsg
 	48,  // 14: znasllc.memql.v1.MemqlClientMessage.identity_create:type_name -> znasllc.memql.v1.IdentityCreateMsg
 	49,  // 15: znasllc.memql.v1.MemqlClientMessage.identity_update:type_name -> znasllc.memql.v1.IdentityUpdateMsg
 	50,  // 16: znasllc.memql.v1.MemqlClientMessage.identity_list:type_name -> znasllc.memql.v1.IdentityListMsg
@@ -14365,9 +14365,9 @@ var file_memql_proto_depIdxs = []int32{
 	81,  // 28: znasllc.memql.v1.MemqlClientMessage.concepts_list:type_name -> znasllc.memql.v1.ConceptsListMsg
 	84,  // 29: znasllc.memql.v1.MemqlClientMessage.concepts_subscribe:type_name -> znasllc.memql.v1.ConceptsSubscribeMsg
 	87,  // 30: znasllc.memql.v1.MemqlClientMessage.my_access:type_name -> znasllc.memql.v1.MyAccessMsg
-	41,  // 31: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_start:type_name -> znasllc.memql.v1.AiTranscribeStreamStart
-	42,  // 32: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_chunk:type_name -> znasllc.memql.v1.AiTranscribeStreamChunk
-	43,  // 33: znasllc.memql.v1.MemqlClientMessage.ai_transcribe_stream_end:type_name -> znasllc.memql.v1.AiTranscribeStreamEnd
+	41,  // 31: znasllc.memql.v1.MemqlClientMessage.si_transcribe_stream_start:type_name -> znasllc.memql.v1.SITranscribeStreamStart
+	42,  // 32: znasllc.memql.v1.MemqlClientMessage.si_transcribe_stream_chunk:type_name -> znasllc.memql.v1.SITranscribeStreamChunk
+	43,  // 33: znasllc.memql.v1.MemqlClientMessage.si_transcribe_stream_end:type_name -> znasllc.memql.v1.SITranscribeStreamEnd
 	90,  // 34: znasllc.memql.v1.MemqlClientMessage.agent_generate_turn:type_name -> znasllc.memql.v1.AgentGenerateTurnMsg
 	33,  // 35: znasllc.memql.v1.MemqlClientMessage.client_tool_result:type_name -> znasllc.memql.v1.ClientToolResult
 	107, // 36: znasllc.memql.v1.MemqlClientMessage.send_guest_invite:type_name -> znasllc.memql.v1.SendGuestInviteMsg
@@ -14391,14 +14391,14 @@ var file_memql_proto_depIdxs = []int32{
 	14,  // 54: znasllc.memql.v1.MemqlServerMessage.query_result:type_name -> znasllc.memql.v1.QueryResultChunk
 	15,  // 55: znasllc.memql.v1.MemqlServerMessage.query_error:type_name -> znasllc.memql.v1.QueryErrorMsg
 	18,  // 56: znasllc.memql.v1.MemqlServerMessage.event:type_name -> znasllc.memql.v1.EventNotification
-	19,  // 57: znasllc.memql.v1.MemqlServerMessage.ai_chunk:type_name -> znasllc.memql.v1.AiStreamChunk
+	19,  // 57: znasllc.memql.v1.MemqlServerMessage.si_chunk:type_name -> znasllc.memql.v1.SIStreamChunk
 	10,  // 58: znasllc.memql.v1.MemqlServerMessage.heartbeat:type_name -> znasllc.memql.v1.HeartbeatMsg
 	27,  // 59: znasllc.memql.v1.MemqlServerMessage.list_tools_result:type_name -> znasllc.memql.v1.ListToolsResult
 	30,  // 60: znasllc.memql.v1.MemqlServerMessage.call_tool_result:type_name -> znasllc.memql.v1.CallToolResult
-	36,  // 61: znasllc.memql.v1.MemqlServerMessage.ai_chat_result:type_name -> znasllc.memql.v1.AiChatResult
-	38,  // 62: znasllc.memql.v1.MemqlServerMessage.ai_speech_result:type_name -> znasllc.memql.v1.AiSpeechResult
-	40,  // 63: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_result:type_name -> znasllc.memql.v1.AiTranscribeResult
-	47,  // 64: znasllc.memql.v1.MemqlServerMessage.ai_suggest_result:type_name -> znasllc.memql.v1.AiSuggestResult
+	36,  // 61: znasllc.memql.v1.MemqlServerMessage.si_chat_result:type_name -> znasllc.memql.v1.SIChatResult
+	38,  // 62: znasllc.memql.v1.MemqlServerMessage.si_speech_result:type_name -> znasllc.memql.v1.SISpeechResult
+	40,  // 63: znasllc.memql.v1.MemqlServerMessage.si_transcribe_result:type_name -> znasllc.memql.v1.SITranscribeResult
+	47,  // 64: znasllc.memql.v1.MemqlServerMessage.si_suggest_result:type_name -> znasllc.memql.v1.SISuggestResult
 	51,  // 65: znasllc.memql.v1.MemqlServerMessage.identity_result:type_name -> znasllc.memql.v1.IdentityResult
 	56,  // 66: znasllc.memql.v1.MemqlServerMessage.delegation_result:type_name -> znasllc.memql.v1.DelegationResult
 	61,  // 67: znasllc.memql.v1.MemqlServerMessage.sense_tokenize_result:type_name -> znasllc.memql.v1.SenseTokenizeResult
@@ -14412,8 +14412,8 @@ var file_memql_proto_depIdxs = []int32{
 	82,  // 75: znasllc.memql.v1.MemqlServerMessage.concepts_list_result:type_name -> znasllc.memql.v1.ConceptsListResult
 	85,  // 76: znasllc.memql.v1.MemqlServerMessage.concepts_subscribe_result:type_name -> znasllc.memql.v1.ConceptsSubscribeResult
 	88,  // 77: znasllc.memql.v1.MemqlServerMessage.my_access_result:type_name -> znasllc.memql.v1.MyAccessResult
-	44,  // 78: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_stream_delta:type_name -> znasllc.memql.v1.AiTranscribeStreamDelta
-	45,  // 79: znasllc.memql.v1.MemqlServerMessage.ai_transcribe_stream_complete:type_name -> znasllc.memql.v1.AiTranscribeStreamComplete
+	44,  // 78: znasllc.memql.v1.MemqlServerMessage.si_transcribe_stream_delta:type_name -> znasllc.memql.v1.SITranscribeStreamDelta
+	45,  // 79: znasllc.memql.v1.MemqlServerMessage.si_transcribe_stream_complete:type_name -> znasllc.memql.v1.SITranscribeStreamComplete
 	99,  // 80: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_delta:type_name -> znasllc.memql.v1.AgentGenerateTurnDelta
 	103, // 81: znasllc.memql.v1.MemqlServerMessage.agent_generate_turn_complete:type_name -> znasllc.memql.v1.AgentGenerateTurnComplete
 	32,  // 82: znasllc.memql.v1.MemqlServerMessage.client_tool_call:type_name -> znasllc.memql.v1.ClientToolCall
@@ -14443,8 +14443,8 @@ var file_memql_proto_depIdxs = []int32{
 	2,   // 106: znasllc.memql.v1.EventNotification.kind:type_name -> znasllc.memql.v1.EventKind
 	145, // 107: znasllc.memql.v1.EventNotification.ts:type_name -> google.protobuf.Timestamp
 	146, // 108: znasllc.memql.v1.EventNotification.payload:type_name -> google.protobuf.Struct
-	146, // 109: znasllc.memql.v1.AiStreamChunk.json_delta:type_name -> google.protobuf.Struct
-	146, // 110: znasllc.memql.v1.AiStreamChunk.metadata:type_name -> google.protobuf.Struct
+	146, // 109: znasllc.memql.v1.SIStreamChunk.json_delta:type_name -> google.protobuf.Struct
+	146, // 110: znasllc.memql.v1.SIStreamChunk.metadata:type_name -> google.protobuf.Struct
 	23,  // 111: znasllc.memql.v1.Result.bundle:type_name -> znasllc.memql.v1.GraphBundle
 	147, // 112: znasllc.memql.v1.Result.data:type_name -> google.protobuf.Value
 	21,  // 113: znasllc.memql.v1.Result.meta:type_name -> znasllc.memql.v1.ResultMeta
@@ -14460,10 +14460,10 @@ var file_memql_proto_depIdxs = []int32{
 	146, // 123: znasllc.memql.v1.CallToolMsg.arguments:type_name -> google.protobuf.Struct
 	31,  // 124: znasllc.memql.v1.CallToolResult.content:type_name -> znasllc.memql.v1.ToolResultContent
 	31,  // 125: znasllc.memql.v1.ClientToolResult.content:type_name -> znasllc.memql.v1.ToolResultContent
-	35,  // 126: znasllc.memql.v1.AiChatMsg.messages:type_name -> znasllc.memql.v1.AiChatMessage
-	35,  // 127: znasllc.memql.v1.AiChatResult.message:type_name -> znasllc.memql.v1.AiChatMessage
-	146, // 128: znasllc.memql.v1.AiSuggestMsg.payload:type_name -> google.protobuf.Struct
-	146, // 129: znasllc.memql.v1.AiSuggestResult.result:type_name -> google.protobuf.Struct
+	35,  // 126: znasllc.memql.v1.SIChatMsg.messages:type_name -> znasllc.memql.v1.SIChatMessage
+	35,  // 127: znasllc.memql.v1.SIChatResult.message:type_name -> znasllc.memql.v1.SIChatMessage
+	146, // 128: znasllc.memql.v1.SISuggestMsg.payload:type_name -> google.protobuf.Struct
+	146, // 129: znasllc.memql.v1.SISuggestResult.result:type_name -> google.protobuf.Struct
 	0,   // 130: znasllc.memql.v1.IdentityCreateMsg.role:type_name -> znasllc.memql.v1.UserRole
 	146, // 131: znasllc.memql.v1.IdentityUpdateMsg.fields:type_name -> google.protobuf.Struct
 	52,  // 132: znasllc.memql.v1.IdentityResult.identities:type_name -> znasllc.memql.v1.IdentityInfo
@@ -14699,7 +14699,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[14].Exporter = func(v any, i int) any {
-			switch v := v.(*AiStreamChunk); i {
+			switch v := v.(*SIStreamChunk); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14879,7 +14879,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[29].Exporter = func(v any, i int) any {
-			switch v := v.(*AiChatMsg); i {
+			switch v := v.(*SIChatMsg); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14891,7 +14891,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[30].Exporter = func(v any, i int) any {
-			switch v := v.(*AiChatMessage); i {
+			switch v := v.(*SIChatMessage); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14903,7 +14903,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[31].Exporter = func(v any, i int) any {
-			switch v := v.(*AiChatResult); i {
+			switch v := v.(*SIChatResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14915,7 +14915,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[32].Exporter = func(v any, i int) any {
-			switch v := v.(*AiSpeechMsg); i {
+			switch v := v.(*SISpeechMsg); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14927,7 +14927,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[33].Exporter = func(v any, i int) any {
-			switch v := v.(*AiSpeechResult); i {
+			switch v := v.(*SISpeechResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14939,7 +14939,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[34].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeMsg); i {
+			switch v := v.(*SITranscribeMsg); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14951,7 +14951,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[35].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeResult); i {
+			switch v := v.(*SITranscribeResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14963,7 +14963,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[36].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeStreamStart); i {
+			switch v := v.(*SITranscribeStreamStart); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14975,7 +14975,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[37].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeStreamChunk); i {
+			switch v := v.(*SITranscribeStreamChunk); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14987,7 +14987,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[38].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeStreamEnd); i {
+			switch v := v.(*SITranscribeStreamEnd); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -14999,7 +14999,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[39].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeStreamDelta); i {
+			switch v := v.(*SITranscribeStreamDelta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -15011,7 +15011,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[40].Exporter = func(v any, i int) any {
-			switch v := v.(*AiTranscribeStreamComplete); i {
+			switch v := v.(*SITranscribeStreamComplete); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -15023,7 +15023,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[41].Exporter = func(v any, i int) any {
-			switch v := v.(*AiSuggestMsg); i {
+			switch v := v.(*SISuggestMsg); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -15035,7 +15035,7 @@ func file_memql_proto_init() {
 			}
 		}
 		file_memql_proto_msgTypes[42].Exporter = func(v any, i int) any {
-			switch v := v.(*AiSuggestResult); i {
+			switch v := v.(*SISuggestResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -16253,9 +16253,9 @@ func file_memql_proto_init() {
 		(*MemqlServerMessage_RotateAuthResult)(nil),
 	}
 	file_memql_proto_msgTypes[14].OneofWrappers = []any{
-		(*AiStreamChunk_TextDelta)(nil),
-		(*AiStreamChunk_JsonDelta)(nil),
-		(*AiStreamChunk_Metadata)(nil),
+		(*SIStreamChunk_TextDelta)(nil),
+		(*SIStreamChunk_JsonDelta)(nil),
+		(*SIStreamChunk_Metadata)(nil),
 	}
 	file_memql_proto_msgTypes[16].OneofWrappers = []any{}
 	file_memql_proto_msgTypes[94].OneofWrappers = []any{

@@ -225,7 +225,7 @@ type (
 		latestHumanUtterance   map[string]string
 
 		// agentForwarder routes AgentGenerateTurnMsg to an agent peer
-		// via NodeService.AiForwardRequest. Injected by app bootstrap
+		// via NodeService.SIForwardRequest. Injected by app bootstrap
 		// on cognition binaries; nil otherwise (cognition is the only
 		// node type that originates agent-turn forwards today).
 		agentForwarder AgentForwarder

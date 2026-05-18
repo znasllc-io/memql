@@ -253,9 +253,9 @@ message ConfigSnapshot {
   bool engine_step_cache_enabled = 12;
 
   // AI
-  string ai_openai_api_key = 20;
-  string ai_openai_project_id = 21;
-  string ai_default_provider = 22;
+  string si_openai_api_key = 20;
+  string si_openai_project_id = 21;
+  string si_default_provider = 22;
 
   // Server
   string grpc_address = 30;
