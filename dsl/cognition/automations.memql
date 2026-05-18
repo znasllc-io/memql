@@ -125,3 +125,97 @@ automation voiceMigrationOnSecondHuman {
     logic voiceMigrationOnSecondHuman { event: event }
   }
 }
+
+// ---- automations/v1/cognition/provisionDailySpaceOnUserCreate ----
+//
+// PURPOSE:
+// When a new v1:identity:user row lands, ensure that user has today's
+// daily space waiting for them. Combines with ensureDailySpaceOnAuthSession
+// (every login) and rolloverDailySpace (hourly cron) to guarantee the
+// per-user singleton always exists by the time the user looks for it.
+//
+// FIRES:
+// graph.node.created.*.v1:identity:user. Every signup, every admin-
+// created user, every system-bootstrap owner row.
+//
+// IDEMPOTENCY:
+// The downstream mutationCreateDailySpace is content-addressable on
+// (userShortId, dateKey) so re-firing within the same day is a no-op.
+//
+// dailySpaceEnabled OPT-OUT:
+// Honored inside the Go capability rather than the @filter, since the
+// preference is nested at payload.preferences.dailySpaceEnabled and
+// the filter parser doesn't traverse nested paths reliably.
+@enabled
+@trigger(event="node.created", concept="v1:identity:user", partition="*")
+@description("On user creation, ensure today's daily space exists for the new user.")
+@useLogic(logicProvisionDailySpaceOnUserCreate)
+automation provisionDailySpaceOnUserCreate {
+  step run {
+    logic provisionDailySpaceOnUserCreate { event: event }
+  }
+}
+
+// ---- automations/v1/cognition/ensureDailySpaceOnAuthSession -------
+//
+// PURPOSE:
+// Every login lands a new v1:identity:authSession. Re-running
+// ensureForUser on each login closes the "user logged out yesterday,
+// logs back in today" gap that the hourly cron alone would leave
+// (worst case: the user logs in 59 minutes before the next cron
+// tick and would see no daily). The capability is idempotent so
+// callers that already have today's daily pay only the read cost.
+//
+// FIRES:
+// graph.node.created.*.v1:identity:authSession.
+//
+// SAFETY:
+// Auth sessions can be created at very high frequency during token
+// refresh storms. The capability gates on dailySpaceEnabled +
+// short-circuits when today's daily already exists (the engine's
+// id-conflict path is the gate), so per-session cost is one user
+// row read + one cheap insert attempt. No additional throttling
+// needed at this layer.
+@enabled
+@trigger(event="node.created", concept="v1:identity:authSession", partition="*")
+@description("On every login (authSession created), ensure today's daily space exists for the authenticated user.")
+@useLogic(logicEnsureDailySpaceOnAuthSession)
+automation ensureDailySpaceOnAuthSession {
+  step run {
+    logic ensureDailySpaceOnAuthSession { event: event }
+  }
+}
+
+// ---- automations/v1/cognition/rolloverDailySpace ------------------
+//
+// PURPOSE:
+// Hourly safety-net cron. Walks every active user with
+// dailySpaceEnabled (default true) and ensures today's daily exists
+// for each. Catches the long-lived-session case: a user logged in
+// before midnight and stays logged in past midnight will not fire
+// the authSession trigger, so without this cron their daily would
+// stagnate on yesterday's id until they re-auth.
+//
+// SCHEDULE:
+// Every hour at minute 0 (six-field cron: sec min hour dom mon dow).
+// Hourly is the smallest unit that respects per-user IANA timezones
+// without over-firing -- a per-minute cron would be wasteful for a
+// change that only matters at the user's local midnight.
+//
+// ARCHIVE/SAVE ROLLOVER:
+// Yesterday's daily is currently left in place (status="active")
+// rather than being archived/saved per dailySpaceRolloverAction.
+// The follow-up needs a query to list prior dailies per user, which
+// doesn't exist yet -- adding it is in scope for a sibling PR. The
+// user-visible gap the operator flagged ("cron might not fire
+// before the user looks") is fully addressed by the synchronous
+// authSession path; this cron is the safety net for long sessions.
+@enabled
+@trigger(schedule="0 0 * * * *")
+@description("Hourly safety-net: ensure every active user has today's daily space. Idempotent per user.")
+@useLogic(logicRolloverDailySpace)
+automation rolloverDailySpace {
+  step run {
+    logic rolloverDailySpace { event: event }
+  }
+}
