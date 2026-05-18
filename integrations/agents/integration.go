@@ -244,6 +244,14 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	if def.Role != "specialist" {
 		return nil, fmt.Errorf("askSpecialist(%q): target agent has role=%q, not specialist", role, def.Role)
 	}
+	// Defense in depth: system-kind agents (MemQL Planner, MemQL
+	// Trainer) carry role="specialist" but are platform infrastructure
+	// invoked by the planner service, not by the assistant's tool loop.
+	// They must never be reachable via askSpecialist even if the
+	// assistant hallucinates a system roleSlug into its tool call.
+	if def.Kind == "system" {
+		return nil, fmt.Errorf("askSpecialist(%q): target is a platform-infrastructure agent (kind=system); askSpecialist is for user-facing specialists only", role)
+	}
 
 	data := map[string]any{
 		"specialistName":         def.Name,
