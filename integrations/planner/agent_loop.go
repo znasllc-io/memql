@@ -25,6 +25,7 @@
 package planner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // PlannerAgentLoop owns the structured-output cycle that drives every
@@ -86,10 +88,15 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		//   docs/planning/agent-role-catalog.md.
 		return
 	}
-	if status != "queued" {
-		// We only kick off on freshly-queued Plans. The loop's own
-		// state transitions (queued -> routing -> running -> ...) are
-		// driven by HandlePlanUpdated, not this path.
+	if status != "planning" && status != "queued" {
+		// We only kick off on freshly-created Plans. The new userGoal
+		// lifecycle stamps `planning` at mutationCreatePlan time and
+		// transitions to `queued` once the planner agent has finished
+		// decomposing + emitting tasks. Legacy callers / scope-
+		// elevation flows still land in `queued` directly; accept
+		// both so a freshly-inserted plan in either status triggers
+		// the loop. Later transitions (running, awaitingFeedback,
+		// terminal) are driven by HandlePlanUpdated, not this path.
 		return
 	}
 	l.logger.Info("planner agent loop: handling new plan",
@@ -97,12 +104,69 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	// Run dispatch in a fresh goroutine: the bus loop processes events
 	// synchronously per-subscriber, and a Planner Agent invocation is a
 	// multi-second LLM call. Pattern mirrors handlePlanApprovedForExecution.
+	//
+	// Safety net: every leaky error path inside invokeAndDispatch (a
+	// failing load, a rejected mutation, an unknown action, a panic
+	// recovered by Go) must NOT leave a userGoal Plan stranded in
+	// status="planning" forever. If the goroutine returns with an
+	// error AND the plan is still in a non-terminal "live" status,
+	// transition it to "failed" with the error as the errorMessage.
+	// Explicit terminal transitions inside the loop
+	// (markPlanFailed / markPlanSucceeded / escalateAwaitingFeedback)
+	// fire before we get here, so the post-condition check is a
+	// belt-and-suspenders backstop -- not the primary path.
 	go func() {
-		if err := l.invokeAndDispatch(context.Background(), planId); err != nil {
-			l.logger.Warn("planner agent loop: invoke+dispatch failed",
-				"planId", planId, "error", err)
+		defer func() {
+			if r := recover(); r != nil {
+				l.logger.Error("planner agent loop: PANIC in dispatch goroutine",
+					"planId", planId, "recover", fmt.Sprintf("%v", r))
+				l.ensurePlanLeftPlanning(context.Background(), planId,
+					fmt.Errorf("panic: %v", r))
+			}
+		}()
+		err := l.invokeAndDispatch(context.Background(), planId)
+		if err == nil {
+			return
 		}
+		l.logger.Warn("planner agent loop: invoke+dispatch failed",
+			"planId", planId, "error", err)
+		l.ensurePlanLeftPlanning(context.Background(), planId, err)
 	}()
+}
+
+// ensurePlanLeftPlanning is the safety net that catches every leaky
+// error path. Reads the Plan's current status; if it's still in a
+// live working state (planning / routing / running), force a
+// transition to failed so the user sees a clear terminal status with
+// the underlying error message instead of a row stuck in planning
+// for hours. Terminal-status plans (failed / succeeded / cancelled /
+// awaitingFeedback / needsAgent / queued / paused) are left alone --
+// they already represent a definite state the user can act on.
+func (l *PlannerAgentLoop) ensurePlanLeftPlanning(ctx context.Context, planId string, loopErr error) {
+	plan, lerr := l.loadPlan(ctx, planId)
+	if lerr != nil {
+		// Can't read the plan, can't safely classify -- best we can
+		// do is unconditionally try to mark failed. The mutation is
+		// idempotent on terminal states (an update on an already-
+		// terminal plan is a no-op the user will not notice).
+		if mfErr := l.markPlanFailed(ctx, planId,
+			fmt.Sprintf("planner safety net: %v (status read failed: %v)", loopErr, lerr)); mfErr != nil {
+			l.logger.Warn("planner agent loop: safety-net markPlanFailed failed",
+				"planId", planId, "loopError", loopErr, "loadError", lerr, "markError", mfErr)
+		}
+		return
+	}
+	switch getString(plan, "status") {
+	case "planning", "routing", "running":
+		// Still in a live working state -- the loop bailed but
+		// nothing inside it stamped a terminal status. Mark failed
+		// so the row is no longer a UI mystery.
+		if mfErr := l.markPlanFailed(ctx, planId,
+			fmt.Sprintf("planner safety net: %v", loopErr)); mfErr != nil {
+			l.logger.Warn("planner agent loop: safety-net markPlanFailed failed",
+				"planId", planId, "loopError", loopErr, "markError", mfErr)
+		}
+	}
 }
 
 // HandlePlanUpdated is the event-bus subscriber for
@@ -249,9 +313,44 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// phases set but no Tasks created.
 		return l.invokeAndDispatchIter(ctx, planId, iter+1)
 	case "dispatchTask":
-		return l.insertDispatchedTask(ctx, planId, d.Task)
+		if err := l.insertDispatchedTask(ctx, planId, d.Task); err != nil {
+			return err
+		}
+		// Re-invoke so the planner can emit the next task (or
+		// markPlanSucceeded once it's done emitting). Previously
+		// dispatchTask parked the plan after a single task, which
+		// produced one-task-per-event-cycle plans -- fine when the
+		// agent immediately consumed the task and triggered a new
+		// cycle, but in planning-mode there's no auto-dispatch
+		// pulling us forward. Continue iterating until the planner
+		// signals it's done (markPlanSucceeded) or we hit the cap.
+		return l.invokeAndDispatchIter(ctx, planId, iter+1)
 	case "markPlanSucceeded":
-		return l.markPlanSucceeded(ctx, planId, d.Output)
+		// "Planning complete" semantics: while a userGoal plan is
+		// still in status="planning", markPlanSucceeded from the
+		// planner means "I've emitted every task I want to emit; the
+		// plan is ready for the user to run." Transition to queued
+		// (not succeeded) so the cockpit's Run button shows up.
+		// markPlanSucceeded on a plan that's already running /
+		// queued / etc. keeps its terminal-state semantics.
+		plan, lerr := l.loadPlan(ctx, planId)
+		if lerr == nil && getString(plan, "status") == "planning" {
+			// Guard: a planning-stage Plan with ZERO tasks is the
+			// "model shortcutted the workflow and tried to answer
+			// the user directly" failure mode. The prompt forbids
+			// it, but models are sometimes creative. When we detect
+			// it, re-invoke so the model gets another shot rather
+			// than promoting an empty Plan to queued. Iteration cap
+			// will bail us out if it keeps refusing.
+			existing, terr := l.loadTasks(ctx, planId)
+			if terr == nil && len(existing) == 0 {
+				l.logger.Warn("planner agent loop: markPlanSucceeded with no tasks; re-invoking",
+					"planId", planId, "iter", iter)
+				return l.invokeAndDispatchIter(ctx, planId, iter+1)
+			}
+			return l.markPlanningComplete(ctx, planId)
+		}
+		return l.markPlanSucceeded(ctx, planId, d.outputAsMap())
 	case "markPlanFailed":
 		return l.markPlanFailed(ctx, planId, d.ErrorMessage)
 	case "escalate":
@@ -353,7 +452,7 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 // flat row slice, then pluck the factory-specific fields off the
 // first row's top-level or payload.
 func extractAgentFactoryResult(res any) (agentId, action string) {
-	rows := plannerExtractRows(res)
+	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
 		return "", ""
 	}
@@ -402,7 +501,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 	if err != nil {
 		return nil, err
 	}
-	rows := plannerExtractRows(res)
+	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
 		// Dump the raw response shape so we can see whether the
 		// engine returned an empty result (filter mismatch / partition
@@ -426,7 +525,7 @@ func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[
 	if err != nil {
 		return nil, err
 	}
-	return plannerExtractRows(res), nil
+	return memql.MaterializeRows(res), nil
 }
 
 func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]any) ([]map[string]any, error) {
@@ -443,79 +542,11 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 	if err != nil {
 		return nil, err
 	}
-	return plannerExtractRows(res), nil
+	return memql.MaterializeRows(res), nil
 }
 
-// plannerExtractRows pulls a slice of row-maps out of an engine.Execute
-// return value. The engine wraps query results in one of several
-// shapes (a bare slice, a {rows: []} envelope, a {result: {rows: []}}
-// envelope, a {nodes: []} envelope); the JSON-roundtrip walk here
-// tolerates all of them. Same approach the agents integration uses
-// in factory.go's extractRowsFromExecuteResult -- duplicated here so
-// the planner doesn't take a dependency on the agents package's
-// internal helpers.
-func plannerExtractRows(raw any) []map[string]any {
-	if raw == nil {
-		return nil
-	}
-	rawJSON, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var loose any
-	if err := json.Unmarshal(rawJSON, &loose); err != nil {
-		return nil
-	}
-	return plannerRowsFromLoose(loose)
-}
-
-func plannerRowsFromLoose(v any) []map[string]any {
-	switch x := v.(type) {
-	case map[string]any:
-		// Engine-emitted shape today: {bundle: {nodes: [...]}}. The
-		// diagnostic we logged on the failing reproducer surfaced this:
-		// the rawResponse was a non-empty bundle that the extractor
-		// silently dropped because it only knew about top-level keys.
-		if bundle, ok := x["bundle"].(map[string]any); ok {
-			if nodes, ok := bundle["nodes"].([]any); ok {
-				return plannerCastRows(nodes)
-			}
-		}
-		// Other shapes the engine produces under different builders.
-		// Keep them so this extractor works against every working path
-		// for future-proofing.
-		for _, key := range []string{"nodes", "rows", "items", "results", "data"} {
-			if arr, ok := x[key].([]any); ok {
-				return plannerCastRows(arr)
-			}
-		}
-		if result, ok := x["result"].(map[string]any); ok {
-			for _, key := range []string{"rows", "nodes"} {
-				if arr, ok := result[key].([]any); ok {
-					return plannerCastRows(arr)
-				}
-			}
-			if bundle, ok := result["bundle"].(map[string]any); ok {
-				if nodes, ok := bundle["nodes"].([]any); ok {
-					return plannerCastRows(nodes)
-				}
-			}
-		}
-	case []any:
-		return plannerCastRows(x)
-	}
-	return nil
-}
-
-func plannerCastRows(items []any) []map[string]any {
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
+// (Row unwrapping moved to component/memql.MaterializeRows -- one
+// canonical helper for every in-process or wire-format consumer.)
 
 // stampPhases, insertDispatchedTask, markPlanSucceeded, markPlanFailed,
 // and escalateAwaitingFeedback all call DSL mutation functions via
@@ -534,11 +565,14 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 	if err != nil {
 		return err
 	}
-	// Values may be JSON literals (objects/arrays/numbers) -- those
-	// stay JSON-quoted because MemQL's value syntax accepts JSON
-	// literals; only the KEY needs to be a bare identifier.
+	// Keep the plan in "planning" while phases are being stamped --
+	// under the new lifecycle the plan stays in planning until the
+	// planner emits markPlanSucceeded (which we reinterpret as
+	// "planning complete -> queued"). The previous code flipped
+	// status to "running" here, which prematurely transitioned the
+	// plan out of planning and broke the UI gating + the Run button.
 	q := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"running", phases:%s})`,
+		`mutationUpdatePlanStatus({planId:%q, status:"planning", phases:%s})`,
 		planId, string(phasesJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
@@ -551,27 +585,87 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	if logicalStepId == "" {
 		logicalStepId = taskId
 	}
-	inputJSON, err := json.Marshal(task.Input)
-	if err != nil || string(inputJSON) == "null" {
-		inputJSON = []byte(`{}`)
+	input := task.Input
+	if input == nil {
+		input = map[string]any{}
 	}
-	q := fmt.Sprintf(
-		`mutationCreateSemanticTask({taskId:%q, planId:%q, kind:%q, seq:0, logicalStepId:%q, attemptNumber:1, agentId:%q, phase:%q, input:%s})`,
-		taskId, planId, task.Kind, logicalStepId, task.AgentId, task.Phase, string(inputJSON),
-	)
+	// seq is the task's order within the parent Plan. The
+	// plannerAgent prompt could be tightened to emit seq on each
+	// dispatchTask, but it isn't part of the structured-output
+	// schema today, so we compute it server-side: count existing
+	// tasks under this Plan and assign the next index. The loop is
+	// single-goroutine per Plan, so no race.
+	existing, _ := l.loadTasks(ctx, planId)
+	seq := len(existing)
+	// Build the args block via json.Marshal -- the MemQL parser
+	// accepts a JSON object literal as a function call's argument map
+	// (quoted keys, properly-typed values incl. integers), which is
+	// the same pattern the cockpit's mutationCreatePlan call uses.
+	// The earlier handcrafted fmt.Sprintf produced bare-key /
+	// bare-int syntax (`seq:0, attemptNumber:1, ...`) which the
+	// parser rejected at the first integer-literal value.
+	// task.AgentId is intentionally NOT passed to mutationCreateSemanticTask --
+	// the task concept doesn't carry an agentId field (per the v1
+	// design where the parent Plan's ownerAgentId is the single
+	// authority on "who runs the tasks under this Plan"). We DO
+	// still stamp ownerAgentId on the Plan below so the UI can show
+	// the assigned agent next to the plan row.
+	args := map[string]any{
+		"taskId":        taskId,
+		"planId":        planId,
+		"kind":          task.Kind,
+		"seq":           seq,
+		"logicalStepId": logicalStepId,
+		"attemptNumber": 1,
+		"phase":         task.Phase,
+		"input":         input,
+	}
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("marshal task args: %w", err)
+	}
+	q := fmt.Sprintf("mutationCreateSemanticTask(%s)", string(argsJSON))
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
+		l.logger.Warn("planner agent loop: insertDispatchedTask query rejected",
+			"planId", planId, "query", q, "error", err)
 		return err
 	}
-	// Stamp the Plan to running with the task's agent. The existing
-	// scope-elevation re-dispatch path picks it up from here. Phase
-	// 4b stretch goal: fire AgentForwarder.ForwardContinuation
-	// directly so the specialist starts immediately rather than on
-	// the next event tick.
-	q2 := fmt.Sprintf(
-		`mutationUpdatePlanStatus({planId:%q, status:"running", ownerAgentId:%q})`,
-		planId, task.AgentId,
+	// During the planning phase we ONLY persist task definitions --
+	// we do not flip the plan to running. The plan stays in
+	// status="planning" until the planner emits markPlanSucceeded
+	// (interpreted as "planning complete" -- the plan transitions to
+	// "queued" and waits for the user to click Run). The agent /
+	// dispatch surface that consumes status==running events is what
+	// actually executes tasks; that path fires from
+	// mutationStartPlan, not from here.
+	//
+	// We do stamp ownerAgentId so the queued plan's "who's going to
+	// run this" is visible in the cockpit while the user reviews the
+	// task list.
+	if task.AgentId != "" {
+		q2 := fmt.Sprintf(
+			`mutationUpdatePlanStatus({planId:%q, status:"planning", ownerAgentId:%q})`,
+			planId, task.AgentId,
+		)
+		if _, err := l.engine.Execute(systemActorContext(ctx), q2); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// markPlanningComplete flips a planning-phase Plan to queued.
+// Triggered when the planner agent emits markPlanSucceeded while
+// the plan is still in status="planning" -- it means "I've emitted
+// every Task I'm going to emit; the user can review and click Run."
+// No completedAt, no output -- the plan isn't actually done, just
+// done planning.
+func (l *PlannerAgentLoop) markPlanningComplete(ctx context.Context, planId string) error {
+	q := fmt.Sprintf(
+		`mutationUpdatePlanStatus({planId:%q, status:"queued"})`,
+		planId,
 	)
-	_, err = l.engine.Execute(systemActorContext(ctx), q2)
+	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
 }
 
@@ -624,13 +718,48 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 // prompt is contracted to emit. The eight valid action values live in
 // dispatchDecision above.
 type plannerDecision struct {
-	Action         string         `json:"action"`
-	PlanOutline    []phaseOutline `json:"plan_outline,omitempty"`
-	Task           plannerTask    `json:"task,omitempty"`
-	Output         map[string]any `json:"output,omitempty"`
-	ErrorMessage   string         `json:"errorMessage,omitempty"`
-	FeedbackReason string         `json:"feedbackReason,omitempty"`
-	Question       string         `json:"question,omitempty"`
+	Action      string         `json:"action"`
+	PlanOutline []phaseOutline `json:"plan_outline,omitempty"`
+	Task        plannerTask    `json:"task,omitempty"`
+	// Output is the markPlanSucceeded payload. The contract is an
+	// object, but models occasionally hand back a bare string when
+	// they shortcut the workflow (treating the goal as "just answer
+	// the user"). Use json.RawMessage so we can detect the shape at
+	// dispatch time and either wrap a string in {response:"..."} or
+	// reject the shortcut entirely. Parsing never fails on the shape
+	// alone, so the planner doesn't lose the iteration to a parse
+	// error on a recoverable mismatch.
+	Output         json.RawMessage `json:"output,omitempty"`
+	ErrorMessage   string          `json:"errorMessage,omitempty"`
+	FeedbackReason string          `json:"feedbackReason,omitempty"`
+	Question       string          `json:"question,omitempty"`
+}
+
+// outputAsMap decodes plannerDecision.Output into a map. When the
+// model emitted a bare string under `output`, the result is wrapped
+// as {response: "..."} so downstream serializers don't blow up. nil /
+// empty / unparseable input returns an empty map.
+func (d *plannerDecision) outputAsMap() map[string]any {
+	out := map[string]any{}
+	if len(d.Output) == 0 {
+		return out
+	}
+	// Object first -- the canonical contract.
+	if err := json.Unmarshal(d.Output, &out); err == nil {
+		return out
+	}
+	// String -- the shortcut shape. Wrap so callers see a map.
+	var s string
+	if err := json.Unmarshal(d.Output, &s); err == nil {
+		return map[string]any{"response": s}
+	}
+	// Anything else (array, number, etc.) -- store under "value" so
+	// the data survives but the downstream type contract is still met.
+	var raw any
+	if err := json.Unmarshal(d.Output, &raw); err == nil {
+		return map[string]any{"value": raw}
+	}
+	return out
 }
 
 type phaseOutline struct {
@@ -672,6 +801,14 @@ func parsePlannerDecision(resp any) (plannerDecision, error) {
 		}
 		raw = b
 	}
+	// Strip markdown code-fence wrappers if the model emitted one
+	// despite the prompt's "no prose / first char {, last char }"
+	// instruction. Both Claude and GPT-4-class models still wrap JSON
+	// in ```json ... ``` fences on occasion, especially after a long
+	// system prompt; refusing to handle that brittle-prompts the
+	// planner. Strip leading ```[lang] and trailing ``` markers (with
+	// surrounding whitespace) before unmarshalling.
+	raw = stripJSONFence(raw)
 	var d plannerDecision
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return plannerDecision{}, fmt.Errorf("parse decision JSON: %w (raw=%s)", err, truncate(string(raw), 200))
@@ -680,6 +817,26 @@ func parsePlannerDecision(resp any) (plannerDecision, error) {
 		return plannerDecision{}, fmt.Errorf("planner decision missing 'action' field (raw=%s)", truncate(string(raw), 200))
 	}
 	return d, nil
+}
+
+// stripJSONFence removes a single leading ```[lang]\n ... ``` fence
+// pair if present. Leaves non-fenced input untouched. Conservative:
+// only strips when BOTH a leading and trailing fence are detected.
+func stripJSONFence(raw []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if !bytes.HasPrefix(trimmed, []byte("```")) {
+		return raw
+	}
+	// Drop the opening fence line (```[lang]\n).
+	rest := trimmed[3:]
+	if nl := bytes.IndexByte(rest, '\n'); nl >= 0 {
+		rest = rest[nl+1:]
+	}
+	rest = bytes.TrimRight(rest, " \t\n\r")
+	if !bytes.HasSuffix(rest, []byte("```")) {
+		return raw
+	}
+	return bytes.TrimSpace(rest[:len(rest)-3])
 }
 
 // --- small helpers --------------------------------------------------------

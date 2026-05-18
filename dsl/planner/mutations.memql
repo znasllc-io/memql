@@ -52,7 +52,6 @@ mutation mutationCreateSemanticTask {
     seq             int     @required
     logicalStepId   string
     attemptNumber   int
-    agentId         string
     phase           string
     input           object  @required
   }
@@ -66,6 +65,7 @@ mutation mutationCreateSemanticTask {
     args.phase
     args.logicalStepId
     attemptNumber: coalesce(args.attemptNumber, 1)
+    executionSurface: "inProcess"
     args.input
   }
 }
@@ -162,7 +162,7 @@ mutation mutationCreatePlan {
     args.spaceId
     args.parentPlanId
     args.kind
-    status: "queued"
+    status: "planning"
     args.goal
     args.requestedBy
     triggerSource: coalesce(args.triggerSource, "user.explicit")
@@ -172,6 +172,28 @@ mutation mutationCreatePlan {
     args.tokenBudget
     pauseExtendsDeadline: coalesce(args.pauseExtendsDeadline, false)
     args.chatAnchorMessageId
+  }
+}
+
+// mutationStartPlan
+// =================
+//
+// Flip a queued Plan to running. Called from the cockpit's Run
+// button after the planner has finished decomposing + emitting the
+// task list and the user has reviewed them. The dispatch surface
+// that consumes status==running events on the planner / agent nodes
+// then drives the actual task execution.
+@enabled
+@useConcept(plan)
+@description("Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf.")
+mutation mutationStartPlan {
+  args {
+    planId  string  @required
+  }
+  update plan {
+    id: args.planId
+    status: "running"
+    startedAt: now()
   }
 }
 
@@ -331,7 +353,7 @@ mutation mutationUpdatePlanStatus {
     feedbackResponse          object
     feedbackReason            string
     recommendationCardId      string
-    phases                    object
+    phases                    []object
     estimate                  object
     estimatedAt               string
     tokenSpent                int
