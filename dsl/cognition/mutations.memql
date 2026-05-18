@@ -59,23 +59,44 @@ mutation mutationArchiveSpace {
 //
 // Creates the per-user, per-day daily space. Same shape as
 // mutationCreateSpace but with the daily-specific fields baked in
-// (kind="daily", private=true) so the frontend doesn't have to know
+// (kind="daily", private=true) so the caller doesn't have to know
 // the convention.
 //
 // IDEMPOTENCY:
-// The space id is content-addressable as `daily-{userHash}-{dateKey}`,
+// The space id is content-addressable as `daily-{userShortId}-{dateKey}`,
 // computed by the caller. Calling this mutation twice for the same
 // (user, dateKey) inserts a second version of the same row -- the
 // node id collides, so it's effectively a no-op upsert.
 //
-// LIFECYCLE OWNER:
-// The daily-space lifecycle is driven entirely by the frontend
-// (src/hooks/useDailySpace or wherever it lands). On mount, the
-// frontend computes today's dateKey in the user's TZ via Intl,
-// ensures today's daily exists via this mutation, and archives or
-// saves any older dailies based on User.preferences.dailySpaceRolloverAction.
-// No backend automation is needed -- per-user TZ math is trivial in
-// the browser and only happens when the user actually opens the app.
+// LIFECYCLE OWNER -- server-driven (rewritten 2026-05-18):
+// The dailyspace integration (integrations/dailyspace/) owns
+// provisioning + rollover. Three automations call its
+// ensureDailySpaceForUser capability:
+//
+//   provisionDailySpaceOnUserCreate -- fires on every new
+//     v1:identity:user row. New users get their daily before they
+//     ever look for it.
+//
+//   ensureDailySpaceOnAuthSession -- fires on every login
+//     (v1:identity:authSession create). Returning users after a
+//     day's gap have today's daily ready by the time the SPA
+//     queries their space list.
+//
+//   rolloverDailySpace -- hourly cron. Safety net for users who
+//     stay logged in across midnight (no authSession fires for
+//     them). Walks every active user with preferences.dailySpaceEnabled
+//     != false; idempotent per user.
+//
+// The Go capability owns the IANA-timezone date math
+// (integration.timeutil.dateKeyInTimezone) and reads
+// preferences.dailySpaceEnabled / timezone off the user row before
+// dispatching this mutation.
+//
+// SPA INTEGRATION:
+// The legacy useDailySpace hook on the SPA is now a read-only lens:
+// today's daily is always present server-side, so the hook just
+// reads it. Calling this mutation from the client is permitted
+// (the idempotent insert collapses) but redundant.
 //
 // PHASE 10 (chat architecture):
 // The hard maxHumans=1 / maxAgents=1 override that locked daily
@@ -84,8 +105,8 @@ mutation mutationArchiveSpace {
 // per the per-user-per-space cap), so the user can invite collaborators
 // and add specialists from their roster. Auto-provisioning at this
 // mutation level still seeds nothing -- the autoJoinSI automation on
-// space-created handles the owner GA, same path the regular space
-// flow uses.
+// space-created handles the owner assistant, same path the regular
+// space flow uses.
 
 @enabled
 @useConcept(space)

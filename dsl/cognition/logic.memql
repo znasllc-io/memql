@@ -387,3 +387,67 @@ logic logicVoiceMigrationOnSecondHuman {
     logic voiceMigrationOnSecondHuman { event: event }
 
     logic voiceMigrationOnSecondHuman { event: event }
+
+// ---- logicProvisionDailySpaceOnUserCreate -----------------------
+//
+// Fires when a new v1:identity:user row lands. The event payload
+// carries the user's full row at args.event.payload, so the userId
+// reads directly off args.event.payload.id without a follow-up
+// query. We pass that through to the dailyspace.ensureForUser
+// capability which owns the timezone math + idempotent insert.
+//
+// dailySpaceEnabled gating lives inside the Go capability (not in
+// an automation @filter) because the value is nested under
+// preferences and the filter expression syntax doesn't navigate
+// nested payload paths reliably. The capability short-circuits +
+// reports skip-reason in its result, which is sufficient for the
+// observability story.
+@useBuiltin(ensureDailySpaceForUser)
+@description("Imperative body of automation provisionDailySpaceOnUserCreate.")
+logic logicProvisionDailySpaceOnUserCreate {
+  args {
+    event object @required
+  }
+  body {
+    ctx.output = ensureDailySpaceForUser({ userId: args.event.payload.id })
+  }
+}
+
+// ---- logicEnsureDailySpaceOnAuthSession -------------------------
+//
+// Fires on every v1:identity:authSession create -- one per login.
+// The session payload carries userId (the v1:identity:user.id the
+// session authenticates as). We dispatch ensureForUser the same
+// way as the user-create automation; the idempotent insert
+// collapses to a no-op when today's daily already exists.
+//
+// This is the path that makes the cron-frequency concern moot:
+// every time the user re-auths, today's daily is guaranteed to
+// exist before any read query the SPA might issue.
+@useBuiltin(ensureDailySpaceForUser)
+@description("Imperative body of automation ensureDailySpaceOnAuthSession.")
+logic logicEnsureDailySpaceOnAuthSession {
+  args {
+    event object @required
+  }
+  body {
+    ctx.output = ensureDailySpaceForUser({ userId: args.event.payload.userId })
+  }
+}
+
+// ---- logicRolloverDailySpace -----------------------------------
+//
+// Hourly cron tick. Delegates the entire per-user sweep to the
+// dailyspace.rolloverAllUsers capability, which walks queryActiveUsers
+// and calls ensureForUser per row. Returns a one-row summary the
+// automation logs.
+@useBuiltin(rolloverDailySpacesAllUsers)
+@description("Imperative body of automation rolloverDailySpace (hourly cron).")
+logic logicRolloverDailySpace {
+  args {
+    event object @required
+  }
+  body {
+    ctx.output = rolloverDailySpacesAllUsers({})
+  }
+}
