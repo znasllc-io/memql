@@ -48,7 +48,7 @@ type Tool struct {
 
 	// AllowedRoles restricts which agent roles may call the tool.
 	// Empty = no restriction. Used to gate Operator tools to
-	// general_assistant-role agents.
+	// assistant-role agents.
 	AllowedRoles []string `json:"allowedRoles,omitempty"`
 
 	// Origin tracks where this tool was loaded from (file path).

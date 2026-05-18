@@ -349,7 +349,7 @@ func TestParseRoutingResult(t *testing.T) {
 // TestReconcileRoutingWithReason locks in the defensive safety net
 // that catches the chat-router model's self-contradictions. Pattern:
 // the LLM fills the reason with a correct agent name but the
-// agentName field with someone else (usually the general assistant).
+// agentName field with someone else (usually the assistant).
 // Each case is a realistic LLM output we've either observed in logs
 // or can reasonably expect.
 func TestReconcileRoutingWithReason(t *testing.T) {
@@ -409,7 +409,7 @@ func TestReconcileRoutingWithReason(t *testing.T) {
 		{
 			name:       "reason names no candidate -- no swap",
 			agentName:  "Zara",
-			reason:     "General greeting to the space; general assistant welcomes.",
+			reason:     "General greeting to the space; assistant welcomes.",
 			candidates: cands,
 			wantSwap:   false,
 		},

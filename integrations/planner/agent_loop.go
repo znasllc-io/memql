@@ -392,7 +392,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 //
 // We call it directly from Go rather than through the GA's
 // ensureAgent tool because (a) the tool's @allowedRoles is
-// "general_assistant" by design (it's a GA-only surface in chat),
+// "assistant" by design (it's a GA-only surface in chat),
 // and (b) the planner integration has full engine access -- routing
 // through the LLM's tool loop would add an unnecessary round trip
 // when the planner has already decided this is the right action.

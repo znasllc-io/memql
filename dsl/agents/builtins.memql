@@ -21,7 +21,7 @@
 // for one-shot LLM calls with no tools.
 //
 // Args:
-//   name     The agent's registry name (e.g. "generalAssistant" --
+//   name     The agent's registry name (e.g. "assistant" --
 //            typically the roleSlug). Must match an entry in the
 //            AgentRegistry; the handler returns an error listing
 //            registered names when no match is found.
@@ -52,7 +52,7 @@ builtin agent {
 
 // ---- builtin ensureAgentForGoal --------------------------------------
 //
-// Factory builtin invoked by the General Assistant's `ensureAgent`
+// Factory builtin invoked by the Assistant's `ensureAgent`
 // tool (dsl/agents/tools/ensureAgent.memql). Resolves a free-form
 // goal into an agent ready to handle it:
 //

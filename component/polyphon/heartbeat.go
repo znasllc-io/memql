@@ -41,8 +41,8 @@ func (e *DefaultHeartbeatEvaluator) Evaluate(session *PolyphonSession, candidate
 	// they are queued in session.PendingEvents. The heartbeat surfaces them
 	// to the appropriate agent.
 	if len(session.PendingEvents) > 0 {
-		// Find the general assistant (or first agent) to deliver notifications.
-		agent := findGeneralAssistant(candidates)
+		// Find the assistant (or first agent) to deliver notifications.
+		agent := findAssistant(candidates)
 		if agent == nil && len(candidates) > 0 {
 			agent = &candidates[0]
 		}
@@ -64,7 +64,7 @@ func (e *DefaultHeartbeatEvaluator) Evaluate(session *PolyphonSession, candidate
 	if pred := session.GetPrediction(); pred != nil && pred.SuggestedAction != "" {
 		agent := findAgentById(candidates, pred.LikelyNextAgent)
 		if agent == nil {
-			agent = findGeneralAssistant(candidates)
+			agent = findAssistant(candidates)
 		}
 		if agent != nil {
 			return &HeartbeatAction{
@@ -96,8 +96,8 @@ func (e *DefaultHeartbeatEvaluator) Evaluate(session *PolyphonSession, candidate
 			}
 		}
 
-		// Pick the general assistant for re-engagement.
-		agent := findGeneralAssistant(candidates)
+		// Pick the assistant for re-engagement.
+		agent := findAssistant(candidates)
 		if agent == nil && len(candidates) > 0 {
 			agent = &candidates[0]
 		}
@@ -116,10 +116,10 @@ func (e *DefaultHeartbeatEvaluator) Evaluate(session *PolyphonSession, candidate
 	return nil
 }
 
-// findGeneralAssistant returns the first candidate with Role "general_assistant".
-func findGeneralAssistant(candidates []AgentCandidate) *AgentCandidate {
+// findAssistant returns the first candidate with Role "assistant".
+func findAssistant(candidates []AgentCandidate) *AgentCandidate {
 	for i := range candidates {
-		if candidates[i].Role == "general_assistant" {
+		if candidates[i].Role == "assistant" {
 			return &candidates[i]
 		}
 	}

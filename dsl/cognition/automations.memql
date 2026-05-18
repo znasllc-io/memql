@@ -6,7 +6,7 @@
 @enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(payload.active==true)
-@description("On space creation, joins the creator's general assistant plus any specialist agents picked at creation time. Joiners' GAs are never auto-joined.")
+@description("On space creation, joins the creator's assistant plus any specialist agents picked at creation time. Joiners' GAs are never auto-joined.")
 @useLogic(logicAutoJoinSI)
 automation autoJoinSI {
   step run {

@@ -18,13 +18,13 @@
 // automations/v1/cognition/autoJoinSI/automation.memql
 //
 // PURPOSE:
-// On space creation, auto-join the CREATOR's general assistant into
+// On space creation, auto-join the CREATOR's assistant into
 // the space, plus any specialist agents the creator picked at
 // creation time (space.selectedAgentIds).
 //
 // BEHAVIOR BY DESIGN:
-// - The space OWNER's general assistant is always auto-joined.
-// - Joiners' general assistants are NEVER auto-joined. When a new
+// - The space OWNER's assistant is always auto-joined.
+// - Joiners' assistants are NEVER auto-joined. When a new
 //   human enters an existing space, their personal GA stays out;
 //   the space's AI representation is its creator's GA.
 // - Specialist agents the creator picked in selectedAgentIds are
@@ -37,7 +37,7 @@
 // The graph-event payload emitted on node-create flattens both the
 // node's payload AND the Actor (createdBy on the MemoryNode) into
 // `ctx.input.payload`. We key GAs on the user's primary email in
-// provisionGeneralAssistant, and the Actor stamp is also the user's
+// provisionAssistant, and the Actor stamp is also the user's
 // email (see component/auth/security.go ActorFromToken), so a single
 // event-payload read resolves the lookup -- no cross-step reference
 // needed. The compiler's bare-step-reference rewriter only handles
@@ -52,7 +52,7 @@
 // - bootstrapSession automation creates sessions for new SI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-@useQuery(queryGeneralAssistantForUser, queryParticipantByAgentSpace)
+@useQuery(queryAssistantForUser, queryParticipantByAgentSpace)
 @useMutation(mutationJoinSpaceAsSI)
 @description("Imperative body of automation autoJoinSI (migrated from the legacy func form).")
 logic logicAutoJoinSI {
@@ -63,7 +63,7 @@ logic logicAutoJoinSI {
   // hash(args.event.payload.actor) = the Actor the MemoryNode was stamped with
   // at insert time (the user's email for user-originated writes).
   // GAs are keyed on ga-<email>, so the lookup is direct.
-  getGA := queryGeneralAssistantForUser({ agentId: concat("ga-", hash(args.event.payload.actor)) })
+  getGA := queryAssistantForUser({ agentId: concat("ga-", hash(args.event.payload.actor)) })
 
   // Join the GA if it exists and isn't already a participant. The
   // function-step arg resolver (automations/steps/function.go) only
@@ -82,7 +82,7 @@ logic logicAutoJoinSI {
   // getGA.First().id exposes the partition-prefixed canonical id
   // from the shape's `node("id")` projection.
   // We build the GA's agent id deterministically from the same
-  // hash(email) formula provisionGeneralAssistant uses, so we don't
+  // hash(email) formula provisionAssistant uses, so we don't
   // have to dig it out of the getGA step result. The function-step
   // arg evaluator's path resolver does not reliably navigate
   // `stepName.First().id` / `.First().payload.name` when the step's

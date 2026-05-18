@@ -219,7 +219,7 @@ type agentPayload struct {
 	Description     string                 `json:"description,omitempty"`
 	Personality     string                 `json:"personality,omitempty"`
 	SystemPrompt    string                 `json:"systemPrompt,omitempty"`
-	Role            string                 `json:"role,omitempty"` // "specialist" | "general_assistant"
+	Role            string                 `json:"role,omitempty"` // "specialist" | "assistant"
 	Gender          string                 `json:"gender,omitempty"`
 	AudioControl    string                 `json:"audioControl,omitempty"` // "always_on" | "always_off" | "mirror_user"
 	ProviderConfig  map[string]interface{} `json:"providerConfig,omitempty"`
@@ -227,14 +227,14 @@ type agentPayload struct {
 	TriggerBehavior map[string]interface{} `json:"triggerBehavior,omitempty"`
 }
 
-// isGeneralAssistant reports whether this agent is the designated
+// isAssistant reports whether this agent is the designated
 // general-assistant fallback. Used by the router to route soft-gap and
 // escalation turns.
-func (a *agentPayload) isGeneralAssistant() bool {
+func (a *agentPayload) isAssistant() bool {
 	if a == nil {
 		return false
 	}
-	return strings.TrimSpace(a.Role) == "general_assistant"
+	return strings.TrimSpace(a.Role) == "assistant"
 }
 
 // extractStringSlice pulls a []string out of a Capabilities map value,

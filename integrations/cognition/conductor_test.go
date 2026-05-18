@@ -40,11 +40,11 @@ func candidate(participantId, agentTemplateId, name, role string) polyphon.Agent
 }
 
 // rosterFor builds a small, common-case candidate roster used across
-// fixtures. Sofia is the general assistant; Atlas is technical;
+// fixtures. Sofia is the assistant; Atlas is technical;
 // Wren is customer-facing.
 func rosterFor() []polyphon.AgentCandidate {
 	return []polyphon.AgentCandidate{
-		candidate("p-sofia", "agent-sofia", "Sofia", "general_assistant"),
+		candidate("p-sofia", "agent-sofia", "Sofia", "assistant"),
 		candidate("p-atlas", "agent-atlas", "Atlas", "engineering_technology"),
 		candidate("p-wren", "agent-wren", "Wren", "customer_success"),
 	}
@@ -797,7 +797,7 @@ func TestPlanValidation_KeepsDifferentiatingReference(t *testing.T) {
 	// Use a roster that has a "Moss" agent so the candidate-name
 	// match would have triggered the old false positive.
 	candidates := []polyphon.AgentCandidate{
-		candidate("p-sofia", "agent-sofia", "Sofia", "general_assistant"),
+		candidate("p-sofia", "agent-sofia", "Sofia", "assistant"),
 		candidate("p-atlas", "agent-atlas", "Atlas", "engineering_technology"),
 		candidate("p-moss", "agent-moss", "Moss", "legal_compliance"),
 	}

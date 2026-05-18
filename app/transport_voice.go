@@ -20,7 +20,7 @@ import (
 // The Go Bridge Agent that historically owned the ASR -> ScoreEngine -> LLM
 // -> TTS pipeline was retired in Initiative C Phase 11. The Python
 // voice-agent (under voice-agent/, LiveKit Agents 1.5) is now the sole voice
-// participant for the General Assistant in LiveKit rooms; it speaks the
+// participant for the Assistant in LiveKit rooms; it speaks the
 // VoiceAgent* gRPC contract on MemqlService.Stream.
 func (a *App) wirePolyphonEndpoints() {
 	cfg := polyphon.ConfigFromEnv()

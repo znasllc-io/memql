@@ -8084,7 +8084,7 @@ type ActingAgentIdentity struct {
 	Description  string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	Personality  string `protobuf:"bytes,4,opt,name=personality,proto3" json:"personality,omitempty"`                       // inline persona block
 	SystemPrompt string `protobuf:"bytes,5,opt,name=system_prompt,json=systemPrompt,proto3" json:"system_prompt,omitempty"` // additional system instructions
-	// Guardrail-routing role. One of: "specialist", "general_assistant".
+	// Guardrail-routing role. One of: "specialist", "assistant".
 	// Empty string defaults to specialist on the consumer side.
 	Role     string   `protobuf:"bytes,6,opt,name=role,proto3" json:"role,omitempty"`
 	Domains  []string `protobuf:"bytes,7,rep,name=domains,proto3" json:"domains,omitempty"`
@@ -8274,9 +8274,9 @@ type AgentTurnRoutingContext struct {
 	// branches in the agentReply template:
 	//
 	//	"answer"            -- specialist in scope; answer normally.
-	//	"fallback_attempt"  -- general assistant stretching on a soft gap;
+	//	"fallback_attempt"  -- assistant stretching on a soft gap;
 	//	                       try with general knowledge, flag uncertainty.
-	//	"escalation_notice" -- general assistant cannot help (hard gap);
+	//	"escalation_notice" -- assistant cannot help (hard gap);
 	//	                       acknowledge + flag for humans, do not attempt
 	//	                       the substantive answer.
 	//
@@ -10851,7 +10851,7 @@ type VoiceAgentSessionStart struct {
 
 	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	SpaceId   string `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`         // v1:cognition:space.id
-	GaAgentId string `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the General Assistant
+	GaAgentId string `protobuf:"bytes,3,opt,name=ga_agent_id,json=gaAgentId,proto3" json:"ga_agent_id,omitempty"` // v1:agents:agent.id of the Assistant
 	RoomName  string `protobuf:"bytes,4,opt,name=room_name,json=roomName,proto3" json:"room_name,omitempty"`      // LiveKit room name
 	// Optional: identity hint for the avatar vendor. Currently
 	// 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the
@@ -11452,7 +11452,7 @@ func (x *VoiceAgentFinalAck) GetErrorMessage() string {
 	return ""
 }
 
-// VoiceAgentTurnRequest asks memql to drive the General Assistant
+// VoiceAgentTurnRequest asks memql to drive the Assistant
 // for one turn. Memql runs the conductor (GA-always-primary on
 // voice triggers), then the GA's agent tool loop, and streams
 // the GA's response prose back via VoiceAgentTurnDelta. Tools

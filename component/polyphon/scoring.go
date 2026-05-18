@@ -80,7 +80,7 @@ func (s *Scorer) ScoreAll(candidates []AgentCandidate, utterance Utterance, sess
 //     at 40.0 so the agent reliably clears the response threshold.
 //   - speakWhen="always" floor: If an agent has speakWhen="always" and scored below
 //     the default response threshold (30.0), boost to reach 30.0.
-//   - Personal assistant floor: The user's general assistant (Role="general_assistant")
+//   - Personal assistant floor: The user's assistant (Role="assistant")
 //     is boosted to 35.0 when the utterance is a question, task, or greeting AND no
 //     domain specialist already clears the threshold. This ensures questions and
 //     greetings always get answered without the assistant dominating over specialists.
@@ -138,12 +138,12 @@ func (s *Scorer) applyContextualBoosts(scores []AgentScore, candidates []AgentCa
 		}
 	}
 
-	// The personal-assistant floor used to boost general_assistant agents
+	// The personal-assistant floor used to boost assistant agents
 	// to 35.0 on questions and greetings whenever no specialist already
 	// cleared 30.0. That was decision-layer logic ("default to the general
 	// assistant when nothing else fits") implemented as a silent +N score
 	// boost, which hid the preference inside a number and caused the
-	// general assistant to dominate anytime specialists had mild keyword
+	// assistant to dominate anytime specialists had mild keyword
 	// matches. The cognitionRouting SI prompt now owns that fallback
 	// decision and states it explicitly as a principle ("general
 	// assistant is a last resort"); the score engine should not override

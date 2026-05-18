@@ -59,7 +59,7 @@ func ClientToolInvokerFromContext(ctx context.Context) ClientToolInvoker {
 }
 
 // WithActingAgentRole returns a child context that carries the acting
-// agent's guardrail role (e.g. "general_assistant" or "specialist").
+// agent's guardrail role (e.g. "assistant" or "specialist").
 // Used by ExecuteTool so client-execution tools honour Tool.AllowedRoles
 // even when they come in through the in-engine ExecuteToolByName path
 // rather than a CallToolMsg with metadata on the wire.

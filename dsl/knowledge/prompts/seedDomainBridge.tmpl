@@ -60,6 +60,6 @@ Notice: every chunk EXPLICITLY names two or more of the input domains in the bod
 
 Generate ~{{if .targetCount}}{{.targetCount}}{{else}}10{{end}} chunks. Mix is mostly `decisionRule` (cross-domain heuristics) and `principle` (cross-domain conceptual rules). Use `factExample` sparingly -- bridges aren't the place for per-domain facts.
 
-Skip generation entirely (return chunks: []) ONLY if the input domain set has no real intersection -- e.g. `{quantum_mechanics, restaurant_dining}` for a `general_assistant`. In that case the bridge would be filler. Don't manufacture connections that aren't there.
+Skip generation entirely (return chunks: []) ONLY if the input domain set has no real intersection -- e.g. `{quantum_mechanics, restaurant_dining}` for a `assistant`. In that case the bridge would be filler. Don't manufacture connections that aren't there.
 
 Output the JSON object now.

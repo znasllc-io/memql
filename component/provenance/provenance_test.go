@@ -15,7 +15,7 @@ func TestProvenance_Validate(t *testing.T) {
 		{"zero", Provenance{}, "kind is required"},
 		{"missing name", Provenance{Kind: KindSeed}, "name is required"},
 		{"unknown kind", Provenance{Kind: "weird", Name: "foo"}, "unknown kind"},
-		{"valid seed", Seed("generalAssistant"), ""},
+		{"valid seed", Seed("assistant"), ""},
 		{"valid mutation", Mutation("mutationCreateAgent"), ""},
 		{"valid automation", Automation("reRouteAgent", "graph.node.created.*.v1:agents:agent"), ""},
 		{"valid direct", Direct("bootstrap.insertDefaultPartition"), ""},
@@ -44,8 +44,8 @@ func TestProvenance_String(t *testing.T) {
 		want string
 	}{
 		{Provenance{}, "<none>"},
-		{Seed("generalAssistant"), "seed:generalAssistant"},
-		{Seed("generalAssistant").WithVia("mutationCreateAgent"), "seed:generalAssistant via=mutationCreateAgent"},
+		{Seed("assistant"), "seed:assistant"},
+		{Seed("assistant").WithVia("mutationCreateAgent"), "seed:assistant via=mutationCreateAgent"},
 		{Direct("frameworkInsert"), "direct:frameworkInsert"},
 		{
 			Automation("re", "graph.node.created.*.v1:agents:agent").WithVia("mutationUpdatePlanStatus"),
@@ -68,7 +68,7 @@ func TestContextRoundtrip(t *testing.T) {
 	}
 
 	// Round-trip through ContextWithProvenance.
-	p := Seed("generalAssistant")
+	p := Seed("assistant")
 	ctx = ContextWithProvenance(ctx, p)
 	got := FromContext(ctx)
 	if got != p {

@@ -111,7 +111,7 @@ func (p Provenance) IsZero() bool {
 
 // String renders the provenance compactly for log output.
 //
-//	"seed:generalAssistant via=mutationCreateAgent"
+//	"seed:assistant via=mutationCreateAgent"
 //	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.*.v1:agents:agent via=mutationUpdatePlanStatus"
 //	"direct:mutationCreateAgent"
 //	"system:bootstrapDefaultPartition"
