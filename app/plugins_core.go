@@ -16,6 +16,7 @@ package app
 import (
 	_ "github.com/znasllc-io/memql/integrations/agents"
 	_ "github.com/znasllc-io/memql/integrations/auth"
+	_ "github.com/znasllc-io/memql/integrations/chat"
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/email"
 	_ "github.com/znasllc-io/memql/integrations/embedding"
