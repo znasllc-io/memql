@@ -93,9 +93,11 @@ remaining work is to make the elevation card actually show up.
 
 ## The chain that should work
 
-1. User asks Sofia (or any agent with `computer_use`) to do something
-   needing more scope than they have. Example: "create
-   `~/birds_research` and put a file in it."
+1. User asks Sofia (or any agent with `computer_use_headless` /
+   `computer_use_embodied` -- the slug was split by mode on
+   2026-05-17) to do something needing more scope than they
+   have. Example: "create `~/birds_research` and put a file in
+   it."
 2. Sofia recognizes it needs `full` scope (shell exec + fs writes).
 3. Sofia calls `requestComputerUseScope({intent, requestedScope, summary})`.
 4. The agent-side handler `handleRequestScope` in

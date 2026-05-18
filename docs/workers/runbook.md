@@ -150,8 +150,14 @@ kill -HUP $(pgrep memql-cockpit)
 Three independent gates run **before** every dispatch:
 
 1. **Layer 1 — agent capability flag.** The agent must carry
-   `computer_use` in `v1:agents:agent.capabilities`. Set on
-   create, edit on the agent panel.
+   `computer_use_headless` and/or `computer_use_embodied` in
+   `v1:agents:agent.capabilities` (legacy umbrella `computer_use`
+   was split by mode on 2026-05-17 -- see CLAUDE.md, Workers
+   section). The headless slug carries the `workerHost` family;
+   the embodied slug carries `workerComputer`. Set on create,
+   edit on the agent panel. Workbench (the sandboxed Linux
+   default for headless work) is governed separately by
+   `workbench_use` and is on by default for every role.
 2. **Layer 2 — standing scope.** The user grants the agent a
    tier on the agentAuthorization row:
      - `observe` — read-only (screenshot, fs_read/list/stat,
