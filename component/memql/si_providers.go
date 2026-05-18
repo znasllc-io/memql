@@ -2120,6 +2120,54 @@ func (p *anthropicStreamProvider) anthropicMaxTokens() int64 {
 	return maxTokens
 }
 
+// anthropicThinking returns the extended-thinking config to attach to
+// MessageNewParams.Thinking. Opt-in via the provider's params block:
+//
+//	params {
+//	  thinkingBudgetTokens 8192   // >= 1024, must be < maxTokens
+//	  // ...
+//	}
+//
+// When the budget is unset / < 1024, returns the zero union (which
+// the SDK omits from the request). When set, returns
+// ThinkingConfigParamOfEnabled(budget) -- the SDK's helper that
+// constructs the {type: "enabled", budget_tokens: N} shape Anthropic's
+// extended thinking surface expects.
+//
+// The two also-supported config types (Adaptive, Disabled) are not
+// wired here -- the user-facing knob is "is thinking on, and how
+// much can it spend?" Adding Adaptive is a follow-up if the
+// `adaptive` heuristic turns out to be worth surfacing per-agent.
+//
+// API constraint: when thinking is enabled, Anthropic requires
+// temperature == 1 (or omitted). Callers that detect a non-omitted
+// thinking union must therefore SKIP applying p.params["temperature"]
+// or the request fails with a 400. anthropicThinkingEnabled() below
+// is the predicate every params-building call site reads.
+func (p *anthropicStreamProvider) anthropicThinking() anthropic.ThinkingConfigParamUnion {
+	budget, ok := intParam(p.params["thinkingBudgetTokens"])
+	if !ok {
+		return anthropic.ThinkingConfigParamUnion{}
+	}
+	if budget < 1024 {
+		// Below the API floor. Treat as off rather than erroring at
+		// request time -- the provider definition's intent was clearly
+		// "no thinking" even if the author miscalibrated the budget.
+		return anthropic.ThinkingConfigParamUnion{}
+	}
+	return anthropic.ThinkingConfigParamOfEnabled(int64(budget))
+}
+
+// anthropicThinkingEnabled mirrors anthropicThinking()'s decision
+// without allocating the union. Used by the temperature-suppression
+// branch in every call site: thinking + non-1 temperature == 400 from
+// the API, so we silently skip applying the temperature param when
+// thinking is on.
+func (p *anthropicStreamProvider) anthropicThinkingEnabled() bool {
+	budget, ok := intParam(p.params["thinkingBudgetTokens"])
+	return ok && budget >= 1024
+}
+
 func (p *anthropicStreamProvider) Call(ctx context.Context, prompt string) (any, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
@@ -2156,11 +2204,12 @@ func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []commo
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.anthropicMaxTokens(),
 		Messages:  anthropicMessages,
+		Thinking:  p.anthropicThinking(),
 	}
 	if len(systemBlocks) > 0 {
 		params.System = systemBlocks
 	}
-	if _, ok := p.params["temperature"]; ok {
+	if _, ok := p.params["temperature"]; ok && !p.anthropicThinkingEnabled() {
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	resp, err := p.client.Messages.New(ctx, params)
@@ -2181,6 +2230,7 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.anthropicMaxTokens(),
 		Messages:  anthropicMessages,
+		Thinking:  p.anthropicThinking(),
 	}
 	if len(systemBlocks) > 0 {
 		params.System = systemBlocks
@@ -2193,7 +2243,7 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 			},
 		}
 	}
-	if _, ok := p.params["temperature"]; ok {
+	if _, ok := p.params["temperature"]; ok && !p.anthropicThinkingEnabled() {
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	resp, err := p.client.Messages.New(ctx, params)
@@ -2224,8 +2274,9 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.anthropicMaxTokens(),
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt))},
+		Thinking:  p.anthropicThinking(),
 	}
-	if _, ok := p.params["temperature"]; ok {
+	if _, ok := p.params["temperature"]; ok && !p.anthropicThinkingEnabled() {
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	stream := p.client.Messages.NewStreaming(ctx, params)
@@ -2257,12 +2308,13 @@ func (p *anthropicStreamProvider) CallChatStream(ctx context.Context, messages [
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.anthropicMaxTokens(),
 		Messages:  anthropicMessages,
+		Thinking:  p.anthropicThinking(),
 	}
 	if len(systemBlocks) > 0 {
 		applyAnthropicSystemPromptCache(systemBlocks, p.params)
 		params.System = systemBlocks
 	}
-	if _, ok := p.params["temperature"]; ok {
+	if _, ok := p.params["temperature"]; ok && !p.anthropicThinkingEnabled() {
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 	stream := p.client.Messages.NewStreaming(ctx, params)
@@ -2295,6 +2347,7 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.anthropicMaxTokens(),
 		Messages:  anthropicMessages,
+		Thinking:  p.anthropicThinking(),
 	}
 	if len(systemBlocks) > 0 {
 		applyAnthropicSystemPromptCache(systemBlocks, p.params)
@@ -2309,7 +2362,7 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 			},
 		}
 	}
-	if _, ok := p.params["temperature"]; ok {
+	if _, ok := p.params["temperature"]; ok && !p.anthropicThinkingEnabled() {
 		params.Temperature = anthropic.Float(numberParam(p.params["temperature"], 1.0))
 	}
 
