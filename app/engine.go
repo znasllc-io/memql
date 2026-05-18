@@ -2,13 +2,11 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
-	"github.com/znasllc-io/memql/component"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -20,26 +18,40 @@ import (
 // engineAndBus creates the MemQL engine, sets up the component bus wiring,
 // event bus, telemetry, automation scheduler, and Polyphon score engine.
 func (a *App) engineAndBus() {
-	// Configure engine database lifecycle hook
-	setEngineDatabase := func(target *memql.MemQLEngine) error {
-		return target.ConfigureLifecycle(component.WithPrepareHook(func(ctx context.Context) (context.Context, context.CancelFunc, error) {
-			if a.db.BunDB() == nil {
-				return nil, nil, fmt.Errorf("memory nodes database bun handle not available")
-			}
-			target.SetDatabaseGetter(a.db.BunDB)
-			return ctx, nil, nil
-		}))
-	}
-
 	memEngine, err := a.overrides.NewEngine(nil)
 	if err != nil {
 		a.fatal("failed to create memory engine", "error", err, "component", memql.ComponentName)
 	}
 	a.engine = memEngine
 
-	if err := setEngineDatabase(a.engine); err != nil {
-		a.fatal("failed to configure memory engine lifecycle", "error", err, "component", memql.ComponentName)
+	// Start the database synchronously and wire its handle into the
+	// engine BEFORE Init. Init runs the provider loader, which
+	// resolves auth.apiKey="${MEMQL_SI_X_API_KEY}" placeholders
+	// against v1:platform:globalSecret rows -- that lookup needs a
+	// live DB handle. Database.Start is idempotent
+	// (ErrLifecycleAlreadyRunning is swallowed), so main.go's later
+	// StartDependencies call is safe.
+	//
+	// Subtle: the context passed to a.db.Start becomes the lifetime
+	// context of the database's run loop. We MUST NOT cancel it when
+	// this function returns -- doing so triggers cleanupAfterRun,
+	// which nils out d.Bun and turns every subsequent query into
+	// "memory engine database not configured." Use a process-
+	// lifetime context here. The wait-for-ready is bounded by a
+	// SEPARATE short-lived timeout so a stuck DB still fails fast at
+	// boot without coupling that timeout to the run loop's lifetime.
+	a.db.Start(context.Background())
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer waitCancel()
+	select {
+	case <-a.db.Ready():
+	case <-waitCtx.Done():
+		a.fatal("database did not become ready before engine init", "error", waitCtx.Err(), "component", memql.ComponentName)
 	}
+	if a.db.BunDB() == nil {
+		a.fatal("memory nodes database bun handle not available", "component", memql.ComponentName)
+	}
+	a.engine.SetDatabaseGetter(a.db.BunDB)
 
 	if err := a.engine.Init(a.registry); err != nil {
 		a.fatal("failed to initialize memory engine", "error", err, "component", memql.ComponentName)
