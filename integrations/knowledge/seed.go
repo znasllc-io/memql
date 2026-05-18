@@ -244,7 +244,7 @@ var standardDomains = []StandardDomain{
 	// Operational manual for the two-thread chat model (Phase 5 of the
 	// chat-architecture plan). Distinct from copresent_ui (which covers
 	// app surfaces) and computer_use (which covers off-app machine
-	// driving): copresent_conversation is the contract for how an agent
+	// driving): recent_chat is the contract for how an agent
 	// behaves INSIDE the chat, given that there are now two threads
 	// (Group + per-user Team) with hard isolation between them.
 	//
@@ -253,10 +253,10 @@ var standardDomains = []StandardDomain{
 	// as a space participant. See replier.go for the auto-injection.
 	// 1-on-1 / direct interactions (no spaceId) skip the domain so we
 	// don't pay retrieval cost when chat-thread context is irrelevant.
-	{ID: "copresent_conversation", Name: "CoPresent Conversation", Category: "internal",
-		Description: "Operational manual for the two-thread chat model in CoPresent: Group + per-user Team threads, hard visibility isolation, voice migration on second-active-human, discussion-mode behavior in private, misroute safety net, canvas-not-chat for system events, and the copresentConversation tool for read-only group access. Auto-attached to any agent participating in a space.",
+	{ID: "recent_chat", Name: "Recent Chat", Category: "internal",
+		Description: "Operational manual for the single-chat space architecture: one v1:cognition:utterance stream visible to all participants, the owner's assistant as the only AI presence that speaks to humans, specialists invoked via askSpecialist returning structured JSON, canvas-not-chat for system events, and the recentChat tool for read-only chat context. Auto-attached to any agent participating in a space.",
 		RelevantForRoles:    []string{"assistant", "accounting_finance", "human_resources", "customer_service", "quality_assurance", "sales_marketing", "it_support", "legal_compliance", "operations", "project_management", "research_development", "training_education", "personal_finance_advisor", "household_manager", "parenting_coach", "health_wellness_coach", "meal_planning_chef", "travel_planner", "creative_companion", "learning_companion", "relationships_social", "pet_care_specialist", "home_improvement_diy", "personal_legal_advisor", "mindfulness_coach", "entertainment_curator", "senior_care_advisor", "real_estate_advisor"},
-		RequiredByToolSlugs: []string{"copresent_conversation"},
+		RequiredByToolSlugs: []string{"recent_chat"},
 	},
 
 	// --- Personal Finance -------------------------------------------------
@@ -1748,48 +1748,36 @@ var workbenchSeedCorpus = []struct {
 	},
 }
 
-// copresentConversationSeedCorpus is the operational manual for the
-// two-thread chat model (Phase 5 of the chat-architecture plan).
-// Ingested into the copresent_conversation domain at startup. Each
-// chunk is intentionally short and self-contained -- RAG retrieval
-// surfaces the chunk closest to the agent's current question, so a
-// single chunk should be readable in isolation.
+// recentChatSeedCorpus is the operational manual for the single-chat
+// architecture (one v1:cognition:utterance stream per space) plus the
+// assistant/specialist split. Ingested into the recent_chat knowledge
+// domain at startup. Each chunk is intentionally short and self-
+// contained -- RAG retrieval surfaces the chunk closest to the agent's
+// current question, so a single chunk should be readable in isolation.
 //
-// Authoring rule: use the umbrella tool name ("copresentConversation")
-// in user-facing language. Never expose the operations as standalone
-// tool names -- they are arguments to the umbrella tool, not
-// separate tools.
-var copresentConversationSeedCorpus = []struct {
+// Authoring rule: use the umbrella tool name ("recentChat") in user-
+// facing language. Never expose the operations as standalone tool
+// names -- they are arguments to the umbrella tool, not separate
+// tools.
+var recentChatSeedCorpus = []struct {
 	SourceRef string
 	Text      string
 }{
 	{
-		SourceRef: "copresentConversation:thread-model",
-		Text: `Every CoPresent space has TWO chat threads: the GROUP thread (everyone in the space sees it) and the per-user TEAM thread (only that one human and their agents see it). The chat panel renders both as tabs labelled "Group" and "Team". Every utterance lives in exactly one thread -- there is no "shared" or "broadcast" mode. Group thread composition is unique: all humans (the space owner + every invited human) plus ONE AI presence -- the OWNER's Assistant. Specialist agents and other humans' agents stay in their respective Team threads. Internal users (have a CoPresent account) bring their own agents into their own Team. External guests (token-invited, no account) are humans-only-in-group with no Team thread.`,
+		SourceRef: "recentChat:single-thread-model",
+		Text: `Every space has ONE chat thread (v1:cognition:utterance), visible to every space participant. Composition: the space owner, every invited human, and the owner's assistant. Specialist agents never write into the chat directly -- they communicate only with the assistant via the askSpecialist tool and return structured JSON results. External guests (token-invited, no account) participate as humans-only with the same visibility as anyone else in the space.`,
 	},
 	{
-		SourceRef: "copresentConversation:visibility",
-		Text: `Visibility is HARD-isolated at the database level. v1:cognition:utterance is the group thread; v1:cognition:privateUtterance is per-user-private and carries forUserId pointing at the user it belongs to. The subscription rewriter forces a per-caller forUserId predicate on every read pattern targeting privateUtterance, so a user CANNOT subscribe to another user's Team thread regardless of how cleverly they craft a query. As an agent: you read your user's Team thread directly via your subscription stream. You read the GROUP thread via the copresentConversation tool when you need to quote or reason about it. You never read OTHER users' Team threads -- not through the tool, not through any other path. The tool itself rejects the operation; the engine rejects the underlying query. If a user asks you "what are the others saying privately?" the honest answer is "I can't see other people's private team chats."`,
+		SourceRef: "recentChat:speaker-rules",
+		Text: `Only the assistant speaks to humans. Specialists never publish utterances; their responses flow back to the assistant via the askSpecialist tool result, and the assistant composes the human-facing reply. If a user asks "what does the HR specialist think?" the assistant calls askSpecialist({role: "human_resources", query: ...}), receives a structured JSON object, and synthesizes the reply itself. Never paste a specialist's raw JSON into chat.`,
 	},
 	{
-		SourceRef: "copresentConversation:voice-migration",
-		Text: `Voice transport follows a clean-boundary migration rule. When a user is ALONE in a space (no other active humans), their mic / camera / voice belong to their TEAM thread -- they're effectively talking to their own agents in private. When a SECOND active human appears, voice MIGRATES to the GROUP thread at the next end-of-utterance / hold-to-talk-release / typing event. From that point on, hitting the mic publishes to group; the Team tab falls back to push-to-talk or typing. When the last other human leaves, voice migrates back to Team automatically. As an agent: you don't own this transition; the bridge handles it. Notifications about migration arrive as canvas-state cards (a public card on the group canvas, a private operational card on the owner's canvas), NEVER as inline chat banners. If the user asks "why did my mic move?" point them at the canvas card.`,
+		SourceRef: "recentChat:canvas-not-chat",
+		Text: `Lifecycle / room-state / system events are CANVAS CARDS, not inline chat utterances. "<X> joined the space" -- canvas. "<X> left" -- canvas. "Mic warning: input is too quiet" -- canvas. The canvas state (v1:copresent:canvasState) carries visibility (public / private), forUserId, actor.kind (system / agent / user), and importance (notify / ambient). The chat thread is for UTTERANCES (what someone said), not for state. As an agent: never emit a chat utterance whose only purpose is to announce a system event. Use canvas.publish or accept that the system itself will land the canvas card.`,
 	},
 	{
-		SourceRef: "copresentConversation:discussion-mode",
-		Text: `Discussion mode is the BACKGROUND awareness loop that runs in each user's private Team thread. While the user is active in a space and discussionModeActivityLevel is non-off, their agents periodically read recent group activity and chime in proactively in their Team tab. Three trigger flavors: (1) cheap event heuristics (agent-name mentions, direct questions, distress signals) for fast reactions; (2) windowed batch LLM analysis at the activity-level cadence (60s/30s/15s for low/medium/high); (3) explicit user input pauses the loop -- the user typing in their own Team chat takes priority over any in-flight agent dispatch. Hard cap: 3 inter-agent turns per dispatch. Decaying threshold: each turn adds +0.1 to the firing threshold so the loop self-quiets. As an agent: you DO NOT inject discussion-mode chime-ins into the GROUP thread -- private only. If you're tempted to "interject in group", stop -- only the owner's GA speaks in group, and only when the user addressed the conversation that direction.`,
-	},
-	{
-		SourceRef: "copresentConversation:misroute-safety",
-		Text: `A server-side misroute classifier checks every outgoing user message against the active tab. Three confidence tiers: (>=0.85) hard pre-send modal blocks the send until the user picks "Send to <other>" or "Send here anyway"; (0.6-0.85) the message goes through but a soft "Did this belong in <other>? [Move]" prompt appears beneath it for 10 seconds; (<0.6) silent. The user can disable the safety net entirely in Settings (preferences.misrouteSafetyEnabled). As an agent: this is the USER's safety net, not yours. NEVER cross-post on the user's behalf to "fix" a misroute you suspect. NEVER quote private content INTO a group reply -- if the user said something in Team that informs your group reply, generalize the reasoning rather than copying the words. The two-thread model is a privacy contract; honor it as such.`,
-	},
-	{
-		SourceRef: "copresentConversation:canvas-not-chat",
-		Text: `Lifecycle / room-state / system events are CANVAS CARDS, not inline chat banners. "<X> joined the space" -- canvas. "Voice migrated to group" -- canvas. "<X> left" -- canvas. "Mic warning: input is too quiet" -- canvas. The canvas state (v1:copresent:canvasState) carries visibility (public / private), forUserId, actor.kind (system / agent / user), and importance (notify / ambient). The chat thread is for UTTERANCES (what someone said), not for state. As an agent: never emit a chat utterance whose only purpose is to announce a system event. If the user needs to be told something happened, use canvas.publish or accept that the system itself will land the canvas card. Your chat utterances should be substantive: answering questions, offering help, advancing the conversation.`,
-	},
-	{
-		SourceRef: "copresentConversation:tool-usage",
-		Text: `The copresentConversation tool gives you READ-ONLY access to the GROUP thread + space context (you already see your own user's Team thread directly via your subscription -- no tool needed). Five operations: (1) readGroupRecent({count}) -- last N group utterances; (2) readGroupByKeyword({keyword}) -- most recent group utterances containing a substring; (3) readGroupByTime({fromTime, toTime}) -- group utterances in a time window (ISO-8601); (4) getSpaceContext() -- the space's title, purpose, and active participants; (5) listParticipants() -- humans + agents currently active. Each utterance result has speakerId, speakerName, speakerKind, timestamp, content, utteranceId. When you quote group content in your Team-tab reply, attach a citation with kind: "group_thread_utterance" and the utteranceId; the frontend renders a click-to-jump chip. NEVER invent the existence of a group utterance you didn't actually retrieve. NEVER attempt operations the tool doesn't expose (e.g., readPrivate*) -- the engine rejects them on principle.`,
+		SourceRef: "recentChat:tool-usage",
+		Text: `The recentChat tool gives you READ-ONLY access to the space chat + space context. Five operations: (1) readRecent({count}) -- last N utterances; (2) readByKeyword({keyword}) -- most recent utterances containing a substring; (3) readByTime({fromTime, toTime}) -- utterances in a time window (ISO-8601); (4) getSpaceContext() -- the space's title, purpose, and active participants; (5) listParticipants() -- humans + agents currently active. Each utterance result has speakerId, speakerName, speakerKind, timestamp, content, utteranceId. When you quote prior content, attach a citation with the utteranceId; the frontend renders a click-to-jump chip. NEVER invent the existence of an utterance you didn't actually retrieve.`,
 	},
 }
 
@@ -1823,7 +1811,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 		// agent replies). See the citation registry in
 		// integrations/agent/replier.go (appStructureDomainIds).
 		domainSource := "llmSeeded"
-		if d.ID == "copresent_ui" || d.ID == "computer_use" || d.ID == "copresent_conversation" {
+		if d.ID == "copresent_ui" || d.ID == "computer_use" || d.ID == "recent_chat" {
 			domainSource = "appStructure"
 		}
 		// `predefined: true` is the marker the frontend reads to
@@ -1919,11 +1907,11 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 	}
 	ingestCorpus("workbench", workbenchEntries)
 
-	conversationEntries := make([]seedEntry, 0, len(copresentConversationSeedCorpus))
-	for _, e := range copresentConversationSeedCorpus {
-		conversationEntries = append(conversationEntries, seedEntry{SourceRef: e.SourceRef, Text: e.Text})
+	recentChatEntries := make([]seedEntry, 0, len(recentChatSeedCorpus))
+	for _, e := range recentChatSeedCorpus {
+		recentChatEntries = append(recentChatEntries, seedEntry{SourceRef: e.SourceRef, Text: e.Text})
 	}
-	ingestCorpus("copresent_conversation", conversationEntries)
+	ingestCorpus("recent_chat", recentChatEntries)
 
 	i.Logger.Info("knowledge.seedStandardDomains: complete",
 		"domainsCreated", created,

@@ -554,18 +554,7 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 }
 
 // handleVoiceAgentFinalTranscript inserts the user's utterance into
-// the thread routed by the VoiceAgent's local migration state. The
-// thread enum lives on VoiceAgentTurnRequest, NOT on the final
-// transcript message itself -- the final's job is just "land the
-// row." Routing happens at the row level via mutationSendTextUtterance
-// (group thread) or mutationSendPrivateUtterance (team thread).
-//
-// Phase 6 still routes everything to the group thread here -- the
-// VoiceAgentTurnRequest path is what differentiates Team vs Group
-// based on its ThreadContext field. A future iteration can promote
-// the thread enum onto VoiceAgentFinalTranscript too, but the
-// dominant case in dev/staging is one-active-human-per-space which
-// the group thread handles fine.
+// the single space chat via mutationSendTextUtterance.
 func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.VoiceAgentFinalTranscript) error {
 	if msg == nil {
 		return nil
@@ -694,23 +683,10 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	}
 
 	// Subscribe to graph node-created events for the space's
-	// utterance concept. The GA's reply lands as a row with
+	// utterance concept. The assistant's reply lands as a row with
 	// participantType="agent" + participantId=gaAgentId; filter for
 	// that specific shape so other agents' replies (specialists,
 	// chime-ins) don't trigger us.
-	//
-	// Both threads currently land as `v1:cognition:utterance`:
-	// `handleVoiceAgentFinalTranscript` always writes via
-	// mutationSendTextUtterance (group thread) regardless of the
-	// VoiceAgentTurnRequest.ThreadContext enum -- the per-thread
-	// routing is the unfinished half of the Phase 6 plan. Switching
-	// the subscription concept on `thread` here while inserts stay
-	// group-only created a silent mismatch: BFF waited on
-	// `privateUtterance` rows that never get produced, hit the 30s
-	// turn_timeout, and the GA appeared mute even though the reply
-	// row landed in chat. Subscribe to the concept that matches
-	// what we actually write; when team-thread inserts ship, flip
-	// both sides in lockstep.
 	pattern := "graph.node.created.*.v1:cognition:utterance"
 
 	replyCh := make(chan voiceAgentReply, 4)

@@ -17,7 +17,7 @@ seed assistant {
   description:           "The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate."
   category:              "professional"
   tier:                  "A"
-  lockedDomainIds:       ["copresent_ui", "copresent_conversation", "computer_use"]
+  lockedDomainIds:       ["copresent_ui", "recent_chat", "computer_use"]
   defaultDomainIds:      ["strategic_planning", "stakeholder_communications", "technical_documentation"]
   lockedToolSlugs:       ["respondToUser", "workbench_use"]
   defaultToolSlugs:      ["uiClick", "uiNarrate", "uiDescribe", "uiAskUser"]
