@@ -120,6 +120,70 @@ func safePlanId(planId string) bool {
 	return true
 }
 
+// tearDownForPlan removes the on-disk workspace directory for a
+// Plan and drops the in-memory cache entry. Idempotent: returns
+// (0, nil) when no workspace was ever provisioned for the planId.
+// Returns the byte-size of the removed tree on success (best-effort;
+// failure to compute size is non-fatal, returns 0 with no error).
+func (m *Manager) tearDownForPlan(planId string) (int64, error) {
+	if strings.TrimSpace(planId) == "" {
+		return 0, errors.New("workbench: planId is required")
+	}
+	if !safePlanId(planId) {
+		return 0, fmt.Errorf("workbench: planId %q has disallowed characters", planId)
+	}
+	m.mu.Lock()
+	ws, cached := m.cache[planId]
+	if cached {
+		delete(m.cache, planId)
+	}
+	m.mu.Unlock()
+
+	// Resolve the directory path. Even if the in-memory cache was
+	// empty (e.g. agent node restarted mid-Plan), we still check the
+	// on-disk path so an orphaned tree from a previous process gets
+	// cleaned up.
+	var rootPath string
+	if cached && ws != nil {
+		rootPath = ws.rootPath
+	} else {
+		rootPath = filepath.Join(m.root, planId)
+	}
+
+	info, err := os.Stat(rootPath)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("workbench: stat workspace root: %w", err)
+	}
+	var size int64
+	if info.IsDir() {
+		size, _ = treeSize(rootPath)
+	}
+	if rmErr := os.RemoveAll(rootPath); rmErr != nil {
+		return size, fmt.Errorf("workbench: remove workspace root: %w", rmErr)
+	}
+	return size, nil
+}
+
+// treeSize sums the byte size of all regular files under root.
+// Best-effort: walk errors are returned alongside whatever was
+// summed so far. Callers may ignore the error.
+func treeSize(root string) (int64, error) {
+	var total int64
+	err := filepath.Walk(root, func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
 // safeJoin resolves a user-supplied path relative to the workspace
 // root, rejecting anything that escapes the root (absolute paths,
 // `..` traversal). Returns the absolute path inside the workspace.

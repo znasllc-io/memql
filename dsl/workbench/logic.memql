@@ -6,7 +6,8 @@
 
 @useQuery(queryWorkspaceForPlan)
 @useMutation(mutationReleaseWorkspace)
-@description("Imperative body of automation releaseWorkspaceOnPlanTerminal. On every plan update, check the new status; if terminal AND a workspace exists for the planId AND it is still provisioned, mark it released so the workbench integration tears down the on-disk directory.")
+@useBuiltin(workbenchTeardownDirectory)
+@description("Imperative body of automation releaseWorkspaceOnPlanTerminal. On every plan update, check the new status; if terminal AND a workspace exists for the planId AND it is still provisioned, flip the concept row AND call the workbench integration to remove the on-disk directory tree. Also fires the teardown unconditionally when status is terminal even if no concept row exists -- the MVP Go integration provisions workspaces in-memory + on-disk without writing the concept row, so the teardown call cleans those up too. Idempotent on both paths.")
 logic logicReleaseWorkspaceOnPlanTerminal {
   args {
     event object @required
@@ -24,6 +25,7 @@ logic logicReleaseWorkspaceOnPlanTerminal {
           })
         }
       }
+      teardown := workbenchTeardownDirectory({ planId: planId })
     }
     ctx.output = planId
   }

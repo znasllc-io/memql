@@ -18,7 +18,7 @@ seed legal_compliance {
   tier:                  "B"
   lockedDomainIds:       ["legal_documents", "contracts_agreements", "regulatory_compliance"]
   defaultDomainIds:      ["intellectual_property", "labor_law", "risk_management", "tax_regulations", "stakeholder_communications"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general legal and compliance information. For matters specific to a contract, jurisdiction, or dispute, always recommend a licensed attorney in the relevant jurisdiction."
   predefined:            true
@@ -36,7 +36,7 @@ seed immigration_legal_educator {
   tier:                  "B"
   lockedDomainIds:       ["immigration_law"]
   defaultDomainIds:      ["legal_documents", "regulatory_compliance"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Information only. Immigration law is highly fact- and jurisdiction-specific; always recommend consulting a licensed immigration attorney."
   predefined:            true
@@ -54,7 +54,7 @@ seed family_law_educator {
   tier:                  "B"
   lockedDomainIds:       ["family_law"]
   defaultDomainIds:      ["legal_documents", "estate_planning_personal", "contracts_personal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed family-law attorney for personal situations."
   predefined:            true
@@ -72,7 +72,7 @@ seed estate_planning_educator {
   tier:                  "B"
   lockedDomainIds:       ["estate_planning_personal"]
   defaultDomainIds:      ["personal_taxes", "personal_finance", "personal_insurance", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Estate planning is jurisdiction-specific; always recommend a licensed estate attorney for personal documents."
   predefined:            true
@@ -90,7 +90,7 @@ seed personal_legal_advisor {
   tier:                  "B"
   lockedDomainIds:       ["personal_legal"]
   defaultDomainIds:      ["estate_planning_personal", "contracts_personal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed attorney in the relevant jurisdiction for any actual legal decision."
   predefined:            true

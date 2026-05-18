@@ -17,3 +17,18 @@ builtin workbenchDispatchHost {
   agentId  string
   taskId   string
 }
+
+// workbenchTeardownDirectory -- on-disk teardown of a per-Plan
+// workspace. Called from the releaseWorkspaceOnPlanTerminal logic
+// alongside mutationReleaseWorkspace (which flips the lifecycle
+// bit on the concept row). The integration removes the directory
+// tree under MEMQL_WORKBENCH_ROOT/{planId}/. Idempotent: a Plan
+// that never provisioned a workspace is a no-op.
+
+@enabled
+@executor("integration.workbench.teardownDirectory")
+@args(profile="object")
+@description("Remove the on-disk workbench workspace directory for a Plan. Idempotent. Called by the releaseWorkspaceOnPlanTerminal automation after the concept row has been flipped to released.")
+builtin workbenchTeardownDirectory {
+  planId  string  @required
+}

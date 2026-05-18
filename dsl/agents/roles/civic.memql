@@ -16,7 +16,7 @@ seed civic_navigator {
   category:              "civic"
   lockedDomainIds:       ["civic_services"]
   defaultDomainIds:      ["government_benefits", "voting_election_basics", "tax_regulations", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -32,7 +32,7 @@ seed nonprofit_program_manager {
   category:              "civic"
   lockedDomainIds:       ["nonprofit_management"]
   defaultDomainIds:      ["grant_writing", "fundraising", "impact_measurement", "stakeholder_communications", "budgeting_forecasting"]
-  lockedToolSlugs:       ["respondToUser"]
+  lockedToolSlugs:       ["respondToUser", "workbench_use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

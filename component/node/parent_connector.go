@@ -31,12 +31,13 @@ type ParentConnector struct {
 	peerMgr  *PeerManager
 	logger   *slog.Logger
 
-	mu            sync.Mutex
-	conn          *peerConnection
-	cancel        context.CancelFunc
-	parentNodeId  string                // learned from NodeWelcome
-	aiForwardSink AiForwardResponseSink // optional, set on BFF binaries
-	eventInbound  EventInbound          // republishes parent-pushed events onto local bus
+	mu                   sync.Mutex
+	conn                 *peerConnection
+	cancel               context.CancelFunc
+	parentNodeId         string                       // learned from NodeWelcome
+	aiForwardSink        AiForwardResponseSink        // optional, set on BFF binaries
+	workbenchForwardSink WorkbenchForwardResponseSink // optional, set on agent binaries in cluster mode
+	eventInbound         EventInbound                 // republishes parent-pushed events onto local bus
 }
 
 // SetAiForwardResponseSink registers a sink for AiForwardResponse
@@ -49,6 +50,19 @@ func (pc *ParentConnector) SetAiForwardResponseSink(sink AiForwardResponseSink) 
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	pc.aiForwardSink = sink
+}
+
+// SetWorkbenchForwardResponseSink registers a sink for inbound
+// WorkbenchForwardResponse messages received over the parent
+// connection. Called during agent-node bootstrap when cluster-mode
+// workbench forwarding is enabled.
+func (pc *ParentConnector) SetWorkbenchForwardResponseSink(sink WorkbenchForwardResponseSink) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	pc.workbenchForwardSink = sink
 }
 
 // SetEventInbound registers the local-bus bridge for EventForward
@@ -222,6 +236,17 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 		pc.mu.Unlock()
 		if sink != nil {
 			sink.Dispatch(payload.AiForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_WorkbenchForwardResponse:
+		// Workbench dispatch responses for cluster-mode forwards.
+		// Set on agent binaries when MEMQL_WORKBENCH_REMOTE is on;
+		// no-op otherwise.
+		pc.mu.Lock()
+		sink := pc.workbenchForwardSink
+		pc.mu.Unlock()
+		if sink != nil {
+			sink.Dispatch(payload.WorkbenchForwardResponse)
 		}
 
 	case *nodev1.NodeServerMessage_EventForward:

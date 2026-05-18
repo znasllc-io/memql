@@ -43,6 +43,29 @@ type AiForwardResponseSink interface {
 	Dispatch(resp *nodev1.AiForwardResponse)
 }
 
+// WorkbenchForwardHandler is the workbench-node-side entry point
+// for a forwarded workbench dispatch. The nodeService invokes it
+// when an inbound NodeClientMessage carries a WorkbenchForwardRequest.
+// Single round-trip semantics (no streaming): the handler executes
+// the action, builds a response, and uses `send` to deliver exactly
+// one WorkbenchForwardResponse back to the originating agent node.
+//
+// Left as an interface so component/node/ stays independent of the
+// concrete workbench integration. The workbench node-type build's
+// transport wires a concrete implementation via SetWorkbenchHandler.
+type WorkbenchForwardHandler interface {
+	HandleForwardedRequest(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error)
+	CancelForwardedRequest(ctx context.Context, requestId string)
+}
+
+// WorkbenchForwardResponseSink is the agent-side receiver for
+// responses to workbench dispatches originated here. Each inbound
+// WorkbenchForwardResponse on a peer connection is routed through
+// this sink. The agent-side WorkbenchForwardRouter satisfies this.
+type WorkbenchForwardResponseSink interface {
+	Dispatch(resp *nodev1.WorkbenchForwardResponse)
+}
+
 // EventInbound accepts a peer-forwarded event, dedups it against
 // recently-seen event IDs + TTL, and republishes it on the local event
 // bus so local subscribers (integrations, automations, gRPC subscribers)
@@ -58,13 +81,15 @@ type EventInbound interface {
 type nodeService struct {
 	nodev1.UnimplementedNodeServiceServer
 
-	logger            *slog.Logger
-	identity          *Identity
-	peerManager       *PeerManager
-	queryExecutor     QueryExecutor         // set via SetQueryExecutor for cross-node query forwarding
-	aiForwardHandler  AiForwardHandler      // worker-side handler; nil on BFF binaries
-	aiForwardResponse AiForwardResponseSink // BFF-side response sink; nil on worker binaries
-	eventInbound      EventInbound          // bridges peer-forwarded events onto the local bus
+	logger                   *slog.Logger
+	identity                 *Identity
+	peerManager              *PeerManager
+	queryExecutor            QueryExecutor                  // set via SetQueryExecutor for cross-node query forwarding
+	aiForwardHandler         AiForwardHandler               // worker-side handler; nil on BFF binaries
+	aiForwardResponse        AiForwardResponseSink          // BFF-side response sink; nil on worker binaries
+	workbenchForwardHandler  WorkbenchForwardHandler        // workbench-side handler; nil on non-workbench binaries
+	workbenchForwardResponse WorkbenchForwardResponseSink   // agent-side response sink; nil on non-agent binaries
+	eventInbound             EventInbound                   // bridges peer-forwarded events onto the local bus
 }
 
 // Stream handles a bidirectional streaming connection from a peer node.
@@ -268,6 +293,12 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_AiForwardCancel:
 		s.handleAiForwardCancel(peerId, payload.AiForwardCancel)
 
+	case *nodev1.NodeClientMessage_WorkbenchForwardRequest:
+		s.handleWorkbenchForwardRequest(peerId, payload.WorkbenchForwardRequest, stream)
+
+	case *nodev1.NodeClientMessage_WorkbenchForwardCancel:
+		s.handleWorkbenchForwardCancel(peerId, payload.WorkbenchForwardCancel)
+
 	default:
 		s.logger.Debug("unhandled message type from peer",
 			"peer_id", peerId,
@@ -411,6 +442,20 @@ func (s *nodeService) SetAiForwardResponseSink(sink AiForwardResponseSink) {
 	s.aiForwardResponse = sink
 }
 
+// SetWorkbenchForwardHandler installs the workbench-side handler
+// invoked for inbound WorkbenchForwardRequest messages. Left nil on
+// non-workbench binaries.
+func (s *nodeService) SetWorkbenchForwardHandler(h WorkbenchForwardHandler) {
+	s.workbenchForwardHandler = h
+}
+
+// SetWorkbenchForwardResponseSink installs the agent-side sink for
+// inbound WorkbenchForwardResponse messages. Left nil on
+// non-agent / non-router binaries.
+func (s *nodeService) SetWorkbenchForwardResponseSink(sink WorkbenchForwardResponseSink) {
+	s.workbenchForwardResponse = sink
+}
+
 // handleAiForwardRequest dispatches a forwarded AI/voice request to the
 // registered handler and streams responses back on the peer's stream.
 func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.AiForwardRequest, stream nodev1.NodeService_StreamServer) {
@@ -446,6 +491,44 @@ func (s *nodeService) handleAiForwardCancel(peerId string, cancel *nodev1.AiForw
 		return
 	}
 	s.aiForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
+}
+
+// handleWorkbenchForwardRequest dispatches an inbound workbench
+// dispatch envelope to the configured local handler. Single
+// request -> single response: the handler emits exactly one
+// WorkbenchForwardResponse via `send` and returns. When no handler
+// is configured (e.g. mis-typed node, missing wiring), responds
+// with a `not_configured` error so the agent's tool loop fails
+// fast instead of timing out.
+func (s *nodeService) handleWorkbenchForwardRequest(peerId string, req *nodev1.WorkbenchForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.workbenchForwardHandler == nil {
+		s.logger.Warn("workbench forward request received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   uuid.New().String(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
+				WorkbenchForwardResponse: &nodev1.WorkbenchForwardResponse{
+					RequestId:    req.GetRequestId(),
+					ErrorCode:    "not_configured",
+					ErrorMessage: "workbench handler not configured on this node",
+				},
+			},
+		})
+		return
+	}
+	s.workbenchForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+}
+
+// handleWorkbenchForwardCancel forwards a cancel notification to the
+// workbench-side handler so it can stop in-flight work for the
+// request_id (kill exec, abort http_fetch).
+func (s *nodeService) handleWorkbenchForwardCancel(peerId string, cancel *nodev1.WorkbenchForwardCancel) {
+	if cancel == nil || s.workbenchForwardHandler == nil {
+		return
+	}
+	s.workbenchForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
 }
 
 // handleQueryForward executes a forwarded query locally and sends the
