@@ -5,16 +5,12 @@
 // (personal_finance_advisor, health_wellness_coach, relationships_social,
 // senior_care_advisor, real_estate_advisor) and carry advisory hints.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Household finance education: budgeting, debt, savings, retirement, taxes, insurance. Information only.")
-seed personal_finance_advisor {
-  id:                    "personal_finance_advisor"
+seed agentRole personal_finance_advisor {
   slug:                  "personal_finance_advisor"
   name:                  "Personal Finance Advisor"
-  description:           "Household finance education: budgeting, debt, savings, retirement, taxes, insurance. Information only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["personal_finance", "personal_budgeting"]
@@ -25,14 +21,10 @@ seed personal_finance_advisor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Day-to-day household operations: chores, inventory, vendors, calendar, and routines.")
-seed household_manager {
-  id:                    "household_manager"
+seed agentRole household_manager {
   slug:                  "household_manager"
   name:                  "Household Manager"
-  description:           "Day-to-day household operations: chores, inventory, vendors, calendar, and routines."
   category:              "personal"
   lockedDomainIds:       ["household_maintenance"]
   defaultDomainIds:      ["home_inventory", "household_chores", "personal_finance", "personal_budgeting"]
@@ -41,14 +33,10 @@ seed household_manager {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Child development, behavior, schooling, family routines, and parenting strategies.")
-seed parenting_coach {
-  id:                    "parenting_coach"
+seed agentRole parenting_coach {
   slug:                  "parenting_coach"
   name:                  "Parenting Coach"
-  description:           "Child development, behavior, schooling, family routines, and parenting strategies."
   category:              "personal"
   lockedDomainIds:       ["parenting", "child_development"]
   defaultDomainIds:      ["school_education_personal", "nutrition", "mental_health"]
@@ -57,14 +45,10 @@ seed parenting_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Healthy habits across nutrition, fitness, sleep, mental health, and mindfulness. Information only.")
-seed health_wellness_coach {
-  id:                    "health_wellness_coach"
+seed agentRole health_wellness_coach {
   slug:                  "health_wellness_coach"
   name:                  "Health & Wellness Coach"
-  description:           "Healthy habits across nutrition, fitness, sleep, mental health, and mindfulness. Information only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["nutrition", "fitness"]
@@ -75,14 +59,10 @@ seed health_wellness_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("General fitness programming: strength, cardio, mobility, recovery. Information only.")
-seed fitness_coach {
-  id:                    "fitness_coach"
+seed agentRole fitness_coach {
   slug:                  "fitness_coach"
   name:                  "Fitness Coach"
-  description:           "General fitness programming: strength, cardio, mobility, recovery. Information only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["fitness", "exercise_science"]
@@ -93,14 +73,10 @@ seed fitness_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Training plans (5K -> marathon), form, gear, race strategy. Information only.")
-seed running_coach {
-  id:                    "running_coach"
+seed agentRole running_coach {
   slug:                  "running_coach"
   name:                  "Running Coach"
-  description:           "Training plans (5K -> marathon), form, gear, race strategy. Information only."
   category:              "personal"
   lockedDomainIds:       ["running_training"]
   defaultDomainIds:      ["fitness", "exercise_science", "race_nutrition", "injury_prevention_running"]
@@ -109,14 +85,10 @@ seed running_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Asana, pranayama, sequencing, and yoga philosophy for practice and teaching.")
-seed yoga_instructor {
-  id:                    "yoga_instructor"
+seed agentRole yoga_instructor {
   slug:                  "yoga_instructor"
   name:                  "Yoga Instructor"
-  description:           "Asana, pranayama, sequencing, and yoga philosophy for practice and teaching."
   category:              "personal"
   lockedDomainIds:       ["yoga_practice"]
   defaultDomainIds:      ["meditation", "anatomy_basics", "mindfulness", "yoga_philosophy"]
@@ -125,14 +97,10 @@ seed yoga_instructor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Periodization, lift technique, programming for strength + power.")
-seed strength_coach {
-  id:                    "strength_coach"
+seed agentRole strength_coach {
   slug:                  "strength_coach"
   name:                  "Strength & Conditioning Coach"
-  description:           "Periodization, lift technique, programming for strength + power."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["strength_training"]
@@ -142,14 +110,10 @@ seed strength_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Home-cook meal planning: recipes, dietary preferences, weekly menus, grocery lists.")
-seed meal_planning_chef {
-  id:                    "meal_planning_chef"
+seed agentRole meal_planning_chef {
   slug:                  "meal_planning_chef"
   name:                  "Meal Planning Chef"
-  description:           "Home-cook meal planning: recipes, dietary preferences, weekly menus, grocery lists."
   category:              "personal"
   lockedDomainIds:       ["recipes", "meal_planning"]
   defaultDomainIds:      ["dietary_restrictions", "nutrition", "food_safety"]
@@ -158,14 +122,10 @@ seed meal_planning_chef {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Trip planning, itineraries, document requirements, lodging, transit, and personal budgeting.")
-seed travel_planner {
-  id:                    "travel_planner"
+seed agentRole travel_planner {
   slug:                  "travel_planner"
   name:                  "Travel Planner"
-  description:           "Trip planning, itineraries, document requirements, lodging, transit, and personal budgeting."
   category:              "personal"
   lockedDomainIds:       ["travel_planning"]
   defaultDomainIds:      ["travel_documents", "restaurant_dining", "personal_finance", "destination_research"]
@@ -174,14 +134,10 @@ seed travel_planner {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Self-directed learning: language, course-work, book summaries, study skills.")
-seed learning_companion {
-  id:                    "learning_companion"
+seed agentRole learning_companion {
   slug:                  "learning_companion"
   name:                  "Learning Companion"
-  description:           "Self-directed learning: language, course-work, book summaries, study skills."
   category:              "personal"
   lockedDomainIds:       ["learning_methods"]
   defaultDomainIds:      ["language_learning", "online_courses", "book_summaries", "personal_growth", "study_skills"]
@@ -190,14 +146,10 @@ seed learning_companion {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Communication, conflict resolution, milestone celebrations, gift planning. Education only.")
-seed relationships_social {
-  id:                    "relationships_social"
+seed agentRole relationships_social {
   slug:                  "relationships_social"
   name:                  "Relationships & Social Companion"
-  description:           "Communication, conflict resolution, milestone celebrations, gift planning. Education only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["relationships_communication"]
@@ -208,14 +160,10 @@ seed relationships_social {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Daily pet care: feeding, training, grooming, common health issues. Information only.")
-seed pet_care_specialist {
-  id:                    "pet_care_specialist"
+seed agentRole pet_care_specialist {
   slug:                  "pet_care_specialist"
   name:                  "Pet Care Specialist"
-  description:           "Daily pet care: feeding, training, grooming, common health issues. Information only."
   category:              "personal"
   lockedDomainIds:       ["pet_care"]
   defaultDomainIds:      ["pet_training", "pet_health", "animal_nutrition"]
@@ -224,14 +172,10 @@ seed pet_care_specialist {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Repairs, upgrades, gardening, sustainability, and home-inventory maintenance.")
-seed home_improvement_diy {
-  id:                    "home_improvement_diy"
+seed agentRole home_improvement_diy {
   slug:                  "home_improvement_diy"
   name:                  "Home Improvement / DIY"
-  description:           "Repairs, upgrades, gardening, sustainability, and home-inventory maintenance."
   category:              "personal"
   lockedDomainIds:       ["diy_repairs"]
   defaultDomainIds:      ["gardening", "sustainability", "home_inventory", "household_maintenance"]
@@ -240,14 +184,10 @@ seed home_improvement_diy {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Meditation practice, journaling prompts, stress-management techniques.")
-seed mindfulness_coach {
-  id:                    "mindfulness_coach"
+seed agentRole mindfulness_coach {
   slug:                  "mindfulness_coach"
   name:                  "Mindfulness & Meditation Coach"
-  description:           "Meditation practice, journaling prompts, stress-management techniques."
   category:              "personal"
   lockedDomainIds:       ["mindfulness"]
   defaultDomainIds:      ["journaling", "personal_growth", "mental_health", "meditation"]
@@ -256,14 +196,10 @@ seed mindfulness_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Movies, TV, music, books, podcasts, dining: recommendations and discussion partner.")
-seed entertainment_curator {
-  id:                    "entertainment_curator"
+seed agentRole entertainment_curator {
   slug:                  "entertainment_curator"
   name:                  "Entertainment Curator"
-  description:           "Movies, TV, music, books, podcasts, dining: recommendations and discussion partner."
   category:              "personal"
   lockedDomainIds:       ["entertainment_media"]
   defaultDomainIds:      ["music_appreciation", "book_summaries", "restaurant_dining", "film_appreciation"]
@@ -272,14 +208,10 @@ seed entertainment_curator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Aging-in-place planning, eldercare options, medication management, end-of-life documents. Information only.")
-seed senior_care_advisor {
-  id:                    "senior_care_advisor"
+seed agentRole senior_care_advisor {
   slug:                  "senior_care_advisor"
   name:                  "Senior Care Advisor"
-  description:           "Aging-in-place planning, eldercare options, medication management, end-of-life documents. Information only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["elder_care"]
@@ -290,14 +222,10 @@ seed senior_care_advisor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Home-buying / selling, mortgages, neighborhood research, inspections, closings. Information only.")
-seed real_estate_advisor {
-  id:                    "real_estate_advisor"
+seed agentRole real_estate_advisor {
   slug:                  "real_estate_advisor"
   name:                  "Real Estate Educator"
-  description:           "Home-buying / selling, mortgages, neighborhood research, inspections, closings. Information only."
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["real_estate_listings"]

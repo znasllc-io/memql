@@ -288,15 +288,95 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	return total, nil
 }
 
-// fileTopUseClauseRe matches a `use <namespace>.<concept>` line
-// anchored at column 0 (with optional leading whitespace). Each seed
-// file is expected to declare its target concept once at the top;
-// the loader extracts it and re-injects into every per-seed slice
-// before parsing (ExtractKeywordSlices walks the slice preamble back
-// from the seed line through annotations + comments, which stops
-// short of the `use` line -- so we have to carry it forward
-// ourselves).
+// fileTopUseClauseRe matches a legacy single-line `use <ns>.<concept>`
+// clause anchored at column 0. Form B `use <path>.{ names }` imports
+// can span multiple lines and are extracted separately by
+// extractFileTopPreamble below.
 var fileTopUseClauseRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
+
+// extractFileTopPreamble returns every file-top `use ...` clause in
+// the source -- both Form A (legacy single-binding) and Form B
+// (`path.{ names }`) shapes -- joined into a single preamble string
+// that the loader re-prepends to each per-seed slice. Form B clauses
+// can span multiple lines, so we scan with a small state machine
+// rather than a per-line regex.
+//
+// Stops at the first non-comment, non-blank, non-`use` line --
+// typically the first `seed`, `@`, or other construct keyword.
+func extractFileTopPreamble(source string) string {
+	var out []string
+	i := 0
+	for i < len(source) {
+		// Find start of next logical line.
+		lineStart := i
+		// Skip leading whitespace within the line.
+		for lineStart < len(source) && (source[lineStart] == ' ' || source[lineStart] == '\t') {
+			lineStart++
+		}
+		if lineStart >= len(source) {
+			break
+		}
+		// Detect blank line -- skip and continue.
+		if source[lineStart] == '\n' || source[lineStart] == '\r' {
+			// advance i past the newline
+			for i < len(source) && source[i] != '\n' {
+				i++
+			}
+			if i < len(source) {
+				i++
+			}
+			continue
+		}
+		// Detect line comment -- skip and continue.
+		if lineStart+1 < len(source) && source[lineStart] == '/' && source[lineStart+1] == '/' {
+			for i < len(source) && source[i] != '\n' {
+				i++
+			}
+			if i < len(source) {
+				i++
+			}
+			continue
+		}
+		// `use` keyword followed by whitespace?
+		if lineStart+4 <= len(source) && source[lineStart:lineStart+3] == "use" &&
+			(source[lineStart+3] == ' ' || source[lineStart+3] == '\t') {
+			// Walk to end of this use clause: either end-of-line for
+			// Form A, or balanced closing `}` for Form B.
+			j := lineStart
+			braceDepth := 0
+			seenBrace := false
+			for j < len(source) {
+				ch := source[j]
+				if ch == '{' {
+					braceDepth++
+					seenBrace = true
+				} else if ch == '}' {
+					braceDepth--
+					if seenBrace && braceDepth == 0 {
+						j++
+						break
+					}
+				} else if ch == '\n' && !seenBrace {
+					break
+				}
+				j++
+			}
+			out = append(out, source[lineStart:j])
+			// Advance past the terminating newline if present.
+			i = j
+			if i < len(source) && source[i] == '\n' {
+				i++
+			}
+			continue
+		}
+		// Hit body / construct keyword. Stop.
+		break
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, "\n") + "\n"
+}
 
 // LoadUnifiedSeeds walks the DSL tree, parses every `seed NAME { ... }`
 // block, compiles each into a SeedDefinition, and registers it. Row
@@ -330,19 +410,17 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
-		// Extract the file-top `use <ns>.<concept>` clause once per
-		// file. Each per-seed slice doesn't include it (the
-		// ExtractKeywordSlices preamble walk-back stops at the
-		// blank line before the seed's annotation cluster), so we
-		// re-inject it into every slice we parse.
-		useLine := ""
-		if m := fileTopUseClauseRe.FindStringSubmatch(raw.Content); len(m) == 3 {
-			useLine = "use " + m[1] + "." + m[2] + "\n"
-		}
+		// Extract the file-top preamble (every `use ...` clause,
+		// both Form A and Form B) once per file. Each per-seed slice
+		// doesn't include the file-top preamble (the
+		// ExtractKeywordSlices preamble walk-back stops at the blank
+		// line before the seed's annotation cluster), so we re-inject
+		// it into every slice we parse.
+		preamble := extractFileTopPreamble(raw.Content)
 
 		for _, slice := range ExtractKeywordSlices(raw.Content, "seed") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
-			source := useLine + slice.Source
+			source := preamble + slice.Source
 			decl, err := parseSeedMemQL(origin, []byte(source))
 			if err != nil {
 				if logger != nil {
