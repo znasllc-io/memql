@@ -3,18 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-    logic autoJoinSI { event: event }
-
-    logic autoJoinSI { event: event }
-
-    logic bootstrapSession { event: event }
-
-    logic bootstrapSession { event: event }
-
-    logic generateResponse { event: event }
-
-    logic generateResponse { event: event }
-
 // automations/v1/cognition/autoJoinSI/automation.memql
 //
 // PURPOSE:
@@ -379,14 +367,6 @@ logic logicVoiceMigrationOnSecondHuman {
   return publishPrivateCard
   }
 }
-
-    logic purgeExpiredArchivedSpaces { event: event }
-
-    logic purgeExpiredArchivedSpaces { event: event }
-
-    logic voiceMigrationOnSecondHuman { event: event }
-
-    logic voiceMigrationOnSecondHuman { event: event }
 
 // ---- logicProvisionDailySpaceOnUserCreate -----------------------
 //
