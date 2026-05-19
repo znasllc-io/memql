@@ -13,6 +13,8 @@ docs/
 ├── ROADMAP.md         Future-work tracker (deferred items, not abandonment list)
 ├── SERVICE_ACCOUNT_SETUP.md  GCP service account for Cloud Run deploys
 ├── polyphon-architecture.md  Voice + video architecture (voice-agent / LiveKit Agents 1.5)
+├── PLANNER_TODO.md    Planner integration: remaining v1 build-out work
+├── dsl-import-model-refactor.md  In-flight DSL import-model design + migration plan
 ├── handoff-*.md       Cross-session handoff notes (see "Handoff docs" below)
 ├── core/              Core concepts and language reference
 ├── architecture/      Architecture audits, diagrams, and cross-cutting patterns
@@ -159,6 +161,23 @@ Active planning docs only -- removed when work ships. Currently:
   shape silently vanishes on the next full-payload update.
 - `struct-form-rewriter-retirement.md` -- deferred design proposal
   for collapsing the rewriter passes into grammar + AST changes.
+
+---
+
+## Top-level active docs
+
+Top-level docs that aren't handoffs, planning entries, or reference
+material. Listed here so the index is exhaustive.
+
+- [PLANNER_TODO.md](PLANNER_TODO.md) -- single-source-of-truth todo
+  list for the remaining v1 planner build-out (Cognition triage
+  wire-up, lazy embedding, container-executor work, real budget
+  enforcement). Each item carries scope + dependencies + effort.
+- [dsl-import-model-refactor.md](dsl-import-model-refactor.md) --
+  design doc + migration plan for replacing the directory-as-namespace
+  + `@useConcept` annotations with explicit Go-style `import (...)`
+  blocks across every DSL construct. Commit 1 (machinery) complete;
+  Commit 2 (file migration) in flight.
 
 ---
 
