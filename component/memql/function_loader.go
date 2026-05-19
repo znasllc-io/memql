@@ -139,13 +139,19 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `<name>.` occurrences in comments / docstrings too (comments
 	// don't affect parsing, and the rewrite reads as a clarifying
 	// "this is payload data" annotation rather than a mis-edit).
-	if name, ok := extractUseConceptName(content); ok && name != "" {
+	// Multi-construct files (Phase 2 consolidated layout) can declare
+	// many @useConcept / @useShape annotations -- one per construct.
+	// Translate each distinct bare name independently so a query
+	// bound to `participant` and a query bound to `space` in the
+	// same file each see their own payload references rewritten
+	// without stomping on the other. extractAllUseConceptNames
+	// returns names in declaration order; translation is order-
+	// insensitive (each `\b<name>\.` pattern is disjoint by
+	// construction).
+	for _, name := range extractAllUseConceptNames(content) {
 		content = translateConceptPathsToPayload(content, name)
 	}
-	// Same naive rewrite for @useShape(<bareName>): the binding's
-	// effective concept is the shape's, but the body still references
-	// payload fields via `<bareName>.X` -- translate to `payload.X`.
-	if name, ok := extractUseShapeName(content); ok && name != "" {
+	for _, name := range extractAllUseShapeNames(content) {
 		content = translateConceptPathsToPayload(content, name)
 	}
 
@@ -513,9 +519,13 @@ var useConceptAnnotSourceRe = regexp.MustCompile(`@useConcept\(\s*([A-Za-z_][A-Z
 // the spec's effective concept).
 var useShapeAnnotSourceRe = regexp.MustCompile(`@useShape\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
 
-// extractUseConceptName scans raw .memql source for a single-name
+// extractUseConceptName scans raw .memql source for the first
 // `@useConcept(<bareName>)` annotation and returns the bare name.
 // Returns ("", false) when no annotation is present.
+//
+// For multi-construct files (the import-model refactor's
+// consolidated layout), prefer extractAllUseConceptNames -- this
+// helper only sees the first match.
 func extractUseConceptName(source string) (string, bool) {
 	m := useConceptAnnotSourceRe.FindStringSubmatch(source)
 	if m == nil {
@@ -524,7 +534,33 @@ func extractUseConceptName(source string) (string, bool) {
 	return m[1], true
 }
 
-// extractUseShapeName scans raw .memql source for a single-name
+// extractAllUseConceptNames scans raw .memql source for every
+// `@useConcept(<bareName>)` annotation and returns the distinct
+// bare names in declaration order. The list is the input to the
+// per-construct bareName-to-payload translation for files holding
+// multiple constructs bound to different concepts.
+func extractAllUseConceptNames(source string) []string {
+	matches := useConceptAnnotSourceRe.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		name := m[1]
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+// extractUseShapeName scans raw .memql source for the first
 // `@useShape(<bareName>)` annotation and returns the bare name.
 // Returns ("", false) when no annotation is present.
 func extractUseShapeName(source string) (string, bool) {
@@ -533,6 +569,30 @@ func extractUseShapeName(source string) (string, bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+// extractAllUseShapeNames -- shape-side twin of
+// extractAllUseConceptNames. Used by the multi-construct
+// translation pass.
+func extractAllUseShapeNames(source string) []string {
+	matches := useShapeAnnotSourceRe.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		name := m[1]
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // translateConceptPathsToPayload rewrites every `\b<bareName>\.`
