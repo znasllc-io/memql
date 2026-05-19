@@ -120,6 +120,22 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// instead of returning nil silently.
 		return nil, fmt.Errorf("logic %q has no `_return` step (body must end with `return <expr>`)", fnName)
 	}
+	// Short-circuit pure step-method-call returns like
+	// `expiredDelegations.Len()` / `existing.First()` / `rows.Empty()`.
+	// The engine's expression parser doesn't recognise the
+	// `stepName.method()` shape and looks the whole dotted name up as
+	// a top-level function (-> "function not found"). The local
+	// Evaluator's EvaluateStepReference already understands the
+	// shape (strips `()`, resolves through `steps.<id>.<method>`
+	// shorthand), so route through it before falling back to
+	// engine.Execute via the step registry.
+	if returnStep.Query != nil {
+		if val, handled, err := r.tryEvaluateReturnLocally(returnStep.Query.Query, evaluator); err != nil {
+			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
+		} else if handled {
+			return val, nil
+		}
+	}
 	if err := r.runOneStep(ctx, returnStep, stepCtx, evaluator); err != nil {
 		return nil, fmt.Errorf("logic %q return: %w", fnName, err)
 	}
@@ -127,6 +143,53 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		return returnResult.Result, nil
 	}
 	return nil, nil
+}
+
+// tryEvaluateReturnLocally short-circuits engine.Execute for return
+// expressions whose body is purely a method call on a bound step
+// result -- `expiredDelegations.Len()`, `existing.First()`,
+// `rows.Empty()`, etc. The engine's expression parser doesn't
+// recognise the dotted shape and looks up `expiredDelegations.Len`
+// as a top-level function ("function not found").
+//
+// Returns (value, true, nil) when the expression matched a known
+// step-method shape and resolved cleanly via the local Evaluator.
+// Returns (nil, false, nil) when the expression doesn't match the
+// shape -- the caller should fall back to engine.Execute via the
+// step registry.
+// Returns (nil, false, err) on a hard error (e.g. step exists but
+// the dotted suffix didn't resolve).
+func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil, false, nil
+	}
+	// Must end in `()` -- the step-method shape from the DSL is
+	// always `stepName.method()`.
+	inner := strings.TrimSuffix(expr, "()")
+	if inner == expr {
+		return nil, false, nil
+	}
+	// The inner part can't carry anything that needs more parsing
+	// (no parens, no commas, no quotes). This filters out compound
+	// expressions like `coalesce(a.first(), b.first())` whose outer
+	// shape happens to end with `()` but isn't a step-method call.
+	if strings.ContainsAny(inner, "()[]{}\"', \t\n") {
+		return nil, false, nil
+	}
+	firstDot := strings.Index(inner, ".")
+	if firstDot <= 0 {
+		return nil, false, nil
+	}
+	firstSegment := inner[:firstDot]
+	if !evaluator.HasStep(firstSegment) {
+		return nil, false, nil
+	}
+	val, err := evaluator.EvaluateStepReference(expr)
+	if err != nil {
+		return nil, false, err
+	}
+	return val, true, nil
 }
 
 // runOneStep evaluates an optional condition, dispatches the step,
