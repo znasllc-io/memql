@@ -116,7 +116,7 @@ func (s *streamSession) handleAiChatNonStream(requestId, correlate string, messa
 	}
 
 	_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-		Payload: &memqlv1.MemqlServerMessage_AiChatResult{
+		Payload: &memqlv1.MemqlServerMessage_SIChatResult{
 			SIChatResult: &memqlv1.SIChatResult{
 				RequestId: requestId,
 				Message: &memqlv1.SIChatMessage{
@@ -164,7 +164,7 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 		if chunk.Content != "" {
 			fullContent.WriteString(chunk.Content)
 			_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_AiChunk{
+				Payload: &memqlv1.MemqlServerMessage_SIChunk{
 					SIChunk: &memqlv1.SIStreamChunk{
 						StreamId:  requestId,
 						RequestId: requestId,
@@ -179,7 +179,7 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 
 		if chunk.Done {
 			_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-				Payload: &memqlv1.MemqlServerMessage_AiChatResult{
+				Payload: &memqlv1.MemqlServerMessage_SIChatResult{
 					SIChatResult: &memqlv1.SIChatResult{
 						RequestId: requestId,
 						Message: &memqlv1.SIChatMessage{
@@ -245,7 +245,7 @@ func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg
 		}
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiSpeechResult{
+			Payload: &memqlv1.MemqlServerMessage_SISpeechResult{
 				SISpeechResult: &memqlv1.SISpeechResult{
 					RequestId: requestId,
 					Audio:     audioBytes,
@@ -321,7 +321,7 @@ func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage,
 		}
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiTranscribeResult{
+			Payload: &memqlv1.MemqlServerMessage_SITranscribeResult{
 				SITranscribeResult: &memqlv1.SITranscribeResult{
 					RequestId: requestId,
 					Text:      text,
@@ -621,7 +621,7 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 		}
 
 		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiSuggestResult{
+			Payload: &memqlv1.MemqlServerMessage_SISuggestResult{
 				SISuggestResult: &memqlv1.SISuggestResult{
 					RequestId: requestId,
 					Domain:    domain,

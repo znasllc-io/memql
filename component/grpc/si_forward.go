@@ -124,7 +124,7 @@ func (r *SIForwardRouter) Forward(
 		if peer.Connection != nil {
 			peer.Connection.Send(&nodev1.NodeClientMessage{
 				MessageId: uuid.NewString(),
-				Payload: &nodev1.NodeClientMessage_AiForwardCancel{
+				Payload: &nodev1.NodeClientMessage_SIForwardCancel{
 					SIForwardCancel: &nodev1.SIForwardCancel{RequestId: requestId},
 				},
 			})
@@ -140,7 +140,7 @@ func (r *SIForwardRouter) Forward(
 	}
 	msg := &nodev1.NodeClientMessage{
 		MessageId: uuid.NewString(),
-		Payload:   &nodev1.NodeClientMessage_AiForwardRequest{SIForwardRequest: fwd},
+		Payload:   &nodev1.NodeClientMessage_SIForwardRequest{SIForwardRequest: fwd},
 	}
 	if peer.Connection == nil {
 		r.cleanupInflight(requestId)
@@ -251,7 +251,7 @@ func (r *SIForwardRouter) ForwardContinuation(
 
 	entry.peer.Connection.Send(&nodev1.NodeClientMessage{
 		MessageId: uuid.NewString(),
-		Payload: &nodev1.NodeClientMessage_AiForwardRequest{
+		Payload: &nodev1.NodeClientMessage_SIForwardRequest{
 			SIForwardRequest: &nodev1.SIForwardRequest{
 				RequestId:     requestId,
 				Auth:          authClaims,
@@ -380,19 +380,19 @@ func (s *service) HandleForwardedRequest(
 
 	// Dispatch to the appropriate handler based on the envelope payload.
 	switch payload := envelope.GetPayload().(type) {
-	case *memqlv1.MemqlClientMessage_AiTranscribe:
+	case *memqlv1.MemqlClientMessage_SITranscribe:
 		_ = sess.handleAiTranscribe(&envelope, payload.SITranscribe)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamStart:
 		_ = sess.handleAiTranscribeStreamStart(&envelope, payload.SITranscribeStreamStart)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamChunk:
 		_ = sess.handleAiTranscribeStreamChunk(&envelope, payload.SITranscribeStreamChunk)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamEnd:
 		_ = sess.handleAiTranscribeStreamEnd(&envelope, payload.SITranscribeStreamEnd)
-	case *memqlv1.MemqlClientMessage_AiSpeech:
+	case *memqlv1.MemqlClientMessage_SISpeech:
 		_ = sess.handleAiSpeech(&envelope, payload.SISpeech)
-	case *memqlv1.MemqlClientMessage_AiChat:
+	case *memqlv1.MemqlClientMessage_SIChat:
 		_ = sess.handleAiChat(&envelope, payload.SIChat)
-	case *memqlv1.MemqlClientMessage_AiSuggest:
+	case *memqlv1.MemqlClientMessage_SISuggest:
 		_ = sess.handleAiSuggest(&envelope, payload.SISuggest)
 	case *memqlv1.MemqlClientMessage_ListTools:
 		_ = sess.handleListTools(&envelope, payload.ListTools)
@@ -452,7 +452,7 @@ func (h *aiForwardHandlerShim) HandleForwardedRequest(ctx context.Context, req *
 		_ = send(&nodev1.NodeServerMessage{
 			MessageId:   uuid.NewString(),
 			CorrelateTo: req.GetRequestId(),
-			Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+			Payload: &nodev1.NodeServerMessage_SIForwardResponse{
 				SIForwardResponse: &nodev1.SIForwardResponse{
 					RequestId:      req.GetRequestId(),
 					MemqlServerMsg: errBytes,
@@ -519,7 +519,7 @@ func (s *service) sendForwardError(
 	_ = send(&nodev1.NodeServerMessage{
 		MessageId:   uuid.NewString(),
 		CorrelateTo: requestId,
-		Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+		Payload: &nodev1.NodeServerMessage_SIForwardResponse{
 			SIForwardResponse: &nodev1.SIForwardResponse{
 				RequestId:      requestId,
 				MemqlServerMsg: errBytes,
@@ -560,7 +560,7 @@ func (f *forwardedStream) Send(msg *memqlv1.MemqlServerMessage) error {
 	wrapped := &nodev1.NodeServerMessage{
 		MessageId:   uuid.NewString(),
 		CorrelateTo: f.requestId,
-		Payload: &nodev1.NodeServerMessage_AiForwardResponse{
+		Payload: &nodev1.NodeServerMessage_SIForwardResponse{
 			SIForwardResponse: &nodev1.SIForwardResponse{
 				RequestId:      f.requestId,
 				MemqlServerMsg: b,
@@ -602,11 +602,11 @@ func (f *forwardedStream) RecvMsg(_ any) error { return io.EOF }
 // terminal; their following SIChatResult is.
 func isTerminalServerPayload(p any) bool {
 	switch p.(type) {
-	case *memqlv1.MemqlServerMessage_AiChatResult,
-		*memqlv1.MemqlServerMessage_AiSpeechResult,
-		*memqlv1.MemqlServerMessage_AiTranscribeResult,
-		*memqlv1.MemqlServerMessage_AiTranscribeStreamComplete,
-		*memqlv1.MemqlServerMessage_AiSuggestResult,
+	case *memqlv1.MemqlServerMessage_SIChatResult,
+		*memqlv1.MemqlServerMessage_SISpeechResult,
+		*memqlv1.MemqlServerMessage_SITranscribeResult,
+		*memqlv1.MemqlServerMessage_SITranscribeStreamComplete,
+		*memqlv1.MemqlServerMessage_SISuggestResult,
 		*memqlv1.MemqlServerMessage_ListToolsResult,
 		*memqlv1.MemqlServerMessage_CallToolResult,
 		// Agent-turn forwarding: Delta is streamed mid-turn (not
