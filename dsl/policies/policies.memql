@@ -7,8 +7,7 @@
 @frontend_visible
 @description("Pick the avatar vendor for a voice-agent session given context.")
 func (Policy) avatarVendorChoice(ctx any) string {
-  ctx.output = policy("isAvatarVendorAvailable", { vendor: "anam" })
-  return ctx, nil
+  return policy("isAvatarVendorAvailable", { vendor: "anam" })
 }
 
 @primary("streamClaudeSonnet")
@@ -25,8 +24,7 @@ policy balancedChat { }
 @cacheable
 @description("Should the admin settings page be visible to this user?")
 func (Policy) canViewAdminSettings(_ any) bool {
-  ctx.output = spec("traitRequiresAdmin")
-  return ctx, nil
+  return spec("traitRequiresAdmin")
 }
 
 // ---- policies/v1/cheapestCapable.memql ----
@@ -69,8 +67,7 @@ policy fastCoding { }
 @tier("bff")
 @description("Is the named avatar vendor configured + available?")
 func (Policy) isAvatarVendorAvailable(ctx any) bool {
-  ctx.output = ctx.vendor == "anam"
-  return ctx, nil
+  return args.vendor == "anam"
 }
 
 // ---- policies/v1/lowLatencyVoice.memql ----

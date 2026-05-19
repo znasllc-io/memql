@@ -65,7 +65,7 @@ logic logicPurgeExpiredPolicyTraces {
     }
   })
 
-  ctx.output = allTraces.Len()
+  return allTraces.Len()
   }
 }
 

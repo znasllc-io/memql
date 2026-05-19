@@ -15,11 +15,10 @@ query queryRouterBudgets {
 }
 
 func (Query) queryRouterRecentCalls(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     concept;
     ?.call.vendor==args.vendor;
     ?.call.outcome==args.outcome,
     "callFull"
-  )
-  return ctx, nil
+  ), nil
 }

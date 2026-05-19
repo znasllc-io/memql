@@ -27,6 +27,6 @@ logic logicReleaseWorkspaceOnPlanTerminal {
       }
       teardown := workbenchTeardownDirectory({ planId: planId })
     }
-    ctx.output = planId
+    return planId
   }
 }

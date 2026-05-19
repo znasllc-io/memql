@@ -144,7 +144,7 @@ logic logicAutoJoinSI {
     }
   })
 
-  ctx.output = emitAutoJoinComplete
+  return emitAutoJoinComplete
   }
 }
 
@@ -177,7 +177,7 @@ logic logicBootstrapSession {
   // Emit session created event for downstream consumers
   emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: concat("session-", args.event.payload.id), participantId: args.event.payload.id, spaceId: args.event.payload.spaceId, timestamp: timestamp() } }) }
 
-  ctx.output = coalesce(createSession, checkExistingSession.First())
+  return coalesce(createSession, checkExistingSession.First())
   }
 }
 
@@ -236,7 +236,7 @@ logic logicGenerateResponse {
     })
   }
 
-  ctx.output = insertResponse
+  return insertResponse
   }
 }
 
@@ -284,7 +284,7 @@ logic logicPurgeExpiredArchivedSpaces {
     })
   }
 
-  ctx.output = expired.Len()
+  return expired.Len()
   }
 }
 
@@ -376,7 +376,7 @@ logic logicVoiceMigrationOnSecondHuman {
     })
   }
 
-  ctx.output = publishPrivateCard
+  return publishPrivateCard
   }
 }
 
