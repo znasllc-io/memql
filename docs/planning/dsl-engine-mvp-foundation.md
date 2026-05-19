@@ -543,9 +543,11 @@ of the broader Commit 2 file sweep).
       blocker. (commit `d6d1190`)
 - [x] Stage migration progress reporting:
       `scripts/audit-import-model` (commit `bbbc2d8`).
-- [ ] Run the mechanical 570-file sweep. Byte-equality audit on
-      every concept ID. **Operator-gated** -- requires production
-      DB access for the audit to be meaningful.
+- [ ] Run the mechanical 570-file sweep. The byte-equality audit
+      against production concept IDs is **not required** -- the
+      project hasn't deployed yet, so the migration starts fresh.
+      Stage in a follow-up PR (touches ~570 .memql files, separate
+      review scope from this PR's code/test changes).
 - [ ] Land Commit 3 of the refactor: reject legacy forms; delete
       transitional shim code; delete `concepts_only_extractor.go`;
       collapse to one loader path.
@@ -555,11 +557,12 @@ of the broader Commit 2 file sweep).
 ### Phase 2 — lock the rules (1 week)
 
 - [x] Promote naming-prefix warnings to errors under strict mode;
-      make strict mode the default at engine startup.
-      MEMQL_NAMING_LENIENT=1 escape valve. (commit `d98d07f`)
+      make strict mode the default at engine startup. No escape
+      valve -- fresh-start project. (commit `d98d07f`)
 - [x] Loader-side CQS enforcement (was executor-side only).
       Per-file ValidateCQS + cross-registry validator at engine
-      startup. MEMQL_CQS_LENIENT=1 escape valve. (commit `6feda17`)
+      startup. No escape valve -- fresh-start project.
+      (commit `6feda17`)
 - [x] Formalize the policy/spec migration rule (Decision 2):
       annotation-based rejection with precise migration message.
       (commit `56f391a`)
@@ -575,8 +578,8 @@ of the broader Commit 2 file sweep).
 ### Phase 3 — close the in-flight loops (2–3 weeks)
 
 - [ ] End-to-end smoke test for multi-step Logic (cluster boot + at
-      least one cycle of every logic block). **Operator-gated**:
-      requires a running cluster.
+      least one cycle of every logic block). Requires a running
+      cluster; queue alongside the broader integration-test work.
 - [ ] Planner orchestrator goroutine: take the seven PLANNER_TODO
       items to completion. **Out of scope** for the foundation
       branch -- own feature.
@@ -635,18 +638,16 @@ a precise migration message naming the target file path.
 - Documented in `docs/core/memql-specifications.md` § "Migration
   nudge from policies" with the exact rule wording.
 
-### Decision 3 — Naming strict mode is default ON with an escape valve
+### Decision 3 — Naming strict mode is default ON, no escape valve
 
 Engine starts strict; naming mismatches (`query*` / `mutation*` /
-`spec*` prefix violations) fail the load.
+`spec*` prefix violations) fail the load. **No env var escape
+valve** -- the project starts fresh under the rule, with no
+deployed state to migrate.
 
-- Env var `MEMQL_NAMING_LENIENT=1` downgrades errors to warnings.
-- Intended use: 30-day migration window after release, plus the
-  occasional one-off legacy file. Not a long-term mode.
 - Error message must include the suggested rename, e.g.:
-  `function "getUserById" violates naming.query-prefix; rename to
-  "queryUserById" (or set MEMQL_NAMING_LENIENT=1 to downgrade to
-  warning).`
+  `function "getUserById" violates naming.query-prefix: Query
+  functions must use "query" prefix; rename to "queryUserById"`.
 
 ---
 
