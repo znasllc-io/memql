@@ -3,15 +3,10 @@ package memql
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
-
-// getEnv wraps os.Getenv so the CQS-lenient flag is easy to stub in
-// tests if needed.
-func getEnv(key string) string { return os.Getenv(key) }
 
 func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.relationships = relationshipRegistry{}
@@ -328,17 +323,10 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// tryParseNewFunctionSyntax misses: a query in file A calling
 	// a mutation in file B is rejected here, fail-loud at engine
 	// startup rather than silently corrupting data when the call
-	// site fires for the first time.
-	//
-	// Allow opt-out via MEMQL_CQS_LENIENT=1 for the migration
-	// window -- mirrors the naming-strict-mode escape valve. The
-	// gate is otherwise default-on.
-	if !cqsLenient() {
-		if err := ValidateCQSAcrossRegistry(functionRegistry); err != nil {
-			return err
-		}
-	} else {
-		e.Logger.Warn("CQS gate downgraded by MEMQL_CQS_LENIENT", "component", "memql.engine")
+	// site fires for the first time. No escape valve -- the project
+	// starts fresh under the new rule.
+	if err := ValidateCQSAcrossRegistry(functionRegistry); err != nil {
+		return err
 	}
 
 	// Log boot validation summary
@@ -347,19 +335,6 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.initialized = true
 
 	return nil
-}
-
-// cqsLenient reports whether the CQS strict-mode escape valve is
-// set. Used by Init to downgrade ValidateCQSAcrossRegistry
-// violations to a logged warning during the migration window. Not
-// a permanent operating mode.
-func cqsLenient() bool {
-	v := strings.ToLower(strings.TrimSpace(getEnv("MEMQL_CQS_LENIENT")))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
 }
 
 // ReloadSIProviders re-loads the SI provider registry from .memql

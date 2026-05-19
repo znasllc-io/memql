@@ -301,8 +301,8 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 
 	// Naming-prefix enforcement (Decision 3 of the MVP-foundation
 	// rule lock). Query / mutation / spec functions must use their
-	// kind's prefix. Hard error in strict mode; MEMQL_NAMING_LENIENT
-	// downgrades to a logged warning for the migration window.
+	// kind's prefix. Hard error -- no escape valve, since the project
+	// starts fresh under the new rule.
 	if err := validateNamingPrefix(funcDef); err != nil {
 		return nil, err
 	}

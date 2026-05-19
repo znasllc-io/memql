@@ -94,8 +94,6 @@ func TestValidateNamingPrefix_StrictMode(t *testing.T) {
 		},
 	}
 
-	// Strict mode is the default. We don't set MEMQL_NAMING_LENIENT
-	// so namingLenient() returns false (cached for the test process).
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateNamingPrefix(tc.fn)
@@ -108,9 +106,6 @@ func TestValidateNamingPrefix_StrictMode(t *testing.T) {
 				}
 				if tc.wantHint != "" && !strings.Contains(err.Error(), tc.wantHint) {
 					t.Errorf("error should suggest rename %q, got %v", tc.wantHint, err)
-				}
-				if !strings.Contains(err.Error(), "MEMQL_NAMING_LENIENT") {
-					t.Errorf("error should advertise the escape valve, got %v", err)
 				}
 			} else {
 				if err != nil {
