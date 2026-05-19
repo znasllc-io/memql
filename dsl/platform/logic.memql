@@ -3,10 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-    logic bootstrapDefaultPartition { event: event }
-
-    logic bootstrapDefaultPartition { event: event }
-
 // ---- logic/v1/platform/bootstrapDefaultPartition.memql ----
 
 // Ensure the "default" partition exists in v1:platform:partition.
@@ -69,6 +65,3 @@ logic logicPurgeExpiredPolicyTraces {
   }
 }
 
-    logic purgeExpiredPolicyTraces { event: event }
-
-    logic purgeExpiredPolicyTraces { event: event }
