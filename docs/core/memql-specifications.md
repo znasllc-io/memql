@@ -108,9 +108,43 @@ case for row-specs always safe.
 
 ## Migration nudge from policies
 
-A policy whose body would compile as a pure context-spec (caller-only
-boolean, no policy-only annotations like `@audited` / `@cacheable`,
-no sub-policy calls) is rejected at load time. The loader emits a
-hint pointing the author at the spec form: move the file under
-`dsl/v1/specs/...`, swap the receiver to `spec`, and have any caller
-use `spec("name")` instead of `policy("name")`.
+**The rule (locked Decision 2 of the MVP-foundation work).** A policy
+is rejected at load time when ALL of the following hold:
+
+1. It carries none of the policy-only annotations:
+   `@audited`, `@cacheable`, `@traces_persisted`, `@frontend_visible`,
+   `@returns_trace`.
+2. Its body contains zero `policy(...)` and zero `spec(...)`
+   sub-routine calls.
+3. It returns `bool`.
+4. Its body reads only `caller.*` (no `ctx.*` / `args` / `payload`
+   references).
+
+When all four are true the policy is structurally a context-spec and
+must be authored as a spec instead. The loader emits a precise
+migration message naming the target spec file path:
+
+```
+policy "canViewAdminSettings" has no policy-only annotations and no
+sub-policy calls (body reads only caller.* and contains no
+policy()/spec() calls); author as a spec instead. Move to
+dsl/specs/<namespace>/canViewAdminSettings.memql, change the receiver
+to `spec`, and replace `policy("canViewAdminSettings")` calls with
+`spec("canViewAdminSettings")`.
+```
+
+**Why the four conditions instead of two.** Decision 2 nominally
+lists conditions (1) and (2). The implementation in
+`component/memql/policy_function_loader.go` additionally requires
+(3) bool return and (4) no `args`/`ctx`/`payload` reads, both as
+guard rails preventing false-positive rejections of obviously-policy
+bodies that happen to lack annotations -- a policy that returns
+`string` (vendor name) or that reads caller-passed args is
+clearly not a spec.
+
+**Why the rule exists.** Specs are the atomic boolean primitive.
+Policies compose decisions across many specs, sub-policies, and
+config. Letting both share the same author shape leads to drift:
+two ways to write the same thing, two surfaces to maintain, no
+clear answer to "when do I write a spec vs a policy?". The rule
+collapses the ambiguity.

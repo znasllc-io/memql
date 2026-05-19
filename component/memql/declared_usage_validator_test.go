@@ -20,7 +20,7 @@ func TestDeclaredUsage_AcceptsFullyUsedDecls(t *testing.T) {
 	})
 	// Every declaration is exercised.
 	src := `@useConcept(space)
-mutation testCreateSpace {
+mutation mutationCreateSpace {
   args {
     name string @required
     description string
@@ -32,7 +32,7 @@ mutation testCreateSpace {
     status: "active"
   }
 }`
-	_, err := tryParseNewFunctionSyntax("testCreateSpace", "mutation", src, "test.memql", registry)
+	_, err := tryParseNewFunctionSyntax("mutationCreateSpace", "mutation", src, "test.memql", registry)
 	require.NoError(t, err)
 }
 
@@ -43,7 +43,7 @@ func TestDeclaredUsage_RejectsStaleArgsField(t *testing.T) {
 
 	// Mutation declares args.other but never uses it.
 	src := `@useConcept(space)
-mutation testMutation {
+mutation mutationStaleArgs {
   args {
     name  string @required
     other string @required
@@ -53,7 +53,7 @@ mutation testMutation {
     name: args.name
   }
 }`
-	_, err := tryParseNewFunctionSyntax("testMutation", "mutation", src, "test.memql", registry)
+	_, err := tryParseNewFunctionSyntax("mutationStaleArgs", "mutation", src, "test.memql", registry)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "other")
 	require.Contains(t, err.Error(), "args.other")
@@ -67,13 +67,13 @@ func TestDeclaredUsage_RejectsStaleUseSpec(t *testing.T) {
 	// Query declares @useSpec(specGhost) but never references it.
 	src := `@useConcept(space)
 @useSpec(specGhost)
-query testQuery {
+query queryStaleSpec {
   args {
     userId string
   }
   filter ?.createdBy==args.userId
 }`
-	_, err := tryParseNewFunctionSyntax("testQuery", "query", src, "test.memql", registry)
+	_, err := tryParseNewFunctionSyntax("queryStaleSpec", "query", src, "test.memql", registry)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "specGhost")
 	require.Contains(t, err.Error(), "never referenced")

@@ -122,7 +122,7 @@ func (Policy) badSpecShapedPolicy(_ any) bool {
 }`
 	_, err := parsePolicyFunctionFile("badSpecShapedPolicy.memql", "core", []byte(src))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "spec-shaped")
+	require.Contains(t, err.Error(), "no policy-only annotations and no sub-policy calls")
 	require.Contains(t, err.Error(), `spec("badSpecShapedPolicy")`)
 
 	// Same body but with @audited -- the author's intent that this

@@ -318,9 +318,20 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// concept storage and only the OS env fallback keeps them alive.
 	// See docs/guides/env-vars.md for the full bootstrap-order story.
 	
+	// Cross-registry CQS pass (Phase 2 hoist). Catches the
+	// cross-file violations the per-file ValidateCQS in
+	// tryParseNewFunctionSyntax misses: a query in file A calling
+	// a mutation in file B is rejected here, fail-loud at engine
+	// startup rather than silently corrupting data when the call
+	// site fires for the first time. No escape valve -- the project
+	// starts fresh under the new rule.
+	if err := ValidateCQSAcrossRegistry(functionRegistry); err != nil {
+		return err
+	}
+
 	// Log boot validation summary
 	e.logBootValidationSummary(functionRegistry, shapeRegistry, specRegistry, providerRegistry)
-	
+
 	e.initialized = true
 
 	return nil
