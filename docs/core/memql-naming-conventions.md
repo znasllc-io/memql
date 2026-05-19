@@ -14,8 +14,10 @@ Use receiver-specific prefixes so intent is obvious at call sites and in diffs.
 Examples:
 
 ```memql
-@useConcept(user)
-query queryUserById {
+use identity.concepts.{ user }
+use identity.shapes.{ userFull }
+
+query user queryUserById {
   args {
     userId  string  @required
   }
@@ -23,8 +25,7 @@ query queryUserById {
   shape   userFull
 }
 
-@useConcept(user)
-mutation mutationArchiveUser {
+mutation user mutationArchiveUser {
   args {
     userId  string  @required
   }

@@ -174,10 +174,12 @@ material. Listed here so the index is exhaustive.
   wire-up, lazy embedding, container-executor work, real budget
   enforcement). Each item carries scope + dependencies + effort.
 - [dsl-import-model-refactor.md](dsl-import-model-refactor.md) --
-  design doc + migration plan for replacing the directory-as-namespace
-  + `@useConcept` annotations with explicit Go-style `import (...)`
-  blocks across every DSL construct. Commit 1 (machinery) complete;
-  Commit 2 (file migration) in flight.
+  the import-model pivot landed via PRs #47 / #48 / #49 on 2026-05-19.
+  File-top `use <module>.{ names }` imports + concept-in-signature
+  signatures (`query <Concept> <name>`, etc.) replaced the legacy
+  `@useConcept` / `@use*` family. Doc serves as the shipped-state
+  reference now; the migration scripts live under
+  `scripts/dsl-imports/`.
 
 ---
 

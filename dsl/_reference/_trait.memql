@@ -137,32 +137,25 @@ trait traitIsClusterOwner {
 //   5. Annotations REJECTED on traits
 // =============================================================================
 //
-// The AST converter rejects two annotations on traits with structured
-// error messages. Both are valid on specs but never on traits, because
-// traits are concept-agnostic and shape-agnostic.
-//
-//   @useConcept(...)
-//     Error: `trait %q must not carry an @useConcept(...) annotation
-//             (traits are concept-agnostic; use @useConcept only on
-//             specs that bind to a single concept)`.
-//
-//   @shape("name")
-//     Error: `trait %q must not carry a @shape("name") annotation
-//             (traits are concept-agnostic; bind to a shape only on
-//             specs)`.
+// Traits do not bind to a concept or a shape. The legacy
+// `@useConcept(...)` annotation family was retired in the import-model
+// pivot and is rejected at parse time for every construct kind, not
+// just traits -- declare a file-top `use <module>.{ ... }` import
+// for cross-file dependencies, and use `spec` (not `trait`) when the
+// predicate naturally belongs to a single concept (specs accept an
+// optional `@shape("name")` binding for the post-load
+// ValidateSpecBindings pass).
 //
 // Example of what NOT to write:
 //
-//     // REJECTED: traits cannot bind to a concept.
+//     // REJECTED: traits cannot bind to a concept (and @useConcept
+//     // is retired across the DSL).
 //     @useConcept(participant)
 //     trait traitMatchesParticipant { payload.spaceId == "x" }
 //
 //     // REJECTED: traits cannot bind to a shape.
 //     @shape("participantFull")
 //     trait traitOfShape { payload.active == true }
-//
-// If you need either binding, declare a `spec` instead -- specs require
-// exactly one of them.
 //
 // =============================================================================
 //   6. Mixed-reference bodies are REJECTED
