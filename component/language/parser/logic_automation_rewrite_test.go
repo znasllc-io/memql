@@ -8,8 +8,10 @@ import (
 // Logic struct form rewrites to `func (Logic) NAME(...) (any, error)`
 // with the body's statements inline. The `args { ... }` block lifts
 // to the file top so the parser's existing args attachment handles
-// it; `args.X` references in the body translate to `ctx.X` to match
-// the runtime envelope.
+// it. `args.X` references in the body now pass through verbatim --
+// the engine parser and mutation-template parser learned `args.X`
+// natively as part of F.3 of the ctx-envelope purge, so the rewriter
+// no longer translates them to `ctx.X`.
 func TestNormaliseLogicSource_BasicRewrite(t *testing.T) {
 	src := `@useQuery(queryFoo)
 @description("test")
@@ -32,11 +34,11 @@ logic doFoo {
 	if !strings.Contains(out, "args {") {
 		t.Fatalf("expected file-top args block in rewrite; got %q", out)
 	}
-	if strings.Contains(out, "args.x") {
-		t.Fatalf("expected args.x to translate to ctx.x; got %q", out)
+	if !strings.Contains(out, "queryFoo({ y: args.x })") {
+		t.Fatalf("expected body to carry args.x untranslated; got %q", out)
 	}
-	if !strings.Contains(out, "queryFoo({ y: ctx.x })") {
-		t.Fatalf("expected body to carry the translated call; got %q", out)
+	if strings.Contains(out, "ctx.x") {
+		t.Fatalf("expected no ctx.X translation in body; got %q", out)
 	}
 }
 

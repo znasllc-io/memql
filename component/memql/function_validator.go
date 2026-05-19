@@ -360,6 +360,111 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	return expanded, nil
 }
 
+// expandFunctionCallAllowMutationLeaf expands a Logic function call
+// to its return expression with args substituted, permitting the leaf
+// to be a mutation call. This is the F.6 hook for top-level Logic
+// invocations whose body returns a mutation call -- the plan
+// resolver hoists the resulting FunctionCallExpression into
+// plan.MutationCall so the engine dispatches it through
+// executeMutationFunctionCall.
+//
+// Returns (nil, nil) if the call is not a Logic, the Logic's
+// expression is missing, or the expansion does not yield a
+// top-level FunctionCallExpression.
+func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCallExpression) (ExpressionNode, error) {
+	if call == nil {
+		return nil, nil
+	}
+	key := strings.TrimSpace(call.Name)
+	if key == "" {
+		return nil, nil
+	}
+	fn, ok := v.functions[key]
+	if !ok || fn == nil {
+		return nil, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") {
+		return nil, nil
+	}
+	if fn.Expr == nil {
+		return nil, nil
+	}
+
+	args := call.Args
+	if args == nil {
+		args = make(map[string]any)
+	}
+	if err := v.validateFunctionArgs(fn, args); err != nil {
+		return nil, err
+	}
+
+	expr := cloneExpressionNode(fn.Expr)
+	// Substitute caller args against the Logic's body. We can't call
+	// the regular expandExpressionWithArgs path because that recurses
+	// into expandFunctionCall which rejects mutations. Substitute
+	// ArgReference nodes manually -- they're the only things in a
+	// Logic's `return <mutationCall(args.X)>` body that need
+	// rewriting (the call target itself stays a FunctionCallExpression
+	// pointing at the mutation).
+	substituted, err := v.substituteArgRefsAndCallArgs(expr, args)
+	if err != nil {
+		return nil, err
+	}
+	return substituted, nil
+}
+
+// substituteArgRefsAndCallArgs handles the F.6 case where a Logic's
+// `return <expr>` body is a top-level mutation call -- e.g.
+// `return mutationCreatePartition({ id: args.id, name: args.name })`.
+// We need a fully-substituted top-level FunctionCallExpression so
+// resolvePlanFunctions can hoist it into plan.MutationCall. ArgReference
+// nodes live in the call-args value space (not the ExpressionNode
+// hierarchy), so this walker only fires on FunctionCallExpression
+// targets and rewrites their Args map; non-call expressions pass
+// through unchanged.
+func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, args map[string]any) (ExpressionNode, error) {
+	call, ok := expr.(*FunctionCallExpression)
+	if !ok || call == nil {
+		return expr, nil
+	}
+	newArgs := make(map[string]any, len(call.Args))
+	for k, v := range call.Args {
+		newArgs[k] = substituteArgRefValue(v, args)
+	}
+	return &FunctionCallExpression{Name: call.Name, Args: newArgs}, nil
+}
+
+// substituteArgRefValue walks a value (which may be a nested map /
+// slice produced by parsing object-literal call args) and replaces
+// *ArgReference leaves with values pulled from args. Non-ref values
+// pass through unchanged.
+func substituteArgRefValue(v any, args map[string]any) any {
+	switch t := v.(type) {
+	case *ArgReference:
+		if t == nil {
+			return nil
+		}
+		if val, ok := getNestedValue(args, t.Path); ok {
+			return val
+		}
+		return nil
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = substituteArgRefValue(val, args)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = substituteArgRefValue(val, args)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // getNestedValue retrieves a value from a nested map using dot-separated path.
 // Returns the value and a boolean indicating if the path exists.
 func getNestedValue(data map[string]any, path string) (any, bool) {
@@ -595,6 +700,26 @@ func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *S
 				plan.MutationCall = call
 				plan.Root = nil
 				return nil
+			}
+		}
+	}
+
+	// F.6 -- Logic-calls-mutation dispatch: when a Logic function's
+	// `return <expr>` body is a top-level mutation call, the resolved
+	// expression is a FunctionCallExpression whose target is a
+	// mutation. expandFunctionCall would normally reject that with
+	// "function X is a mutation and cannot be used inside query
+	// expressions". Instead, treat it the same as a direct top-level
+	// mutation call: hoist it to plan.MutationCall so Execute dispatches
+	// through executeMutationFunctionCall.
+	if call, ok := plan.Root.(*FunctionCallExpression); ok && call != nil && functions != nil {
+		if expanded, err := validator.expandFunctionCallAllowMutationLeaf(call); err == nil && expanded != nil {
+			if inner, isCall := expanded.(*FunctionCallExpression); isCall && inner != nil {
+				if fn, err := functions.Get(inner.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "mutation") {
+					plan.MutationCall = inner
+					plan.Root = nil
+					return nil
+				}
 			}
 		}
 	}

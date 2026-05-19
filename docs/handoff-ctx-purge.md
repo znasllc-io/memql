@@ -1,8 +1,9 @@
 # ctx-envelope purge — handoff for follow-up sessions
 
-> **Status:** Logic-construct slice landed; the rest of the purge is
-> open follow-up work. Branch: see the most recent
-> `fix/daily-space-logic-parse` / successor PR.
+> **Status:** Logic slice + F.1 (rewriter) + F.3 (executor) + F.6
+> (Logic→mutation dispatch) landed. F.2, F.4, F.5, F.7 are open
+> follow-up work. Branch: see the most recent
+> `feature/dsl-engine-ctx-purge-e2e` / successor PR.
 
 This doc tracks the remaining work for **removing the legacy `ctx`
 runtime envelope from every DSL construct** -- the directive being
@@ -67,30 +68,26 @@ or `v1:identity:authSession` lands.
 
 ## What's still left
 
-### F.1 -- Rewriter: stop emitting `(ctx any)` and `ctx.output = ...`
+### F.1 -- Rewriter: stop emitting `ctx.output = ...` _(LANDED)_
 
-`component/language/parser/rewriter.go` still generates the legacy
-procedural shape for non-Logic struct forms:
+`component/language/parser/rewriter.go` now emits the canonical
+`return <expr>, nil` shape:
 
-- `emitQuery` writes `ctx.output = <expr>\n  return ctx, nil`
-- `emitMutation` writes `ctx.output = insert(...)\n  return ctx, nil`
-- `emitLogic` writes a trailing `return ctx, nil` when the body has
-  no explicit terminator (a minor leftover that doesn't affect the
-  Logic happy path but should be cleaned up alongside the others)
-- `emitFuncHeader` always emits `func (Kind) NAME(ctx any) <returns>`
-- `translateArgsRefsToCtx` rewrites every `args.X` in filter / shape
-  / insert / update / body bodies to `ctx.X` before tokenisation
+- `emitQuery` writes `return <queryExpr>, nil`
+- `emitMutation` writes `return insert(...)` / `return update(...)`
+- `translateArgsRefsToCtx` is a no-op -- `args.X` passes through to
+  the engine parser, which learned `args.X` natively in F.3
 
-Target shape (matching what Logic already uses internally after my
-slice):
+Carry-overs:
 
-```go
-emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
-// drop "(ctx any)" -- args resolution moves to the engine side
-sb.WriteString("  return ")
-sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape))
-sb.WriteString(", nil\n}")
-```
+- `emitFuncHeader` still emits `(ctx any)` as the parameter name
+  (just a placeholder identifier; the parser's
+  `validateGoStyleFunctionSignature` only checks the type). Renaming
+  to `_` / `args` is cosmetic and can land alongside F.4.
+- `emitLogic` still appends a trailing `return ctx, nil` when the
+  body has no explicit terminator. Bodies the rewriter touches in
+  practice all carry their own `return <expr>`, so this is dead
+  emission -- safe to clean up alongside F.2.
 
 ### F.2 -- Parser: drop the ctx.output body parsers
 
@@ -109,21 +106,17 @@ all delete:
   `parseGoStyleMutationBodyOrLegacy`, which become straight
   delegations to `parseGoStyleQueryBody` / `parseGoStyleMutationBody`
 
-### F.3 -- Executor: resolve `args.X` without the ctx envelope
+### F.3 -- Executor: resolve `args.X` without the ctx envelope _(LANDED)_
 
-`component/memql/parser.go` has multiple places that special-case
-`ctx` as an identifier prefix (see lines 2648, 2725, 3372, 3378-3379).
-`component/memql/policy_evaluator.go:613` and
-`component/memql/policy_function_loader.go:373` also branch on
-`"payload"` / `"ctx"`. These need to learn about `args.X` directly so
-the rewriter can stop translating `args.X` → `ctx.X` at source-text
-time.
+The engine parser (`component/memql/parser.go`), the mutation-template
+parser (`component/memql/mutation_templates.go`), and the policy
+field-ref resolvers (`policy_evaluator.go`, `policy_function_loader.go`)
+all accept `args.X` as a first-class caller-arg reference. Both
+`args.X` and `ctx.X` produce the same `ArgReference` AST node so the
+rest of the validator / executor pipeline stays single-shape.
 
-The cleanest landing: bind the caller's arg map under a top-level
-`args` scope variable (analogous to how `caller.X`, `now`,
-`partition`, `config.X` already resolve). The path resolver should
-walk `args.<field>.<subfield>...` the same way it walks `ctx.<field>`
-today.
+Regression coverage: `component/memql/args_ref_test.go` pins the
+parser path; the existing `caller_ref_test.go` shape sits next to it.
 
 ### F.4 -- Strip `ctx.X` and `(ctx any)` from every remaining .memql
 
@@ -200,23 +193,23 @@ glue lives somewhere between the function dispatcher
 (`engine.executeMutationFunctionCall` and the query evaluator's
 function-call expansion) and the automation step package.
 
-### F.6 -- Logic-calls-mutation dispatch
+### F.6 -- Logic-calls-mutation dispatch _(LANDED)_
 
-Even with multi-step support, single-statement logics that call a
-top-level mutation hit a separate guard:
+`resolvePlanFunctions` (`component/memql/function_validator.go`)
+detects the case where a top-level call resolves to a Logic whose
+return expression is a mutation call, and hoists the inner
+mutation call into `plan.MutationCall` (with caller args
+substituted into the mutation's args map). The engine's existing
+`executeMutationFunctionCall` path runs it. The `function_validator.go:325`
+"function X is a mutation and cannot be used inside query
+expressions" guard remains in place for the general case --
+this hoist intercepts the Logic-leaf pattern before that guard
+fires. Regression coverage:
+`TestResolvePlanFunctions_LogicReturningMutationDispatches`
+and `..._SubstitutesArgs` in `mutation_functions_test.go`.
 
-```
-function "mutationCreatePartition" is a mutation and cannot be used
-inside query expressions
-```
-
-(function_validator.go:325). The guard exists for a real reason --
-mutations have side-effect dispatch that the query evaluator
-doesn't trigger. The fix: when a Logic's `_return` expression is a
-mutation function call, dispatch through `executeMutationFunctionCall`
-rather than the query expression path. Currently this affects
-`logicBootstrapDefaultPartition` (`return mutationCreatePartition(...)`)
-and a handful of identity logics.
+`logicBootstrapDefaultPartition` and the identity logics that
+forward to a mutation now run end-to-end.
 
 ### F.7 -- Documentation cleanup
 

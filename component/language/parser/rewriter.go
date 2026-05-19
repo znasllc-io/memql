@@ -62,17 +62,15 @@ func findMatchingCloseBrace(s string, openIdx int) int {
 	return -1
 }
 
-// argsDotRefMatcher matches `args.X` occurrences for translation to
-// the legacy `ctx.X` envelope form. Identifier chars only; one
-// segment at a time (the parser handles chaining `.Y.Z` itself).
-var argsDotRefMatcher = regexp.MustCompile(`\bargs\.([A-Za-z_][A-Za-z0-9_]*)`)
-
-// translateArgsRefsToCtx swaps `args.X` references for the legacy
-// `ctx.X` envelope form. Engine resolves both to the same caller-
-// arg value; the struct form is the author surface, ctx is the
-// runtime surface. Leaves non-arg references untouched.
+// translateArgsRefsToCtx used to swap `args.X` references for the
+// legacy `ctx.X` envelope form during the transition window before
+// the parser learned `args.X` natively. F.3 of the ctx-envelope
+// purge added native `args.X` recognition to the engine parser and
+// the mutation-template parser, so this translation is a no-op now
+// (preserved as a function call site for the rewriter; remove the
+// helper once every emit site has been audited).
 func translateArgsRefsToCtx(expr string) string {
-	return argsDotRefMatcher.ReplaceAllString(expr, "ctx.$1")
+	return expr
 }
 
 // fileTopUseDecl matches a file-top `use <ns>.<concept>` declaration.
@@ -312,9 +310,9 @@ func emitQuery(name, conceptId, body string) (string, error) {
 	}
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
-	sb.WriteString("  ctx.output = ")
+	sb.WriteString("  return ")
 	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape))
-	sb.WriteString("\n  return ctx, nil\n}")
+	sb.WriteString(", nil\n}")
 	return sb.String(), nil
 }
 
@@ -428,9 +426,9 @@ func emitMutation(name, conceptId, body string) (string, error) {
 	switch parsed.writeKind {
 	case "insert":
 		if idExpr != "" {
-			sb.WriteString(fmt.Sprintf("  ctx.output = insert(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
+			sb.WriteString(fmt.Sprintf("  return insert(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
 		} else {
-			sb.WriteString(fmt.Sprintf("  ctx.output = insert(%s, %s)\n", conceptId, payload))
+			sb.WriteString(fmt.Sprintf("  return insert(%s, %s)\n", conceptId, payload))
 		}
 	case "update":
 		if idExpr == "" {
@@ -443,9 +441,9 @@ func emitMutation(name, conceptId, body string) (string, error) {
 		// -- but emitting it keeps the post-rewrite shape symmetric
 		// with insert and prevents `function not found` at call
 		// time from a silently-dropped load.
-		sb.WriteString(fmt.Sprintf("  ctx.output = update(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
+		sb.WriteString(fmt.Sprintf("  return update(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
 	}
-	sb.WriteString("  return ctx, nil\n}")
+	sb.WriteString("}")
 	return sb.String(), nil
 }
 
