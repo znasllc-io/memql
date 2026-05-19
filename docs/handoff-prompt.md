@@ -1,196 +1,129 @@
 # Handoff prompt — copy this to brief a new implementer
 
-> **STATUS (2026-05-18): NEEDS REVISION BEFORE USE.**
->
-> Key inaccuracies in the pasteable prompt below:
->
-> - **Repo layout changed.** The split shipped; there are now three Go
->   repos tied by `go.work`: `memql/` (core, "post-split residual"),
->   `memql-bff-copresent/` (BFF, extracted from memql), and
->   `memql-cockpit/` (cockpit, extracted). Linux paths under
->   `~/projects/memql/` now — not the macOS `~/projects/memql` +
->   `~/projects/copresent` two-repo layout the prompt describes.
-> - **Initiative A (Multi-Repo BFF Migration) has shipped.** The prompt
->   still lists it as PLANNED. `docs/architecture/multi-repo-migration.md`
->   itself is stale.
-> - **Initiative B (Chat Architecture) was inverted to single-chat.**
->   The two-thread (Group + per-user Team) design was abandoned (commits
->   `8975f33` foundations, `a27db80` misroute classifier dropped,
->   `c570875` copresentConversation tool/builtin/integration dropped).
->   `docs/chat/chat-architecture-plan.md` describes the abandoned design.
-> - **Org renamed** — `visionarys-io` is dead; everywhere is `znasllc-io`.
->   Email is `jsanz@znasllc.io`.
->
-> Revise (or rewrite from current state) before pasting to a new
-> implementer. Everything below is the original prompt, preserved for
-> reference.
-
----
-
-This is the prompt to paste into a new chat (or hand to a developer) when onboarding someone onto any of the in-flight initiatives. Each project has a comprehensive plan document committed to the memql repo; this prompt gets the implementer pointed at the right doc and explains how the user works.
+The prompt below onboards a new agent (or developer) on the memql
+stack. The pattern is "point at CLAUDE.md + the relevant handoff,
+work end-to-end, open a PR." This doc itself ages quickly when it
+enumerates specifics; the source-of-truth pointers below age
+slowly.
 
 ---
 
 ## Prompt to paste
 
 ```
-You're picking up work on the memql / copresent product stack. Several
-initiatives are in flight; pick the one I direct you to (or the one
-with the next pending phase).
+You're picking up work on the memql stack. Repos (Linux, post-split):
 
-REPOSITORIES (both already cloned, both on `main` branch only):
-  /Users/znas/projects/memql      — Go backend / control plane
-  /Users/znas/projects/copresent  — TypeScript/React frontend
+  ~/projects/memql/
+  ├── go.work                   workspace tying the three Go modules together
+  ├── memql/                    core: engine, gRPC, identity, DSL, node-type binaries
+  ├── memql-bff-copresent/      BFF for the CoPresent product (Go, imports memql)
+  └── memql-cockpit/            terminal IDE / ops console (Go, consumes memql-sdk-go)
 
-SHIPPED (no work pending — read the operational doc if you need to
-reason about how it works):
+The CoPresent React/Vite frontend lives in its own repo elsewhere on the
+operator's machine; if you need to touch it, ask for the path.
 
-  IDENTITY SERVICE (in-house auth)
-    Magic-link login, JWKS, admin web app, setup wizard, copresent
-    cutover. All in main. Operational notes:
-    memql/docs/auth/identity-service.md.
+GitHub org: znasllc-io. Email: jsanz@znasllc.io.
 
-  COPRESENT WORKERS (agent-callable computer-use tools)
-    Operational reference at memql/docs/workers/runbook.md. Source:
-    component/worker/, integrations/agent/worker/,
-    cmd/memql-cockpit/internal/worker/. The implementation plan
-    has been removed per the no-stale-docs convention.
+SOURCE OF TRUTH for operational state:
 
-  VOICE / AUDIO ARCHITECTURE
-    Shipped 2026-05-09; the plan doc was deleted per the
-    no-stale-docs rule. Canonical voice catalog, agent.gender +
-    auto-assigned voice, per-agent audio control overlay, and the
-    LiveKit-only ASR path in a Polyphon room are all live. See the
-    "Voice Pipeline (Polyphon)" section of memql/CLAUDE.md for the
-    operational reference.
+  - memql/CLAUDE.md                        engine + DSL + node architecture
+  - memql/docs/CLAUDE.md                   docs layout + index
+  - memql/component/CLAUDE.md              Go components
+  - memql/integrations/CLAUDE.md           Go integrations + plug-in path
+  - memql-bff-copresent/README.md          BFF-specific bootstrapping
+  - memql-cockpit/README.md                cockpit-specific bootstrapping
 
-  DEEPGRAM MIGRATION
-    Shipped 2026-05-11; the plan doc was deleted per the
-    no-stale-docs rule. NVIDIA Riva is gone (DSL builtin, bridge
-    branch, app wiring, voice-catalog hints, config/proto, the
-    integrations/riva package, and all infra/docs). Deepgram is
-    the new auto-selected default for both ASR (Nova-3 streaming
-    WS) and TTS (Aura-2 /v1/speak REST) when
-    MEMQL_DEEPGRAM_API_KEY is set; OpenAI is the startup-time
-    fallback. Mid-session failover is explicitly out of scope.
-    See the "Voice + Video Pipeline" section of memql/CLAUDE.md
-    and docs/polyphon-architecture.md for the operational
-    reference.
+  Domain-specific deep-dives are linked from each CLAUDE.md.
 
-  INITIATIVE C — REALTIME VOICE + VIDEO ARCHITECTURE
-    Shipped through Phase 11 in 2026-05; the plan doc was
-    deleted per the no-stale-docs rule. Voice transport
-    collapsed to 1:1 GA-only on LiveKit Agents 1.5 (Deepgram
-    Nova-3 STT + custom memql LLM plugin BYO + Deepgram Aura-2
-    TTS), the Go Bridge Agent retired in favor of the Python
-    voice-agent process under voice-agent/, Anam + Simli
-    avatar plugins live, parallel audioControl + videoControl
-    fields, PresencePanel orb toggles bigger / bounded /
-    responsive. Open debugging tickets continue under
-    docs/voice/voice-agent-handoff.md. Operational reference:
-    "Voice + Video Pipeline (LiveKit Agents 1.5)" section of
-    memql/CLAUDE.md.
+AUTO-MEMORY (persists across sessions, indexed by MEMORY.md):
 
-  INITIATIVE D — POLICIES + DSL HYGIENE REFACTOR + DSL CONSOLIDATION
-    Phases 0-10 of the policies initiative shipped (plan doc
-    self-deleted at 65d7088). Follow-on dependency-tree
-    refactor shipped 2026-05:
-      Phase A — specs broaden to atomic boolean predicates
-                (row-spec compiles to SQL; context-spec
-                evaluates in-process; bodies that mix both
-                are rejected).
-      Phase B — struct-form `query NAME { concept ... filter
-                ... shape ... }` syntax; 115 simple queries
-                migrated mechanically.
-      Phase C — engine rejects policies whose body would
-                compile as a context-spec (pure caller
-                booleans must live in specs/ and be called
-                via `spec("name")`).
-    Operational reference: the "DSL dependency tree",
-    "Specs", "Policies", and "Key Concepts" sections of
-    memql/CLAUDE.md.
+  ~/.claude/projects/-home-znas-projects-memql/memory/
 
-PLANNED (brainstorm done, comprehensive plan committed, not yet
-executed — pick whichever I direct you to):
+  Read MEMORY.md first; it indexes every saved user / feedback /
+  project / reference memory. Apply feedback memories immediately;
+  treat project memories as snapshots that may be stale.
 
-  INITIATIVE A — MULTI-REPO BFF MIGRATION
-    Plan: memql/docs/architecture/multi-repo-migration.md
-    Memory: <memory>/project_bff_architecture.md
-    Splits memql into a core Go library + per-client BFF repos
-    (copresent-bff, memql-cockpit-bff, portal-bff), tied together
-    via go.work for development. 8 phases.
+HANDOFF DOCS (currently open work, in repo at memql/docs/):
 
-  INITIATIVE B — CHAT ARCHITECTURE
-    Plan: memql/docs/chat/chat-architecture-plan.md
-    Memory: <memory>/project_chat_architecture.md
-    Two-thread chat (Group + per-user Team) with per-human agent
-    teams, hard 1-active-space-per-human cap, agents unbounded
-    across spaces, discussion mode (per-private-thread, hybrid
-    trigger, activity-level controlled), confidence-tiered misroute
-    safety net, copresent_conversation knowledge domain +
-    copresentConversation tool, canvas inheritance + Share-to-group,
-    daily-space adjustment. 10 phases.
+  - handoff-ctx-purge.md                   historical record of the
+                                           shipped ctx-envelope purge;
+                                           deletable once a release ships.
+  - planning/portal-ai-router-handoff.md   product spec for the Portal
+                                           team; under product review.
 
-EVERY PLAN opens with a "Section 0: Pre-flight" that captures every
-working convention I expect — repo rules, the four-phase workflow
-(familiarize → brainstorm → plan → execute), the triage rule, the
-pre-prod deletion policy, doc hygiene, the Makefile-canonical rule,
-the AAA security framing, my brainstorming style, and pointers to
-the persistent memory directory at:
+  Audit on demand: `ls memql/docs/handoff*.md memql/docs/planning/*.md`
+  and read the STATUS banner at the top of each.
 
-  /Users/znas/Library/Application Support/Claude/local-agent-mode-sessions/<...>/spaces/<...>/memory/
+WORKING CONVENTIONS (the load-bearing rules):
 
-That memory directory's MEMORY.md is the index of all rules and
-project context. project_repos.md, project_chat_architecture.md,
-project_realtime_voice_video.md, project_policies_feature.md,
-project_bff_architecture.md, project_voice_provider_evaluation.md,
-project_tasks_model_direction.md, and the feedback_*.md files
-(especially feedback_canvas_over_banners.md and
-feedback_dsl_ctx_convention.md) are the ones you'll care about most.
+  Workflow
+    - PR-based. One feature branch per task; commit to the branch,
+      push it, open a PR, merge via the GitHub UI or `gh pr merge`.
+    - Before opening a PR (and before any merge), `git fetch origin
+      main` and rebase the branch onto it. If the rebase produces
+      conflicts, resolve them on the branch -- never on main.
+    - When work spans repos, one PR per repo; cross-link them in the
+      PR descriptions.
+    - Push to feature branches is fine; pushes to `main` are blocked
+      by policy and should never be attempted.
 
-GROUND RULES THAT MATTER MOST (full detail in Section 0 of each plan):
+  Diffs + staging
+    - Stage files by explicit path (`git add <file>`). Never `git add
+      -A` or `git add .` -- the operator runs multiple sessions in
+      the same tree and untracked files from a sibling session must
+      not get swept in.
+    - Commit messages via `git commit -F /tmp/msg.txt`; heredoc
+      breaks on colons + quotes.
+    - Sign every commit with the co-author trailer:
+        Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
-  - Commit directly to `main` in both repos. Never feature-branch
-    unless I explicitly ask.
-  - Stage files with `git add <path>` per file. Never `git add -A`
-    or `git add .` (multiple sessions run against the same tree).
-  - When given a multi-step plan, execute end-to-end without
-    pausing between phases. Use parallel agents aggressively.
-  - At the end, COMMIT changes locally. DO NOT push. I validate
-    locally before authorizing push.
-  - Pre-production: delete dead code outright. No @deprecated, no
-    fallback shims, no "TODO: remove later."
-  - Stale docs are worse than missing docs. Update CLAUDE.md and
-    docs/ in the same change as the code.
-  - No emojis in any output (code, commits, docs, replies).
-  - The Makefile is the canonical entry point for every build/run/
-    test command. Multi-step logic extracts to scripts/<area>/<name>.sh
-    following the project's bash conventions.
+  Code
+    - Pre-production: delete dead code outright. No @deprecated, no
+      fallback shims, no "TODO: remove later." Update CLAUDE.md and
+      docs/ in the SAME change as the code -- stale docs are worse
+      than missing docs.
+    - The Makefile is canonical for every build/run/test command.
+      Multi-step logic extracts to `scripts/<area>/<name>.sh` with
+      `#!/usr/bin/env bash` + `set -euo pipefail` + function-based
+      structure.
+    - No emojis anywhere (code, commits, docs, PR bodies, replies).
+    - Backend identifies as "SI"; user-facing copy says "AI".
+
+  Execution
+    - When the operator says "do it end-to-end," run uninterrupted.
+      Don't pause between phases. Use parallel agents aggressively.
+    - The operator verifies UX; the agent verifies lower-level state
+      (docker logs, DB queries, build/test). Don't ask the operator
+      to grep / psql / navigate the UI.
+    - "Branch off what you have so far" = preserve current branch's
+      commits in the new branch, not branch off main fresh.
 
 WHAT TO DO RIGHT NOW:
 
-  1. Read the relevant plan document end to end.
-  2. Read the memory file pointed to by that plan
-     (project_bff_architecture.md, project_chat_architecture.md,
-     project_realtime_voice_video.md, or
-     project_policies_feature.md).
-  3. Verify your dev environment (each plan has a quickstart
-     section near the end). Confirm the existing stack boots
-     cleanly before touching new code.
-  4. Tell me which phase you're starting and what the commit
-     boundary will be. Then go.
+  1. Read the relevant CLAUDE.md(s) end-to-end.
+  2. Read the handoff doc the operator pointed you at (if any).
+  3. Skim ~/.claude/projects/-home-znas-projects-memql/memory/MEMORY.md.
+  4. Confirm the dev stack boots cleanly before touching new code:
+       cd ~/projects/memql/memql && make dev-cluster-restart
+     (or `make dev-refresh` for non-purging rebuilds).
+  5. Tell the operator which branch you're cutting and what the
+     commit boundary will be. Then go.
 
-If anything in the plan contradicts what's in memory, memory wins
-and we update the plan. If something seems wrong or unclear, ask
-before assuming.
+If memory and a doc conflict, memory wins and you update the doc in
+the same PR. If anything is genuinely unclear, ask before assuming.
 ```
 
 ---
 
 ## How to use this prompt
 
-- Default: send the full prompt above and tell the implementer which initiative (A or B) to take. They read that plan, ask which phase to start, and execute end-to-end and commit (don't push) at the phase boundary.
-- For a focused hand-off, edit the prompt to mention only the relevant initiative.
-- Once they've read the plan, they should ask for the phase to start with, then execute end-to-end and commit (don't push) at the phase boundary.
-
-The full memory directory + the implementation plan docs together carry every decision, every rule, every dev-env setup step they need. They shouldn't have to ask you to re-explain anything that's already captured — and if they do, that's a signal something's missing from the docs and worth adding.
+- Default: paste the full prompt above and tell the implementer
+  which handoff (or `git log` slice) to start from. They read the
+  pointers, ask which branch they're cutting, and execute.
+- For a focused handoff, edit the prompt to mention only the
+  relevant CLAUDE.md / handoff doc and remove unrelated context.
+- The CLAUDE.md files + memory directory carry every operational
+  decision and convention. The implementer shouldn't have to ask
+  for re-explanations of anything that's already captured -- if
+  they do, that's a signal the source-of-truth pointer above is
+  missing or stale; add it.

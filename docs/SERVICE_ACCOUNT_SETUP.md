@@ -24,7 +24,7 @@ The service account has the following permissions:
 ## Key File Location
 
 ```
-/Users/znas/.gcloud/memql-sa-key.json
+~/.gcloud/memql-sa-key.json
 ```
 
 **IMPORTANT**: This file contains sensitive credentials. Never commit it to version control.
@@ -36,7 +36,7 @@ The service account has the following permissions:
 ```bash
 gcloud auth activate-service-account \
   memql-deploy@fast-fire-486523-f3.iam.gserviceaccount.com \
-  --key-file=/Users/znas/.gcloud/memql-sa-key.json
+  --key-file=~/.gcloud/memql-sa-key.json
 ```
 
 ### Verify Activation
@@ -126,7 +126,7 @@ If you see permission errors during deployment:
 # Re-activate the service account
 gcloud auth activate-service-account \
   memql-deploy@fast-fire-486523-f3.iam.gserviceaccount.com \
-  --key-file=/Users/znas/.gcloud/memql-sa-key.json
+  --key-file=~/.gcloud/memql-sa-key.json
 
 # Verify it's active
 gcloud auth list
@@ -137,13 +137,13 @@ gcloud auth list
 Ensure the key file exists:
 
 ```bash
-ls -la /Users/znas/.gcloud/memql-sa-key.json
+ls -la ~/.gcloud/memql-sa-key.json
 ```
 
 If missing, recreate it:
 
 ```bash
-gcloud iam service-accounts keys create /Users/znas/.gcloud/memql-sa-key.json \
+gcloud iam service-accounts keys create ~/.gcloud/memql-sa-key.json \
   --iam-account=memql-deploy@fast-fire-486523-f3.iam.gserviceaccount.com
 ```
 
