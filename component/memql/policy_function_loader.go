@@ -274,23 +274,25 @@ func policyFunctionFromDef(origin, dirTier string, fd *languageParser.FunctionDe
 		return nil, fmt.Errorf("policy filename %q must match function name %q", base, fd.Name)
 	}
 
-	// Phase C check -- reject policies whose body is spec-shaped.
+	// Decision 2 of the MVP-foundation rule lock (see
+	// docs/planning/dsl-engine-mvp-foundation.md): a policy whose
+	// body has none of @audited / @cacheable / @traces_persisted /
+	// @frontend_visible / @returns_trace, calls no policy()/spec()
+	// sub-routine, returns bool, and reads only caller.* is
+	// structurally a context-spec wearing a policy hat. The loader
+	// rejects with a precise migration message naming the target
+	// spec file path.
 	//
-	// A spec-shaped body:
-	//   - is a pure boolean expression (no policy() / spec() /
-	//     other function calls)
-	//   - references only caller.* (would compile as a context-spec)
-	//   - carries no policy-only annotations (@audited /
-	//     @frontend_visible / @traces_persisted / @cacheable /
-	//     @returns_trace)
-	//   - the policy itself doesn't take args the body uses
-	//     (no ctx.input / ctx.* references in the body)
-	//
-	// When all four conditions hold the body is structurally a
-	// context-spec wearing a policy hat -- redundant, since specs
-	// are the atomic predicate primitive. Refactor to a spec.
+	// The four-condition check is implemented in isPolicySpecShaped.
+	// Decision 2 nominally lists two conditions (no annotations + no
+	// sub-policy calls); the additional two (bool return + no args)
+	// are guard rails preventing false-positive rejections of
+	// obviously-policy bodies that happen to lack annotations.
 	if reason := isPolicySpecShaped(out); reason != "" {
-		return nil, fmt.Errorf("policy %q has a spec-shaped body (%s) -- define as a spec under dsl/v1/specs/v1/<namespace>/ and compose via `spec(%q)` from policy bodies", fd.Name, reason, fd.Name)
+		return nil, fmt.Errorf(
+			"policy %q has no policy-only annotations and no sub-policy calls (%s); author as a spec instead. Move to dsl/specs/<namespace>/%s.memql, change the receiver to `spec`, and replace `policy(%q)` calls with `spec(%q)`",
+			fd.Name, reason, fd.Name, fd.Name, fd.Name,
+		)
 	}
 
 	return out, nil
