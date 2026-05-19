@@ -632,6 +632,15 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 	switch funcType {
 	case FunctionTypeAutomation:
 		body, err = p.parseGoStyleAutomationBody(name)
+	case FunctionTypeLogic:
+		// Logic functions are procedural blocks called from automation
+		// steps. Same body shape as an automation: zero or more
+		// `name := <expr>` statements, optional control flow, and a
+		// final `return <expr>` terminator. We reuse the automation
+		// body parser; the `_return` synthetic step its `return`
+		// branch emits is what the executor evaluates as the logic's
+		// returned value.
+		body, err = p.parseGoStyleAutomationBody(name)
 	case FunctionTypeMutation:
 		body, err = p.parseGoStyleMutationBodyOrLegacy()
 	case FunctionTypeQuery:

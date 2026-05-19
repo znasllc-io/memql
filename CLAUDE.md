@@ -963,17 +963,21 @@ reach the event from within the automation body.
 collides with one of these names is rejected at load time — keeps
 the resolution rules unambiguous.
 
-**Procedural form.** The legacy `func (Query|Mutation|Automation|Policy)
-NAME(ctx any) (any, error) { ... }` shape still exists for functions
-that need branching or multi-step composition (mutation-with-update-then-insert,
-conditional automations, audited policies). Inside that body, the
-runtime envelope is exposed as `ctx.input` / `ctx.actor` /
-`ctx.partition` / `ctx.now` / `ctx.config` / `ctx.output` /
-`ctx.error` / `ctx.trace`. The struct-form rewriter translates
-`args.X` → `ctx.X` and leaves `now` / `actor.X` / etc. as bare
-references the engine already understands. So the struct form is
-the canonical author surface; the procedural form is the underlying
-runtime contract.
+**Procedural form (internal only).** The struct-form rewriter
+expands every author-side block to a `func (Receiver) NAME(ctx any)
+(any, error) { ... }` shape for the engine's parser. Inside that
+post-rewrite text the runtime envelope is `ctx.input` / `ctx.actor`
+/ `ctx.partition` / `ctx.now` / `ctx.config` / `ctx.output` /
+`ctx.error` / `ctx.trace`, and `args.X` references get translated
+to `ctx.X`. Authors should never write that shape directly --
+**ctx is gone from the author surface for every receiver kind**.
+Use the struct form (`query NAME { args { ... } filter ... shape
+... }`, `logic NAME { args { ... } body { ... return <expr> } }`,
+etc.). The full removal of the `(ctx any)` parameter, the
+`ctx.output = ...` boilerplate, and the `args.X → ctx.X` source
+rewrite is in flight -- see
+[docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md) for the
+remaining parser / executor / DSL work.
 
 **Receivers exempt entirely:**
 - **Specs** keep their `bool` return — they compile into SQL filter
@@ -1253,6 +1257,37 @@ mutation mutationCreateSpace {
 mutations that read-merge-validate-write an existing row instead of
 inserting a new one. Exactly one `insert` OR `update` block per
 mutation.
+
+### Logic
+
+Imperative procedure called from an automation step. `args { ... }`
+declares inputs; `body { ... }` is a sequence of named statements
+ending in `return <expr>`. The single-statement form is the common
+case:
+
+```memql
+@enabled
+@useBuiltin(ensureDailySpaceForUser)
+@description("On user creation, ensure today's daily space exists.")
+logic logicProvisionDailySpaceOnUserCreate {
+  args {
+    event object @required
+  }
+  body {
+    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+  }
+}
+```
+
+Multi-statement bodies (intermediate `name := <call>` steps with
+side effects, followed by a trailing `return <expr>`) parse today
+but the function executor doesn't yet walk them end-to-end -- the
+loader rejects with a clear error pointing the author at the
+single-statement form. The step-runner-backed Logic invocation
+path is tracked in [docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md#f5----multi-step-logic-execution).
+
+Logic functions don't write `ctx.output = ...`; the body's
+trailing `return <expr>` is the function's return value.
 
 ### Prompts
 SI prompt templates with input schemas and default providers. Struct

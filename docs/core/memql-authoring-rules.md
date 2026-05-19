@@ -857,15 +857,19 @@ mutation example {
 }
 ```
 
-**Procedural form (legacy escape hatch).** For mutations with
-branching, automations, audited policies, and any function that
-needs multi-step composition, the legacy `func (Receiver) NAME(ctx any)
-(any, error) { ... }` form still works. Inside that body the
-runtime envelope is exposed as `ctx.input`, `ctx.actor`,
-`ctx.partition`, `ctx.now`, `ctx.config`, plus `ctx.output` /
-`ctx.error` / `ctx.trace`. The struct-form rewriter translates
-`args.X` → `ctx.X` for the engine; bare `now` / `actor.X` /
-`partition` resolve to the same envelope fields.
+**Procedural form (internal post-rewrite shape, not for authors).**
+The struct-form rewriter still emits a `func (Receiver) NAME(ctx any)
+(any, error) { ... }` shape for the engine parser, where the runtime
+envelope appears as `ctx.input`, `ctx.actor`, `ctx.partition`,
+`ctx.now`, `ctx.config`, plus `ctx.output` / `ctx.error` /
+`ctx.trace`, and `args.X` references get translated to `ctx.X`.
+**Don't author that shape.** It's an implementation detail being
+removed -- see [docs/handoff-ctx-purge.md](../handoff-ctx-purge.md).
+The struct form is the surface every author works with.
+
+For Logic bodies the author surface is already ctx-free: write
+`body { ... ; return <expr> }`, reach inputs via `args.X`, never
+write `ctx.output = ...`.
 
 **Why `args.X` is required (not bare).** In a mutation's `insert`
 block, the keys ARE bare field names of the row's payload. Saying
