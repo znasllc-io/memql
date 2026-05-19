@@ -105,8 +105,17 @@ Active planning docs only -- removed when work ships. Currently:
 Cross-session handoff notes for ongoing refactors. Removed when the
 work fully lands.
 
-- [handoff-automations-logic-followups.md](handoff-automations-logic-followups.md) -- automations + logic struct-form retirement (Phase F.1-F.6 follow-ups).
-- [handoff-ctx-purge.md](handoff-ctx-purge.md) -- removing the legacy `(ctx any)` parameter, `ctx.output = ...` boilerplate, and `args.X → ctx.X` rewriter pass from every non-Logic receiver. Logic slice landed; the rest is pending.
+- [handoff-prompt.md](handoff-prompt.md) -- meta-template: the briefing
+  prompt for onboarding a new implementer (agent or developer). Points
+  at CLAUDE.md, the memory directory, and the active handoff list below.
+- [handoff-ctx-purge.md](handoff-ctx-purge.md) -- ctx-envelope purge
+  (F.1-F.7). Shipped end-to-end; kept as the historical record of the
+  migration. Deletable once the repo has cut a release with the
+  purged form.
+- [handoff-computer-use-scope-elevation.md](handoff-computer-use-scope-elevation.md) --
+  per-task scope-elevation card flow. Feature is absent from the current
+  tree; needs a product call (deferred, replaced, or rebuild?) before
+  anyone resumes.
 
 ---
 
