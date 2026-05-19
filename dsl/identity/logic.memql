@@ -50,7 +50,7 @@
 // iterating all of it daily is cheap.
 @useQuery(queryExpiredPendingAccessRequests, queryGlobalVariable)
 @useMutation(mutationExpireAccessRequest)
-@description("Imperative body of automation accessRequestExpirySweep (migrated from the legacy func form).")
+@description("Daily 04:00 UTC sweep that ages out pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30) by stamping status='expired'. Per-row windowing via addDuration(createdAt, P{N}D) since MemQL filters can't push the duration math down. Pending queue is small (admin), so daily walk is cheap.")
 logic logicAccessRequestExpirySweep {
   args {
     event object @required
@@ -97,7 +97,7 @@ logic logicAccessRequestExpirySweep {
 // MemQL parser limitation + email-delivery delegation: see header
 // of accountDeletionReminder7Days.
 @useQuery(queryUsersInDeletionCooldown)
-@description("Imperative body of automation accountDeletionReminder25Days (migrated from the legacy func form).")
+@description("Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days into their deletion cooldown -- final notice before accountDeletionSweep performs the hard delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets exactly one reminder at this milestone.")
 logic logicAccountDeletionReminder25Days {
   args {
     event object @required
@@ -158,7 +158,7 @@ logic logicAccountDeletionReminder25Days {
 // literals in filter comparisons), so windowing happens per-row
 // inside the loop.
 @useQuery(queryUsersInDeletionCooldown)
-@description("Imperative body of automation accountDeletionReminder7Days (migrated from the legacy func form).")
+@description("Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D) on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email delivery is consumed by the component/server subscriber.")
 logic logicAccountDeletionReminder7Days {
   args {
     event object @required
@@ -228,7 +228,7 @@ logic logicAccountDeletionReminder7Days {
 //     time inside the loop.
 @useQuery(queryAuthSessionsForUser, queryGlobalVariable, queryUsersScheduledForDeletion)
 @useMutation(mutationDeleteUserHard)
-@description("Imperative body of automation accountDeletionSweep (migrated from the legacy func form).")
+@description("Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via mutationDeleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
 logic logicAccountDeletionSweep {
   args {
     event object @required
@@ -291,7 +291,7 @@ logic logicAccountDeletionSweep {
 // against `timestamp()`, same as accessRequestExpirySweep -- MemQL
 // can't push that into the filter today.
 @useQuery(queryExpiredAuditEvents, queryGlobalVariable)
-@description("Imperative body of automation auditEventRetentionSweep (migrated from the legacy func form).")
+@description("Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.")
 logic logicAuditEventRetentionSweep {
   args {
     event object @required
@@ -348,7 +348,7 @@ logic logicAuditEventRetentionSweep {
 // in filter comparisons.
 @useQuery(queryExpiredMagicLinkRequests)
 @useMutation(mutationConsumeMagicLinkRequest)
-@description("Imperative body of automation magicLinkExpirySweep (migrated from the legacy func form).")
+@description("Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.")
 logic logicMagicLinkExpirySweep {
   args {
     event object @required
@@ -372,7 +372,7 @@ logic logicMagicLinkExpirySweep {
 //
 // Emits a delegation.created event when a new delegation is created.
 // Used for audit logging and downstream event processing.
-@description("Imperative body of automation onDelegationCreated (migrated from the legacy func form).")
+@description("Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the delegation id + identity / agent / role / scope fields for audit logging and downstream event processing.")
 logic logicOnDelegationCreated {
   args {
     event object @required
@@ -424,7 +424,7 @@ logic logicOnDelegationCreated {
 // here unconditionally. The internal flag is set by the magic-link
 // verifier when the registering email matches IDENTITY_INTERNAL_DOMAINS.
 @useMutation(mutationCreatePartition, mutationGrantPartitionAccess)
-@description("Imperative body of automation provisionPersonalPartitionOnFirstLogin (migrated from the legacy func form).")
+@description("On v1:identity:user create for an external (non-internal) user, materialises a per-user 'personal' partition (slug='user-<hash(primaryEmail)>') and grants the user owner role on it. Internal users skip this entirely -- they receive cluster-wide access via the IDENTITY_INTERNAL_DEFAULT_ROLE the magic-link verifier stamps at first login. Idempotent (both inserts are append-only versions of the same row).")
 logic logicProvisionPersonalPartitionOnFirstLogin {
   args {
     event object @required
