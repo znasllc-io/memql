@@ -173,8 +173,11 @@ func renderMemQLValue(value any) string {
 
 func isRuntimeReference(value string) bool {
 	return strings.HasPrefix(value, "$") ||
+		value == "event" ||
 		strings.HasPrefix(value, "event.") ||
+		value == "item" ||
 		strings.HasPrefix(value, "item.") ||
+		value == "index" ||
 		strings.HasPrefix(value, "index.") ||
 		strings.Contains(value, ".result.") ||
 		strings.Contains(value, ".metadata.")

@@ -334,6 +334,20 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 		return nil, err
 	}
 
+	// Builtin functions have no DSL body -- their behaviour lives in a
+	// Go executor named by fn.Executor. The validator emits a
+	// BuiltinFunctionExpression so the evaluator dispatches through
+	// `evaluateBuiltinFunctionExpression` (which calls the registered
+	// builtinExecutorHandler) instead of treating the call as an
+	// unexpanded user function.
+	if fn.Executor != "" && fn.Expr == nil {
+		return &BuiltinFunctionExpression{
+			Name:     fn.Name,
+			Executor: fn.Executor,
+			Args:     args,
+		}, nil
+	}
+
 	// Clone the function expression so we don't modify the original
 	expr := cloneExpressionNode(fn.Expr)
 
