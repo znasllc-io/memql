@@ -9,14 +9,14 @@
 shape budgetFull {
   row.id
   row.createdAt
-  budget.scope
-  budget.scopeId
-  budget.periodType
-  budget.limitUSD
-  budget.alertThresholdPct
-  budget.alertSent
-  budget.resetAt
-  budget.active
+  payload.scope
+  payload.scopeId
+  payload.periodType
+  payload.limitUSD
+  payload.alertThresholdPct
+  payload.alertSent
+  payload.resetAt
+  payload.active
 }
 
 @row
@@ -25,30 +25,30 @@ shape budgetFull {
 shape callFull {
   row.id
   row.createdAt
-  call.requestId
-  call.agentId
-  call.userId
-  call.spaceId
-  call.promptName
-  call.policyName
-  call.vendor
-  call.model
-  call.providerName
-  call.inputTokens
-  call.outputTokens
-  call.cachedInputTokens
-  call.tokensEstimated
-  call.inputCost
-  call.outputCost
-  call.cachedInputCost
-  call.totalCost
-  call.pricingConfigured
-  call.timeToFirstTokenMs
-  call.totalDurationMs
-  call.tokensPerSec
-  call.streaming
-  call.outcome
-  call.errorCategory
-  call.errorMessage
-  call.fallbackFromModel
+  payload.requestId
+  payload.agentId
+  payload.userId
+  payload.spaceId
+  payload.promptName
+  payload.policyName
+  payload.vendor
+  payload.model
+  payload.providerName
+  payload.inputTokens
+  payload.outputTokens
+  payload.cachedInputTokens
+  payload.tokensEstimated
+  payload.inputCost
+  payload.outputCost
+  payload.cachedInputCost
+  payload.totalCost
+  payload.pricingConfigured
+  payload.timeToFirstTokenMs
+  payload.totalDurationMs
+  payload.tokensPerSec
+  payload.streaming
+  payload.outcome
+  payload.errorCategory
+  payload.errorMessage
+  payload.fallbackFromModel
 }

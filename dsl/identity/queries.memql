@@ -10,7 +10,7 @@ query queryAccessForUser {
   args {
     userId  string  @required
   }
-  filter  partitionAccess.userId==args.userId; partitionAccess.active==true; traitIsActiveRecord
+  filter  payload.userId==args.userId; traitIsActiveRecord
   shape   partitionAccessFull
 }
 
@@ -67,7 +67,7 @@ query queryActiveDelegationsForAgent {
   args {
     agentId  string  @required
   }
-  filter  delegation.agentId==args.agentId; delegation.active==true; traitIsActiveRecord
+  filter  payload.agentId==args.agentId; traitIsActiveRecord
   shape   delegationFull
 }
 
@@ -79,7 +79,7 @@ query queryActiveUsers {
     role     string
     groupId  string
   }
-  filter  traitIsActiveRecord; ?.user.role==args.role; ?.user.groupIds has args.groupId
+  filter  traitIsActiveRecord; ?.payload.role==args.role; ?.payload.groupIds has args.groupId
   shape   userFull
 }
 
@@ -117,7 +117,7 @@ query queryAuditEventsByActor {
   args {
     userId  string  @required
   }
-  filter  auditEvent.actorUserId==args.userId
+  filter  payload.actorUserId==args.userId
   shape   auditEventFull
 }
 
@@ -151,7 +151,7 @@ query queryAuditEventsByTarget {
   args {
     userId  string  @required
   }
-  filter  auditEvent.targetId==args.userId
+  filter  payload.targetId==args.userId
   shape   auditEventFull
 }
 
@@ -185,7 +185,7 @@ query queryAuthCodeByCodeHash {
   args {
     codeHash  string  @required
   }
-  filter  authCode.codeHash==args.codeHash
+  filter  payload.codeHash==args.codeHash
   shape   authCodeFull
 }
 
@@ -223,7 +223,7 @@ query queryAuthSessionByPreviousRefreshTokenHash {
   args {
     previousRefreshTokenHash  string  @required
   }
-  filter  authSession.previousRefreshTokenHash==args.previousRefreshTokenHash
+  filter  payload.previousRefreshTokenHash==args.previousRefreshTokenHash
   shape   authSessionFull
 }
 
@@ -262,7 +262,7 @@ query queryAuthSessionByRefreshTokenHash {
   args {
     refreshTokenHash  string  @required
   }
-  filter  authSession.refreshTokenHash==args.refreshTokenHash
+  filter  payload.refreshTokenHash==args.refreshTokenHash
   shape   authSessionFull
 }
 
@@ -295,7 +295,7 @@ query queryAuthSessionByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  authSession.tokenHash==args.tokenHash
+  filter  payload.tokenHash==args.tokenHash
   shape   authSessionFull
 }
 
@@ -330,7 +330,7 @@ query queryAuthSessionsForSubject {
   args {
     subject  string  @required
   }
-  filter  authSession.subject==args.subject
+  filter  payload.subject==args.subject
   shape   authSessionFull
 }
 
@@ -391,7 +391,7 @@ query queryDelegationsByIdentity {
   args {
     identityId  string  @required
   }
-  filter  delegation.identityId==args.identityId; traitIsActiveRecord
+  filter  payload.identityId==args.identityId; traitIsActiveRecord
   shape   delegationFull
 }
 
@@ -425,7 +425,7 @@ query queryExpiredActiveDelegations {
   args {
     now  string  @required
   }
-  filter  delegation.active==true; delegation.expiresAt<args.now
+  filter  traitIsActiveRecord; payload.expiresAt<args.now
   shape   delegationFull
 }
 
@@ -459,7 +459,7 @@ query queryExpiredActiveDelegations {
 @useConcept(auditEvent)
 @description("All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.")
 query queryExpiredAuditEvents {
-  filter  auditEvent.action!=""
+  filter  payload.action!=""
   shape   auditEventFull
 }
 
@@ -493,7 +493,7 @@ query queryExpiredConsumedAuthCodes {
   args {
     now  string  @required
   }
-  filter  authCode.expiresAt<args.now
+  filter  payload.expiresAt<args.now
   shape   authCodeFull
 }
 
@@ -527,7 +527,7 @@ query queryExpiredMagicLinkRequests {
   args {
     now  string  @required
   }
-  filter  magicLinkRequest.expiresAt<args.now
+  filter  payload.expiresAt<args.now
   shape   magicLinkRequestFull
 }
 
@@ -562,7 +562,7 @@ query queryExpiredMagicLinkRequests {
 @useConcept(accessRequest)
 @description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
 query queryExpiredPendingAccessRequests {
-  filter  accessRequest.status=="pending"
+  filter  traitStatusIsPending
   shape   accessRequestFull
 }
 
@@ -623,7 +623,7 @@ query queryInvitationByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  invitation.kind=="guest"; invitation.tokenHash==args.tokenHash
+  filter  payload.kind=="guest"; payload.tokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -658,7 +658,7 @@ query queryMagicLinkRequestByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  magicLinkRequest.tokenHash==args.tokenHash
+  filter  payload.tokenHash==args.tokenHash
   shape   magicLinkRequestFull
 }
 
@@ -686,7 +686,7 @@ query queryMembersOfPartition {
   args {
     partitionName  string  @required
   }
-  filter  partitionAccess.partitionName==args.partitionName; partitionAccess.active==true; traitIsActiveRecord
+  filter  payload.partitionName==args.partitionName; traitIsActiveRecord
   shape   partitionAccessFull
 }
 
@@ -710,7 +710,7 @@ query queryPartitionsForUser {
   args {
     userId  string  @required
   }
-  filter  partitionAccess.userId==args.userId; partitionAccess.active==true; traitIsActiveRecord
+  filter  payload.userId==args.userId; traitIsActiveRecord
   shape   partitionAccessFull
 }
 
@@ -742,7 +742,7 @@ query queryPatIdentitiesForUser {
   args {
     userId  string  @required
   }
-  filter  identity.userId==args.userId; identity.identityType=="api_key"
+  filter  payload.userId==args.userId; traitIdentityIsApiKey
   shape   patSummary
 }
 
@@ -775,7 +775,7 @@ query queryPatIdentityById {
   args {
     identityId  string  @required
   }
-  filter  identity.identityType=="api_key"; id==args.identityId
+  filter  traitIdentityIsApiKey; id==args.identityId
   shape   identityFull
 }
 
@@ -811,7 +811,7 @@ query queryPatIdentityByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  identity.identityType=="api_key"; identity.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsApiKey; payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -833,7 +833,7 @@ query queryPatIdentityByKeyHash {
 @useConcept(accessRequest)
 @description("Access requests with status=pending; backs the admin review queue.")
 query queryPendingAccessRequests {
-  filter  accessRequest.status=="pending"
+  filter  traitStatusIsPending
   shape   accessRequestFull
 }
 
@@ -844,7 +844,7 @@ query queryRecentAuditEvents {
   args {
     category  string
   }
-  filter  ?.auditEvent.category==args.category
+  filter  ?.payload.category==args.category
   shape   auditEventFull
 }
 
@@ -901,7 +901,7 @@ query queryUserByEmail {
   args {
     primaryEmail  string  @required
   }
-  filter  user.primaryEmail==args.primaryEmail; traitIsActiveRecord
+  filter  payload.primaryEmail==args.primaryEmail; traitIsActiveRecord
   shape   userFull
 }
 
@@ -981,7 +981,7 @@ query queryUsersActiveInSpace {
   args {
     spaceId  string  @required
   }
-  filter  ?.user.activeSpaceId==args.spaceId
+  filter  ?.payload.activeSpaceId==args.spaceId
   shape   userActiveSpaceProjection
 }
 
@@ -1015,7 +1015,7 @@ query queryUsersActiveInSpace {
 @useConcept(user)
 @description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
 query queryUsersInDeletionCooldown {
-  filter  traitIsActiveRecord; user.deletionScheduledAt!=""
+  filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1051,7 +1051,7 @@ query queryUsersInDeletionCooldown {
 @useConcept(user)
 @description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
 query queryUsersScheduledForDeletion {
-  filter  traitIsActiveRecord; user.deletionScheduledAt!=""
+  filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1078,7 +1078,7 @@ query queryWorkerPairingCodeByHash {
   args {
     codeHash  string  @required
   }
-  filter  workerPairingCode.codeHash==args.codeHash
+  filter  payload.codeHash==args.codeHash
   shape   workerPairingCodeFull
 }
 
@@ -1108,7 +1108,7 @@ query queryWorkerTokenByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  identity.identityType=="worker_token"; identity.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsWorkerToken; payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -1131,6 +1131,6 @@ query queryWorkerTokensForUser {
   args {
     userId  string  @required
   }
-  filter  identity.identityType=="worker_token"; identity.userId==args.userId
+  filter  traitIdentityIsWorkerToken; payload.userId==args.userId
   shape   identityFull
 }

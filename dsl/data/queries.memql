@@ -12,7 +12,7 @@ query queryDetectConflicts {
     naturalKeyValue  string  @required
     recordType  string  @required
   }
-  filter  traitIsConfirmed; record.spaceId==args.spaceId; record.recordType==args.recordType; record.naturalKeyValue==args.naturalKeyValue
+  filter  traitIsConfirmed; payload.spaceId==args.spaceId; payload.recordType==args.recordType; payload.naturalKeyValue==args.naturalKeyValue
   shape   recordFull
 }
 
@@ -45,7 +45,7 @@ query queryPolicy {
     targetRecordType  string  @required
     spaceId  string
   }
-  filter  traitIsActiveRecord; policy.targetRecordType==args.targetRecordType; ?.policy.spaceId==args.spaceId
+  filter  traitIsActiveRecord; payload.targetRecordType==args.targetRecordType; ?.payload.spaceId==args.spaceId
   shape   policyFull
 }
 
@@ -83,7 +83,7 @@ query queryRecordsByState {
     validationState  string
     importSource  string
   }
-  filter  traitIsActiveRecord; ?.record.spaceId==args.spaceId; ?.record.recordType==args.recordType; ?.record.validationState==args.validationState; ?.record.importSource==args.importSource
+  filter  traitIsActiveRecord; ?.payload.spaceId==args.spaceId; ?.payload.recordType==args.recordType; ?.payload.validationState==args.validationState; ?.payload.importSource==args.importSource
   shape   recordFull
 }
 
@@ -126,7 +126,7 @@ query queryUsableRecords {
     spaceId  string
     recordType  string
   }
-  filter  traitIsUsable; ?.record.spaceId==args.spaceId; ?.record.recordType==args.recordType
+  filter  traitIsUsable; ?.payload.spaceId==args.spaceId; ?.payload.recordType==args.recordType
   shape   recordFull
 }
 
@@ -161,6 +161,6 @@ query queryValidationLog {
     spaceId  string
     action  string
   }
-  filter  traitIsActiveRecord; ?.log.recordId==args.recordId; ?.log.spaceId==args.spaceId; ?.log.action==args.action
+  filter  traitIsActiveRecord; ?.payload.recordId==args.recordId; ?.payload.spaceId==args.spaceId; ?.payload.action==args.action
   shape   logFull
 }

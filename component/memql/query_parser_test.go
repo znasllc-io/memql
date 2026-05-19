@@ -17,7 +17,7 @@ query queryActiveParticipantsForSpace {
   args {
     spaceId  string  @required
   }
-  filter participant.spaceId == args.spaceId
+  filter payload.spaceId == args.spaceId
   shape  participantFull
 }`
 
@@ -40,7 +40,7 @@ func TestParseQueryMemQL_RejectsUnknownAnnotation(t *testing.T) {
 	src := `@useConcept(participant)
 @bogusAnnotation("x")
 query queryFoo {
-  filter participant.id == "x"
+  filter id == "x"
   shape  participantFull
 }`
 

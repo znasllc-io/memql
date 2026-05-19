@@ -279,3 +279,65 @@ trait traitStatusIsArchived {
 trait traitStatusIsSaved {
   payload.status=="saved"
 }
+
+// ---- traitStatusIsPending ----
+//
+// Reusable filter that matches records with payload.status == 'pending'.
+// Used by identity flows (access requests, invitations) where pending
+// rows are queued for action by an admin or the original requester.
+
+@enabled
+@description("Matches records with payload.status == 'pending'.")
+trait traitStatusIsPending {
+  payload.status=="pending"
+}
+
+// ---- traitStatusIsRunning ----
+//
+// Reusable filter that matches records with payload.status == 'running'.
+// Used by planner Plans / Tasks and by worker invocations that are
+// actively executing right now.
+
+@enabled
+@description("Matches records with payload.status == 'running'.")
+trait traitStatusIsRunning {
+  payload.status=="running"
+}
+
+// ---- traitIdentityIsApiKey ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "api_key". Distinct from worker tokens
+// (traitIdentityIsWorkerToken) so callers can scope per-credential-class
+// queries explicitly.
+
+@enabled
+@description("Matches v1:identity:identity rows with identityType=='api_key'.")
+trait traitIdentityIsApiKey {
+  payload.identityType=="api_key"
+}
+
+// ---- traitIdentityIsWorkerToken ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "worker_token". Worker tokens are admitted
+// only on the WorkerService gRPC path; this trait scopes per-worker
+// credential lookups.
+
+@enabled
+@description("Matches v1:identity:identity rows with identityType=='worker_token'.")
+trait traitIdentityIsWorkerToken {
+  payload.identityType=="worker_token"
+}
+
+// ---- traitIsDeletionScheduled ----
+//
+// Matches records that carry a non-empty deletionScheduledAt field.
+// Used by the user-deletion cooldown sweep to enumerate identities
+// queued for hard delete after the retention window expires.
+
+@enabled
+@description("Matches records that have a deletion scheduled (deletionScheduledAt is set).")
+trait traitIsDeletionScheduled {
+  payload.deletionScheduledAt!=""
+}

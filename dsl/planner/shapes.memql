@@ -12,27 +12,27 @@
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape planFull {
   row.id
-  plan.spaceId
-  plan.kind
-  plan.status
-  plan.goal
-  plan.ownerAgentId
-  plan.requestedBy
-  plan.input
-  plan.output
-  plan.errorMessage
-  plan.startedAt
-  plan.completedAt
-  plan.cancelledBy
-  plan.phases
-  plan.estimate
-  plan.estimatedAt
-  plan.tokenBudget
-  plan.tokenSpent
-  plan.tokenAllocatedToChildren
-  plan.tokenCapDisabled
-  plan.parentPlanId
-  plan.retryThreshold
+  payload.spaceId
+  payload.kind
+  payload.status
+  payload.goal
+  payload.ownerAgentId
+  payload.requestedBy
+  payload.input
+  payload.output
+  payload.errorMessage
+  payload.startedAt
+  payload.completedAt
+  payload.cancelledBy
+  payload.phases
+  payload.estimate
+  payload.estimatedAt
+  payload.tokenBudget
+  payload.tokenSpent
+  payload.tokenAllocatedToChildren
+  payload.tokenCapDisabled
+  payload.parentPlanId
+  payload.retryThreshold
   row.createdAt
   row.createdBy
 }
@@ -42,28 +42,28 @@ shape planFull {
 @description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent, llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's planner detail pane.")
 shape taskFull {
   row.id
-  task.planId
-  task.category
-  task.parentTaskId
-  task.kind
-  task.logicalStepId
-  task.attemptNumber
-  task.toolName
-  task.toolArgs
-  task.toolResult
-  task.status
-  task.seq
-  task.phase
-  task.executionSurface
-  task.executorBackend
-  task.input
-  task.output
-  task.metrics
-  task.errorMessage
-  task.startedAt
-  task.completedAt
-  task.parkedAt
-  task.parkedAtCheckpoint
+  payload.planId
+  payload.category
+  payload.parentTaskId
+  payload.kind
+  payload.logicalStepId
+  payload.attemptNumber
+  payload.toolName
+  payload.toolArgs
+  payload.toolResult
+  payload.status
+  payload.seq
+  payload.phase
+  payload.executionSurface
+  payload.executorBackend
+  payload.input
+  payload.output
+  payload.metrics
+  payload.errorMessage
+  payload.startedAt
+  payload.completedAt
+  payload.parkedAt
+  payload.parkedAtCheckpoint
   row.createdAt
   row.createdBy
 }
@@ -73,10 +73,10 @@ shape taskFull {
 @description("TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused / awaitingFeedback Task is resumed.")
 shape taskStateFull {
   row.id
-  taskState.taskId
-  taskState.workingMemory
-  taskState.reasoningChain
-  taskState.toolCallHistory
-  taskState.pendingSubPlanIds
+  payload.taskId
+  payload.workingMemory
+  payload.reasoningChain
+  payload.toolCallHistory
+  payload.pendingSubPlanIds
   row.createdAt
 }
