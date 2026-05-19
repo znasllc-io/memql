@@ -3345,9 +3345,8 @@ activeConversations();payload.priority=="high"
 ### Struct Form (canonical)
 
 ```memql
-use cognition.participant
-
 @enabled
+@useConcept(participant)
 @description("Get space participants")
 query querySpaceParticipants {
   args {

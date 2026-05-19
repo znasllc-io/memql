@@ -10,14 +10,14 @@
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
 shape agentAuthorizationFull {
   row.id
-  agentAuthorization.agentId
-  agentAuthorization.userId
-  agentAuthorization.planKind
-  agentAuthorization.spaceScope
-  agentAuthorization.computerUseScope
-  agentAuthorization.tokenBudgetCap
-  agentAuthorization.expiresAt
-  agentAuthorization.active
+  payload.agentId
+  payload.userId
+  payload.planKind
+  payload.spaceScope
+  payload.computerUseScope
+  payload.tokenBudgetCap
+  payload.expiresAt
+  payload.active
   row.createdAt
 }
 
@@ -40,23 +40,23 @@ shape agentAuthorizationFull {
 @description("Comprehensive agent projection with all configuration fields")
 shape agentFull {
   row.id
-  agent.ownerUserId
-  agent.name
-  agent.description
-  agent.personality
-  agent.systemPrompt
-  agent.role
-  agent.roleSlug
-  agent.kind
-  agent.capabilities
-  agent.avatar
-  agent.providerConfig
-  agent.triggerBehavior
-  agent.groupIds
-  agent.active
-  agent.deleted
-  agent.audioControl
-  agent.gender
+  payload.ownerUserId
+  payload.name
+  payload.description
+  payload.personality
+  payload.systemPrompt
+  payload.role
+  payload.roleSlug
+  payload.kind
+  payload.capabilities
+  payload.avatar
+  payload.providerConfig
+  payload.triggerBehavior
+  payload.groupIds
+  payload.active
+  payload.deleted
+  payload.audioControl
+  payload.gender
   row.createdAt
   row.createdBy
 }
@@ -66,7 +66,7 @@ shape agentFull {
 @description("Minimal agent projection used by queryAgentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
 shape agentRoleSlugLite {
   row.id
-  agent.roleSlug
+  payload.roleSlug
 }
 
 @row
@@ -74,14 +74,14 @@ shape agentRoleSlugLite {
 @description("Compact agent projection the layered-dedupe similarity step consumes. Carries only the fields that influence dedupe decisions: identity (id, roleSlug, name, description), capabilities the Planner reasons about (domains, tools, keywords), and the lineage that lets the Planner avoid daisy-chaining extensions (extendedFromAgentId, extensionGoals). Embedding (roleEmbedding) is included so the dedupe-Layer-1 cosine math has the data it needs without a second row fetch.")
 shape agentMinimalForDedupe {
   row.id
-  agent.name
-  agent.role
-  agent.roleSlug
-  agent.kind
-  agent.description
-  agent.capabilities
-  agent.lineage
-  agent.roleEmbedding
+  payload.name
+  payload.role
+  payload.roleSlug
+  payload.kind
+  payload.description
+  payload.capabilities
+  payload.lineage
+  payload.roleEmbedding
 }
 
 @row
@@ -89,21 +89,21 @@ shape agentMinimalForDedupe {
 @description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the lock + default lists for the materialization step; recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
 shape agentRoleFull {
   row.id
-  agentRole.slug
-  agentRole.name
-  agentRole.description
-  agentRole.category
-  agentRole.tier
-  agentRole.lockedDomainIds
-  agentRole.defaultDomainIds
-  agentRole.availableDomainIds
-  agentRole.lockedToolSlugs
-  agentRole.defaultToolSlugs
-  agentRole.forbiddenToolSlugs
-  agentRole.lockedLiveKnowledgeIds
-  agentRole.recommendedPolicySlug
-  agentRole.recommendedGender
-  agentRole.systemPromptHints
-  agentRole.active
-  agentRole.predefined
+  payload.slug
+  payload.name
+  payload.description
+  payload.category
+  payload.tier
+  payload.lockedDomainIds
+  payload.defaultDomainIds
+  payload.availableDomainIds
+  payload.lockedToolSlugs
+  payload.defaultToolSlugs
+  payload.forbiddenToolSlugs
+  payload.lockedLiveKnowledgeIds
+  payload.recommendedPolicySlug
+  payload.recommendedGender
+  payload.systemPromptHints
+  payload.active
+  payload.predefined
 }

@@ -132,10 +132,14 @@ Mutation functions execute insert operations with parameters.
 
 ### Syntax (struct form, canonical)
 
-```memql
-use <ns>.<concept>
+Each query/mutation binds its concept via `@useConcept(<name>)`
+per construct. File-top `use <ns>.<concept>` is reserved for
+seed files; the per-construct query/mutation parser does not
+read a file-top binding.
 
+```memql
 @enabled
+@useConcept(<conceptName>)
 @description("Creates a new record")
 mutation mutationFunctionName {
   args { ... }
@@ -149,9 +153,8 @@ mutation mutationFunctionName {
 ### Example: createUser
 
 ```memql
-use identity.user
-
 @enabled
+@useConcept(user)
 @description("Creates a new user record")
 mutation mutationCreateUser {
   args {

@@ -10,7 +10,7 @@ query queryRouterBudgets {
   args {
     scope  string
   }
-  filter  ?.budget.scope==args.scope; ?.budget.active==true
+  filter  ?.payload.scope==args.scope; traitIsActiveRecord
   shape   budgetFull
 }
 

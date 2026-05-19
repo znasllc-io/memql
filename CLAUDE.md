@@ -1198,11 +1198,32 @@ form. Procedural `func (Query|Mutation) NAME(ctx any) (any, error)`
 is reserved for functions that need branching or multi-step
 composition.
 
-**File-top `use <ns>.<concept>` is required** for every struct-form
-query or mutation. It binds the file's single concept; the body
-references it via the `filter` clause (queries) or via the bare
-`insert { ... }` / `update { ... }` block (mutations) without
-re-stating the concept id.
+**Concept binding: `@useConcept(<name>)` per construct.** Each
+struct-form query or mutation binds its concept via the
+`@useConcept(<conceptName>)` annotation above the declaration.
+Per-construct files (`queries.memql`, `mutations.memql`) hold many
+constructs each, so the binding lives on the construct, not the
+file. File-top `use <ns>.<concept>` is reserved for seed files
+(one declaration per file).
+
+The bound concept's payload is referenced from filter clauses as
+`payload.<field>` and from mutation bodies via the bare
+`insert { ... }` / `update { ... }` block without re-stating the
+concept id.
+
+**Canonical filter-clause syntax** (locked in 2026-05 on
+feature/dsl-improvements; enforced by `dsl/conformance_test.go`):
+
+- Payload fields: `payload.<field>` — never `<conceptName>.<field>`
+- Intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
+  `partition`, `type`, `schema`): bare names
+- Optional-chain prefix `?.` is preserved where it carries
+  arg-conditional semantics; the form is `?.payload.<field>==args.X`
+  or `?.<intrinsic>==args.X`, never `?.<conceptName>.<field>`
+- When a trait spec covers the predicate (e.g. `traitIsActiveRecord`
+  for `payload.active==true`), the trait is mandatory. Inline
+  `payload.active==true` / `payload.deleted==false` are rejected
+  by the conformance test.
 
 **Argument resolution.** Caller-passed args declared in the
 `args { ... }` block are referenced as `args.X` in the body. The
@@ -1218,22 +1239,20 @@ name collides with one of those is rejected at load time.
 
 Queries:
 ```memql
-use cognition.participant
-
+@useConcept(participant)
 @description("Get space participants")
 query querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; specIsActiveRecord
+  filter  payload.spaceId==args.spaceId; traitIsActiveRecord
   shape   participantFull
 }
 ```
 
 Mutations:
 ```memql
-use cognition.space
-
+@useConcept(space)
 @description("Create a cognition space")
 mutation mutationCreateSpace {
   args {

@@ -7,7 +7,7 @@
 @useConcept(invocation)
 @description("List worker invocation rows for retention pruning. Caller filters by age.")
 query queryExpiredWorkerInvocations {
-  filter  invocation.action!=""
+  filter  payload.action!=""
   shape   workerInvocationFull
 }
 
@@ -30,7 +30,7 @@ query queryInvocationsForPlan {
   args {
     planId  string  @required
   }
-  filter  invocation.planId==args.planId
+  filter  payload.planId==args.planId
   shape   workerInvocationFull
 }
 
@@ -53,7 +53,7 @@ query queryInvocationsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  invocation.ownerUserId==args.ownerUserId
+  filter  payload.ownerUserId==args.ownerUserId
   shape   workerInvocationFull
 }
 
@@ -64,7 +64,7 @@ query queryRunningPlansForUser {
   args {
     userId  string  @required
   }
-  filter  plan.requestedBy==args.userId; plan.status=="running"
+  filter  payload.requestedBy==args.userId; traitStatusIsRunning
   shape   planFull
 }
 
@@ -90,7 +90,7 @@ query queryWorkerByIdentityId {
   args {
     identityId  string  @required
   }
-  filter  registration.identityId==args.identityId
+  filter  payload.identityId==args.identityId
   shape   workerRegistrationFull
 }
 
@@ -119,6 +119,6 @@ query queryWorkersForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  registration.ownerUserId==args.ownerUserId
+  filter  payload.ownerUserId==args.ownerUserId
   shape   workerRegistrationFull
 }

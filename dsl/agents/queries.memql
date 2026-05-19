@@ -14,7 +14,7 @@ query queryActiveAgents {
   args {
     groupId  string
   }
-  filter  traitIsActiveRecord; traitIsNotDeleted; ?.agent.groupIds has args.groupId
+  filter  traitIsActiveRecord; traitIsNotDeleted; ?.payload.groupIds has args.groupId
   shape   agentFull
 }
 
@@ -25,7 +25,7 @@ query queryAgentAuthorizationsForUser {
   args {
     userId  string  @required
   }
-  filter  agentAuthorization.userId==args.userId; agentAuthorization.active==true
+  filter  payload.userId==args.userId; traitIsActiveRecord
   shape   agentAuthorizationFull
 }
 
@@ -104,7 +104,7 @@ query queryActiveAgentsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId; payload.active==true; payload.deleted==false
+  filter  payload.ownerUserId==args.ownerUserId; traitIsActiveRecord; traitIsNotDeleted
   shape   agentMinimalForDedupe
 }
 
@@ -115,7 +115,7 @@ query queryAgentRoleBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug; payload.active==true
+  filter  payload.slug==args.slug; traitIsActiveRecord
   shape   agentRoleFull
 }
 
@@ -123,6 +123,6 @@ query queryAgentRoleBySlug {
 @useConcept(agentRole)
 @description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
 query queryActiveAgentRoles {
-  filter  payload.active==true
+  filter  traitIsActiveRecord
   shape   agentRoleFull
 }
