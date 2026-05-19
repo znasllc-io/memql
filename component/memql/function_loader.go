@@ -282,6 +282,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, err
 	}
 
+	// Naming-prefix enforcement (Decision 3 of the MVP-foundation
+	// rule lock). Query / mutation / spec functions must use their
+	// kind's prefix. Hard error in strict mode; MEMQL_NAMING_LENIENT
+	// downgrades to a logged warning for the migration window.
+	if err := validateNamingPrefix(funcDef); err != nil {
+		return nil, err
+	}
+
 	// Declared-must-be-used enforcement (Phase G.3.g pt 4). Every
 	// `@use*(target)` annotation and every declared args field must be
 	// referenced in the body somewhere; stale declarations error here.

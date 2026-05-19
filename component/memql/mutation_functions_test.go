@@ -114,7 +114,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
 	src := `@useConcept(space)
-mutation testCreateSpaceShorthand {
+mutation mutationCreateSpaceShorthand {
   args {
     spaceId  string  @required
     name     string  @required
@@ -127,7 +127,7 @@ mutation testCreateSpaceShorthand {
     active: true
   }
 }`
-	fn, err := tryParseNewFunctionSyntax("testCreateSpaceShorthand", "mutation", src, "test.memql", registry)
+	fn, err := tryParseNewFunctionSyntax("mutationCreateSpaceShorthand", "mutation", src, "test.memql", registry)
 	require.NoError(t, err)
 	require.NotNil(t, fn.MutationTemplate)
 
