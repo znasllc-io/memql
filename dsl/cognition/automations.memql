@@ -3,11 +3,12 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.logic.{ logicAutoJoinSI, logicBootstrapSession, logicEnsureDailySpaceOnAuthSession, logicGenerateResponse, logicProvisionDailySpaceOnUserCreate, logicPurgeExpiredArchivedSpaces, logicRolloverDailySpace, logicVoiceMigrationOnSecondHuman }
+
 @enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(payload.active==true)
 @description("On space creation, joins the creator's assistant plus any specialist agents picked at creation time. Joiners' GAs are never auto-joined.")
-@useLogic(logicAutoJoinSI)
 automation autoJoinSI {
   step run {
     logic autoJoinSI { event: event }
@@ -20,7 +21,6 @@ automation autoJoinSI {
 @enabled
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("Auto-creates a session when a participant joins a space")
-@useLogic(logicBootstrapSession)
 automation bootstrapSession {
   step run {
     logic bootstrapSession { event: event }
@@ -36,7 +36,6 @@ automation bootstrapSession {
 @enabled
 @trigger(event="cognition.response.requested")
 @description("Generate and insert SI response for an utterance")
-@useLogic(logicGenerateResponse)
 automation generateResponse {
   step run {
     logic generateResponse { event: event }
@@ -68,7 +67,6 @@ automation generateResponse {
 @enabled
 @trigger(schedule="0 0 2 * * *")
 @description("Daily sweep to hard-delete archived spaces past their expiresAt deadline.")
-@useLogic(logicPurgeExpiredArchivedSpaces)
 automation purgeExpiredArchivedSpaces {
   step run {
     logic purgeExpiredArchivedSpaces { event: event }
@@ -119,7 +117,6 @@ automation purgeExpiredArchivedSpaces {
 @trigger(event="node.created", concept="v1:identity:user", partition="*")
 @filter(payload.activeSpaceId!="")
 @description("On second-active-human-in-space, emit the Phase 7 voice-migration canvas-card pair (public group card + private operator card per existing user).")
-@useLogic(logicVoiceMigrationOnSecondHuman)
 automation voiceMigrationOnSecondHuman {
   step run {
     logic voiceMigrationOnSecondHuman { event: event }
@@ -149,7 +146,6 @@ automation voiceMigrationOnSecondHuman {
 @enabled
 @trigger(event="node.created", concept="v1:identity:user", partition="*")
 @description("On user creation, ensure today's daily space exists for the new user.")
-@useLogic(logicProvisionDailySpaceOnUserCreate)
 automation provisionDailySpaceOnUserCreate {
   step run {
     logic provisionDailySpaceOnUserCreate { event: event }
@@ -179,7 +175,6 @@ automation provisionDailySpaceOnUserCreate {
 @enabled
 @trigger(event="node.created", concept="v1:identity:authSession", partition="*")
 @description("On every login (authSession created), ensure today's daily space exists for the authenticated user.")
-@useLogic(logicEnsureDailySpaceOnAuthSession)
 automation ensureDailySpaceOnAuthSession {
   step run {
     logic ensureDailySpaceOnAuthSession { event: event }
@@ -213,7 +208,6 @@ automation ensureDailySpaceOnAuthSession {
 @enabled
 @trigger(schedule="0 0 * * * *")
 @description("Hourly safety-net: ensure every active user has today's daily space. Idempotent per user.")
-@useLogic(logicRolloverDailySpace)
 automation rolloverDailySpace {
   step run {
     logic rolloverDailySpace { event: event }

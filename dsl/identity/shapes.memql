@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, partitionAccess, user, workerPairingCode }
+
 @row
-@useConcept(accessRequest)
 @description("Full projection of v1:identity:accessRequest including review state and risk signals.")
-shape accessRequestFull {
+shape accessRequest accessRequestFull {
   row.id
   payload.email
   payload.name
@@ -24,9 +25,8 @@ shape accessRequestFull {
 }
 
 @row
-@useConcept(auditEvent)
 @description("Full projection of v1:identity:auditEvent including actor, target, and source attribution.")
-shape auditEventFull {
+shape auditEvent auditEventFull {
   row.id
   payload.occurredAt
   payload.category
@@ -49,9 +49,8 @@ shape auditEventFull {
 }
 
 @row
-@useConcept(authCode)
 @description("Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256 hash is exposed to query consumers so a query result can never be replayed at the token endpoint.")
-shape authCodeFull {
+shape authCode authCodeFull {
   row.id
   payload.codeHash
   payload.clientId
@@ -67,9 +66,8 @@ shape authCodeFull {
 }
 
 @row
-@useConcept(authSession)
 @description("Full projection of v1:identity:authSession including revocation state.")
-shape authSessionFull {
+shape authSession authSessionFull {
   row.id
   payload.userId
   payload.identityId
@@ -90,9 +88,8 @@ shape authSessionFull {
 }
 
 @row
-@useConcept(clusterSettings)
 @description("Full projection of v1:identity:clusterSettings -- the singleton runtime-editable cluster configuration row.")
-shape clusterSettingsFull {
+shape clusterSettings clusterSettingsFull {
   row.id
   payload.registrationMode
   payload.registrationDomains
@@ -110,9 +107,8 @@ shape clusterSettingsFull {
 }
 
 @row
-@useConcept(delegation)
 @description("Comprehensive delegation projection with all fields")
-shape delegationFull {
+shape delegation delegationFull {
   row.id
   payload.identityId
   payload.identitySubject
@@ -130,9 +126,8 @@ shape delegationFull {
 }
 
 @row
-@useConcept(identity)
 @description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person, delegationFull for delegations, partitionAccessFull for grants.")
-shape identityFull {
+shape identity identityFull {
   row.id
   payload.userId
   payload.identityType
@@ -145,9 +140,8 @@ shape identityFull {
 }
 
 @row
-@useConcept(identity)
 @description("Compact identity projection with the identifying fields only. The full credentials object lives on identityFull.")
-shape identitySummary {
+shape identity identitySummary {
   row.id
   payload.userId
   payload.identityType
@@ -157,9 +151,8 @@ shape identitySummary {
 }
 
 @row
-@useConcept(invitation)
 @description("Comprehensive invitation projection (user + guest kinds)")
-shape invitationFull {
+shape invitation invitationFull {
   row.id
   payload.kind
   payload.spaceId
@@ -178,9 +171,8 @@ shape invitationFull {
 }
 
 @row
-@useConcept(magicLinkRequest)
 @description("Full projection of v1:identity:magicLinkRequest including consume state.")
-shape magicLinkRequestFull {
+shape magicLinkRequest magicLinkRequestFull {
   row.id
   payload.email
   payload.tokenHash
@@ -195,9 +187,8 @@ shape magicLinkRequestFull {
 }
 
 @row
-@useConcept(partitionAccess)
 @description("Comprehensive partition-access projection: a single grant authorizing a user to operate in a partition with a given role.")
-shape partitionAccessFull {
+shape partitionAccess partitionAccessFull {
   row.id
   payload.userId
   payload.partitionName
@@ -214,9 +205,8 @@ shape partitionAccessFull {
 }
 
 @row
-@useConcept(identity)
 @description("Lightweight PAT (api_key identity) projection for UI listings. Excludes credentials entirely so neither the keyHash nor any future per-variant secret material lands in user-facing payloads.")
-shape patSummary {
+shape identity patSummary {
   row.id
   payload.userId
   payload.label
@@ -227,17 +217,15 @@ shape patSummary {
 }
 
 @row
-@useConcept(user)
 @description("Lightweight projection: just the user's id and activeSpaceId pointer. Phase 4 of the chat-architecture plan.")
-shape userActiveSpaceProjection {
+shape user userActiveSpaceProjection {
   row.id
   payload.activeSpaceId
 }
 
 @row
-@useConcept(user)
 @description("Comprehensive user projection: the person behind one or more identities.")
-shape userFull {
+shape user userFull {
   row.id
   payload.displayName
   payload.firstName
@@ -259,9 +247,8 @@ shape userFull {
 }
 
 @row
-@useConcept(workerPairingCode)
 @description("Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's lookup path + the redeem handler's validation path.")
-shape workerPairingCodeFull {
+shape workerPairingCode workerPairingCodeFull {
   row.id
   payload.ownerUserId
   payload.codeHash

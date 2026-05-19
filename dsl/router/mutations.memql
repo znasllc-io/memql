@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use router.concepts.{ budget, call }
+
 @enabled
-@useConcept(call)
 @description("Record a single SI call through the memQL SI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.")
-mutation mutationRecordRouterCall {
+mutation call mutationRecordRouterCall {
   args {
     requestId           string  @required
     agentId             string
@@ -75,9 +76,8 @@ mutation mutationRecordRouterCall {
 // Called from the CoPresent /router/settings page.
 
 @enabled
-@useConcept(budget)
 @description("Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.")
-mutation mutationSetBudget {
+mutation budget mutationSetBudget {
   args {
     id                 string  @required
     scope              string  @required

@@ -7,10 +7,11 @@
 // automation flips the concept's lifecycle bit and emits the
 // event the integration listens for.
 
+use workbench.logic.{ logicReleaseWorkspaceOnPlanTerminal }
+
 @enabled
 @trigger(event="graph.node.updated.*.v1:planner:plan")
 @description("When a Plan transitions to a terminal status (succeeded / failed / cancelled), release the associated workbench workspace if one exists. The releaseWorkspace mutation flips the concept row; the workbench integration consumes the resulting graph.node.updated event and removes the on-disk directory tree.")
-@useLogic(logicReleaseWorkspaceOnPlanTerminal)
 automation releaseWorkspaceOnPlanTerminal {
   step run {
     logic releaseWorkspaceOnPlanTerminal { event: event }

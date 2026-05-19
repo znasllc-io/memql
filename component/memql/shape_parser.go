@@ -186,10 +186,28 @@ func (p *shapeMemQLParser) parseDecorator(decl *shapeDecl) error {
 func (p *shapeMemQLParser) parseShapeStructDecl(decl *shapeDecl) error {
 	p.SkipWhitespaceAndComments()
 
-	// Name: bare identifier (no receiver type).
-	decl.name = p.ReadWord()
-	if decl.name == "" {
+	// Accept either of the two signature shapes:
+	//   shape <name> { ... }              -- legacy (concept via @useConcept)
+	//   shape <Concept> <name> { ... }    -- canonical post-migration
+	first := p.ReadWord()
+	if first == "" {
 		return fmt.Errorf("expected shape name after 'shape'")
+	}
+	p.SkipWhitespaceAndComments()
+	if !p.EOF() && p.Peek() != '{' {
+		second := p.ReadWord()
+		if second != "" {
+			// Two-identifier form: first is concept, second is shape name.
+			// Treat the signature concept as an implicit @useConcept; the
+			// post-body validator (looks at decl.useConcepts) gives us the
+			// must-be-referenced check for free.
+			decl.useConcepts = append(decl.useConcepts, first)
+			decl.name = second
+		} else {
+			decl.name = first
+		}
+	} else {
+		decl.name = first
 	}
 
 	p.SkipWhitespaceAndComments()

@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cluster.concepts.{ cluster, node, nodeType, spawnEvent }
+
 @enabled
-@useConcept(nodeType)
 @description("Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)")
-query queryClusterNodeTypes {
+query nodeType queryClusterNodeTypes {
 }
 
 // ---- queries/v1/cluster/clusterNodes.memql ----
@@ -19,9 +20,8 @@ query queryClusterNodeTypes {
 // the function-loader validator treats it as an unknown function call.
 
 @enabled
-@useConcept(node)
 @description("Returns all cluster node rows (CLI dedupes to latest per id)")
-query queryClusterNodes {
+query node queryClusterNodes {
 }
 
 // ---- queries/v1/cluster/clusterSpawnEvents.memql ----
@@ -30,9 +30,8 @@ query queryClusterNodes {
 // Used by the CLI topology view to discover nodes via their spawn history.
 
 @enabled
-@useConcept(spawnEvent)
 @description("Returns all cluster spawn events")
-query queryClusterSpawnEvents {
+query spawnEvent queryClusterSpawnEvents {
 }
 
 // ---- queries/v1/cluster/existingCluster.memql ----
@@ -41,7 +40,6 @@ query queryClusterSpawnEvents {
 // Used by bootstrapCluster to check if cluster is already initialized.
 
 @enabled
-@useConcept(cluster)
 @description("Returns the existing cluster record, if any")
-query queryExistingCluster {
+query cluster queryExistingCluster {
 }
