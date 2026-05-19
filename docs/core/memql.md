@@ -3368,35 +3368,17 @@ See `dsl/v1/queries/v1/_querySchemaReference.memql` and
 `dsl/v1/mutations/v1/_mutationSchemaReference.memql` for the full
 reference.
 
-### Procedural Form (escape hatch)
+### Procedural Form (internal post-rewrite shape)
 
-For queries / mutations / automations / policies that need
-branching or multi-step composition:
-
-```memql
-use identity.user
-
-@enabled
-@description("Lists active users with computed metadata.")
-args {
-  role  string  @enum("owner", "admin", "writer", "reader")
-}
-func (Query) queryActiveUsers(ctx any) (any, error) {
-  ctx.output = shape(
-    concept;
-    ?.payload.role == args.role,
-    "userFull"
-  )
-  return ctx, nil
-}
-```
-
-`ctx` is the runtime envelope (`ctx.input` / `ctx.actor` /
-`ctx.partition` / `ctx.now` / `ctx.config` / `ctx.output` /
-`ctx.error` / `ctx.trace`). Inside the body, `args.X` resolves to
-the caller-passed args declared in the file-top `args { }` block;
-bare names (`now`, `actor.X`, `partition`, `config.X`) resolve to
-the engine envelope fields.
+The rewriter still emits a `func (Receiver) NAME(ctx any) (any,
+error) { ctx.output = ...; return ctx, nil }` shape for the engine
+parser, with `args.X` source-rewritten to `ctx.X`. **Don't author
+that form.** Every receiver kind has a struct form -- queries
+above, mutations next to them, logic with `body { ... ; return
+<expr> }`, automations as `step` lists. The `(ctx any)` parameter
+and `ctx.output =` boilerplate are leftover scaffolding being
+removed; see [handoff-ctx-purge.md](../handoff-ctx-purge.md) for
+the cleanup status.
 
 ### Built-in Functions
 

@@ -409,7 +409,7 @@ logic logicProvisionDailySpaceOnUserCreate {
     event object @required
   }
   body {
-    ctx.output = ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return ensureDailySpaceForUser({ userId: args.event.payload.id })
   }
 }
 
@@ -431,7 +431,7 @@ logic logicEnsureDailySpaceOnAuthSession {
     event object @required
   }
   body {
-    ctx.output = ensureDailySpaceForUser({ userId: args.event.payload.userId })
+    return ensureDailySpaceForUser({ userId: args.event.payload.userId })
   }
 }
 
@@ -445,9 +445,9 @@ logic logicEnsureDailySpaceOnAuthSession {
 @description("Imperative body of automation rolloverDailySpace (hourly cron).")
 logic logicRolloverDailySpace {
   args {
-    event object @required
+    event object
   }
   body {
-    ctx.output = rolloverDailySpacesAllUsers({})
+    return rolloverDailySpacesAllUsers({})
   }
 }

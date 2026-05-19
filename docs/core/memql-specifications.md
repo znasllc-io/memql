@@ -65,7 +65,7 @@ query queryHumanParticipants {
     spaceId  string  @required
   }
   concept v1:cognition:participant
-  filter  payload.spaceId==ctx.spaceId; specIsHumanParticipant
+  filter  payload.spaceId==args.spaceId; specIsHumanParticipant
   shape   participantFull
 }
 ```
@@ -85,11 +85,15 @@ Called from a policy body via the `spec("name")` builtin:
 ```memql
 @tier("bff")
 @description("Gate the admin settings panel")
-func (Policy) canViewAdminSettings(_ any) bool {
-  ctx.output = spec("requiresAdmin")
-  return ctx, nil
+policy canViewAdminSettings {
+  return spec("requiresAdmin")
 }
 ```
+
+(The legacy `func (Policy) ... { ctx.output = ...; return ctx, nil }`
+shape is still emitted by the rewriter today; that residual is being
+removed -- see [handoff-ctx-purge.md](../handoff-ctx-purge.md). Don't
+author it.)
 
 ## CQS interaction
 
