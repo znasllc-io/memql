@@ -9,7 +9,7 @@
 
 @row
 @useConcept(plan)
-@description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps and the per-kind input/output blobs.")
+@description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
 shape planFull {
   row.id
   plan.spaceId
@@ -24,24 +24,46 @@ shape planFull {
   plan.startedAt
   plan.completedAt
   plan.cancelledBy
+  plan.phases
+  plan.estimate
+  plan.estimatedAt
+  plan.tokenBudget
+  plan.tokenSpent
+  plan.tokenAllocatedToChildren
+  plan.tokenCapDisabled
+  plan.parentPlanId
+  plan.retryThreshold
   row.createdAt
   row.createdBy
 }
 
 @row
 @useConcept(task)
-@description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations.")
+@description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent, llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's planner detail pane.")
 shape taskFull {
   row.id
   task.planId
+  task.category
+  task.parentTaskId
   task.kind
+  task.logicalStepId
+  task.attemptNumber
+  task.toolName
+  task.toolArgs
+  task.toolResult
   task.status
   task.seq
+  task.phase
+  task.executionSurface
+  task.executorBackend
   task.input
   task.output
+  task.metrics
   task.errorMessage
   task.startedAt
   task.completedAt
+  task.parkedAt
+  task.parkedAtCheckpoint
   row.createdAt
   row.createdBy
 }
