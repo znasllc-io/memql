@@ -86,9 +86,10 @@ func (p *toolMemQLParser) parse(origin string) ([]*Tool, error) {
 
 		ch := p.Peek()
 
-		// use statement - skip
+		// use statement — skipped here; imports surfaced through the
+		// loader-side import index.
 		if p.MatchWord("use") {
-			p.SkipToEndOfLine()
+			p.SkipUseClauseBody()
 			continue
 		}
 

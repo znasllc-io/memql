@@ -259,20 +259,30 @@ func (p *Parser) parseImportEntry() (*ImportDecl, error) {
 	return decl, nil
 }
 
-// parseUseDeclaration parses: use <dotted.path> [as <alias>]
-// Examples:
-//   - use cognition.participant
-//   - use cognition.session as cognitionSession
-//   - use v1.cognition.participant (explicit version)
+// parseUseDeclaration parses one file-top `use` statement in either
+// of the two recognised shapes:
+//
+//	Form A (legacy):
+//	  use <dotted.path> [as <alias>]
+//	  use cognition.participant
+//	  use cognition.session as cognitionSession
+//
+//	Form B (canonical post-migration):
+//	  use <dotted.path>.{ name1, name2, ... }
+//	  use cognition.concepts.{ participant, space }
+//	  use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+//
+// Form B names a module file and lists the constructs to pull into
+// the importing file's local scope. The lexer breaks `path.{` into
+// IDENT + DOT + BRACE, so we look ahead one token after consuming
+// the path to decide which shape we're in.
 func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 	if err := p.expect(TokenKeywordUse); err != nil {
 		return nil, err
 	}
 
-	// Parse the dotted path: cognition.participant or data.staging
-	// The lexer produces this as a single identifier since '.' is a valid identifier char
 	if !p.check(TokenIdentifier) {
-		return nil, newParseErrorf(&p.current, "expected concept path after 'use', got %q", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "expected module path after 'use', got %q", p.current.Literal)
 	}
 
 	path := p.current.Literal
@@ -283,7 +293,33 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 		Parts: strings.Split(path, "."),
 	}
 
-	// Check for optional alias: as <name>
+	// Form B: `.{ name, name, ... }` follows the path.
+	if p.check(TokenDot) {
+		p.advance() // consume '.'
+		if err := p.expect(TokenBraceOpen); err != nil {
+			return nil, newParseErrorf(&p.current, "expected '{' after '.' in `use %s.{ ... }`, got %q", path, p.current.Literal)
+		}
+		for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+			if p.check(TokenComma) || p.check(TokenSemicolon) {
+				p.advance()
+				continue
+			}
+			if !p.check(TokenIdentifier) {
+				return nil, newParseErrorf(&p.current, "expected imported name in `use %s.{ ... }`, got %q", path, p.current.Literal)
+			}
+			decl.Names = append(decl.Names, p.current.Literal)
+			p.advance()
+		}
+		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if len(decl.Names) == 0 {
+			return nil, newParseErrorf(&p.current, "`use %s.{ ... }` must list at least one imported name", path)
+		}
+		return decl, nil
+	}
+
+	// Form A: optional `as <alias>`.
 	if p.check(TokenKeywordAs) {
 		p.advance()
 		if !p.check(TokenIdentifier) {

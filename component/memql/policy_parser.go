@@ -72,7 +72,7 @@ func (p *policyMemQLParser) parse(origin string) (*PolicyConfig, error) {
 		ch := p.Peek()
 
 		if p.MatchWord("use") {
-			p.SkipToEndOfLine()
+			p.SkipUseClauseBody()
 			continue
 		}
 

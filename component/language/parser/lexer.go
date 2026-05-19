@@ -32,6 +32,7 @@ const (
 	TokenAt               // @ for Python-style attributes/decorators
 	TokenAmpAmp           // && for logical AND
 	TokenBang             // ! for boolean negation
+	TokenDot              // . between path and `{` in `use path.{ names }`
 
 	// Keywords - Type receivers (used in func receiver syntax)
 	TokenKeywordQuery      // Query
@@ -126,6 +127,8 @@ func (t TokenType) String() string {
 		return "'&&'"
 	case TokenBang:
 		return "'!'"
+	case TokenDot:
+		return "'.'"
 	case TokenKeywordQuery:
 		return "Query"
 	case TokenKeywordMutation:
@@ -308,6 +311,16 @@ func (l *Lexer) NextToken() (Token, error) {
 	case '@':
 		l.advance()
 		return makeToken(TokenAt, "@"), nil
+	case '.':
+		// A `.` followed by an alnum starts a dotted-path identifier
+		// (e.g. the `.payload.value` tail after `)`). A `.` followed
+		// by anything else is the standalone separator used in the
+		// new `use path.{ names }` import syntax.
+		if l.hasNext() && (unicode.IsLetter(l.peekNext()) || unicode.IsDigit(l.peekNext()) || l.peekNext() == '_') {
+			return l.scanIdentifier(start, startLine, startColumn)
+		}
+		l.advance()
+		return makeToken(TokenDot, "."), nil
 	case '"':
 		return l.scanString(start, startLine, startColumn)
 	case '!':
@@ -503,6 +516,19 @@ func (l *Lexer) scanIdentifier(start, startLine, startColumn int) (Token, error)
 				continue
 			}
 			// Colon followed by non-alphanumeric is a separator, stop here
+			break
+		}
+		// Handle dot specially - only include if followed by an alnum/`_` (for
+		// dotted paths like `payload.X`, `cognition.shapes`). A trailing
+		// dot (e.g. before `{` in the new file-top `use path.{ ... }`
+		// imports form) is NOT consumed -- the lexer stops, leaving the
+		// `.` to be tokenised as a separator.
+		if ch == '.' {
+			if l.hasNext() && (unicode.IsLetter(l.peekNext()) || unicode.IsDigit(l.peekNext()) || l.peekNext() == '_') {
+				builder.WriteRune(ch)
+				l.advance()
+				continue
+			}
 			break
 		}
 		if isIdentifierCharNoColon(ch) {
@@ -703,6 +729,8 @@ func isDigit(ch rune) bool {
 }
 
 func isIdentifierCharNoColon(ch rune) bool {
-	// Like isIdentifierChar but without ':' - colon is handled specially
-	return unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' || ch == '.' || ch == '-'
+	// Like isIdentifierChar but without ':' / '.' - both are handled
+	// specially in the scanner so they only join an identifier when
+	// the next rune is alphanumeric.
+	return unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' || ch == '-'
 }
