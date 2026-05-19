@@ -26,6 +26,10 @@ type KeywordSlice struct {
 // ExtractKeywordSlices scans `source` for top-level declarations of
 // the form `<keyword> NAME { ... }` at column 0 (with optional
 // leading whitespace) and returns each as a self-contained slice.
+// Also accepts the canonical `<keyword> CONCEPT NAME { ... }` two-
+// identifier signature used by seeds / queries / mutations under
+// the Form B import model; in that case NAME is the trailing
+// identifier (the slice name).
 //
 // Slice extent: preamble of @-attribute and comment lines walking
 // up from the header, through the matching close-brace below it.
@@ -33,7 +37,7 @@ type KeywordSlice struct {
 func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 	headerRe := regexp.MustCompile(
 		`(?m)^[ \t]*` + regexp.QuoteMeta(keyword) +
-			`[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
 	matches := headerRe.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {

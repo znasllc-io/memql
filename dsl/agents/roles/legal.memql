@@ -4,16 +4,12 @@
 // always defer to a licensed attorney for personal matters). Their
 // systemPromptHints carry the "information only" framing.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Contracts, corporate policies, regulatory frameworks, IP, and audit readiness at a business-level.")
-seed legal_compliance {
-  id:                    "legal_compliance"
+seed agentRole legal_compliance {
   slug:                  "legal_compliance"
   name:                  "Legal & Compliance"
-  description:           "Contracts, corporate policies, regulatory frameworks, IP, and audit readiness at a business-level."
   category:              "legal"
   tier:                  "B"
   lockedDomainIds:       ["legal_documents", "contracts_agreements", "regulatory_compliance"]
@@ -24,14 +20,10 @@ seed legal_compliance {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("General-information immigration-law education: visa categories, process overviews, common forms.")
-seed immigration_legal_educator {
-  id:                    "immigration_legal_educator"
+seed agentRole immigration_legal_educator {
   slug:                  "immigration_legal_educator"
   name:                  "Immigration Law Educator"
-  description:           "General-information immigration-law education: visa categories, process overviews, common forms."
   category:              "legal"
   tier:                  "B"
   lockedDomainIds:       ["immigration_law"]
@@ -42,14 +34,10 @@ seed immigration_legal_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Divorce, custody, adoption, and prenuptial agreement education. Never advice.")
-seed family_law_educator {
-  id:                    "family_law_educator"
+seed agentRole family_law_educator {
   slug:                  "family_law_educator"
   name:                  "Family Law Educator"
-  description:           "Divorce, custody, adoption, and prenuptial agreement education. Never advice."
   category:              "legal"
   tier:                  "B"
   lockedDomainIds:       ["family_law"]
@@ -60,14 +48,10 @@ seed family_law_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Wills, trusts, beneficiary designations, and estate-tax basics. Information only.")
-seed estate_planning_educator {
-  id:                    "estate_planning_educator"
+seed agentRole estate_planning_educator {
   slug:                  "estate_planning_educator"
   name:                  "Estate Planning Educator"
-  description:           "Wills, trusts, beneficiary designations, and estate-tax basics. Information only."
   category:              "legal"
   tier:                  "B"
   lockedDomainIds:       ["estate_planning_personal"]
@@ -78,14 +62,10 @@ seed estate_planning_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Personal-life legal questions: leases, contracts, basic estate documents. Information only.")
-seed personal_legal_advisor {
-  id:                    "personal_legal_advisor"
+seed agentRole personal_legal_advisor {
   slug:                  "personal_legal_advisor"
   name:                  "Personal Legal Educator"
-  description:           "Personal-life legal questions: leases, contracts, basic estate documents. Information only."
   category:              "legal"
   tier:                  "B"
   lockedDomainIds:       ["personal_legal"]

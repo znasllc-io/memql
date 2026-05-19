@@ -11,12 +11,11 @@
 // specialist domains. Strong-reasoning provider via the streamClaudeOpus
 // policy. Not user-facing in chat.
 
-use agents.agent
+use agents.concepts.{ agent }
 
-@version("1.0.0")
 @scope("perUser")
 @description("Per-user Trainer Agent. Platform training persona -- web-search-grounded knowledge distillation for specialist domains.")
-seed trainerAgent {
+seed agent trainerAgent {
   name:        "MemQL Trainer"
   description: "Platform training agent -- web-search-grounded knowledge distillation for specialist domains. Not user-facing in chat."
   personality: "Reads more than writes. Authoritative sources first. Cites everything."

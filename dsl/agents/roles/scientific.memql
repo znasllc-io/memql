@@ -4,16 +4,12 @@
 // at an undergraduate-survey level and recommend authoritative sources
 // for deep-dives.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Classical mechanics, E&M, thermodynamics, waves, modern physics at undergrad level.")
-seed physics_educator {
-  id:                    "physics_educator"
+seed agentRole physics_educator {
   slug:                  "physics_educator"
   name:                  "Physics Educator"
-  description:           "Classical mechanics, E&M, thermodynamics, waves, modern physics at undergrad level."
   category:              "scientific"
   lockedDomainIds:       ["physics"]
   defaultDomainIds:      ["classical_mechanics", "electromagnetism", "thermodynamics", "quantum_mechanics", "calculus"]
@@ -22,14 +18,10 @@ seed physics_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("General, organic, inorganic, and physical chemistry at undergrad level.")
-seed chemistry_educator {
-  id:                    "chemistry_educator"
+seed agentRole chemistry_educator {
   slug:                  "chemistry_educator"
   name:                  "Chemistry Educator"
-  description:           "General, organic, inorganic, and physical chemistry at undergrad level."
   category:              "scientific"
   lockedDomainIds:       ["chemistry"]
   defaultDomainIds:      ["organic_chemistry", "inorganic_chemistry", "physical_chemistry", "biochemistry"]
@@ -38,14 +30,10 @@ seed chemistry_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Cell, molecular, organismal, ecology, and evolutionary biology at undergrad level.")
-seed biology_educator {
-  id:                    "biology_educator"
+seed agentRole biology_educator {
   slug:                  "biology_educator"
   name:                  "Biology Educator"
-  description:           "Cell, molecular, organismal, ecology, and evolutionary biology at undergrad level."
   category:              "scientific"
   lockedDomainIds:       ["biology"]
   defaultDomainIds:      ["cell_biology", "molecular_biology", "genetics", "ecology", "evolution"]
@@ -54,14 +42,10 @@ seed biology_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Stars, galaxies, cosmology, planetary science, and observational astronomy.")
-seed astronomy_educator {
-  id:                    "astronomy_educator"
+seed agentRole astronomy_educator {
   slug:                  "astronomy_educator"
   name:                  "Astronomy & Astrophysics Educator"
-  description:           "Stars, galaxies, cosmology, planetary science, and observational astronomy."
   category:              "scientific"
   lockedDomainIds:       ["astronomy"]
   defaultDomainIds:      ["astrophysics", "cosmology", "planetary_science"]
@@ -70,14 +54,10 @@ seed astronomy_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Mineralogy, petrology, structural geology, plate tectonics, and earth history.")
-seed geology_educator {
-  id:                    "geology_educator"
+seed agentRole geology_educator {
   slug:                  "geology_educator"
   name:                  "Geology Educator"
-  description:           "Mineralogy, petrology, structural geology, plate tectonics, and earth history."
   category:              "scientific"
   lockedDomainIds:       ["geology"]
   defaultDomainIds:      ["mineralogy", "plate_tectonics", "earth_history"]
