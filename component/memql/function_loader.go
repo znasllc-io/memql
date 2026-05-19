@@ -126,6 +126,16 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// source.
 	rawSourceForUsage := content
 
+	// Reject the legacy filter form (`<conceptName>.X==args.X`) at
+	// load time. The 2026-05 DSL cleanup picked `payload.X` as the
+	// only legal way to reference payload fields when an @useConcept
+	// binding is in scope; this validator enforces the rule so a
+	// regression fails the engine startup with a clear message rather
+	// than silently translating via translateConceptPathsToPayload.
+	if err := validateNoLegacyConceptPathRefs(content, origin); err != nil {
+		return nil, err
+	}
+
 	// Concept-namespace path translation. A function bound via
 	// `@useConcept(name)` writes payload references in the canonical
 	// `<name>.X` form (e.g. `space.name`). Translate every occurrence

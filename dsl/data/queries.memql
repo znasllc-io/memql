@@ -16,7 +16,7 @@ query queryDetectConflicts {
   shape   recordFull
 }
 
-// ---- queries/v1/data/policy.memql ----
+// ---- queries/v1/data/payload.memql ----
 
 // policy - Query Validation Policy for a Record Type
 // ====================================================

@@ -7,7 +7,7 @@
 @useConcept(documentChunk)
 @description("Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without paying for full-chunk-payload bandwidth.")
 shape documentChunkDomainLite {
-  documentChunk.domainId
+  payload.domainId
 }
 
 @row
@@ -15,11 +15,11 @@ shape documentChunkDomainLite {
 @description("Document chunk projection including the source reference and ordering.")
 shape documentChunkFull {
   row.id
-  documentChunk.domainId
-  documentChunk.text
-  documentChunk.sourceRef
-  documentChunk.seq
-  documentChunk.tokenCount
+  payload.domainId
+  payload.text
+  payload.sourceRef
+  payload.seq
+  payload.tokenCount
   row.createdAt
 }
 
@@ -44,17 +44,17 @@ shape documentChunkFull {
 @description("Knowledge domain projection for the agent builder picker, delegateTakeover retrieval, the citation registry's domain lookup (replier.go), the training pipeline's domain freshness check (training.go's domainNeedsRefresh), and the Knowledge panel's row + modal renderers (cadence badge, last-updated, next-refresh).")
 shape knowledgeDomainFull {
   row.id
-  knowledgeDomain.name
-  knowledgeDomain.description
-  knowledgeDomain.category
-  knowledgeDomain.relevantForRoles
-  knowledgeDomain.requiredByToolSlugs
-  knowledgeDomain.active
-  knowledgeDomain.source
-  knowledgeDomain.refreshCadenceDays
-  knowledgeDomain.lastSeededAt
-  knowledgeDomain.seederRecipeVersion
-  knowledgeDomain.predefined
+  payload.name
+  payload.description
+  payload.category
+  payload.relevantForRoles
+  payload.requiredByToolSlugs
+  payload.active
+  payload.source
+  payload.refreshCadenceDays
+  payload.lastSeededAt
+  payload.seederRecipeVersion
+  payload.predefined
   row.createdAt
 }
 

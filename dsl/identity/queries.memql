@@ -97,14 +97,14 @@ query queryActiveUsers {
 // general "audit events for a user" question -- which logically
 // means actorUserId==X OR targetId==X -- callers run BOTH this
 // query and queryAuditEventsByTarget and merge the results on the
-// client. The frontend dedupes on auditEvent.id when the same
+// client. The frontend dedupes on payload.id when the same
 // row would be returned by both (e.g. self-action events).
 //
 // Returns events regardless of category / action / outcome -- the
 // admin view filters by those facets on the client.
 //
 // Arguments:
-//   userId (string, required) - v1:identity:user.id of the actor
+//   userId (string, required) - v1:identity:payload.id of the actor
 //
 // Returns:
 //   Zero or more audit-event rows in auditEventFull shape.
@@ -130,15 +130,15 @@ query queryAuditEventsByActor {
 // userId. Used by the user-history admin view ("show me everything
 // done TO Alice"); covers events like role_changed, session_revoked,
 // partition_grant_created where the actor was an admin acting on
-// the user.
+// the payload.
 //
 // Companion of queryAuditEventsByActor: MemQL's filter grammar has
 // no OR operator, so the general "audit history for a user" query
-// runs both and merges on the client (dedupe on auditEvent.id).
+// runs both and merges on the client (dedupe on payload.id).
 // See queryAuditEventsByActor for the full rationale.
 //
 // Arguments:
-//   userId (string, required) - v1:identity:user.id of the target
+//   userId (string, required) - v1:identity:payload.id of the target
 //
 // Returns:
 //   Zero or more audit-event rows in auditEventFull shape.
@@ -317,7 +317,7 @@ query queryAuthSessionByTokenHash {
 // concept.
 //
 // Arguments:
-//   subject (string) - JWT sub claim (canonical v1:identity:user.id)
+//   subject (string) - JWT sub claim (canonical v1:identity:payload.id)
 //
 // Returns:
 //   Zero or more session rows in authSessionFull shape.
@@ -372,7 +372,7 @@ query queryClusterSettingsCurrent {
 // =========================================================
 //
 // Returns all delegations (active and revoked) for a given identity ID.
-// Used to audit delegation history for an identity.
+// Used to audit delegation history for an payload.
 //
 // Arguments:
 //   identityId (string, required) - The identity identifier
@@ -436,7 +436,7 @@ query queryExpiredActiveDelegations {
 //
 // Returns every audit-event row. The auditEventRetentionSweep cron
 // iterates the result and per-row tests
-// `addDuration(item.auditEvent.occurredAt, "P{N}D") < timestamp()` to
+// `addDuration(item.payload.occurredAt, "P{N}D") < timestamp()` to
 // decide whether the row is past
 // IDENTITY_AUDIT_LOG_RETENTION_DAYS. Same MemQL-parser limitation
 // as queryExpiredPendingAccessRequests: filter expressions can't
@@ -562,7 +562,7 @@ query queryExpiredMagicLinkRequests {
 @useConcept(accessRequest)
 @description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
 query queryExpiredPendingAccessRequests {
-  filter  payload.status=="pending"
+  filter  traitStatusIsPending
   shape   accessRequestFull
 }
 
@@ -742,7 +742,7 @@ query queryPatIdentitiesForUser {
   args {
     userId  string  @required
   }
-  filter  payload.userId==args.userId; payload.identityType=="api_key"
+  filter  payload.userId==args.userId; traitIdentityIsApiKey
   shape   patSummary
 }
 
@@ -775,7 +775,7 @@ query queryPatIdentityById {
   args {
     identityId  string  @required
   }
-  filter  payload.identityType=="api_key"; id==args.identityId
+  filter  traitIdentityIsApiKey; id==args.identityId
   shape   identityFull
 }
 
@@ -791,7 +791,7 @@ query queryPatIdentityById {
 // to surface).
 //
 // The caller is responsible for following up with queryUserById
-// (using identity.userId) to materialize the owning user's claims.
+// (using payload.userId) to materialize the owning user's claims.
 //
 // Returns the row even when active=false so the interceptor can
 // stamp a precise audit reason ("token revoked") rather than a
@@ -811,7 +811,7 @@ query queryPatIdentityByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  payload.identityType=="api_key"; payload.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsApiKey; payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -833,7 +833,7 @@ query queryPatIdentityByKeyHash {
 @useConcept(accessRequest)
 @description("Access requests with status=pending; backs the admin review queue.")
 query queryPendingAccessRequests {
-  filter  payload.status=="pending"
+  filter  traitStatusIsPending
   shape   accessRequestFull
 }
 
@@ -889,7 +889,7 @@ query queryUserActiveSpace {
 //     the registration-mode-appropriate stage.
 //
 // Arguments:
-//   primaryEmail (string, required) - email to match against user.primaryEmail
+//   primaryEmail (string, required) - email to match against payload.primaryEmail
 //
 // Returns:
 //   Array with 0 or 1 user record in userFull shape.
@@ -996,7 +996,7 @@ query queryUsersActiveInSpace {
 //      crons -- they iterate the result and per-row check whether
 //      (now - deletionScheduledAt) is roughly 7 or 25 days,
 //      sending one reminder email per match. Per-row math uses
-//      `addDuration(item.user.deletionScheduledAt, "P7D")` /
+//      `addDuration(item.payload.deletionScheduledAt, "P7D")` /
 //      `"P8D"` to bracket a 24-hour window.
 //   2. A future settings-page handler -- "do I have a pending deletion?".
 //      The handler will branch on whether the matched row's
@@ -1015,7 +1015,7 @@ query queryUsersActiveInSpace {
 @useConcept(user)
 @description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
 query queryUsersInDeletionCooldown {
-  filter  traitIsActiveRecord; payload.deletionScheduledAt!=""
+  filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1038,7 +1038,7 @@ query queryUsersInDeletionCooldown {
 // addDuration() calls (the planner rejects function-call literals
 // in filter comparisons), so we cannot push the cooldown math down
 // to the query. The automation does it per-row via
-// `if addDuration(item.user.deletionScheduledAt, "P{N}D") < timestamp()`.
+// `if addDuration(item.payload.deletionScheduledAt, "P{N}D") < timestamp()`.
 // `addDuration` only accepts positive ISO-8601 durations -- there
 // is no negative-duration literal -- so the math has to live on the
 // "deadline-vs-now" side of the comparison, not "now-minus-cooldown".
@@ -1051,7 +1051,7 @@ query queryUsersInDeletionCooldown {
 @useConcept(user)
 @description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
 query queryUsersScheduledForDeletion {
-  filter  traitIsActiveRecord; payload.deletionScheduledAt!=""
+  filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1108,7 +1108,7 @@ query queryWorkerTokenByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  payload.identityType=="worker_token"; payload.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsWorkerToken; payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -1117,20 +1117,20 @@ query queryWorkerTokenByKeyHash {
 // queryWorkerTokensForUser
 // =========================
 //
-// Lists every worker_token identity owned by the user. Backs the
+// Lists every worker_token identity owned by the payload. Backs the
 // admin / per-user device list used to surface "who minted what
 // token, when, with which scope" without exposing the keyHash.
 //
 // Arguments:
-//   userId (string, required) - v1:identity:user.id
+//   userId (string, required) - v1:identity:payload.id
 
 @enabled
 @useConcept(identity)
-@description("List worker-token identities owned by a user.")
+@description("List worker-token identities owned by a payload.")
 query queryWorkerTokensForUser {
   args {
     userId  string  @required
   }
-  filter  payload.identityType=="worker_token"; payload.userId==args.userId
+  filter  traitIdentityIsWorkerToken; payload.userId==args.userId
   shape   identityFull
 }

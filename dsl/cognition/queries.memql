@@ -10,7 +10,7 @@ query queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.participantType=="human"; payload.status=="active"; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId; payload.participantType=="human"; traitStatusIsActive; traitIsActiveRecord
   shape   participantFull
 }
 
@@ -20,7 +20,7 @@ func (Query) queryActiveSpaces(ctx any) (any, error) {
     traitIsActiveRecord;
     traitIsNotArchived;
     ?.createdBy==args.userId;
-    ?.space.status==coalesce(args.status, "active"),
+    ?.payload.status==coalesce(args.status, "active"),
     "spaceFull"
   ), nil
 }
@@ -100,14 +100,14 @@ query queryAllArchivedSpacesAcrossUsers {
 // archivedSpaces - Query Archived Spaces
 // =======================================
 //
-// Returns spaces with space.status == "archived". Archived spaces
+// Returns spaces with payload.status == "archived". Archived spaces
 // are hidden from the Active tab and on a retention countdown to
-// hard-delete -- the purgeExpiredArchivedSpaces cron uses space.archivedAt
+// hard-delete -- the purgeExpiredArchivedSpaces cron uses payload.archivedAt
 // against User.preferences.archiveRetentionDays to decide when each
 // row gets a deleted=true marker.
 //
 // Drives the Archived tab in the SpacesListPanel. The frontend reads
-// space.archivedAt + the user's retention preference to render a
+// payload.archivedAt + the user's retention preference to render a
 // "Auto-deletes in N days" countdown badge per row -- last call before
 // purge.
 //
@@ -122,7 +122,7 @@ query queryAllArchivedSpacesAcrossUsers {
 
 @enabled
 @useConcept(space)
-@description("Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).")
+@description("Returns spaces with payload.status == 'archived'. Optional filter: userId (createdBy).")
 query queryArchivedSpaces {
   args {
     userId  string
@@ -169,7 +169,7 @@ func (Query) queryAudioOverridesForSpace(ctx any) (any, error) {
 
 @enabled
 @useConcept(space)
-@description("Archived spaces whose space.expiresAt is before the supplied cutoff.")
+@description("Archived spaces whose payload.expiresAt is before the supplied cutoff.")
 query queryExpiredArchivedSpaces {
   args {
     now  string  @required
@@ -184,7 +184,7 @@ query queryExpiredArchivedSpaces {
 // ====================================================
 //
 // Checks if a greeting utterance already exists for a specific agent
-// in a specific space. Prevents duplicate greetings.
+// in a specific payload. Prevents duplicate greetings.
 //
 // Arguments:
 //   spaceId (string, required) - The space ID to check
@@ -232,9 +232,9 @@ func (Query) queryGroupGAForSpace(ctx any) (any, error) {
   // active SI participant per space; that's their GA).
   return shape(
     concept;
-    participant.spaceId==args.spaceId;
-    participant.participantType=="si";
-    participant.status=="active",
+    payload.spaceId==args.spaceId;
+    payload.participantType=="si";
+    traitStatusIsActive,
     "participantFull"
   ), nil
 }
@@ -244,7 +244,7 @@ func (Query) queryGroupGAForSpace(ctx any) (any, error) {
 // queryHasAIResponseForReply - Idempotency Check for SI Response
 // ================================================================
 //
-// Checks whether an SI response already exists for a given utterance.
+// Checks whether an SI response already exists for a given payload.
 // Used as an idempotency guard to prevent duplicate SI responses
 // when the same event is processed multiple times.
 //
@@ -272,7 +272,7 @@ query queryHasSIResponseForReply {
 // queryParticipantByAgentSpace - Check if Agent Already in Space
 // ===============================================================
 //
-// Checks if a specific AI agent is already participating in a space.
+// Checks if a specific AI agent is already participating in a payload.
 // Used to prevent duplicate AI participant records during auto-join.
 //
 // Arguments:
@@ -316,20 +316,20 @@ query queryParticipantByAgentSpace {
 // which tracks authorization and lifecycle.
 //
 // Arguments:
-//   spaceId (string, optional)       - Filter by space ID to get all sessions in a space.
+//   spaceId (string, optional)       - Filter by space ID to get all sessions in a payload.
 //   participantId (string, optional) - Filter by specific participant ID.
 //
 // Returns:
 //   Array of session records with fields like:
 //   - id: Unique session identifier
-//   - session.spaceId: ID of the space this session belongs to
-//   - session.participantId: ID of the participant this session tracks
-//   - session.activeTier: Current interaction tier (text, speechToText, voiceToVoice, voiceAvatar, voiceVision)
-//   - session.humanInput: Device states (microphoneEnabled, cameraEnabled)
-//   - session.aiOutput: AI output states (voiceEnabled, avatarEnabled, visionEnabled)
-//   - session.streams: Active stream IDs (realtimeSessionId, avatarStreamId)
-//   - session.startedAt: When the session started
-//   - session.lastActivityAt: Timestamp of last activity
+//   - payload.spaceId: ID of the space this session belongs to
+//   - payload.participantId: ID of the participant this session tracks
+//   - payload.activeTier: Current interaction tier (text, speechToText, voiceToVoice, voiceAvatar, voiceVision)
+//   - payload.humanInput: Device states (microphoneEnabled, cameraEnabled)
+//   - payload.aiOutput: AI output states (voiceEnabled, avatarEnabled, visionEnabled)
+//   - payload.streams: Active stream IDs (realtimeSessionId, avatarStreamId)
+//   - payload.startedAt: When the session started
+//   - payload.lastActivityAt: Timestamp of last activity
 //
 // Usage:
 //   participantSession()                                      // Returns all sessions
@@ -355,7 +355,7 @@ query queryParticipantSession {
 // savedSpaces - Query Saved Spaces
 // =================================
 //
-// Returns spaces with space.status == "saved". Saved spaces are
+// Returns spaces with payload.status == "saved". Saved spaces are
 // manually preserved by the user (clicked "Save" in the SpacesListPanel
 // or had their daily roll over via the rolloverDailySpace cron with
 // preferences.dailySpaceRolloverAction == "save"). They never
@@ -376,7 +376,7 @@ query queryParticipantSession {
 
 @enabled
 @useConcept(space)
-@description("Returns spaces with space.status == 'saved'. Optional filter: userId (createdBy).")
+@description("Returns spaces with payload.status == 'saved'. Optional filter: userId (createdBy).")
 query querySavedSpaces {
   args {
     userId  string
@@ -390,9 +390,9 @@ query querySavedSpaces {
 // querySIParticipantForSpace - Find Active SI Participant in Space
 // =================================================================
 //
-// Finds the active SI participant in a given space. Returns the first
+// Finds the active SI participant in a given payload. Returns the first
 // SI participant with status "active". Used by the cognition automation
-// to identify which SI agent is responding in a space.
+// to identify which SI agent is responding in a payload.
 //
 // Arguments:
 //   spaceId (string, required) - The space to search in
@@ -402,12 +402,12 @@ query querySavedSpaces {
 
 @enabled
 @useConcept(participant)
-@description("Find the active SI participant in a space.")
+@description("Find the active SI participant in a payload.")
 query querySiParticipantForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; payload.status=="active"
+  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; traitStatusIsActive
   shape   participantFull
 }
 
@@ -491,9 +491,9 @@ func (Query) querySpaceParticipantPresence(ctx any) (any, error) {
 func (Query) querySpaceParticipants(ctx any) (any, error) {
   return shape(
     concept;
-    ?.participant.spaceId==args.spaceId;
-    ?.participant.status==args.status;
-    ?.participant.participantType==args.participantType,
+    ?.payload.spaceId==args.spaceId;
+    ?.payload.status==args.status;
+    ?.payload.participantType==args.participantType,
     "participantFull"
   ), nil
 }
@@ -501,9 +501,9 @@ func (Query) querySpaceParticipants(ctx any) (any, error) {
 func (Query) querySpaceUtterances(ctx any) (any, error) {
   return shape(
     concept;
-    ?.utterance.spaceId==args.spaceId;
-    ?.utterance.participantId==args.participantId;
-    ?.utterance.utteranceType==args.utteranceType,
+    ?.payload.spaceId==args.spaceId;
+    ?.payload.participantId==args.participantId;
+    ?.payload.utteranceType==args.utteranceType,
     "utteranceFull"
   ), nil
 }
@@ -513,7 +513,7 @@ func (Query) querySpaceUtterances(ctx any) (any, error) {
 // userMicStatesForSpace
 // =====================
 //
-// Returns the latest per-user mic state rows scoped to one space.
+// Returns the latest per-user mic state rows scoped to one payload.
 // The cognition handler queries this when resolving mirror_user
 // agents: it locates the row matching the space's owner (or, more
 // generally, any human currently in the space) and skips TTS
@@ -521,7 +521,7 @@ func (Query) querySpaceUtterances(ctx any) (any, error) {
 
 @enabled
 @useConcept(micState)
-@description("Latest mic state rows per user for a space.")
+@description("Latest mic state rows per user for a payload.")
 query queryUserMicStatesForSpace {
   args {
     spaceId  string  @required

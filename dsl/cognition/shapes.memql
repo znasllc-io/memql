@@ -8,11 +8,11 @@
 @description("Per-(space, agent) audio override projection")
 shape audioOverrideFull {
   row.id
-  audioOverride.spaceId
-  audioOverride.agentId
-  audioOverride.setBy
-  audioOverride.mode
-  audioOverride.active
+  payload.spaceId
+  payload.agentId
+  payload.setBy
+  payload.mode
+  payload.active
   row.createdAt
 }
 
@@ -21,10 +21,10 @@ shape audioOverrideFull {
 @description("Per-(space, user) mic state projection")
 shape micStateFull {
   row.id
-  micState.spaceId
-  micState.userId
-  micState.muted
-  micState.updatedAt
+  payload.spaceId
+  payload.userId
+  payload.muted
+  payload.updatedAt
   row.createdAt
 }
 
@@ -33,16 +33,16 @@ shape micStateFull {
 @description("Comprehensive participant projection with all fields")
 shape participantFull {
   row.id
-  participant.spaceId
-  participant.userId
-  participant.agentId
-  participant.participantType
-  participant.displayName
-  participant.status
-  participant.joinedAt
-  participant.leftAt
-  participant.capabilityOverrides
-  participant.hidden
+  payload.spaceId
+  payload.userId
+  payload.agentId
+  payload.participantType
+  payload.displayName
+  payload.status
+  payload.joinedAt
+  payload.leftAt
+  payload.capabilityOverrides
+  payload.hidden
   row.createdAt
 }
 
@@ -51,11 +51,11 @@ shape participantFull {
 @description("Comprehensive session projection with device + stream state")
 shape sessionFull {
   row.id
-  session.humanInput
-  session.aiOutput
-  session.streams
-  session.startedAt
-  session.lastActivityAt
+  payload.humanInput
+  payload.aiOutput
+  payload.streams
+  payload.startedAt
+  payload.lastActivityAt
 }
 
 @row
@@ -63,10 +63,10 @@ shape sessionFull {
 @description("Comprehensive space context snapshot projection")
 shape spaceContextFull {
   row.id
-  context.spaceId
-  context.snapshot
-  context.computedAt
-  context.lastUpdatedAt
+  payload.spaceId
+  payload.snapshot
+  payload.computedAt
+  payload.lastUpdatedAt
   row.createdAt
 }
 
@@ -75,24 +75,24 @@ shape spaceContextFull {
 @description("Comprehensive space projection with all fields")
 shape spaceFull {
   row.id
-  space.name
-  space.description
-  space.purpose
-  space.status
-  space.archivedAt
-  space.expiresAt
-  space.savedAt
-  space.scheduledAt
-  space.settings
-  space.turnStateId
-  space.active
-  space.spaceType
-  space.kind
-  space.private
-  space.dailyDateKey
-  space.maxHumans
-  space.maxAgents
-  space.selectedAgentIds
+  payload.name
+  payload.description
+  payload.purpose
+  payload.status
+  payload.archivedAt
+  payload.expiresAt
+  payload.savedAt
+  payload.scheduledAt
+  payload.settings
+  payload.turnStateId
+  payload.active
+  payload.spaceType
+  payload.kind
+  payload.private
+  payload.dailyDateKey
+  payload.maxHumans
+  payload.maxAgents
+  payload.selectedAgentIds
   row.createdAt
   row.createdBy
 }
@@ -102,20 +102,20 @@ shape spaceFull {
 @description("Comprehensive utterance projection with all fields")
 shape utteranceFull {
   row.id
-  utterance.spaceId
-  utterance.participantId
-  utterance.utteranceType
-  utterance.text
-  utterance.action
-  utterance.audioId
-  utterance.videoId
-  utterance.duration
-  utterance.replyToId
-  utterance.timestamps
-  utterance.analysis
-  utterance.source
-  utterance.citations
-  utterance.retrieved
+  payload.spaceId
+  payload.participantId
+  payload.utteranceType
+  payload.text
+  payload.action
+  payload.audioId
+  payload.videoId
+  payload.duration
+  payload.replyToId
+  payload.timestamps
+  payload.analysis
+  payload.source
+  payload.citations
+  payload.retrieved
   row.createdAt
 }
 
@@ -124,10 +124,10 @@ shape utteranceFull {
 @description("Per-(space, agent) video override projection")
 shape videoOverrideFull {
   row.id
-  videoOverride.spaceId
-  videoOverride.agentId
-  videoOverride.setBy
-  videoOverride.mode
-  videoOverride.active
+  payload.spaceId
+  payload.agentId
+  payload.setBy
+  payload.mode
+  payload.active
   row.createdAt
 }

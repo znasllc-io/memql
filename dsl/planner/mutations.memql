@@ -233,7 +233,7 @@ mutation mutationStartPlan {
 
 @enabled
 @useConcept(plan)
-@description("Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use task. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.")
+@description("Insert a Plan in awaitingFeedback / scope_elevation_required for a pending computer_use payload. The emitScopeElevationCanvasCard automation lands the canvas card; the user approves or denies via the card's buttons.")
 mutation mutationCreateScopeElevationPlan {
   args {
     planId          string  @required

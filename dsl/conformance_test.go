@@ -99,6 +99,20 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 		{regexp.MustCompile(`payload\.active\s*!=\s*false\b`), "traitIsActiveRecord"},
 		{regexp.MustCompile(`payload\.deleted\s*==\s*false\b`), "traitIsNotDeleted"},
 		{regexp.MustCompile(`payload\.deleted\s*!=\s*true\b`), "traitIsNotDeleted"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"active"`), "traitStatusIsActive"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"archived"`), "traitStatusIsArchived"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"saved"`), "traitStatusIsSaved"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"pending"`), "traitStatusIsPending"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"running"`), "traitStatusIsRunning"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"cancelled"`), "traitIsCancelled"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"completed"`), "traitIsCompleted"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"inProgress"`), "traitIsInProgress"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"open"`), "traitIsOpen"},
+		{regexp.MustCompile(`payload\.status\s*==\s*"scheduled"`), "traitIsScheduled"},
+		{regexp.MustCompile(`payload\.status\s*!=\s*"archived"`), "traitIsNotArchived"},
+		{regexp.MustCompile(`payload\.identityType\s*==\s*"api_key"`), "traitIdentityIsApiKey"},
+		{regexp.MustCompile(`payload\.identityType\s*==\s*"worker_token"`), "traitIdentityIsWorkerToken"},
+		{regexp.MustCompile(`payload\.deletionScheduledAt\s*!=\s*""`), "traitIsDeletionScheduled"},
 	}
 
 	type violation struct {
@@ -153,22 +167,57 @@ func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred st
 	}
 }
 
-// walkFilterPredicates scans src line-by-line. When it sees a line
-// beginning with `filter ` it enters "in filter clause" mode and
-// emits each `;`-separated predicate on the line. Subsequent
-// indented continuation lines are treated as more predicates. The
-// clause ends when it hits `shape`, `insert`, `update`, `return`,
-// `concept`, `args`, `use`, `@<annotation>`, a closing brace, or a
-// blank line.
+// walkFilterPredicates scans src line-by-line.
+//
+// Two contexts emit predicates:
+//
+//  1. Struct-form: a line beginning with `filter ` opens a clause
+//     whose body runs across `;`-separated predicates on the same
+//     line and indented continuation lines, terminating on a known
+//     end keyword / annotation / blank line.
+//
+//  2. Procedural-form: a `shape(concept;` call inside a `func`
+//     body. Predicates are `;`-separated between `concept;` and
+//     the closing `,` before the shape name argument.
+//
+// @filter(...) annotations on automations are intentionally NOT
+// walked: that annotation uses a different (event-trigger)
+// evaluator that doesn't recognize trait spec calls, so the same
+// rules don't apply.
 func walkFilterPredicates(path, src string, emit func(file string, lineno int, pred string)) {
 	inFilter := false
+	inShapeCall := false
 	for lineno, raw := range strings.Split(src, "\n") {
 		line := raw
-		// strip // comments (best-effort; don't try to handle strings)
 		if idx := strings.Index(line, "//"); idx >= 0 {
 			line = line[:idx]
 		}
 		trim := strings.TrimSpace(line)
+
+		// Procedural-form `shape(` body — emit each ;-piece until
+		// we see the closing `,` + shape name + `)`.
+		if inShapeCall {
+			if strings.Contains(trim, ")") {
+				inShapeCall = false
+			}
+			for _, p := range splitPredicates(strim(trim, ',')) {
+				p = strings.TrimSpace(p)
+				if p == "" || p == "concept" {
+					continue
+				}
+				// drop the trailing shape-name string arg if it's on this line
+				if strings.HasPrefix(p, "\"") {
+					continue
+				}
+				emit(path, lineno+1, p)
+			}
+			continue
+		}
+		if m := procShapeCallStart(line); m {
+			inShapeCall = !strings.Contains(trim, ")")
+			continue
+		}
+
 		if trim == "" {
 			inFilter = false
 			continue
@@ -186,7 +235,6 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 		if !inFilter {
 			continue
 		}
-		// End markers
 		end := false
 		for _, kw := range []string{"shape", "insert", "update", "return", "concept", "args", "use", "}", ")"} {
 			if strings.HasPrefix(trim, kw+" ") || trim == kw || strings.HasPrefix(trim, kw+"\t") {
@@ -207,6 +255,27 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 			}
 		}
 	}
+}
+
+// procShapeCallStart returns true if the line opens a procedural-
+// form `shape(concept;` call. We look for the `shape(` token
+// followed (possibly across whitespace) by `concept;`.
+func procShapeCallStart(line string) bool {
+	idx := strings.Index(line, "shape(")
+	if idx < 0 {
+		return false
+	}
+	rest := strings.TrimSpace(line[idx+len("shape("):])
+	return strings.HasPrefix(rest, "concept;") || rest == "concept"
+}
+
+// strim trims the trailing rune `r` off a string if present.
+// Mirrors strings.TrimRight for a single byte.
+func strim(s string, r byte) string {
+	for len(s) > 0 && s[len(s)-1] == r {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func splitPredicates(s string) []string {

@@ -51,7 +51,7 @@ query queryAgentById {
 // ==============================================
 //
 // Returns the v1:agents:agent row projected through agentFull,
-// which exposes BOTH `agent.ownerUserId` and `createdBy`. Callers
+// which exposes BOTH `payload.ownerUserId` and `createdBy`. Callers
 // (resolveAgentOwner in app/computer_use_status_agent.go and
 // resolveOwnerForAgent in integrations/agent/replier.go) read
 // ownerUserId first and fall back to createdBy.
@@ -70,7 +70,7 @@ query queryAgentOwner {
 // agentRoleSlugsInUse - Query roleSlugs already taken by an agent
 // ================================================================
 //
-// Returns the list of `agent.roleSlug` values currently in use by
+// Returns the list of `payload.roleSlug` values currently in use by
 // non-deleted agents in the partition. Used by create-agent UIs to
 // filter out already-taken roles from role pickers.
 
@@ -99,7 +99,7 @@ query queryAllAgents {
 
 @enabled
 @useConcept(agent)
-@description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
+@description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new payload. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
 query queryActiveAgentsForUser {
   args {
     ownerUserId  string  @required

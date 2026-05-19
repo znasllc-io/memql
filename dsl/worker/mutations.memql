@@ -70,7 +70,7 @@ mutation mutationCreateWorkerInvocation {
 //
 // ownerUserId is taken from the identity's userId, NOT from the
 // caller -- the worker authenticates as worker:<id>, not as the
-// registering user.
+// registering payload.
 
 @enabled
 @useConcept(registration)
@@ -115,14 +115,14 @@ mutation mutationCreateWorkerRegistration {
 // revokeWorker
 // ============
 //
-// Stamps revokedAt / revokedBy / revokeReason on a worker registration.
+// Stamps revokedAt / revokedBy / revokeReason on a worker payload.
 // The agent node's worker registry checks revokedAt on every dispatch
 // and on a periodic sweep -- a revoked worker's gRPC stream is closed
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
 @enabled
 @useConcept(registration)
-@description("Revoke a worker registration.")
+@description("Revoke a worker payload.")
 mutation mutationRevokeWorker {
   args {
     registrationId  string  @required
@@ -207,7 +207,7 @@ mutation mutationUpdateAgentAuthScope {
 
 @enabled
 @useConcept(registration)
-@description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
+@description("Bump lastSeenAt + lastConnectedFromIP on a worker payload.")
 mutation mutationUpdateWorkerLastSeen {
   args {
     registrationId       string  @required

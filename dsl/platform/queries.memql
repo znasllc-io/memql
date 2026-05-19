@@ -35,13 +35,13 @@ query queryAllPolicyTraces {
   shape   policyTraceFull
 }
 
-// ---- queries/v1/platform/globalVariable.memql ----
+// ---- queries/v1/platform/payload.memql ----
 
 // queryGlobalVariable -- Get Single Instance-Wide Configuration Variable
 // ======================================================================
 //
 // Returns a single instance-wide (global) configuration variable by
-// name from v1:platform:globalVariable. Used for system configuration
+// name from v1:platform:payload. Used for system configuration
 // lookups that are NOT partition-scoped.
 //
 // Arguments:
@@ -74,7 +74,7 @@ query queryGlobalVariable {
 // ==========================================================================
 //
 // Returns multiple instance-wide (global) configuration variables by
-// name list from v1:platform:globalVariable. Used for bulk
+// name list from v1:platform:payload. Used for bulk
 // system-config retrieval.
 //
 // Arguments:
@@ -120,7 +120,7 @@ query queryGlobalVariables {
 @useConcept(partition)
 @description("List partitions visible to the caller (owner sees all)")
 query queryListPartitions {
-  filter  partition.name in caller.partitions
+  filter  payload.name in caller.partitions
 }
 
 // ---- queries/v1/platform/userDefaults.memql ----
@@ -149,9 +149,9 @@ query queryListPartitions {
 // Returns:
 //   Array of variable records with fields:
 //   - id: Variable identifier
-//   - globalVariable.name: Variable name (e.g., "MEMQL_DEFAULT_USER_ROLE")
-//   - globalVariable.value: Variable value
-//   - globalVariable.active: Whether the variable is active
+//   - payload.name: Variable name (e.g., "MEMQL_DEFAULT_USER_ROLE")
+//   - payload.value: Variable value
+//   - payload.active: Whether the variable is active
 //
 // Note:
 //   This function is marked @internal and should not be called directly from

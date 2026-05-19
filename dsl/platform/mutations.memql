@@ -79,7 +79,7 @@ mutation mutationDeletePartition {
 
 @enabled
 @useConcept(policyTrace)
-@description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
+@description("Persist a single policy evaluation trace to v1:platform:payload.")
 mutation mutationInsertPolicyTrace {
   args {
     policyName       string  @required
@@ -122,7 +122,7 @@ mutation mutationInsertPolicyTrace {
 // ===============
 //
 // Upserts an instance-wide (global) encrypted secret row in
-// v1:platform:globalSecret. Companion to mutationSetPartitionSecret
+// v1:platform:payload. Companion to mutationSetPartitionSecret
 // (partition-scoped). Used by `make secrets-seed`,
 // `make prod-seed-secrets`, and `make secret-set SCOPE=global` to
 // populate instance defaults.
@@ -132,7 +132,7 @@ mutation mutationInsertPolicyTrace {
 
 @enabled
 @useConcept(globalSecret)
-@description("Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
+@description("Persist an instance-wide (global) encrypted secret row in v1:platform:payload. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
 mutation mutationSetGlobalSecret {
   args {
     id              string  @required
@@ -162,12 +162,12 @@ mutation mutationSetGlobalSecret {
 // =================
 //
 // Upserts an instance-wide (global) plaintext variable in
-// v1:platform:globalVariable. Used by seed files and
+// v1:platform:payload. Used by seed files and
 // `make variable-set SCOPE=global` to populate instance defaults.
 
 @enabled
 @useConcept(globalVariable)
-@description("Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.")
+@description("Persist an instance-wide (global) plaintext variable row in v1:platform:payload.")
 mutation mutationSetGlobalVariable {
   args {
     id           string  @required
@@ -191,7 +191,7 @@ mutation mutationSetGlobalVariable {
 // ==================
 //
 // Upserts a partition-scoped encrypted secret row in
-// v1:platform:partitionSecret. Callers pre-compute the ciphertext +
+// v1:platform:payload. Callers pre-compute the ciphertext +
 // fingerprint via component/secret.Encrypt; this mutation only persists
 // the opaque fields. The router integration uses this for vendor_api_key
 // rows; future callers will use it for per-tenant integration creds.
@@ -201,7 +201,7 @@ mutation mutationSetGlobalVariable {
 
 @enabled
 @useConcept(partitionSecret)
-@description("Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
+@description("Persist a partition-scoped encrypted secret row in v1:platform:payload. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
 mutation mutationSetPartitionSecret {
   args {
     id              string  @required
@@ -231,13 +231,13 @@ mutation mutationSetPartitionSecret {
 // ====================
 //
 // Upserts a partition-scoped plaintext configuration variable in
-// v1:platform:partitionVariable. Companion to mutationSetPartitionSecret
+// v1:platform:payload. Companion to mutationSetPartitionSecret
 // for non-sensitive values. Used by `make variable-set SCOPE=partition`
 // and by automations that write per-tenant config.
 
 @enabled
 @useConcept(partitionVariable)
-@description("Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.")
+@description("Persist a partition-scoped plaintext variable row in v1:platform:payload.")
 mutation mutationSetPartitionVariable {
   args {
     id           string  @required

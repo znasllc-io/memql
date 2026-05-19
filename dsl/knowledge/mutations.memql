@@ -19,7 +19,7 @@ mutation mutationAttachDocumentToDomain {
 
 // ---- mutations/v1/knowledge/createDocument.memql ----
 
-// mutationCreateDocument -- single write path for v1:knowledge:document.
+// mutationCreateDocument -- single write path for v1:knowledge:payload.
 // Called by the analyzer after a Plan's Tasks have produced a structured
 // breakdown of an attachment.
 
@@ -148,7 +148,7 @@ mutation mutationCreateEntityIndexEntry {
 
 @enabled
 @useConcept(imageRegion)
-@description("Insert a v1:knowledge:imageRegion. Called per-region by the image analyzer.")
+@description("Insert a v1:knowledge:payload. Called per-region by the image analyzer.")
 mutation mutationCreateImageRegion {
   args {
     regionId     string
@@ -240,7 +240,7 @@ mutation mutationCreateKnowledgeDomain {
 
 @enabled
 @useConcept(spreadsheetRow)
-@description("Insert a v1:knowledge:spreadsheetRow. Called per-row by the analyzer during a Document's structured breakdown.")
+@description("Insert a v1:knowledge:payload. Called per-row by the analyzer during a Document's structured breakdown.")
 mutation mutationCreateSpreadsheetRow {
   args {
     rowId        string

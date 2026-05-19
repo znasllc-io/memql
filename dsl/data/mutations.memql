@@ -27,7 +27,7 @@ mutation mutationCheckRecord {
 // confirmRecord - Human Validate a Data Record
 // ===============================================
 //
-// Performs a human confirmation on a data record. Only human identities
+// Performs a human confirmation on a data payload. Only human identities
 // should call this. Updates the confirm count and validation state.
 // Audit logging is handled by the conflictDetection automation.
 //

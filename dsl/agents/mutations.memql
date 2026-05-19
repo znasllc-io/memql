@@ -1,7 +1,7 @@
 // mutations.memql
 //
 // Agent-namespace mutations -- the platform's canonical write surface
-// for v1:agents:agent + v1:agents:agentAuthorization + v1:agents:agentRole.
+// for v1:agents:agent + v1:agents:agentAuthorization + v1:agents:payload.
 // Every BFF and every internal seeder writes through these;
 // product-specific mutations (e.g. CoPresent's space-join flow) layer
 // on top, never re-implement the row write.
