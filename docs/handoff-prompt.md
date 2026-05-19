@@ -48,9 +48,6 @@ HANDOFF DOCS (currently open work, in repo at memql/docs/):
   - handoff-ctx-purge.md                   historical record of the
                                            shipped ctx-envelope purge;
                                            deletable once a release ships.
-  - handoff-computer-use-scope-elevation.md  feature absent from tree;
-                                           needs product call before
-                                           anyone resumes.
   - planning/portal-ai-router-handoff.md   product spec for the Portal
                                            team; under product review.
 
