@@ -266,6 +266,104 @@ logic logicSweep {
 	}
 }
 
+// TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod pins the
+// pure step-method short-circuit: `<stepName>.<method>()` in a
+// Logic's `return` expression resolves against the bound step
+// result via the local Evaluator, bypassing engine.Execute (which
+// doesn't recognise the dotted shape and would fail with
+// `function "stepName.method" not found`).
+//
+// This is the path that lets logicRevokeExpiredDelegations,
+// purgeExpired{ArchivedSpaces,PolicyTraces}, and the rest of the
+// `return X.Len()` family run end-to-end.
+func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	evaluator := NewEvaluator()
+	evaluator.SetStepResult("expiredDelegations", &StepResult{
+		Status: "success",
+		Result: map[string]any{
+			"Bundle": map[string]any{
+				"nodes": []any{
+					map[string]any{"id": "d1"},
+					map[string]any{"id": "d2"},
+					map[string]any{"id": "d3"},
+				},
+			},
+		},
+	})
+
+	// .Len() -> count of nodes
+	val, handled, err := r.tryEvaluateReturnLocally("expiredDelegations.Len()", evaluator)
+	if err != nil {
+		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+	}
+	if !handled {
+		t.Fatalf("expected handled=true for `expiredDelegations.Len()`; bound step ID should be recognised")
+	}
+	if val != 3 {
+		t.Errorf(".Len() = %#v, want 3", val)
+	}
+
+	// .Empty() -> false (3 nodes)
+	val, handled, err = r.tryEvaluateReturnLocally("expiredDelegations.Empty()", evaluator)
+	if err != nil {
+		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+	}
+	if !handled || val != false {
+		t.Errorf(".Empty() = (handled=%v val=%#v); want (true, false)", handled, val)
+	}
+
+	// .First().id navigation
+	val, handled, err = r.tryEvaluateReturnLocally("expiredDelegations.First()", evaluator)
+	if err != nil {
+		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+	}
+	if !handled {
+		t.Errorf(".First() should be handled locally")
+	}
+	if m, ok := val.(map[string]any); !ok || m["id"] != "d1" {
+		t.Errorf(".First() = %#v, want first node {id: d1}", val)
+	}
+}
+
+// TestLogicRunner_TryEvaluateReturnLocally_FallsThrough pins that
+// expressions which AREN'T pure step-method calls report handled=false
+// so the caller falls back to engine.Execute. This protects compound
+// expressions, mutation calls, and literals from being silently
+// short-circuited.
+func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	evaluator := NewEvaluator()
+	evaluator.SetStepResult("rows", &StepResult{
+		Status: "success",
+		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
+	})
+
+	tests := []struct {
+		name string
+		expr string
+	}{
+		{"compound coalesce", `coalesce(rows.First(), "fallback")`},
+		{"mutation call", `mutationCreateThing({name: "x"})`},
+		{"builtin call", `ensureDailySpaceForCaller({})`},
+		{"plain step name (no parens)", `rows`},
+		{"unknown step", `notARealStep.Len()`},
+		{"single-segment call", `someFunc()`},
+		{"empty expr", ``},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, handled, err := r.tryEvaluateReturnLocally(tt.expr, evaluator)
+			if err != nil {
+				t.Errorf("expected no error for %q, got %v", tt.expr, err)
+			}
+			if handled {
+				t.Errorf("expected handled=false for %q (should fall through to engine.Execute)", tt.expr)
+			}
+		})
+	}
+}
+
 // TestLogicRunner_RejectsNilBody pins that the runner errors on a
 // nil body rather than panicking. Production never hits this path
 // (the function loader only stamps LogicSteps when there's a multi-
