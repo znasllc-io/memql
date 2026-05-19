@@ -41,7 +41,7 @@ logic logicKillSwitchSuspendsRunningPlans {
       })
     }
   }
-  ctx.output = plans.Len()
+  return plans.Len()
   }
 }
 
@@ -82,7 +82,7 @@ logic logicWorkerInvocationRetentionSweep {
     }
   }
 
-  ctx.output = candidates.Len()
+  return candidates.Len()
   }
 }
 
