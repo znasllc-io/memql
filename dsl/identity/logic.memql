@@ -207,7 +207,6 @@ logic logicAccountDeletionReminder7Days {
 //       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < timestamp()
 //   - There's no batch-update path; we revoke sessions one row at a
 //     time inside the loop.
-@useQuery(queryAuthSessionsForUser, queryGlobalVariable, queryUsersScheduledForDeletion)
 @description("Daily 03:00 UTC sweep that hard-deletes users whose deletionScheduledAt + IDENTITY_DELETION_COOLDOWN_DAYS (default 30) has elapsed, via mutationDeleteUserHard. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.")
 logic logicAccountDeletionSweep {
   args {

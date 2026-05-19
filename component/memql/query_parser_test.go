@@ -6,14 +6,12 @@ import (
 )
 
 // TestParseQueryMemQL_GoldenPath locks the canonical struct-form
-// query syntax. A query that declares args, filter, shape, and the
-// concept binding via @useConcept must parse without error and
-// populate the resulting *Function.
+// query syntax post-PR-C: concept binding lives in the signature
+// (`query Concept name`), not in a `@useConcept(...)` annotation.
 func TestParseQueryMemQL_GoldenPath(t *testing.T) {
 	src := `@enabled
-@useConcept(participant)
 @description("Active participants in a space.")
-query queryActiveParticipantsForSpace {
+query participant queryActiveParticipantsForSpace {
   args {
     spaceId  string  @required
   }
@@ -37,9 +35,8 @@ query queryActiveParticipantsForSpace {
 // annotation allow-list catches typos -- the value the dedicated parser
 // adds over the general parser.
 func TestParseQueryMemQL_RejectsUnknownAnnotation(t *testing.T) {
-	src := `@useConcept(participant)
-@bogusAnnotation("x")
-query queryFoo {
+	src := `@bogusAnnotation("x")
+query participant queryFoo {
   filter id == "x"
   shape  participantFull
 }`
@@ -53,10 +50,31 @@ query queryFoo {
 	}
 }
 
+// TestParseQueryMemQL_RejectsUseAnnotations confirms the lockdown:
+// every `@use*` annotation is rejected at parse time with a message
+// pointing at the new file-top `use <module>.{ ... }` form.
+func TestParseQueryMemQL_RejectsUseAnnotations(t *testing.T) {
+	for _, attr := range []string{"useConcept", "useShape", "useQuery", "useMutation", "useLogic", "useBuiltin"} {
+		t.Run(attr, func(t *testing.T) {
+			src := `@` + attr + `(x)
+query participant queryFoo {
+  filter id == "x"
+  shape  fooFull
+}`
+			_, err := parseQueryMemQL("queryFoo", "test.memql", src, nil)
+			if err == nil {
+				t.Fatalf("expected @%s to be rejected", attr)
+			}
+			if !strings.Contains(err.Error(), "retired") {
+				t.Errorf("error should mention 'retired', got %v", err)
+			}
+		})
+	}
+}
+
 // TestParseQueryMemQL_AcceptsAllAllowedAnnotations sweeps the
-// full allow-list to lock the surface against accidental removal.
-// If an annotation is later removed from allowedQueryAnnotations,
-// this test points at the removed name.
+// full allow-list (post-lockdown) to lock the surface against
+// accidental removal.
 func TestParseQueryMemQL_AcceptsAllAllowedAnnotations(t *testing.T) {
 	cases := []string{
 		`@description("d")`,
@@ -69,27 +87,15 @@ func TestParseQueryMemQL_AcceptsAllAllowedAnnotations(t *testing.T) {
 		`@audit`,
 		`@role("admin")`,
 		`@permission("p")`,
-		`@useConcept(foo)`,
-		`@useShape(s)`,
-		`@useSpec(x)`,
-		`@useTrait(t)`,
-		`@useQuery(q)`,
-		`@useLogic(l)`,
-		`@useBuiltin(b)`,
 	}
 	for _, ann := range cases {
 		t.Run(ann, func(t *testing.T) {
 			src := ann + `
-@useConcept(foo)
-query queryFoo {
+query foo queryFoo {
   filter foo.id == "x"
   shape  fooFull
 }`
 			_, err := parseQueryMemQL("queryFoo", "test.memql", src, nil)
-			// We only care that the annotation-allow-list pass does
-			// not reject the annotation. Downstream errors (missing
-			// concept registry entries, etc.) are acceptable -- those
-			// come from a different layer.
 			if err != nil && strings.Contains(err.Error(), "unknown annotation") {
 				t.Errorf("allow-listed annotation %q reported as unknown: %v", ann, err)
 			}

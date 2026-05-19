@@ -2014,16 +2014,13 @@ func (Mutation) editThing(args any) error {
 }`,
 			wantKind: MutationKindUpdate,
 		},
-		{
-			name: "implicit-concept update form (use directive style)",
-			input: `
-use thing
-@enabled
-func (Mutation) editThing(args any) error {
-  return update(id=args.id, payload={ status: args.status })
-}`,
-			wantKind: MutationKindUpdate,
-		},
+		// (The "implicit-concept update form (use directive style)"
+		// case was retired in PR C; the legacy single-segment
+		// `use <name>` shape is rejected at parse time post-lockdown.
+		// The procedural-form `update(...)` call now requires either
+		// an explicit `concept` first argument or the canonical
+		// struct-form `mutation <Concept> <name> { ... update { ... } }`
+		// binding.)
 	}
 
 	for _, tc := range cases {
