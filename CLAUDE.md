@@ -965,19 +965,16 @@ the resolution rules unambiguous.
 
 **Procedural form (internal only).** The struct-form rewriter
 expands every author-side block to a `func (Receiver) NAME(ctx any)
-(any, error) { ... }` shape for the engine's parser. Inside that
-post-rewrite text the runtime envelope is `ctx.input` / `ctx.actor`
-/ `ctx.partition` / `ctx.now` / `ctx.config` / `ctx.output` /
-`ctx.error` / `ctx.trace`, and `args.X` references get translated
-to `ctx.X`. Authors should never write that shape directly --
-**ctx is gone from the author surface for every receiver kind**.
-Use the struct form (`query NAME { args { ... } filter ... shape
+(any, error) { return <expr>, nil }` shape for the engine's parser.
+The `ctx` parameter name is a placeholder identifier only -- the
+body references `args.X` directly (the parser recognises both
+`args.X` and `ctx.X` and resolves them to the same caller-arg AST
+node). Authors should never write the procedural shape directly --
+use the struct form (`query NAME { args { ... } filter ... shape
 ... }`, `logic NAME { args { ... } body { ... return <expr> } }`,
-etc.). The full removal of the `(ctx any)` parameter, the
-`ctx.output = ...` boilerplate, and the `args.X → ctx.X` source
-rewrite is in flight -- see
-[docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md) for the
-remaining parser / executor / DSL work.
+etc.). The remaining purge work (multi-step Logic via the
+automation step runner) is tracked in
+[docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md).
 
 **Receivers exempt entirely:**
 - **Specs** keep their `bool` return — they compile into SQL filter

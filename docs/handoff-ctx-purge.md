@@ -1,9 +1,11 @@
 # ctx-envelope purge — handoff for follow-up sessions
 
-> **Status:** Logic slice + F.1 (rewriter) + F.3 (executor) + F.6
-> (Logic→mutation dispatch) landed. F.2, F.4, F.5, F.7 are open
-> follow-up work. Branch: see the most recent
-> `feature/dsl-engine-ctx-purge-e2e` / successor PR.
+> **Status:** F.1, F.2, F.3, F.4, F.6, F.7 all landed via
+> `feature/dsl-engine-ctx-purge-e2e`. F.5 (multi-step Logic via the
+> automation step runner) is the only remaining piece -- it's a
+> structural change, not cleanup, and needs its own PR with care
+> taken around the cross-package interface between the engine's
+> function dispatcher and the automation step runner.
 
 This doc tracks the remaining work for **removing the legacy `ctx`
 runtime envelope from every DSL construct** -- the directive being
@@ -89,22 +91,15 @@ Carry-overs:
   practice all carry their own `return <expr>`, so this is dead
   emission -- safe to clean up alongside F.2.
 
-### F.2 -- Parser: drop the ctx.output body parsers
+### F.2 -- Parser: drop the ctx.output body parsers _(LANDED)_
 
-Once F.1 lands, the parser's transitional dual-form code paths can
-all delete:
-
-- `parseGoStyleCtxOutputBody` (parser.go:870)
-- `parseGoStyleCtxOutputMutationBody` (~parser.go:1086)
-- `parseGoStyleCtxOutputAutomationAssignment` (parser.go:932)
-- `looksLikeCtxOutputBody` (parser.go:916)
-- The `if p.looksLikeCtxOutputBody() { ... } else { ... }` branch in
-  the Policy case of `parseGoStyleFunction` -- collapse to the
-  spec-style `return <expr>` parser
-- The corresponding fallback branches in
-  `parseGoStyleQueryBodyOrLegacy` and
-  `parseGoStyleMutationBodyOrLegacy`, which become straight
-  delegations to `parseGoStyleQueryBody` / `parseGoStyleMutationBody`
+`parseGoStyleCtxOutputBody`, `parseGoStyleCtxOutputMutationBody`,
+`parseGoStyleCtxOutputAutomationAssignment`, and
+`looksLikeCtxOutputBody` are deleted. The `parseGoStyleQueryBodyOrLegacy`
+and `parseGoStyleMutationBodyOrLegacy` dual-form switches now go
+straight to the `return <expr>` parsers; the Policy receiver case
+delegates to `parseGoStyleSpecBody`. The automation-body loop's
+ctx-output branch is gone.
 
 ### F.3 -- Executor: resolve `args.X` without the ctx envelope _(LANDED)_
 
@@ -118,46 +113,33 @@ rest of the validator / executor pipeline stays single-shape.
 Regression coverage: `component/memql/args_ref_test.go` pins the
 parser path; the existing `caller_ref_test.go` shape sits next to it.
 
-### F.4 -- Strip `ctx.X` and `(ctx any)` from every remaining .memql
+### F.4 -- Strip `ctx.X` from every remaining .memql _(LANDED)_
 
-Files still carrying `ctx.output =` or `(ctx any)` (one-line bodies
-are the natural first batch):
+Every `.memql` file that carried `ctx.output = <expr>; return ctx, nil`
+has been converted to `return <expr>, nil`. The `func (Kind)` headers
+keep the `(ctx any)` parameter -- it's a placeholder identifier the
+validator only type-checks, and renaming to `_` / `args` is cosmetic
+churn we left for a future migration that also converts the bodies
+to struct form.
 
-```
-dsl/cluster/logic.memql
-dsl/cognition/logic.memql           (multi-step logics only -- daily-space ones done)
-dsl/cognition/queries.memql         (legacy func form)
-dsl/common/queries.memql            (legacy func form)
-dsl/data/logic.memql
-dsl/identity/automations.memql
-dsl/identity/logic.memql
-dsl/memql/queries.memql
-dsl/planner/queries.memql
-dsl/platform/logic.memql            (bootstrap done)
-dsl/policies/policies.memql
-dsl/router/queries.memql
-dsl/workbench/logic.memql
-dsl/worker/logic.memql
-dsl/_reference/_spec.memql
-dsl/_reference/_trait.memql
-```
+Files touched (mechanical sweep, single commit on the F.4 branch):
+cluster, cognition, common, data, identity, memql, planner, platform,
+policies, router, workbench, worker logic + queries plus the two
+`_reference/` doc files.
 
-The `.memql` rewrite is mechanical:
-- `ctx.output = <expr>` → `return <expr>`
-- `func (Kind) NAME(ctx any) (any, error) { ... }` → the struct form,
-  or the post-rewriter signature once F.1 drops the parameter
-- `ctx.input.X` (only in legacy procedural files / comments) →
-  `args.X`
+### F.5 -- Multi-step Logic execution _(OPEN -- needs its own PR)_
 
-### F.5 -- Multi-step Logic execution
-
-This is the bigger structural item. The function loader's Logic case
-currently rejects multi-step bodies:
+This is the one piece of the purge that's still pending. The function
+loader's Logic case rejects multi-step bodies with an actionable error
+pointing at this handoff:
 
 ```
-function "X": multi-step logic bodies are not yet supported by the
-function executor (N intermediate steps before `_return`); restructure
-as a single `return <expr>` statement
+function "X": multi-step logic bodies are not yet executable by the
+function dispatcher (N intermediate steps before `_return`). F.5 of
+the ctx-envelope purge tracks the step-runner integration; until
+then, restructure the body as a single `return <expr>` statement
+or move the multi-step orchestration into an automation that calls
+single-step logics
 ```
 
 Several existing logics need full step-runner-backed invocation to
@@ -185,13 +167,42 @@ work end-to-end:
 - `logicWorkerInvocationRetentionSweep`
 - `logicRegisterNode`, `logicDeregisterNode`, `logicBootstrapCluster`
 
-Design sketch: invoke Logic functions through the same step-runner
-the automation scheduler uses (`component/automations/steps/`).
-Bind step IDs as local variables visible to later steps; the
-`_return` step's evaluated value is the function's return. The
-glue lives somewhere between the function dispatcher
-(`engine.executeMutationFunctionCall` and the query evaluator's
-function-call expansion) and the automation step package.
+**Design sketch.** Invoke Logic functions through the same step
+runner the automation scheduler uses (`component/automations/steps/`).
+The cross-package shape that minimises coupling:
+
+1. Define a `LogicRunner` interface in `component/memql/` with a
+   single method `RunSteps(ctx, args, *AutomationDef) (any, error)`.
+2. Engine has a `SetLogicRunner(LogicRunner)` setter; the Logic call
+   path (function loader stores the `*AutomationDef` on the
+   Function, dispatcher checks `logicRunner != nil` before falling
+   back to the single-step `fn.Expr` path) delegates when set.
+3. Implement `LogicRunner` in `component/automations/` (new file)
+   as a thin wrapper that builds a minimal `StepContext` with the
+   existing `Evaluator`, seeds `args` as a custom variable, and
+   walks the steps via `Registry.Execute` -- skipping the heavy
+   automation Executor machinery (concurrency limits, dedup,
+   execution-storm detection, retention, event publishing). The
+   `_return` step's evaluated value is the Logic's return.
+4. Wire at app bootstrap (`app/integrations.go` or the closest
+   phase that already has both the engine and the step registry).
+
+What makes this F.5's-own-PR-worthy rather than fitting in the
+cleanup pass:
+
+- Substituting step references (`getGA.First()`, `getGA.Empty()`,
+  `expired.Nodes()`, `candidates.Len()`) in subsequent step args
+  needs the automation Evaluator's expression resolution path --
+  the simple ArgReference substitution used by F.6 isn't enough.
+- forEach + switch + parallel step shapes appear in real logics
+  (`logicPurgeExpiredArchivedSpaces` iterates `expired.Nodes()`;
+  `logicKillSwitchSuspendsRunningPlans` iterates `plans.Nodes()`)
+  and must Just Work via the existing executors.
+- Logic invocations should NOT trigger automation lifecycle events
+  (started/completed/failed), persist execution rows, or burn
+  concurrency slots -- so the wrapper bypasses
+  `Executor.ExecuteWithEvent` and orchestrates the per-step calls
+  directly.
 
 ### F.6 -- Logic-calls-mutation dispatch _(LANDED)_
 
@@ -211,27 +222,21 @@ and `..._SubstitutesArgs` in `mutation_functions_test.go`.
 `logicBootstrapDefaultPartition` and the identity logics that
 forward to a mutation now run end-to-end.
 
-### F.7 -- Documentation cleanup
+### F.7 -- Documentation cleanup _(LANDED)_
 
-When F.1-F.3 land, the legacy text in `CLAUDE.md`
-(lines ~966-976 -- "Procedural form. The legacy
-`func (...) NAME(ctx any) (any, error)`...") and
-`docs/core/memql-authoring-rules.md` (lines ~860-868 --
-"Procedural form (legacy escape hatch)...") should be deleted, not
-softened. There's no escape hatch once the rewriter stops emitting
-the form -- the parser will reject it.
+The legacy "Procedural form" paragraphs in `CLAUDE.md` and
+`docs/core/memql-authoring-rules.md` are rewritten to describe the
+canonical post-rewrite shape (`return <expr>, nil`, no `ctx.output`
+boilerplate) and the dual `args.X` / `ctx.X` parser recognition.
+The "in flight -- see handoff" pointer is removed since this handoff
+now tracks only F.5.
 
 ---
 
 ## Why this matters
 
-Until F.1-F.4 land, the system has two ways to express "return a
-value from a function body" and they're not interchangeable:
-
-- Author-facing: `return <expr>` in Logic bodies (new, clean).
-- Internal: `ctx.output = <expr>; return ctx, nil` everywhere else.
-
-The transitional split is visible in error messages, in the
-rewriter's emitted text, and in every non-Logic `.memql` file. New
-DSL authors hit this immediately. Closing the loop removes a
-load-bearing piece of confusion.
+Closing F.5 removes the last reason to handle anything but
+`return <expr>` in DSL bodies. After F.1-F.4 + F.7 landed, the
+transitional dual-form text is gone from the codebase + docs;
+multi-step Logic is the only remaining reason an author would still
+hit a confusing error message.

@@ -400,7 +400,12 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			// invocation flow on the engine side; tracked as a follow-up.
 			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok {
 				if extra := nonReturnStepCount(auto.Steps); extra > 0 {
-					return nil, fmt.Errorf("function %q: multi-step logic bodies are not yet supported by the function executor (%d intermediate steps before `_return`); restructure as a single `return <expr>` statement", expectedName, extra)
+					// F.5 follow-up: wire Logic dispatch through the
+					// automation step runner so intermediate `name := <call>`
+					// steps execute end-to-end with their results bound for
+					// later steps + the `_return` expression. Tracked in
+					// docs/handoff-ctx-purge.md.
+					return nil, fmt.Errorf("function %q: multi-step logic bodies are not yet executable by the function dispatcher (%d intermediate steps before `_return`). F.5 of the ctx-envelope purge tracks the step-runner integration; until then, restructure the body as a single `return <expr>` statement or move the multi-step orchestration into an automation that calls single-step logics", expectedName, extra)
 				}
 				retExpr, err := extractLogicReturnExpression(auto)
 				if err != nil {
