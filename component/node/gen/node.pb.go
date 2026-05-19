@@ -108,8 +108,8 @@ type NodeClientMessage struct {
 	//	*NodeClientMessage_CapabilityQuery
 	//	*NodeClientMessage_CapabilityResponse
 	//	*NodeClientMessage_QueryForward
-	//	*NodeClientMessage_AiForwardRequest
-	//	*NodeClientMessage_AiForwardCancel
+	//	*NodeClientMessage_SIForwardRequest
+	//	*NodeClientMessage_SIForwardCancel
 	//	*NodeClientMessage_WorkbenchForwardRequest
 	//	*NodeClientMessage_WorkbenchForwardCancel
 	Payload       isNodeClientMessage_Payload `protobuf_oneof:"payload"`
@@ -265,18 +265,18 @@ func (x *NodeClientMessage) GetQueryForward() *QueryForward {
 	return nil
 }
 
-func (x *NodeClientMessage) GetAiForwardRequest() *SIForwardRequest {
+func (x *NodeClientMessage) GetSIForwardRequest() *SIForwardRequest {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeClientMessage_AiForwardRequest); ok {
+		if x, ok := x.Payload.(*NodeClientMessage_SIForwardRequest); ok {
 			return x.SIForwardRequest
 		}
 	}
 	return nil
 }
 
-func (x *NodeClientMessage) GetAiForwardCancel() *SIForwardCancel {
+func (x *NodeClientMessage) GetSIForwardCancel() *SIForwardCancel {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeClientMessage_AiForwardCancel); ok {
+		if x, ok := x.Payload.(*NodeClientMessage_SIForwardCancel); ok {
 			return x.SIForwardCancel
 		}
 	}
@@ -345,11 +345,11 @@ type NodeClientMessage_QueryForward struct {
 	QueryForward *QueryForward `protobuf:"bytes,60,opt,name=query_forward,json=queryForward,proto3,oneof"`
 }
 
-type NodeClientMessage_AiForwardRequest struct {
+type NodeClientMessage_SIForwardRequest struct {
 	SIForwardRequest *SIForwardRequest `protobuf:"bytes,70,opt,name=si_forward_request,json=aiForwardRequest,proto3,oneof"`
 }
 
-type NodeClientMessage_AiForwardCancel struct {
+type NodeClientMessage_SIForwardCancel struct {
 	SIForwardCancel *SIForwardCancel `protobuf:"bytes,71,opt,name=si_forward_cancel,json=aiForwardCancel,proto3,oneof"`
 }
 
@@ -381,9 +381,9 @@ func (*NodeClientMessage_CapabilityResponse) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_QueryForward) isNodeClientMessage_Payload() {}
 
-func (*NodeClientMessage_AiForwardRequest) isNodeClientMessage_Payload() {}
+func (*NodeClientMessage_SIForwardRequest) isNodeClientMessage_Payload() {}
 
-func (*NodeClientMessage_AiForwardCancel) isNodeClientMessage_Payload() {}
+func (*NodeClientMessage_SIForwardCancel) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_WorkbenchForwardRequest) isNodeClientMessage_Payload() {}
 
@@ -407,7 +407,7 @@ type NodeServerMessage struct {
 	//	*NodeServerMessage_CapabilityResponse
 	//	*NodeServerMessage_NodeShutdown
 	//	*NodeServerMessage_QueryResponse
-	//	*NodeServerMessage_AiForwardResponse
+	//	*NodeServerMessage_SIForwardResponse
 	//	*NodeServerMessage_WorkbenchForwardResponse
 	Payload       isNodeServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -571,9 +571,9 @@ func (x *NodeServerMessage) GetQueryResponse() *QueryResponse {
 	return nil
 }
 
-func (x *NodeServerMessage) GetAiForwardResponse() *SIForwardResponse {
+func (x *NodeServerMessage) GetSIForwardResponse() *SIForwardResponse {
 	if x != nil {
-		if x, ok := x.Payload.(*NodeServerMessage_AiForwardResponse); ok {
+		if x, ok := x.Payload.(*NodeServerMessage_SIForwardResponse); ok {
 			return x.SIForwardResponse
 		}
 	}
@@ -637,7 +637,7 @@ type NodeServerMessage_QueryResponse struct {
 	QueryResponse *QueryResponse `protobuf:"bytes,60,opt,name=query_response,json=queryResponse,proto3,oneof"`
 }
 
-type NodeServerMessage_AiForwardResponse struct {
+type NodeServerMessage_SIForwardResponse struct {
 	SIForwardResponse *SIForwardResponse `protobuf:"bytes,70,opt,name=si_forward_response,json=aiForwardResponse,proto3,oneof"`
 }
 
@@ -667,7 +667,7 @@ func (*NodeServerMessage_NodeShutdown) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_QueryResponse) isNodeServerMessage_Payload() {}
 
-func (*NodeServerMessage_AiForwardResponse) isNodeServerMessage_Payload() {}
+func (*NodeServerMessage_SIForwardResponse) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_WorkbenchForwardResponse) isNodeServerMessage_Payload() {}
 
@@ -2367,8 +2367,8 @@ func file_node_proto_init() {
 		(*NodeClientMessage_CapabilityQuery)(nil),
 		(*NodeClientMessage_CapabilityResponse)(nil),
 		(*NodeClientMessage_QueryForward)(nil),
-		(*NodeClientMessage_AiForwardRequest)(nil),
-		(*NodeClientMessage_AiForwardCancel)(nil),
+		(*NodeClientMessage_SIForwardRequest)(nil),
+		(*NodeClientMessage_SIForwardCancel)(nil),
 		(*NodeClientMessage_WorkbenchForwardRequest)(nil),
 		(*NodeClientMessage_WorkbenchForwardCancel)(nil),
 	}
@@ -2384,7 +2384,7 @@ func file_node_proto_init() {
 		(*NodeServerMessage_CapabilityResponse)(nil),
 		(*NodeServerMessage_NodeShutdown)(nil),
 		(*NodeServerMessage_QueryResponse)(nil),
-		(*NodeServerMessage_AiForwardResponse)(nil),
+		(*NodeServerMessage_SIForwardResponse)(nil),
 		(*NodeServerMessage_WorkbenchForwardResponse)(nil),
 	}
 	type x struct{}

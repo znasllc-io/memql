@@ -228,7 +228,7 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 			}
 		}
 
-	case *nodev1.NodeServerMessage_AiForwardResponse:
+	case *nodev1.NodeServerMessage_SIForwardResponse:
 		// Responses to forwards originated on this node. Route through
 		// the registered sink (set on BFF binaries; no-op otherwise).
 		pc.mu.Lock()

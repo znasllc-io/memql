@@ -688,7 +688,7 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 			}
 		}
 
-	case *nodev1.NodeServerMessage_AiForwardResponse:
+	case *nodev1.NodeServerMessage_SIForwardResponse:
 		wd.sinkMu.RLock()
 		sink := wd.aiForwardSink
 		wd.sinkMu.RUnlock()

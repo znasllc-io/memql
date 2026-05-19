@@ -1043,19 +1043,19 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCallTool(envelope, payload.CallTool)
 	case *memqlv1.MemqlClientMessage_ClientToolResult:
 		return s.handleClientToolResult(envelope, payload.ClientToolResult)
-	case *memqlv1.MemqlClientMessage_AiChat:
+	case *memqlv1.MemqlClientMessage_SIChat:
 		return s.handleAiChat(envelope, payload.SIChat)
-	case *memqlv1.MemqlClientMessage_AiSpeech:
+	case *memqlv1.MemqlClientMessage_SISpeech:
 		return s.handleAiSpeech(envelope, payload.SISpeech)
-	case *memqlv1.MemqlClientMessage_AiTranscribe:
+	case *memqlv1.MemqlClientMessage_SITranscribe:
 		return s.handleAiTranscribe(envelope, payload.SITranscribe)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamStart:
 		return s.handleAiTranscribeStreamStart(envelope, payload.SITranscribeStreamStart)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamChunk:
 		return s.handleAiTranscribeStreamChunk(envelope, payload.SITranscribeStreamChunk)
-	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
+	case *memqlv1.MemqlClientMessage_SITranscribeStreamEnd:
 		return s.handleAiTranscribeStreamEnd(envelope, payload.SITranscribeStreamEnd)
-	case *memqlv1.MemqlClientMessage_AiSuggest:
+	case *memqlv1.MemqlClientMessage_SISuggest:
 		return s.handleAiSuggest(envelope, payload.SISuggest)
 	// MemQL Sense -- language intelligence
 	case *memqlv1.MemqlClientMessage_SenseTokenize:

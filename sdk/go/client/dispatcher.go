@@ -30,10 +30,11 @@ type Dispatcher struct {
 
 	mu           sync.Mutex
 	pending      map[string]chan *memqlv1.MemqlServerMessage
-	eventCh      chan *memqlv1.MemqlServerMessage // uncorrelated messages (events, heartbeats)
-	stopCh       chan struct{}                    // closed on any termination
-	unexpectedCh chan struct{}                    // closed only on stream error
-	sendMu       sync.Mutex                       // serializes writes to the stream
+	streams      map[string]chan *memqlv1.MemqlServerMessage // session-keyed (request_id) streaming listeners
+	eventCh      chan *memqlv1.MemqlServerMessage            // uncorrelated messages (events, heartbeats)
+	stopCh       chan struct{}                               // closed on any termination
+	unexpectedCh chan struct{}                               // closed only on stream error
+	sendMu       sync.Mutex                                  // serializes writes to the stream
 
 	// partitionMu guards partition. Sent under sendMu, set under
 	// partitionMu so the two don't deadlock.
@@ -47,6 +48,7 @@ func NewDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger
 		stream:       stream,
 		logger:       logger,
 		pending:      make(map[string]chan *memqlv1.MemqlServerMessage),
+		streams:      make(map[string]chan *memqlv1.MemqlServerMessage),
 		eventCh:      make(chan *memqlv1.MemqlServerMessage, 256),
 		stopCh:       make(chan struct{}),
 		unexpectedCh: make(chan struct{}),
@@ -105,6 +107,26 @@ func (d *Dispatcher) Run() {
 			d.mu.Unlock()
 			if ok {
 				ch <- msg
+				continue
+			}
+		}
+
+		// Streaming-session routing: messages on multi-reply protocols
+		// (SITranscribeStream*, VoiceAgent*, polyphon) carry a session
+		// request_id rather than the per-message correlate_to. Route
+		// them to any listener registered via RegisterStream.
+		if reqId := streamRequestId(msg); reqId != "" {
+			d.mu.Lock()
+			ch, ok := d.streams[reqId]
+			d.mu.Unlock()
+			if ok {
+				select {
+				case ch <- msg:
+				default:
+					if d.logger != nil {
+						d.logger.Warn("stream listener channel full, dropping message", "request_id", reqId)
+					}
+				}
 				continue
 			}
 		}
@@ -263,6 +285,52 @@ func (d *Dispatcher) RotateAuth(ctx context.Context, accessToken string) error {
 // silent event loss. Use Done() to observe stream termination instead.
 func (d *Dispatcher) Events() <-chan *memqlv1.MemqlServerMessage {
 	return d.eventCh
+}
+
+// RegisterStream registers a listener for server messages whose
+// session request_id matches the supplied key. Returns a channel for
+// incoming messages and an unregister function the caller must invoke
+// when the session is over.
+//
+// Used by streaming protocols (SITranscribeStream*, VoiceAgent*,
+// polyphon) where multiple replies share a session id rather than the
+// per-message message_id used by SendAndWait. The Dispatcher routes
+// matching messages here before falling through to the global event
+// channel.
+//
+// The returned channel is buffered (64). If a listener falls behind,
+// further messages for that session are dropped with a logged warning;
+// protocol-level recovery is the caller's responsibility.
+func (d *Dispatcher) RegisterStream(requestId string) (<-chan *memqlv1.MemqlServerMessage, func()) {
+	ch := make(chan *memqlv1.MemqlServerMessage, 64)
+	d.mu.Lock()
+	d.streams[requestId] = ch
+	d.mu.Unlock()
+	unregister := func() {
+		d.mu.Lock()
+		if cur, ok := d.streams[requestId]; ok && cur == ch {
+			delete(d.streams, requestId)
+		}
+		d.mu.Unlock()
+	}
+	return ch, unregister
+}
+
+// streamRequestId returns the session request_id carried by a
+// streaming-protocol server message, or "" if the message does not
+// belong to one of the known streaming families. Centralized here so
+// adding a new streaming protocol is a single-edit operation.
+func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
+	if msg == nil {
+		return ""
+	}
+	switch p := msg.Payload.(type) {
+	case *memqlv1.MemqlServerMessage_SITranscribeStreamDelta:
+		return p.SITranscribeStreamDelta.GetRequestId()
+	case *memqlv1.MemqlServerMessage_SITranscribeStreamComplete:
+		return p.SITranscribeStreamComplete.GetRequestId()
+	}
+	return ""
 }
 
 // Done returns a channel that is closed when the stream terminates --
