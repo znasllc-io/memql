@@ -20,7 +20,7 @@
 // database, so the redundant inserts are harmless and the row
 // converges to its expected state on first boot.
 @useMutation(mutationCreatePartition)
-@description("Imperative body of automation bootstrapDefaultPartition (migrated from the legacy func form).")
+@description("Ensures the 'default' partition exists in v1:platform:partition on every startup. Without this row the CLI's partition list shows empty even though queries implicitly target 'default'. Idempotent (re-runs append-only versions of the same id). Runs on every node type; the shared database makes the redundant inserts harmless.")
 logic logicBootstrapDefaultPartition {
   args {
     event object
@@ -47,7 +47,7 @@ logic logicBootstrapDefaultPartition {
 // Schedule chosen as 02:30 UTC (offset from the 02:00 archive
 // purge so the two crons don't contend on the same DB window).
 @useQuery(queryAllPolicyTraces, queryGlobalVariable)
-@description("Imperative body of automation purgeExpiredPolicyTraces (migrated from the legacy func form).")
+@description("Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.")
 logic logicPurgeExpiredPolicyTraces {
   args {
     event object @required
