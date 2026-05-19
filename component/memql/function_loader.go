@@ -248,6 +248,17 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, fmt.Errorf("file composition error: %w", err)
 	}
 
+	// CQS call-graph enforcement (Phase 2 hoist: was compiler-only).
+	// Catches in-file violations:
+	//   - Query   -> Mutation : forbidden (read path side-effect free)
+	//   - Mutation -> Mutation: forbidden (one observable write per body)
+	//   - Spec     -> Mutation: forbidden (predicates are read-only)
+	// Cross-file CQS (caller in file A, callee in file B) is enforced
+	// by ValidateCQSAcrossRegistry after all files have been loaded.
+	if err := compiler.ValidateCQS(collectFunctionDefsFromFile(file)); err != nil {
+		return nil, fmt.Errorf("CQS violation in %s: %w", origin, err)
+	}
+
 	// Check for automations in named-function directories (should be in
 	// automations/). The check applies only when this entry point was
 	// invoked for a non-automation construct -- the unified loader and
@@ -814,6 +825,22 @@ func functionBodyStartsWithReturn(content string) bool {
 	}
 
 	return false
+}
+
+// collectFunctionDefsFromFile filters a parsed *File down to the
+// function definitions it contains. Used by the per-file CQS
+// validator hoist in tryParseNewFunctionSyntax.
+func collectFunctionDefsFromFile(file *languageParser.File) []*languageParser.FunctionDef {
+	if file == nil {
+		return nil
+	}
+	out := make([]*languageParser.FunctionDef, 0, len(file.Definitions))
+	for _, def := range file.Definitions {
+		if fn, ok := def.(*languageParser.FunctionDef); ok {
+			out = append(out, fn)
+		}
+	}
+	return out
 }
 
 // nonReturnStepCount returns the number of steps in the slice whose ID is
