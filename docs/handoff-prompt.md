@@ -1,5 +1,32 @@
 # Handoff prompt — copy this to brief a new implementer
 
+> **STATUS (2026-05-18): NEEDS REVISION BEFORE USE.**
+>
+> Key inaccuracies in the pasteable prompt below:
+>
+> - **Repo layout changed.** The split shipped; there are now three Go
+>   repos tied by `go.work`: `memql/` (core, "post-split residual"),
+>   `memql-bff-copresent/` (BFF, extracted from memql), and
+>   `memql-cockpit/` (cockpit, extracted). Linux paths under
+>   `~/projects/memql/` now — not the macOS `~/projects/memql` +
+>   `~/projects/copresent` two-repo layout the prompt describes.
+> - **Initiative A (Multi-Repo BFF Migration) has shipped.** The prompt
+>   still lists it as PLANNED. `docs/architecture/multi-repo-migration.md`
+>   itself is stale.
+> - **Initiative B (Chat Architecture) was inverted to single-chat.**
+>   The two-thread (Group + per-user Team) design was abandoned (commits
+>   `8975f33` foundations, `a27db80` misroute classifier dropped,
+>   `c570875` copresentConversation tool/builtin/integration dropped).
+>   `docs/chat/chat-architecture-plan.md` describes the abandoned design.
+> - **Org renamed** — `visionarys-io` is dead; everywhere is `znasllc-io`.
+>   Email is `jsanz@znasllc.io`.
+>
+> Revise (or rewrite from current state) before pasting to a new
+> implementer. Everything below is the original prompt, preserved for
+> reference.
+
+---
+
 This is the prompt to paste into a new chat (or hand to a developer) when onboarding someone onto any of the in-flight initiatives. Each project has a comprehensive plan document committed to the memql repo; this prompt gets the implementer pointed at the right doc and explains how the user works.
 
 ---
