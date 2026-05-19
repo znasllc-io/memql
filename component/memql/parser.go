@@ -2639,12 +2639,17 @@ func (p *parser) parseLiteralValue() (any, error) {
 		if tok.literal == "caller" || strings.HasPrefix(tok.literal, "caller.") {
 			return p.parseCallerReference()
 		}
-		// ctx.X -- caller-passed argument reference, the unified
-		// replacement for ctx.X across every DSL construct.
-		// The lexer emits `ctx.foo` as a single identifier token;
-		// we strip the `ctx.` prefix and produce the same
-		// ArgReference that arg() does, so the executor /
-		// renderer / spec validator paths keep working unchanged.
+		// args.X / ctx.X -- caller-passed argument reference. `args.X`
+		// is the author-facing form; `ctx.X` is the legacy runtime
+		// form still emitted by the struct-form rewriter for non-Logic
+		// receivers. Both produce the same ArgReference AST so the
+		// executor / renderer / spec validator paths keep working
+		// unchanged. The lexer emits `args.foo` / `ctx.foo` as a single
+		// identifier token (`.` is part of isIdentifierCharNoColon), so
+		// we match on the prefix and split off the path.
+		if tok.literal == "args" || strings.HasPrefix(tok.literal, "args.") {
+			return p.parseArgsReference()
+		}
 		if tok.literal == "ctx" || strings.HasPrefix(tok.literal, "ctx.") {
 			return p.parseCtxReference()
 		}
@@ -2715,10 +2720,10 @@ func (p *parser) parseCallerReference() (*CallerReference, error) {
 // (empty for bare `ctx`; bare ctx isn't usable in comparison-value
 // position today and errors out).
 //
-// `ctx.X` is the unified caller-passed-argument access syntax
-// introduced by the policies + DSL hygiene initiative. It produces
-// the same AST node as `ctx.X` so the rest of the parser /
-// executor / renderer pipeline is unchanged.
+// `ctx.X` is the legacy runtime-form caller-passed-argument access
+// syntax still emitted by the struct-form rewriter for non-Logic
+// receivers. It produces the same AST node as `args.X` so the rest
+// of the parser / executor / renderer pipeline is unchanged.
 func (p *parser) parseCtxReference() (*ArgReference, error) {
 	tok := p.next()
 	literal := strings.TrimSpace(tok.literal)
@@ -2731,6 +2736,26 @@ func (p *parser) parseCtxReference() (*ArgReference, error) {
 	path := strings.TrimSpace(strings.TrimPrefix(literal, "ctx."))
 	if path == "" {
 		return nil, p.errorf(tok, "ctx reference requires a field path, e.g. ctx.spaceId")
+	}
+	return &ArgReference{Path: path}, nil
+}
+
+// parseArgsReference consumes an `args` or `args.X[.Y...]` identifier
+// token and returns an *ArgReference whose Path is the dotted suffix.
+// `args.X` is the author-facing caller-passed-argument access syntax.
+// Bare `args` is not usable in comparison-value position and errors.
+func (p *parser) parseArgsReference() (*ArgReference, error) {
+	tok := p.next()
+	literal := strings.TrimSpace(tok.literal)
+	if literal == "args" {
+		return nil, p.errorf(tok, "args reference requires a field path, e.g. args.spaceId")
+	}
+	if !strings.HasPrefix(literal, "args.") {
+		return nil, p.errorf(tok, "expected args.X, got %q", literal)
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(literal, "args."))
+	if path == "" {
+		return nil, p.errorf(tok, "args reference requires a field path, e.g. args.spaceId")
 	}
 	return &ArgReference{Path: path}, nil
 }
