@@ -26,6 +26,8 @@ Quick access to all memQL documentation by topic.
 | **Permissions** | [docs/core/permissions_and_access_control.md](docs/core/permissions_and_access_control.md) | Access control model |
 | **Attributes** | [docs/core/attribute-matrix.md](docs/core/attribute-matrix.md) | Attribute schema reference |
 | **Naming Conventions** | [docs/core/memql-naming-conventions.md](docs/core/memql-naming-conventions.md) | MemQL naming conventions |
+| **Reserved Names** | [docs/core/memql-reserved.md](docs/core/memql-reserved.md) | Single index of every reserved identifier (engine names, row intrinsics, caller envelope, keywords, annotations, import aliases) |
+| **Operator Capabilities** | [docs/core/operator-capabilities.md](docs/core/operator-capabilities.md) | Capability slugs (copresent_control, computer_use_headless, computer_use_embodied, workbench_use) and how they expand into concrete tools |
 | **Identifier Conventions** | [docs/core/identifiers.md](docs/core/identifiers.md) | Canonical node id format, dispatch-site composition, anti-patterns |
 | **Specifications** | [docs/core/memql-specifications.md](docs/core/memql-specifications.md) | MemQL specifications reference |
 | **Automations** | [automations/CLAUDE.md](automations/CLAUDE.md) | Event-driven workflows |

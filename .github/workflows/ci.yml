@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+      - name: go build
+        run: go build ./...
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+      - name: go test
+        run: go test -count=1 -timeout=300s ./...
+
+  vet:
+    name: vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+      - name: go vet
+        run: go vet ./...
+
+  # DSL-lint gate. Runs `memql-cockpit lint dsl/` once the cockpit
+  # binary is available on the runner (it lives in a separate repo,
+  # github.com/znasllc-io/memql-cockpit). The gate is wired here as
+  # a placeholder so the workflow grows with the tooling rather
+  # than getting added later as a one-off. Disabled by default
+  # via the `if:` guard; flip the literal to `true` to enable.
+  dsl-lint:
+    name: dsl lint
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install memql-cockpit
+        run: |
+          # TODO: install or build the cockpit binary on the runner.
+          # When enabled, this should pin a known-good version.
+          echo "memql-cockpit installation not yet automated"
+          exit 1
+      - name: lint dsl tree
+        run: memql-cockpit lint dsl/

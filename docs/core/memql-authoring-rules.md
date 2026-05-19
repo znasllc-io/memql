@@ -8,6 +8,109 @@ make sure the same trap doesn't get sprung twice.
 When you find a new gotcha, **add it here**. Future you (and every
 other agent) will thank you.
 
+> **Companion reference:** every name the engine reserves -- top-level
+> identifiers, row intrinsics, caller-envelope fields, construct
+> keywords, annotation names, import aliases -- is indexed in
+> [memql-reserved.md](memql-reserved.md). Read that doc before
+> picking a field or arg name; this doc is for gotchas that survive
+> the name check.
+
+---
+
+## Rule #1 — One write per mutation body
+
+This is the foundational rule of the mutation surface. Every other
+rule below is a gotcha; this one is the contract.
+
+**Rule.** A mutation body contains exactly one `insert` block or
+exactly one `update` block. Two writes in one mutation is a
+parse-time error.
+
+```memql
+// Right -- one insert.
+@useConcept(space)
+mutation mutationCreateSpace {
+  args { name string @required }
+  insert space {
+    name: args.name
+    status: "active"
+    createdAt: now
+    createdBy: actor.userId
+  }
+}
+
+// Wrong -- two writes in one body. The parser rejects it.
+@useConcept(space)
+mutation mutationCreateSpaceAndGrantOwner {
+  args { name string @required }
+  insert space { ... }            // ERROR -- only one write allowed
+  insert partitionAccess { ... }
+}
+```
+
+**Why.** Every mutation is a single observable write. Audit trails are
+per-row. Event emission is one event per row. Mutations cannot read,
+cannot call other mutations, and cannot loop -- the read path stays
+side-effect-free and SQL push-down stays safe. This is the CQS
+backbone the engine relies on.
+
+**Multi-write flows compose via an automation.** When the product
+needs "create the row + grant access," write the second mutation as
+an event-triggered automation that fires on the first row's
+creation. The two writes happen sequentially; ordering is explicit;
+the user sees one product action even though two rows land.
+
+The canonical worked example is **workspace creation**:
+
+```memql
+// 1. The product calls this mutation.
+@useConcept(partition)
+mutation mutationCreatePartition {
+  args {
+    name      string  @required
+    type      string  @default("standard")
+  }
+  insert partition {
+    name: args.name
+    partitionType: args.type
+    status: "active"
+    createdAt: now
+    createdBy: actor.userId
+  }
+}
+
+// 2. An automation fires on the row landing and grants the
+//    creating user owner access.
+@enabled
+@trigger(event="node.created", concept=platform.partition, partition="_system")
+@description("Grant the partition creator owner access on first landing.")
+automation autoBootstrapWorkspaceOwnerAccess {
+  step grant {
+    logic logicGrantOwnerOnPartitionCreate { event: event }
+  }
+}
+
+@useMutation(mutationGrantPartitionAccess)
+logic logicGrantOwnerOnPartitionCreate {
+  args { event object @required }
+  body {
+    return mutationGrantPartitionAccess({
+      userId:      args.event.payload.createdBy,
+      partitionId: args.event.payload.id,
+      role:        "owner",
+    })
+  }
+}
+```
+
+The product calls `mutationCreatePartition` once. The automation
+takes care of the second write. The user gets one product action;
+the engine gets two atomic rows with clean audit trails.
+
+**Cross-references**: see the cognition + partition / workspace
+creation flow in `dsl/cognition/automations.memql` and
+`dsl/identity/automations.memql` for live examples of this pattern.
+
 **Sense diagnostics for these gotchas** land at edit time in Cockpit
 (Phase 5 Step 34). The rules live in
 `component/memql/sense/authoring_rules.go` and cover the most
