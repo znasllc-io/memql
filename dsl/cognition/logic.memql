@@ -413,6 +413,31 @@ logic logicProvisionDailySpaceOnUserCreate {
   }
 }
 
+// ---- logicEnsureDailySpaceForCaller -----------------------------
+//
+// Top-level entry point for interactive clients (the cockpit Chat
+// tab today) that want today's daily provisioned for whoever is
+// authenticated on the current request. Wraps
+// integration.dailyspace.ensureForCaller (via the
+// `ensureDailySpaceForCaller` builtin), which reads the calling
+// user's id off the request's auth context, then runs the same
+// ensureForUser orchestration the cron + automation paths use.
+//
+// Why a Logic wrapper: the engine's top-level Execute path
+// dispatches Logic and Mutation function calls but not bare
+// builtin calls. Wrapping the builtin in a Logic gives callers
+// an Execute-able entry (`logicEnsureDailySpaceForCaller({})`)
+// without forcing them to also know how to build a triggering
+// event.
+@enabled
+@useBuiltin(ensureDailySpaceForCaller)
+@description("Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.")
+logic logicEnsureDailySpaceForCaller {
+  body {
+    return ensureDailySpaceForCaller({})
+  }
+}
+
 // ---- logicEnsureDailySpaceOnAuthSession -------------------------
 //
 // Fires on every v1:identity:authSession create -- one per login.

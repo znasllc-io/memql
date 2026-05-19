@@ -124,9 +124,81 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertErrorRefExpr(node)
 	case *languageParser.ErrorExpr:
 		return c.convertErrorExpr(node)
+	// Typed expression-builtin nodes -- the parser produces these
+	// dedicated AST types for `coalesce(...)`, `cond(...)`, `concat(...)`,
+	// `hash(...)`, `canonicalId(...)`, `first(...)`, `last(...)`,
+	// `lower(...)`, `upper(...)`, `trim(...)`. The step-RHS path
+	// normalises these into a generic FunctionCallExpr via
+	// `expressionToFunctionCall` in the parser; the body-expression
+	// path (Logic return values, conditional step bodies, etc.) lands
+	// here unwrapped, so the converter normalises them the same way.
+	// Without these cases a body that ends with `return coalesce(a, b)`
+	// would fail to load with "unsupported parser expression type:
+	// *ast.CoalesceExpr".
+	case *languageParser.CoalesceExpr:
+		return c.convertPositionalBuiltin("coalesce", node.Args)
+	case *languageParser.CondExpr:
+		return c.convertPositionalBuiltin("cond",
+			[]languageParser.ExpressionNode{node.Condition, node.Then, node.Else})
+	case *languageParser.ConcatExpr:
+		return c.convertPositionalBuiltin("concat", node.Args)
+	case *languageParser.HashExpr:
+		return c.convertPositionalBuiltin("hash",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.CanonicalIdExpr:
+		// canonicalId(value, concept) -- Concept is a string literal
+		// at parse time (the concept's bare name), so encode it as a
+		// literal positional arg rather than recursing.
+		value, err := c.ConvertExpression(node.Value)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalId arg 0: %w", err)
+		}
+		return &FunctionCallExpression{Name: "canonicalId", Args: map[string]any{
+			"0": value,
+			"1": node.Concept,
+		}}, nil
+	case *languageParser.FirstExpr:
+		return c.convertPositionalBuiltin("first",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.LastExpr:
+		return c.convertPositionalBuiltin("last",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.LowerExpr:
+		return c.convertPositionalBuiltin("lower",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.UpperExpr:
+		return c.convertPositionalBuiltin("upper",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.TrimExpr:
+		return c.convertPositionalBuiltin("trim",
+			[]languageParser.ExpressionNode{node.Target})
+	case *languageParser.NilExpr:
+		// `nil` literal in a Logic body (e.g. `return ctx.x != nil ?
+		// ctx.x : default`). Represented as an engine LiteralValueNode
+		// carrying Go nil; the executor's truthiness + comparison
+		// helpers handle it the same as any other zero-valued literal.
+		return &LiteralValueNode{Value: nil}, nil
 	default:
 		return nil, fmt.Errorf("unsupported parser expression type: %T", expr)
 	}
+}
+
+// convertPositionalBuiltin wraps a list of positionally-indexed
+// argument expressions into a FunctionCallExpression with the given
+// builtin name. The runtime evaluator dispatches the call by name
+// (see runtime_evaluator.go's EvaluateCoalesce / EvaluateConcat /
+// etc.), so the typed-AST -> FunctionCallExpression rewrite is
+// transparent at execution time.
+func (c *ASTConverter) convertPositionalBuiltin(name string, args []languageParser.ExpressionNode) (*FunctionCallExpression, error) {
+	out := make(map[string]any, len(args))
+	for i, arg := range args {
+		converted, err := c.ConvertExpression(arg)
+		if err != nil {
+			return nil, fmt.Errorf("%s arg %d: %w", name, i, err)
+		}
+		out[strconv.Itoa(i)] = converted
+	}
+	return &FunctionCallExpression{Name: name, Args: out}, nil
 }
 
 // convertLogicalExpr converts languageParser.LogicalExpr to memql.LogicalExpression.

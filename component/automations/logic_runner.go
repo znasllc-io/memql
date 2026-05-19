@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/language/compiler"
@@ -168,6 +169,19 @@ func (r *LogicRunner) runOneStep(ctx context.Context, step *Step, stepCtx *StepC
 // the compiler keeps the AST→runtime translation (step references,
 // `event.X` rewrites, helper builtin recognition, topological sort)
 // in exactly one place.
+//
+// The compiler peels the parser's synthetic `_return` step out of the
+// step list and emits it as a top-level `_return` JSON field
+// (automation_generator.go's "If there's a return statement..."
+// branch). The automations Loader struct has no field for `_return`,
+// so a vanilla unmarshal drops it. The runtime LogicRunner looks for
+// a step with ID `_return` in `automation.Steps` and refuses to run
+// when it isn't there ("logic %q has no `_return` step"), which is
+// why every multi-step Logic that ends with `return <expr>` failed
+// at runtime even though the parser captured the return correctly.
+// We undo the round-trip loss here by re-reading the `_return` field
+// off the compiled JSON and stitching a synthetic Step{ID: "_return",
+// Type: query} back onto the end of the slice.
 func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParser.AutomationDef) (*Automation, error) {
 	fakeFunc := &languageParser.FunctionDef{
 		Name: fnName,
@@ -185,7 +199,8 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 		return nil, fmt.Errorf("compiler emitted no automation for logic %q", fnName)
 	}
 
-	jsonBytes, err := json.Marshal(result.Automations[0].JSON)
+	compiled := result.Automations[0].JSON
+	jsonBytes, err := json.Marshal(compiled)
 	if err != nil {
 		return nil, fmt.Errorf("marshal compiled logic %q: %w", fnName, err)
 	}
@@ -193,6 +208,17 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 	if err != nil {
 		return nil, fmt.Errorf("parse compiled logic %q: %w", fnName, err)
 	}
+
+	if returnExpr, ok := compiled["_return"].(string); ok && strings.TrimSpace(returnExpr) != "" {
+		automation.Steps = append(automation.Steps, &Step{
+			ID:   "_return",
+			Type: StepTypeQuery,
+			Query: &QueryStepConfig{
+				Query: returnExpr,
+			},
+		})
+	}
+
 	return automation, nil
 }
 
