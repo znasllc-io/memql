@@ -230,6 +230,67 @@ func TestResolvePlanFunctions_LogicReturningMutationDispatches(t *testing.T) {
 	require.Equal(t, "standard", plan.MutationCall.Args["partitionType"])
 }
 
+// TestResolvePlanFunctions_LogicReturningMutationPositionalArgs pins
+// the F.6 hoist normalisation for the shape the language parser
+// actually produces. `mutationCreatePartition({name: "default", ...})`
+// in a Logic body is parsed as a FunctionCallExpr whose Args map has
+// a single positional key "0" carrying the object literal. The engine's
+// own expression parser produces flat args ({name: "default"}); the
+// hoist must flatten the language-parser shape so the downstream
+// mutation validator sees the canonical form. Without the flatten step
+// logicBootstrapDefaultPartition fails at startup with
+// `mutationCreatePartition: argument validation failed: required
+// argument "name" is missing`.
+func TestResolvePlanFunctions_LogicReturningMutationPositionalArgs(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:         "mutationCreatePartition",
+		FunctionKind: "mutation",
+		Enabled:      true,
+		MutationTemplate: &FunctionMutationTemplate{
+			Concept:    "v1:platform:partition",
+			IDTemplate: &languageParser.ArgRefExpr{Path: "name"},
+			PayloadTemplate: map[string]any{
+				"name":          &languageParser.ArgRefExpr{Path: "name"},
+				"partitionType": &languageParser.ArgRefExpr{Path: "partitionType"},
+			},
+		},
+	}))
+	// Logic body where the object literal is wrapped under positional
+	// key "0" -- exactly the shape extractLogicReturnExpression hands
+	// over to the AST converter when the body is parsed by the
+	// language parser.
+	require.NoError(t, reg.add(&Function{
+		Name:         "logicBootstrapDefaultPartition",
+		FunctionKind: "logic",
+		Enabled:      true,
+		Expr: &FunctionCallExpression{
+			Name: "mutationCreatePartition",
+			Args: map[string]any{
+				"0": map[string]any{
+					"name":          "default",
+					"partitionType": "standard",
+				},
+			},
+		},
+	}))
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{
+			Name: "logicBootstrapDefaultPartition",
+			Args: map[string]any{},
+		},
+	}
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+	require.NotNil(t, plan.MutationCall, "Logic-returning-mutation should be hoisted to plan.MutationCall")
+	require.Equal(t, "mutationCreatePartition", plan.MutationCall.Name)
+	require.Equal(t, "default", plan.MutationCall.Args["name"],
+		"positional-arg wrap must flatten so the mutation validator sees `name`")
+	require.Equal(t, "standard", plan.MutationCall.Args["partitionType"])
+	_, hasPositional := plan.MutationCall.Args["0"]
+	require.False(t, hasPositional, "positional `0` key should be unwrapped after the hoist")
+}
+
 // TestResolvePlanFunctions_LogicReturningMutationSubstitutesArgs
 // pins that caller-passed args to the Logic propagate into the
 // inner mutation call's args via the ArgReference substitution path.
