@@ -7,7 +7,7 @@
 @useConcept(documentChunk)
 @description("Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.")
 query queryAllDocumentChunkDomains {
-  filter  documentChunk.domainId!=""
+  filter  payload.domainId!=""
   shape   documentChunkDomainLite
 }
 
@@ -34,7 +34,7 @@ query queryDocumentsForDomain {
   args {
     domainId  string  @required
   }
-  filter  document.attachedDomains==args.domainId; document.validationStatus=="validated"
+  filter  payload.attachedDomains==args.domainId; payload.validationStatus=="validated"
   shape   documentFull
 }
 
@@ -50,7 +50,7 @@ query queryDocumentsForSpace {
   args {
     spaceId  string  @required
   }
-  filter  document.spaceId==args.spaceId
+  filter  payload.spaceId==args.spaceId
   shape   documentFull
 }
 
@@ -69,7 +69,7 @@ query queryEntityIndexLookup {
     entityKind  string  @required
     keyHash  string  @required
   }
-  filter  entityIndex.domainId==args.domainId; entityIndex.entityKind==args.entityKind; entityIndex.keyHash==args.keyHash
+  filter  payload.domainId==args.domainId; payload.entityKind==args.entityKind; payload.keyHash==args.keyHash
   shape   entityIndexFull
 }
 
@@ -80,7 +80,7 @@ query queryEntitySchemaForDomain {
   args {
     domainId  string  @required
   }
-  filter  domainEntitySchema.domainId==args.domainId; domainEntitySchema.active==true
+  filter  payload.domainId==args.domainId; traitIsActiveRecord
   shape   domainEntitySchemaFull
 }
 
@@ -91,7 +91,7 @@ query queryImageRegionsForDocument {
   args {
     documentId  string  @required
   }
-  filter  imageRegion.documentId==args.documentId
+  filter  payload.documentId==args.documentId
   shape   imageRegionFull
 }
 
@@ -121,7 +121,7 @@ query queryKnowledgeDomainById {
 @useConcept(knowledgeDomain)
 @description("List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.")
 query queryListKnowledgeDomains {
-  filter  ?.knowledgeDomain.active==true
+  filter  traitIsActiveRecord
   shape   knowledgeDomainFull
 }
 
@@ -132,7 +132,7 @@ query querySpreadsheetRowsForDocument {
   args {
     documentId  string  @required
   }
-  filter  spreadsheetRow.documentId==args.documentId
+  filter  payload.documentId==args.documentId
   shape   spreadsheetRowFull
 }
 
@@ -143,7 +143,7 @@ query queryValidationEventsForTarget {
   args {
     targetId  string  @required
   }
-  filter  validationEvent.targetId==args.targetId
+  filter  payload.targetId==args.targetId
   shape   validationEventFull
 }
 
@@ -152,6 +152,6 @@ query queryValidationEventsForTarget {
 @description("Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).")
 query queryDueRefreshDomains {
   args {}
-  filter  payload.active==true; payload.refreshCadenceDays!=null
+  filter  traitIsActiveRecord; payload.refreshCadenceDays!=null
   shape   knowledgeDomainFull
 }

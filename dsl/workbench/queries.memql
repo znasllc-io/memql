@@ -11,7 +11,7 @@ query queryWorkspaceForPlan {
   args {
     planId  string  @required
   }
-  filter  workspace.planId==args.planId
+  filter  payload.planId==args.planId
   shape   workspaceFull
 }
 
@@ -19,6 +19,6 @@ query queryWorkspaceForPlan {
 @useConcept(workspace)
 @description("List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.")
 query queryProvisionedWorkspaces {
-  filter  workspace.status=="provisioned"
+  filter  payload.status=="provisioned"
   shape   workspaceFull
 }

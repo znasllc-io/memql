@@ -10,7 +10,7 @@ query queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  participant.spaceId==args.spaceId; participant.participantType=="human"; participant.status=="active"; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId; payload.participantType=="human"; payload.status=="active"; traitIsActiveRecord
   shape   participantFull
 }
 
@@ -65,7 +65,7 @@ query queryAgentInteractionCount {
   args {
     agentId  string  @required
   }
-  filter  utterance.source.agentId==args.agentId; utterance.utteranceType in ["speech", "agentGreeting"]; traitIsActiveRecord
+  filter  payload.source.agentId==args.agentId; payload.utteranceType in ["speech", "agentGreeting"]; traitIsActiveRecord
   shape   utteranceFull
 }
 
@@ -174,7 +174,7 @@ query queryExpiredArchivedSpaces {
   args {
     now  string  @required
   }
-  filter  traitIsActiveRecord; traitStatusIsArchived; space.expiresAt<args.now
+  filter  traitIsActiveRecord; traitStatusIsArchived; payload.expiresAt<args.now
   shape   spaceFull
 }
 
@@ -208,7 +208,7 @@ query queryGreetingUtterance {
     spaceId  string  @required
     agentId  string  @required
   }
-  filter  utterance.spaceId==args.spaceId; utterance.source.agentId==args.agentId; utterance.source.kind in ["agentGreeting"]; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId; payload.source.agentId==args.agentId; payload.source.kind in ["agentGreeting"]; traitIsActiveRecord
   shape   utteranceFull
 }
 
@@ -263,7 +263,7 @@ query queryHasSIResponseForReply {
     replyToId  string  @required
     participantId  string  @required
   }
-  filter  utterance.replyToId==args.replyToId; utterance.participantId==args.participantId
+  filter  payload.replyToId==args.replyToId; payload.participantId==args.participantId
   shape   utteranceFull
 }
 
@@ -298,7 +298,7 @@ query queryParticipantByAgentSpace {
     spaceId  string  @required
     agentId  string  @required
   }
-  filter  participant.spaceId==args.spaceId; participant.agentId==args.agentId; participant.status!="left"; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId; payload.agentId==args.agentId; payload.status!="left"; traitIsActiveRecord
   shape   participantFull
 }
 
@@ -346,7 +346,7 @@ query queryParticipantSession {
     spaceId  string
     participantId  string
   }
-  filter  ?.session.spaceId==args.spaceId; ?.session.participantId==args.participantId
+  filter  ?.payload.spaceId==args.spaceId; ?.payload.participantId==args.participantId
   shape   sessionFull
 }
 
@@ -407,7 +407,7 @@ query querySiParticipantForSpace {
   args {
     spaceId  string  @required
   }
-  filter  participant.spaceId==args.spaceId; participant.participantType=="si"; participant.status=="active"
+  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; payload.status=="active"
   shape   participantFull
 }
 
@@ -430,7 +430,7 @@ query querySpaceContext {
   args {
     spaceId  string
   }
-  filter  ?.context.spaceId==args.spaceId
+  filter  ?.payload.spaceId==args.spaceId
   shape   spaceContextFull
 }
 
@@ -526,7 +526,7 @@ query queryUserMicStatesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  ?.micState.spaceId==args.spaceId
+  filter  ?.payload.spaceId==args.spaceId
   shape   micStateFull
 }
 

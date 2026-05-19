@@ -54,7 +54,7 @@ func (Query) queryAllPlans(ctx any) (any, error) {
 @useConcept(plan)
 @description("Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.")
 query queryAwaitingFeedbackPlansPastTimeout {
-  filter  plan.status=="awaitingFeedback"; plan.feedbackRequest.timeoutAt < now()
+  filter  payload.status=="awaitingFeedback"; payload.feedbackRequest.timeoutAt < now()
   shape   planFull
 }
 
@@ -81,7 +81,7 @@ query queryAwaitingFeedbackPlansPastTimeout {
 @useConcept(plan)
 @description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
 query queryDueTrainAgentRetryPlans {
-  filter  plan.kind=="trainAgentRetryStep"; plan.status=="queued"
+  filter  payload.kind=="trainAgentRetryStep"; payload.status=="queued"
   shape   planFull
 }
 
@@ -106,7 +106,7 @@ query queryHistoricalPlanMetrics {
   args {
     planKind  string  @required
   }
-  filter  plan.kind==args.planKind; plan.status=="succeeded"
+  filter  payload.kind==args.planKind; payload.status=="succeeded"
   shape   planFull
 }
 
@@ -155,7 +155,7 @@ query queryPlansForSpace {
   args {
     spaceId  string  @required
   }
-  filter  plan.spaceId==args.spaceId
+  filter  payload.spaceId==args.spaceId
   shape   planFull
 }
 
@@ -185,7 +185,7 @@ query queryPlansForSpace {
 @useConcept(plan)
 @description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
 query queryRunningTrainAgentPlans {
-  filter  plan.kind=="trainAgent"; plan.status=="running"
+  filter  payload.kind=="trainAgent"; payload.status=="running"
   shape   planFull
 }
 
@@ -196,7 +196,7 @@ query queryTaskStateById {
   args {
     taskId  string  @required
   }
-  filter  taskState.taskId==args.taskId
+  filter  payload.taskId==args.taskId
   shape   taskStateFull
 }
 
@@ -222,6 +222,6 @@ query queryTasksForPlan {
   args {
     planId  string  @required
   }
-  filter  task.planId==args.planId
+  filter  payload.planId==args.planId
   shape   taskFull
 }
