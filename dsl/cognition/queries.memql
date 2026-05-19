@@ -15,15 +15,14 @@ query queryActiveHumanParticipants {
 }
 
 func (Query) queryActiveSpaces(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     concept;
     traitIsActiveRecord;
     traitIsNotArchived;
     ?.createdBy==args.userId;
     ?.space.status==coalesce(args.status, "active"),
     "spaceFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
@@ -139,13 +138,12 @@ func (Query) queryAudioOverridesForSpace(ctx any) (any, error) {
   // whatever it has -- usually the bare slug. Canonicalize the
   // arg before the equality check so both forms resolve to the
   // same value and the comparison matches.
-  ctx.output = shape(
+  return shape(
     concept;
     ?.audioOverride.spaceId==canonicalId(args.spaceId, "v1:cognition:space");
     ?.audioOverride.active==true,
     "audioOverrideFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 // ---- queries/v1/cognition/expiredArchivedSpaces.memql ----
@@ -232,14 +230,13 @@ func (Query) queryGroupGAForSpace(ctx any) (any, error) {
   // underlying participant IS the GA. Filtering by participantType
   // + status is sufficient under v1 (each user has at most one
   // active SI participant per space; that's their GA).
-  ctx.output = shape(
+  return shape(
     concept;
     participant.spaceId==args.spaceId;
     participant.participantType=="si";
     participant.status=="active",
     "participantFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 // ---- queries/v1/cognition/hasSIResponseForReply.memql ----
@@ -470,7 +467,7 @@ query querySpaceMeta {
 }
 
 func (Query) querySpaceParticipantPresence(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     concept;
     ?.presence.spaceId==args.spaceId;
     ?.presence.participantId==args.participantId,
@@ -488,30 +485,27 @@ func (Query) querySpaceParticipantPresence(ctx any) (any, error) {
       node("presence.intent"),
       node("createdAt")
     }
-  )
-  return ctx, nil
+  ), nil
 }
 
 func (Query) querySpaceParticipants(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     concept;
     ?.participant.spaceId==args.spaceId;
     ?.participant.status==args.status;
     ?.participant.participantType==args.participantType,
     "participantFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 func (Query) querySpaceUtterances(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     concept;
     ?.utterance.spaceId==args.spaceId;
     ?.utterance.participantId==args.participantId;
     ?.utterance.utteranceType==args.utteranceType,
     "utteranceFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 // ---- queries/v1/cognition/userMicStatesForSpace.memql ----
@@ -543,11 +537,10 @@ func (Query) queryVideoOverridesForSpace(ctx any) (any, error) {
   // whatever it has -- usually the bare slug. Canonicalize the
   // arg before the equality check so both forms resolve to the
   // same value and the comparison matches.
-  ctx.output = shape(
+  return shape(
     concept;
     ?.videoOverride.spaceId==canonicalId(args.spaceId, "v1:cognition:space");
     ?.videoOverride.active==true,
     "videoOverrideFull"
-  )
-  return ctx, nil
+  ), nil
 }

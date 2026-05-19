@@ -6,7 +6,7 @@
 func (Query) queryTestAutomation(ctx any) (any, error) {
   // Query checkpoints for this automation
   // Returns all checkpoints for the specified automation
-  ctx.output = shape(
+  return shape(
     concept;checkpoint.automationName==args.automationName,
     {
       node("checkpoint.executionId"),
@@ -16,6 +16,5 @@ func (Query) queryTestAutomation(ctx any) (any, error) {
       node("checkpoint.failedAt"),
       node("checkpoint.stepIndex")
     }
-  )
-  return ctx, nil
+  ), nil
 }

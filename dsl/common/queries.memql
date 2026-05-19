@@ -4,11 +4,10 @@
 // files cover the other construct kinds.
 
 func (Query) queryVersion(ctx any) (any, error) {
-  ctx.output = shape(
+  return shape(
     memqlVersion(),
     {
       node("payload.version")
     }
-  )
-  return ctx, nil
+  ), nil
 }

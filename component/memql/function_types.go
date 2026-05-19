@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseregistry"
 )
 
@@ -89,6 +90,13 @@ type Function struct {
 
 	// Expr is the parsed expression AST (for user-defined functions).
 	Expr ExpressionNode
+
+	// LogicSteps carries the parsed multi-step body for Logic functions
+	// whose body has intermediate `name := <call>` steps before the
+	// `_return` terminator. When set, the engine dispatches the call
+	// through the wired LogicRunner instead of evaluating Expr directly.
+	// Single-statement Logic bodies leave this nil and run through Expr.
+	LogicSteps *languageParser.AutomationDef
 
 	// MutationTemplate is the parsed mutation template (for mutation functions).
 	// Only set when FunctionKind == "mutation".
@@ -178,6 +186,7 @@ func (f *Function) clone() *Function {
 		ExprSource:       f.ExprSource,
 		BoundConcept:     f.BoundConcept,
 		Expr:             cloneExpressionNode(f.Expr),
+		LogicSteps:       f.LogicSteps, // shared parsed AST -- read-only at runtime
 		MutationTemplate: mutationCopy,
 		Origin:           f.Origin,
 		Type:             f.Type,

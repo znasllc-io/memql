@@ -254,8 +254,7 @@ spec specRichPredicate {
 //     evaluate without a row context.
 //
 //         func (Policy) canViewAdmin(_ any) bool {
-//           ctx.output = spec("requiresAdmin")
-//           return ctx, nil
+//           return spec("requiresAdmin")
 //         }
 //
 //   - From Go: engine.EvaluateSpec(ctx, "specName") evaluates a

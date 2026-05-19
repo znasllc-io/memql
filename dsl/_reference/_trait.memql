@@ -224,8 +224,7 @@ trait traitIsClusterOwner {
 //     context-spec or row-spec, both routed via spec().
 //
 //         func (Policy) canEdit(_ any) bool {
-//           ctx.output = spec("traitRequiresAdmin")
-//           return ctx, nil
+//           return spec("traitRequiresAdmin")
 //         }
 //
 //   - As a shape binding on a spec: every spec must bind to a shape via
