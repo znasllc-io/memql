@@ -57,7 +57,7 @@ mutation mutationArchiveSpace {
 // createDailySpace
 // =================
 //
-// Creates the per-user, per-day daily payload. Same shape as
+// Creates the per-user, per-day daily space. Same shape as
 // mutationCreateSpace but with the daily-specific fields baked in
 // (kind="daily", private=true) so the caller doesn't have to know
 // the convention.
@@ -135,7 +135,7 @@ mutation mutationCreateDailySpace {
 // mutationCreateGreetingUtterance - Create SI Greeting Utterance
 // ===============================================================
 //
-// Creates a greeting utterance when an SI participant joins a payload.
+// Creates a greeting utterance when an SI participant joins a space.
 // Uses a deterministic ID to prevent duplicate greetings.
 //
 // Arguments:
@@ -189,11 +189,11 @@ mutation mutationCreateGreetingUtterance {
 // createSessionForParticipant
 // ==========================
 //
-// Creates (or re-creates) a v1:cognition:session record for a participant in a payload.
+// Creates (or re-creates) a v1:cognition:session record for a participant in a space.
 
 @enabled
 @useConcept(session)
-@description("Create a session record for a participant in a payload.")
+@description("Create a session record for a participant in a space.")
 mutation mutationCreateSessionForParticipant {
   args {
     sessionId      string
@@ -226,7 +226,7 @@ mutation mutationCreateSessionForParticipant {
 
 @enabled
 @useConcept(space)
-@description("Create a payload.")
+@description("Create a space.")
 mutation mutationCreateSpace {
   args {
     spaceId           string
@@ -344,7 +344,7 @@ mutation mutationEmitClientToolRequest {
 //
 // Inserts a v1:cognition:client:tool:response record. Called by the
 // browser (from its client-tool relay bridge) after dispatching a tool
-// from a matching v1:cognition:client:tool:payload. Cognition subscribes
+// from a matching v1:cognition:client:tool:request. Cognition subscribes
 // to these events, matches on callId, wraps the payload in a
 // ClientToolResult MemqlClientMessage and forwards it to the agent
 // node via AiForwardRequest so the parked tool-loop waiter unblocks.
@@ -409,7 +409,7 @@ mutation mutationEmitTextChunk {
 // joinSpaceAsHuman
 // ===============
 //
-// Creates (or re-creates) a human participant record for a payload.
+// Creates (or re-creates) a human participant record for a space.
 //
 // IDEMPOTENCY:
 // The participant id is content-addressed on (canonical spaceId,
@@ -431,7 +431,7 @@ mutation mutationEmitTextChunk {
 
 @enabled
 @useConcept(participant)
-@description("Join a space as a human payload.")
+@description("Join a space as a human participant.")
 mutation mutationJoinSpaceAsHuman {
   args {
     spaceId              string  @required
@@ -462,7 +462,7 @@ mutation mutationJoinSpaceAsHuman {
 // joinSpaceAsSI
 // ============
 //
-// Creates (or re-creates) an SI participant record for a payload.
+// Creates (or re-creates) an SI participant record for a space.
 //
 // IDEMPOTENCY:
 // The id is content-addressed on (canonical agentId, canonical
@@ -483,7 +483,7 @@ mutation mutationJoinSpaceAsHuman {
 
 @enabled
 @useConcept(participant)
-@description("Join a space as an SI payload. Uses canonicalized deterministic ID.")
+@description("Join a space as an SI participant. Uses canonicalized deterministic ID.")
 mutation mutationJoinSpaceAsSI {
   args {
     spaceId              string  @required
@@ -675,7 +675,7 @@ mutation mutationSaveSpace {
 
 @enabled
 @useConcept(utterance)
-@description("Create an action utterance in a payload.")
+@description("Create an action utterance in a space.")
 mutation mutationSendActionUtterance {
   args {
     utteranceId      string
@@ -730,7 +730,7 @@ mutation mutationSendActionUtterance {
 
 @enabled
 @useConcept(utterance)
-@description("Create a transcript-only realtime voice utterance in a payload.")
+@description("Create a transcript-only realtime voice utterance in a space.")
 mutation mutationSendRealtimeTranscriptUtterance {
   args {
     utteranceId      string
@@ -794,7 +794,7 @@ mutation mutationSendRealtimeTranscriptUtterance {
 
 @enabled
 @useConcept(utterance)
-@description("Create a speech utterance in a payload.")
+@description("Create a speech utterance in a space.")
 mutation mutationSendSpeechUtterance {
   args {
     utteranceId      string
@@ -839,7 +839,7 @@ mutation mutationSendSpeechUtterance {
 
 @enabled
 @useConcept(utterance)
-@description("Create a text utterance in a payload.")
+@description("Create a text utterance in a space.")
 mutation mutationSendTextUtterance {
   args {
     utteranceId      string
@@ -887,7 +887,7 @@ mutation mutationSendTextUtterance {
 
 @enabled
 @useConcept(audioOverride)
-@description("Set the per-session audio control mode for an agent in a payload.")
+@description("Set the per-session audio control mode for an agent in a space.")
 mutation mutationSetAgentAudioOverride {
   args {
     spaceId  string  @required
@@ -939,7 +939,7 @@ mutation mutationSetAgentAudioOverride {
 
 @enabled
 @useConcept(videoOverride)
-@description("Set the per-session video control mode for an agent in a payload.")
+@description("Set the per-session video control mode for an agent in a space.")
 mutation mutationSetAgentVideoOverride {
   args {
     spaceId  string  @required

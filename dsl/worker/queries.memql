@@ -18,10 +18,10 @@ query queryExpiredWorkerInvocations {
 //
 // Telemetry feed for a Plan: every workerHost / workerComputer call
 // the Plan's tasks dispatched. Backs the Tasks-page drilldown and
-// the payload.completed canvas card's "view worker activity" link.
+// the plan.completed canvas card's "view worker activity" link.
 //
 // Arguments:
-//   planId (string, required) - v1:planner:payload.id
+//   planId (string, required) - v1:planner:plan.id
 
 @enabled
 @useConcept(invocation)

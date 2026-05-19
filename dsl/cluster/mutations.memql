@@ -128,7 +128,7 @@ mutation mutationCreateSpawnEvent {
 
 // ---- mutations/v1/cluster/updateNodeHealth.memql ----
 
-// Record a health transition for an existing cluster payload. Called by
+// Record a health transition for an existing cluster node. Called by
 // the PeerManager's NodeStatusWriter whenever a peer crosses a
 // heartbeat threshold (healthy -> degraded -> offline) or recovers.
 //
@@ -136,7 +136,7 @@ mutation mutationCreateSpawnEvent {
 // transitions for the same node form a time-series under the same
 // record. Subsequent inserts with the same id append new payload
 // versions, and the engine's CDC path emits
-// graph.payload.created.<partition>.v1:cluster:node, which the CLI
+// graph.node.created.<partition>.v1:cluster:node, which the CLI
 // subscribes to for live topology updates.
 
 @enabled

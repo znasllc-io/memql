@@ -34,12 +34,12 @@ func (Query) queryAllPlans(ctx any) (any, error) {
   // `concept;` -- a true bare `shape(concept, "shapeName")` is not
   // an established pattern in this repo. The earlier draft used
   // `traitIsNotDeleted`, mirroring queryAllAgents, but that spec
-  // checks `payload.deleted!=true` -- Agents declare a `deleted`
+  // checks `plan.deleted!=true` -- Agents declare a `deleted`
   // field and Plans do not, so the predicate failed for every row
   // and the panel rendered empty. Same trap for traitIsActiveRecord
   // (Plans don't carry `active` either).
   //
-  // `payload.spaceId!=""` is the right tautological filter for
+  // `plan.spaceId!=""` is the right tautological filter for
   // Plans: spaceId is @required on the concept, so every row
   // matches. Verified against a live BFF: queryAllPlans() returns
   // the same row count as queryPlansForSpace() summed across spaces.
@@ -165,11 +165,11 @@ query queryPlansForSpace {
 // Returns every Plan currently in `running` for kind `trainAgent`.
 // Backs the Training Studio's "this agent is being trained right
 // now" lock: the frontend filters the result by the agent slot's
-// id (extracted from `payload.input.agentId` on each row) and
+// id (extracted from `plan.input.agentId` on each row) and
 // disables Studio interactions when a match is found.
 //
 // Why no agentId filter on the server: memQL queries don't yet
-// support nested-object paths like `payload.input.agentId` in the
+// support nested-object paths like `plan.input.agentId` in the
 // where clause -- the bound list of in-flight training Plans is
 // at most a handful (one per concurrent training run across the
 // tenant), so client-side filtering by agent is cheap.
@@ -183,7 +183,7 @@ query queryPlansForSpace {
 
 @enabled
 @useConcept(plan)
-@description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by payload.input.agentId.")
+@description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
 query queryRunningTrainAgentPlans {
   filter  payload.kind=="trainAgent"; traitStatusIsRunning
   shape   planFull

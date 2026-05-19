@@ -50,7 +50,7 @@ shape auditEventFull {
 
 @row
 @useConcept(authCode)
-@description("Full projection of v1:identity:payload. Excludes the plaintext code field; only the SHA-256 hash is exposed to query consumers so a query result can never be replayed at the token endpoint.")
+@description("Full projection of v1:identity:authCode. Excludes the plaintext code field; only the SHA-256 hash is exposed to query consumers so a query result can never be replayed at the token endpoint.")
 shape authCodeFull {
   row.id
   payload.codeHash
@@ -131,7 +131,7 @@ shape delegationFull {
 
 @row
 @useConcept(identity)
-@description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a payload. Use userFull for the person, delegationFull for delegations, partitionAccessFull for grants.")
+@description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person, delegationFull for delegations, partitionAccessFull for grants.")
 shape identityFull {
   row.id
   payload.userId

@@ -38,7 +38,7 @@ mutation mutationApproveAccessRequest {
 
 @enabled
 @useConcept(identity)
-@description("Bump the lastUsedAt stamp on a PAT payload. Best-effort; callers must not fail the request on error.")
+@description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error.")
 mutation mutationBumpPATLastUsedAt {
   args {
     identityId      string  @required
@@ -72,7 +72,7 @@ mutation mutationBumpPATLastUsedAt {
 // generate exports faster than the configured cadence.
 //
 // Partial-update via update() so the caller doesn't have to re-pass
-// every @required field on the payload. Only dataExportLastAt
+// every @required field on the user. Only dataExportLastAt
 // changes.
 //
 // Arguments:
@@ -112,7 +112,7 @@ mutation mutationBumpUserDataExport {
 // validation; null would be rejected because type=string.
 //
 // Partial-update via update() so the caller doesn't have to re-pass
-// every @required field on the payload.
+// every @required field on the user.
 //
 // Arguments:
 //   userId  (string)  - User node ID
@@ -279,7 +279,7 @@ mutation mutationCreateAccessRequest {
 //   occurredAt       (string)            - ISO 8601 timestamp the event happened
 //   category         (string)            - Coarse grouping (auth/identity/authorization/configuration/admin/data)
 //   action           (string)            - Machine-readable lower_snake_case action enum
-//   actorUserId      (string, optional)  - v1:identity:payload.id of the authenticated actor
+//   actorUserId      (string, optional)  - v1:identity:user.id of the authenticated actor
 //   actorEmail       (string, optional)  - Actor's email at time of event
 //   actorRole        (string, optional)  - Actor's cluster role at time of event
 //   actorIdentityId  (string, optional)  - v1:identity:identity used to authenticate
@@ -362,9 +362,9 @@ mutation mutationCreateAuditEvent {
 //   clientId            (string)            - OAuth client identifier
 //   redirectURI         (string)            - Exact-matched redirect URI for clientId
 //   state               (string, optional)  - PKCE-style state value echoed back
-//   userId              (string)            - v1:identity:payload.id the code authenticates
-//   identityId          (string)            - v1:identity:payload.id of the magic_link credential
-//   magicLinkRequestId  (string)            - v1:identity:payload.id this code was minted from
+//   userId              (string)            - v1:identity:user.id the code authenticates
+//   identityId          (string)            - v1:identity:identity.id of the magic_link credential
+//   magicLinkRequestId  (string)            - v1:identity:magicLinkRequest.id this code was minted from
 //   expiresAt           (string)            - Absolute expiration (~60s after creation)
 //
 
@@ -557,11 +557,11 @@ mutation mutationCreateClusterSettings {
 // ================
 //
 // Creates a new v1:identity:delegation record granting an agent
-// scoped authority to act on behalf of an payload.
+// scoped authority to act on behalf of an identity.
 
 @enabled
 @useConcept(delegation)
-@description("Create a new delegation granting an agent scoped authority on behalf of an payload.")
+@description("Create a new delegation granting an agent scoped authority on behalf of an identity.")
 mutation mutationCreateDelegation {
   args {
     delegationId     string
@@ -598,7 +598,7 @@ mutation mutationCreateDelegation {
 // ==============
 //
 // Creates a new v1:identity:identity record: a credential set owned by
-// a v1:identity:payload. One user can have many identities (a magic-link
+// a v1:identity:user. One user can have many identities (a magic-link
 // verified email, OAuth accounts on external apps, API keys, service
 // accounts, worker tokens for memql-cockpit machines).
 //
@@ -711,7 +711,7 @@ mutation mutationCreateMagicLinkRequest {
 
 @enabled
 @useConcept(identity)
-@description("Create a Personal Access Token identity (api_key) owned by a payload. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
+@description("Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
 mutation mutationCreatePATIdentity {
   args {
     identityId      string  @required
@@ -954,7 +954,7 @@ mutation mutationCreateWorkerTokenIdentity {
 //
 // Display fields (displayName, primaryEmail) are blanked out as a
 // privacy measure: the row stays around for foreign-key integrity
-// (e.g. payload.userId, payload.actorUserId) but PII is
+// (e.g. authSession.userId, auditEvent.actorUserId) but PII is
 // removed. Captured email addresses on audit rows are
 // point-in-time copies and not affected.
 //
@@ -963,7 +963,7 @@ mutation mutationCreateWorkerTokenIdentity {
 // doesn't change.
 //
 // Partial-update via update() so the caller doesn't have to re-pass
-// every @required field on the payload.
+// every @required field on the user.
 //
 // Arguments:
 //   userId  (string)  - User node ID
@@ -1153,7 +1153,7 @@ mutation mutationRedeemWorkerPairingCode {
 //
 // Arguments:
 //   requestId     (string)            - Access-request node ID
-//   reviewedBy    (string)            - v1:identity:payload.id of the deciding admin
+//   reviewedBy    (string)            - v1:identity:user.id of the deciding admin
 //   reviewerNote  (string, optional)  - Free-text admin rationale
 //
 
@@ -1400,7 +1400,7 @@ mutation mutationRotateAuthSession {
 // mutationCancelScheduledDeletion.
 //
 // Partial-update via update() so the caller doesn't have to re-pass
-// every @required field on the payload. Only deletionScheduledAt
+// every @required field on the user. Only deletionScheduledAt
 // changes.
 //
 // Arguments:
@@ -1440,7 +1440,7 @@ mutation mutationScheduleAccountDeletion {
 // here; abuse mitigation rests on the partition-ACL middleware
 // (cluster-wide owner check) and the engine's standard write
 // authorization (a user cannot mutate another user's row without
-// elevated role -- the bun update path keys on v1:identity:payload.id and
+// elevated role -- the bun update path keys on v1:identity:user.id and
 // access control would catch a cross-user write).
 //
 // Discussion mode (Phase 6) and voice migration (Phase 7) read

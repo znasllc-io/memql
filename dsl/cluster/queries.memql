@@ -14,7 +14,7 @@ query queryClusterNodeTypes {
 // Returns all registered cluster nodes.
 //
 // Note: this returns EVERY row in the time-series, not just the latest
-// per payload. The CLI collapses them to "latest-per-id" in Go. We can't
+// per node. The CLI collapses them to "latest-per-id" in Go. We can't
 // use `asOf(..., latest)` here because it's a query-level directive and
 // the function-loader validator treats it as an unknown function call.
 
