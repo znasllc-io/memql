@@ -2,7 +2,7 @@
 //
 // Logic bodies for the knowledge-domain automations.
 
-@description("Imperative body of automation refreshDueKnowledgeDomains. Reads candidate domains via queryDueRefreshDomains, then for each candidate the Go-side cron handler (registered against this automation by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9: the schema-side cadence + the runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.")
+@description("Reads candidate knowledge-domain rows via queryDueRefreshDomains; for each, the Go-side cron handler (registered by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9 the schema-side cadence + runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.")
 logic logicRefreshDueKnowledgeDomains {
   args {
     event object @required
