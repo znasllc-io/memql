@@ -78,7 +78,6 @@ mutation partition mutationDeletePartition {
 // Retention is enforced by purgeExpiredPolicyTraces (daily cron).
 
 @enabled
-@useConcept(policyTrace)
 @description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
 mutation policyTrace mutationInsertPolicyTrace {
   args {

@@ -82,32 +82,26 @@ func (Query) listParticipants(_ any) (any, error) {
 	}
 }
 
-// TestLoad_LegacyUseFiles_LoadCleanly locks the transitional state:
-// files that still use the legacy `use` directive (no `import`) load
-// without errors through the import-graph pipeline. Their import
-// lists are empty; the new graph has no edges for them; the old
-// loader (untouched in this commit) still handles them via the
-// legacy concept-resolver path.
-//
-// Uses procedural func form because the struct-form `query NAME {}`
-// goes through a rewriter that the bare parser.ParseFile entry
-// doesn't run. The point of this test is "presence of legacy `use`
-// declarations doesn't trip the new pipeline" -- not full parse
-// coverage of every author shape.
-func TestLoad_LegacyUseFiles_LoadCleanly(t *testing.T) {
+// TestLoad_LegacyUseFiles_Rejected locks the PR C lockdown: files
+// that still carry the legacy `use <ns>.<concept>` directive fail
+// the load pipeline with a clear migration message. Authors must
+// rewrite to `use <module>.{ <name> }` (Form B).
+func TestLoad_LegacyUseFiles_Rejected(t *testing.T) {
 	root := fstest.MapFS{
 		"legacy.memql": {Data: []byte(`use cognition.participant
 
 @description("legacy")
-@useConcept(participant)
 func (Query) legacyQuery(_ any) (any, error) {
   return nil, nil
 }
 `)},
 	}
 	_, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: legacy file should load cleanly, got %v", err)
+	if err == nil {
+		t.Fatal("expected Form A rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "retired") {
+		t.Errorf("err %q should mention 'retired' (PR C lockdown message)", err.Error())
 	}
 }
 
