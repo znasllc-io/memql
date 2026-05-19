@@ -399,14 +399,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			// would be lost. Those logics need a step-runner-backed
 			// invocation flow on the engine side; tracked as a follow-up.
 			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok {
-				if extra := nonReturnStepCount(auto.Steps); extra > 0 {
-					// F.5 follow-up: wire Logic dispatch through the
-					// automation step runner so intermediate `name := <call>`
-					// steps execute end-to-end with their results bound for
-					// later steps + the `_return` expression. Tracked in
-					// docs/handoff-ctx-purge.md.
-					return nil, fmt.Errorf("function %q: multi-step logic bodies are not yet executable by the function dispatcher (%d intermediate steps before `_return`). F.5 of the ctx-envelope purge tracks the step-runner integration; until then, restructure the body as a single `return <expr>` statement or move the multi-step orchestration into an automation that calls single-step logics", expectedName, extra)
-				}
+				// Always extract the `_return` expression as fn.Expr.
+				// Single-statement bodies (no intermediate `name := <call>`
+				// steps) run through the standard expression evaluator
+				// via this path. Multi-step bodies ALSO keep fn.Expr set
+				// so callers that aren't routing through the LogicRunner
+				// (e.g. validation paths) still see something callable;
+				// the engine's dispatch path checks LogicSteps first.
 				retExpr, err := extractLogicReturnExpression(auto)
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -421,6 +420,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
+				// F.5: when the body has intermediate steps, stash the
+				// full AutomationDef on the function so the engine can
+				// dispatch through the wired LogicRunner. The runner
+				// walks the intermediate steps in order, binds each
+				// result for later step references, and evaluates the
+				// `_return` expression as the function's return.
+				if nonReturnStepCount(auto.Steps) > 0 {
+					fn.LogicSteps = auto
+				}
 			} else {
 				return nil, fmt.Errorf("function %q logic body must be a procedural block, got %T", expectedName, funcDef.Body)
 			}

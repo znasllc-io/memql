@@ -704,6 +704,20 @@ func resolvePlanFunctions(plan *QueryPlan, functions *FunctionRegistry, specs *S
 		}
 	}
 
+	// F.5 -- Multi-step Logic dispatch: when a top-level call is a
+	// Logic function whose body has intermediate `name := <call>` steps
+	// before the `_return` terminator, hoist it to plan.LogicCall so
+	// the engine dispatches it through the wired LogicRunner. The
+	// runner walks the steps via the automation step registry,
+	// binding each result for later steps + the `_return` expression.
+	if call, ok := plan.Root.(*FunctionCallExpression); ok && call != nil && functions != nil {
+		if fn, err := functions.Get(call.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") && fn.LogicSteps != nil {
+			plan.LogicCall = call
+			plan.Root = nil
+			return nil
+		}
+	}
+
 	// F.6 -- Logic-calls-mutation dispatch: when a Logic function's
 	// `return <expr>` body is a top-level mutation call, the resolved
 	// expression is a FunctionCallExpression whose target is a

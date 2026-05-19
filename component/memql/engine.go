@@ -15,6 +15,7 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -68,6 +69,29 @@ type MemQLEngine struct {
 	wiring                  *bus.Wiring
 	partition               string // active partition for data isolation
 	metadataCollector       metadataCollectorInterface
+	// logicRunner wires multi-step Logic dispatch through the
+	// automation step runner. Set via SetLogicRunner from app bootstrap;
+	// when nil, multi-step Logic invocations fall back to the
+	// "function dispatcher does not support multi-step" error path so
+	// stripped-down binaries that don't load automations still get an
+	// actionable failure mode.
+	logicRunner LogicRunner
+}
+
+// LogicRunner is the cross-package bridge that lets the memql engine
+// dispatch a multi-step Logic call into the automation step runner.
+// Implemented in component/automations/ (logic_runner.go); wired at
+// app bootstrap. The runner takes the parsed *AutomationDef body
+// (the parser's representation of `body { ... ; return <expr> }`),
+// walks the intermediate `name := <call>` steps in order, binds each
+// result for later steps to reference, and returns the `_return`
+// step's evaluated value.
+//
+// caller args are passed under both `args` (the canonical author-
+// facing form) and `ctx` (the legacy runtime form still produced
+// by the rewriter) so step bodies referencing either resolve.
+type LogicRunner interface {
+	RunLogic(ctx context.Context, fnName string, body *languageParser.AutomationDef, args map[string]any) (any, error)
 }
 
 const ComponentName = common.ComponentName("memQLEngine")
@@ -109,6 +133,19 @@ func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
 	}
 
 	return memql, nil
+}
+
+// SetLogicRunner wires the multi-step Logic dispatcher. Called from
+// app bootstrap once the automations package's runner is constructed
+// against the live step registry + evaluator. Set to nil to revert
+// to the "multi-step bodies are not executable" error path.
+func (e *MemQLEngine) SetLogicRunner(runner LogicRunner) {
+	e.logicRunner = runner
+}
+
+// LogicRunner returns the wired runner (may be nil).
+func (e *MemQLEngine) LogicRunner() LogicRunner {
+	return e.logicRunner
 }
 
 // SetEventBus wires the event bus used for publishing events.
@@ -350,6 +387,18 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 		return nil, err
 	}
 
+	// Top-level multi-step Logic call: dispatch through the wired
+	// LogicRunner. When no runner is wired (e.g. tests, stripped-down
+	// binaries), surface an actionable error pointing at app bootstrap.
+	if plan.LogicCall != nil {
+		result, err := e.executeLogicFunctionCall(ctx, plan.LogicCall)
+		if err != nil {
+			return nil, err
+		}
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	// Top-level mutation function call: evaluate template and execute one insert.
 	if plan.MutationCall != nil {
 		// Disallow any query directives or modifiers around mutation calls.
@@ -462,6 +511,66 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 	// Emit query executed event
 	e.emitQueryExecutedEvent(startTime, result, false)
 
+	return result, nil
+}
+
+// executeLogicFunctionCall dispatches a top-level multi-step Logic
+// call through the wired LogicRunner. The runner walks the parsed
+// AutomationDef body's intermediate `name := <call>` steps in order
+// (via the automation step registry), binds each step's result so
+// later steps can reference it, and returns the `_return` step's
+// evaluated value as the Logic's return.
+//
+// When no runner is wired the call surfaces an actionable error
+// pointing at the bootstrap wiring; this matches the pre-F.5 path
+// so stripped-down binaries that don't load automations still fail
+// loudly instead of returning nil silently.
+func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *FunctionCallExpression) (*ExecuteResult, error) {
+	if call == nil {
+		return nil, fmt.Errorf("logic call is nil")
+	}
+	if e.functions == nil {
+		return nil, fmt.Errorf("function registry is not initialized")
+	}
+
+	fn, err := e.functions.Get(call.Name)
+	if err != nil {
+		return nil, err
+	}
+	if fn == nil {
+		return nil, fmt.Errorf("function %q not found", call.Name)
+	}
+	if !strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") {
+		return nil, fmt.Errorf("function %q is not a logic", call.Name)
+	}
+	if !fn.Enabled {
+		return nil, fmt.Errorf("function %q is disabled", call.Name)
+	}
+	if fn.LogicSteps == nil {
+		return nil, fmt.Errorf("function %q has no multi-step body (LogicSteps unset)", call.Name)
+	}
+	if e.logicRunner == nil {
+		return nil, fmt.Errorf("function %q has a multi-step logic body but no LogicRunner is wired -- call engine.SetLogicRunner from app bootstrap (the automations package registers one against the live step registry)", call.Name)
+	}
+
+	args := call.Args
+	if args == nil {
+		args = make(map[string]any)
+	}
+
+	// Validate args using the function's args-block schema.
+	validator := newFunctionValidator(e.functions.Snapshot(), nil)
+	if err := validator.validateFunctionArgs(fn, args); err != nil {
+		return nil, err
+	}
+
+	out, err := e.logicRunner.RunLogic(ctx, fn.Name, fn.LogicSteps, args)
+	if err != nil {
+		return nil, fmt.Errorf("logic %q: %w", fn.Name, err)
+	}
+
+	result := newExecuteResult(nil)
+	result.setOutput(out)
 	return result, nil
 }
 
