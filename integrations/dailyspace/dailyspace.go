@@ -90,6 +90,12 @@ func (d *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "ensureForCaller",
+			Description: "Ensure today's daily space exists for the authenticated caller. Derives userId from the request's auth context (JWT/PAT subject), then calls ensureForUser internally. The cockpit Chat tab calls this on connect so the daily space is present before the space list paints.",
+			Handler:     d.handleEnsureForCaller,
+			ArgsSchema:  map[string]string{},
+		},
+		{
 			Name:        "rolloverAllUsers",
 			Description: "Hourly cron entry point. For every active user with dailySpaceEnabled != false: ensures today's daily exists and archives or saves any prior-day dailies per their dailySpaceRolloverAction preference. Returns one summary node with counts.",
 			Handler:     d.handleRolloverAllUsers,
@@ -118,6 +124,36 @@ func (d *Integration) handleEnsureForUser(ctx context.Context, args map[string]a
 		return nil, fmt.Errorf("dailyspace.ensureForUser: userId is required")
 	}
 	res, err := d.ensureForUser(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	return wrapResult(res)
+}
+
+// handleEnsureForCaller resolves the calling user from the request's
+// auth context and delegates to ensureForUser. Surfaces the same
+// ensureResult shape as the user-keyed handler so callers can branch
+// on Skipped / Inserted without caring which capability they invoked.
+//
+// Picks the subject from the active TokenInfo (JWT `sub` or PAT
+// subject) -- that's the canonical v1:identity:user.id stamped on
+// every request envelope. When no auth context is present (e.g.
+// background automations running under the synthetic system actor)
+// the call returns a Skipped result; system actors don't have a
+// "daily space" surface to back.
+func (d *Integration) handleEnsureForCaller(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	token := auth.TokenInfoFromContext(ctx)
+	if token == nil {
+		return wrapResult(ensureResult{Skipped: true, Reason: "no auth context on request"})
+	}
+	subject := strings.TrimSpace(token.Subject)
+	if subject == "" {
+		return wrapResult(ensureResult{Skipped: true, Reason: "auth context has empty subject"})
+	}
+	if strings.HasPrefix(subject, "system:") {
+		return wrapResult(ensureResult{UserId: subject, Skipped: true, Reason: "caller is a system actor"})
+	}
+	res, err := d.ensureForUser(ctx, subject)
 	if err != nil {
 		return nil, err
 	}

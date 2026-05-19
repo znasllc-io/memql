@@ -212,6 +212,60 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 	}
 }
 
+// TestLogicRunner_PreservesReturnStep pins the compile->JSON->loader
+// round-trip: the compiler peels the parser's synthetic `_return`
+// step out of the steps slice and emits it as a top-level
+// `_return` JSON field, the automations.Loader has no struct field
+// for it, and a vanilla unmarshal drops it on the floor. The
+// runtime then refuses to run the Logic with "logic %q has no
+// `_return` step (body must end with `return <expr>`)". Every
+// multi-statement Logic across the DSL trees hit this -- including
+// logicRevokeExpiredDelegations, the cluster/identity sweeps, etc.
+// compileBodyToAutomation re-attaches a synthetic Step at the end
+// of the slice; this test guards that fix.
+func TestLogicRunner_PreservesReturnStep(t *testing.T) {
+	src := `@useQuery(queryFoo)
+@useMutation(mutationBar)
+@description("repro")
+logic logicSweep {
+  args {
+    now string @required
+  }
+  body {
+    rows := queryFoo({ now: args.now })
+    for item := range rows.Nodes() {
+      tick := mutationBar({ id: item.id })
+    }
+    return rows.Len()
+  }
+}`
+	body := parseLogicBody(t, src)
+	r := NewLogicRunner(nil, nil, nil)
+
+	auto, err := r.compileBodyToAutomation("logicSweep", body)
+	if err != nil {
+		t.Fatalf("compileBodyToAutomation: %v", err)
+	}
+
+	var returnStep *Step
+	for _, s := range auto.Steps {
+		if s != nil && s.ID == "_return" {
+			returnStep = s
+			break
+		}
+	}
+	if returnStep == nil {
+		t.Fatalf("expected a _return step in compiled automation; got %d steps without one (the JSON round-trip drops the compiler's top-level `_return` field unless stitched back)",
+			len(auto.Steps))
+	}
+	if returnStep.Type != StepTypeQuery {
+		t.Errorf("_return step type = %v, want %v", returnStep.Type, StepTypeQuery)
+	}
+	if returnStep.Query == nil || strings.TrimSpace(returnStep.Query.Query) == "" {
+		t.Errorf("_return step missing Query expression: %+v", returnStep.Query)
+	}
+}
+
 // TestLogicRunner_RejectsNilBody pins that the runner errors on a
 // nil body rather than panicking. Production never hits this path
 // (the function loader only stamps LogicSteps when there's a multi-
