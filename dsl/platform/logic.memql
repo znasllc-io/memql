@@ -23,14 +23,14 @@
 @description("Imperative body of automation bootstrapDefaultPartition (migrated from the legacy func form).")
 logic logicBootstrapDefaultPartition {
   args {
-    event object @required
+    event object
   }
   body {
-  ctx.output = mutationCreatePartition({
-    name:          "default",
-    partitionType: "standard",
-    config:        {}
-  })
+    return mutationCreatePartition({
+      name:          "default",
+      partitionType: "standard",
+      config:        {}
+    })
   }
 }
 

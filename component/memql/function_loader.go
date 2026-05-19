@@ -385,6 +385,41 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			}
 			fn.ExprSource = extractExpressionFromContent(content)
 
+		case languageParser.FunctionTypeLogic:
+			// Logic functions: the parser produces an *AutomationDef body
+			// (a sequence of `name := <call>` steps plus a synthetic
+			// `_return` step). For single-statement bodies (`body { return
+			// <expr> }`) the AutomationDef has exactly one `_return` step
+			// whose Query is the expression — we extract it as fn.Expr so
+			// the standard expression evaluator runs the call directly.
+			//
+			// Multi-statement Logic bodies (with intermediate `:=` steps)
+			// are not yet executed end-to-end through this path: the
+			// intermediate steps' side effects (mutations, publishEvent)
+			// would be lost. Those logics need a step-runner-backed
+			// invocation flow on the engine side; tracked as a follow-up.
+			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok {
+				if extra := nonReturnStepCount(auto.Steps); extra > 0 {
+					return nil, fmt.Errorf("function %q: multi-step logic bodies are not yet supported by the function executor (%d intermediate steps before `_return`); restructure as a single `return <expr>` statement", expectedName, extra)
+				}
+				retExpr, err := extractLogicReturnExpression(auto)
+				if err != nil {
+					return nil, fmt.Errorf("function %q: %w", expectedName, err)
+				}
+				converter := NewASTConverter()
+				engineExpr, err := converter.ConvertExpression(retExpr)
+				if err != nil {
+					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
+				}
+				if boundConcept != "" {
+					engineExpr = resolveBareConcept(engineExpr, boundConcept)
+				}
+				fn.Expr = engineExpr
+				fn.ExprSource = extractExpressionFromContent(content)
+			} else {
+				return nil, fmt.Errorf("function %q logic body must be a procedural block, got %T", expectedName, funcDef.Body)
+			}
+
 		default:
 			// Query functions: convert the expression AST to executable engine AST.
 			if parserExpr, ok := funcDef.Body.(languageParser.ExpressionNode); ok {
@@ -751,6 +786,38 @@ func functionBodyStartsWithReturn(content string) bool {
 	}
 
 	return false
+}
+
+// nonReturnStepCount returns the number of steps in the slice whose ID is
+// not "_return". Used by the logic-body validator to flag multi-step
+// bodies that the function executor doesn't yet run end-to-end.
+func nonReturnStepCount(steps []languageParser.StepDef) int {
+	n := 0
+	for _, s := range steps {
+		if s.ID != "_return" {
+			n++
+		}
+	}
+	return n
+}
+
+// extractLogicReturnExpression returns the expression the logic body
+// produces. We look for the synthetic `_return` step that
+// parseGoStyleAutomationBody appends for trailing `return <expr>` /
+// `ctx.output = <expr>` terminators, and pull the wrapped
+// QueryStepConfig.Query out of it.
+func extractLogicReturnExpression(auto *languageParser.AutomationDef) (languageParser.ExpressionNode, error) {
+	for _, s := range auto.Steps {
+		if s.ID != "_return" {
+			continue
+		}
+		cfg, ok := s.Config.(*languageParser.QueryStepConfig)
+		if !ok || cfg == nil || cfg.Query == nil {
+			return nil, fmt.Errorf("logic `_return` step is missing its expression")
+		}
+		return cfg.Query, nil
+	}
+	return nil, fmt.Errorf("logic body has no trailing `return <expr>` terminator")
 }
 
 // validateFunctions validates all parsed functions for correctness.
