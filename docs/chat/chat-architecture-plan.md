@@ -1,5 +1,24 @@
 # Chat Architecture — Implementation Plan
 
+> **STATUS (2026-05-18): SUPERSEDED — DESIGN INVERTED TO SINGLE-CHAT.**
+>
+> The two-thread (Group + per-user Team) design described below was
+> abandoned in favor of a single-chat collapse:
+> - `8975f33 single-chat assistant architecture (rename + collapse foundations)`
+> - `a27db80 remove misroute classifier (dead code after single-chat collapse)`
+>   — kills Phase 8 (Misroute safety net).
+> - `c570875 drop copresentConversation tool, builtin, and Go integration`
+>   — kills Phase 5 (`copresent_conversation` domain + tool).
+> - `da2017c feat: askSpecialist tool + strict specialist gatekeeping` —
+>   the post-collapse routing primitive that replaces per-user team threads.
+>
+> Phases 1, 4, 6, 7, 9, 10 may have partial overlap with current state;
+> Phases 5 and 8 are dead. Treat this doc as historical context, not a
+> work plan. Delete per the no-stale-docs convention once anything
+> still relevant is consolidated elsewhere.
+
+---
+
 > **Status:** Brainstorm done (2026-05-09). Ten design decisions locked plus the activity-model architectural correction. Implementation not yet started.
 >
 > This document is the handoff for whoever (developer or AI agent) executes the chat-architecture initiative on the memql + copresent stack. It captures the working conventions, the locked decisions verbatim, the current state with file-path anchors, the phase-by-phase implementation plan, the cross-cutting conventions, and the quick-start.
