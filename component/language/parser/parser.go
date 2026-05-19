@@ -649,17 +649,10 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		// Specs require an explicit return statement with a boolean expression.
 		body, err = p.parseGoStyleSpecBody()
 	case FunctionTypePolicy:
-		// Policies are pure decision functions. Two body shapes are
-		// accepted during the ctx-envelope transition:
-		//   - canonical:  ctx.output = <expr>; return ctx, nil
-		//   - legacy:     return <expr>
-		// Both produce the same AST; the engine stamps ctx.output
-		// post-eval regardless.
-		if p.looksLikeCtxOutputBody() {
-			body, err = p.parseGoStyleCtxOutputBody()
-		} else {
-			body, err = p.parseGoStyleSpecBody()
-		}
+		// Policies are pure decision functions. Body shape: `return <expr>`.
+		// (The legacy `ctx.output = <expr>; return ctx, nil` envelope form
+		// was retired in F.2 of the ctx-envelope purge.)
+		body, err = p.parseGoStyleSpecBody()
 	case FunctionTypeTool, FunctionTypeBuiltin:
 		// Tool and Builtin definitions have declarative bodies parsed externally.
 		// Skip the body content until the closing brace.
@@ -865,111 +858,6 @@ func (p *Parser) parseGoStyleSpecBody() (Node, error) {
 	return expr, nil
 }
 
-// parseGoStyleCtxOutputBody parses the explicit ctx-envelope body
-// form:
-//
-//	ctx.output = <expr>
-//	return ctx, nil
-//
-// Returns the parsed <expr> so each receiver's body parser can
-// treat it identically to its corresponding `return <expr>, nil`
-// shape. Both terminators are required; the surrounding parser
-// decides whether the body is allowed to use this form (procedural
-// receivers only — Spec and the declarative receivers are exempt).
-func (p *Parser) parseGoStyleCtxOutputBody() (Node, error) {
-	// First token must be the identifier `ctx.output` (the lexer
-	// folds `.` into identifier characters, so it's a single token).
-	if !p.check(TokenIdentifier) || strings.TrimSpace(p.current.Literal) != "ctx.output" {
-		return nil, newParseErrorf(&p.current, "expected 'ctx.output' to start ctx-envelope body, got %q", p.current.Literal)
-	}
-	p.advance() // consume ctx.output
-
-	// Expect `=`. The lexer emits this as TokenOperator with Literal "=".
-	if !p.check(TokenOperator) || strings.TrimSpace(p.current.Literal) != "=" {
-		return nil, newParseErrorf(&p.current, "expected '=' after 'ctx.output', got %q", p.current.Literal)
-	}
-	p.advance() // consume =
-
-	expr, err := p.parseLogicalAnd()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenKeywordReturn) {
-		return nil, newParseErrorf(&p.current, "expected 'return ctx, nil' after ctx.output assignment, got %q", p.current.Literal)
-	}
-	p.advance() // consume return
-
-	if !p.check(TokenIdentifier) || strings.TrimSpace(p.current.Literal) != "ctx" {
-		return nil, newParseErrorf(&p.current, "expected 'ctx' after 'return', got %q", p.current.Literal)
-	}
-	p.advance() // consume ctx
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "expected ',' after 'return ctx', got %q", p.current.Literal)
-	}
-	p.advance() // consume ,
-
-	if !p.check(TokenKeywordNil) {
-		return nil, newParseErrorf(&p.current, "expected 'nil' after 'return ctx,', got %q", p.current.Literal)
-	}
-	p.advance() // consume nil
-
-	return expr, nil
-}
-
-// looksLikeCtxOutputBody peeks the current token to decide whether
-// the body starts with the explicit ctx-envelope form. Used by the
-// per-receiver body parsers to choose between the new form and the
-// legacy `return <expr>` form during the transition window.
-func (p *Parser) looksLikeCtxOutputBody() bool {
-	return p.check(TokenIdentifier) && strings.TrimSpace(p.current.Literal) == "ctx.output"
-}
-
-// parseGoStyleCtxOutputAutomationAssignment is the automation-body
-// flavour of parseGoStyleCtxOutputBody. Inside an automation step
-// loop the assignment + return-ctx terminator can appear at any
-// position, but the structure is the same:
-//
-//	ctx.output = <expr>
-//	return ctx, nil      (optional in automation bodies — when the
-//	                      assignment is the last statement, the
-//	                      caller treats it as the implicit return)
-//
-// Returns the parsed expression so the caller can synthesise the
-// equivalent `_return` step.
-func (p *Parser) parseGoStyleCtxOutputAutomationAssignment() (ExpressionNode, error) {
-	if !p.check(TokenIdentifier) || strings.TrimSpace(p.current.Literal) != "ctx.output" {
-		return nil, newParseErrorf(&p.current, "expected 'ctx.output', got %q", p.current.Literal)
-	}
-	p.advance() // ctx.output
-
-	if !p.check(TokenOperator) || strings.TrimSpace(p.current.Literal) != "=" {
-		return nil, newParseErrorf(&p.current, "expected '=' after 'ctx.output', got %q", p.current.Literal)
-	}
-	p.advance() // =
-
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-
-	// Optional `return ctx, nil` terminator — consume if present.
-	if p.check(TokenKeywordReturn) {
-		p.advance()
-		if p.check(TokenIdentifier) && strings.TrimSpace(p.current.Literal) == "ctx" {
-			p.advance()
-			if p.check(TokenComma) {
-				p.advance()
-				if p.check(TokenKeywordNil) {
-					p.advance()
-				}
-			}
-		}
-	}
-	return expr, nil
-}
-
 // parseGoStyleEmptyOrCommentBody parses a body that contains only comments.
 // Used for Tool and Builtin definitions where the body is declarative metadata
 // parsed externally (not executable MemQL code).
@@ -1018,11 +906,9 @@ func (p *Parser) parseGoStyleQueryBody() (Node, error) {
 }
 
 func (p *Parser) parseGoStyleQueryBodyOrLegacy() (Node, error) {
-	// New canonical form: `ctx.output = <expr>; return ctx, nil`.
-	// Old form (transition window): `return <expr>, nil`.
-	if p.looksLikeCtxOutputBody() {
-		return p.parseGoStyleCtxOutputBody()
-	}
+	// Canonical form: `return <expr>, nil`. (The transitional
+	// `ctx.output = <expr>; return ctx, nil` envelope shape was
+	// retired in F.2 of the ctx-envelope purge.)
 	if p.check(TokenKeywordReturn) {
 		return p.parseGoStyleQueryBody()
 	}
@@ -1071,70 +957,13 @@ func (p *Parser) parseGoStyleMutationBody() (Node, error) {
 }
 
 func (p *Parser) parseGoStyleMutationBodyOrLegacy() (Node, error) {
-	// New canonical form: `ctx.output = insert(...); return ctx, nil`.
-	// The <expr> in the ctx.output assignment must produce a
-	// MutationStmt (insert / update), so we dispatch to the
-	// mutation-aware variant rather than the generic-expression
-	// parser used by Query/Policy/Spec.
-	if p.looksLikeCtxOutputBody() {
-		return p.parseGoStyleCtxOutputMutationBody()
-	}
+	// Canonical form: `return insert(...)` / `return update(...)`.
+	// (The transitional `ctx.output = insert(...); return ctx, nil`
+	// envelope shape was retired in F.2 of the ctx-envelope purge.)
 	if p.check(TokenKeywordReturn) {
 		return p.parseGoStyleMutationBody()
 	}
 	return p.parseMutationBody()
-}
-
-// parseGoStyleCtxOutputMutationBody is the mutation-aware variant
-// of parseGoStyleCtxOutputBody. The expression on the RHS of
-// `ctx.output =` must be an insert(...) or update(...) call —
-// the same shape parseMutationBody produces — so the engine
-// downstream receives a MutationStmt rather than a generic
-// expression node.
-func (p *Parser) parseGoStyleCtxOutputMutationBody() (Node, error) {
-	if !p.check(TokenIdentifier) || strings.TrimSpace(p.current.Literal) != "ctx.output" {
-		return nil, newParseErrorf(&p.current, "expected 'ctx.output' to start ctx-envelope mutation body, got %q", p.current.Literal)
-	}
-	p.advance() // consume ctx.output
-
-	if !p.check(TokenOperator) || strings.TrimSpace(p.current.Literal) != "=" {
-		return nil, newParseErrorf(&p.current, "expected '=' after 'ctx.output', got %q", p.current.Literal)
-	}
-	p.advance() // consume =
-
-	// The RHS must be insert(...) or update(...). parseMutationBody
-	// reads the call shape and returns a MutationStmt.
-	if !p.check(TokenIdentifier) {
-		return nil, newParseErrorf(&p.current, "expected 'insert' or 'update' after 'ctx.output =', got %q", p.current.Literal)
-	}
-	lit := strings.TrimSpace(p.current.Literal)
-	if !strings.EqualFold(lit, "insert") && !strings.EqualFold(lit, "update") {
-		return nil, newParseErrorf(&p.current, "mutation body RHS must be insert(...) or update(...), got %q", lit)
-	}
-	stmt, err := p.parseMutationBody()
-	if err != nil {
-		return nil, err
-	}
-
-	// Terminator: `return ctx, nil`
-	if !p.check(TokenKeywordReturn) {
-		return nil, newParseErrorf(&p.current, "expected 'return ctx, nil' after ctx.output assignment, got %q", p.current.Literal)
-	}
-	p.advance() // return
-	if !p.check(TokenIdentifier) || strings.TrimSpace(p.current.Literal) != "ctx" {
-		return nil, newParseErrorf(&p.current, "expected 'ctx' after 'return', got %q", p.current.Literal)
-	}
-	p.advance() // ctx
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "expected ',' after 'return ctx', got %q", p.current.Literal)
-	}
-	p.advance() // ,
-	if !p.check(TokenKeywordNil) {
-		return nil, newParseErrorf(&p.current, "expected 'nil' after 'return ctx,', got %q", p.current.Literal)
-	}
-	p.advance() // nil
-
-	return stmt, nil
 }
 
 func isNilOrErrorExpr(expr ExpressionNode) bool {
@@ -1155,32 +984,6 @@ func (p *Parser) parseGoStyleAutomationBody(name string) (*AutomationDef, error)
 	}
 
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-		// ctx-envelope explicit form inside an automation body:
-		//
-		//   ctx.output = <expr>
-		//   return ctx, nil
-		//
-		// The two together are folded into a single synthetic
-		// `return <expr>` step so the downstream evaluator sees the
-		// same shape it would have for a plain `return X` body. The
-		// `return ctx, nil` terminator is optional in this branch —
-		// when present, it's consumed; when absent the assignment
-		// alone implies the return.
-		if p.looksLikeCtxOutputBody() {
-			expr, err := p.parseGoStyleCtxOutputAutomationAssignment()
-			if err != nil {
-				return nil, err
-			}
-			automation.Steps = append(automation.Steps, StepDef{
-				ID:   "_return",
-				Type: StepTypeQuery,
-				Config: &QueryStepConfig{
-					Query: expr,
-				},
-			})
-			continue
-		}
-
 		// Check for return statement
 		if p.check(TokenKeywordReturn) {
 			p.advance()
