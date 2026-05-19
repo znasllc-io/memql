@@ -67,13 +67,9 @@ def test_build_stt_passes_production_params(stub_cfg: Config) -> None:
     assert captured["language"] == "en-US"
     assert captured["interim_results"] is True
     assert captured["endpointing_ms"] == 500
-    assert captured["utterance_end_ms"] == 1000
-
-
-def test_build_stt_omits_utterance_end_when_disabled(stub_cfg: Config) -> None:
-    captured = _install_stub()
-    cfg = Config(**{**stub_cfg.__dict__, "dg_utterance_end_ms": 0})
-    from voice_agent.stt_plugin import build_stt
-
-    build_stt(cfg)
+    # utterance_end_ms is intentionally NOT forwarded: the LK Agents 1.5
+    # Deepgram STT plugin doesn't accept the kwarg (passing it raises
+    # TypeError). The env-only knob is preserved on Config for the day
+    # the plugin gets patched or we migrate to a raw Deepgram client.
+    # See docs/voice/eou-tuning.md.
     assert "utterance_end_ms" not in captured
