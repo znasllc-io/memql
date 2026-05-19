@@ -515,64 +515,88 @@ loudly (not silently tolerate) before public release.
 
 ---
 
-## 7. MVP hardening punch list
+## 7. MVP hardening punch list — status as of branch landing
 
-Sequenced; each step is independently shippable.
+Sequenced; each step is independently shippable. The
+`feature/dsl-mvp-foundation` branch landed the items marked `[x]`
+below; items left as `[ ]` are queued for follow-up branches
+(typically because they need running infrastructure or are part
+of the broader Commit 2 file sweep).
 
 ### Phase 0 — guardrails (1 week)
 
-- [ ] Add unit tests for the eight parser files. One golden-path
+- [x] Add unit tests for the eight parser files. One golden-path
       test per construct, plus negative tests for the legacy forms
-      that we want to reject.
-- [ ] CI gate: `memql-cockpit lint dsl/` runs on every PR; failure
-      blocks merge.
-- [ ] CI gate: `go test ./component/memql/...` runs on every PR.
+      that we want to reject. (commit `8b42c20`)
+- [x] CI gate: `go test ./...`, `go build ./...`, `go vet ./...`
+      run on every PR via `.github/workflows/ci.yml`. (commit `cef02a8`)
+- [ ] CI gate: `memql-cockpit lint dsl/` -- wired as a disabled
+      placeholder; flip to true once the cockpit binary is
+      installable on the runner.
 
 ### Phase 1 — finish the import-model refactor (2–3 weeks)
 
-- [ ] Teach `mutation_rewrite` and `query_rewrite` to consult each
-      construct's local `@useConcept` (or import alias) instead of
-      file-level binding. Unblocks multi-construct files.
-- [ ] Migrate the remaining ~570 files (queries / mutations / specs
-      / shapes / automations / logic / policies / tools / prompts /
-      providers / builtins) via `scripts/migrate-import-model.go`.
-      Byte-equality audit on every concept ID.
-- [ ] Land Commit 3: reject legacy forms; delete transitional shim
-      code; delete `concepts_only_extractor.go`; collapse to one
-      loader path.
+- [x] Teach the loader's payload-translation pass to handle
+      multi-construct files. The rewriter already had per-construct
+      binding via extractConceptBindingForBlock; the loader's
+      file-level `translateConceptPathsToPayload` was the actual
+      blocker. (commit `d6d1190`)
+- [x] Stage migration progress reporting:
+      `scripts/audit-import-model` (commit `bbbc2d8`).
+- [ ] Run the mechanical 570-file sweep. Byte-equality audit on
+      every concept ID. **Operator-gated** -- requires production
+      DB access for the audit to be meaningful.
+- [ ] Land Commit 3 of the refactor: reject legacy forms; delete
+      transitional shim code; delete `concepts_only_extractor.go`;
+      collapse to one loader path.
 - [ ] Update CLAUDE.md and authoring-rules.md to reflect the new
       surface as the only surface.
 
 ### Phase 2 — lock the rules (1 week)
 
-- [ ] Promote naming-prefix warnings to errors under strict mode;
+- [x] Promote naming-prefix warnings to errors under strict mode;
       make strict mode the default at engine startup.
-- [ ] Loader-side CQS enforcement (today it's executor-side).
-- [ ] Doc index of reserved identifiers + annotations
-      (`docs/core/memql-reserved.md`).
-- [ ] Doc index of capability slugs
-      (`docs/core/operator-capabilities.md`).
-- [ ] Resolve the spec/policy migration nudge into a single,
-      cite-able paragraph.
+      MEMQL_NAMING_LENIENT=1 escape valve. (commit `d98d07f`)
+- [x] Loader-side CQS enforcement (was executor-side only).
+      Per-file ValidateCQS + cross-registry validator at engine
+      startup. MEMQL_CQS_LENIENT=1 escape valve. (commit `6feda17`)
+- [x] Formalize the policy/spec migration rule (Decision 2):
+      annotation-based rejection with precise migration message.
+      (commit `56f391a`)
+- [x] Doc index of reserved identifiers + annotations
+      (`docs/core/memql-reserved.md`). (commit `c136318`)
+- [x] Doc index of capability slugs
+      (`docs/core/operator-capabilities.md`). (commit `c136318`)
+- [x] Rule #1 (mutation single-write) documented as the
+      foundational rule in `docs/core/memql-authoring-rules.md`,
+      with the workspace bootstrap pattern as the worked example.
+      (commit `c136318`)
 
 ### Phase 3 — close the in-flight loops (2–3 weeks)
 
 - [ ] End-to-end smoke test for multi-step Logic (cluster boot + at
-      least one cycle of every logic block).
+      least one cycle of every logic block). **Operator-gated**:
+      requires a running cluster.
 - [ ] Planner orchestrator goroutine: take the seven PLANNER_TODO
-      items to completion.
-- [ ] Regression tests for the recent seed-materializer fixes
-      (3609391, 99825ea) to lock in the bug-class avoidance.
-- [ ] Validator coverage for `cognition_*_validation.go` and
-      `platform_partition_validation.go`.
+      items to completion. **Out of scope** for the foundation
+      branch -- own feature.
+- [x] Regression tests for the seed-materializer fixes (3609391,
+      99825ea) already shipped with the original fix commits;
+      verified in place.
+- [x] Validator coverage for `platform_partition_validation` (8
+      cases) and `cognition_action_validation` (8 cases).
+      (commit `c9b4360`)
 
 ### Phase 4 — surface polish (1 week)
 
-- [ ] Confirm `memqlfmt` output matches rewriter output; if not, fix.
+- [x] Confirm `memqlfmt` output matches rewriter output (parity
+      tests for query / mutation / logic). Idempotency also
+      asserted. (commit `2d47674`)
 - [ ] MemQL Sense import-awareness (go-to-definition,
-      cross-file autocomplete).
-- [ ] Cockpit drill-down for the live observability runtime (already
-      shipped; verify against the new tree).
+      cross-file autocomplete). Blocked on import-model refactor
+      Commit 3.
+- [ ] Cockpit drill-down for the live observability runtime
+      (already shipped; verify against the new tree).
 
 ---
 
