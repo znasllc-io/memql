@@ -98,6 +98,35 @@ func TestValidateCQSAcrossRegistry_IgnoresDottedCalls(t *testing.T) {
 	}
 }
 
+// TestValidateCQSAcrossRegistry_SelfReferenceFromRewriter pins that
+// a mutation whose stored ExprSource carries the struct-form
+// rewriter's procedural header (`func (Mutation) NAME(ctx any) error
+// { ... }`) is NOT flagged as calling itself. The extractor sees the
+// header's `NAME(` and would otherwise loop back as a self-call --
+// flagging every mutation in the registry, refusing to boot.
+func TestValidateCQSAcrossRegistry_SelfReferenceFromRewriter(t *testing.T) {
+	reg := newFunctionRegistry()
+	// ExprSource shape mirrors what extractExpressionFromContent
+	// returns for a rewritten mutation -- args block, the synthetic
+	// `func (Mutation) NAME(ctx any) error { ... }` wrapper, and the
+	// `return insert(...)` body. The function header carries the
+	// name with a `(` immediately after, which extractBareCallNames
+	// would otherwise mark as a callee.
+	must(t, reg.Upsert(&Function{
+		Name:         "mutationAddAgentToSpace",
+		FunctionKind: "mutation",
+		ExprSource: `spaceId string @required
+}
+func (Mutation) mutationAddAgentToSpace(ctx any) error {
+  return insert(participant, id=concat("si-", hash("seed")))
+}`,
+	}))
+
+	if err := ValidateCQSAcrossRegistry(reg); err != nil {
+		t.Errorf("self-reference from rewriter header should be ignored, got %v", err)
+	}
+}
+
 // TestValidateCQSAcrossRegistry_EmptyRegistry covers the no-op
 // guard.
 func TestValidateCQSAcrossRegistry_EmptyRegistry(t *testing.T) {
