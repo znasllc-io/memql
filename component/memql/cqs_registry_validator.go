@@ -75,6 +75,15 @@ func ValidateCQSAcrossRegistry(registry *FunctionRegistry) error {
 			continue
 		}
 		for callee := range extractBareCallNames(body) {
+			// Skip self-references. The struct-form rewriter emits the
+			// stored ExprSource in procedural form (`func (Mutation) NAME(ctx any)
+			// error { ... }`); extractBareCallNames sees the function
+			// header as a `NAME(` call site and flags every mutation as
+			// calling itself. MemQL doesn't permit recursion anyway, so
+			// a legitimate self-call would already be rejected upstream.
+			if callee == fn.Name {
+				continue
+			}
 			calleeKind, ok := kindByName[callee]
 			if !ok {
 				continue
