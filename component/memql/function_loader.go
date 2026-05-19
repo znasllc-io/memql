@@ -248,10 +248,17 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		return nil, fmt.Errorf("file composition error: %w", err)
 	}
 
-	// Check for automations in named-function directories (should be in automations/)
-	comp := compiler.AnalyzeComposition(file)
-	if comp.Automations > 0 {
-		return nil, fmt.Errorf("automation definitions should be in automations/ directory, not query/mutation files")
+	// Check for automations in named-function directories (should be in
+	// automations/). The check applies only when this entry point was
+	// invoked for a non-automation construct -- the unified loader and
+	// the per-construct parsers route automation slices here with
+	// expectedKind="automation" to share the rewrite + AST conversion
+	// machinery, so legitimate automation sources must not be rejected.
+	if !strings.EqualFold(expectedKind, "automation") {
+		comp := compiler.AnalyzeComposition(file)
+		if comp.Automations > 0 {
+			return nil, fmt.Errorf("automation definitions should be in automations/ directory, not query/mutation files")
+		}
 	}
 
 	// Get the primary definition (mutation or first query)
