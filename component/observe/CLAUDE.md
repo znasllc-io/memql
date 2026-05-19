@@ -137,7 +137,7 @@ The FQN must match the Method node's ID in `topology.model.json`. The model's `m
 ### Tune from a developer's machine
 
 ```bash
-echo 'MEMQL_OBSERVE_LEVEL=verbose' >> /Users/znas/projects/memql/.env
+echo 'MEMQL_OBSERVE_LEVEL=verbose' >> ~/projects/memql/.env
 ```
 
 That bumps the process-wide default. Per-FQN tuning goes through the codeProfile concept (insert/upsert from the cockpit drill-down, the engine, or any tool that can write concept rows). The CDC subscriber picks it up within the events-bus latency.
