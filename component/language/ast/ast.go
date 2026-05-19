@@ -1138,19 +1138,38 @@ type SwitchCase struct {
 // File/Module Nodes (NEW - for .memql files with multiple definitions)
 // ----------------------------------------------------------------------------
 
-// UseDeclaration represents a `use` import for a concept reference.
-// Examples:
-//   - use cognition.participant           -> resolves to v1:cognition:participant (version from file path)
-//   - use cognition.session as cognitionSess -> aliased reference
-//   - use v1.cognition.participant        -> explicit version override
+// UseDeclaration represents a `use` import statement at the top of a
+// .memql file. Two shapes coexist during the import-model migration:
+//
+//	Form A (legacy, retired in PR C):
+//	  use cognition.participant            -- single concept binding
+//	  use cognition.session as cognSession -- aliased single binding
+//
+//	Form B (canonical post-migration):
+//	  use cognition.concepts.{ participant, space }
+//	  use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+//
+// Form B names a module file (`cognition.concepts` -> `dsl/cognition/
+// concepts.memql`) and lists which exported constructs to pull into
+// local scope. References inside the importing file use the bare
+// names; the loader rejects collisions across imports.
+//
+// Names is non-empty for Form B and empty for Form A. Alias is only
+// populated by Form A.
 type UseDeclaration struct {
-	// Path is the dotted path as written: "cognition.participant", "data.staging"
+	// Path is the dotted module path as written: "cognition.concepts",
+	// "common.traits", "agents.agentRole" (legacy).
 	Path string
-	// Alias is the optional alias from `as <name>`, empty if none
+	// Alias is the optional `as <name>` binding -- Form A only.
 	Alias string
-	// Parts are the split components: ["cognition", "participant"]
+	// Parts are the split components: ["cognition", "concepts"].
 	Parts []string
-	// ResolvedId is filled by the concept resolver: "v1:cognition:participant"
+	// Names is the imported-construct list from Form B. Empty for
+	// Form A imports.
+	Names []string
+	// ResolvedId is filled by the concept resolver: "v1:cognition:participant".
+	// Only meaningful for Form A; Form B resolves per-Name through the
+	// loader's import index.
 	ResolvedId string
 }
 

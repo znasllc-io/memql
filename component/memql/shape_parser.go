@@ -60,7 +60,7 @@ func (p *shapeMemQLParser) parse(origin string) (*ShapeDefinition, error) {
 
 		// use statement - skip
 		if p.MatchWord("use") {
-			p.SkipToEndOfLine()
+			p.SkipUseClauseBody()
 			continue
 		}
 

@@ -200,6 +200,41 @@ func (b *Base) SkipOptionalParens() {
 	b.SkipBalancedParens()
 }
 
+// SkipUseClauseBody consumes the body of a `use ...` statement after
+// the `use` keyword has already been matched. Handles both file-top
+// import shapes:
+//
+//	Form A (legacy):   use cognition.participant [as cog]
+//	Form B (canonical): use cognition.concepts.{ participant, space }
+//
+// Form A is single-line: the helper skips to end of line. Form B may
+// span multiple lines inside the braces; the helper consumes the
+// dotted path, the `.`, and the balanced `{ ... }`. Used by construct
+// parsers (shape/spec/builtin/...) that don't need to retain the
+// imports themselves -- the languageParser-driven loader records them
+// separately. The seed parser, which DOES need to know about Form A
+// concept bindings, has its own use-clause parser.
+func (b *Base) SkipUseClauseBody() {
+	b.SkipWhitespaceInline()
+	// Consume the dotted path (letters, digits, '_', '.', '-').
+	for !b.EOF() {
+		ch := b.Peek()
+		if unicode.IsLetter(rune(ch)) || unicode.IsDigit(rune(ch)) || ch == '_' || ch == '.' || ch == '-' {
+			b.Advance()
+			continue
+		}
+		break
+	}
+	b.SkipWhitespaceInline()
+	if !b.EOF() && b.Peek() == '{' {
+		// Form B brace-list body.
+		b.SkipBalancedBraces()
+		return
+	}
+	// Form A: skip rest of line (covers any `as <alias>`).
+	b.SkipToEndOfLine()
+}
+
 // ReadWord reads an identifier ([A-Za-z0-9_]+). Returns "" when the
 // first byte isn't an identifier char.
 func (b *Base) ReadWord() string {
