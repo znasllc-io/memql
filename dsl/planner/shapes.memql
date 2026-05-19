@@ -7,10 +7,11 @@
 // and its data shapes have to be uniformly available on every binary
 // that loads concepts, not just on the copresent BFF.
 
+use planner.concepts.{ plan, task, taskState }
+
 @row
-@useConcept(plan)
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
-shape planFull {
+shape plan planFull {
   row.id
   payload.spaceId
   payload.kind
@@ -38,9 +39,8 @@ shape planFull {
 }
 
 @row
-@useConcept(task)
 @description("Comprehensive task projection for the Tasks page expand-drawer (which lists Tasks under a Plan) and the planner's per-Task lifecycle automations. Carries the metrics rollup (tokensSpent, llmCallCount, toolCallCount, modelBreakdown[]) so per-task token cost surfaces in the cockpit's planner detail pane.")
-shape taskFull {
+shape task taskFull {
   row.id
   payload.planId
   payload.category
@@ -69,9 +69,8 @@ shape taskFull {
 }
 
 @row
-@useConcept(taskState)
 @description("TaskState projection. Used by the planner to bootstrap an agent's resume context after a paused / awaitingFeedback Task is resumed.")
-shape taskStateFull {
+shape taskState taskStateFull {
   row.id
   payload.taskId
   payload.workingMemory

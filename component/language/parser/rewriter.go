@@ -163,15 +163,6 @@ func rewriteEachBlock(
 	for i := len(matches) - 1; i >= 0; i-- {
 		h := matches[i]
 
-		var conceptId string
-		if needsConcept {
-			cid, err := extractConceptBindingForBlock(out, h[0])
-			if err != nil {
-				return "", fmt.Errorf("%s: %w", kindLabel, err)
-			}
-			conceptId = cid
-		}
-
 		openIdx := h[1] - 1
 		closeIdx := findMatchingCloseBrace(out, openIdx)
 		if closeIdx < 0 {
@@ -183,7 +174,31 @@ func rewriteEachBlock(
 		if len(nameMatch) < 2 {
 			return "", fmt.Errorf("%s: could not extract name", kindLabel)
 		}
-		name := nameMatch[1]
+		// Headers that carry a signature-bound concept expose it as
+		// the second-to-last submatch (capture group 1); the name is
+		// always the trailing group. Headers that don't bind a concept
+		// in the signature have only the name capture.
+		signatureConcept := ""
+		var name string
+		if len(nameMatch) >= 3 {
+			signatureConcept = nameMatch[1]
+			name = nameMatch[2]
+		} else {
+			name = nameMatch[1]
+		}
+
+		var conceptId string
+		if needsConcept {
+			if signatureConcept != "" {
+				conceptId = signatureConcept
+			} else {
+				cid, err := extractConceptBindingForBlock(out, h[0])
+				if err != nil {
+					return "", fmt.Errorf("%s: %w", kindLabel, err)
+				}
+				conceptId = cid
+			}
+		}
 
 		body := out[openIdx+1 : closeIdx]
 		rewritten, err := emit(name, conceptId, body)
@@ -278,7 +293,14 @@ func NormaliseAll(source string) (string, error) {
 // Query
 // =============================================================================
 
-var queryStructHeader = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+// queryStructHeader matches both the legacy and the canonical
+// post-migration shapes:
+//
+//	query queryFoo { ... }                  -- legacy (concept via @useConcept)
+//	query participant queryFoo { ... }      -- canonical (concept-in-signature)
+//
+// Group 1 is the optional concept name; group 2 is the construct name.
+var queryStructHeader = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // LooksLikeStructQuery reports whether the source declares a
 // struct-form query.
@@ -377,7 +399,9 @@ func buildStructQueryExpr(conceptId, filter, shape string) string {
 // Mutation
 // =============================================================================
 
-var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+// mutationStructHeader matches both the legacy and the canonical
+// post-migration shapes; mirrors queryStructHeader.
+var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // LooksLikeStructMutation reports whether the source declares a
 // struct-form mutation.

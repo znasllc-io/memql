@@ -3,7 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-@useConcept(participant)
+use cognition.concepts.{ participant }
+
 @description("Matches participants with human participantType")
 spec specIsHumanParticipant {
   payload.participantType == "human"
@@ -21,7 +22,6 @@ spec specIsHumanParticipant {
 //   concept==v1:cognition:participant;specIsSIParticipant()
 //
 
-@useConcept(participant)
 @description("Matches participants with SI participantType")
 spec specIsSIParticipant {
   payload.participantType=="si"

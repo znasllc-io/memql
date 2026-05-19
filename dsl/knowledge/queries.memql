@@ -3,18 +3,18 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use knowledge.concepts.{ document, documentChunk, domainEntitySchema, entityIndex, imageRegion, knowledgeBridge, knowledgeDomain, spreadsheetRow, validationEvent }
+
 @enabled
-@useConcept(documentChunk)
 @description("Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.")
-query queryAllDocumentChunkDomains {
+query documentChunk queryAllDocumentChunkDomains {
   filter  payload.domainId!=""
   shape   documentChunkDomainLite
 }
 
 @enabled
-@useConcept(document)
 @description("Single Document by id.")
-query queryDocumentById {
+query document queryDocumentById {
   args {
     documentId  string  @required
   }
@@ -28,9 +28,8 @@ query queryDocumentById {
 // Backs the Knowledge page detail view ("what's in this domain").
 
 @enabled
-@useConcept(document)
 @description("Validated Documents attached to a knowledge domain.")
-query queryDocumentsForDomain {
+query document queryDocumentsForDomain {
   args {
     domainId  string  @required
   }
@@ -44,9 +43,8 @@ query queryDocumentsForDomain {
 // Backs the Knowledge page's "all uploads in this space" view.
 
 @enabled
-@useConcept(document)
 @description("All Documents in a space, regardless of validation status.")
-query queryDocumentsForSpace {
+query document queryDocumentsForSpace {
   args {
     spaceId  string  @required
   }
@@ -61,9 +59,8 @@ query queryDocumentsForSpace {
 // Multiple matches happen when force-added overrides exist.
 
 @enabled
-@useConcept(entityIndex)
 @description("Look up entity-index entries by (domainId, entityKind, keyHash) for cross-file dedup.")
-query queryEntityIndexLookup {
+query entityIndex queryEntityIndexLookup {
   args {
     domainId  string  @required
     entityKind  string  @required
@@ -74,9 +71,8 @@ query queryEntityIndexLookup {
 }
 
 @enabled
-@useConcept(domainEntitySchema)
 @description("Active entity schemas for a knowledge domain (a domain may declare multiple entity kinds).")
-query queryEntitySchemaForDomain {
+query domainEntitySchema queryEntitySchemaForDomain {
   args {
     domainId  string  @required
   }
@@ -85,9 +81,8 @@ query queryEntitySchemaForDomain {
 }
 
 @enabled
-@useConcept(imageRegion)
 @description("All ImageRegions for an image Document, in region-seq order.")
-query queryImageRegionsForDocument {
+query imageRegion queryImageRegionsForDocument {
   args {
     documentId  string  @required
   }
@@ -96,9 +91,8 @@ query queryImageRegionsForDocument {
 }
 
 @enabled
-@useConcept(knowledgeBridge)
 @description("Look up a single knowledge-bridge row by its deterministic id. Used by the bridge generator to detect 'this combination has already been seeded; reuse instead of regenerating'.")
-query queryKnowledgeBridgeById {
+query knowledgeBridge queryKnowledgeBridgeById {
   args {
     bridgeId  string  @required
   }
@@ -107,9 +101,8 @@ query queryKnowledgeBridgeById {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Look up a single knowledge domain by id.")
-query queryKnowledgeDomainById {
+query knowledgeDomain queryKnowledgeDomainById {
   args {
     domainId  string  @required
   }
@@ -118,17 +111,15 @@ query queryKnowledgeDomainById {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.")
-query queryListKnowledgeDomains {
+query knowledgeDomain queryListKnowledgeDomains {
   filter  traitIsActiveRecord
   shape   knowledgeDomainFull
 }
 
 @enabled
-@useConcept(spreadsheetRow)
 @description("All SpreadsheetRows for a Document, in row-seq order.")
-query querySpreadsheetRowsForDocument {
+query spreadsheetRow querySpreadsheetRowsForDocument {
   args {
     documentId  string  @required
   }
@@ -137,9 +128,8 @@ query querySpreadsheetRowsForDocument {
 }
 
 @enabled
-@useConcept(validationEvent)
 @description("Audit history of validation transitions for a specific target row.")
-query queryValidationEventsForTarget {
+query validationEvent queryValidationEventsForTarget {
   args {
     targetId  string  @required
   }
@@ -148,9 +138,8 @@ query queryValidationEventsForTarget {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).")
-query queryDueRefreshDomains {
+query knowledgeDomain queryDueRefreshDomains {
   args {}
   filter  traitIsActiveRecord; payload.refreshCadenceDays!=null
   shape   knowledgeDomainFull

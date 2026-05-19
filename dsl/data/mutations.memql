@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use data.concepts.{ policy, record }
+
 @enabled
-@useConcept(record)
 @description("Synthetically check a data record, updating check count and validation state")
-mutation mutationCheckRecord {
+mutation record mutationCheckRecord {
   args {
     recordId       string  @required
     identityId     string  @required
@@ -47,9 +48,8 @@ mutation mutationCheckRecord {
 //
 
 @enabled
-@useConcept(record)
 @description("Human confirm a data record, updating confirm count and validation state")
-mutation mutationConfirmRecord {
+mutation record mutationConfirmRecord {
   args {
     recordId         string  @required
     identityId       string  @required
@@ -102,9 +102,8 @@ mutation mutationConfirmRecord {
 //
 
 @enabled
-@useConcept(record)
 @description("Create a data record in draft validation state awaiting check and confirmation")
-mutation mutationCreateRecord {
+mutation record mutationCreateRecord {
   args {
     recordId            string  @required
     spaceId             string  @required
@@ -176,9 +175,8 @@ mutation mutationCreateRecord {
 //
 
 @enabled
-@useConcept(record)
 @description("Create a single data record from a batch import in draft validation state (called once per record)")
-mutation mutationCreateRecordBatch {
+mutation record mutationCreateRecordBatch {
   args {
     recordId            string  @required
     spaceId             string  @required
@@ -229,9 +227,8 @@ mutation mutationCreateRecordBatch {
 //
 
 @enabled
-@useConcept(record)
 @description("Soft-delete a data record (sets active=false)")
-mutation mutationDeleteRecord {
+mutation record mutationDeleteRecord {
   args {
     recordId  string  @required
     spaceId   string  @required
@@ -274,9 +271,8 @@ mutation mutationDeleteRecord {
 //
 
 @enabled
-@useConcept(record)
 @description("Revert a data record to a previous validation state with counter reset")
-mutation mutationRevertRecord {
+mutation record mutationRevertRecord {
   args {
     recordId      string  @required
     toState       string  @required
@@ -320,9 +316,8 @@ mutation mutationRevertRecord {
 //
 
 @enabled
-@useConcept(policy)
 @description("Create or update a validation policy for a record type")
-mutation mutationSetPolicy {
+mutation policy mutationSetPolicy {
   args {
     policyId               string  @required
     targetRecordType       string  @required
@@ -372,9 +367,8 @@ mutation mutationSetPolicy {
 //
 
 @enabled
-@useConcept(record)
 @description("Update a data record (resets validation state to draft)")
-mutation mutationUpdateRecord {
+mutation record mutationUpdateRecord {
   args {
     recordId         string  @required
     data             object
