@@ -3,26 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-    logic accessRequestExpirySweep { event: event }
-
-    logic accessRequestExpirySweep { event: event }
-
-    logic accountDeletionReminder25Days { event: event }
-
-    logic accountDeletionReminder25Days { event: event }
-
-    logic accountDeletionReminder7Days { event: event }
-
-    logic accountDeletionReminder7Days { event: event }
-
-    logic accountDeletionSweep { event: event }
-
-    logic accountDeletionSweep { event: event }
-
-    logic auditEventRetentionSweep { event: event }
-
-    logic auditEventRetentionSweep { event: event }
-
 // accessRequestExpirySweep
 // =========================
 //
@@ -494,18 +474,6 @@ logic logicRevokeExpiredDelegations {
     return expiredDelegations.Len()
   }
 }
-
-    logic magicLinkExpirySweep { event: event }
-
-    logic magicLinkExpirySweep { event: event }
-
-    logic onDelegationCreated { event: event }
-
-    logic onDelegationCreated { event: event }
-
-    logic provisionPersonalPartitionOnFirstLogin { event: event }
-
-    logic provisionPersonalPartitionOnFirstLogin { event: event }
 
     logic revokeExpiredDelegations { now: timestamp() }
 
