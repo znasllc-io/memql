@@ -422,6 +422,13 @@ func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCa
 // hierarchy), so this walker only fires on FunctionCallExpression
 // targets and rewrites their Args map; non-call expressions pass
 // through unchanged.
+//
+// Single-positional object-literal calls produced by the language
+// parser (`mutationFoo({a: 1, b: 2})` -> Args = {"0": {a:1, b:2}})
+// are flattened to the inner map so the downstream mutation
+// validator sees the canonical flat-args shape. The engine's own
+// expression parser produces flat args directly; this normalisation
+// closes the gap between the two parsers.
 func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, args map[string]any) (ExpressionNode, error) {
 	call, ok := expr.(*FunctionCallExpression)
 	if !ok || call == nil {
@@ -430,6 +437,11 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 	newArgs := make(map[string]any, len(call.Args))
 	for k, v := range call.Args {
 		newArgs[k] = substituteArgRefValue(v, args)
+	}
+	if len(newArgs) == 1 {
+		if inner, ok := newArgs["0"].(map[string]any); ok {
+			newArgs = inner
+		}
 	}
 	return &FunctionCallExpression{Name: call.Name, Args: newArgs}, nil
 }
