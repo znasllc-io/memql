@@ -1,11 +1,12 @@
-# ctx-envelope purge — handoff for follow-up sessions
+# ctx-envelope purge — handoff doc (closed out)
 
-> **Status:** F.1, F.2, F.3, F.4, F.6, F.7 all landed via
-> `feature/dsl-engine-ctx-purge-e2e`. F.5 (multi-step Logic via the
-> automation step runner) is the only remaining piece -- it's a
-> structural change, not cleanup, and needs its own PR with care
-> taken around the cross-package interface between the engine's
-> function dispatcher and the automation step runner.
+> **Status:** F.1 through F.7 all landed via
+> `feature/dsl-engine-ctx-purge-e2e`. The DSL engine has a single
+> canonical body shape (`return <expr>, nil`), multi-step Logic
+> dispatches through the automation step runner, and the docs
+> describe the as-shipped behaviour. This file is kept as the
+> historical record of the migration; it can be deleted once the
+> repo has shipped a release with the purged form.
 
 This doc tracks the remaining work for **removing the legacy `ctx`
 runtime envelope from every DSL construct** -- the directive being
@@ -127,82 +128,69 @@ cluster, cognition, common, data, identity, memql, planner, platform,
 policies, router, workbench, worker logic + queries plus the two
 `_reference/` doc files.
 
-### F.5 -- Multi-step Logic execution _(OPEN -- needs its own PR)_
+### F.5 -- Multi-step Logic execution _(LANDED)_
 
-This is the one piece of the purge that's still pending. The function
-loader's Logic case rejects multi-step bodies with an actionable error
-pointing at this handoff:
+The engine carries a `LogicRunner` interface
+(`component/memql/engine.go`); when wired, top-level calls to a
+Logic function whose body has intermediate `name := <call>` steps
+delegate to it instead of evaluating just the `_return`
+expression. `resolvePlanFunctions` hoists the call into
+`plan.LogicCall` (analogous to `plan.MutationCall` from F.6) so
+the engine's Execute dispatches via `executeLogicFunctionCall`.
 
-```
-function "X": multi-step logic bodies are not yet executable by the
-function dispatcher (N intermediate steps before `_return`). F.5 of
-the ctx-envelope purge tracks the step-runner integration; until
-then, restructure the body as a single `return <expr>` statement
-or move the multi-step orchestration into an automation that calls
-single-step logics
-```
+The runner lives at `component/automations/logic_runner.go`. It
+translates the parsed `*AutomationDef` body through the existing
+`compiler` + JSON-loader path so the resulting runtime steps
+arrive in topological dependency order with `Condition` strings,
+step-reference rewrites, helper-builtin recognition, and the
+canonical `_return` step shape already baked in. Then it walks
+the steps via `steps.Registry.Execute`, binding each result on a
+fresh `Evaluator` so later steps + the `_return` expression can
+reference them.
 
-Several existing logics need full step-runner-backed invocation to
-work end-to-end:
+**Isolation properties.** Logic invocations do NOT publish
+automation lifecycle events, persist an execution row, burn a
+concurrency slot, participate in dedup / storm detection, or
+trigger sub-automations. The runner bypasses
+`Executor.ExecuteWithEvent` entirely; only the per-step registry
+and the evaluator are reused.
 
-- `logicAutoJoinSI` (joins owner GA + checks/inserts participants +
-  publishes event)
-- `logicBootstrapSession`
-- `logicGenerateResponse`
-- `logicPurgeExpiredArchivedSpaces`
-- `logicVoiceMigrationOnSecondHuman`
-- `logicAccessRequestExpirySweep`
-- `logicAccountDeletionReminder{7,25}Days`
-- `logicAccountDeletionSweep`
-- `logicAuditEventRetentionSweep`
-- `logicMagicLinkExpirySweep`
-- `logicOnDelegationCreated`
-- `logicProvisionPersonalPartitionOnFirstLogin`
-- `logicRevokeExpiredDelegations`
-- `logicPurgeExpiredPolicyTraces`
-- `logicConflictDetection`
-- `logicRefreshDueKnowledgeDomains`
-- `logicReleaseWorkspaceOnPlanTerminal`
-- `logicKillSwitchSuspendsRunningPlans`
-- `logicWorkerInvocationRetentionSweep`
-- `logicRegisterNode`, `logicDeregisterNode`, `logicBootstrapCluster`
+**Caller args.** Args are seeded under three spellings --
+`$args.X` (author-facing), `$ctx.input.X` (legacy runtime form),
+and `$event.X` (when args carries an `event` key, matching how
+graph-event-triggered logics see the trigger payload). The
+existing function-step arg resolver picks up whichever form the
+compiled step body references.
 
-**Design sketch.** Invoke Logic functions through the same step
-runner the automation scheduler uses (`component/automations/steps/`).
-The cross-package shape that minimises coupling:
+**Wiring.** `app/engine.go` calls
+`engine.SetLogicRunner(automations.NewLogicRunner(engine, stepRegistry, logger))`
+once the step registry is built. Stripped-down binaries that
+omit the automations package keep the engine's "no LogicRunner
+wired" error path; single-step Logic dispatch continues to work
+through the standard `fn.Expr` path either way.
 
-1. Define a `LogicRunner` interface in `component/memql/` with a
-   single method `RunSteps(ctx, args, *AutomationDef) (any, error)`.
-2. Engine has a `SetLogicRunner(LogicRunner)` setter; the Logic call
-   path (function loader stores the `*AutomationDef` on the
-   Function, dispatcher checks `logicRunner != nil` before falling
-   back to the single-step `fn.Expr` path) delegates when set.
-3. Implement `LogicRunner` in `component/automations/` (new file)
-   as a thin wrapper that builds a minimal `StepContext` with the
-   existing `Evaluator`, seeds `args` as a custom variable, and
-   walks the steps via `Registry.Execute` -- skipping the heavy
-   automation Executor machinery (concurrency limits, dedup,
-   execution-storm detection, retention, event publishing). The
-   `_return` step's evaluated value is the Logic's return.
-4. Wire at app bootstrap (`app/integrations.go` or the closest
-   phase that already has both the engine and the step registry).
+Regression coverage:
+`component/automations/logic_runner_test.go` exercises the
+compile-body path, the conditional-step shape, the multi-spelling
+arg seeding, and the nil-body defensive check.
 
-What makes this F.5's-own-PR-worthy rather than fitting in the
-cleanup pass:
+Logics now unblocked at load time:
+`logicAutoJoinSI`, `logicBootstrapSession`, `logicGenerateResponse`,
+`logicPurgeExpiredArchivedSpaces`, `logicVoiceMigrationOnSecondHuman`,
+`logicAccessRequestExpirySweep`,
+`logicAccountDeletionReminder{7,25}Days`, `logicAccountDeletionSweep`,
+`logicAuditEventRetentionSweep`, `logicMagicLinkExpirySweep`,
+`logicOnDelegationCreated`, `logicProvisionPersonalPartitionOnFirstLogin`,
+`logicRevokeExpiredDelegations`, `logicPurgeExpiredPolicyTraces`,
+`logicConflictDetection`, `logicRefreshDueKnowledgeDomains`,
+`logicReleaseWorkspaceOnPlanTerminal`, `logicKillSwitchSuspendsRunningPlans`,
+`logicWorkerInvocationRetentionSweep`, `logicRegisterNode`,
+`logicDeregisterNode`, `logicBootstrapCluster`.
 
-- Substituting step references (`getGA.First()`, `getGA.Empty()`,
-  `expired.Nodes()`, `candidates.Len()`) in subsequent step args
-  needs the automation Evaluator's expression resolution path --
-  the simple ArgReference substitution used by F.6 isn't enough.
-- forEach + switch + parallel step shapes appear in real logics
-  (`logicPurgeExpiredArchivedSpaces` iterates `expired.Nodes()`;
-  `logicKillSwitchSuspendsRunningPlans` iterates `plans.Nodes()`)
-  and must Just Work via the existing executors.
-- Logic invocations should NOT trigger automation lifecycle events
-  (started/completed/failed), persist execution rows, or burn
-  concurrency slots -- so the wrapper bypasses
-  `Executor.ExecuteWithEvent` and orchestrates the per-step calls
-  directly.
+End-to-end smoke-test on a running cluster (Cluster bootstrap
+mutations + cognition automations firing on space creation) is
+the recommended next verification step before declaring the
+migration fully shipped.
 
 ### F.6 -- Logic-calls-mutation dispatch _(LANDED)_
 
@@ -235,8 +223,9 @@ now tracks only F.5.
 
 ## Why this matters
 
-Closing F.5 removes the last reason to handle anything but
-`return <expr>` in DSL bodies. After F.1-F.4 + F.7 landed, the
-transitional dual-form text is gone from the codebase + docs;
-multi-step Logic is the only remaining reason an author would still
-hit a confusing error message.
+With F.5 landed the DSL has one canonical body shape
+(`return <expr>` / `return <expr>, nil`) regardless of receiver
+kind or step count. The transitional dual-form text is gone from
+the codebase + docs; multi-step Logic dispatches through the same
+step registry the automation scheduler uses. Author surface and
+runtime shape now line up.

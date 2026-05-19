@@ -18,6 +18,14 @@ type QueryPlan struct {
 	// When set, Root will be nil and Mutations will be empty; Execute will evaluate the
 	// function template and run exactly one insert.
 	MutationCall  *FunctionCallExpression
+	// LogicCall is a top-level call to a multi-step Logic function
+	// (func (Logic) ... whose body has intermediate `name := <call>`
+	// steps before `_return`). When set, Root is nil and Execute
+	// dispatches through the wired LogicRunner so step results bind
+	// for later steps + the `_return` expression. Single-statement
+	// Logic bodies don't set this -- their fn.Expr is evaluated
+	// directly via the normal query expression path.
+	LogicCall *FunctionCallExpression
 	Filters       []FilterNode
 	Relationships []RelationshipNode
 	Timestamp     *time.Time

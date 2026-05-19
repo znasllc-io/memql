@@ -126,6 +126,16 @@ func (a *App) engineAndBus() {
 	}
 	a.automationScheduler.SetWiring(a.wiring)
 
+	// F.5 of the ctx-envelope purge: wire the multi-step Logic
+	// dispatcher. Reuses the same step registry the automation
+	// scheduler uses so Logic step executors (function / query /
+	// mutation / forEach / parallel / switch) get the same
+	// integration plug-ins, SI providers, and caching behaviour.
+	// When this binary doesn't include the automations package
+	// the engine keeps its "no LogicRunner wired" error path and
+	// single-step Logic dispatch continues to work unchanged.
+	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
+
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 
