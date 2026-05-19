@@ -56,7 +56,7 @@ logic logicBootstrapCluster {
     })
   }
 
-  ctx.output = coalesce(clusterRecord, existing.First())
+  return coalesce(clusterRecord, existing.First())
   }
 }
 
@@ -78,7 +78,7 @@ logic logicDeregisterNode {
     reason:   "system.shutdown"
   })
 
-  ctx.output = spawnEvent
+  return spawnEvent
   }
 }
 
@@ -120,7 +120,7 @@ logic logicRegisterNode {
     reason:   "system.startup"
   })
 
-  ctx.output = nodeRecord
+  return nodeRecord
   }
 }
 

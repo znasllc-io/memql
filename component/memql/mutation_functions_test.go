@@ -174,6 +174,108 @@ func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 	require.Equal(t, "createSpace", plan.MutationCall.Name)
 }
 
+// TestResolvePlanFunctions_LogicReturningMutationDispatches pins
+// F.6 of the ctx-envelope purge: a top-level call to a Logic
+// function whose body returns a mutation call is hoisted to
+// plan.MutationCall (with caller args substituted into the
+// mutation's args map) so the engine dispatches it through
+// executeMutationFunctionCall instead of the query-expression
+// path. Without this, logicBootstrapDefaultPartition and the
+// identity logics hit the "function X is a mutation and cannot
+// be used inside query expressions" guard at call time.
+func TestResolvePlanFunctions_LogicReturningMutationDispatches(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:         "mutationCreatePartition",
+		FunctionKind: "mutation",
+		Enabled:      true,
+		MutationTemplate: &FunctionMutationTemplate{
+			Concept:    "v1:platform:partition",
+			IDTemplate: &languageParser.ArgRefExpr{Path: "name"},
+			PayloadTemplate: map[string]any{
+				"name":          &languageParser.ArgRefExpr{Path: "name"},
+				"partitionType": &languageParser.ArgRefExpr{Path: "partitionType"},
+			},
+		},
+	}))
+	// Logic whose return expression is a mutation call. The Logic's
+	// own arg (event) is unused -- this mirrors the real
+	// logicBootstrapDefaultPartition shape where the cron-fired
+	// logic ignores its event and just dispatches the mutation
+	// with constants.
+	require.NoError(t, reg.add(&Function{
+		Name:         "logicBootstrapDefaultPartition",
+		FunctionKind: "logic",
+		Enabled:      true,
+		Expr: &FunctionCallExpression{
+			Name: "mutationCreatePartition",
+			Args: map[string]any{
+				"name":          "default",
+				"partitionType": "standard",
+			},
+		},
+	}))
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{
+			Name: "logicBootstrapDefaultPartition",
+			Args: map[string]any{},
+		},
+	}
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+	require.Nil(t, plan.Root, "Logic-returning-mutation should be hoisted to plan.MutationCall")
+	require.NotNil(t, plan.MutationCall, "plan.MutationCall must be set")
+	require.Equal(t, "mutationCreatePartition", plan.MutationCall.Name)
+	require.Equal(t, "default", plan.MutationCall.Args["name"])
+	require.Equal(t, "standard", plan.MutationCall.Args["partitionType"])
+}
+
+// TestResolvePlanFunctions_LogicReturningMutationSubstitutesArgs
+// pins that caller-passed args to the Logic propagate into the
+// inner mutation call's args via the ArgReference substitution path.
+func TestResolvePlanFunctions_LogicReturningMutationSubstitutesArgs(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:         "mutationCreatePartition",
+		FunctionKind: "mutation",
+		Enabled:      true,
+		MutationTemplate: &FunctionMutationTemplate{
+			Concept:    "v1:platform:partition",
+			IDTemplate: &languageParser.ArgRefExpr{Path: "name"},
+			PayloadTemplate: map[string]any{
+				"name": &languageParser.ArgRefExpr{Path: "name"},
+			},
+		},
+	}))
+	// Logic whose body forwards a caller-supplied arg into the
+	// mutation: `return mutationCreatePartition({ name: args.partitionName })`.
+	require.NoError(t, reg.add(&Function{
+		Name:         "logicProvisionNamedPartition",
+		FunctionKind: "logic",
+		Enabled:      true,
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{{Name: "partitionName", Type: "string"}},
+		},
+		Expr: &FunctionCallExpression{
+			Name: "mutationCreatePartition",
+			Args: map[string]any{
+				"name": &ArgReference{Path: "partitionName"},
+			},
+		},
+	}))
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{
+			Name: "logicProvisionNamedPartition",
+			Args: map[string]any{"partitionName": "acme"},
+		},
+	}
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+	require.NotNil(t, plan.MutationCall)
+	require.Equal(t, "mutationCreatePartition", plan.MutationCall.Name)
+	require.Equal(t, "acme", plan.MutationCall.Args["name"], "args.partitionName should resolve to caller-passed value")
+}
+
 func TestResolvePlanFunctions_SpecCallExpands(t *testing.T) {
 	specs := newSpecRegistry()
 	require.NoError(t, specs.add(&Spec{

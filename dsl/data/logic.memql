@@ -40,6 +40,6 @@ logic logicConflictDetection {
   // If conflicts exist, emit detection event for the UI
   emitConflicts := if !matchingConfirmed.Empty() { publishEvent({ topic: "data.conflicts.detected", payload: { spaceId: args.event.payload.spaceId, recordId: args.event.payload.id, recordType: args.event.payload.recordType, naturalKeyField: args.event.payload.naturalKeyField, naturalKeyValue: args.event.payload.naturalKeyValue, matchCount: matchingConfirmed.Len(), matches: matchingConfirmed.Nodes(), requiresHumanApproval: true, timestamp: timestamp() } }) }
 
-  ctx.output = emitConflicts
+  return emitConflicts
   }
 }

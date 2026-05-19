@@ -283,13 +283,22 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 		return f, nil
 	}
 
-	// ctx.X / ctx.X.Y -- caller-argument reference. Same resolution
-	// semantics: look up in e.args, returning missingValue{} for
+	// args.X / args.X.Y -- caller-argument reference (author-facing
+	// form). `ctx.X` is the legacy runtime form still emitted by the
+	// struct-form rewriter for non-Logic receivers; both prefixes
+	// resolve identically against e.args. Returns missingValue{} for
 	// absent paths so optional arguments still drop their object field.
-	if strings.HasPrefix(trimmed, "ctx.") {
-		path := strings.TrimSpace(strings.TrimPrefix(trimmed, "ctx."))
+	var argPrefix string
+	switch {
+	case strings.HasPrefix(trimmed, "args."):
+		argPrefix = "args."
+	case strings.HasPrefix(trimmed, "ctx."):
+		argPrefix = "ctx."
+	}
+	if argPrefix != "" {
+		path := strings.TrimSpace(strings.TrimPrefix(trimmed, argPrefix))
 		if path == "" {
-			return nil, fmt.Errorf("ctx: argument path is required")
+			return nil, fmt.Errorf("%s: argument path is required", strings.TrimSuffix(argPrefix, "."))
 		}
 		// Disallow embedded whitespace / call-shaped suffixes: only a
 		// dotted identifier path is valid here. Anything else is a
@@ -299,7 +308,7 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
 				continue
 			}
-			return nil, fmt.Errorf("ctx.<path>: invalid character %q in %q", c, trimmed)
+			return nil, fmt.Errorf("%s<path>: invalid character %q in %q", argPrefix, c, trimmed)
 		}
 		val, ok := getNestedValue(e.args, path)
 		if !ok {
@@ -1119,18 +1128,23 @@ func parseObjectLiteral(s string) map[string]any {
 	return out
 }
 
-// tryParseShorthandCtx recognises `ctx.<bareIdent>` with no `key:`
-// prefix in an object literal and infers the
-// key from the ctx path. Dotted suffixes (`ctx.user.id`) are rejected
-// so they fall through to the normal key:value parser, matching the
-// arg() restriction.
+// tryParseShorthandCtx recognises `args.<bareIdent>` or `ctx.<bareIdent>`
+// with no `key:` prefix in an object literal and infers the key from
+// the path. Dotted suffixes (`args.user.id` / `ctx.user.id`) are
+// rejected so they fall through to the normal key:value parser,
+// matching the arg() restriction.
 func tryParseShorthandCtx(s string, pos int) (string, string, int, bool) {
 	start := pos
 	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
 		start++
 	}
-	const prefix = "ctx."
-	if start+len(prefix) > len(s) || s[start:start+len(prefix)] != prefix {
+	var prefix string
+	switch {
+	case start+len("args.") <= len(s) && s[start:start+len("args.")] == "args.":
+		prefix = "args."
+	case start+len("ctx.") <= len(s) && s[start:start+len("ctx.")] == "ctx.":
+		prefix = "ctx."
+	default:
 		return "", "", pos, false
 	}
 	scan := start + len(prefix)

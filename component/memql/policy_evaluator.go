@@ -610,9 +610,10 @@ func evaluatePolicyFieldRef(ref FieldReference, ctx map[string]any) (any, error)
 	}
 	first := strings.ToLower(strings.TrimSpace(ref.Parts[0]))
 	switch first {
-	case "payload", "ctx":
+	case "payload", "ctx", "args":
 		// The parser normalises ctx → payload in field-reference
-		// position; both resolve to the policy ctx.
+		// position; `args` is the author-facing form. All three
+		// resolve to the policy ctx.
 		return lookupPath(ctx, ref.Parts[1:]), nil
 	case "caller":
 		actor, _ := ctx["actor"].(map[string]any)

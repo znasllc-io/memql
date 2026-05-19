@@ -43,12 +43,11 @@ func (Query) queryAllPlans(ctx any) (any, error) {
   // Plans: spaceId is @required on the concept, so every row
   // matches. Verified against a live BFF: queryAllPlans() returns
   // the same row count as queryPlansForSpace() summed across spaces.
-  ctx.output = shape(
+  return shape(
     concept;
     plan.spaceId!="",
     "planFull"
-  )
-  return ctx, nil
+  ), nil
 }
 
 @enabled

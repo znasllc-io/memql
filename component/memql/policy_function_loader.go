@@ -370,7 +370,7 @@ func walkPolicyBodyFieldRef(ref languageParser.FieldReference, hasCtxOrArgs, has
 	}
 	first := strings.ToLower(strings.TrimSpace(ref.Parts[0]))
 	switch first {
-	case "ctx", "payload":
+	case "ctx", "args", "payload":
 		*hasCtxOrArgs = true
 	case "caller":
 		*hasCallerRef = true

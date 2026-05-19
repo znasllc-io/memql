@@ -71,7 +71,7 @@ logic logicAccessRequestExpirySweep {
     }
   }
 
-  ctx.output = pending.Len()
+  return pending.Len()
   }
 }
 
@@ -121,7 +121,7 @@ logic logicAccountDeletionReminder25Days {
     }
   }
 
-  ctx.output = candidates.Len()
+  return candidates.Len()
   }
 }
 
@@ -184,7 +184,7 @@ logic logicAccountDeletionReminder7Days {
     }
   }
 
-  ctx.output = candidates.Len()
+  return candidates.Len()
   }
 }
 
@@ -257,7 +257,7 @@ logic logicAccountDeletionSweep {
   // When a queryAuthSessionsForUser (or an "expand identities for
   // user" helper) lands, add a second loop here that revokes each
   // session via mutationRevokeAuthSession.
-  ctx.output = candidates.Len()
+  return candidates.Len()
   }
 }
 
@@ -313,7 +313,7 @@ logic logicAuditEventRetentionSweep {
     }
   })
 
-  ctx.output = allEvents.Len()
+  return allEvents.Len()
   }
 }
 
@@ -363,7 +363,7 @@ logic logicMagicLinkExpirySweep {
     })
   }
 
-  ctx.output = expired.Len()
+  return expired.Len()
   }
 }
 
@@ -392,7 +392,7 @@ logic logicOnDelegationCreated {
       timestamp: timestamp()
     }
   })
-  ctx.output = emitEvent
+  return emitEvent
   }
 }
 
@@ -456,7 +456,7 @@ logic logicProvisionPersonalPartitionOnFirstLogin {
     })
   }
 
-  ctx.output = coalesce(newGrant, newPartition, 0)
+  return coalesce(newGrant, newPartition, 0)
   }
 }
 
