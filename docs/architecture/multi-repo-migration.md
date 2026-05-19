@@ -1,5 +1,17 @@
 # Multi-Repo BFF Architecture — Migration Plan
 
+> **STATUS (2026-05-18): SHIPPED — DOC IS STALE.**
+>
+> The split executed. Current layout under `~/projects/memql/`:
+> `memql/` (core; initial commit literally reads "memQL core
+> (post-split residual)"), `memql-bff-copresent/` (BFF extracted),
+> `memql-cockpit/` (cockpit extracted), and a top-level `go.work`
+> tying them together. The phases below are historical; the
+> "Migration not yet started" line is wrong. Delete per the
+> no-stale-docs convention.
+
+---
+
 > **Status:** Brainstorm done (2026-05-04). Architectural decision locked: separate Go modules per client + `go.work` for development. Migration not yet started.
 >
 > This document is the handoff for whoever (developer or AI agent) executes the migration. It captures the architectural decision, the repo layout, the phase-by-phase migration steps, and the conventions that survive afterward.

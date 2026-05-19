@@ -1,5 +1,13 @@
 # AI Router — Portal Product Specification
 
+> **STATUS (2026-05-18): QUESTIONABLE — under product review.**
+>
+> Spec is intact and forward-looking; no execution work has started in any
+> of the three repos. Confirm scope and priority before handing this off
+> to a Portal-team implementer.
+
+---
+
 **Audience:** the engineer building the CoPresent Portal.
 **Purpose:** give you a complete understanding of the AI Router as a product — what it is, who it's for, what features it offers, and what requirements each feature has — so you can design and build the admin surfaces in the Portal from scratch.
 

@@ -1,5 +1,22 @@
 # Handoff — Computer Use scope-elevation flow (per-task approval card)
 
+> **STATUS (2026-05-18): FEATURE ABSENT FROM CURRENT TREE.**
+>
+> Zero matches in any of the three split repos for `emitScopeElevation*`,
+> `requestComputerUseScope`, `createScopeElevationPlan`,
+> `PlanScopeElevationCard`, or `ComputerUseSection`. The referenced
+> commits (`574a0a5`, `cbf9611`, `6b702bb`) don't exist in the post-split
+> history. The `computer_use` slug was later split into
+> `computer_use_headless` / `computer_use_embodied` (commit `3c758c0`),
+> but the per-task scope-elevation card flow described here was not
+> carried forward.
+>
+> Confirm intent before resuming: deferred, replaced with a different
+> pattern (e.g. the workbench-first routing model), or rebuild needed?
+> Everything below is preserved for historical context only.
+
+---
+
 This handoff covers ONE specific in-flight feature: making the agent's
 "I need elevated computer-use scope to do this" path land an approval
 card on the canvas, get user input, and resume. Three commits up the
