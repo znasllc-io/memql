@@ -435,6 +435,28 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 		return e.executeMutation(ctx, plan.Mutations[0])
 	}
 
+	// Top-level builtin call: a Logic whose body is a single
+	// `return <builtin>({...})` expands at resolve time to a bare
+	// BuiltinFunctionExpression at plan.Root. The query path below
+	// would treat it as a filter and trip "expected collection
+	// literal" at the SQL compile step, so dispatch it to the
+	// builtin executor directly here -- same path the inline
+	// expression evaluator uses (executor.go's
+	// `case *BuiltinFunctionExpression`). The result is wrapped as
+	// the function's return value, matching how
+	// `executeLogicFunctionCall` packages a multi-step Logic's
+	// output.
+	if builtinCall, ok := plan.Root.(*BuiltinFunctionExpression); ok {
+		nodes, err := e.evaluateBuiltinFunctionExpression(ctx, builtinCall, 0)
+		if err != nil {
+			return nil, err
+		}
+		result := newExecuteResult(nil)
+		result.setOutput(nodesToMap(nodes))
+		e.emitQueryExecutedEvent(startTime, result, false)
+		return result, nil
+	}
+
 	if plan.Root == nil {
 		return nil, fmt.Errorf("query must include at least one filter or relationship expression")
 	}

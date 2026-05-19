@@ -1103,6 +1103,21 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 
 	// Function-call step with conditional wrapper:
 	//   step := if condition { queryFoo({ ... }) }
+	//
+	// The single-call form remains the canonical shape -- one
+	// StepDef whose ID is the LHS name and whose Condition is the
+	// if's predicate.
+	//
+	// When the if body contains multiple statements (workspaces :=
+	// queryFoo(...); for item := range ... { ... }; teardown :=
+	// queryBar(...)), parseGoStyleStep can only return one StepDef.
+	// Multi-statement bodies are flagged here with a clear error and
+	// the author is pointed at the top-level form -- which accepts
+	// the same `if cond { multi-stmt }` shape today, via
+	// parseIfStatement / ifStatementToSteps in the body parser, and
+	// where the assignment LHS is just structural noise anyway (the
+	// flattener doesn't bind a name to a multi-step block; the
+	// inner steps keep their own IDs).
 	if p.check(TokenKeywordIf) {
 		p.advance()
 		cond, err := p.parseConditionExpression()
@@ -1112,9 +1127,29 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		if err := p.expect(TokenBraceOpen); err != nil {
 			return nil, err
 		}
+		// Lookahead: is this body a single bare function-call
+		// expression (the legacy single-call form) or multiple
+		// statements (the multi-stmt form)?
+		//
+		// Single-call iff the next non-whitespace token is an
+		// identifier followed by `(` AND the matching `)` is the
+		// last token before `}`. Easier heuristic: try parsing as
+		// an expression and see whether the next token is `}`. If
+		// not, the author meant a multi-stmt body and we should
+		// reject with a clear migration message.
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
+		}
+		if !p.check(TokenBraceClose) {
+			// Multi-statement body. Surface a targeted error rather
+			// than the generic "expected '}', got X" that the next
+			// expect() would emit -- the migration story is unique
+			// to the assignment form so the user shouldn't have to
+			// guess.
+			return nil, newParseErrorf(&p.current,
+				"multi-statement bodies are not supported in the `%s := if cond { ... }` assignment form (the LHS only binds a single result). Drop the `%s := ` prefix and write the if statement at the top level of the body -- the inner statements keep their own names and the if's condition is stamped on each.",
+				names[0], names[0])
 		}
 		if err := p.expect(TokenBraceClose); err != nil {
 			return nil, err
@@ -1777,7 +1812,24 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 	}, nil
 }
 
-// parseIfStatement parses a Go-style if statement
+// parseIfStatement parses a Go-style if statement. The body shape
+// the parser cares about for Logic / Automation use is:
+//
+//	if <cond> {
+//	  name := funcCall(...)
+//	  for item := range collection.Nodes() { ... }
+//	  if <nestedCond> { ... }
+//	  funcCall(...)            // bare call -- emits an anonymous step
+//	}
+//	else if <cond2> { ... }
+//	else { ... }
+//
+// All statements inside the then-block are parsed into `ThenSteps`
+// (an []StepDef) so the body-flattener (ifStatementToSteps) can stamp
+// the if's condition on each step. The legacy continue / break /
+// return shape is preserved into `Then` for callers that still walk
+// that field, but Logic bodies don't use those terminators inside
+// an if block today.
 func (p *Parser) parseIfStatement() (*IfStmt, error) {
 	if err := p.expect(TokenKeywordIf); err != nil {
 		return nil, err
@@ -1785,89 +1837,51 @@ func (p *Parser) parseIfStatement() (*IfStmt, error) {
 
 	stmt := &IfStmt{}
 
-	// Parse condition (until '{')
-	condParts := []string{}
-	parenDepth := 0
-	for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
-		if p.check(TokenParenOpen) {
-			parenDepth++
-		} else if p.check(TokenParenClose) {
-			parenDepth--
-		}
-		condParts = append(condParts, p.current.Literal)
-		p.advance()
+	// Parse condition (until '{') -- canonicalised by parseConditionExpression
+	// so the runtime evaluator sees the same shape that step.Condition
+	// strings carry elsewhere.
+	condStr, err := p.parseConditionExpression()
+	if err != nil {
+		return nil, err
 	}
-
-	// Parse condition as expression (simplified - store as literal for now)
-	condStr := strings.Join(condParts, " ")
 	stmt.Condition = &LiteralExpr{Value: condStr}
 
 	// Parse then block
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
 	}
-
-	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-		// Check for continue/break/return
-		if p.check(TokenKeywordContinue) {
-			stmt.Then = append(stmt.Then, &ContinueStmt{})
-			p.advance()
-			continue
-		}
-		if p.check(TokenKeywordBreak) {
-			stmt.Then = append(stmt.Then, &BreakStmt{})
-			p.advance()
-			continue
-		}
-		if p.check(TokenKeywordReturn) {
-			p.advance()
-			var results []ExpressionNode
-			if !p.check(TokenBraceClose) {
-				expr, err := p.parseExpression()
-				if err != nil {
-					return nil, err
-				}
-				results = append(results, expr)
-				// Handle ", error" part
-				if p.check(TokenComma) {
-					p.advance()
-					expr2, err := p.parseExpression()
-					if err != nil {
-						return nil, err
-					}
-					results = append(results, expr2)
-				}
-			}
-			stmt.Then = append(stmt.Then, &ReturnStmt{Results: results})
-			continue
-		}
-
-		// Skip other tokens in if body for now
-		p.advance()
+	thenSteps, err := p.parseIfBodyStatements()
+	if err != nil {
+		return nil, err
 	}
-
+	stmt.ThenSteps = thenSteps
 	if err := p.expect(TokenBraceClose); err != nil {
 		return nil, err
 	}
 
-	// Check for else
+	// Check for else / else-if
 	if p.check(TokenKeywordElse) {
 		p.advance()
 		if p.check(TokenKeywordIf) {
-			// else if
+			// else if -- recurse. The nested IfStmt's ThenSteps will
+			// carry its own condition when ifStatementToSteps walks
+			// them; the parent's ElseIf pointer is what signals to the
+			// flattener that the negated parent condition should be
+			// layered too.
 			elseIf, err := p.parseIfStatement()
 			if err != nil {
 				return nil, err
 			}
-			stmt.Else = []Node{elseIf}
+			stmt.ElseIf = elseIf
 		} else {
-			// else block
 			if err := p.expect(TokenBraceOpen); err != nil {
 				return nil, err
 			}
-			for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-				p.advance() // Skip else body for now
+			elseSteps, err := p.parseIfBodyStatements()
+			if err != nil {
+				return nil, err
 			}
+			stmt.ElseSteps = elseSteps
 			if err := p.expect(TokenBraceClose); err != nil {
 				return nil, err
 			}
@@ -1875,6 +1889,103 @@ func (p *Parser) parseIfStatement() (*IfStmt, error) {
 	}
 
 	return stmt, nil
+}
+
+// parseIfBodyStatements reads the statements inside an if/else body.
+// The opening '{' must have been consumed by the caller; this routine
+// reads up to but does NOT consume the matching '}'. Accepts:
+//
+//   - `name := <funcCall>` step assignments
+//   - `for item := range collection.Nodes() { ... }` for-range steps
+//   - nested `if cond { ... }` statements
+//   - bare function-call expressions (emit an anonymous function step)
+//
+// Returns the flat ordered list of step defs. The if-statement's
+// own condition is NOT stamped here -- that lives in
+// ifStatementToSteps so the flattener can combine nested condition
+// stacks correctly.
+func (p *Parser) parseIfBodyStatements() ([]StepDef, error) {
+	var steps []StepDef
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		switch {
+		case p.check(TokenKeywordFor):
+			step, err := p.parseForRangeStep()
+			if err != nil {
+				return nil, err
+			}
+			if step != nil {
+				steps = append(steps, *step)
+			}
+		case p.check(TokenKeywordIf):
+			nested, err := p.parseIfStatement()
+			if err != nil {
+				return nil, err
+			}
+			steps = append(steps, p.ifStatementToSteps(nested)...)
+		case p.check(TokenIdentifier):
+			// Distinguish `name :=` assignment from a bare function call.
+			next := p.peekAhead(1)
+			if next.Type == TokenDefine || next.Type == TokenComma {
+				step, err := p.parseGoStyleStep()
+				if err != nil {
+					return nil, err
+				}
+				if step != nil {
+					steps = append(steps, *step)
+				}
+				continue
+			}
+			if next.Type == TokenParenOpen {
+				// Bare function call: emit an anonymous function step.
+				// The auto-generated ID keys off the parser position so
+				// downstream uniqueness checks (validateSteps' duplicate
+				// id guard) hold even when multiple anonymous steps share
+				// the same callee name.
+				pos := p.current.Pos
+				line := p.current.Line
+				expr, err := p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+				call, ok := expressionToFunctionCall(expr)
+				if !ok {
+					return nil, newParseErrorf(&p.current,
+						"if-body statement must be an assignment, for-range, nested if, or function call; got %T", expr)
+				}
+				steps = append(steps, StepDef{
+					ID:   fmt.Sprintf("anon_%d_L%d", pos, line),
+					Type: StepTypeFunction,
+					Config: &FunctionStepConfig{
+						Name: call.Name,
+						Args: call.Args,
+					},
+				})
+				continue
+			}
+			return nil, newParseErrorf(&p.current,
+				"unexpected token after identifier %q in if-body (expected ':=' or '(')", p.current.Literal)
+		case p.check(TokenKeywordContinue):
+			// Inherited shape -- continue / break terminators only
+			// matter inside a for-range body; an if-body inside a
+			// for-range body uses them as inner loop control.
+			stmt := &ContinueStmt{}
+			p.advance()
+			// No corresponding StepDef -- the legacy Then slot
+			// captured these, but the flattener only walks ThenSteps,
+			// so this is effectively a no-op for the runtime today.
+			_ = stmt
+		case p.check(TokenKeywordBreak):
+			p.advance()
+		default:
+			// Anything else gets reported with a clear error rather
+			// than silently skipped (the legacy behaviour was the
+			// silent-drop that made every multi-stmt if body invisible
+			// at runtime).
+			return nil, newParseErrorf(&p.current,
+				"unexpected token in if-body: %q", p.current.Literal)
+		}
+	}
+	return steps, nil
 }
 
 // parseSwitchStep parses a Go-style switch statement as a step
@@ -1970,11 +2081,94 @@ func (p *Parser) parseSwitchStep() (*StepDef, error) {
 	}, nil
 }
 
-// ifStatementToSteps converts an if statement to automation steps
-func (p *Parser) ifStatementToSteps(_ *IfStmt) []StepDef {
-	// For now, if statements are primarily used for error handling (if err != nil { continue })
-	// We don't convert them to steps - they're handled inline
-	return nil
+// ifStatementToSteps flattens a parsed IfStmt into a list of
+// conditional StepDefs. Each step in stmt.ThenSteps gets the if's
+// condition stamped on top of its own (combined with `and` when the
+// step already carries an inner condition from a nested `name := if`
+// or a deeper if branch). ElseSteps + ElseIf chains are layered with
+// the negated parent condition so the runtime evaluator sees a flat
+// list of always-gated steps rather than a nested if structure.
+//
+// Returns an empty slice for an empty if body (legacy behaviour: a
+// vacuous if at the top level is a no-op).
+func (p *Parser) ifStatementToSteps(stmt *IfStmt) []StepDef {
+	if stmt == nil {
+		return nil
+	}
+	cond := conditionString(stmt.Condition)
+	var out []StepDef
+	for _, step := range stmt.ThenSteps {
+		out = append(out, stampStepCondition(step, cond))
+	}
+	// Negate the parent condition for the else branch. ElseIf takes
+	// priority over ElseSteps (matches the parser's wiring: an else-if
+	// chain doesn't carry plain ElseSteps).
+	negated := negateCondition(cond)
+	if stmt.ElseIf != nil {
+		for _, step := range p.ifStatementToSteps(stmt.ElseIf) {
+			out = append(out, stampStepCondition(step, negated))
+		}
+	} else if len(stmt.ElseSteps) > 0 {
+		for _, step := range stmt.ElseSteps {
+			out = append(out, stampStepCondition(step, negated))
+		}
+	}
+	return out
+}
+
+// stampStepCondition combines the outer (if-statement) condition with
+// the step's existing condition. When the step has no inner condition
+// the outer wins as-is. When both are present they get ANDed in
+// parenthesised form so operator-precedence quirks in either source
+// don't bite the runtime evaluator.
+func stampStepCondition(step StepDef, outer string) StepDef {
+	if outer == "" {
+		return step
+	}
+	if step.Condition == "" {
+		step.Condition = outer
+	} else {
+		step.Condition = "(" + outer + ") and (" + step.Condition + ")"
+	}
+	// For-range steps own a list of inner Do steps; the inner steps
+	// don't inherit the outer Condition automatically, so we walk
+	// them and stamp the same outer string. Without this an
+	// `if cond { for item := range x { body } }` body would run the
+	// inner mutation regardless of the outer cond when the for-range
+	// gate fires.
+	if cfg, ok := step.Config.(*ForEachStepConfig); ok && cfg != nil {
+		for i := range cfg.Do {
+			cfg.Do[i] = stampStepCondition(cfg.Do[i], outer)
+		}
+	}
+	return step
+}
+
+// conditionString unwraps the LiteralExpr the parser produces for
+// if-condition tokens. Empty when the expression is anything else
+// (defensive -- the parser today always emits LiteralExpr from
+// parseConditionExpression).
+func conditionString(expr ExpressionNode) string {
+	if expr == nil {
+		return ""
+	}
+	if lit, ok := expr.(*LiteralExpr); ok {
+		if s, ok := lit.Value.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// negateCondition wraps a condition string in `not (...)` so the
+// else-branch flattener can re-use the same evaluator path as the
+// then-branch. Returns the empty string when the input is empty
+// (means: no else gating beyond the inner step's own condition).
+func negateCondition(cond string) string {
+	if cond == "" {
+		return ""
+	}
+	return "not (" + cond + ")"
 }
 
 // tokenToReceiverType converts a token type to ReceiverType
