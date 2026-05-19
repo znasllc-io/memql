@@ -43,6 +43,26 @@ builtin ensureDailySpaceForUser {
   userId  string  @required
 }
 
+// ---- builtin ensureDailySpaceForCaller ------------------------------
+//
+// Caller-driven daily-space provisioning. Resolves the user id from
+// the request's auth context (JWT/PAT subject), then runs the same
+// ensureForUser orchestration. Used by interactive clients (the
+// memql-cockpit Chat tab today) that want today's daily provisioned
+// on connect without having to know their own canonical user id.
+//
+// Idempotent on (userShortId, dateKey); a no-op when the caller is a
+// system actor (subject "system:...") or has no auth context. Returns
+// the same ensureResult shape as ensureDailySpaceForUser so the
+// caller can read Skipped / Inserted / SpaceId.
+
+@enabled
+@executor("integration.dailyspace.ensureForCaller")
+@args(profile="object")
+@description("Ensure today's daily space exists for the authenticated caller. Derives userId from the request's auth context; no-op for system actors.")
+builtin ensureDailySpaceForCaller {
+}
+
 // ---- builtin rolloverDailySpacesAllUsers ----------------------------
 //
 // Hourly cron entry point. Walks every active user and ensures

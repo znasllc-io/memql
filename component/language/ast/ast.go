@@ -833,6 +833,19 @@ type IfStmt struct {
 	Condition ExpressionNode // Condition to evaluate
 	Then      []Node         // Body if condition is true
 	Else      []Node         // Body if condition is false (can contain another IfStmt)
+
+	// ThenSteps and ElseSteps hold the body parsed as automation step
+	// definitions (the canonical shape for Logic-body if statements).
+	// Populated by parseIfStatement when the body contains
+	// assignments / for-range / nested if statements rather than the
+	// legacy continue/break/return-only shape. ifStatementToSteps
+	// reads these to flatten the if into a list of conditional steps.
+	ThenSteps []StepDef
+	ElseSteps []StepDef
+	// ElseIf holds a nested `else if` chain. If non-nil, ElseSteps
+	// is unused -- the nested if's steps carry the negated parent
+	// condition layered on top of their own.
+	ElseIf *IfStmt
 }
 
 func (*IfStmt) node()          {}
