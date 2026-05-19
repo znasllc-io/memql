@@ -75,9 +75,10 @@ func (p *providerMemQLParser) parse(origin string) (*ProviderConfig, error) {
 
 		ch := p.Peek()
 
-		// use statement - skip
+		// use statement — skipped here; imports surfaced through the
+		// loader-side import index.
 		if p.MatchWord("use") {
-			p.SkipToEndOfLine()
+			p.SkipUseClauseBody()
 			continue
 		}
 
