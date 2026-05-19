@@ -91,7 +91,14 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 
 	// args fields: each declared field must be referenced as `args.X`
 	// or `ctx.X` (the legacy envelope alias the rewriter emits).
-	if funcDef.ArgsSchema != nil {
+	//
+	// Logic functions are exempt: they're called from automation steps
+	// that always pass the triggering `event` payload (`logic name {
+	// event: event }`). A cron-fired automation has nothing meaningful
+	// in event, so the corresponding logic body legitimately ignores
+	// it. Reflecting that as a validation pass keeps the convention
+	// uniform across event-driven and cron-driven logics.
+	if funcDef.ArgsSchema != nil && funcDef.Type != languageParser.FunctionTypeLogic {
 		for _, field := range funcDef.ArgsSchema.Fields {
 			if field == nil || field.Name == "" {
 				continue

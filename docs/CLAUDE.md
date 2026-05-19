@@ -100,6 +100,16 @@ Active planning docs only -- removed when work ships. Currently:
 
 ---
 
+## Handoff docs
+
+Cross-session handoff notes for ongoing refactors. Removed when the
+work fully lands.
+
+- [handoff-automations-logic-followups.md](handoff-automations-logic-followups.md) -- automations + logic struct-form retirement (Phase F.1-F.6 follow-ups).
+- [handoff-ctx-purge.md](handoff-ctx-purge.md) -- removing the legacy `(ctx any)` parameter, `ctx.output = ...` boilerplate, and `args.X → ctx.X` rewriter pass from every non-Logic receiver. Logic slice landed; the rest is pending.
+
+---
+
 ## Roadmap
 
 [ROADMAP.md](ROADMAP.md) -- future-work tracker. Items here are
