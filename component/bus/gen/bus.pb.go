@@ -2213,21 +2213,21 @@ func (x *ConfigSnapshot) GetEngineStepCacheEnabled() bool {
 	return false
 }
 
-func (x *ConfigSnapshot) GetAiOpenaiApiKey() string {
+func (x *ConfigSnapshot) GetSIOpenaiApiKey() string {
 	if x != nil {
 		return x.SIOpenaiApiKey
 	}
 	return ""
 }
 
-func (x *ConfigSnapshot) GetAiOpenaiProjectId() string {
+func (x *ConfigSnapshot) GetSIOpenaiProjectId() string {
 	if x != nil {
 		return x.SIOpenaiProjectId
 	}
 	return ""
 }
 
-func (x *ConfigSnapshot) GetAiDefaultProvider() string {
+func (x *ConfigSnapshot) GetSIDefaultProvider() string {
 	if x != nil {
 		return x.SIDefaultProvider
 	}

@@ -238,7 +238,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 		ts.waitForPumpDone(500 * time.Millisecond)
 		cancelMsg := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
-			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+			Payload: &memqlv1.MemqlServerMessage_SITranscribeStreamComplete{
 				SITranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
 					RequestId:  requestId,
 					Text:       "",
@@ -290,7 +290,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 
 	complete := &memqlv1.MemqlServerMessage{
 		CorrelateTo: ts.correlate,
-		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamComplete{
+		Payload: &memqlv1.MemqlServerMessage_SITranscribeStreamComplete{
 			SITranscribeStreamComplete: &memqlv1.SITranscribeStreamComplete{
 				RequestId:  requestId,
 				Text:       text,
@@ -341,7 +341,7 @@ func (ts *transcribeStream) pumpDeltas(logger interface {
 
 		delta := &memqlv1.MemqlServerMessage{
 			CorrelateTo: ts.correlate,
-			Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
+			Payload: &memqlv1.MemqlServerMessage_SITranscribeStreamDelta{
 				SITranscribeStreamDelta: &memqlv1.SITranscribeStreamDelta{
 					RequestId:  ts.requestId,
 					Text:       text,

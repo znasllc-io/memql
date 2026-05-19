@@ -476,10 +476,10 @@ type MemqlClientMessage struct {
 	//	*MemqlClientMessage_Ack
 	//	*MemqlClientMessage_ListTools
 	//	*MemqlClientMessage_CallTool
-	//	*MemqlClientMessage_AiChat
-	//	*MemqlClientMessage_AiSpeech
-	//	*MemqlClientMessage_AiTranscribe
-	//	*MemqlClientMessage_AiSuggest
+	//	*MemqlClientMessage_SIChat
+	//	*MemqlClientMessage_SISpeech
+	//	*MemqlClientMessage_SITranscribe
+	//	*MemqlClientMessage_SISuggest
 	//	*MemqlClientMessage_IdentityCreate
 	//	*MemqlClientMessage_IdentityUpdate
 	//	*MemqlClientMessage_IdentityList
@@ -497,9 +497,9 @@ type MemqlClientMessage struct {
 	//	*MemqlClientMessage_ConceptsList
 	//	*MemqlClientMessage_ConceptsSubscribe
 	//	*MemqlClientMessage_MyAccess
-	//	*MemqlClientMessage_AiTranscribeStreamStart
-	//	*MemqlClientMessage_AiTranscribeStreamChunk
-	//	*MemqlClientMessage_AiTranscribeStreamEnd
+	//	*MemqlClientMessage_SITranscribeStreamStart
+	//	*MemqlClientMessage_SITranscribeStreamChunk
+	//	*MemqlClientMessage_SITranscribeStreamEnd
 	//	*MemqlClientMessage_AgentGenerateTurn
 	//	*MemqlClientMessage_ClientToolResult
 	//	*MemqlClientMessage_SendGuestInvite
@@ -651,29 +651,29 @@ func (x *MemqlClientMessage) GetCallTool() *CallToolMsg {
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiChat() *SIChatMsg {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiChat); ok {
+func (x *MemqlClientMessage) GetSIChat() *SIChatMsg {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SIChat); ok {
 		return x.SIChat
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiSpeech() *SISpeechMsg {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiSpeech); ok {
+func (x *MemqlClientMessage) GetSISpeech() *SISpeechMsg {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SISpeech); ok {
 		return x.SISpeech
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribe() *SITranscribeMsg {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribe); ok {
+func (x *MemqlClientMessage) GetSITranscribe() *SITranscribeMsg {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SITranscribe); ok {
 		return x.SITranscribe
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiSuggest() *SISuggestMsg {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiSuggest); ok {
+func (x *MemqlClientMessage) GetSISuggest() *SISuggestMsg {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SISuggest); ok {
 		return x.SISuggest
 	}
 	return nil
@@ -798,22 +798,22 @@ func (x *MemqlClientMessage) GetMyAccess() *MyAccessMsg {
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamStart() *SITranscribeStreamStart {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamStart); ok {
+func (x *MemqlClientMessage) GetSITranscribeStreamStart() *SITranscribeStreamStart {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SITranscribeStreamStart); ok {
 		return x.SITranscribeStreamStart
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamChunk() *SITranscribeStreamChunk {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamChunk); ok {
+func (x *MemqlClientMessage) GetSITranscribeStreamChunk() *SITranscribeStreamChunk {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SITranscribeStreamChunk); ok {
 		return x.SITranscribeStreamChunk
 	}
 	return nil
 }
 
-func (x *MemqlClientMessage) GetAiTranscribeStreamEnd() *SITranscribeStreamEnd {
-	if x, ok := x.GetPayload().(*MemqlClientMessage_AiTranscribeStreamEnd); ok {
+func (x *MemqlClientMessage) GetSITranscribeStreamEnd() *SITranscribeStreamEnd {
+	if x, ok := x.GetPayload().(*MemqlClientMessage_SITranscribeStreamEnd); ok {
 		return x.SITranscribeStreamEnd
 	}
 	return nil
@@ -982,20 +982,20 @@ type MemqlClientMessage_CallTool struct {
 	CallTool *CallToolMsg `protobuf:"bytes,17,opt,name=call_tool,json=callTool,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiChat struct {
+type MemqlClientMessage_SIChat struct {
 	// AI operations
 	SIChat *SIChatMsg `protobuf:"bytes,18,opt,name=si_chat,json=aiChat,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiSpeech struct {
+type MemqlClientMessage_SISpeech struct {
 	SISpeech *SISpeechMsg `protobuf:"bytes,19,opt,name=si_speech,json=aiSpeech,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiTranscribe struct {
+type MemqlClientMessage_SITranscribe struct {
 	SITranscribe *SITranscribeMsg `protobuf:"bytes,20,opt,name=si_transcribe,json=aiTranscribe,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiSuggest struct {
+type MemqlClientMessage_SISuggest struct {
 	SISuggest *SISuggestMsg `protobuf:"bytes,21,opt,name=si_suggest,json=aiSuggest,proto3,oneof"`
 }
 
@@ -1072,7 +1072,7 @@ type MemqlClientMessage_MyAccess struct {
 	MyAccess *MyAccessMsg `protobuf:"bytes,40,opt,name=my_access,json=myAccess,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiTranscribeStreamStart struct {
+type MemqlClientMessage_SITranscribeStreamStart struct {
 	// Streaming transcription (multi-message, keyed by request_id).
 	// Start opens a provider session; Chunk pushes audio bytes; End
 	// closes the session (or cancels). Server replies with repeated
@@ -1080,11 +1080,11 @@ type MemqlClientMessage_AiTranscribeStreamStart struct {
 	SITranscribeStreamStart *SITranscribeStreamStart `protobuf:"bytes,41,opt,name=si_transcribe_stream_start,json=aiTranscribeStreamStart,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiTranscribeStreamChunk struct {
+type MemqlClientMessage_SITranscribeStreamChunk struct {
 	SITranscribeStreamChunk *SITranscribeStreamChunk `protobuf:"bytes,42,opt,name=si_transcribe_stream_chunk,json=aiTranscribeStreamChunk,proto3,oneof"`
 }
 
-type MemqlClientMessage_AiTranscribeStreamEnd struct {
+type MemqlClientMessage_SITranscribeStreamEnd struct {
 	SITranscribeStreamEnd *SITranscribeStreamEnd `protobuf:"bytes,43,opt,name=si_transcribe_stream_end,json=aiTranscribeStreamEnd,proto3,oneof"`
 }
 
@@ -1257,13 +1257,13 @@ func (*MemqlClientMessage_ListTools) isMemqlClientMessage_Payload() {}
 
 func (*MemqlClientMessage_CallTool) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiChat) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SIChat) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiSpeech) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SISpeech) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiTranscribe) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SITranscribe) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiSuggest) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SISuggest) isMemqlClientMessage_Payload() {}
 
 func (*MemqlClientMessage_IdentityCreate) isMemqlClientMessage_Payload() {}
 
@@ -1299,11 +1299,11 @@ func (*MemqlClientMessage_ConceptsSubscribe) isMemqlClientMessage_Payload() {}
 
 func (*MemqlClientMessage_MyAccess) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiTranscribeStreamStart) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SITranscribeStreamStart) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiTranscribeStreamChunk) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SITranscribeStreamChunk) isMemqlClientMessage_Payload() {}
 
-func (*MemqlClientMessage_AiTranscribeStreamEnd) isMemqlClientMessage_Payload() {}
+func (*MemqlClientMessage_SITranscribeStreamEnd) isMemqlClientMessage_Payload() {}
 
 func (*MemqlClientMessage_AgentGenerateTurn) isMemqlClientMessage_Payload() {}
 
@@ -1355,14 +1355,14 @@ type MemqlServerMessage struct {
 	//	*MemqlServerMessage_QueryResult
 	//	*MemqlServerMessage_QueryError
 	//	*MemqlServerMessage_Event
-	//	*MemqlServerMessage_AiChunk
+	//	*MemqlServerMessage_SIChunk
 	//	*MemqlServerMessage_Heartbeat
 	//	*MemqlServerMessage_ListToolsResult
 	//	*MemqlServerMessage_CallToolResult
-	//	*MemqlServerMessage_AiChatResult
-	//	*MemqlServerMessage_AiSpeechResult
-	//	*MemqlServerMessage_AiTranscribeResult
-	//	*MemqlServerMessage_AiSuggestResult
+	//	*MemqlServerMessage_SIChatResult
+	//	*MemqlServerMessage_SISpeechResult
+	//	*MemqlServerMessage_SITranscribeResult
+	//	*MemqlServerMessage_SISuggestResult
 	//	*MemqlServerMessage_IdentityResult
 	//	*MemqlServerMessage_DelegationResult
 	//	*MemqlServerMessage_SenseTokenizeResult
@@ -1376,8 +1376,8 @@ type MemqlServerMessage struct {
 	//	*MemqlServerMessage_ConceptsListResult
 	//	*MemqlServerMessage_ConceptsSubscribeResult
 	//	*MemqlServerMessage_MyAccessResult
-	//	*MemqlServerMessage_AiTranscribeStreamDelta
-	//	*MemqlServerMessage_AiTranscribeStreamComplete
+	//	*MemqlServerMessage_SITranscribeStreamDelta
+	//	*MemqlServerMessage_SITranscribeStreamComplete
 	//	*MemqlServerMessage_AgentGenerateTurnDelta
 	//	*MemqlServerMessage_AgentGenerateTurnComplete
 	//	*MemqlServerMessage_ClientToolCall
@@ -1489,8 +1489,8 @@ func (x *MemqlServerMessage) GetEvent() *EventNotification {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiChunk() *SIStreamChunk {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiChunk); ok {
+func (x *MemqlServerMessage) GetSIChunk() *SIStreamChunk {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SIChunk); ok {
 		return x.SIChunk
 	}
 	return nil
@@ -1517,29 +1517,29 @@ func (x *MemqlServerMessage) GetCallToolResult() *CallToolResult {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiChatResult() *SIChatResult {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiChatResult); ok {
+func (x *MemqlServerMessage) GetSIChatResult() *SIChatResult {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SIChatResult); ok {
 		return x.SIChatResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiSpeechResult() *SISpeechResult {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiSpeechResult); ok {
+func (x *MemqlServerMessage) GetSISpeechResult() *SISpeechResult {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SISpeechResult); ok {
 		return x.SISpeechResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeResult() *SITranscribeResult {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeResult); ok {
+func (x *MemqlServerMessage) GetSITranscribeResult() *SITranscribeResult {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SITranscribeResult); ok {
 		return x.SITranscribeResult
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiSuggestResult() *SISuggestResult {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiSuggestResult); ok {
+func (x *MemqlServerMessage) GetSISuggestResult() *SISuggestResult {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SISuggestResult); ok {
 		return x.SISuggestResult
 	}
 	return nil
@@ -1636,15 +1636,15 @@ func (x *MemqlServerMessage) GetMyAccessResult() *MyAccessResult {
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeStreamDelta() *SITranscribeStreamDelta {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeStreamDelta); ok {
+func (x *MemqlServerMessage) GetSITranscribeStreamDelta() *SITranscribeStreamDelta {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SITranscribeStreamDelta); ok {
 		return x.SITranscribeStreamDelta
 	}
 	return nil
 }
 
-func (x *MemqlServerMessage) GetAiTranscribeStreamComplete() *SITranscribeStreamComplete {
-	if x, ok := x.GetPayload().(*MemqlServerMessage_AiTranscribeStreamComplete); ok {
+func (x *MemqlServerMessage) GetSITranscribeStreamComplete() *SITranscribeStreamComplete {
+	if x, ok := x.GetPayload().(*MemqlServerMessage_SITranscribeStreamComplete); ok {
 		return x.SITranscribeStreamComplete
 	}
 	return nil
@@ -1810,7 +1810,7 @@ type MemqlServerMessage_Event struct {
 	Event *EventNotification `protobuf:"bytes,20,opt,name=event,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiChunk struct {
+type MemqlServerMessage_SIChunk struct {
 	SIChunk *SIStreamChunk `protobuf:"bytes,30,opt,name=si_chunk,json=aiChunk,proto3,oneof"`
 }
 
@@ -1827,20 +1827,20 @@ type MemqlServerMessage_CallToolResult struct {
 	CallToolResult *CallToolResult `protobuf:"bytes,51,opt,name=call_tool_result,json=callToolResult,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiChatResult struct {
+type MemqlServerMessage_SIChatResult struct {
 	// AI results
 	SIChatResult *SIChatResult `protobuf:"bytes,55,opt,name=si_chat_result,json=aiChatResult,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiSpeechResult struct {
+type MemqlServerMessage_SISpeechResult struct {
 	SISpeechResult *SISpeechResult `protobuf:"bytes,56,opt,name=si_speech_result,json=aiSpeechResult,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiTranscribeResult struct {
+type MemqlServerMessage_SITranscribeResult struct {
 	SITranscribeResult *SITranscribeResult `protobuf:"bytes,57,opt,name=si_transcribe_result,json=aiTranscribeResult,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiSuggestResult struct {
+type MemqlServerMessage_SISuggestResult struct {
 	SISuggestResult *SISuggestResult `protobuf:"bytes,58,opt,name=si_suggest_result,json=aiSuggestResult,proto3,oneof"`
 }
 
@@ -1901,14 +1901,14 @@ type MemqlServerMessage_MyAccessResult struct {
 	MyAccessResult *MyAccessResult `protobuf:"bytes,80,opt,name=my_access_result,json=myAccessResult,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiTranscribeStreamDelta struct {
+type MemqlServerMessage_SITranscribeStreamDelta struct {
 	// Streaming transcription replies (see SITranscribeStreamStart).
 	// Delta fires repeatedly with the full accumulated text; Complete
 	// is the terminal message carrying the final transcript.
 	SITranscribeStreamDelta *SITranscribeStreamDelta `protobuf:"bytes,81,opt,name=si_transcribe_stream_delta,json=aiTranscribeStreamDelta,proto3,oneof"`
 }
 
-type MemqlServerMessage_AiTranscribeStreamComplete struct {
+type MemqlServerMessage_SITranscribeStreamComplete struct {
 	SITranscribeStreamComplete *SITranscribeStreamComplete `protobuf:"bytes,82,opt,name=si_transcribe_stream_complete,json=aiTranscribeStreamComplete,proto3,oneof"`
 }
 
@@ -2033,7 +2033,7 @@ func (*MemqlServerMessage_QueryError) isMemqlServerMessage_Payload() {}
 
 func (*MemqlServerMessage_Event) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiChunk) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SIChunk) isMemqlServerMessage_Payload() {}
 
 func (*MemqlServerMessage_Heartbeat) isMemqlServerMessage_Payload() {}
 
@@ -2041,13 +2041,13 @@ func (*MemqlServerMessage_ListToolsResult) isMemqlServerMessage_Payload() {}
 
 func (*MemqlServerMessage_CallToolResult) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiChatResult) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SIChatResult) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiSpeechResult) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SISpeechResult) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiTranscribeResult) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SITranscribeResult) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiSuggestResult) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SISuggestResult) isMemqlServerMessage_Payload() {}
 
 func (*MemqlServerMessage_IdentityResult) isMemqlServerMessage_Payload() {}
 
@@ -2075,9 +2075,9 @@ func (*MemqlServerMessage_ConceptsSubscribeResult) isMemqlServerMessage_Payload(
 
 func (*MemqlServerMessage_MyAccessResult) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiTranscribeStreamDelta) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SITranscribeStreamDelta) isMemqlServerMessage_Payload() {}
 
-func (*MemqlServerMessage_AiTranscribeStreamComplete) isMemqlServerMessage_Payload() {}
+func (*MemqlServerMessage_SITranscribeStreamComplete) isMemqlServerMessage_Payload() {}
 
 func (*MemqlServerMessage_AgentGenerateTurnDelta) isMemqlServerMessage_Payload() {}
 
@@ -16160,10 +16160,10 @@ func file_memql_proto_init() {
 		(*MemqlClientMessage_Ack)(nil),
 		(*MemqlClientMessage_ListTools)(nil),
 		(*MemqlClientMessage_CallTool)(nil),
-		(*MemqlClientMessage_AiChat)(nil),
-		(*MemqlClientMessage_AiSpeech)(nil),
-		(*MemqlClientMessage_AiTranscribe)(nil),
-		(*MemqlClientMessage_AiSuggest)(nil),
+		(*MemqlClientMessage_SIChat)(nil),
+		(*MemqlClientMessage_SISpeech)(nil),
+		(*MemqlClientMessage_SITranscribe)(nil),
+		(*MemqlClientMessage_SISuggest)(nil),
 		(*MemqlClientMessage_IdentityCreate)(nil),
 		(*MemqlClientMessage_IdentityUpdate)(nil),
 		(*MemqlClientMessage_IdentityList)(nil),
@@ -16181,9 +16181,9 @@ func file_memql_proto_init() {
 		(*MemqlClientMessage_ConceptsList)(nil),
 		(*MemqlClientMessage_ConceptsSubscribe)(nil),
 		(*MemqlClientMessage_MyAccess)(nil),
-		(*MemqlClientMessage_AiTranscribeStreamStart)(nil),
-		(*MemqlClientMessage_AiTranscribeStreamChunk)(nil),
-		(*MemqlClientMessage_AiTranscribeStreamEnd)(nil),
+		(*MemqlClientMessage_SITranscribeStreamStart)(nil),
+		(*MemqlClientMessage_SITranscribeStreamChunk)(nil),
+		(*MemqlClientMessage_SITranscribeStreamEnd)(nil),
 		(*MemqlClientMessage_AgentGenerateTurn)(nil),
 		(*MemqlClientMessage_ClientToolResult)(nil),
 		(*MemqlClientMessage_SendGuestInvite)(nil),
@@ -16208,14 +16208,14 @@ func file_memql_proto_init() {
 		(*MemqlServerMessage_QueryResult)(nil),
 		(*MemqlServerMessage_QueryError)(nil),
 		(*MemqlServerMessage_Event)(nil),
-		(*MemqlServerMessage_AiChunk)(nil),
+		(*MemqlServerMessage_SIChunk)(nil),
 		(*MemqlServerMessage_Heartbeat)(nil),
 		(*MemqlServerMessage_ListToolsResult)(nil),
 		(*MemqlServerMessage_CallToolResult)(nil),
-		(*MemqlServerMessage_AiChatResult)(nil),
-		(*MemqlServerMessage_AiSpeechResult)(nil),
-		(*MemqlServerMessage_AiTranscribeResult)(nil),
-		(*MemqlServerMessage_AiSuggestResult)(nil),
+		(*MemqlServerMessage_SIChatResult)(nil),
+		(*MemqlServerMessage_SISpeechResult)(nil),
+		(*MemqlServerMessage_SITranscribeResult)(nil),
+		(*MemqlServerMessage_SISuggestResult)(nil),
 		(*MemqlServerMessage_IdentityResult)(nil),
 		(*MemqlServerMessage_DelegationResult)(nil),
 		(*MemqlServerMessage_SenseTokenizeResult)(nil),
@@ -16229,8 +16229,8 @@ func file_memql_proto_init() {
 		(*MemqlServerMessage_ConceptsListResult)(nil),
 		(*MemqlServerMessage_ConceptsSubscribeResult)(nil),
 		(*MemqlServerMessage_MyAccessResult)(nil),
-		(*MemqlServerMessage_AiTranscribeStreamDelta)(nil),
-		(*MemqlServerMessage_AiTranscribeStreamComplete)(nil),
+		(*MemqlServerMessage_SITranscribeStreamDelta)(nil),
+		(*MemqlServerMessage_SITranscribeStreamComplete)(nil),
 		(*MemqlServerMessage_AgentGenerateTurnDelta)(nil),
 		(*MemqlServerMessage_AgentGenerateTurnComplete)(nil),
 		(*MemqlServerMessage_ClientToolCall)(nil),
