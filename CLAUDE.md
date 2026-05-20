@@ -1198,13 +1198,32 @@ form. Procedural `func (Query|Mutation) NAME(ctx any) (any, error)`
 is reserved for functions that need branching or multi-step
 composition.
 
-**Concept binding: `@useConcept(<name>)` per construct.** Each
-struct-form query or mutation binds its concept via the
-`@useConcept(<conceptName>)` annotation above the declaration.
-Per-construct files (`queries.memql`, `mutations.memql`) hold many
-constructs each, so the binding lives on the construct, not the
-file. File-top `use <ns>.<concept>` is reserved for seed files
-(one declaration per file).
+**Concept binding lives in the construct signature** (locked in
+2026-05 via the import-model pivot; PR #47 / #48 / #49). The
+two-identifier signature `query <Concept> <name>`,
+`mutation <Concept> <name>`, `seed <Concept> <name>`, and
+`shape <Concept> <name>` names the bound concept directly; the
+loader resolves the concept name through the file's file-top
+imports. The legacy per-construct `@useConcept(<name>)` annotation
+is retired and rejected at parse time.
+
+**Cross-file dependencies go through file-top `use` imports.** Every
+construct another file pulls into local scope (shapes, traits,
+specs, mutations, queries, logic, builtins, prompts, providers,
+tools) is declared via a dotted-path import:
+
+```memql
+use cognition.concepts.{ participant, space }
+use cognition.shapes.{ participantFull }
+use common.traits.{ traitIsActiveRecord, traitIsNotDeleted }
+```
+
+The dotted path maps to a file on disk (`cognition.concepts` →
+`dsl/cognition/concepts.memql`); the brace-list names the
+constructs imported into local scope. The legacy `@use*`
+annotation family (`@useConcept`, `@useShape`, `@useQuery`,
+`@useMutation`, `@useLogic`, `@useBuiltin`, etc.) is retired and
+rejected at parse time with a migration-pointing error.
 
 The bound concept's payload is referenced from filter clauses as
 `payload.<field>` and from mutation bodies via the bare
@@ -1239,9 +1258,12 @@ name collides with one of those is rejected at load time.
 
 Queries:
 ```memql
-@useConcept(participant)
+use cognition.concepts.{ participant }
+use cognition.shapes.{ participantFull }
+use common.traits.{ traitIsActiveRecord }
+
 @description("Get space participants")
-query querySpaceParticipants {
+query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
@@ -1252,9 +1274,10 @@ query querySpaceParticipants {
 
 Mutations:
 ```memql
-@useConcept(space)
+use cognition.concepts.{ space }
+
 @description("Create a cognition space")
-mutation mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -1282,8 +1305,9 @@ ending in `return <expr>`. The single-statement form is the common
 case:
 
 ```memql
+use common.builtins.{ ensureDailySpaceForUser }
+
 @enabled
-@useBuiltin(ensureDailySpaceForUser)
 @description("On user creation, ensure today's daily space exists.")
 logic logicProvisionDailySpaceOnUserCreate {
   args {

@@ -3345,10 +3345,12 @@ activeConversations();payload.priority=="high"
 ### Struct Form (canonical)
 
 ```memql
+use cognition.concepts.{ participant }
+use cognition.shapes.{ participantFull }
+
 @enabled
-@useConcept(participant)
 @description("Get space participants")
-query querySpaceParticipants {
+query participant querySpaceParticipants {
   args {
     spaceId          string
     status           string  @enum("active", "idle", "left")
@@ -3363,9 +3365,10 @@ query querySpaceParticipants {
 
 Mutations follow the same shell with an `insert { ... }` or
 `update { id: ..., ... }` block in place of `filter` / `shape`.
-See `dsl/v1/queries/v1/_querySchemaReference.memql` and
-`dsl/v1/mutations/v1/_mutationSchemaReference.memql` for the full
-reference.
+The concept binding lives in the signature (`query <Concept> <name>`
+/ `mutation <Concept> <name>`); cross-file dependencies come in via
+file-top `use <module>.{ ... }` imports. The legacy `@useConcept`
+annotation family is retired and rejected at parse time.
 
 ### Procedural Form (internal post-rewrite shape)
 

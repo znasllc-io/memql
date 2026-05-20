@@ -4,22 +4,18 @@
 //
 // This file is the source of truth for `spec` syntax. It is NOT loaded by
 // the engine (the leading underscore on the path tells every walker to
-// skip it). Every spec-level annotation, every body classification, and
-// every rejected form is demonstrated below with inline commentary.
+// skip it).
 //
-// A spec is an atomic boolean predicate that binds to a concept (directly
-// via @useConcept) or to a shape (transitively via @useShape). The body is
-// a single boolean expression. The expression's field references
-// implicitly classify the spec as a row-spec (compiles to a SQL WHERE
-// fragment) or a context-spec (evaluates in-process against the auth
-// envelope).
+// A spec is an atomic boolean predicate. The body is a single boolean
+// expression. The expression's field references implicitly classify the
+// spec as a row-spec (compiles to a SQL WHERE fragment, pushed down to
+// the database) or a context-spec (evaluates in-process against the
+// auth envelope).
 //
 // Spec vs Trait -- the one-line summary:
 //
 //                       Trait                       Spec
-//   binding              forbidden                  REQUIRED (one of two)
-//   @useConcept          rejected                   accepted
-//   @useShape            rejected                   accepted
+//   keyword              `trait <name>`             `spec <name>`
 //   body classification  row-spec OR context-spec   row-spec OR context-spec
 //   author lifecycle     @enabled / @disabled OK    NOT ALLOWED
 //
@@ -27,111 +23,84 @@
 //   1. Spec-level annotations
 // =============================================================================
 //
-// Every annotation goes above the `spec` keyword. The full author surface
-// is three annotations -- and exactly one of @useConcept / @useShape is
-// REQUIRED.
+// Every annotation goes above the `spec` keyword. The author surface is
+// narrow:
 //
-//   @description("text")           Human-readable description.           optional
-//   @useConcept(<bareName>)        Concept binding. Spec body references
-//                                  payload fields as `<bareName>.X`.    REQUIRED*
-//   @useShape(<bareName>)          Shape binding. The shape's concept
-//                                  becomes the spec's effective concept;
-//                                  body references payload fields as
-//                                  `<bareName>.X`.                       REQUIRED*
+//   @description("text")    Human-readable description.   optional
+//   @shape("<name>")        Optional binding to a shape so the post-load
+//                           ValidateSpecBindings pass can verify the body
+//                           references a subset of the shape's projected
+//                           fields. The shape's concept becomes the spec's
+//                           effective concept.                       optional
 //
-//   (* exactly one of @useConcept or @useShape -- neither = error,
-//      both = error)
-//
-// One internal sentinel is injected by the rewriter -- never write it by
-// hand:
-//
-//   @_isTrait                      Synthetic marker injected when the
-//                                  declaration is `trait` rather than
-//                                  `spec`. Specs never carry it.
+// The legacy `@use*` family (`@useConcept`, `@useShape`, etc.) was
+// retired in the import-model pivot. Cross-file constructs are pulled
+// into local scope via a file-top `use <module>.{ ... }` import; the
+// concept binding (when needed) is implicit in the body's `payload.X`
+// references.
 //
 // =============================================================================
-//   2. EXPLICITLY REJECTED on specs
+//   2. Canonical concept-row spec
 // =============================================================================
 //
-//   @enabled  /  @disabled
-//     The engine owns spec lifecycle, not authors. Specs either exist (in
-//     which case they're live) or they don't. Use git to add / remove a
-//     spec; do not toggle it via annotation. Error messages:
-//
-//        `spec %q must not carry @enabled (the engine controls spec
-//         lifecycle; remove the annotation)`
-//        `spec %q must not carry @disabled (the engine controls spec
-//         lifecycle; delete the spec instead)`
-//
-//   @shape("name")
-//     The legacy single-string binding form. Retired. Use the canonical
-//     @useShape(<bareName>) form instead.
-//
-// =============================================================================
-//   3. Concept-bound spec: the most common case
-// =============================================================================
-//
-// A spec bound via @useConcept(<name>) names a concept directly. Inside
-// the body, payload fields are written as `<name>.X` for readability and
-// rewritten to `payload.X` by the loader before parse.
+// A row-spec writes its predicate against `payload.X` and row intrinsics.
+// The engine classifies it as row-bound based on the references; no
+// annotation is required to declare "this is a row spec."
 
-@useConcept(participant)
 @description("Matches participants with human participantType")
 spec specIsHumanParticipant {
-  participant.participantType == "human"
+  payload.participantType == "human"
 }
 
-@useConcept(participant)
 @description("Matches participants with SI participantType")
 spec specIsSIParticipant {
-  participant.participantType == "si"
+  payload.participantType == "si"
 }
 
 // =============================================================================
-//   4. Shape-bound spec: opt into a row shape's projection
+//   3. Caller / context spec
 // =============================================================================
 //
-// A spec bound via @useShape(<shapeName>) binds to a shape; the shape's
-// concept becomes the spec's effective concept. Same body-reference rule:
-// payload fields written as `<shapeName>.X` are rewritten to `payload.X`.
-//
-// Use @useShape when the spec is naturally tied to a SHAPE'S projection
-// rather than to the concept's full payload -- e.g. a spec that only
-// references fields the shape projects.
+// A context-spec references `caller.X` fields only. It evaluates
+// in-process against the auth envelope; it is not pushed down to SQL.
+// Context-specs are called from policy bodies via `spec("name")`.
 
-@useShape(participantFull)
-@description("Same predicate as specIsHumanParticipant, bound via the shape that owns the projection.")
-spec specIsHumanParticipantViaShape {
-  participantFull.participantType == "human"
-}
-
-// =============================================================================
-//   5. Trait-shape-bound spec: caller-only or cross-concept predicates
-// =============================================================================
-//
-// A trait shape is a @row shape without @concepts(...) -- a concept-
-// agnostic scaffold. Binding a spec to one expresses "this predicate
-// applies to any row that matches the trait shape's projection" without
-// committing to a single concept.
-//
-// Trait shapes the tree ships today: callerActor (caller envelope),
-// activeRowTrait, statusRowTrait, deletedRowTrait, archivedRowTrait,
-// savedRowTrait, validationRowTrait, etc.
-
-@useShape(callerActor)
 @description("Caller must hold an admin or owner role.")
 spec requiresAdmin {
   caller.role == "admin" || caller.role == "owner"
 }
 
-@useShape(statusRowTrait)
-@description("Any row whose status is 'active' regardless of concept.")
-spec specStatusActive {
+@description("Caller is the cluster owner.")
+spec specIsClusterOwner {
+  caller.isClusterOwner == true
+}
+
+// =============================================================================
+//   4. Trait predicate -- concept-agnostic row predicate
+// =============================================================================
+//
+// A `trait` is a row predicate written without committing to a single
+// concept. It compiles to the same SQL WHERE fragment shape as a row-
+// spec; the engine just doesn't require a shape binding. The tree's
+// trait library lives under `dsl/common/traits.memql`.
+
+@description("Matches records with payload.active == true.")
+trait traitIsActiveRecord {
+  payload.active == true
+}
+
+@description("Matches records with payload.deleted != true.")
+trait traitIsNotDeleted {
+  payload.deleted != true
+}
+
+@description("Matches records with payload.status == 'active'.")
+trait traitStatusIsActive {
   payload.status == "active"
 }
 
 // =============================================================================
-//   6. Body classification: row-spec vs context-spec
+//   5. Body classification: row-spec vs context-spec
 // =============================================================================
 //
 // Implicit. The body's field references decide:
@@ -144,8 +113,7 @@ spec specStatusActive {
 //
 //   caller.*
 //     -> CONTEXT-SPEC. Evaluates in-process against the auth envelope.
-//        Callable from policy bodies via `spec("name")`. Not pushed down
-//        to SQL -- engine.EvaluateSpec(ctx, name) returns the boolean.
+//        Callable from policy bodies via `spec("name")`.
 //
 // Mixed bodies (both row + caller refs) are REJECTED at load time:
 //
@@ -154,22 +122,20 @@ spec specStatusActive {
 //    compose via a policy`
 //
 // Split mixed predicates into two specs + compose via a policy that
-// invokes spec("row") AND spec("context").
+// invokes `spec("row")` AND `spec("context")`.
 
-@useConcept(participant)
 @description("Row-spec: payload-only body. Compiles to SQL.")
 spec rowSpecExample {
   payload.status == "active"
 }
 
-@useShape(callerActor)
 @description("Context-spec: caller-only body. Evaluates in-process.")
 spec contextSpecExample {
   caller.userId != null
 }
 
 // =============================================================================
-//   7. Caller envelope vocabulary
+//   6. Caller envelope vocabulary
 // =============================================================================
 //
 // Context-spec bodies can reference these caller.* fields:
@@ -183,14 +149,8 @@ spec contextSpecExample {
 //   caller.now             RFC3339 timestamp captured at request start
 //   caller.config.<key>    allow-listed config values (see policy_exposable.go)
 
-@useShape(callerActor)
-@description("Caller is the cluster owner.")
-spec specIsClusterOwner {
-  caller.isClusterOwner == true
-}
-
 // =============================================================================
-//   8. Row intrinsics: bare-name references inside row-specs
+//   7. Row intrinsics
 // =============================================================================
 //
 // Row-spec bodies can reference these engine-stamped intrinsics by their
@@ -206,14 +166,13 @@ spec specIsClusterOwner {
 //
 // The same spec can mix payload fields AND intrinsics.
 
-@useConcept(participant)
 @description("Row authored by a specific seed identity.")
 spec specIsSeedParticipant {
   createdBy == "seed" && payload.participantType == "human"
 }
 
 // =============================================================================
-//   9. Spec body operator vocabulary
+//   8. Spec body operator vocabulary
 // =============================================================================
 //
 // Comparison operators: == != > >= < <=
@@ -222,7 +181,6 @@ spec specIsSeedParticipant {
 // Null check:           field == null  /  field != null
 // Parentheses:          (expr1) || (expr2 && expr3)
 
-@useConcept(participant)
 @description("Rich predicate showing the operator surface.")
 spec specRichPredicate {
   payload.participantType == "human"
@@ -232,7 +190,7 @@ spec specRichPredicate {
 }
 
 // =============================================================================
-//   10. Calling specs
+//   9. Calling specs
 // =============================================================================
 //
 // Specs register under their declared name. Callers reference them like
@@ -241,11 +199,12 @@ spec specRichPredicate {
 //   - From a query's filter clause: list the spec name alongside other
 //     predicates, separated by `;`:
 //
-//         use cognition.participant
+//         use cognition.shapes.{ participantFull }
+//         use cognition.specs.{ specIsHumanParticipant }
 //
-//         query queryActiveHumanParticipants {
+//         query participant queryActiveHumanParticipants {
 //           args { spaceId string @required }
-//           filter participant.spaceId==args.spaceId; specIsHumanParticipant
+//           filter payload.spaceId == args.spaceId; specIsHumanParticipant
 //           shape  participantFull
 //         }
 //
@@ -253,49 +212,34 @@ spec specRichPredicate {
 //     context-specs can be composed this way, though only context-specs
 //     evaluate without a row context.
 //
-//         func (Policy) canViewAdmin(_ any) bool {
-//           return spec("requiresAdmin")
+//         policy canViewAdmin {
+//           body { return spec("requiresAdmin") }
 //         }
 //
 //   - From Go: engine.EvaluateSpec(ctx, "specName") evaluates a
 //     context-spec against the request's auth context. Row-specs cannot
 //     be called this way -- they require a row to evaluate.
-//
+
 // =============================================================================
-//   11. Forbidden binding combinations
-// =============================================================================
-//
-// All three of these are rejected at load time:
-//
-//   // REJECTED: missing binding.
-//   @description("no binding")
-//   spec specNoBinding {
-//     payload.active == true
-//   }
-//
-//   // REJECTED: cannot carry both bindings.
-//   @useConcept(participant)
-//   @useShape(participantFull)
-//   @description("both bindings")
-//   spec specBothBindings {
-//     participant.active == true
-//   }
-//
-//   // REJECTED: legacy single-string @shape form retired.
-//   @shape("participantFull")
-//   @description("legacy form")
-//   spec specLegacyShape {
-//     payload.active == true
-//   }
-//
-// =============================================================================
-//   12. The legacy `func (Spec) name(...) bool { ... }` form -- retired
+//   10. EXPLICITLY REJECTED on specs
 // =============================================================================
 //
-// The struct-form `spec NAME { <expr> }` is the only spec declaration the
-// parser accepts. The procedural function-receiver form was retired
-// during the policy-first migration. The current parser will reject any
-// attempt at the legacy form.
+//   @enabled  /  @disabled
+//     The engine owns spec lifecycle, not authors. Specs either exist
+//     (in which case they're live) or they don't. Use git to add /
+//     remove a spec; do not toggle it via annotation.
+//
+//   @useConcept(...) / @useShape(...) / any other @use<X>(...)
+//     Retired in the import-model pivot. The concept binding is
+//     implicit in the body's `payload.X` references; cross-file shapes
+//     are pulled via a file-top `use <module>.{ ... }` import.
+//
+// =============================================================================
+//   11. The legacy `func (Spec) name(...) bool { ... }` form -- retired
+// =============================================================================
+//
+// The struct-form `spec NAME { <expr> }` is the only spec declaration
+// the parser accepts.
 //
 //     // NOT VALID -- struct form is required.
 //     func (Spec) isActive(_ any) bool { return payload.active == true }

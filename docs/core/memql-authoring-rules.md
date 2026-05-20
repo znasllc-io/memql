@@ -27,9 +27,10 @@ exactly one `update` block. Two writes in one mutation is a
 parse-time error.
 
 ```memql
+use cognition.concepts.{ space }
+
 // Right -- one insert.
-@useConcept(space)
-mutation mutationCreateSpace {
+mutation space mutationCreateSpace {
   args { name string @required }
   insert space {
     name: args.name
@@ -40,8 +41,7 @@ mutation mutationCreateSpace {
 }
 
 // Wrong -- two writes in one body. The parser rejects it.
-@useConcept(space)
-mutation mutationCreateSpaceAndGrantOwner {
+mutation space mutationCreateSpaceAndGrantOwner {
   args { name string @required }
   insert space { ... }            // ERROR -- only one write allowed
   insert partitionAccess { ... }
@@ -63,9 +63,11 @@ the user sees one product action even though two rows land.
 The canonical worked example is **workspace creation**:
 
 ```memql
+use platform.concepts.{ partition }
+use identity.mutations.{ mutationGrantPartitionAccess }
+
 // 1. The product calls this mutation.
-@useConcept(partition)
-mutation mutationCreatePartition {
+mutation partition mutationCreatePartition {
   args {
     name      string  @required
     type      string  @default("standard")
@@ -90,7 +92,6 @@ automation autoBootstrapWorkspaceOwnerAccess {
   }
 }
 
-@useMutation(mutationGrantPartitionAccess)
 logic logicGrantOwnerOnPartitionCreate {
   args { event object @required }
   body {

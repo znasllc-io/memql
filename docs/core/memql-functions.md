@@ -132,16 +132,20 @@ Mutation functions execute insert operations with parameters.
 
 ### Syntax (struct form, canonical)
 
-Each query/mutation binds its concept via `@useConcept(<name>)`
-per construct. File-top `use <ns>.<concept>` is reserved for
-seed files; the per-construct query/mutation parser does not
-read a file-top binding.
+Each query / mutation binds its concept in the SIGNATURE:
+`mutation <Concept> <name>` / `query <Concept> <name>`. Cross-file
+constructs (other queries, mutations, shapes, traits, builtins,
+logic blocks) are pulled into local scope via file-top `use
+<module>.{ ... }` imports. The legacy per-construct `@useConcept`
+annotation and the legacy single-binding `use <ns>.<concept>`
+shape are both retired and rejected at parse time.
 
 ```memql
+use <ns>.concepts.{ <conceptName> }
+
 @enabled
-@useConcept(<conceptName>)
 @description("Creates a new record")
-mutation mutationFunctionName {
+mutation <conceptName> mutationFunctionName {
   args { ... }
   insert {
     id: args.id
@@ -153,10 +157,11 @@ mutation mutationFunctionName {
 ### Example: createUser
 
 ```memql
+use identity.concepts.{ user }
+
 @enabled
-@useConcept(user)
 @description("Creates a new user record")
-mutation mutationCreateUser {
+mutation user mutationCreateUser {
   args {
     userId        string  @required
     authorizerId  string  @required
