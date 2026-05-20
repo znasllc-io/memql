@@ -19,8 +19,17 @@ func NewQueryClient(dispatcher *Dispatcher) *QueryClient {
 	return &QueryClient{dispatcher: dispatcher}
 }
 
-// Execute runs a MemQL query and returns the raw result as a map.
-func (qc *QueryClient) Execute(ctx context.Context, query string) (any, error) {
+// executeRaw runs a MemQL query string and returns the protojson-decoded
+// result. UNEXPORTED on purpose: consumers must go through the generated
+// typed methods (see sdk/go/client/generated_*.go). The named-primitive
+// contract -- documented in sdk/go/CLAUDE.md -- forbids inlining raw
+// DSL strings in client code. Raw concept queries reach past the
+// contract and break when the engine evolves its internal projection
+// shapes (see memql-cockpit#49).
+//
+// Internal use only -- the generated typed methods dispatch through
+// executeNamed (support.go) which wraps this in a *Result envelope.
+func (qc *QueryClient) executeRaw(ctx context.Context, query string) (any, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
 			ExecuteQuery: &memqlv1.ExecuteQueryMsg{
