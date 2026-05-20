@@ -88,11 +88,22 @@ var kindFromString = map[string]languageParser.FunctionType{
 // ExtractConceptDecls for those. Builtins are extracted (they use
 // `func (Builtin) NAME` shape in the legacy tree) so the unified
 // loader can later wire them.
+//
+// File-top `use` declarations are extracted up-front and prepended to
+// every emitted slice. Without this, the per-slice parser sees an
+// empty Uses list and the function-loader's concept-binding logic
+// (the path that turns the bare `concept` keyword in procedural
+// queries into a real comparison) can't determine which concept the
+// function targets.
 func ExtractFunctionSlices(source string) []FunctionSlice {
 	matches := functionDeclHeader.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {
 		return nil
 	}
+
+	// Collect file-top `use ... .{ ... }` blocks once so each slice
+	// inherits them.
+	usePreamble := extractUseDeclarations(source)
 
 	var slices []FunctionSlice
 	for _, m := range matches {
@@ -164,8 +175,12 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 			break
 		}
 
+		body := source[preambleStart : closeIdx+1]
+		if usePreamble != "" {
+			body = usePreamble + body
+		}
 		slices = append(slices, FunctionSlice{
-			Source: source[preambleStart : closeIdx+1],
+			Source: body,
 			Kind:   kind,
 			Name:   name,
 		})
@@ -173,6 +188,31 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 
 	return slices
 }
+
+// extractUseDeclarations returns every file-top `use ... .{ ... }`
+// declaration concatenated with newlines + a trailing blank line.
+// Used by ExtractFunctionSlices to prepend the file's import context
+// to each per-function slice so the per-slice parser sees the same
+// Uses list the full-file parser would. Returns an empty string when
+// the source has no use declarations.
+func extractUseDeclarations(source string) string {
+	matches := useBlockRE.FindAllString(source, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, m := range matches {
+		b.WriteString(m)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// useBlockRE matches `use <path>.{ <names> }` declarations including
+// multi-line bodies. The path may contain dots; the body may span
+// multiple lines.
+var useBlockRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+[A-Za-z_][A-Za-z0-9_.]*\.\{[^}]*\}`)
 
 // findMatchingCloseBraceRune walks source from openIdx (position of
 // `{`) and returns the index of the matching `}`. Strings + chars

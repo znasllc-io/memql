@@ -226,25 +226,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `insert()` calls. Exactly one binding source is permitted; the
 	// concept-resolver guards against collisions.
 	var boundConcept string
-	if len(file.Uses) == 1 {
-		if file.Uses[0].ResolvedId != "" {
-			boundConcept = file.Uses[0].ResolvedId
-		} else {
-			// Fallback when registry is nil (no concept resolver ran):
-			// construct concept ID from the use path + version context.
-			version := VersionFromFilePath(origin)
-			if version == "" {
-				version = "v1"
-			}
-			parts := file.Uses[0].Parts
-			startIdx := 0
-			if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
-				version = parts[0]
-				startIdx = 1
-			}
-			if len(parts)-startIdx >= 2 {
-				boundConcept = version + ":" + strings.Join(parts[startIdx:], ":")
-			}
+	// Legacy Form A (`use cognition.space`) is rejected at parse
+	// time, but the resolver still stamps ResolvedId on any
+	// declaration it manages to canonicalize. Pick that up first.
+	// Form B (`use cognition.concepts.{ space, participant }`)
+	// leaves ResolvedId empty -- the binding comes from one of the
+	// fallbacks below.
+	if len(file.Uses) == 1 && file.Uses[0].ResolvedId != "" {
+		boundConcept = file.Uses[0].ResolvedId
+	}
+	// Form B with a single imported Name: resolve that name through
+	// the registry. Procedural queries with bare `concept;` rely on
+	// this when the file imports exactly one concept.
+	if boundConcept == "" && registry != nil && len(file.Uses) == 1 && len(file.Uses[0].Names) == 1 {
+		resolver := NewConceptResolver(registry)
+		if id, err := resolver.resolveBareConceptName(file.Uses[0].Names[0]); err == nil {
+			boundConcept = id
 		}
 	}
 	if boundConcept == "" {
@@ -259,11 +256,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// `use` directive and no legacy `@useConcept` annotation are
 	// present, resolve the signature concept via the registry's
 	// trailing-segment match (same rule the legacy concept-resolver
-	// applied to bare `@useConcept` names). Without this branch the
-	// runtime can't translate the bare concept name (e.g.
-	// `globalSecret`) to its full id (`v1:platform:globalSecret`)
-	// and every mutation that needs the concept binding fails with
-	// "concept ... not found".
+	// applied to bare `@useConcept` names).
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
 		if id, err := resolver.resolveBareConceptName(signatureConcepts[0]); err == nil {
