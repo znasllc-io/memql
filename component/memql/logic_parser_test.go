@@ -9,7 +9,6 @@ import (
 // logic syntax: args block + body block ending in `return <expr>`.
 func TestParseLogicMemQL_GoldenPath(t *testing.T) {
 	src := `@enabled
-@useBuiltin(ensureDailySpaceForUser)
 @description("On user creation, ensure today's daily space exists.")
 logic logicProvisionDailySpaceOnUserCreate {
   args {
@@ -78,16 +77,6 @@ func TestParseLogicMemQL_AcceptsAllAllowedAnnotations(t *testing.T) {
 		`@enabled`,
 		`@disabled`,
 		`@deprecated("hint")`,
-		`@useConcept(foo)`,
-		`@useShape(s)`,
-		`@useSpec(x)`,
-		`@useTrait(t)`,
-		`@useQuery(q)`,
-		`@useMutation(m)`,
-		`@useLogic(l)`,
-		`@useBuiltin(b)`,
-		`@usePrompt(p)`,
-		`@useTool(tn)`,
 	}
 	for _, ann := range cases {
 		t.Run(ann, func(t *testing.T) {

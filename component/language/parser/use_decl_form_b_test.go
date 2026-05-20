@@ -1,12 +1,14 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
-// TestParseUseDeclaration_FormA_BareConcept locks the legacy single-
-// concept import shape.
-func TestParseUseDeclaration_FormA_BareConcept(t *testing.T) {
+// TestParseUseDeclaration_FormA_BareConcept_Rejected locks the
+// PR C lockdown: the legacy `use <ns>.<concept>` shape is rejected
+// at parse time with a migration hint.
+func TestParseUseDeclaration_FormA_BareConcept_Rejected(t *testing.T) {
 	source := `use cognition.participant
 query queryFoo { filter id == args.id; shape participantFull }`
 	tokens, err := NewLexer(source).Tokenize()
@@ -14,28 +16,19 @@ query queryFoo { filter id == args.id; shape participantFull }`
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := NewParser(tokens)
-	file := &File{}
-	for p.check(TokenKeywordUse) {
-		decl, err := p.parseUseDeclaration()
-		if err != nil {
-			t.Fatalf("parseUseDeclaration: %v", err)
-		}
-		file.Uses = append(file.Uses, decl)
+	_, err = p.parseUseDeclaration()
+	if err == nil {
+		t.Fatal("expected Form A rejection, got nil")
 	}
-	if len(file.Uses) != 1 {
-		t.Fatalf("got %d use decls, want 1", len(file.Uses))
-	}
-	u := file.Uses[0]
-	if u.Path != "cognition.participant" {
-		t.Errorf("Path = %q, want cognition.participant", u.Path)
-	}
-	if len(u.Names) != 0 {
-		t.Errorf("Form A use should not populate Names; got %v", u.Names)
+	if !strings.Contains(err.Error(), "retired") {
+		t.Errorf("error should mention 'retired'; got: %v", err)
 	}
 }
 
-// TestParseUseDeclaration_FormA_WithAlias locks `use path as alias`.
-func TestParseUseDeclaration_FormA_WithAlias(t *testing.T) {
+// TestParseUseDeclaration_FormA_WithAlias_Rejected locks the
+// rejection of `use <ns>.<concept> as <alias>`. The aliasing
+// surface is gone post-PR-C; rename at source if names collide.
+func TestParseUseDeclaration_FormA_WithAlias_Rejected(t *testing.T) {
 	source := `use cognition.session as cognSess
 query queryFoo { filter id == args.id; shape sessionFull }`
 	tokens, err := NewLexer(source).Tokenize()
@@ -43,15 +36,12 @@ query queryFoo { filter id == args.id; shape sessionFull }`
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := NewParser(tokens)
-	decl, err := p.parseUseDeclaration()
-	if err != nil {
-		t.Fatalf("parseUseDeclaration: %v", err)
+	_, err = p.parseUseDeclaration()
+	if err == nil {
+		t.Fatal("expected Form A alias rejection, got nil")
 	}
-	if decl.Alias != "cognSess" {
-		t.Errorf("Alias = %q, want cognSess", decl.Alias)
-	}
-	if len(decl.Names) != 0 {
-		t.Errorf("Form A should not populate Names; got %v", decl.Names)
+	if !strings.Contains(err.Error(), "retired") {
+		t.Errorf("error should mention 'retired'; got: %v", err)
 	}
 }
 

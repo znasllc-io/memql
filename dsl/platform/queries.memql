@@ -6,7 +6,6 @@
 use platform.concepts.{ globalVariable, missingCapability, partition }
 
 @enabled
-@useConcept(policyTrace)
 @description("Recent persisted policy traces for the named policy, most-recent first.")
 query policyTrace policyTracesForPolicy {
   args {
@@ -30,7 +29,6 @@ query policyTrace policyTracesForPolicy {
 //
 
 @enabled
-@useConcept(policyTrace)
 @description("All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.")
 query policyTrace queryAllPolicyTraces {
   filter  payload.policyName!=""
