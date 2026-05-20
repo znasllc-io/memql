@@ -550,11 +550,11 @@ func (s *NetHTTP) Addr() string {
 }
 
 func defaultStrictRequestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	http.Error(w, err.Error(), http.StatusBadRequest)
+	WriteSafeError(w, r, nil, http.StatusBadRequest, "bad_request", "invalid request", err)
 }
 
 func defaultStrictResponseErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	WriteSafeError(w, r, nil, http.StatusInternalServerError, "internal", "internal server error", err)
 }
 
 func ensureContext(ctx context.Context) context.Context {

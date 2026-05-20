@@ -62,7 +62,13 @@ func (a *App) transportBase() {
 		// follow-up will swap to identity-issued tokens but the
 		// surface-pin stays the same.
 		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, voiceAgentSharedToken(), a.Logger)
-		a.grpcServer.SetStreamInterceptor(voiceAgentChecked)
+		// Panic recovery wraps the entire chain. A panic anywhere
+		// downstream is caught here, logged with stack + error id,
+		// and surfaced to the client as codes.Internal with the
+		// safe message "internal server error [ERR-...]" -- never
+		// the raw panic value.
+		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(voiceAgentChecked, a.Logger)
+		a.grpcServer.SetStreamInterceptor(recovered)
 		// Hand the verifier to the gRPC server so the in-stream
 		// rotation handler (RotateAuthMsg) can re-verify a refreshed
 		// bearer against the same JWKS + audience + issuer the
