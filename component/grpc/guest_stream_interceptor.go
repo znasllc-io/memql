@@ -27,8 +27,11 @@ const GuestAuthClaimKey = "identity.guest"
 // `Authorization: Guest <token>`. Guest streams are validated at
 // connect time against the invitation registry (via engine); valid
 // guests get a claims map with subject "guest:<invitationId>", the
-// resolved space ID, and the plain token (for handlers that need it,
-// e.g. mutationJoinSpaceAsGuest).
+// resolved space ID, and the token's SHA-256 hash (for handlers
+// that need to re-lookup the invitation row, e.g. mutationJoinSpaceAsGuest).
+// The plain token is intentionally NOT stowed in claims -- claims maps
+// are surfaced in audit logs and debug dumps, and a plain bearer in
+// that path is a log-leak surface.
 //
 // Bearer / non-Guest headers fall through to `base` unchanged.
 //
@@ -114,7 +117,7 @@ func validateGuestAndDispatch(
 		GuestAuthClaimKey: map[string]any{
 			"invitationId": summary.ID,
 			"spaceId":      summary.SpaceId,
-			"token":        plainToken, // handlers that need to forward it (join mutation) read from here
+			"tokenHash":    hashGuestToken(plainToken), // hash only -- plain token must not enter the claims map (log-leak surface)
 			"status":       strings.ToLower(summary.Status),
 		},
 	}
