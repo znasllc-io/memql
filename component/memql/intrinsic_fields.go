@@ -11,7 +11,6 @@ const (
 	intrinsicFieldType
 	intrinsicFieldCreatedAt
 	intrinsicFieldCreatedBy
-	intrinsicFieldPartition
 	// intrinsicFieldProvenance is the engine-stamped origin metadata
 	// (see component/provenance). Unlike the other intrinsics it is a
 	// JSON object and supports nested paths (provenance.kind,
@@ -50,11 +49,6 @@ var intrinsicFieldRegistry = map[string]intrinsicFieldInfo{
 		kind:      intrinsicFieldCreatedBy,
 		canonical: "createdBy",
 		column:    `"createdBy"`,
-	},
-	"partition": {
-		kind:      intrinsicFieldPartition,
-		canonical: "partition",
-		column:    "partition",
 	},
 	"provenance": {
 		kind:      intrinsicFieldProvenance,
