@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, partitionAccess, user, workerPairingCode }
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, user, workerPairingCode }
 
 @row
 @description("Full projection of v1:identity:accessRequest including review state and risk signals.")
@@ -126,7 +126,7 @@ shape delegation delegationFull {
 }
 
 @row
-@description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person, delegationFull for delegations, partitionAccessFull for grants.")
+@description("Comprehensive identity projection for the post-restructure identity concept: a credential set owned by a user. Use userFull for the person and delegationFull for delegations.")
 shape identity identityFull {
   row.id
   payload.userId
@@ -183,24 +183,6 @@ shape magicLinkRequest magicLinkRequestFull {
   payload.sourceIP
   payload.userAgent
   payload.invitationId
-  row.createdAt
-}
-
-@row
-@description("Comprehensive partition-access projection: a single grant authorizing a user to operate in a partition with a given role.")
-shape partitionAccess partitionAccessFull {
-  row.id
-  payload.userId
-  payload.partitionName
-  payload.role
-  payload.grantedBy
-  payload.grantedAt
-  payload.expiresAt
-  payload.active
-  payload.source
-  payload.sourceRef
-  payload.revokedAt
-  payload.revokedBy
   row.createdAt
 }
 

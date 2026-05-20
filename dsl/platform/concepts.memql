@@ -28,18 +28,6 @@ concept globalVariable {
   active       bool    @default("true")  @description("When false the resolver ignores this row.")
 }
 
-@version("1.0.0")
-@namespace("platform")
-@description("Data isolation boundary within a database instance. Every node belongs to exactly one partition; queries are auto-scoped, no cross-partition reads. CoPresent surfaces this concept to end users as a 'workspace'. The id is the partition slug (lowercase alphanumeric + inner dashes); displayName is the human-readable label shown in UI. Authorization to operate in a partition is held on v1:identity:partitionAccess grants -- creating a partition does NOT by itself grant access; the caller must also issue a partitionAccess(role=owner) grant for themselves. The atomic two-write wrapper got removed because the MemQL Mutation parser only allows a single insert per body; callers run mutationCreatePartition followed by mutationGrantPartitionAccess as two client-side calls today. Note: the original creator's identity subject is auto-stamped onto every node version as the reserved `createdBy` intrinsic (set from the request actor); we don't redeclare it on this concept's payload schema.")
-concept partition {
-  name           string  @required @description("Unique partition slug. Lowercase alphanumeric and inner dashes only, 1-50 chars (DNS-label rules). Used as the concept id, the database PK column value, and the {partition} segment in event topics, so it must be filesystem/URL/topic safe. Renames are forbidden because v1:identity:partitionAccess grants reference this name.")
-  displayName    string  @description("Human-readable workspace label shown in CoPresent UI. Free-form, may contain spaces and unicode. Auto-derived from name if not provided.")
-  description    string  @description("Optional one-line description of the workspace's purpose.")
-  partitionType  enum("standard", "dedicated", "personal")  @default("standard") @description("Partition deployment type.")
-  status         enum("active", "draining")  @default("active") @description("Lifecycle state. 'draining' is used for soft-deleted partitions; the CLI hides them from the list. Hard-delete (purging the data rows in that partition) is an out-of-band admin operation.")
-  config         object  @description("Partition-specific configuration.")
-}
-
 // ---- concepts/v1/platform/globalSecret/seed.memql ----
 
 @actor("system")

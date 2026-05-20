@@ -3,54 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.concepts.{ globalSecret, globalVariable, missingCapability, partition, partitionSecret, partitionVariable }
-
-@enabled
-@description("Create or re-register a v1:platform:partition row.")
-mutation partition mutationCreatePartition {
-  args {
-    name           string  @required
-    displayName    string
-    description    string
-    partitionType  string
-    config         object
-  }
-  insert partition {
-    id: args.name
-    args.name
-    args.displayName
-    args.description
-    partitionType: coalesce(args.partitionType, "standard")
-    status: "active"
-    config: coalesce(args.config, {})
-  }
-}
-
-// ---- mutations/v1/platform/deletePartition.memql ----
-
-// Soft-delete a partition by appending a new version with
-// status="draining". The CLI hides draining partitions from the list.
-//
-// Hard-delete (purging the actual data rows in this partition) is an
-// out-of-band admin operation -- doing it here would orphan thousands
-// of rows whose composite PK includes this partition string. See
-// docs/ROADMAP.md for the planned admin tooling.
-
-@enabled
-@description("Soft-delete a partition (mark draining)")
-mutation partition mutationDeletePartition {
-  args {
-    name           string  @required
-    partitionType  string
-  }
-  insert partition {
-    id: args.name
-    args.name
-    partitionType: coalesce(args.partitionType, "standard")
-    status: "draining"
-    config: {}
-  }
-}
+use platform.concepts.{ globalSecret, globalVariable, missingCapability, partitionSecret, partitionVariable }
 
 // ---- mutations/v1/platform/insertPolicyTrace.memql ----
 
@@ -247,38 +200,6 @@ mutation partitionVariable mutationSetPartitionVariable {
     args.value
     args.description
     active: coalesce(args.active, true)
-  }
-}
-
-// ---- mutations/v1/platform/updatePartition.memql ----
-
-// mutationUpdatePartition
-// =======================
-//
-// Append a new version of an existing v1:platform:partition row.
-// Reuses the same id (the slug) so the change appends a new version
-// on the existing time-series row instead of creating a separate
-// partition record. The slug itself cannot change -- partitionAccess
-// grants reference it by name, so renames are forbidden.
-
-@enabled
-@description("Update partition display fields / config / type")
-mutation partition mutationUpdatePartition {
-  args {
-    name           string  @required
-    displayName    string
-    description    string
-    partitionType  string
-    config         object
-  }
-  insert partition {
-    id: args.name
-    args.name
-    args.displayName
-    args.description
-    partitionType: coalesce(args.partitionType, "standard")
-    status: "active"
-    config: coalesce(args.config, {})
   }
 }
 

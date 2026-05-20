@@ -1087,108 +1087,53 @@ policy-only annotations and points the author at the spec form.
 
 ## Key Concepts
 
-### Partitions
-Data isolation boundaries within a database instance. Concepts live in one
-of two scopes:
+### Authorization model
 
-- **Partition-scoped (default)** -- domain/tenant data. Every row stamps
-  the request envelope's partition into its PK, and queries are
-  auto-scoped to that same partition. No cross-partition reads from
-  user data. Cognition, HR, finance, common concepts all live here.
-- **Global** -- infrastructure metadata that has to be visible from
-  every tenant's view. Cluster topology (`v1:cluster:*`), identity
-  (`v1:identity:*`), and the partition registry itself
-  (`v1:platform:partition`) carry `@scope("global")` in their `.memql`
-  file. Their rows live in the reserved `_system` partition regardless
-  of envelope; their events fire under
-  `graph.node.created._system.<concept>`.
+Per-row authorization is the only gate (see
+[docs/auth/per-row-authz-audit.md](docs/auth/per-row-authz-audit.md)).
+Every query and mutation in the DSL classifies as **owned** (filter
+on `payload.ownerUserId == caller.userId`), **granted** (relationship
+predicate gates on caller.userId), **admin** (cluster-owner spec), or
+**public** (`@public` annotation). The classification test in
+`dsl/conformance_test.go` hard-fails on any new unclassified
+construct.
 
-The active partition for partition-scoped requests is taken from the
-gRPC envelope (`MemqlClientMessage.partition`); when absent it defaults
-to `"default"`. Global concepts ignore this field entirely.
-
-**Authorization** is enforced per-row inside DSL queries + mutations
-post-#56 phase 4 (see [docs/auth/per-row-authz-audit.md](docs/auth/per-row-authz-audit.md)).
-The PartitionACL middleware was retired in that phase; the
-envelope.partition dimension is still on the wire (phase 5 strips
-the field) but no longer gates dispatch. The subscription handler
-(`handleSubscribe` + `scopeGraphPatternToPartition`) still rewrites
-graph subscription patterns server-side against envelope.partition so
-event topics stay scoped.
-
-**Slug rules.** Partition names are DNS-label-shape: lowercase
-alphanumeric + inner dashes, 1-50 chars, no leading underscore
-(reserved for `_system`). `core/id.ValidatePartitionName` and
-`SuggestPartitionSlug` are the canonical helpers; the engine pre-insert
-guard on `v1:platform:partition`
-(`component/memql/platform_partition_validation.go`) enforces the
-shape regardless of caller, so a raw insert / mutation / automation
-all fail the same way.
-
-**Workspace creation.** CoPresent surfaces partitions as "workspaces."
-Creating one is a two-call dance from the client:
-`mutationCreatePartition` then `mutationGrantPartitionAccess(role=owner)`.
-The intent of an atomic wrapper is documented in `createPartition.memql`
-but the wrapper is gone -- the MemQL Mutation parser only allows a
-single `insert()` per body. A `bootstrapWorkspaceOwnerAccess` automation
-firing on `graph.node.created._system.v1:platform:partition` would
-collapse this back to one call once it lands.
-
-**`createdBy` is auto-stamped.** Don't redeclare it on a concept's
-payload schema -- it's a reserved intrinsic the engine sets from the
-request actor on every insert. See
-[memql-authoring-rules.md #19](docs/core/memql-authoring-rules.md#19-reserved-intrinsics-do-not-redeclare-id--createdby--createdat--partition).
-
-The CLI's Clusters tab includes a partition manager that lists the
-`v1:platform:partition` rows (global, so visible from any partition),
-lets you create / soft-delete partitions, and stamps the selected
-partition onto every outgoing request. Selection persists per-cluster
-in `~/.memql/clusters.yaml`. Switching partitions changes the scope
-for user data but never hides the cluster topology or the partition
-list -- those are global.
-
-Future: tying partition selection to the authenticated identity
-(identity-issued JWT `partitions` claim → partition) is tracked in
-[docs/ROADMAP.md](docs/ROADMAP.md).
+The partition dimension that historically gated tenant isolation is
+retired in #56 (phases 1-7 of which are landed; phase 8 sweeps the
+remaining cross-repo wire stragglers). `envelope.partition` is still
+on the gRPC wire as a no-op until phase 8.
 
 ### Concepts
-Schemas for nodes (like tables in SQL)
-```memql
-concept==v1:common:agent
-```
-
-Concepts declare their partition scope via an optional annotation:
-
-- **(default, no annotation) -- partition-scoped.** Rows stamp the
-  envelope's partition; reads auto-filter on it. Tenant data.
-- **`@scope("global")` -- global.** Rows live in the reserved
-  `_system` partition regardless of envelope. Used for cluster
-  topology and the partition registry -- anything every tenant needs
-  to see the same way.
+Schemas for nodes (like tables in SQL).
 
 ```memql
-@description("A registered node in the memQL cluster.")
-@scope("global")
-concept Node { ... }
+concept agent {
+  ownerUserId  string  @required
+  // ...
+}
 ```
 
 ### Nodes
-Individual records with time-series history. IDs include the partition prefix:
+Individual records with time-series history. IDs are
+`{concept}:{shortId}`:
+
 ```
-{partition}:{concept}:{contentHash}
-Example: acme:v1:common:agent:a9f3b7c2...
-```
-Global-scoped concepts use `_system` as the partition prefix:
-```
-_system:v1:cluster:node:bff-local
+v1:common:agent:a9f3b7c2...
+v1:cluster:node:bff-local
 ```
 
 ### Automations
-Event-driven workflows. Trigger patterns use `*` to match any partition:
+Event-driven workflows. Trigger patterns key off concept:
+
 ```memql
 @trigger(event="graph.node.created.*.v1:cognition:participant")
-func (Automation) autoJoinSI() { ... }
+automation autoJoinSI { ... }
 ```
+
+> **#56 phase 8 caveat:** the event topic still embeds a partition
+> segment (`graph.node.created.{partition}.{concept}`), which is why
+> trigger patterns carry a `.*.` wildcard between `created` and the
+> concept name. That segment goes away in phase 8.
 
 ### Functions
 Reusable query and mutation functions. Both default to the struct

@@ -3,23 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, partitionAccess, user, workerPairingCode }
-
-@enabled
-// `@public` marks this query as intentionally not caller-scoped.
-// Called by the auth middleware (`component/auth/access/middleware.go`)
-// under system context to build the PartitionACL. Goes away
-// entirely with #56 (partition removal); no point in caller-
-// scoping it.
-@public
-@description("Active partition grants held by a user; used to build the PartitionACL for request authorization.")
-query partitionAccess queryAccessForUser {
-  args {
-    userId  string  @required
-  }
-  filter  payload.userId==args.userId; traitIsActiveRecord
-  shape   partitionAccessFull
-}
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, user, workerPairingCode }
 
 // ---- queries/v1/identity/accessRequestById.memql ----
 
@@ -659,59 +643,6 @@ query magicLinkRequest queryMagicLinkRequestByTokenHash {
   shape   magicLinkRequestFull
 }
 
-// ---- queries/v1/identity/membersOfPartition.memql ----
-
-// queryMembersOfPartition - Users with access to a partition
-// ==========================================================
-//
-// Returns every active grant targeting a given partition. Used by
-// admin UIs to answer "who can touch this partition" and by the JC
-// group-sync job to compare desired vs. actual membership for a group-
-// mapped partition.
-//
-// Arguments:
-//   partitionName (string, required) - partition name (matches
-//     v1:platform:partition.name)
-//
-// Returns:
-//   Array of partition-access grants in partitionAccessFull shape.
-
-@enabled
-@description("Active partition-access grants targeting a partition.")
-query partitionAccess queryMembersOfPartition {
-  args {
-    partitionName  string  @required
-  }
-  filter  payload.partitionName==args.partitionName; traitIsActiveRecord
-  shape   partitionAccessFull
-}
-
-// ---- queries/v1/identity/partitionsForUser.memql ----
-
-// queryPartitionsForUser - User's partition list
-// ==============================================
-//
-// Alias of accessForUser today, kept as a named query so the Cockpit
-// Settings tab (and future admin tooling) can request "what partitions
-// does this user have?" without the caller having to know it's the same
-// concept shape. Returns the same partitionAccessFull rows.
-//
-// If we ever split "partition list" from "grant detail" (e.g. to hide
-// grantedBy from non-admins), that split lands here.
-
-@enabled
-// `@public` marks this query as intentionally not caller-scoped.
-// Alias of `queryAccessForUser` for the cockpit Settings tab.
-// Goes away with #56 (partition removal).
-@public
-@description("Partitions accessible to a user, returned as partition-access grants.")
-query partitionAccess queryPartitionsForUser {
-  args {
-    userId  string  @required
-  }
-  filter  payload.userId==args.userId; traitIsActiveRecord
-  shape   partitionAccessFull
-}
 
 // ---- queries/v1/identity/patIdentitiesForUser.memql ----
 

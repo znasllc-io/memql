@@ -28,9 +28,8 @@
 //
 // The pending-access-request table is small (admin queue), so
 // iterating all of it daily is cheap.
-use identity.mutations.{ mutationConsumeMagicLinkRequest, mutationDeleteUserHard, mutationExpireAccessRequest, mutationGrantPartitionAccess, mutationRevokeDelegation }
+use identity.mutations.{ mutationConsumeMagicLinkRequest, mutationDeleteUserHard, mutationExpireAccessRequest, mutationRevokeDelegation }
 use identity.queries.{ queryExpiredActiveDelegations, queryExpiredAuditEvents, queryExpiredMagicLinkRequests, queryExpiredPendingAccessRequests, queryUsersInDeletionCooldown, queryUsersScheduledForDeletion }
-use platform.mutations.{ mutationCreatePartition }
 use platform.queries.{ queryGlobalVariable }
 
 @description("Daily 04:00 UTC sweep that ages out pending access requests older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30) by stamping status='expired'. Per-row windowing via addDuration(createdAt, P{N}D) since MemQL filters can't push the duration math down. Pending queue is small (admin), so daily walk is cheap.")
@@ -369,69 +368,6 @@ logic logicOnDelegationCreated {
     }
   })
   return emitEvent
-  }
-}
-
-// provisionPersonalPartitionOnFirstLogin
-// =======================================
-//
-// On `graph.node.created.*.v1:identity:user`, materialises a
-// per-user "personal" partition for external (non-internal) users
-// and grants them owner role on it. Internal users skip this step
-// entirely -- they receive cluster-wide access via the
-// IDENTITY_INTERNAL_DEFAULT_ROLE that the magic-link verifier
-// stamps on their user row at first-login time.
-//
-// The partition name follows the convention
-// `user-<hash(primaryEmail)>` so it's deterministic + DNS-label-shape
-// (lowercase, dashes only, well under 50 chars). The hash keeps the
-// raw email out of the partition slug, both for readability and for
-// the case where the user later changes their primary email (the
-// partition stays stable).
-//
-// Idempotency:
-// - mutationCreatePartition is keyed on the slug; a re-run produces
-//   a new time-series version of the same partition row. Harmless.
-// - mutationGrantPartitionAccess is keyed on `<userId>:<partition>`;
-//   re-grants are also append-only versions of the same row.
-//
-// Internal-user gating reads `ctx.input.payload.internal`. The User
-// concept stamps a default of `false`, so an external user lands
-// here unconditionally. The internal flag is set by the magic-link
-// verifier when the registering email matches IDENTITY_INTERNAL_DOMAINS.
-@description("On v1:identity:user create for an external (non-internal) user, materialises a per-user 'personal' partition (slug='user-<hash(primaryEmail)>') and grants the user owner role on it. Internal users skip this entirely -- they receive cluster-wide access via the IDENTITY_INTERNAL_DEFAULT_ROLE the magic-link verifier stamps at first login. Idempotent (both inserts are append-only versions of the same row).")
-logic logicProvisionPersonalPartitionOnFirstLogin {
-  args {
-    event object @required
-  }
-  body {
-  // Skip internal users entirely. They live cluster-wide; per-user
-  // partition isolation isn't desired for them.
-  newPartition := if args.event.payload.internal != true {
-    mutationCreatePartition({
-      name: concat("user-", hash(args.event.payload.primaryEmail)),
-      displayName: concat("Personal -- ", args.event.payload.primaryEmail),
-      description: "Personal workspace auto-provisioned at first login.",
-      partitionType: "personal"
-    })
-  }
-
-  // Grant the new user owner role on their personal partition. The
-  // grant id mirrors bootstrapIdentity's `<userId>:<partition>`
-  // convention.
-  newGrant := if args.event.payload.internal != true {
-    mutationGrantPartitionAccess({
-      grantId: concat(args.event.payload.id, ":user-", hash(args.event.payload.primaryEmail)),
-      userId: args.event.payload.id,
-      partitionName: concat("user-", hash(args.event.payload.primaryEmail)),
-      role: "owner",
-      grantedBy: args.event.payload.id,
-      grantedAt: timestamp(),
-      source: "manual"
-    })
-  }
-
-  return coalesce(newGrant, newPartition, 0)
   }
 }
 
