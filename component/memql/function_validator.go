@@ -325,8 +325,18 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 		return nil, fmt.Errorf("function %q is a mutation and cannot be used inside query expressions", key)
 	}
 
-	// Validate arguments against schema
-	args := call.Args
+	// Validate arguments against schema. Normalise positional
+	// object-literal wrapping first: the language parser produces
+	// `funcName({a: 1, b: 2})` as Args = {"0": {a: 1, b: 2}} (single
+	// positional arg holding the named-args object); the engine's own
+	// expression parser produces flat args directly. Both shapes are
+	// valid input here; downstream code (validator, ArgRef
+	// substitution, mutation-template rendering) expects the flat
+	// shape. Reducing here means callers never have to think about
+	// which parser produced the call. The F.6 path
+	// (`substituteArgRefsAndCallArgs`) does the same flattening
+	// after substitution.
+	args := flattenPositionalArgs(call.Args)
 	if args == nil {
 		args = make(map[string]any)
 	}
@@ -358,6 +368,20 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	}
 
 	return expanded, nil
+}
+
+// flattenPositionalArgs reduces a single-positional object-literal
+// call args shape (`{"0": {a: 1, b: 2}}`) to its flat form
+// (`{a: 1, b: 2}`). Non-positional inputs pass through unchanged.
+func flattenPositionalArgs(args map[string]any) map[string]any {
+	if len(args) != 1 {
+		return args
+	}
+	inner, ok := args["0"].(map[string]any)
+	if !ok {
+		return args
+	}
+	return inner
 }
 
 // expandFunctionCallAllowMutationLeaf expands a Logic function call
