@@ -48,6 +48,15 @@ type Options struct {
 	MaxMessageBytes       int64
 	WriteTimeout          time.Duration
 	PingInterval          time.Duration
+	// OriginPatterns is the allow-list of Origin header values that may
+	// upgrade to a WebSocket. Patterns are passed verbatim to
+	// nhooyr.io/websocket's AcceptOptions; that library matches with
+	// shell-style globs (so "https://*.example.com" works). Empty means
+	// "fall back to the legacy wildcard". Production deployments should
+	// always supply an explicit list (e.g. via MEMQL_WEBSOCKET_ORIGIN_PATTERNS
+	// in the bootstrap config) so the upgrade can't be triggered from an
+	// arbitrary attacker page. See docs/auth/threat-model.md.
+	OriginPatterns []string
 }
 
 // Handler proxies WebSocket frames to the MemQL gRPC stream surface.
@@ -59,6 +68,7 @@ type Handler struct {
 	maxMessageBytes       int64
 	writeTimeout          time.Duration
 	pingInterval          time.Duration
+	originPatterns        []string
 }
 
 // New constructs a Handler.
@@ -75,7 +85,24 @@ func New(opts Options) (*Handler, error) {
 		maxMessageBytes:       firstPositiveInt64(opts.MaxMessageBytes, defaultMaxMessageBytes),
 		writeTimeout:          firstDuration(opts.WriteTimeout, defaultWriteTimeout),
 		pingInterval:          firstDuration(opts.PingInterval, defaultPingInterval),
+		originPatterns:        sanitizeOriginPatterns(opts.OriginPatterns),
 	}, nil
+}
+
+// sanitizeOriginPatterns drops empty strings and trims whitespace. When
+// the result is empty, the handler falls back to the legacy wildcard
+// pattern so existing dev environments stay unblocked. A WARN log at
+// upgrade time flags the situation.
+func sanitizeOriginPatterns(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		t := strings.TrimSpace(s)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // ServeHTTP upgrades eligible requests and proxies messages.
@@ -93,9 +120,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Allow any authenticated user (role check removed to support frontend client apps)
 
+	originPatterns := h.originPatterns
+	if len(originPatterns) == 0 {
+		// No allow-list configured. Fall back to wildcard for backwards
+		// compatibility, but log so the operator knows the upgrade is
+		// effectively unauthenticated by origin. Production deployments
+		// must populate MEMQL_WEBSOCKET_ORIGIN_PATTERNS.
+		h.logWarn("memql websocket origin allow-list empty; accepting any origin -- configure MEMQL_WEBSOCKET_ORIGIN_PATTERNS in production",
+			"remote", remoteAddr(r))
+		originPatterns = []string{"*"}
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
-		OriginPatterns:  []string{"*"},
+		OriginPatterns:  originPatterns,
 	})
 	if err != nil {
 		h.logError("websocket accept failed", err)

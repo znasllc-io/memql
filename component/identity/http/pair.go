@@ -17,6 +17,50 @@ import (
 // can supply a smaller / larger TTL via the request body.
 const defaultPairingCodeTTL = 10 * time.Minute
 
+// envAllowInsecurePair is the dev-only escape hatch that bypasses the
+// HTTPS-required check on /pair/codes and /pair/redeem. The pair code
+// is a bearer credential, so production deployments must NEVER set
+// this. The runtime emits a WARN log every time a request slips
+// through under the escape hatch so accidental production toggles
+// surface in the operator's log shipper.
+const envAllowInsecurePair = "MEMQL_IDENTITY_ALLOW_INSECURE_PAIR"
+
+// requireSecureRequest rejects HTTP-only requests on endpoints that
+// must run over TLS. The pair-code endpoints carry plaintext
+// credentials inside the Authorization header (Pair <code>) and
+// inside the JSON response (plainCode), so a plaintext hop here is a
+// credential-leak surface. A reverse-proxy fronting plaintext to the
+// binary surfaces the deployment posture via X-Forwarded-Proto.
+//
+// Returns true when the request is admissible; writes a 403 and
+// returns false otherwise.
+func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bool {
+	if r == nil {
+		http.Error(w, "no request", http.StatusBadRequest)
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+		return true
+	}
+	if strings.TrimSpace(os.Getenv(envAllowInsecurePair)) == "1" {
+		if s != nil && s.Logger != nil {
+			s.Logger.Warn("pair endpoint admitting plaintext request via "+envAllowInsecurePair+"=1; production must leave this unset",
+				"path", r.URL.Path,
+				"remote", clientIP(r),
+			)
+		}
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"error":     "https required",
+		"errorCode": "insecure_transport",
+	})
+	return false
+}
+
 // PairCreateRequest is the JSON body for POST /pair/codes. Authenticated
 // callers (CoPresent's Connect Computer modal) supply their cluster
 // URL + an optional owner override (admin-only). The server stamps
@@ -67,6 +111,9 @@ type PairRedeemResponse struct {
 // own the signing keys themselves), so we verify the bearer token
 // directly via the local issuer.
 func (s *Server) handlePairCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSecureRequest(w, r) {
+		return
+	}
 	if s.Store == nil || s.Issuer == nil {
 		s.writePairError(w, http.StatusInternalServerError, "server", "identity engine not wired")
 		return
@@ -167,6 +214,9 @@ func (s *Server) handlePairCreate(w http.ResponseWriter, r *http.Request) {
 // implementation; on HTTP it's a single hop, so the same logic lives
 // inline).
 func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSecureRequest(w, r) {
+		return
+	}
 	if s.Store == nil {
 		s.writeRedeemError(w, http.StatusInternalServerError, "server", "identity engine not wired")
 		return
