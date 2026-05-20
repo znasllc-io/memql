@@ -415,7 +415,7 @@ func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCa
 
 // substituteArgRefsAndCallArgs handles the F.6 case where a Logic's
 // `return <expr>` body is a top-level mutation call -- e.g.
-// `return mutationCreatePartition({ id: args.id, name: args.name })`.
+// `return mutationCreateSpace({ id: args.id, name: args.name })`.
 // We need a fully-substituted top-level FunctionCallExpression so
 // resolvePlanFunctions can hoist it into plan.MutationCall. ArgReference
 // nodes live in the call-args value space (not the ExpressionNode

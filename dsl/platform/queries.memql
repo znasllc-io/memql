@@ -3,8 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use platform.concepts.{ globalVariable, missingCapability, partition }
-use common.traits.{ traitStatusIsActive }
+use platform.concepts.{ globalVariable, missingCapability }
 
 @enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
@@ -98,26 +97,6 @@ query globalVariable queryGlobalVariables {
   }
   filter  payload.name in args.names; traitIsActiveRecord
   shape   variableFull
-}
-
-// ---- queries/v1/platform/listPartitions.memql ----
-
-// Returns every partition row. Per-partition ACL was retired in #56
-// phase 4; every authenticated caller sees the full list. The
-// v1:platform:partition concept itself is going away in #56 phase 7.
-//
-// The CLI still dedupes to latest-per-id, pins "default" first, and
-// sorts the rest alphabetically because directives like sort() /
-// paginate() / asOf() cannot appear inside a function body (engine
-// init fails). See docs/core/memql-authoring-rules.md gotcha #1.
-//
-// @public: every authenticated caller may list partitions.
-
-@enabled
-@description("List partitions")
-@public
-query partition queryListPartitions {
-  filter  traitStatusIsActive
 }
 
 // ---- queries/v1/platform/userDefaults.memql ----

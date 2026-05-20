@@ -37,7 +37,7 @@ concept auditEvent {
   actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
-  targetType      enum("user", "session", "identity", "partitionAccess", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "")  @default("")  @description("Concept type of the target row, if any.")
+  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "")  @default("")  @description("Concept type of the target row, if any.")
   targetId        string  @description("Identifier of the target row when targetType is set.")
   targetEmail     string  @description("Email associated with the target, if applicable. Useful for filtering audit history by user without needing a join.")
 
@@ -232,24 +232,7 @@ concept magicLinkRequest {
 
 @version("1.0.0")
 @namespace("identity")
-@description("A grant authorizing a v1:identity:user to operate in a specific partition with a given role. The gRPC middleware enforces this on every request (envelope.partition must be in the caller's allowed set, role must be sufficient for the operation). Grants are time-series records keyed by (userId, partition); re-granting the same pair appends a new version so history is preserved. Global scope: lives in _system and is readable from any partition.")
-concept partitionAccess {
-  active        bool    @default("true")  @description("Soft-revoke flag. active=false means the grant is ineffective; same pattern as partition draining. Hard-deletion never happens so the audit trail survives.")
-  userId        string  @required  @description("Recipient of the grant (v1:identity:user.id).")
-  partitionName string  @required  @description("Partition NAME, matching v1:platform:partition.name. Stored as `partitionName` (not `partition`) because `partition` is a reserved payload-level field name in the engine. Partition renames are forbidden precisely because these grants reference the name.")
-  role          enum("owner", "admin", "writer", "reader")  @required  @description("Role held by the user within this partition. partition-owner/partition-admin are the partition's admins; writer can mutate data; reader can only read. Cluster-wide roles on v1:identity:user are a separate axis.")
-  grantedBy     string  @required  @description("User (v1:identity:user.id) who issued this grant. For self-grants by the bootstrap automation, this equals userId.")
-  grantedAt     datetime  @required  @description("When the grant was issued.")
-  expiresAt     datetime  @description("Optional auto-expiry. After this timestamp the middleware treats the grant as inactive even if active=true.")
-  source        enum("manual")  @default("manual")  @description("How this grant was created. manual = someone called grantPartitionAccess explicitly. Reserved as an enum for future provenance variants (e.g. SCIM-driven, SSO-group-driven) without re-shaping the column.")
-  sourceRef     string  @description("Free-form back-reference to whatever produced the grant. Empty for manual grants; non-manual provenance variants stamp an external id here so audit can answer 'where did this come from?'.")
-  revokedAt     datetime  @description("Set when active flipped to false. Together with revokedBy it answers 'who yanked Alice out of acme and when?'.")
-  revokedBy     string  @description("User (v1:identity:user.id) who revoked the grant.")
-}
-
-@version("1.0.0")
-@namespace("identity")
-@description("A person (or synthetic principal). Owns identities and partition-access grants. Same record across every partition the user can touch. Global scope: lives in _system and is readable from any partition.")
+@description("A person (or synthetic principal). Owns identities. Same record cluster-wide.")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")
   displayName     string  @required  @description("Display name shown in the UI. By convention this is firstName + ' ' + lastName when both are populated; the admin / setup wizard maintain that invariant. Standalone field (rather than a derived computed view) because legacy rows pre-date the firstName/lastName split and we want a stable display value to fall back on.")

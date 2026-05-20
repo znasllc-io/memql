@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, partitionAccess, user, workerPairingCode }
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, user, workerPairingCode }
 
 @enabled
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
@@ -302,7 +302,7 @@ mutation auditEvent mutationCreateAuditEvent {
     actorEmail       string
     actorRole        string
     actorIdentityId  string
-    targetType       string  @enum("user", "session", "identity", "partitionAccess", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings")
+    targetType       string  @enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings")
     targetId         string
     targetEmail      string
     detail           object
@@ -996,51 +996,6 @@ mutation accessRequest mutationExpireAccessRequest {
   }
 }
 
-// ---- mutations/v1/identity/grantPartitionAccess.memql ----
-
-// grantPartitionAccess
-// ====================
-//
-// Creates or renews a v1:identity:partitionAccess grant: "user U has
-// role R in partition P". The gRPC middleware reads the user's active
-// grants on every request and rejects any request whose envelope.partition
-// is not in the allowed set, or whose operation exceeds the granted role.
-//
-// ID convention: <userId>:<partition>. Re-granting the same pair appends
-// a new time-series version (latest wins); this is the update path.
-//
-// source="manual" for human-issued grants. The enum is reserved for
-// future provenance variants (SCIM-driven, SSO-group-driven, etc.) so
-// a sync job can later own only its own rows via sourceRef.
-
-@enabled
-@description("Grant a user access to a partition at a given role.")
-mutation partitionAccess mutationGrantPartitionAccess {
-  args {
-    grantId        string  @required
-    userId         string  @required
-    partitionName  string  @required
-    role           string  @required  @enum("owner", "admin", "writer", "reader")
-    grantedBy      string  @required
-    grantedAt      string  @required
-    expiresAt      string
-    source         string  @enum("manual")
-    sourceRef      string
-  }
-  insert partitionAccess {
-    id: args.grantId
-    args.userId
-    args.partitionName
-    args.role
-    args.grantedBy
-    args.grantedAt
-    args.expiresAt
-    active: true
-    source: coalesce(args.source, "manual")
-    args.sourceRef
-  }
-}
-
 // ---- mutations/v1/identity/recordLegalAcceptance.memql ----
 
 // recordLegalAcceptance
@@ -1257,31 +1212,6 @@ mutation identity mutationRevokePATIdentity {
     args.label
     usableByAgents: coalesce(args.usableByAgents, false)
     active: false
-  }
-}
-
-// ---- mutations/v1/identity/revokePartitionAccess.memql ----
-
-// revokePartitionAccess
-// =====================
-//
-// Soft-revokes a v1:identity:partitionAccess grant (active=false). The
-// row stays in the time-series so audit queries ("who had access and
-// when?") still work. Hard-delete is never used for access grants.
-//
-// The caller passes the full current payload plus the revocation fields;
-// memQL is append-only so partial updates require read-modify-write.
-
-@enabled
-@description("Revoke a partition-access grant (soft-revoke, preserves history).")
-mutation partitionAccess mutationRevokePartitionAccess {
-  args {
-    grantId  string  @required
-    payload  object  @required
-  }
-  insert partitionAccess {
-    id: args.grantId
-    args.payload
   }
 }
 

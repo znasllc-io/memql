@@ -3,34 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-// ---- logic/v1/platform/bootstrapDefaultPartition.memql ----
-
-// Ensure the "default" partition exists in v1:platform:partition.
-//
-// Without this row the CLI's partition list shows up empty even
-// though every query implicitly targets "default" -- confusing. Run
-// on every startup; createPartition is idempotent (same id "default"
-// just appends a new identical version).
-//
-// Runs on ALL node types but every node hits the same shared
-// database, so the redundant inserts are harmless and the row
-// converges to its expected state on first boot.
-use platform.mutations.{ mutationCreatePartition }
 use platform.queries.{ queryAllPolicyTraces, queryGlobalVariable }
-
-@description("Ensures the 'default' partition exists in v1:platform:partition on every startup. Without this row the CLI's partition list shows empty even though queries implicitly target 'default'. Idempotent (re-runs append-only versions of the same id). Runs on every node type; the shared database makes the redundant inserts harmless.")
-logic logicBootstrapDefaultPartition {
-  args {
-    event object
-  }
-  body {
-    return mutationCreatePartition({
-      name:          "default",
-      partitionType: "standard",
-      config:        {}
-    })
-  }
-}
 
 // purgeExpiredPolicyTraces
 // ========================

@@ -6,15 +6,6 @@ import (
 	"unicode"
 )
 
-// DefaultPartition is the historical partition prefix. Retained as a
-// stub for callers that haven't been swept yet; new id-shaped values
-// never carry it post-#56 phase 6.
-//
-// Deprecated: the partition segment is gone from the canonical id
-// format. Remaining references are cleaned up across the next #56
-// phases.
-const DefaultPartition = "default"
-
 // ParseNodeId splits a full node ID into its concept and short ID
 // components.
 //
