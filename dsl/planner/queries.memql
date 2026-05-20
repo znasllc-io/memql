@@ -28,27 +28,16 @@
 
 use planner.concepts.{ plan, task, taskState }
 
+// payload.spaceId!="" is the tautological row-matches-all predicate:
+// spaceId is @required on the Plan concept, so every row passes. We
+// can't use traitIsNotDeleted / traitIsActiveRecord because Plans
+// don't carry the `deleted` or `active` fields those traits filter
+// on.
 @enabled
-@description("Every Plan in the active partition. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
-func (Query) queryAllPlans(ctx any) (any, error) {
-  // The shape() form requires at least one filter expression after
-  // `concept;` -- a true bare `shape(concept, "shapeName")` is not
-  // an established pattern in this repo. The earlier draft used
-  // `traitIsNotDeleted`, mirroring queryAllAgents, but that spec
-  // checks `plan.deleted!=true` -- Agents declare a `deleted`
-  // field and Plans do not, so the predicate failed for every row
-  // and the panel rendered empty. Same trap for traitIsActiveRecord
-  // (Plans don't carry `active` either).
-  //
-  // `plan.spaceId!=""` is the right tautological filter for
-  // Plans: spaceId is @required on the concept, so every row
-  // matches. Verified against a live BFF: queryAllPlans() returns
-  // the same row count as queryPlansForSpace() summed across spaces.
-  return shape(
-    concept;
-    payload.spaceId!="",
-    "planFull"
-  ), nil
+@description("Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
+query plan queryAllPlans {
+  filter  payload.spaceId!=""
+  shape   planFull
 }
 
 @enabled
