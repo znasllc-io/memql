@@ -147,3 +147,33 @@ automation leadClassification {
 		t.Fatalf("step order not preserved (classify=%d, persist=%d)", classifyIdx, persistIdx)
 	}
 }
+
+// The `{ event: event }` step body is the conventional plumb-through
+// every event-triggered automation uses to forward the trigger event
+// to its receiving logic. The rewriter must translate the VALUE-side
+// `event` (RHS of the `:`) to `ctx.input` while leaving the KEY-side
+// `event` (LHS of the `:`) intact so the args bind under the right
+// name. The previous regex over-matched and produced
+// `{ ctx.input: ctx.input }`, which broke arg binding for every
+// event-triggered automation -- surfaced as the "daily space never
+// shows up" symptom in memql-cockpit#49.
+func TestNormaliseAutomationSource_EventKeyPreservedWhilstValueTranslated(t *testing.T) {
+	src := `@enabled
+@trigger(event="graph.node.created.v1:identity:authSession")
+@useLogic(logicEnsureDailySpaceOnAuthSession)
+automation ensureDailySpaceOnAuthSession {
+  step run {
+    logic ensureDailySpaceOnAuthSession { event: event }
+  }
+}`
+	out, err := NormaliseAutomationSource(src)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "run := logicEnsureDailySpaceOnAuthSession({ event: ctx.input })") {
+		t.Fatalf("expected `{ event: ctx.input }` (key preserved, value translated); got %q", out)
+	}
+	if strings.Contains(out, "ctx.input: ctx.input") {
+		t.Fatalf("rewriter regressed to clobbering the `event` key name; got %q", out)
+	}
+}
