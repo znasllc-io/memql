@@ -283,7 +283,7 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 // resolver to signal that the comparison should match every row. It is
 // recognised by compilePayloadComparison and friends, which emit `TRUE`
 // as their SQL fragment when the value is of this type. Cluster owners
-// bypass per-partition ACL filters via this mechanism.
+// hit this branch for owner-bypass semantics.
 type ownerWildcardSentinel struct{}
 
 // resolveCallerReferences walks an expression tree and substitutes every
@@ -350,13 +350,17 @@ func resolveCallerPath(ctx context.Context, path string, op ComparisonOperator) 
 	ac, _ := auth.AccessFromContext(ctx)
 	switch path {
 	case "partitions":
+		// caller.partitions is going away in #56 phase 5. Owners still
+		// get the wildcard sentinel (no-op in the SQL builder); everyone
+		// else gets an empty list. The DSL reference itself is stripped
+		// in phase 5.
 		if op != OpIn && op != OpOut {
 			return nil, fmt.Errorf("caller.partitions must be used with 'in' or 'not in'")
 		}
 		if ac == nil || ac.IsClusterOwner() {
 			return ownerWildcardSentinel{}, nil
 		}
-		return ac.AllowedPartitions(), nil
+		return []string{}, nil
 	case "userId":
 		if ac == nil {
 			return "", nil

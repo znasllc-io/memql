@@ -145,8 +145,8 @@ material that the gRPC suggest handler in `grpc/ai_handlers.go` imports:
   and the admin web app (the identity binary itself)
 - Personal Access Token (PAT) issuance for CLI clients
 - Identity / role context propagation (auth package helpers)
-- Role-based access control + per-partition ACL enforcement
-  (component/auth/access)
+- Per-row authorization is enforced inside DSL queries + mutations
+  (see docs/auth/per-row-authz-audit.md)
 
 ### events/ - **Event Bus**
 **Purpose:** Publish/subscribe event system for automations
@@ -412,7 +412,7 @@ docker-compose logs memql | grep "query.*ms"
 | **database/** | Database layer | `memory-nodes/database.go` |
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
 | **server/sihttp/** | SI suggest schemas + helpers for gRPC | `space_suggest.go`, `group_suggest.go`, `suggest_logic.go` |
-| **auth/** | Auth context helpers + RBAC + delegation | `context.go`, `identity.go`, `rbac.go`, `security.go`, `access/middleware.go` |
+| **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
 | **identity/** | In-house identity service (magic-link, JWT issuance, JWKS, admin UI, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
 | **polyphon/** | Voice pipeline | `cognition.go`, `session.go` |
 | **fileprocessor/** | File processing | `processor.go` |

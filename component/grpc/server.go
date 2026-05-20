@@ -21,7 +21,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/auth/access"
 	"github.com/znasllc-io/memql/component/bus"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -247,21 +246,21 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		grpc.MaxRecvMsgSize(maxWorkerMessageSize),
 		grpc.MaxSendMsgSize(maxWorkerMessageSize),
 	)
-	accessMW := access.NewMiddleware(&engineQueryRunner{engine: s.engine}, s.logger)
+	identityResolver := auth.NewIdentityResolver(&engineQueryRunner{engine: s.engine}, s.logger)
 	svc := &service{
-		logger:          s.logger,
-		engine:          s.engine,
-		eventBus:        s.eventBus,
-		sttProvider:     s.sttProvider,
-		wiring:          s.wiring,
-		sense:           s.sense,
-		scoreEngine:     s.scoreEngine,
-		roomProvider:    s.roomProvider,
-		conceptRegistry: s.conceptRegistry,
-		accessMW:        accessMW,
-		aiForwarder:     s.aiForwarder,
-		agentReplier:    s.agentReplier,
-		verifier:        s.tokenVerifier,
+		logger:           s.logger,
+		engine:           s.engine,
+		eventBus:         s.eventBus,
+		sttProvider:      s.sttProvider,
+		wiring:           s.wiring,
+		sense:            s.sense,
+		scoreEngine:      s.scoreEngine,
+		roomProvider:     s.roomProvider,
+		conceptRegistry:  s.conceptRegistry,
+		identityResolver: identityResolver,
+		aiForwarder:      s.aiForwarder,
+		agentReplier:     s.agentReplier,
+		verifier:         s.tokenVerifier,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
 	if s.serviceRef != nil {
@@ -422,7 +421,7 @@ type service struct {
 	scoreEngine     *polyphon.ScoreEngine
 	roomProvider    polyphon.RoomProvider
 	conceptRegistry memoryNodes.Registry
-	accessMW        *access.Middleware
+	identityResolver *auth.IdentityResolver
 	aiForwarder     *SIForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
 	verifier        *verifier.Verifier // re-verifies presented tokens for in-stream rotation; nil on no-auth nodes
 
@@ -452,15 +451,16 @@ type service struct {
 	clientToolWaiters map[string]chan *memqlv1.ClientToolResult
 }
 
-// engineQueryRunner adapts *memqlengine.MemQLEngine to access.QueryRunner
-// by returning the shaped output payload of each query.
+// engineQueryRunner adapts *memqlengine.MemQLEngine to
+// auth.QueryRunner by returning the shaped output payload of each
+// query.
 type engineQueryRunner struct {
 	engine *memqlengine.MemQLEngine
 }
 
 func (r *engineQueryRunner) ExecuteShaped(ctx context.Context, query string) (any, error) {
 	if r == nil || r.engine == nil {
-		return nil, fmt.Errorf("access runner: engine unavailable")
+		return nil, fmt.Errorf("identity resolver: engine unavailable")
 	}
 	result, err := r.engine.Execute(ctx, query)
 	if err != nil {
@@ -642,10 +642,10 @@ type streamSession struct {
 	eventChan      chan events.Event
 	closeChan      chan struct{}
 
-	// access holds the resolved partition ACL for this stream. Loaded
-	// lazily on the first message that needs it (ensureAccess). Cached
-	// for the lifetime of the stream; clients reconnect to pick up
-	// grant changes.
+	// access holds the resolved user identity (userId / role /
+	// email) for this stream. Loaded lazily on the first message that
+	// needs it (ensureAccess). Cached for the lifetime of the stream;
+	// clients reconnect to pick up role changes.
 	accessMu     sync.Mutex
 	access       *auth.AccessContext
 	accessLoaded bool
@@ -801,11 +801,12 @@ func (s *streamSession) currentAccess() *auth.AccessContext {
 	return s.access
 }
 
-// ensureAccess loads the caller's PartitionACL from the database once
-// per stream. On the very first login (race with the magic-link
-// verifier's user-row insert), the engine may not yet have a user
-// row; we fall back to a claims-derived ACL so the session is not
-// locked out. Subsequent streams pick up the real ACL.
+// ensureAccess resolves the caller's user identity (userId / role /
+// email) from the database once per stream. On the very first login
+// (race with the magic-link verifier's user-row insert), the engine
+// may not yet have a user row; we fall back to claims-derived values
+// so the session is not locked out. Subsequent streams pick up the
+// real user record.
 func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	s.accessMu.Lock()
 	defer s.accessMu.Unlock()
@@ -814,30 +815,30 @@ func (s *streamSession) ensureAccess(ctx context.Context) *auth.AccessContext {
 	}
 	s.accessLoaded = true
 
-	mw := s.service.accessMW
+	resolver := s.service.identityResolver
 	claims, _ := auth.ClaimsFromContext(ctx)
 
-	if mw != nil {
-		ac, err := mw.LoadAccessFromClaims(ctx, claims)
+	if resolver != nil {
+		ac, err := resolver.LoadFromClaims(ctx, claims)
 		if err == nil {
 			s.access = ac
 			return s.access
 		}
-		if !errors.Is(err, access.ErrUserNotProvisioned) {
+		if !errors.Is(err, auth.ErrUserNotProvisioned) {
 			if s.logger != nil {
-				s.logger.Warn("access middleware: LoadAccessFromClaims failed; using claims fallback",
+				s.logger.Warn("identity resolver: LoadFromClaims failed; using claims fallback",
 					"error", err, "subject", s.identity.Subject)
 			}
 		}
 	}
-	s.access = access.FallbackFromClaims(claims)
+	s.access = auth.FallbackFromClaims(claims)
 	return s.access
 }
 
 // handleRotateAuth swaps the bearer on a live stream. Re-verifies the
 // presented token through the same verifier the interceptor uses at
 // stream-open, then -- on success -- replaces the session's identity
-// and reloads the partition ACL atomically.
+// and reloads the resolved user record atomically.
 //
 // Semantics:
 //   - The stream stays open in EVERY branch. Even on a hard reject,
@@ -901,24 +902,24 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 		return reply(false, "invalid_token", "verified claims did not yield an identity: "+identityErr.Error())
 	}
 
-	// Reload the partition ACL under the lock. If LoadAccessFromClaims
-	// errors we DO NOT swap the identity -- leaving the session in a
-	// half-rotated state (new identity, old ACL) is worse than failing
-	// the rotate. The client can retry.
+	// Reload the user context under the lock. If LoadFromClaims errors
+	// we DO NOT swap the identity -- leaving the session in a
+	// half-rotated state (new identity, old user record) is worse than
+	// failing the rotate. The client can retry.
 	s.accessMu.Lock()
 	defer s.accessMu.Unlock()
 
-	if mw := s.service.accessMW; mw != nil {
-		newAccess, err := mw.LoadAccessFromClaims(s.stream.Context(), vc.ClaimsMap)
+	if resolver := s.service.identityResolver; resolver != nil {
+		newAccess, err := resolver.LoadFromClaims(s.stream.Context(), vc.ClaimsMap)
 		if err != nil {
-			if errors.Is(err, access.ErrUserNotProvisioned) {
+			if errors.Is(err, auth.ErrUserNotProvisioned) {
 				// Same fallback path ensureAccess takes -- the user
-				// row may legitimately not exist yet; derive the ACL
+				// row may legitimately not exist yet; derive context
 				// from the verified claims.
-				newAccess = access.FallbackFromClaims(vc.ClaimsMap)
+				newAccess = auth.FallbackFromClaims(vc.ClaimsMap)
 			} else {
 				if s.logger != nil {
-					s.logger.Warn("rotate_auth: access reload failed; rotation rejected",
+					s.logger.Warn("rotate_auth: identity reload failed; rotation rejected",
 						"subject", newIdentity.Subject, "error", err)
 				}
 				return reply(false, "access_load_failed", err.Error())
@@ -927,10 +928,10 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 		s.access = newAccess
 		s.accessLoaded = true
 	} else {
-		// No access middleware (test paths / no-DB builds). Clear the
-		// cache; downstream code that needs an ACL will hit
-		// ensureAccess and fall through to the claims-derived ACL.
-		s.access = access.FallbackFromClaims(vc.ClaimsMap)
+		// No identity resolver (test paths / no-DB builds). Clear the
+		// cache; downstream code that needs an AccessContext will hit
+		// ensureAccess and fall through to the claims-derived form.
+		s.access = auth.FallbackFromClaims(vc.ClaimsMap)
 		s.accessLoaded = true
 	}
 
@@ -945,84 +946,12 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 	return reply(true, "", "")
 }
 
-// partitionCheckRequired reports whether a given message payload should
-// go through the partition-ACL check before dispatch. Handshake and
-// control messages skip it; everything that touches data or events
-// gets checked. MyAccess also skips -- it reports the caller's own
-// ACL so the Cockpit can render Settings before any partition has
-// been chosen; its handler still fails closed if no AccessContext is
-// available.
-func partitionCheckRequired(payload any) bool {
-	switch payload.(type) {
-	case *memqlv1.MemqlClientMessage_ClientHello,
-		*memqlv1.MemqlClientMessage_Ack,
-		*memqlv1.MemqlClientMessage_CancelRequest,
-		*memqlv1.MemqlClientMessage_Unsubscribe,
-		*memqlv1.MemqlClientMessage_ListTools,
-		*memqlv1.MemqlClientMessage_SenseTokenize,
-		*memqlv1.MemqlClientMessage_SenseComplete,
-		*memqlv1.MemqlClientMessage_SenseDiagnose,
-		*memqlv1.MemqlClientMessage_SenseHover,
-		*memqlv1.MemqlClientMessage_SenseSignatureHelp,
-		*memqlv1.MemqlClientMessage_MyAccess,
-		// ResolveGuestInvite is a public token-resolution endpoint.
-		// Anonymous visitors hit it from the /join/<token> landing
-		// page before they have any identity at all; partition gating
-		// would reject them on the plain token.
-		*memqlv1.MemqlClientMessage_ResolveGuestInvite,
-		// Session revocation operates on global v1:identity:authSession
-		// rows; the envelope partition is irrelevant.
-		*memqlv1.MemqlClientMessage_RevokeCurrentSession,
-		*memqlv1.MemqlClientMessage_RevokeAllSessions,
-		// Worker-token issuance / revocation lives on global
-		// v1:identity:identity rows; same partition-irrelevant story.
-		*memqlv1.MemqlClientMessage_CreateWorkerToken,
-		*memqlv1.MemqlClientMessage_RevokeWorkerToken,
-		// Realtime voice + video. The voice-agent service-account
-		// is multi-tenant and the message payloads carry their own
-		// space_id; partition gating is enforced inside the handlers
-		// against the looked-up space's partition. See
-		// voice_agent_handlers.go and the service-account
-		// interceptor that pins this identity-type to the
-		// VoiceAgent* surface only.
-		*memqlv1.MemqlClientMessage_VoiceAgentSessionStart,
-		*memqlv1.MemqlClientMessage_VoiceAgentSessionEnd,
-		*memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript,
-		*memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript,
-		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest,
-		// RotateAuth is a session-control envelope; the new token
-		// IS the auth check. Routing it through the partition-ACL
-		// gate would race against the very swap the handler is
-		// about to perform.
-		*memqlv1.MemqlClientMessage_RotateAuth:
-		return false
-	default:
-		return true
-	}
-}
-
 func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) error {
 	if envelope == nil {
 		return nil
 	}
 
 	payload := envelope.GetPayload()
-
-	// Partition-ACL check: enforce envelope.partition against the
-	// caller's grants before dispatching the message. ClientHello and
-	// other handshake/control messages bypass because they do not
-	// target a partition.
-	if partitionCheckRequired(payload) && s.service.accessMW != nil {
-		ctx := s.stream.Context()
-		ac := s.ensureAccess(ctx)
-		if err := s.service.accessMW.CheckPartition(ctx, ac, envelope.GetPartition(), envelope.GetMessageId()); err != nil {
-			// Tell the client explicitly; best-effort, drop send errors.
-			_ = s.sendQueryError("", envelope.GetMessageId(), status.Code(err), status.Convert(err).Message())
-			return nil
-		}
-		// Downstream handlers pull the AccessContext from s.access (set
-		// by ensureAccess). No need to thread it through ctx.
-	}
 
 	switch payload := payload.(type) {
 	case *memqlv1.MemqlClientMessage_ClientHello:
@@ -1083,8 +1012,8 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// (core policies are server-internal and never reachable here).
 	case *memqlv1.MemqlClientMessage_EvaluatePolicy:
 		return s.handleEvaluatePolicy(envelope, payload.EvaluatePolicy)
-	// In-stream bearer rotation -- swap the session's identity +
-	// partition ACL without dropping the stream. Lives next to the
+	// In-stream bearer rotation -- swap the session's identity
+	// without dropping the stream. Lives next to the
 	// other control-plane handlers so long-lived clients (cockpit)
 	// can keep the in-flight bearer aligned with their background
 	// refresh-token rotation. See handleRotateAuth.
@@ -1164,10 +1093,9 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "query cannot be empty")
 	}
 
-	// Per-partition authorization is enforced by the access middleware
-	// in handleMessage (block _system, require partition in ACL). Any
-	// authenticated role may reach this handler; mutation/writer
-	// checks happen downstream once the partition is known.
+	// Authorization runs per-row inside the DSL (see
+	// docs/auth/per-row-authz-audit.md). Any authenticated role may
+	// reach this handler; query/mutation bodies enforce ownership.
 
 	ctx, cancel := context.WithCancel(s.stream.Context())
 
@@ -1212,12 +1140,6 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 			s.sendQueryErrorWithMetadata(requestId, envelope.GetMessageId(), status.Code(err), status.Convert(err).Message(), metadata)
 			return
 		}
-		// Note: partition ACL filtering used to live here as a
-		// post-filter (filterPartitionsByACL). It now lives in the
-		// query itself via `payload.name in caller.partitions` --
-		// owners get a match-everything sentinel, non-owners get
-		// their actual ACL. See queries/v1/platform/queryListPartitions.memql
-		// and resolveCallerReferences in component/memql/executor.go.
 		chunk := &memqlv1.QueryResultChunk{
 			RequestId: requestId,
 			Result:    result,
