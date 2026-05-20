@@ -149,6 +149,65 @@ mutation mutationCreateSpaceShorthand {
 	require.Equal(t, true, payload["active"])
 }
 
+// In the multi-construct file layout, the slicer prepends ALL file-top
+// `use ...` declarations to every emitted slice so the per-construct
+// parser has its imports. The signature-bound concept (`mutation
+// <Concept> <name>`) names the construct's single concept directly,
+// so the file-top use count is unrelated to "one concept per
+// mutation." Counting file-top uses against signature-bound
+// constructs was rejecting every mutation in
+// `cognition/mutations.memql` after the multi-construct consolidation
+// -- surfaced as memql-cockpit#49 (daily-space never created because
+// `mutationCreateDailySpace` was unloadable).
+func TestSignatureBoundMutationAcceptsMultipleFileTopUses(t *testing.T) {
+	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
+		"v1:cognition:space":    {Name: "v1:cognition:space"},
+		"v1:identity:request":   {Name: "v1:identity:request"},
+	})
+	src := `use cognition.concepts.{ space }
+use identity.concepts.{ request }
+
+mutation space mutationCreateDailySpace {
+  args {
+    spaceId       string  @required
+    name          string  @required
+    dailyDateKey  string  @required
+  }
+  insert space {
+    id: args.spaceId
+    args.name
+    args.dailyDateKey
+    kind: "daily"
+    private: true
+    status: "active"
+    active: true
+  }
+}`
+	fn, err := tryParseNewFunctionSyntax("mutationCreateDailySpace", "mutation", src, "test.memql", registry)
+	require.NoError(t, err)
+	require.NotNil(t, fn)
+	require.NotNil(t, fn.MutationTemplate)
+	require.Equal(t, "v1:cognition:space", fn.MutationTemplate.Concept)
+}
+
+// Legacy procedural-form queries / mutations (no signature-bound
+// concept) still get the single-use rule -- their `use` declaration
+// IS the concept binding, so two uses is genuinely ambiguous.
+func TestLegacyProceduralMutationRejectsMultipleUses(t *testing.T) {
+	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
+		"v1:cognition:space":  {Name: "v1:cognition:space"},
+		"v1:identity:request": {Name: "v1:identity:request"},
+	})
+	src := `use cognition.concepts.{ space }
+use identity.concepts.{ request }
+
+func (Mutation) mutationLegacyForm(ctx any) (any, error) {
+  return insert space { id: ctx.input.id }, nil
+}`
+	_, err := tryParseNewFunctionSyntax("mutationLegacyForm", "mutation", src, "test.memql", registry)
+	require.Error(t, err)
+}
+
 func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 	reg := newFunctionRegistry()
 	require.NoError(t, reg.add(&Function{
