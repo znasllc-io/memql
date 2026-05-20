@@ -9,10 +9,10 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -286,7 +286,7 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 			m.engine.Logger.Warn("seed materializer: dedup lookup failed; minting new id",
 				"seed", def.Name, "userId", userId, "error", err)
 		}
-		return uuid.NewString(), nil
+		return id.NewShortId(), nil
 	}
 	if result != nil && result.Bundle != nil {
 		for _, node := range result.Bundle.Nodes {
@@ -295,7 +295,7 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 			}
 		}
 	}
-	return uuid.NewString(), nil
+	return id.NewShortId(), nil
 }
 
 // invokeCreateMutation builds the canonical `mutationCreate<Concept>`

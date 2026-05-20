@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/uuid"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // SubscriptionManager handles event subscriptions over the gRPC stream.
@@ -32,7 +32,7 @@ func NewSubscriptionManager(dispatcher *Dispatcher) *SubscriptionManager {
 
 // Subscribe sends a SubscribeMsg and returns a channel for receiving events.
 func (sm *SubscriptionManager) Subscribe(ctx context.Context, kind memqlv1.SubscriptionKind, filter string) (string, <-chan *memqlv1.EventNotification, error) {
-	subId := uuid.NewString()
+	subId := id.NewShortId()
 
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_Subscribe{

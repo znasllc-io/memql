@@ -8,10 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // ForwardHandler is the workbench-node-side bridge that turns an
@@ -114,7 +113,7 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		resp.ErrorMessage = p.Msg
 	}
 	if err := send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
 		Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
 			WorkbenchForwardResponse: resp,
@@ -142,7 +141,7 @@ func (h *ForwardHandler) CancelForwardedRequest(_ context.Context, requestId str
 
 func (h *ForwardHandler) sendError(send func(*nodev1.NodeServerMessage) error, requestId, code, msg string) {
 	if err := send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
 		Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
 			WorkbenchForwardResponse: &nodev1.WorkbenchForwardResponse{

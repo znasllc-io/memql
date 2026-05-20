@@ -32,11 +32,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // PlannerAgentLoop owns the structured-output cycle that drives every
@@ -580,7 +579,7 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 }
 
 func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId string, task plannerTask) error {
-	taskId := uuid.New().String()
+	taskId := id.NewShortId()
 	logicalStepId := task.LogicalStepId
 	if logicalStepId == "" {
 		logicalStepId = taskId

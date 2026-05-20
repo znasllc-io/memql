@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -141,9 +141,9 @@ func (g *Gateway) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestId := uuid.NewString()
+	requestId := id.NewShortId()
 	execMsg := &memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
 			ExecuteQuery: &memqlv1.ExecuteQueryMsg{
 				RequestId: requestId,
@@ -198,7 +198,7 @@ func (g *Gateway) sendClientHello(stream memqlv1.MemqlService_StreamClient) erro
 		return errors.New("stream unavailable")
 	}
 	return stream.Send(&memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ClientHello{
 			ClientHello: &memqlv1.ClientHello{
 				ClientId:   defaultGatewayClientId,

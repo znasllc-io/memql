@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/google/uuid"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -117,7 +117,7 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 // handshake sends ClientHello and waits for ServerHello.
 func (c *Connection) handshake(ctx context.Context) error {
 	helloMsg := &memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ClientHello{
 			ClientHello: &memqlv1.ClientHello{
 				ClientId:   "memql-cockpit",

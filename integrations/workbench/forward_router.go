@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // ForwardRouter is the agent-node-side abstraction for dispatching
@@ -75,7 +74,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 		return nil, ErrNoWorkbenchPeer
 	}
 	if req.RequestId == "" {
-		req.RequestId = uuid.New().String()
+		req.RequestId = id.NewShortId()
 	}
 	respCh := make(chan *nodev1.WorkbenchForwardResponse, 1)
 	r.mu.Lock()
@@ -91,7 +90,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 		return nil, ErrNoWorkbenchPeer
 	}
 	msg := &nodev1.NodeClientMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_WorkbenchForwardRequest{
 			WorkbenchForwardRequest: req,
 		},
@@ -105,7 +104,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 		// is wired to stop in-flight work on receipt.
 		if peer.Connection != nil {
 			peer.Connection.Send(&nodev1.NodeClientMessage{
-				MessageId: uuid.New().String(),
+				MessageId: id.NewShortId(),
 				Payload: &nodev1.NodeClientMessage_WorkbenchForwardCancel{
 					WorkbenchForwardCancel: &nodev1.WorkbenchForwardCancel{
 						RequestId: req.RequestId,

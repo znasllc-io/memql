@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Executor is the narrow interface the stamper depends on: the engine's
@@ -76,7 +76,7 @@ func (s *Stamper) ExecuteToolByName(ctx context.Context, toolName string, args m
 		return s.Engine.ExecuteToolByName(ctx, toolName, args)
 	}
 
-	taskId := uuid.New().String()
+	taskId := id.NewShortId()
 	if err := s.stampPre(ctx, pc, taskId, toolName, args); err != nil {
 		s.Logger.Warn("taskstamp: pre-dispatch stamp failed",
 			"tool", toolName, "planId", pc.PlanId, "parentTaskId", pc.SemanticTaskId, "error", err)
@@ -130,7 +130,7 @@ func (s *Stamper) ensurePlanAndSemanticTask(ctx context.Context, pc PlanContext)
 // createAdHocPlan inserts a kind='adHocAction' Plan row using the
 // mutationCreateAdHocPlan DSL function. Returns the new Plan id.
 func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, error) {
-	planId := uuid.New().String()
+	planId := id.NewShortId()
 	goal := fmt.Sprintf("Ad-hoc tool actions by agent %s", pc.AgentId)
 	q := fmt.Sprintf(
 		`mutationCreateAdHocPlan({"planId": %q, "spaceId": %q, "agentId": %q, "ownerUserId": %q, "goal": %q})`,
@@ -147,7 +147,7 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 // own id (one attempt; the threshold model is for retries on a real
 // step, not for ad-hoc grouping).
 func (s *Stamper) createSemanticWrapper(ctx context.Context, pc PlanContext) (string, error) {
-	taskId := uuid.New().String()
+	taskId := id.NewShortId()
 	q := fmt.Sprintf(
 		`mutationCreateSemanticTask({"taskId": %q, "planId": %q, "kind": "callTool", "seq": 0, "logicalStepId": %q, "attemptNumber": 1, "agentId": %q, "input": {"adHoc": true}})`,
 		taskId, pc.PlanId, taskId, pc.AgentId,
