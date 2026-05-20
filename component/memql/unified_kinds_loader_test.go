@@ -123,14 +123,31 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 		t.Fatalf("LoadUnifiedFunctions (with concept registry): %v", err)
 	}
 	// Spot-check a mutation that depends on signature-bound concept
-	// resolution -- without it the function loads but BoundConcept
-	// is empty and the runtime errors with `concept "globalSecret"
-	// not found`.
+	// resolution -- without it the function loads but the runtime
+	// errors with `concept "globalSecret" not found`. Check three
+	// surfaces:
+	//
+	//   - fn.BoundConcept -- the implicit binding the function loader
+	//     stamps onto the Function for downstream consumers.
+	//   - fn.MutationTemplate.Concept -- the canonical id the engine
+	//     executes against. MUST be the canonical id (contains ":");
+	//     bare names error at executeInsert time.
+	//
+	// These two are populated by different code paths (BoundConcept
+	// fallback vs concept-resolver walking the FunctionDef); both
+	// must be green or the runtime breaks in different ways.
 	if fn, err := fnReg3.Get("mutationSetGlobalSecret"); err != nil || fn == nil {
 		t.Errorf("mutationSetGlobalSecret missing after full load: err=%v", err)
-	} else if fn.BoundConcept == "" {
-		t.Errorf("mutationSetGlobalSecret.BoundConcept empty -- signature-bound concept resolution regressed")
-	} else if !strings.Contains(fn.BoundConcept, "globalSecret") {
-		t.Errorf("mutationSetGlobalSecret.BoundConcept = %q, expected to contain 'globalSecret'", fn.BoundConcept)
+	} else {
+		if fn.BoundConcept == "" {
+			t.Errorf("mutationSetGlobalSecret.BoundConcept empty -- signature-bound concept resolution regressed")
+		} else if !strings.Contains(fn.BoundConcept, "globalSecret") {
+			t.Errorf("mutationSetGlobalSecret.BoundConcept = %q, expected to contain 'globalSecret'", fn.BoundConcept)
+		}
+		if fn.MutationTemplate == nil {
+			t.Errorf("mutationSetGlobalSecret.MutationTemplate is nil")
+		} else if !strings.Contains(fn.MutationTemplate.Concept, ":") {
+			t.Errorf("mutationSetGlobalSecret.MutationTemplate.Concept = %q -- expected canonical id (containing ':'), the resolver didn't walk the FunctionDef", fn.MutationTemplate.Concept)
+		}
 	}
 }
