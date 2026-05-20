@@ -40,7 +40,7 @@ func (a *App) configAndAuth() {
 	a.mux = http.NewServeMux()
 	a.httpArgs = make([]server.ServerArg, 0, 2)
 	a.httpArgs = append(a.httpArgs, server.WithBaseRouter(a.mux))
-	a.middlewares = make([]server.MiddlewareFunc, 0, 3)
+	a.middlewares = make([]server.MiddlewareFunc, 0, 4)
 	// Panic recovery is the outermost layer of the HTTP chain. A panic
 	// in any downstream middleware or handler is caught here, logged
 	// with stack + error id, and surfaced to the client as a 500
@@ -49,6 +49,13 @@ func (a *App) configAndAuth() {
 	// because the chain is composed back-to-front: middlewares[0]
 	// wraps everything that follows.
 	a.middlewares = append(a.middlewares, server.PanicRecoveryMiddleware(a.Logger))
+	// Security headers (X-Frame-Options, X-Content-Type-Options,
+	// Referrer-Policy, Permissions-Policy, HSTS-on-TLS) on every
+	// HTTP response, not just the identity web UI. The identity web
+	// stack still mounts its own CSP + frame-ancestors policy on
+	// HTML routes; this middleware adds the API-safe headers
+	// uniformly.
+	a.middlewares = append(a.middlewares, server.SecurityHeadersMiddleware)
 
 	if !verifierRequired {
 		// Identity binary path: no per-node verifier; identity is

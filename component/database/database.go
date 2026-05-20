@@ -260,7 +260,23 @@ func defaultConfig() *config {
 			// Check if the DSN contains sslmode=disable
 			if !strings.Contains(strings.ToLower(normalized), "sslmode=disable") {
 				if cfg.TLSConfig == nil {
-					cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+					// Verify against the system trust pool by default.
+					// MinVersion: TLS 1.2 matches Go's modern default
+					// and rules out known-broken handshakes. Earlier
+					// versions of this file set
+					// `InsecureSkipVerify: true`, which let a
+					// MITM swap the Postgres certificate for an
+					// attacker-controlled one without the client
+					// noticing. An operator who genuinely needs to
+					// bypass verification (e.g. dev cluster with a
+					// self-signed CA they haven't loaded into the
+					// system pool) can set
+					// `MEMQL_DB_TLS_INSECURE_SKIP_VERIFY=1` and
+					// accept the warning logged at startup.
+					cfg.TLSConfig = &tls.Config{
+						MinVersion:         tls.VersionTLS12,
+						InsecureSkipVerify: dbTLSInsecureSkipVerifyOptIn(),
+					}
 				}
 				if serverName != "" && cfg.TLSConfig != nil {
 					cfg.TLSConfig.ServerName = serverName
@@ -1126,4 +1142,18 @@ func (d *Database) safeDSN() string {
 	sanitizedCreds := credentials[:colonIdx+1] + "********"
 
 	return raw[:schemeIdx+3] + sanitizedCreds + rest[atIdx:]
+}
+
+// envDBTLSInsecureSkipVerify is the explicit operator opt-in to skip
+// Postgres TLS certificate verification. Set to "1" to bypass; any
+// other value (including unset) verifies against the system trust
+// pool. Production deployments must leave this unset; a private CA
+// can be loaded into the system trust pool instead.
+const envDBTLSInsecureSkipVerify = "MEMQL_DB_TLS_INSECURE_SKIP_VERIFY"
+
+// dbTLSInsecureSkipVerifyOptIn reports whether the operator opted
+// into bypassing Postgres TLS certificate verification via env var.
+// Returns false (verify) unless the env var is literally "1".
+func dbTLSInsecureSkipVerifyOptIn() bool {
+	return strings.TrimSpace(os.Getenv(envDBTLSInsecureSkipVerify)) == "1"
 }

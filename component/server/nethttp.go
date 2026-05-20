@@ -820,10 +820,23 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 			}
 		}
 
-		// Set CORS headers if origin is allowed
+		// Set CORS headers if origin is allowed.
+		//
+		// Credentials posture: `Access-Control-Allow-Credentials: true`
+		// is ONLY emitted when the allow-list is explicit (not `*`).
+		// The CORS spec forbids credentials + wildcard; browsers
+		// silently reject the response. Worse, when we echoed the
+		// caller's Origin alongside `Credentials: true`, the response
+		// was effectively "any origin may read credentialed
+		// responses" -- a credentialed-XHR exfiltration surface.
+		// Dev environments that need credentialed requests must
+		// configure an explicit allow-list; the legacy wildcard
+		// fallback degrades to a credential-less posture instead.
 		if allowedOrigin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if !allowAll {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			w.Header().Set("Vary", "Origin")
 		}
 
