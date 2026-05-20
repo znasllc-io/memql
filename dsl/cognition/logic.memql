@@ -52,10 +52,18 @@ logic logicAutoJoinSI {
     event object @required
   }
   body {
-  // hash(args.event.payload.actor) = the Actor the MemoryNode was stamped with
-  // at insert time (the user's email for user-originated writes).
-  // GAs are keyed on ga-<email>, so the lookup is direct.
-  getGA := queryAgentById({ agentId: concat("ga-", hash(args.event.payload.actor)) })
+  // hash(args.event.payload.actor) = the Actor the MemoryNode was
+  // stamped with at insert time (the user's email for user-originated
+  // writes). The actual per-user GA agentId composed by the
+  // SeedMaterializer is `assistant-<userId-short>` (see assistant.memql
+  // + seed_materializer.materializePerUser), NOT this hash. This
+  // lookup is a pre-existing mismatch from the legacy `ga-<hash>`
+  // convention and a known no-op in autoJoinSI today; the fix lands
+  // with the per-row authz audit (issue #54) which rewrites GA
+  // resolution to query by (ownerUserId, role="assistant") rather
+  // than constructing the canonical id client-side. Leaving the
+  // shortId free of concept-name prefixes per issue #53.
+  getGA := queryAgentById({ agentId: hash(args.event.payload.actor) })
 
   // Join the GA if it exists and isn't already a participant. The
   // function-step arg resolver (automations/steps/function.go) only
@@ -85,7 +93,7 @@ logic logicAutoJoinSI {
   checkExistingGA := if !getGA.Empty() {
     queryParticipantByAgentSpace({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:agents:agent")
+      agentId: canonicalId(hash(args.event.payload.actor), "v1:agents:agent")
     })
   }
   // Owner GA join carries two chat-architecture flags (Phase 1.5):
@@ -103,7 +111,7 @@ logic logicAutoJoinSI {
   insertGA := if !getGA.Empty() && checkExistingGA.Empty() {
     mutationJoinSpaceAsSI({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(concat("ga-", hash(args.event.payload.actor)), "v1:agents:agent"),
+      agentId: canonicalId(hash(args.event.payload.actor), "v1:agents:agent"),
       displayName: "Sofia",
       forUserId: args.event.payload.actor,
       isGroupGA: true
@@ -165,7 +173,7 @@ logic logicBootstrapSession {
   createSession := if checkExistingSession.Empty() { mutationCreateSessionForParticipant({ participantId: args.event.payload.id, spaceId: args.event.payload.spaceId }) }
 
   // Emit session created event for downstream consumers
-  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: concat("session-", args.event.payload.id), participantId: args.event.payload.id, spaceId: args.event.payload.spaceId, timestamp: timestamp() } }) }
+  emitSessionCreated := if checkExistingSession.Empty() { publishEvent({ topic: "session.created", payload: { sessionId: args.event.payload.id, participantId: args.event.payload.id, spaceId: args.event.payload.spaceId, timestamp: timestamp() } }) }
 
   return coalesce(createSession, checkExistingSession.First())
   }

@@ -130,7 +130,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "token mint failed")
 		return
 	}
-	sessionId, err := identity.NewRandomId("sess-")
+	sessionId, err := identity.NewRandomId("")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "internal_error", "session id mint failed")
 		return

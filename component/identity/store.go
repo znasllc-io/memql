@@ -743,9 +743,9 @@ func NewRandomId(prefix string) (string, error) {
 // somehow fails (which would itself be a fatal-class error in
 // production but should not crash the wizard).
 func NewRequestId() string {
-	id, err := NewRandomId("ar-")
+	id, err := NewRandomId("")
 	if err != nil {
-		return fmt.Sprintf("ar-fallback-%d", len([]byte("fallback")))
+		return fmt.Sprintf("fallback-%d", len([]byte("fallback")))
 	}
 	return id
 }

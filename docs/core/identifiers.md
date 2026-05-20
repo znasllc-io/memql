@@ -184,6 +184,25 @@ These are the band-aids this doc exists to prevent:
   qualified (`{partition}:v1:x:y:<short>`). See
   `validateShortId` in `component/database/memory-nodes/concept.go`.
 
+- **Prefixing the shortId with the concept name** (issue #53,
+  fixed 2026-05-20). Old: `_system:v1:agents:agent:ga-<hash>`,
+  `_system:v1:identity:user:user-<hash>`,
+  `_system:v1:cognition:session:session-<hash>`, plus every
+  `NewRandomId("<prefix>-")` site under `component/identity/`
+  (`pat-`, `wkr-`, `wpc-`, `ml-`, `ar-`, `ac-`, `sess-`). The
+  concept is already in the canonical position; duplicating it in
+  the shortId reads as redundant noise and produces inconsistent
+  ids depending on the writer. **Rule:** the shortId is the bare
+  unique part (uuid / hash / slug) and nothing else. If the
+  prefix was a sub-type discriminator (`ga-` distinguishing GA
+  from specialists), move it to a payload field on the concept
+  (`agent.role="assistant"` already carried the GA-vs-specialist
+  distinction). For the polymorphic `v1:identity:identity`
+  concept, the existing `identityType` enum field (`api_key` /
+  `worker_token` / `oauth` / `magic_link` / `service_account`)
+  is the discriminator -- the shortId prefix was redundant.
+  Conformance test: `dsl.TestNoShortIdConceptPrefix`.
+
 The CoPresent frontend has a `stripConceptPrefix` helper for the
 remaining legitimate cases (extracting a short id for a
 short-channel-key, debug labels, etc.) -- see
