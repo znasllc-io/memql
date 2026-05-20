@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, partitionAccess, user, workerPairingCode }
+
 @enabled
-@useConcept(partitionAccess)
 @description("Active partition grants held by a user; used to build the PartitionACL for request authorization.")
-query queryAccessForUser {
+query partitionAccess queryAccessForUser {
   args {
     userId  string  @required
   }
@@ -32,9 +33,8 @@ query queryAccessForUser {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Returns the access request with the given id. Zero or one result.")
-query queryAccessRequestById {
+query accessRequest queryAccessRequestById {
   args {
     requestId  string  @required
   }
@@ -61,9 +61,8 @@ query queryAccessRequestById {
 //
 
 @enabled
-@useConcept(delegation)
 @description("Get all active delegations for a given agent ID")
-query queryActiveDelegationsForAgent {
+query delegation queryActiveDelegationsForAgent {
   args {
     agentId  string  @required
   }
@@ -72,9 +71,8 @@ query queryActiveDelegationsForAgent {
 }
 
 @enabled
-@useConcept(user)
 @description("Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).")
-query queryActiveUsers {
+query user queryActiveUsers {
   args {
     role     string
     groupId  string
@@ -111,9 +109,8 @@ query queryActiveUsers {
 //
 
 @enabled
-@useConcept(auditEvent)
 @description("Audit events where actorUserId equals the supplied userId. Pair with queryAuditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).")
-query queryAuditEventsByActor {
+query auditEvent queryAuditEventsByActor {
   args {
     userId  string  @required
   }
@@ -145,9 +142,8 @@ query queryAuditEventsByActor {
 //
 
 @enabled
-@useConcept(auditEvent)
 @description("Audit events where targetId equals the supplied userId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
-query queryAuditEventsByTarget {
+query auditEvent queryAuditEventsByTarget {
   args {
     userId  string  @required
   }
@@ -179,9 +175,8 @@ query queryAuditEventsByTarget {
 //
 
 @enabled
-@useConcept(authCode)
 @description("Returns the auth code whose codeHash matches the argument. Zero or one result.")
-query queryAuthCodeByCodeHash {
+query authCode queryAuthCodeByCodeHash {
   args {
     codeHash  string  @required
   }
@@ -217,9 +212,8 @@ query queryAuthCodeByCodeHash {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Returns the auth session whose previousRefreshTokenHash matches the argument. Used by the rotator's grace-window fallback. Zero or one result.")
-query queryAuthSessionByPreviousRefreshTokenHash {
+query authSession queryAuthSessionByPreviousRefreshTokenHash {
   args {
     previousRefreshTokenHash  string  @required
   }
@@ -256,9 +250,8 @@ query queryAuthSessionByPreviousRefreshTokenHash {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Returns the auth session whose refreshTokenHash matches the argument. Zero or one result.")
-query queryAuthSessionByRefreshTokenHash {
+query authSession queryAuthSessionByRefreshTokenHash {
   args {
     refreshTokenHash  string  @required
   }
@@ -289,9 +282,8 @@ query queryAuthSessionByRefreshTokenHash {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Returns the auth session whose tokenHash matches the argument. Zero or one result.")
-query queryAuthSessionByTokenHash {
+query authSession queryAuthSessionByTokenHash {
   args {
     tokenHash  string  @required
   }
@@ -324,9 +316,8 @@ query queryAuthSessionByTokenHash {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Returns every auth-session row owned by the given JWT subject. Latest version per row, including revoked rows.")
-query queryAuthSessionsForSubject {
+query authSession queryAuthSessionsForSubject {
   args {
     subject  string  @required
   }
@@ -360,9 +351,8 @@ query queryAuthSessionsForSubject {
 // canonical form. Memory note reference_id_canonical_format.md.
 
 @enabled
-@useConcept(clusterSettings)
 @description("Latest singleton cluster-settings row.")
-query queryClusterSettingsCurrent {
+query clusterSettings queryClusterSettingsCurrent {
   shape   clusterSettingsFull
 }
 
@@ -385,9 +375,8 @@ query queryClusterSettingsCurrent {
 //
 
 @enabled
-@useConcept(delegation)
 @description("Get all delegations (active and revoked) for a given identity ID")
-query queryDelegationsByIdentity {
+query delegation queryDelegationsByIdentity {
   args {
     identityId  string  @required
   }
@@ -419,9 +408,8 @@ query queryDelegationsByIdentity {
 //
 
 @enabled
-@useConcept(delegation)
 @description("Active delegations whose expiresAt is before the supplied cutoff.")
-query queryExpiredActiveDelegations {
+query delegation queryExpiredActiveDelegations {
   args {
     now  string  @required
   }
@@ -456,9 +444,8 @@ query queryExpiredActiveDelegations {
 //
 
 @enabled
-@useConcept(auditEvent)
 @description("All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.")
-query queryExpiredAuditEvents {
+query auditEvent queryExpiredAuditEvents {
   filter  payload.action!=""
   shape   auditEventFull
 }
@@ -487,9 +474,8 @@ query queryExpiredAuditEvents {
 //
 
 @enabled
-@useConcept(authCode)
 @description("Auth codes whose expiresAt is before the supplied cutoff.")
-query queryExpiredConsumedAuthCodes {
+query authCode queryExpiredConsumedAuthCodes {
   args {
     now  string  @required
   }
@@ -521,9 +507,8 @@ query queryExpiredConsumedAuthCodes {
 //
 
 @enabled
-@useConcept(magicLinkRequest)
 @description("Magic-link requests whose expiresAt is before the supplied cutoff.")
-query queryExpiredMagicLinkRequests {
+query magicLinkRequest queryExpiredMagicLinkRequests {
   args {
     now  string  @required
   }
@@ -559,9 +544,8 @@ query queryExpiredMagicLinkRequests {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.")
-query queryExpiredPendingAccessRequests {
+query accessRequest queryExpiredPendingAccessRequests {
   filter  traitStatusIsPending
   shape   accessRequestFull
 }
@@ -582,9 +566,8 @@ query queryExpiredPendingAccessRequests {
 //
 
 @enabled
-@useConcept(invitation)
 @description("Returns the invitation with the given id. Zero or one result.")
-query queryInvitationById {
+query invitation queryInvitationById {
   args {
     invitationId  string  @required
   }
@@ -617,9 +600,8 @@ query queryInvitationById {
 //
 
 @enabled
-@useConcept(invitation)
 @description("Returns the invitation whose tokenHash matches the argument. Zero or one result.")
-query queryInvitationByTokenHash {
+query invitation queryInvitationByTokenHash {
   args {
     tokenHash  string  @required
   }
@@ -652,9 +634,8 @@ query queryInvitationByTokenHash {
 //
 
 @enabled
-@useConcept(magicLinkRequest)
 @description("Returns the magic-link request whose tokenHash matches the argument. Zero or one result.")
-query queryMagicLinkRequestByTokenHash {
+query magicLinkRequest queryMagicLinkRequestByTokenHash {
   args {
     tokenHash  string  @required
   }
@@ -680,9 +661,8 @@ query queryMagicLinkRequestByTokenHash {
 //   Array of partition-access grants in partitionAccessFull shape.
 
 @enabled
-@useConcept(partitionAccess)
 @description("Active partition-access grants targeting a partition.")
-query queryMembersOfPartition {
+query partitionAccess queryMembersOfPartition {
   args {
     partitionName  string  @required
   }
@@ -704,9 +684,8 @@ query queryMembersOfPartition {
 // grantedBy from non-admins), that split lands here.
 
 @enabled
-@useConcept(partitionAccess)
 @description("Partitions accessible to a user, returned as partition-access grants.")
-query queryPartitionsForUser {
+query partitionAccess queryPartitionsForUser {
   args {
     userId  string  @required
   }
@@ -736,9 +715,8 @@ query queryPartitionsForUser {
 //
 
 @enabled
-@useConcept(identity)
 @description("List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).")
-query queryPatIdentitiesForUser {
+query identity queryPatIdentitiesForUser {
   args {
     userId  string  @required
   }
@@ -769,9 +747,8 @@ query queryPatIdentitiesForUser {
 //
 
 @enabled
-@useConcept(identity)
 @description("Lookup a PAT identity by id (full shape, includes keyHash). Server-side only -- never feed to UI.")
-query queryPatIdentityById {
+query identity queryPatIdentityById {
   args {
     identityId  string  @required
   }
@@ -805,9 +782,8 @@ query queryPatIdentityById {
 //
 
 @enabled
-@useConcept(identity)
 @description("Hot-path PAT lookup by keyHash for the gRPC interceptor. Returns active + inactive rows.")
-query queryPatIdentityByKeyHash {
+query identity queryPatIdentityByKeyHash {
   args {
     keyHash  string  @required
   }
@@ -830,17 +806,15 @@ query queryPatIdentityByKeyHash {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Access requests with status=pending; backs the admin review queue.")
-query queryPendingAccessRequests {
+query accessRequest queryPendingAccessRequests {
   filter  traitStatusIsPending
   shape   accessRequestFull
 }
 
 @enabled
-@useConcept(auditEvent)
 @description("Recent audit events, optionally filtered by category. Powers the admin audit-log view.")
-query queryRecentAuditEvents {
+query auditEvent queryRecentAuditEvents {
   args {
     category  string
   }
@@ -866,9 +840,8 @@ query queryRecentAuditEvents {
 // so the partition slot is _system; the rewriter handles that.
 
 @enabled
-@useConcept(user)
 @description("Returns a user's current activeSpaceId. Empty when the user is not focused on any space.")
-query queryUserActiveSpace {
+query user queryUserActiveSpace {
   args {
     userId  string  @required
   }
@@ -895,9 +868,8 @@ query queryUserActiveSpace {
 //   Array with 0 or 1 user record in userFull shape.
 
 @enabled
-@useConcept(user)
 @description("Look up a user by primary email (the dedup key during bootstrap).")
-query queryUserByEmail {
+query user queryUserByEmail {
   args {
     primaryEmail  string  @required
   }
@@ -922,9 +894,8 @@ query queryUserByEmail {
 //   Array with 0 or 1 user record in userFull shape.
 
 @enabled
-@useConcept(user)
 @description("Get a user by id.")
-query queryUserById {
+query user queryUserById {
   args {
     userId  string  @required
   }
@@ -948,9 +919,8 @@ query queryUserById {
 //
 
 @enabled
-@useConcept(user)
 @description("Every active v1:identity:user row. Caller takes len() to derive a count.")
-query queryUserCount {
+query user queryUserCount {
   filter  traitIsActiveRecord
   shape   userFull
 }
@@ -975,9 +945,8 @@ query queryUserCount {
 // active-human count for the space.
 
 @enabled
-@useConcept(user)
 @description("Returns users whose activeSpaceId == arg(spaceId). Active-human roster per the activity model (Phase 4).")
-query queryUsersActiveInSpace {
+query user queryUsersActiveInSpace {
   args {
     spaceId  string  @required
   }
@@ -1012,9 +981,8 @@ query queryUsersActiveInSpace {
 //
 
 @enabled
-@useConcept(user)
 @description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
-query queryUsersInDeletionCooldown {
+query user queryUsersInDeletionCooldown {
   filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
@@ -1048,9 +1016,8 @@ query queryUsersInDeletionCooldown {
 //
 
 @enabled
-@useConcept(user)
 @description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
-query queryUsersScheduledForDeletion {
+query user queryUsersScheduledForDeletion {
   filter  traitIsActiveRecord; traitIsDeletionScheduled
   shape   userFull
 }
@@ -1072,9 +1039,8 @@ query queryUsersScheduledForDeletion {
 //   codeHash (string, required) - SHA-256 hex digest of the plain code.
 
 @enabled
-@useConcept(workerPairingCode)
 @description("Hot-path pairing-code lookup by codeHash for the Pair-aware gRPC interceptor.")
-query queryWorkerPairingCodeByHash {
+query workerPairingCode queryWorkerPairingCodeByHash {
   args {
     codeHash  string  @required
   }
@@ -1102,9 +1068,8 @@ query queryWorkerPairingCodeByHash {
 //   Zero or one identity row in identityFull shape.
 
 @enabled
-@useConcept(identity)
 @description("Hot-path worker-token lookup by keyHash. Returns active + inactive rows.")
-query queryWorkerTokenByKeyHash {
+query identity queryWorkerTokenByKeyHash {
   args {
     keyHash  string  @required
   }
@@ -1125,9 +1090,8 @@ query queryWorkerTokenByKeyHash {
 //   userId (string, required) - v1:identity:user.id
 
 @enabled
-@useConcept(identity)
 @description("List worker-token identities owned by a user.")
-query queryWorkerTokensForUser {
+query identity queryWorkerTokensForUser {
   args {
     userId  string  @required
   }

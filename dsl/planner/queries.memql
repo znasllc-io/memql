@@ -26,8 +26,9 @@
 //
 // Returns: Array of plan records (planFull shape).
 
+use planner.concepts.{ plan, task, taskState }
+
 @enabled
-@useConcept(plan)
 @description("Every Plan in the active partition. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.")
 func (Query) queryAllPlans(ctx any) (any, error) {
   // The shape() form requires at least one filter expression after
@@ -51,9 +52,8 @@ func (Query) queryAllPlans(ctx any) (any, error) {
 }
 
 @enabled
-@useConcept(plan)
 @description("Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.")
-query queryAwaitingFeedbackPlansPastTimeout {
+query plan queryAwaitingFeedbackPlansPastTimeout {
   filter  payload.status=="awaitingFeedback"; payload.feedbackRequest.timeoutAt < now()
   shape   planFull
 }
@@ -78,9 +78,8 @@ query queryAwaitingFeedbackPlansPastTimeout {
 // at most a one-row-per-failed-training-step set.
 
 @enabled
-@useConcept(plan)
 @description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
-query queryDueTrainAgentRetryPlans {
+query plan queryDueTrainAgentRetryPlans {
   filter  payload.kind=="trainAgentRetryStep"; payload.status=="queued"
   shape   planFull
 }
@@ -100,9 +99,8 @@ query queryDueTrainAgentRetryPlans {
 // fades.
 
 @enabled
-@useConcept(plan)
 @description("Succeeded Plans of a kind, with metrics, for estimation bucket queries.")
-query queryHistoricalPlanMetrics {
+query plan queryHistoricalPlanMetrics {
   args {
     planKind  string  @required
   }
@@ -123,9 +121,8 @@ query queryHistoricalPlanMetrics {
 //   Single plan record (planFull shape) or empty array if missing.
 
 @enabled
-@useConcept(plan)
 @description("Single Plan by id.")
-query queryPlanById {
+query plan queryPlanById {
   args {
     planId  string  @required
   }
@@ -149,9 +146,8 @@ query queryPlanById {
 //   Array of plan records (planFull shape).
 
 @enabled
-@useConcept(plan)
 @description("All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.")
-query queryPlansForSpace {
+query plan queryPlansForSpace {
   args {
     spaceId  string  @required
   }
@@ -182,17 +178,15 @@ query queryPlansForSpace {
 // filter is the cleanest path.
 
 @enabled
-@useConcept(plan)
 @description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
-query queryRunningTrainAgentPlans {
+query plan queryRunningTrainAgentPlans {
   filter  payload.kind=="trainAgent"; traitStatusIsRunning
   shape   planFull
 }
 
 @enabled
-@useConcept(taskState)
 @description("Latest persisted state for a Task (planner reads this on resume).")
-query queryTaskStateById {
+query plan queryTaskStateById {
   args {
     taskId  string  @required
   }
@@ -216,9 +210,8 @@ query queryTaskStateById {
 //   Array of task records (taskFull shape).
 
 @enabled
-@useConcept(task)
 @description("All Tasks for a Plan, in seq order.")
-query queryTasksForPlan {
+query taskState queryTasksForPlan {
   args {
     planId  string  @required
   }

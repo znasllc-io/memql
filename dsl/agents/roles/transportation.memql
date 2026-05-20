@@ -4,16 +4,12 @@
 // educator -- expanded as marine / commercial-driving / rail roles
 // land.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level.")
-seed commercial_pilot_educator {
-  id:                    "commercial_pilot_educator"
+seed agentRole commercial_pilot_educator {
   slug:                  "commercial_pilot_educator"
   name:                  "Commercial Pilot Educator"
-  description:           "Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level."
   category:              "transportation"
   tier:                  "C"
   lockedDomainIds:       ["aviation_fundamentals"]

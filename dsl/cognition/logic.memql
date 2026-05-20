@@ -40,8 +40,12 @@
 // - bootstrapSession automation creates sessions for new SI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-@useQuery(queryAssistantForUser, queryParticipantByAgentSpace)
-@useMutation(mutationJoinSpaceAsSI)
+use agents.queries.{ queryAgentById }
+use cognition.builtins.{ ensureDailySpaceForCaller, ensureDailySpaceForUser, rolloverDailySpacesAllUsers }
+use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsSI, mutationSendTextUtterance }
+use cognition.queries.{ queryExpiredArchivedSpaces, queryHasSIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
+use identity.queries.{ queryUsersActiveInSpace }
+
 @description("Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's General Assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). Idempotent. Emits 'si.auto-joined' for observability. Specialist auto-join is deferred until the runtime can iterate selectedAgentIds.")
 logic logicAutoJoinSI {
   args {
@@ -51,7 +55,7 @@ logic logicAutoJoinSI {
   // hash(args.event.payload.actor) = the Actor the MemoryNode was stamped with
   // at insert time (the user's email for user-originated writes).
   // GAs are keyed on ga-<email>, so the lookup is direct.
-  getGA := queryAssistantForUser({ agentId: concat("ga-", hash(args.event.payload.actor)) })
+  getGA := queryAgentById({ agentId: concat("ga-", hash(args.event.payload.actor)) })
 
   // Join the GA if it exists and isn't already a participant. The
   // function-step arg resolver (automations/steps/function.go) only
@@ -139,8 +143,6 @@ logic logicAutoJoinSI {
 // automations/v1/cognition/bootstrapSession/automation.memql
 // Auto-creates a v1:cognition:session record when a participant is created.
 // Ensures every participant has a session tracking their real-time interaction state.
-@useQuery(queryParticipantSession)
-@useMutation(mutationCreateSessionForParticipant)
 @description("Auto-creates a v1:cognition:session record when a v1:cognition:participant is created, with default device + stream state. Ensures every participant has a session tracking their real-time interaction state. Idempotent via queryParticipantSession existence check. Emits 'session.created' for downstream consumers.")
 logic logicBootstrapSession {
   args {
@@ -175,8 +177,6 @@ logic logicBootstrapSession {
 // reception, concurrent context loading, Polyphon scoring, and streaming
 // dispatch, then emits this event with pre-loaded context when a
 // non-streaming SI response is needed.
-@useQuery(queryHasSIResponseForReply)
-@useMutation(mutationSendTextUtterance)
 @description("Generates and inserts an SI response when the Go cognition handler decides a non-streaming response is needed and emits this event with pre-loaded prompt data. Calls the prompt template, inserts a v1:cognition:utterance via mutationSendTextUtterance, and bumps participant presence to idle. Idempotent via queryHasSIResponseForReply.")
 logic logicGenerateResponse {
   args {
@@ -250,8 +250,6 @@ logic logicGenerateResponse {
 // Runs daily at 02:00 UTC. Cadence is loose (vs expireGuestInvitations's
 // 30-second tick) because retention is measured in days; missing the
 // boundary by a few hours doesn't matter -- next run catches it.
-@useQuery(queryExpiredArchivedSpaces)
-@useMutation(mutationDeleteSpaceNow)
 @description("Daily 02:00 UTC sweep that hard-deletes archived v1:cognition:space rows whose payload.expiresAt has passed (deadline pre-computed at archive time as archivedAt + retentionDays). Defensive: only acts on rows where status='archived' AND active=true AND expiresAt<now. Saved/scheduled/active spaces are untouched.")
 logic logicPurgeExpiredArchivedSpaces {
   args {
@@ -316,7 +314,6 @@ logic logicPurgeExpiredArchivedSpaces {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
-@useQuery(queryUsersActiveInSpace)
 @useMutation(mutationCreateCanvasState)
 @description("Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
 logic logicVoiceMigrationOnSecondHuman {
@@ -382,7 +379,6 @@ logic logicVoiceMigrationOnSecondHuman {
 // nested payload paths reliably. The capability short-circuits +
 // reports skip-reason in its result, which is sufficient for the
 // observability story.
-@useBuiltin(ensureDailySpaceForUser)
 @description("Fires when a new v1:identity:user row lands. Delegates to the dailyspace.ensureForUser capability which owns the timezone math + idempotent insert of today's daily space for that user. dailySpaceEnabled gating lives inside the Go capability since the value sits under preferences and filter syntax doesn't navigate nested payload paths reliably.")
 logic logicProvisionDailySpaceOnUserCreate {
   args {
@@ -410,7 +406,6 @@ logic logicProvisionDailySpaceOnUserCreate {
 // without forcing them to also know how to build a triggering
 // event.
 @enabled
-@useBuiltin(ensureDailySpaceForCaller)
 @description("Ensure today's daily space exists for the authenticated caller. Top-level Execute entry point for interactive clients; resolves userId from the request's auth context inside the dailyspace integration.")
 logic logicEnsureDailySpaceForCaller {
   body {
@@ -429,7 +424,6 @@ logic logicEnsureDailySpaceForCaller {
 // This is the path that makes the cron-frequency concern moot:
 // every time the user re-auths, today's daily is guaranteed to
 // exist before any read query the SPA might issue.
-@useBuiltin(ensureDailySpaceForUser)
 @description("Fires on every v1:identity:authSession create (one per login). Calls dailyspace.ensureForUser for the authenticating user; the idempotent insert collapses to a no-op when today's daily already exists. This is the path that makes the cron-frequency concern moot -- every login guarantees today's daily exists before the SPA reads.")
 logic logicEnsureDailySpaceOnAuthSession {
   args {
@@ -446,7 +440,6 @@ logic logicEnsureDailySpaceOnAuthSession {
 // dailyspace.rolloverAllUsers capability, which walks queryActiveUsers
 // and calls ensureForUser per row. Returns a one-row summary the
 // automation logs.
-@useBuiltin(rolloverDailySpacesAllUsers)
 @description("Hourly cron tick. Delegates the entire per-user sweep to the dailyspace.rolloverAllUsers capability, which walks queryActiveUsers and calls ensureForUser per row. Returns a one-row summary the automation logs.")
 logic logicRolloverDailySpace {
   args {

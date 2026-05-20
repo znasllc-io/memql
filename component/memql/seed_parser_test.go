@@ -136,6 +136,72 @@ seed assistant {
 	}
 }
 
+// TestParseSeedMemQL_SignatureBoundConcept locks the canonical
+// post-migration shape: `seed <Concept> <name>` carries the concept
+// binding in the signature; no `use <ns>.<concept>` clause needed.
+// File-top Form B `use module.{ names }` may appear but isn't required
+// at parse time (the loader resolves the signature concept against
+// the file's imports).
+func TestParseSeedMemQL_SignatureBoundConcept(t *testing.T) {
+	src := `use agents.concepts.{ agentRole }
+
+@description("Corn / soy / wheat agronomy")
+seed agentRole row_crop_farmer {
+  name:     "Row Crop Farmer"
+  category: "agriculture"
+}`
+	decl, err := parseSeedMemQL("test.memql", []byte(src))
+	if err != nil {
+		t.Fatalf("parseSeedMemQL: %v", err)
+	}
+	if decl.name != "row_crop_farmer" {
+		t.Errorf("name = %q, want row_crop_farmer", decl.name)
+	}
+	if decl.useConcept != "agentRole" {
+		t.Errorf("useConcept = %q, want agentRole", decl.useConcept)
+	}
+	if decl.signatureConcept != "agentRole" {
+		t.Errorf("signatureConcept = %q, want agentRole", decl.signatureConcept)
+	}
+	if decl.useNamespace != "" {
+		t.Errorf("useNamespace = %q, want empty (resolution via imports)", decl.useNamespace)
+	}
+	if len(decl.imports) != 1 || decl.imports[0].module != "agents.concepts" {
+		t.Errorf("imports = %+v, want one entry for agents.concepts", decl.imports)
+	}
+	if len(decl.imports[0].names) != 1 || decl.imports[0].names[0] != "agentRole" {
+		t.Errorf("imports[0].names = %v, want [agentRole]", decl.imports[0].names)
+	}
+}
+
+// TestCompileSeedDecl_AutoDerivesIdFromName confirms that a global
+// seed without a body-declared `id` gets one auto-derived from the
+// seed declaration name.
+func TestCompileSeedDecl_AutoDerivesIdFromName(t *testing.T) {
+	src := `use agents.concepts.{ agentRole }
+seed agentRole row_crop_farmer {
+  name: "Row Crop Farmer"
+}`
+	decl, err := parseSeedMemQL("test.memql", []byte(src))
+	if err != nil {
+		t.Fatalf("parseSeedMemQL: %v", err)
+	}
+	def, err := compileSeedDecl(decl)
+	if err != nil {
+		t.Fatalf("compileSeedDecl: %v", err)
+	}
+	if def.Scope != "global" {
+		t.Errorf("scope defaulted to %q, want global", def.Scope)
+	}
+	got, ok := def.Body.fields["id"]
+	if !ok {
+		t.Fatal("compiled body has no id field; expected auto-derived from name")
+	}
+	if got.str != "row_crop_farmer" {
+		t.Errorf("auto-derived id = %q, want row_crop_farmer", got.str)
+	}
+}
+
 func TestParseSeedMemQL_Rejects(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -143,9 +209,9 @@ func TestParseSeedMemQL_Rejects(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "missing use clause",
+			name:    "missing concept binding",
 			src:     `@scope("global") seed foo { id: "x" }`,
-			wantErr: "requires a `use",
+			wantErr: "must bind a concept",
 		},
 		{
 			name:    "func-receiver form rejected",

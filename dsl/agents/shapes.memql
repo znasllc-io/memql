@@ -5,10 +5,11 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
+use agents.concepts.{ agent, agentAuthorization, agentRole }
+
 @row
-@useConcept(agentAuthorization)
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
-shape agentAuthorizationFull {
+shape agentAuthorization agentAuthorizationFull {
   row.id
   payload.agentId
   payload.userId
@@ -36,9 +37,8 @@ shape agentAuthorizationFull {
 //     ownerUserId.
 
 @row
-@useConcept(agent)
 @description("Comprehensive agent projection with all configuration fields")
-shape agentFull {
+shape agent agentFull {
   row.id
   payload.ownerUserId
   payload.name
@@ -62,17 +62,15 @@ shape agentFull {
 }
 
 @row
-@useConcept(agent)
 @description("Minimal agent projection used by queryAgentRoleSlugsInUse: just id + roleSlug, since the create-agent dropdown only needs to know which slugs are taken (not the full agent payload).")
-shape agentRoleSlugLite {
+shape agent agentRoleSlugLite {
   row.id
   payload.roleSlug
 }
 
 @row
-@useConcept(agent)
 @description("Compact agent projection the layered-dedupe similarity step consumes. Carries only the fields that influence dedupe decisions: identity (id, roleSlug, name, description), capabilities the Planner reasons about (domains, tools, keywords), and the lineage that lets the Planner avoid daisy-chaining extensions (extendedFromAgentId, extensionGoals). Embedding (roleEmbedding) is included so the dedupe-Layer-1 cosine math has the data it needs without a second row fetch.")
-shape agentMinimalForDedupe {
+shape agent agentMinimalForDedupe {
   row.id
   payload.name
   payload.role
@@ -85,9 +83,8 @@ shape agentMinimalForDedupe {
 }
 
 @row
-@useConcept(agentRole)
 @description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the lock + default lists for the materialization step; recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
-shape agentRoleFull {
+shape agentRole agentRoleFull {
   row.id
   payload.slug
   payload.name

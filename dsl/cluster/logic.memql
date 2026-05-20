@@ -8,8 +8,9 @@
 // Bootstrap the cluster's self-representation in the database on first startup.
 // Creates records for the cluster, its database, and its identity provider.
 // Only BFF nodes run this. Idempotent: skips if cluster already exists.
-@useQuery(queryExistingCluster)
-@useMutation(mutationCreateCluster, mutationCreateDatabase, mutationCreateIdentityProvider)
+use cluster.mutations.{ mutationCreateCluster, mutationCreateDatabase, mutationCreateIdentityProvider, mutationCreateNode, mutationCreateSpawnEvent }
+use cluster.queries.{ queryExistingCluster }
+
 @description("Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.")
 logic logicBootstrapCluster {
   args {
@@ -56,7 +57,6 @@ logic logicBootstrapCluster {
 
 // Record node shutdown in the database.
 // Creates a spawn event with action="stopped".
-@useMutation(mutationCreateSpawnEvent)
 @description("Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.")
 logic logicDeregisterNode {
   args {
@@ -83,7 +83,6 @@ logic logicDeregisterNode {
 // Passes the peer's NodeId as the explicit concept id so later rows
 // written by NodeStatusWriter (via updateNodeHealth) share the same
 // time-series timeline -- one concept row per real node.
-@useMutation(mutationCreateNode, mutationCreateSpawnEvent)
 @description("Registers this node on startup. Creates a v1:cluster:node record (using the peer's NodeId as the explicit concept id so later NodeStatusWriter rows share the same time-series timeline) and a v1:cluster:spawnEvent with action='spawned' and reason='system.startup'. Runs on every node type; safe to re-run on every restart.")
 logic logicRegisterNode {
   args {

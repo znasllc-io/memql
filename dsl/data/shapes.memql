@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use data.concepts.{ log, policy, record }
+
 @row
-@useConcept(log)
 @description("Validation log entry projection with full audit trail fields")
-shape logFull {
+shape log logFull {
   row.id
   payload.recordId
   payload.action
@@ -21,9 +22,8 @@ shape logFull {
 }
 
 @row
-@useConcept(policy)
 @description("Validation policy projection with all configuration fields")
-shape policyFull {
+shape policy policyFull {
   row.id
   payload.targetRecordType
   payload.spaceId
@@ -36,9 +36,8 @@ shape policyFull {
 }
 
 @row
-@useConcept(record)
 @description("Comprehensive data record projection with validation lifecycle fields")
-shape recordFull {
+shape record recordFull {
   row.id
   payload.spaceId
   payload.validationState

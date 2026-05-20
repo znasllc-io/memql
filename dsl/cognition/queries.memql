@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.concepts.{ context, micState, participant, session, space, utterance }
+
 @enabled
-@useConcept(participant)
 @description("Get active human participants in a space")
-query queryActiveHumanParticipants {
+query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
@@ -59,9 +60,8 @@ func (Query) queryActiveSpaces(ctx any) (any, error) {
 //
 
 @enabled
-@useConcept(utterance)
 @description("Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.")
-query queryAgentInteractionCount {
+query utterance queryAgentInteractionCount {
   args {
     agentId  string  @required
   }
@@ -88,9 +88,8 @@ query queryAgentInteractionCount {
 // archived rows in one pass.
 
 @enabled
-@useConcept(space)
 @description("Returns every archived space in the partition, for the purge cron's per-row retention check.")
-query queryAllArchivedSpacesAcrossUsers {
+query space queryAllArchivedSpacesAcrossUsers {
   filter  traitIsActiveRecord; traitStatusIsArchived
   shape   spaceFull
 }
@@ -121,9 +120,8 @@ query queryAllArchivedSpacesAcrossUsers {
 //
 
 @enabled
-@useConcept(space)
 @description("Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).")
-query queryArchivedSpaces {
+query space queryArchivedSpaces {
   args {
     userId  string
   }
@@ -168,9 +166,8 @@ func (Query) queryAudioOverridesForSpace(ctx any) (any, error) {
 // filter comparisons (see queryExpiredPendingGuestInvitations).
 
 @enabled
-@useConcept(space)
 @description("Archived spaces whose space.expiresAt is before the supplied cutoff.")
-query queryExpiredArchivedSpaces {
+query space queryExpiredArchivedSpaces {
   args {
     now  string  @required
   }
@@ -201,9 +198,8 @@ query queryExpiredArchivedSpaces {
 //
 
 @enabled
-@useConcept(utterance)
 @description("Check if a greeting utterance already exists for an agent in a space")
-query queryGreetingUtterance {
+query utterance queryGreetingUtterance {
   args {
     spaceId  string  @required
     agentId  string  @required
@@ -256,9 +252,8 @@ func (Query) queryGroupGAForSpace(ctx any) (any, error) {
 //   Array of matching utterance records (0 = no response yet, 1+ = already responded)
 
 @enabled
-@useConcept(utterance)
 @description("Check if an SI response already exists for a given utterance (idempotency check).")
-query queryHasSIResponseForReply {
+query utterance queryHasSIResponseForReply {
   args {
     replyToId  string  @required
     participantId  string  @required
@@ -291,9 +286,8 @@ query queryHasSIResponseForReply {
 //
 
 @enabled
-@useConcept(participant)
 @description("Check if an AI agent is already a participant in a space (excludes left status)")
-query queryParticipantByAgentSpace {
+query participant queryParticipantByAgentSpace {
   args {
     spaceId  string  @required
     agentId  string  @required
@@ -339,9 +333,8 @@ query queryParticipantByAgentSpace {
 //
 
 @enabled
-@useConcept(session)
 @description("Returns session state for participants in spaces. Optional filters: spaceId, participantId")
-query queryParticipantSession {
+query session queryParticipantSession {
   args {
     spaceId  string
     participantId  string
@@ -375,9 +368,8 @@ query queryParticipantSession {
 //
 
 @enabled
-@useConcept(space)
 @description("Returns spaces with space.status == 'saved'. Optional filter: userId (createdBy).")
-query querySavedSpaces {
+query space querySavedSpaces {
   args {
     userId  string
   }
@@ -401,9 +393,8 @@ query querySavedSpaces {
 //   Array of SI participant records (typically 0 or 1)
 
 @enabled
-@useConcept(participant)
 @description("Find the active SI participant in a space.")
-query querySiParticipantForSpace {
+query participant querySiParticipantForSpace {
   args {
     spaceId  string  @required
   }
@@ -424,9 +415,8 @@ query querySiParticipantForSpace {
 //
 
 @enabled
-@useConcept(context)
 @description("Returns runtime context snapshots for spaces. Optional filter: spaceId")
-query querySpaceContext {
+query context querySpaceContext {
   args {
     spaceId  string
   }
@@ -456,9 +446,8 @@ query querySpaceContext {
 //   specialist agent ids, createdBy, and createdAt.
 
 @enabled
-@useConcept(space)
 @description("Returns the full space record by id.")
-query querySpaceMeta {
+query space querySpaceMeta {
   args {
     spaceId  string  @required
   }
@@ -520,9 +509,8 @@ func (Query) querySpaceUtterances(ctx any) (any, error) {
 // publish if that user is muted.
 
 @enabled
-@useConcept(micState)
 @description("Latest mic state rows per user for a space.")
-query queryUserMicStatesForSpace {
+query micState queryUserMicStatesForSpace {
   args {
     spaceId  string  @required
   }

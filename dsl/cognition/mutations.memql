@@ -3,10 +3,12 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.concepts.{ audioOverride, chunk, micState, participant, presence, response, session, space, utterance, videoOverride }
+use identity.concepts.{ request }
+
 @enabled
-@useConcept(participant)
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
-mutation mutationAddAgentToSpace {
+mutation participant mutationAddAgentToSpace {
   args {
     spaceId              string  @required
     agentId              string  @required
@@ -39,9 +41,8 @@ mutation mutationAddAgentToSpace {
 // The caller is responsible for passing the full updated payload (e.g., active=false, status="archived").
 
 @enabled
-@useConcept(space)
 @description("Insert a new version of a space record (typically used to archive a space).")
-mutation mutationArchiveSpace {
+mutation space mutationArchiveSpace {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -109,9 +110,8 @@ mutation mutationArchiveSpace {
 // space flow uses.
 
 @enabled
-@useConcept(space)
 @description("Create a daily space (kind=daily, private=true). Idempotent on (userHash, dateKey). Phase 10: no maxHumans=1/maxAgents=1 lock; the user can grow a daily space into a full team conversation if they want.")
-mutation mutationCreateDailySpace {
+mutation space mutationCreateDailySpace {
   args {
     spaceId       string  @required
     name          string  @required
@@ -160,9 +160,8 @@ mutation mutationCreateDailySpace {
 //
 
 @enabled
-@useConcept(utterance)
 @description("Create a greeting utterance for an SI participant joining a space")
-mutation mutationCreateGreetingUtterance {
+mutation utterance mutationCreateGreetingUtterance {
   args {
     spaceId        string  @required
     participantId  string  @required
@@ -192,9 +191,8 @@ mutation mutationCreateGreetingUtterance {
 // Creates (or re-creates) a v1:cognition:session record for a participant in a space.
 
 @enabled
-@useConcept(session)
 @description("Create a session record for a participant in a space.")
-mutation mutationCreateSessionForParticipant {
+mutation session mutationCreateSessionForParticipant {
   args {
     sessionId      string
     spaceId        string  @required
@@ -225,9 +223,8 @@ mutation mutationCreateSessionForParticipant {
 // `maxAgents` default to 5 / 3 when the caller omits them.
 
 @enabled
-@useConcept(space)
 @description("Create a space.")
-mutation mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId           string
     name              string  @required
@@ -286,9 +283,8 @@ mutation mutationCreateSpace {
 // status="archived").
 
 @enabled
-@useConcept(space)
 @description("Insert a new version of a space record marking it as hard-deleted (deleted=true).")
-mutation mutationDeleteSpaceNow {
+mutation space mutationDeleteSpaceNow {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -312,9 +308,8 @@ mutation mutationDeleteSpaceNow {
 // v1:cognition:client:tool:response with the same callId.
 
 @enabled
-@useConcept(request)
 @description("Emit a client-tool request envelope for cross-node relay to a browser stream.")
-mutation mutationEmitClientToolRequest {
+mutation request mutationEmitClientToolRequest {
   args {
     requestId      string  @required
     callId         string  @required
@@ -350,9 +345,8 @@ mutation mutationEmitClientToolRequest {
 // node via AiForwardRequest so the parked tool-loop waiter unblocks.
 
 @enabled
-@useConcept(response)
 @description("Emit a client-tool response envelope fulfilling a pending clientToolRequest.")
-mutation mutationEmitClientToolResponse {
+mutation response mutationEmitClientToolResponse {
   args {
     responseId    string  @required
     callId        string  @required
@@ -381,9 +375,8 @@ mutation mutationEmitClientToolResponse {
 // subscribes to for real-time streaming text display.
 
 @enabled
-@useConcept(chunk)
 @description("Emit a streaming text chunk during AI response generation.")
-mutation mutationEmitTextChunk {
+mutation chunk mutationEmitTextChunk {
   args {
     chunkId        string   @required
     spaceId        string   @required
@@ -430,9 +423,8 @@ mutation mutationEmitTextChunk {
 // canonicalized, so the engine's auto-canon doesn't see it.
 
 @enabled
-@useConcept(participant)
 @description("Join a space as a human participant.")
-mutation mutationJoinSpaceAsHuman {
+mutation participant mutationJoinSpaceAsHuman {
   args {
     spaceId              string  @required
     userId               string  @required
@@ -482,9 +474,8 @@ mutation mutationJoinSpaceAsHuman {
 // without re-encoding via hash().
 
 @enabled
-@useConcept(participant)
 @description("Join a space as an SI participant. Uses canonicalized deterministic ID.")
-mutation mutationJoinSpaceAsSI {
+mutation participant mutationJoinSpaceAsSI {
   args {
     spaceId              string  @required
     agentId              string  @required
@@ -520,9 +511,8 @@ mutation mutationJoinSpaceAsSI {
 // The caller is responsible for passing the full updated payload (e.g., status="left", leftAt=timestamp()).
 
 @enabled
-@useConcept(participant)
 @description("Insert a new version of a participant record (typically used to mark the participant as left).")
-mutation mutationLeaveSpace {
+mutation participant mutationLeaveSpace {
   args {
     participantId  string  @required
     payload        object  @required
@@ -557,9 +547,8 @@ mutation mutationLeaveSpace {
 //      the roster.
 
 @enabled
-@useConcept(participant)
 @description("Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.")
-mutation mutationRemoveAgentFromSpace {
+mutation participant mutationRemoveAgentFromSpace {
   args {
     spaceId  string  @required
     agentId  string  @required
@@ -586,9 +575,8 @@ mutation mutationRemoveAgentFromSpace {
 // The caller is responsible for passing the full updated payload (append-only model).
 
 @enabled
-@useConcept(space)
 @description("Insert a new version of a space record (typically used to rename a space).")
-mutation mutationRenameSpace {
+mutation space mutationRenameSpace {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -614,9 +602,8 @@ mutation mutationRenameSpace {
 // copresentMutations.ts wrappers compose the per-state payload.
 
 @enabled
-@useConcept(space)
 @description("Insert a new version of a space record to restore it to the active state.")
-mutation mutationRestoreSpace {
+mutation space mutationRestoreSpace {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -646,9 +633,8 @@ mutation mutationRestoreSpace {
 // payload composition.
 
 @enabled
-@useConcept(space)
 @description("Insert a new version of a space record with the 'saved' status payload.")
-mutation mutationSaveSpace {
+mutation space mutationSaveSpace {
   args {
     spaceId  string  @required
     payload  object  @required
@@ -674,9 +660,8 @@ mutation mutationSaveSpace {
 // - If action.idempotencyKey is provided, a deterministic utterance ID is derived for safe retries
 
 @enabled
-@useConcept(utterance)
 @description("Create an action utterance in a space.")
-mutation mutationSendActionUtterance {
+mutation utterance mutationSendActionUtterance {
   args {
     utteranceId      string
     spaceId          string  @required
@@ -729,9 +714,8 @@ mutation mutationSendActionUtterance {
 // deterministic IDs when idempotencyKey is provided.
 
 @enabled
-@useConcept(utterance)
 @description("Create a transcript-only realtime voice utterance in a space.")
-mutation mutationSendRealtimeTranscriptUtterance {
+mutation utterance mutationSendRealtimeTranscriptUtterance {
   args {
     utteranceId      string
     idempotencyKey   string
@@ -793,9 +777,8 @@ mutation mutationSendRealtimeTranscriptUtterance {
 // Inserts a new speech utterance into a space conversation.
 
 @enabled
-@useConcept(utterance)
 @description("Create a speech utterance in a space.")
-mutation mutationSendSpeechUtterance {
+mutation utterance mutationSendSpeechUtterance {
   args {
     utteranceId      string
     spaceId          string  @required
@@ -838,9 +821,8 @@ mutation mutationSendSpeechUtterance {
 // Inserts a new text utterance into a space conversation.
 
 @enabled
-@useConcept(utterance)
 @description("Create a text utterance in a space.")
-mutation mutationSendTextUtterance {
+mutation utterance mutationSendTextUtterance {
   args {
     utteranceId      string
     spaceId          string  @required
@@ -886,9 +868,8 @@ mutation mutationSendTextUtterance {
 // destroying history.
 
 @enabled
-@useConcept(audioOverride)
 @description("Set the per-session audio control mode for an agent in a space.")
-mutation mutationSetAgentAudioOverride {
+mutation audioOverride mutationSetAgentAudioOverride {
   args {
     spaceId  string  @required
     agentId  string  @required
@@ -938,9 +919,8 @@ mutation mutationSetAgentAudioOverride {
 // destroying history.
 
 @enabled
-@useConcept(videoOverride)
 @description("Set the per-session video control mode for an agent in a space.")
-mutation mutationSetAgentVideoOverride {
+mutation videoOverride mutationSetAgentVideoOverride {
   args {
     spaceId  string  @required
     agentId  string  @required
@@ -977,9 +957,8 @@ mutation mutationSetAgentVideoOverride {
 // the latest payload wins at read time. No per-click row growth.
 
 @enabled
-@useConcept(micState)
 @description("Set the per-user mic state for a space (LiveKit mic muted / unmuted).")
-mutation mutationSetUserMicState {
+mutation micState mutationSetUserMicState {
   args {
     spaceId  string  @required
     userId   string  @required
@@ -1006,9 +985,8 @@ mutation mutationSetUserMicState {
 // Typically used to bump lastActivityAt (append-only heartbeat).
 
 @enabled
-@useConcept(session)
 @description("Insert a new version of a session record (typically used as a heartbeat).")
-mutation mutationTouchSession {
+mutation session mutationTouchSession {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -1028,9 +1006,8 @@ mutation mutationTouchSession {
 // This is append-only versioning with deterministic IDs for latest-wins reads.
 
 @enabled
-@useConcept(presence)
 @description("Upsert a participant presence snapshot for multi-client status consistency.")
-mutation mutationUpdateParticipantPresence {
+mutation presence mutationUpdateParticipantPresence {
   args {
     presenceId       string
     participantId    string  @required
@@ -1071,9 +1048,8 @@ mutation mutationUpdateParticipantPresence {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@useConcept(participant)
 @description("Insert a new version of a participant record (typically used to update status).")
-mutation mutationUpdateParticipantStatus {
+mutation participant mutationUpdateParticipantStatus {
   args {
     participantId  string  @required
     payload        object  @required
@@ -1093,9 +1069,8 @@ mutation mutationUpdateParticipantStatus {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@useConcept(session)
 @description("Insert a new version of a session record (typically used to update device state).")
-mutation mutationUpdateSessionDevices {
+mutation session mutationUpdateSessionDevices {
   args {
     sessionId  string  @required
     payload    object  @required
@@ -1115,9 +1090,8 @@ mutation mutationUpdateSessionDevices {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@useConcept(session)
 @description("Insert a new version of a session record (typically used to update streams).")
-mutation mutationUpdateSessionStreams {
+mutation session mutationUpdateSessionStreams {
   args {
     sessionId  string  @required
     payload    object  @required

@@ -6,10 +6,11 @@
 // product-specific mutations (e.g. CoPresent's space-join flow) layer
 // on top, never re-implement the row write.
 
+use agents.concepts.{ agent, agentAuthorization, agentRole }
+
 @enabled
-@useConcept(agent)
 @description("Create a new AI agent template. The `kind` arg defaults to `user`; only the SeedMaterializer (running under the system actor) passes `kind: \"system\"` when it materializes platform agents like the MemQL Planner / MemQL Trainer. User-facing callers should omit the field -- omission gets the safe default; an explicit `system` from a user caller is accepted by the mutation but caught downstream by consumers that gate on kind.")
-mutation mutationCreateAgent {
+mutation agent mutationCreateAgent {
   args {
     agentId          string
     ownerUserId      string
@@ -55,9 +56,8 @@ mutation mutationCreateAgent {
 }
 
 @enabled
-@useConcept(agentAuthorization)
 @description("Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.")
-mutation mutationCreateAgentAuthorization {
+mutation agentAuthorization mutationCreateAgentAuthorization {
   args {
     authId            string
     agentId           string  @required
@@ -82,9 +82,8 @@ mutation mutationCreateAgentAuthorization {
 }
 
 @enabled
-@useConcept(agent)
 @description("Soft-delete an agent (active:false, deleted:true).")
-mutation mutationDeleteAgent {
+mutation agent mutationDeleteAgent {
   args {
     agentId  string  @required
   }
@@ -96,9 +95,8 @@ mutation mutationDeleteAgent {
 }
 
 @enabled
-@useConcept(agentAuthorization)
 @description("Soft-revoke a standing authorization. User-revocable from the agent's settings at any time.")
-mutation mutationRevokeAgentAuthorization {
+mutation agentAuthorization mutationRevokeAgentAuthorization {
   args {
     authId  string  @required
   }
@@ -109,9 +107,8 @@ mutation mutationRevokeAgentAuthorization {
 }
 
 @enabled
-@useConcept(agent)
 @description("Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields inherit from the prior row.")
-mutation mutationUpdateAgent {
+mutation agent mutationUpdateAgent {
   args {
     agentId  string  @required
     payload  object  @required
@@ -123,9 +120,8 @@ mutation mutationUpdateAgent {
 }
 
 @enabled
-@useConcept(agentRole)
 @description("Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.")
-mutation mutationCreateAgentRole {
+mutation agentRole mutationCreateAgentRole {
   args {
     agentRoleId             string
     slug                    string  @required

@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, partitionAccess, user, workerPairingCode }
+
 @enabled
-@useConcept(accessRequest)
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
-mutation mutationApproveAccessRequest {
+mutation accessRequest mutationApproveAccessRequest {
   args {
     requestId     string  @required
     reviewedBy    string  @required
@@ -37,9 +38,8 @@ mutation mutationApproveAccessRequest {
 // shape (identityType discriminator, credentials, active flag).
 
 @enabled
-@useConcept(identity)
 @description("Bump the lastUsedAt stamp on a PAT identity. Best-effort; callers must not fail the request on error.")
-mutation mutationBumpPATLastUsedAt {
+mutation identity mutationBumpPATLastUsedAt {
   args {
     identityId      string  @required
     userId          string  @required
@@ -80,9 +80,8 @@ mutation mutationBumpPATLastUsedAt {
 //
 
 @enabled
-@useConcept(user)
 @description("Stamp dataExportLastAt = now after a successful /me/export download.")
-mutation mutationBumpUserDataExport {
+mutation user mutationBumpUserDataExport {
   args {
     userId  string  @required
   }
@@ -119,9 +118,8 @@ mutation mutationBumpUserDataExport {
 //
 
 @enabled
-@useConcept(user)
 @description("Cancel a scheduled account deletion (clears deletionScheduledAt).")
-mutation mutationCancelScheduledDeletion {
+mutation user mutationCancelScheduledDeletion {
   args {
     userId  string  @required
   }
@@ -155,9 +153,8 @@ mutation mutationCancelScheduledDeletion {
 //
 
 @enabled
-@useConcept(authCode)
 @description("Mark an auth code consumed (stamps consumedAt = now).")
-mutation mutationConsumeAuthCode {
+mutation authCode mutationConsumeAuthCode {
   args {
     codeId          string  @required
     consumedFromIP  string
@@ -191,9 +188,8 @@ mutation mutationConsumeAuthCode {
 //
 
 @enabled
-@useConcept(magicLinkRequest)
 @description("Mark a magic-link request consumed (stamps consumedAt = now).")
-mutation mutationConsumeMagicLinkRequest {
+mutation magicLinkRequest mutationConsumeMagicLinkRequest {
   args {
     requestId       string  @required
     consumedFromIP  string
@@ -232,9 +228,8 @@ mutation mutationConsumeMagicLinkRequest {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Create a self-service access request (waitlist row, status=pending).")
-mutation mutationCreateAccessRequest {
+mutation accessRequest mutationCreateAccessRequest {
   args {
     requestId          string  @required
     email              string  @required
@@ -296,9 +291,8 @@ mutation mutationCreateAccessRequest {
 //
 
 @enabled
-@useConcept(auditEvent)
 @description("Append a row to the append-only security audit log.")
-mutation mutationCreateAuditEvent {
+mutation auditEvent mutationCreateAuditEvent {
   args {
     eventId          string  @required
     occurredAt       string  @required
@@ -369,9 +363,8 @@ mutation mutationCreateAuditEvent {
 //
 
 @enabled
-@useConcept(authCode)
 @description("Mint a one-time OAuth authorization code from a consumed magic link.")
-mutation mutationCreateAuthCode {
+mutation authCode mutationCreateAuthCode {
   args {
     codeId              string  @required
     code                string  @required
@@ -426,9 +419,8 @@ mutation mutationCreateAuthCode {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Create a bearer-token session record at issuance time.")
-mutation mutationCreateAuthSession {
+mutation authSession mutationCreateAuthSession {
   args {
     sessionId    string  @required
     subject      string  @required
@@ -491,9 +483,8 @@ mutation mutationCreateAuthSession {
 //
 
 @enabled
-@useConcept(clusterSettings)
 @description("Persist (or refresh) the singleton cluster-settings row.")
-mutation mutationCreateClusterSettings {
+mutation clusterSettings mutationCreateClusterSettings {
   args {
     id                         string  @required
     clusterDomain              string
@@ -560,9 +551,8 @@ mutation mutationCreateClusterSettings {
 // scoped authority to act on behalf of an identity.
 
 @enabled
-@useConcept(delegation)
 @description("Create a new delegation granting an agent scoped authority on behalf of an identity.")
-mutation mutationCreateDelegation {
+mutation delegation mutationCreateDelegation {
   args {
     delegationId     string
     identityId       string  @required
@@ -618,9 +608,8 @@ mutation mutationCreateDelegation {
 // (a new time-series version under the same id rather than a new row).
 
 @enabled
-@useConcept(identity)
 @description("Create a new identity (credential set owned by a user).")
-mutation mutationCreateIdentity {
+mutation identity mutationCreateIdentity {
   args {
     identityId      string  @required
     userId          string  @required
@@ -666,9 +655,8 @@ mutation mutationCreateIdentity {
 //
 
 @enabled
-@useConcept(magicLinkRequest)
 @description("Create a magic-link request row at issuance time.")
-mutation mutationCreateMagicLinkRequest {
+mutation magicLinkRequest mutationCreateMagicLinkRequest {
   args {
     requestId     string  @required
     email         string  @required
@@ -710,9 +698,8 @@ mutation mutationCreateMagicLinkRequest {
 // happens through the v1:identity:delegation concept.
 
 @enabled
-@useConcept(identity)
 @description("Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
-mutation mutationCreatePATIdentity {
+mutation identity mutationCreatePATIdentity {
   args {
     identityId      string  @required
     userId          string  @required
@@ -752,9 +739,8 @@ mutation mutationCreatePATIdentity {
 // set role directly.
 
 @enabled
-@useConcept(user)
 @description("Create a new user (person / synthetic principal).")
-mutation mutationCreateUser {
+mutation user mutationCreateUser {
   args {
     userId        string  @required
     displayName   string  @required
@@ -809,9 +795,8 @@ mutation mutationCreateUser {
 //
 
 @enabled
-@useConcept(user)
 @description("Create a user record on first successful magic-link login.")
-mutation mutationCreateUserOnFirstLogin {
+mutation user mutationCreateUserOnFirstLogin {
   args {
     userId        string  @required
     displayName   string  @required
@@ -862,9 +847,8 @@ mutation mutationCreateUserOnFirstLogin {
 // omitted here so the row is born "unspent."
 
 @enabled
-@useConcept(workerPairingCode)
 @description("Persist a worker-pairing-code row at creation time.")
-mutation mutationCreateWorkerPairingCode {
+mutation workerPairingCode mutationCreateWorkerPairingCode {
   args {
     pairingId    string  @required
     ownerUserId  string  @required
@@ -905,9 +889,8 @@ mutation mutationCreateWorkerPairingCode {
 // about a stable id without knowing the plaintext.
 
 @enabled
-@useConcept(identity)
 @description("Create a worker_token identity (machine credential for a memql-cockpit-worker). Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.")
-mutation mutationCreateWorkerTokenIdentity {
+mutation identity mutationCreateWorkerTokenIdentity {
   args {
     identityId              string  @required
     userId                  string  @required
@@ -970,9 +953,8 @@ mutation mutationCreateWorkerTokenIdentity {
 //
 
 @enabled
-@useConcept(user)
 @description("Hard-delete (soft-delete + PII scrub) a user after the deletion-cooldown sweep.")
-mutation mutationDeleteUserHard {
+mutation user mutationDeleteUserHard {
   args {
     userId  string  @required
   }
@@ -1003,9 +985,8 @@ mutation mutationDeleteUserHard {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Expire a pending access request (status=expired).")
-mutation mutationExpireAccessRequest {
+mutation accessRequest mutationExpireAccessRequest {
   args {
     requestId  string  @required
   }
@@ -1033,9 +1014,8 @@ mutation mutationExpireAccessRequest {
 // a sync job can later own only its own rows via sourceRef.
 
 @enabled
-@useConcept(partitionAccess)
 @description("Grant a user access to a partition at a given role.")
-mutation mutationGrantPartitionAccess {
+mutation partitionAccess mutationGrantPartitionAccess {
   args {
     grantId        string  @required
     userId         string  @required
@@ -1089,9 +1069,8 @@ mutation mutationGrantPartitionAccess {
 //
 
 @enabled
-@useConcept(user)
 @description("Replace a user's legalAcceptance array (caller must read-modify-write to append).")
-mutation mutationRecordLegalAcceptance {
+mutation user mutationRecordLegalAcceptance {
   args {
     userId           string  @required
     legalAcceptance  object  @required
@@ -1120,9 +1099,8 @@ mutation mutationRecordLegalAcceptance {
 // so the audit trail is complete.
 
 @enabled
-@useConcept(workerPairingCode)
 @description("Stamp a pairing-code row redeemed.")
-mutation mutationRedeemWorkerPairingCode {
+mutation workerPairingCode mutationRedeemWorkerPairingCode {
   args {
     pairingId       string  @required
     redeemedAt      string  @required
@@ -1158,9 +1136,8 @@ mutation mutationRedeemWorkerPairingCode {
 //
 
 @enabled
-@useConcept(accessRequest)
 @description("Reject an access request (status=rejected, stamps reviewer + note).")
-mutation mutationRejectAccessRequest {
+mutation accessRequest mutationRejectAccessRequest {
   args {
     requestId     string  @required
     reviewedBy    string  @required
@@ -1203,9 +1180,8 @@ mutation mutationRejectAccessRequest {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Mark a bearer-token session revoked while preserving the discriminator fields the projection requires.")
-mutation mutationRevokeAuthSession {
+mutation authSession mutationRevokeAuthSession {
   args {
     sessionId      string  @required
     subject        string  @required
@@ -1236,9 +1212,8 @@ mutation mutationRevokeAuthSession {
 // revocation metadata.
 
 @enabled
-@useConcept(delegation)
 @description("Revoke a delegation by deactivating it and recording revocation metadata.")
-mutation mutationRevokeDelegation {
+mutation delegation mutationRevokeDelegation {
   args {
     delegationId  string  @required
     payload       object  @required
@@ -1265,9 +1240,8 @@ mutation mutationRevokeDelegation {
 // the discriminator (identityType=api_key) and credentials.keyHash.
 
 @enabled
-@useConcept(identity)
 @description("Soft-revoke a PAT identity (api_key) by inserting a new version with active=false.")
-mutation mutationRevokePATIdentity {
+mutation identity mutationRevokePATIdentity {
   args {
     identityId      string  @required
     userId          string  @required
@@ -1299,9 +1273,8 @@ mutation mutationRevokePATIdentity {
 // memQL is append-only so partial updates require read-modify-write.
 
 @enabled
-@useConcept(partitionAccess)
 @description("Revoke a partition-access grant (soft-revoke, preserves history).")
-mutation mutationRevokePartitionAccess {
+mutation partitionAccess mutationRevokePartitionAccess {
   args {
     grantId  string  @required
     payload  object  @required
@@ -1327,9 +1300,8 @@ mutation mutationRevokePartitionAccess {
 // vice versa.
 
 @enabled
-@useConcept(identity)
 @description("Revoke (deactivate) a worker_token identity row.")
-mutation mutationRevokeWorkerTokenIdentity {
+mutation identity mutationRevokeWorkerTokenIdentity {
   args {
     identityId  string  @required
   }
@@ -1369,9 +1341,8 @@ mutation mutationRevokeWorkerTokenIdentity {
 //
 
 @enabled
-@useConcept(authSession)
 @description("Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.")
-mutation mutationRotateAuthSession {
+mutation authSession mutationRotateAuthSession {
   args {
     sessionId                 string  @required
     newRefreshTokenHash       string  @required
@@ -1408,9 +1379,8 @@ mutation mutationRotateAuthSession {
 //
 
 @enabled
-@useConcept(user)
 @description("Schedule the user for hard-deletion after the cooldown.")
-mutation mutationScheduleAccountDeletion {
+mutation user mutationScheduleAccountDeletion {
   args {
     userId  string  @required
   }
@@ -1448,9 +1418,8 @@ mutation mutationScheduleAccountDeletion {
 // transitions implicitly -- no separate notification needed.
 
 @enabled
-@useConcept(user)
 @description("Set or clear the caller's activeSpaceId. Empty spaceId clears the pointer.")
-mutation mutationSetUserActiveSpace {
+mutation user mutationSetUserActiveSpace {
   args {
     userId   string  @required
     spaceId  string
@@ -1482,9 +1451,8 @@ mutation mutationSetUserActiveSpace {
 //
 
 @enabled
-@useConcept(clusterSettings)
 @description("Update the singleton cluster-settings row from the admin UI.")
-mutation mutationUpdateClusterSettings {
+mutation clusterSettings mutationUpdateClusterSettings {
   args {
     id                         string  @required
     clusterDomain              string
@@ -1551,9 +1519,8 @@ mutation mutationUpdateClusterSettings {
 // The caller is responsible for passing the full updated payload.
 
 @enabled
-@useConcept(identity)
 @description("Insert a new version of an identity record with the provided payload.")
-mutation mutationUpdateIdentity {
+mutation identity mutationUpdateIdentity {
   args {
     identityId  string  @required
     payload     object  @required
@@ -1598,9 +1565,8 @@ mutation mutationUpdateIdentity {
 // behaves identically to insert(), so the admin path is unchanged.
 
 @enabled
-@useConcept(user)
 @description("Partial update of a v1:identity:user row. Only the fields you pass are changed; other fields inherit from the prior row.")
-mutation mutationUpdateUser {
+mutation user mutationUpdateUser {
   args {
     userId   string  @required
     payload  object  @required

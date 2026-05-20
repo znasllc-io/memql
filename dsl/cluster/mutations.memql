@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cluster.concepts.{ cluster, database, identityProvider, node, spawnEvent }
+
 @enabled
-@useConcept(cluster)
 @description("Create the cluster record")
-mutation mutationCreateCluster {
+mutation cluster mutationCreateCluster {
   args {
     name                string  @required
     region              string
@@ -32,9 +33,8 @@ mutation mutationCreateCluster {
 // Register the cluster's database in the graph.
 
 @enabled
-@useConcept(database)
 @description("Register the cluster's database in the graph")
-mutation mutationCreateDatabase {
+mutation database mutationCreateDatabase {
   args {
     host     string  @required
     dbName   string  @required
@@ -55,9 +55,8 @@ mutation mutationCreateDatabase {
 // Register the cluster's identity provider in the graph.
 
 @enabled
-@useConcept(identityProvider)
 @description("Register the cluster's identity provider in the graph")
-mutation mutationCreateIdentityProvider {
+mutation identityProvider mutationCreateIdentityProvider {
   args {
     name            string  @required
     issuerUrl       string  @required
@@ -82,9 +81,8 @@ mutation mutationCreateIdentityProvider {
 // concept row per real node, not one per observer.
 
 @enabled
-@useConcept(node)
 @description("Register a node in the cluster")
-mutation mutationCreateNode {
+mutation node mutationCreateNode {
   args {
     id        string
     nodeType  string  @required
@@ -109,9 +107,8 @@ mutation mutationCreateNode {
 // Record a node lifecycle event (spawned, stopped, failed).
 
 @enabled
-@useConcept(spawnEvent)
 @description("Record a node lifecycle event")
-mutation mutationCreateSpawnEvent {
+mutation spawnEvent mutationCreateSpawnEvent {
   args {
     nodeId    string  @required
     nodeType  string  @required
@@ -140,9 +137,8 @@ mutation mutationCreateSpawnEvent {
 // subscribes to for live topology updates.
 
 @enabled
-@useConcept(node)
 @description("Record a node health transition")
-mutation mutationUpdateNodeHealth {
+mutation node mutationUpdateNodeHealth {
   args {
     id        string  @required
     nodeType  string  @required

@@ -7,10 +7,11 @@
 // "wire it up to call queryAllAgents" -- not "re-implement the agent
 // list query."
 
+use agents.concepts.{ agent, agentAuthorization, agentRole }
+
 @enabled
-@useConcept(agent)
 @description("Returns available AI agent templates. Optional filter: groupId")
-query queryActiveAgents {
+query agent queryActiveAgents {
   args {
     groupId  string
   }
@@ -19,9 +20,8 @@ query queryActiveAgents {
 }
 
 @enabled
-@useConcept(agentAuthorization)
 @description("All active standing authorizations granted by a user, across all agents and plan kinds.")
-query queryAgentAuthorizationsForUser {
+query agentAuthorization queryAgentAuthorizationsForUser {
   args {
     userId  string  @required
   }
@@ -37,9 +37,8 @@ query queryAgentAuthorizationsForUser {
 // capabilities, and trigger behavior.
 
 @enabled
-@useConcept(agent)
 @description("Get an agent by ID with full configuration.")
-query queryAgentById {
+query agent queryAgentById {
   args {
     agentId  string  @required
   }
@@ -57,9 +56,8 @@ query queryAgentById {
 // ownerUserId first and fall back to createdBy.
 
 @enabled
-@useConcept(agent)
 @description("Resolve an agent's owning-user (ownerUserId / createdBy) by id.")
-query queryAgentOwner {
+query agent queryAgentOwner {
   args {
     agentId  string  @required
   }
@@ -75,9 +73,8 @@ query queryAgentOwner {
 // filter out already-taken roles from role pickers.
 
 @enabled
-@useConcept(agent)
 @description("Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.")
-query queryAgentRoleSlugsInUse {
+query agent queryAgentRoleSlugsInUse {
   filter  traitIsActiveRecord; traitIsNotDeleted
   shape   agentRoleSlugLite
 }
@@ -90,17 +87,15 @@ query queryAgentRoleSlugsInUse {
 // agent-management surface that needs to see active + inactive rows.
 
 @enabled
-@useConcept(agent)
 @description("Returns all AI agent templates regardless of active status.")
-query queryAllAgents {
+query agent queryAllAgents {
   filter  traitIsNotDeleted
   shape   agentFull
 }
 
 @enabled
-@useConcept(agent)
 @description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
-query queryActiveAgentsForUser {
+query agent queryActiveAgentsForUser {
   args {
     ownerUserId  string  @required
   }
@@ -109,9 +104,8 @@ query queryActiveAgentsForUser {
 }
 
 @enabled
-@useConcept(agentRole)
 @description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
-query queryAgentRoleBySlug {
+query agentRole queryAgentRoleBySlug {
   args {
     slug  string  @required
   }
@@ -120,9 +114,8 @@ query queryAgentRoleBySlug {
 }
 
 @enabled
-@useConcept(agentRole)
 @description("List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.")
-query queryActiveAgentRoles {
+query agentRole queryActiveAgentRoles {
   filter  traitIsActiveRecord
   shape   agentRoleFull
 }

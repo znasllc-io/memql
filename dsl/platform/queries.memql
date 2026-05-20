@@ -3,10 +3,12 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use platform.concepts.{ globalVariable, missingCapability, partition }
+
 @enabled
 @useConcept(policyTrace)
 @description("Recent persisted policy traces for the named policy, most-recent first.")
-query policyTracesForPolicy {
+query policyTrace policyTracesForPolicy {
   args {
     policyName  string  @required
   }
@@ -30,7 +32,7 @@ query policyTracesForPolicy {
 @enabled
 @useConcept(policyTrace)
 @description("All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.")
-query queryAllPolicyTraces {
+query policyTrace queryAllPolicyTraces {
   filter  payload.policyName!=""
   shape   policyTraceFull
 }
@@ -58,9 +60,8 @@ query queryAllPolicyTraces {
 //
 
 @enabled
-@useConcept(globalVariable)
 @description("Get a single instance-wide configuration variable by name (v1:platform:globalVariable)")
-query queryGlobalVariable {
+query globalVariable queryGlobalVariable {
   args {
     name  string  @required
   }
@@ -91,9 +92,8 @@ query queryGlobalVariable {
 //
 
 @enabled
-@useConcept(globalVariable)
 @description("Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)")
-query queryGlobalVariables {
+query globalVariable queryGlobalVariables {
   args {
     names  array  @required
   }
@@ -117,9 +117,8 @@ query queryGlobalVariables {
 // init fails). See docs/core/memql-authoring-rules.md gotcha #1.
 
 @enabled
-@useConcept(partition)
 @description("List partitions visible to the caller (owner sees all)")
-query queryListPartitions {
+query partition queryListPartitions {
   filter  payload.name in caller.partitions
 }
 
@@ -163,17 +162,15 @@ query queryListPartitions {
 //
 
 @enabled
-@useConcept(globalVariable)
 @internal
 @description("Returns default configuration variables for user provisioning. Used by bootstrapUser automation.")
-query queryUserDefaults {
+query globalVariable queryUserDefaults {
   filter  traitIsActiveRecord; payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 @enabled
-@useConcept(missingCapability)
 @description("Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the platform-roadmap prioritization view -- 'most-requested capabilities that the platform doesn't yet support'. Status filter: 'open' for active backlog, 'in_progress' / 'resolved' / 'wontfix' for the audit view.")
-query queryMissingCapabilitiesByStatus {
+query missingCapability queryMissingCapabilitiesByStatus {
   args {
     status  string  @required
   }
@@ -182,9 +179,8 @@ query queryMissingCapabilitiesByStatus {
 }
 
 @enabled
-@useConcept(missingCapability)
 @description("Per Q7: dedup lookup the Planner Agent runs before logging a new sighting. Returns the existing row (if any) for the (kind, capability) pair so the Planner can call mutationBumpMissingCapabilitySighting instead of creating a duplicate row.")
-query queryMissingCapabilityByKindAndName {
+query missingCapability queryMissingCapabilityByKindAndName {
   args {
     kind        string  @required
     capability  string  @required

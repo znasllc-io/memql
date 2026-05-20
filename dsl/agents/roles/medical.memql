@@ -6,16 +6,12 @@
 // ship with Tier-C placeholder content telling the user to attach
 // their own authoritative sources.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("General-practice medicine education and patient communication. Information only -- never personalized clinical advice.")
-seed family_doctor {
-  id:                    "family_doctor"
+seed agentRole family_doctor {
   slug:                  "family_doctor"
   name:                  "Family Medicine Physician"
-  description:           "General-practice medicine education and patient communication. Information only -- never personalized clinical advice."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["family_medicine", "patient_communication"]
@@ -26,14 +22,10 @@ seed family_doctor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Child health education: developmental milestones, vaccinations, common childhood illnesses. Information only.")
-seed pediatrician {
-  id:                    "pediatrician"
+seed agentRole pediatrician {
   slug:                  "pediatrician"
   name:                  "Pediatrics Specialist"
-  description:           "Child health education: developmental milestones, vaccinations, common childhood illnesses. Information only."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["pediatrics", "child_development", "patient_communication"]
@@ -44,14 +36,10 @@ seed pediatrician {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Oral health, preventive dentistry, common dental issues. Information only.")
-seed dentist {
-  id:                    "dentist"
+seed agentRole dentist {
   slug:                  "dentist"
   name:                  "Dental Health Specialist"
-  description:           "Oral health, preventive dentistry, common dental issues. Information only."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["dentistry", "oral_health"]
@@ -62,14 +50,10 @@ seed dentist {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Movement health, rehab principles, common injuries. Educational only.")
-seed physical_therapist {
-  id:                    "physical_therapist"
+seed agentRole physical_therapist {
   slug:                  "physical_therapist"
   name:                  "Physical Therapy Educator"
-  description:           "Movement health, rehab principles, common injuries. Educational only."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["physical_therapy", "musculoskeletal_health"]
@@ -80,14 +64,10 @@ seed physical_therapist {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Nursing-school-level patient care concepts. Educational only.")
-seed registered_nurse_education {
-  id:                    "registered_nurse_education"
+seed agentRole registered_nurse_education {
   slug:                  "registered_nurse_education"
   name:                  "Nursing Education"
-  description:           "Nursing-school-level patient care concepts. Educational only."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["nursing_fundamentals", "patient_communication"]
@@ -98,14 +78,10 @@ seed registered_nurse_education {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Drug class overviews, mechanism of action, common interactions at the textbook level.")
-seed pharmacist_educator {
-  id:                    "pharmacist_educator"
+seed agentRole pharmacist_educator {
   slug:                  "pharmacist_educator"
   name:                  "Pharmacology Educator"
-  description:           "Drug class overviews, mechanism of action, common interactions at the textbook level."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["clinical_pharmacology_basics"]
@@ -116,14 +92,10 @@ seed pharmacist_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("General companion-animal health, common conditions, preventive care for owners.")
-seed veterinarian_educator {
-  id:                    "veterinarian_educator"
+seed agentRole veterinarian_educator {
   slug:                  "veterinarian_educator"
   name:                  "Veterinary Educator"
-  description:           "General companion-animal health, common conditions, preventive care for owners."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["veterinary_medicine", "pet_health"]
@@ -134,14 +106,10 @@ seed veterinarian_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Mental-health literacy, common conditions, coping skills education. Never therapy.")
-seed mental_health_educator {
-  id:                    "mental_health_educator"
+seed agentRole mental_health_educator {
   slug:                  "mental_health_educator"
   name:                  "Mental Health Educator"
-  description:           "Mental-health literacy, common conditions, coping skills education. Never therapy."
   category:              "medical"
   tier:                  "C"
   lockedDomainIds:       ["mental_health", "psychology_fundamentals"]
