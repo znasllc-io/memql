@@ -325,8 +325,18 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 		return nil, fmt.Errorf("function %q is a mutation and cannot be used inside query expressions", key)
 	}
 
-	// Validate arguments against schema
-	args := call.Args
+	// Validate arguments against schema. Normalise positional
+	// object-literal wrapping first: the language parser produces
+	// `funcName({a: 1, b: 2})` as Args = {"0": {a: 1, b: 2}} (single
+	// positional arg holding the named-args object); the engine's own
+	// expression parser produces flat args directly. Both shapes are
+	// valid input here; downstream code (validator, ArgRef
+	// substitution, mutation-template rendering) expects the flat
+	// shape. Reducing here means callers never have to think about
+	// which parser produced the call. The F.6 path
+	// (`substituteArgRefsAndCallArgs`) does the same flattening
+	// after substitution.
+	args := flattenPositionalArgs(call.Args)
 	if args == nil {
 		args = make(map[string]any)
 	}
@@ -358,6 +368,20 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	}
 
 	return expanded, nil
+}
+
+// flattenPositionalArgs reduces a single-positional object-literal
+// call args shape (`{"0": {a: 1, b: 2}}`) to its flat form
+// (`{a: 1, b: 2}`). Non-positional inputs pass through unchanged.
+func flattenPositionalArgs(args map[string]any) map[string]any {
+	if len(args) != 1 {
+		return args
+	}
+	inner, ok := args["0"].(map[string]any)
+	if !ok {
+		return args
+	}
+	return inner
 }
 
 // expandFunctionCallAllowMutationLeaf expands a Logic function call
@@ -516,6 +540,28 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 
 	switch node := expr.(type) {
 	case *FunctionCallExpression:
+		// Substitute ArgRef nodes in the call's args before resolving
+		// the target. Without this step, a Logic body like
+		// `return someBuiltin({userId: args.event.payload.userId})`
+		// reaches the builtin executor with `args["userId"] =
+		// *ArgReference{Path: "event.payload.userId"}` instead of the
+		// resolved string -- and the executor's `asString(...)` returns
+		// empty. The Logic-call-mutation path already does this via
+		// `substituteArgRefsAndCallArgs` (F.6); the builtin / nested-
+		// call path needs the same treatment, here in the generic
+		// recursive expansion. Surfaced via memql-cockpit#49 -- daily-
+		// space provisioning fired but every call into
+		// `integration.dailyspace.ensureForUser` saw an empty userId.
+		if args != nil && len(node.Args) > 0 {
+			substituted := make(map[string]any, len(node.Args))
+			for k, val := range node.Args {
+				substituted[k] = substituteArgRefValue(val, args)
+			}
+			node = &FunctionCallExpression{
+				Name: node.Name,
+				Args: substituted,
+			}
+		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
 

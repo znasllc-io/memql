@@ -264,17 +264,27 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		}
 	}
 
-	// Enforce single-use rule for queries and mutations. Each query or
-	// mutation operates on at most one concept (declared via its single
-	// use declaration). Multiple use declarations on a query/mutation are
-	// a parse error. Zero use declarations are allowed -- some queries
-	// wrap a builtin (`queryVersion` -> `memqlVersion()`) and never
-	// reference a bare `concept` or argumentless `insert()`. If a
-	// no-use function tries to reference a bare concept at runtime,
-	// execution will fail with an unresolved-reference error; this
-	// loader does not preemptively reject that case.
-	// Automations, prompts, and other types are exempt.
-	if len(file.Definitions) > 0 {
+	// Enforce single-use rule for queries and mutations -- LEGACY form
+	// only. In the legacy single-construct file layout, each query or
+	// mutation operated on at most one concept declared via its single
+	// `use cognition.concepts.{ space }` declaration; multiple uses were
+	// a parse error. The post-PR-48 canonical shape puts the concept
+	// binding in the construct signature (`mutation <Concept> <name>`),
+	// and the multi-construct file layout (per `function_slices.go`
+	// header) prepends every file-top use declaration to every emitted
+	// slice so the slice parser has the imports it needs. Counting
+	// file-top uses against a signature-bound construct is a category
+	// error -- the uses are file-level imports, not a one-concept-per-
+	// function constraint -- and rejecting on `len(file.Uses) > 1` is
+	// what broke `cognition/mutations.memql`, `worker/mutations.memql`,
+	// `worker/queries.memql` after the multi-construct consolidation
+	// (surfaced via memql-cockpit#49: daily-space never created because
+	// `mutationCreateDailySpace` failed to load).
+	//
+	// Skip the check when the construct has a signature-bound concept;
+	// fall through to it only for legacy procedural-form queries /
+	// mutations whose single use *was* the concept binding.
+	if len(signatureConcepts) == 0 && len(file.Definitions) > 0 {
 		if fd, ok := file.Definitions[0].(*languageParser.FunctionDef); ok {
 			switch fd.Type {
 			case languageParser.FunctionTypeQuery, languageParser.FunctionTypeMutation:

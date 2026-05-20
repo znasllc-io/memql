@@ -760,7 +760,6 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if stepBody == "" {
 			return nil, fmt.Errorf("step %q: body is empty", stepName)
 		}
-		stepBody = translateEventRefsToCtxInput(stepBody)
 		call, err := translateStepCall(stepBody)
 		if err != nil {
 			return nil, fmt.Errorf("step %q: %w", stepName, err)
@@ -771,13 +770,25 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 	return out, nil
 }
 
-// eventRefMatcher matches whole-word `event` tokens for translation
-// to the legacy `ctx.input` envelope path.
-var eventRefMatcher = regexp.MustCompile(`\bevent\b`)
-
-func translateEventRefsToCtxInput(expr string) string {
-	return eventRefMatcher.ReplaceAllString(expr, "ctx.input")
-}
+// Historically this file translated `event` references in automation
+// step bodies to the legacy `ctx.input` envelope path. That was a
+// half-purge artifact: the runtime function-step args resolver
+// (`component/automations/steps/function.go::isRuntimeReference`)
+// only recognises `event` and `event.X` as runtime references and
+// dispatches them through `$event.X` against the evaluator -- which
+// has `event` bound to the trigger event map by the automation
+// executor. `ctx.input.X` is NOT a runtime reference, so a translated
+// reference fell through as a literal string ("ctx.input"), arrived
+// at the receiving Logic's validator as `argument "event": expected
+// object, got string`, and broke every event-triggered automation
+// (symptom: memql-cockpit#49 -- daily space never created). And the
+// over-eager `\bevent\b` regex previously clobbered the KEY name in
+// `{ event: event }` too, breaking arg binding entirely.
+//
+// The fix is to stop translating: authors write `event` / `event.X`
+// in step args, the rewriter passes them through verbatim, and the
+// runtime resolves them via the `event` custom binding. Aligns with
+// the broader ctx-envelope purge tracked in #93.
 
 // translateStepCall converts a step body into the legacy call
 // expression. Supported shapes:
