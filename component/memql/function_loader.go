@@ -206,14 +206,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 
 	// Resolve symbolic concept references. Trigger when EITHER a
 	// file-top `use` directive OR a function-def `@useConcept(...)`
-	// annotation is present -- the resolver handles both.
-	if registry != nil && (len(file.Uses) > 0 || hasUseConceptAnnotation(file)) {
+	// annotation OR a signature-bound concept is present -- the
+	// resolver handles all three.
+	if registry != nil && (len(file.Uses) > 0 || hasUseConceptAnnotation(file) || len(signatureConcepts) > 0) {
 		version := VersionFromFilePath(origin)
 		if version == "" {
 			version = "v1" // default
 		}
 		resolver := NewConceptResolver(registry)
-		if err := resolver.ResolveFile(file, version); err != nil {
+		if err := resolver.ResolveFileWithSignatureConcepts(file, version, signatureConcepts); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
 	}

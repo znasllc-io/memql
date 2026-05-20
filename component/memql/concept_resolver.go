@@ -27,6 +27,16 @@ func NewConceptResolver(registry memoryNodes.Registry) *ConceptResolver {
 // versionContext is derived from the file's filesystem path (e.g., "v1" for files in v1/).
 // The file's AST is modified in place.
 func (r *ConceptResolver) ResolveFile(file *languageParser.File, versionContext string) error {
+	return r.ResolveFileWithSignatureConcepts(file, versionContext, nil)
+}
+
+// ResolveFileWithSignatureConcepts is the canonical entry point post-
+// PR-48: in addition to the legacy `use` directive + `@useConcept`
+// resolution, it also seeds the symbol table with concept names
+// captured from the construct SIGNATURE (`mutation <Concept> <name>
+// { ... }`). The caller passes the bare-name list it pulled from
+// the pre-NormaliseAll source via extractAllSignatureConceptNames.
+func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.File, versionContext string, signatureConcepts []string) error {
 	if file == nil {
 		return nil
 	}
@@ -44,6 +54,24 @@ func (r *ConceptResolver) ResolveFile(file *languageParser.File, versionContext 
 	// is on its way out (G.3.g).
 	if err := r.collectUseConceptAnnotations(file, symbols); err != nil {
 		return fmt.Errorf("resolving @useConcept annotations: %w", err)
+	}
+
+	// Augment the symbol table with concepts named in construct
+	// signatures (`<kind> <Concept> <name> { ... }`). Same trailing-
+	// segment resolution rule as @useConcept.
+	for _, bareName := range signatureConcepts {
+		if _, dup := symbols[bareName]; dup {
+			continue
+		}
+		resolvedId, err := r.resolveBareConceptName(bareName)
+		if err != nil {
+			return fmt.Errorf("signature concept %q: %w", bareName, err)
+		}
+		symbols[bareName] = &symbolEntry{
+			leafName:   bareName,
+			resolvedId: resolvedId,
+			fullPath:   "signature(" + bareName + ")",
+		}
 	}
 
 	if len(symbols) == 0 {
