@@ -461,21 +461,22 @@ func (i *Integration) lookupDomainMeta(ctx context.Context, domainId string) (st
 
 // augmentPlanId derives a deterministic Plan id so two simultaneous
 // clicks on the same {domainId, topic, sourceUtteranceId} collapse
-// into one Plan rather than racing against each other. sha256-hex
-// prefix tells the storage layer the id is augment-derived.
+// into one Plan rather than racing against each other. The
+// augment-vs-seed origin is captured in row provenance, not in the
+// id string.
 func augmentPlanId(domainId, topic, sourceUtteranceId string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "augment:%s:%s:%s", domainId, topic, sourceUtteranceId)
-	return "augment-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// augmentChunkId derives a deterministic chunk id under a Plan. Same
-// hashing pattern as seedChunkId; "augment-" prefix tells the storage
-// layer the chunk's origin at a glance.
+// augmentChunkId derives a deterministic chunk id under a Plan.
+// Same hashing pattern as seedChunkId; origin is captured in
+// provenance.
 func augmentChunkId(planId string, chunkIndex int) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s:%d", planId, chunkIndex)
-	return "augment-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // shortTopicHash reduces a topic string to a short hash for use in

@@ -475,12 +475,12 @@ func (i *Integration) storeSeedChunk(
 // seedChunkId derives a deterministic chunk id from
 // (recipeVersion, domainId, chunkIndex) so re-runs are no-ops at the
 // same recipe version and bumping the version invalidates the prior
-// run. sha256-hex prefixed with "seed-" so chunk-id origin is visible
-// at a glance in the DB.
+// run. The seed-vs-augment origin is captured in row provenance, not
+// in the id string.
 func seedChunkId(recipeVersion, domainId string, chunkIndex int) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "seed:%s:%s:%d", recipeVersion, domainId, chunkIndex)
-	return "seed-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // lookupSeededDomain resolves a StandardDomain from the standardDomains
