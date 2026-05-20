@@ -529,4 +529,3 @@ func (d *promptDecl) toInputSchemaJSON() (json.RawMessage, error) {
 	}
 	return json.Marshal(schema)
 }
-

@@ -17,7 +17,7 @@ type QueryPlan struct {
 	// MutationCall is a top-level call to a mutation function (func (Mutation) ...).
 	// When set, Root will be nil and Mutations will be empty; Execute will evaluate the
 	// function template and run exactly one insert.
-	MutationCall  *FunctionCallExpression
+	MutationCall *FunctionCallExpression
 	// LogicCall is a top-level call to a multi-step Logic function
 	// (func (Logic) ... whose body has intermediate `name := <call>`
 	// steps before `_return`). When set, Root is nil and Execute
@@ -25,24 +25,24 @@ type QueryPlan struct {
 	// for later steps + the `_return` expression. Single-statement
 	// Logic bodies don't set this -- their fn.Expr is evaluated
 	// directly via the normal query expression path.
-	LogicCall *FunctionCallExpression
-	Filters       []FilterNode
-	Relationships []RelationshipNode
-	Timestamp     *time.Time
-	UseLatest     bool
-	Limit         *int
-	Offset        *int
-	Depth         *int
-	Sort          []SortField
-	CacheHints    map[string]int64
-	Fields        []FieldReference
-	ConceptFields map[string][]FieldReference
-	Metadata      metadataSelection
-	PayloadSelect bool
+	LogicCall         *FunctionCallExpression
+	Filters           []FilterNode
+	Relationships     []RelationshipNode
+	Timestamp         *time.Time
+	UseLatest         bool
+	Limit             *int
+	Offset            *int
+	Depth             *int
+	Sort              []SortField
+	CacheHints        map[string]int64
+	Fields            []FieldReference
+	ConceptFields     map[string][]FieldReference
+	Metadata          metadataSelection
+	PayloadSelect     bool
 	ShapeTemplate     shapeTemplate
 	ShapeTemplateName string // Named shape reference; resolved at execution time
 	IncludeBundle     bool   // when true, include bundle in shape response
-	InlineSpecs   map[string]*Spec
+	InlineSpecs       map[string]*Spec
 }
 
 // RelationshipNode identifies relationship traversals declared within a query.

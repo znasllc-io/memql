@@ -370,7 +370,7 @@ func (v *Verifier) auditFailure(ctx context.Context, action string, in VerifyInp
 // instead of bouncing through a relying-party OAuth callback.
 //   - bootstrap     = wizard owner-mint (first-run setup)
 //   - adminSession  = identity-admin sign-in (returning admin user
-//                     who landed on /login without a client app)
+//     who landed on /login without a client app)
 //
 // In the adminSession path the row carries no clientId / redirectURI
 // because there is no relying party; we surface them as empty

@@ -9,9 +9,9 @@ import (
 
 // MP3 frame header constants
 const (
-	mp3SyncWord      = 0xFFE0 // First 11 bits of sync word (0xFF + 0xE0 mask)
-	mp3MinFrameSize  = 48     // Minimum MP3 frame size in bytes
-	mp3HeaderSize    = 4      // MP3 frame header is 4 bytes
+	mp3SyncWord     = 0xFFE0 // First 11 bits of sync word (0xFF + 0xE0 mask)
+	mp3MinFrameSize = 48     // Minimum MP3 frame size in bytes
+	mp3HeaderSize   = 4      // MP3 frame header is 4 bytes
 )
 
 // MP3 bitrate tables (kbps) for MPEG Audio Layer III
@@ -222,7 +222,7 @@ func parseMP3FrameHeader(data []byte) (MP3Frame, int, error) {
 
 	// Calculate frame size
 	// Frame size = (samples_per_frame / 8 * bitrate * 1000) / sample_rate + padding
-	frameSize := (samplesPerFrame * bitrate * 1000 / 8) / sampleRate + padding
+	frameSize := (samplesPerFrame*bitrate*1000/8)/sampleRate + padding
 
 	// Calculate duration
 	duration := float64(samplesPerFrame) / float64(sampleRate)
@@ -251,4 +251,3 @@ func ValidateMP3(data []byte) bool {
 	pos := findMP3SyncWord(data, 0)
 	return pos >= 0
 }
-

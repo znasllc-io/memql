@@ -46,7 +46,7 @@ type StdHTTPServerOptions struct {
 }
 
 type (
-	GetHealthzRequestObject        struct{}
+	GetHealthzRequestObject  struct{}
 	GetHealthzResponseObject interface {
 		VisitGetHealthzResponse(http.ResponseWriter) error
 	}
@@ -372,4 +372,3 @@ func methodNotAllowed(w http.ResponseWriter, _ *http.Request, allowed string) {
 	w.Header().Set("Allow", allowed)
 	http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 }
-

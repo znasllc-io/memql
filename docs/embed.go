@@ -11,4 +11,3 @@ var (
 func MemqlGuide() string {
 	return memqlGuide
 }
-

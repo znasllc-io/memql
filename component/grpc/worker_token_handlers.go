@@ -15,16 +15,16 @@ import (
 //
 // Caller flow:
 //
-//   1. Caller authenticates with their own JWT or PAT (the
-//      interceptor rejects worker tokens on this RPC).
-//   2. Server resolves the caller's userId from claims; uses that
-//      as both ownerUserId and registeredBy unless owner_user_id
-//      is set explicitly (admin path).
-//   3. Mints token via workertoken.Mint, persists the identity
-//      row, returns plain_token in the reply.
-//   4. Frontend pastes plain_token into the cockpit-worker config
-//      on the target machine. The next connect attempt resolves
-//      via queryWorkerTokenByKeyHash.
+//  1. Caller authenticates with their own JWT or PAT (the
+//     interceptor rejects worker tokens on this RPC).
+//  2. Server resolves the caller's userId from claims; uses that
+//     as both ownerUserId and registeredBy unless owner_user_id
+//     is set explicitly (admin path).
+//  3. Mints token via workertoken.Mint, persists the identity
+//     row, returns plain_token in the reply.
+//  4. Frontend pastes plain_token into the cockpit-worker config
+//     on the target machine. The next connect attempt resolves
+//     via queryWorkerTokenByKeyHash.
 func (s *streamSession) handleCreateWorkerToken(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.CreateWorkerTokenMsg) error {
 	if msg == nil {
 		return nil

@@ -29,18 +29,18 @@ type PolicyFunctionRegistry struct {
 // definition. Holds the parsed AST plus the metadata pulled out of
 // annotations (tier, frontend_visible, audited, etc.).
 type PolicyFunction struct {
-	Name             string
-	Tier             string // "core" or "bff"
-	Origin           string // path under the policies FS
-	Description      string
-	FrontendVisible  bool
-	Cacheable        bool
-	Audited          bool
-	TracesPersisted  bool
-	ReturnsTrace     bool
-	Enabled          bool
-	Attributes       []*languageParser.Attribute
-	FunctionDef      *languageParser.FunctionDef
+	Name            string
+	Tier            string // "core" or "bff"
+	Origin          string // path under the policies FS
+	Description     string
+	FrontendVisible bool
+	Cacheable       bool
+	Audited         bool
+	TracesPersisted bool
+	ReturnsTrace    bool
+	Enabled         bool
+	Attributes      []*languageParser.Attribute
+	FunctionDef     *languageParser.FunctionDef
 }
 
 func newPolicyFunctionRegistry() *PolicyFunctionRegistry {

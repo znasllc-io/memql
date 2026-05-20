@@ -169,15 +169,16 @@ automation leadClassification {
 // and the VALUE (RHS of `:`) -- must pass through verbatim.
 // Translation to `ctx.input` was a half-purge artifact that broke
 // runtime resolution two different ways:
-//   1. The previous regex was over-eager and rewrote the KEY too,
-//      producing `{ ctx.input: ctx.input }` and clobbering the arg
-//      name.
-//   2. Even after preserving the key, `ctx.input` is NOT a recognised
-//      runtime reference in `automations/steps/function.go::
-//      isRuntimeReference`, so the translated value fell through as
-//      a literal string `"ctx.input"` and the receiving Logic's
-//      validator rejected it with `argument "event": expected
-//      object, got string`.
+//  1. The previous regex was over-eager and rewrote the KEY too,
+//     producing `{ ctx.input: ctx.input }` and clobbering the arg
+//     name.
+//  2. Even after preserving the key, `ctx.input` is NOT a recognised
+//     runtime reference in `automations/steps/function.go::
+//     isRuntimeReference`, so the translated value fell through as
+//     a literal string `"ctx.input"` and the receiving Logic's
+//     validator rejected it with `argument "event": expected
+//     object, got string`.
+//
 // Both failure modes surfaced as the "daily space never shows up"
 // symptom in memql-cockpit#49.
 func TestNormaliseAutomationSource_EventRefsPassThroughVerbatim(t *testing.T) {

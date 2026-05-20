@@ -37,10 +37,10 @@ import (
 // REST path still wins the >70% TTS-TTFB delta vs OpenAI in practice
 // because Aura-2 itself is faster, even before the protocol upgrade.
 type TTSClient struct {
-	cfg          Config
+	cfg           Config
 	voiceOverride string // empty when POLYPHON_DEEPGRAM_TTS_VOICE_OVERRIDE is unset
-	logger       *slog.Logger
-	http         *http.Client
+	logger        *slog.Logger
+	http          *http.Client
 }
 
 // EnvVoiceOverride forces every TTS synthesis to use the named Aura-2

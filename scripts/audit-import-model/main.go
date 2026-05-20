@@ -41,11 +41,11 @@ import (
 const dslRoot = "dsl"
 
 var (
-	useConceptRe = regexp.MustCompile(`(?m)^@useConcept\(`)
-	importBlockRe = regexp.MustCompile(`(?m)^import[ \t]*\(`)
-	importLineRe = regexp.MustCompile(`(?m)^import[ \t]+["]`)
+	useConceptRe        = regexp.MustCompile(`(?m)^@useConcept\(`)
+	importBlockRe       = regexp.MustCompile(`(?m)^import[ \t]*\(`)
+	importLineRe        = regexp.MustCompile(`(?m)^import[ \t]+["]`)
 	structuredTriggerRe = regexp.MustCompile(`@trigger\(\s*event\s*=\s*"node\.(created|updated|deleted)"`)
-	legacyTriggerRe = regexp.MustCompile(`@trigger\(\s*event\s*=\s*"graph\.node\.`)
+	legacyTriggerRe     = regexp.MustCompile(`@trigger\(\s*event\s*=\s*"graph\.node\.`)
 )
 
 // constructHeader matches every top-level construct declaration so
@@ -53,15 +53,15 @@ var (
 var constructHeader = regexp.MustCompile(`(?m)^[ \t]*(concept|query|mutation|spec|trait|logic|automation|tool|prompt|provider|builtin|policy|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 type fileReport struct {
-	Path             string `json:"path"`
-	Domain           string `json:"domain"`
-	Kind             string `json:"kind"`
-	Constructs       int    `json:"constructs"`
-	UseConceptCount  int    `json:"use_concept_count"`
-	HasImportBlock   bool   `json:"has_import_block"`
-	LegacyTriggers   int    `json:"legacy_triggers"`
-	StructuredTriggers int  `json:"structured_triggers"`
-	State            string `json:"state"` // "migrated" | "legacy" | "mixed" | "n/a"
+	Path               string `json:"path"`
+	Domain             string `json:"domain"`
+	Kind               string `json:"kind"`
+	Constructs         int    `json:"constructs"`
+	UseConceptCount    int    `json:"use_concept_count"`
+	HasImportBlock     bool   `json:"has_import_block"`
+	LegacyTriggers     int    `json:"legacy_triggers"`
+	StructuredTriggers int    `json:"structured_triggers"`
+	State              string `json:"state"` // "migrated" | "legacy" | "mixed" | "n/a"
 }
 
 type domainReport struct {

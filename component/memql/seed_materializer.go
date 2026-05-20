@@ -73,8 +73,8 @@ type SeedMaterializer struct {
 	engine   *MemQLEngine
 	registry *SeedRegistry
 
-	mu         sync.Mutex
-	started    bool
+	mu          sync.Mutex
+	started     bool
 	unsubscribe func()
 }
 
@@ -576,4 +576,3 @@ func ucFirst(s string) string {
 	r[0] = unicode.ToUpper(r[0])
 	return string(r)
 }
-

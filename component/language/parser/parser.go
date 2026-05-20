@@ -1512,11 +1512,11 @@ func hasVariantAttribute(attrs []*Attribute) bool {
 // parseTypeRef parses the type expression of a property. Supported
 // forms:
 //
-//   string | bool | int | float | datetime | any | object    primitives
-//   enum("a", "b", ...)                                      inline enum
-//   array(T)                                                 legacy slice
-//   []T                                                      Go-style slice
-//   map[string]T                                             Go-style map
+//	string | bool | int | float | datetime | any | object    primitives
+//	enum("a", "b", ...)                                      inline enum
+//	array(T)                                                 legacy slice
+//	[]T                                                      Go-style slice
+//	map[string]T                                             Go-style map
 //
 // The Go-style forms (`[]T`, `map[K]V`) land in Phase 6; they parse
 // alongside the legacy `array(T)` form so existing `.memql` files

@@ -59,12 +59,12 @@ func TestCanonicalizeAcceptsSloppyInput(t *testing.T) {
 
 func TestCanonicalizeRejectsAmbiguousAndShort(t *testing.T) {
 	cases := []string{
-		"ABCD-EF",       // too short
-		"ABCDEFGHIJ",    // too long
-		"ABCD-EF0H",     // 0 not in alphabet
-		"ABCD-EF1H",     // 1 not in alphabet
-		"ABCD-EFIH",     // I not in alphabet
-		"ABCD-EFOH",     // O not in alphabet
+		"ABCD-EF",    // too short
+		"ABCDEFGHIJ", // too long
+		"ABCD-EF0H",  // 0 not in alphabet
+		"ABCD-EF1H",  // 1 not in alphabet
+		"ABCD-EFIH",  // I not in alphabet
+		"ABCD-EFOH",  // O not in alphabet
 		"",
 		"-",
 	}

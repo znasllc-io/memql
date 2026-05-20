@@ -278,18 +278,20 @@ func routingOutcomeFromConductorPlan(plan *ConductorPlan, candidates []polyphon.
 // empty string / empty array as the no-op value instead.
 //
 // Three agent buckets:
-//   primary  -- one agent leads the response
-//   sequence -- ordered list of independent solo turns ("each of you")
-//   chimeIns -- parallel additions to the primary's response
+//
+//	primary  -- one agent leads the response
+//	sequence -- ordered list of independent solo turns ("each of you")
+//	chimeIns -- parallel additions to the primary's response
 //
 // Per-agent fields (every plan):
-//   agentId          -- participant id from the candidate roster
-//   instruction      -- behavioral directive for THIS turn
-//   brevity          -- "short" / "normal" / "detailed"
-//   acknowledgePrior -- empty string OR opener nod text (rare)
-//   expectedOutput   -- "joke" / "answer" / "commentary" /
-//                       "acknowledgment" / "" -- tag for the
-//                       completion check
+//
+//	agentId          -- participant id from the candidate roster
+//	instruction      -- behavioral directive for THIS turn
+//	brevity          -- "short" / "normal" / "detailed"
+//	acknowledgePrior -- empty string OR opener nod text (rare)
+//	expectedOutput   -- "joke" / "answer" / "commentary" /
+//	                    "acknowledgment" / "" -- tag for the
+//	                    completion check
 const conductorPlanSchemaJSON = `{
   "type": "object",
   "additionalProperties": false,
@@ -650,13 +652,13 @@ type planTrace struct {
 
 // logPlanTrace emits the structured trace log lines. Two lines:
 //
-//   1. INFO "conductor: plan" -- the summary line. Includes
-//      fingerprints (utterance/roster/transcript) so identical inputs
-//      across time can be correlated. Dispatch counts + reason fit on
-//      one log line for at-a-glance debugging.
-//   2. DEBUG "conductor: plan trace (full)" -- the raw plan JSON +
-//      the raw LLM response. Off by default but the truth-of-record
-//      when debugging "what did the conductor actually decide?"
+//  1. INFO "conductor: plan" -- the summary line. Includes
+//     fingerprints (utterance/roster/transcript) so identical inputs
+//     across time can be correlated. Dispatch counts + reason fit on
+//     one log line for at-a-glance debugging.
+//  2. DEBUG "conductor: plan trace (full)" -- the raw plan JSON +
+//     the raw LLM response. Off by default but the truth-of-record
+//     when debugging "what did the conductor actually decide?"
 func (c *CognitionIntegration) logPlanTrace(t planTrace) {
 	logger := c.safeLogger()
 	if logger == nil {
@@ -1017,16 +1019,16 @@ func buildCandidateLookup(candidates []polyphon.AgentCandidate) candidateLookup 
 // resolveId maps an LLM-emitted agent id to a real participant id.
 // Tries, in order:
 //
-//   1. Exact participant-id match (the right answer).
-//   2. Agent-template-id match (LLM emitted the short template id).
-//   3. Case-folded name match (LLM emitted "Sofia" instead of an id).
-//   4. SUBSTRING match -- the LLM frequently strips the
-//      `si-default:v1:agents:agent:` prefix from a participant id,
-//      emitting only the suffix. If the LLM-emitted id is a strict
-//      substring of exactly one participant id (or vice versa), that
-//      participant is the unambiguous match. Multiple matches => fail.
-//   5. Hint-text scan -- when the id is empty or junk, scan the
-//      instruction AND any context text for a known agent name.
+//  1. Exact participant-id match (the right answer).
+//  2. Agent-template-id match (LLM emitted the short template id).
+//  3. Case-folded name match (LLM emitted "Sofia" instead of an id).
+//  4. SUBSTRING match -- the LLM frequently strips the
+//     `si-default:v1:agents:agent:` prefix from a participant id,
+//     emitting only the suffix. If the LLM-emitted id is a strict
+//     substring of exactly one participant id (or vice versa), that
+//     participant is the unambiguous match. Multiple matches => fail.
+//  5. Hint-text scan -- when the id is empty or junk, scan the
+//     instruction AND any context text for a known agent name.
 //
 // Returns (resolvedParticipantId, true) on success, ("", false) when
 // no match can be found.

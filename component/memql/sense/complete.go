@@ -144,7 +144,7 @@ func (s *Service) completeReceiver(prefix string) []CompletionItem {
 			items = append(items, CompletionItem{
 				Label: rt, Kind: "receiver", Detail: "receiver type",
 				Documentation: "Declare a " + strings.ToLower(rt) + " function.",
-				InsertText: rt, SortPriority: i + 1,
+				InsertText:    rt, SortPriority: i + 1,
 			})
 		}
 	}

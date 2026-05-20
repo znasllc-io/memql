@@ -317,7 +317,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// this hook, providers eager-load before secrets exist in
 	// concept storage and only the OS env fallback keeps them alive.
 	// See docs/guides/env-vars.md for the full bootstrap-order story.
-	
+
 	// Cross-registry CQS pass (Phase 2 hoist). Catches the
 	// cross-file violations the per-file ValidateCQS in
 	// tryParseNewFunctionSyntax misses: a query in file A calling

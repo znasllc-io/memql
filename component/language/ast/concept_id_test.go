@@ -49,17 +49,17 @@ func TestValidateAssemblyInputs_RejectsBadVersion(t *testing.T) {
 // all rejected.
 func TestValidateAssemblyInputs_RejectsBadNamespace(t *testing.T) {
 	cases := []string{
-		"",                  // empty
-		"Cognition",         // PascalCase
-		"1cognition",        // leading digit
-		"cognition-foo",     // dash
-		"cognition foo",     // space
-		":cognition",        // leading colon
-		"cognition:",        // trailing colon
-		"cog::foo",          // empty segment
-		"cog:Foo",           // PascalCase segment
-		"cog.foo",           // dot separator no longer allowed
-		"cognition.client",  // dot separator no longer allowed
+		"",                 // empty
+		"Cognition",        // PascalCase
+		"1cognition",       // leading digit
+		"cognition-foo",    // dash
+		"cognition foo",    // space
+		":cognition",       // leading colon
+		"cognition:",       // trailing colon
+		"cog::foo",         // empty segment
+		"cog:Foo",          // PascalCase segment
+		"cog.foo",          // dot separator no longer allowed
+		"cognition.client", // dot separator no longer allowed
 	}
 	for _, ns := range cases {
 		err := ValidateAssemblyInputs(sv(1, 0, 0), ns, "name")
@@ -138,9 +138,9 @@ func TestAssembleConceptId(t *testing.T) {
 // than X.Y.Z (three non-negative integer segments) is rejected.
 func TestParseSemver(t *testing.T) {
 	ok := map[string]SemverVersion{
-		"1.0.0":      sv(1, 0, 0),
-		"2.5.7":      sv(2, 5, 7),
-		"100.200.0":  sv(100, 200, 0),
+		"1.0.0":     sv(1, 0, 0),
+		"2.5.7":     sv(2, 5, 7),
+		"100.200.0": sv(100, 200, 0),
 	}
 	for s, want := range ok {
 		got, err := ParseSemver(s)
@@ -160,8 +160,8 @@ func TestParseSemver(t *testing.T) {
 		"v1.0.0",    // leading v
 		"1.0.0-rc1", // suffix
 		"1.0.0+meta",
-		"1.x.0",     // non-integer
-		"0.1.0",     // major must be >= 1
+		"1.x.0", // non-integer
+		"0.1.0", // major must be >= 1
 	}
 	for _, s := range rejected {
 		_, err := ParseSemver(s)

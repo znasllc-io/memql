@@ -26,11 +26,11 @@ type siResponseCache struct {
 	// Telemetry counters. Atomic so the Stats() snapshot doesn't
 	// need to grab the entries mutex (it just reads counters + a
 	// short read-locked size).
-	hits             atomic.Int64
-	misses           atomic.Int64
-	expiredOnRead    atomic.Int64 // entries deleted because the read found them past TTL
-	sets             atomic.Int64
-	skippedSetsZero  atomic.Int64 // set() called with ttl<=0
+	hits            atomic.Int64
+	misses          atomic.Int64
+	expiredOnRead   atomic.Int64 // entries deleted because the read found them past TTL
+	sets            atomic.Int64
+	skippedSetsZero atomic.Int64 // set() called with ttl<=0
 }
 
 type siCacheEntry struct {
@@ -47,12 +47,12 @@ type siCacheEntry struct {
 // minutes when the cache is non-empty) AND callable on-demand.
 // A future debug HTTP endpoint surfaces them for live inspection.
 type SICacheStats struct {
-	Hits            int64 `json:"hits"`
-	Misses          int64 `json:"misses"`
-	ExpiredOnRead   int64 `json:"expiredOnRead"`
-	Sets            int64 `json:"sets"`
-	SkippedSetsZero int64 `json:"skippedSetsZero"`
-	Size            int   `json:"size"`
+	Hits            int64   `json:"hits"`
+	Misses          int64   `json:"misses"`
+	ExpiredOnRead   int64   `json:"expiredOnRead"`
+	Sets            int64   `json:"sets"`
+	SkippedSetsZero int64   `json:"skippedSetsZero"`
+	Size            int     `json:"size"`
 	HitRatio        float64 `json:"hitRatio"`
 }
 

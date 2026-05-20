@@ -221,8 +221,8 @@ func (i *Integration) seedAllDomainContentHandler(ctx context.Context, args map[
 //   - A: generate via prompt -> validate -> store
 //   - B: prepend disclaimer chunk -> generate -> validate -> store
 //   - C: fetch authoritative Wikipedia content if WikipediaArticles
-//        is set on the StandardDomain; otherwise store the
-//        placeholder chunk only.
+//     is set on the StandardDomain; otherwise store the
+//     placeholder chunk only.
 //
 // On success, stamps lastSeededAt + seederRecipeVersion on the
 // domain row via mutationMarkKnowledgeDomainSeeded. The training

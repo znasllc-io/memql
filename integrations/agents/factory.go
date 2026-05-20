@@ -42,12 +42,12 @@ const factoryResultConcept = "integration:agents:factory-result"
 //  4. Dispatch on action:
 //     - "match":   return the targetAgentId unchanged.
 //     - "extend":  union the proposed domains + tools onto the
-//                  target's current capabilities and write via
-//                  mutationUpdateAgent (the lock validator blocks
-//                  any removal of locked items).
+//     target's current capabilities and write via
+//     mutationUpdateAgent (the lock validator blocks
+//     any removal of locked items).
 //     - "create":  compose capabilities from the role's locked +
-//                  default + proposed additions, then write a new
-//                  agent via mutationCreateAgent.
+//     default + proposed additions, then write a new
+//     agent via mutationCreateAgent.
 //  5. Return ONE MemoryNode whose payload JSON is
 //     {agentId, agentName, roleSlug, action, reasoning}.
 //
@@ -57,8 +57,8 @@ const factoryResultConcept = "integration:agents:factory-result"
 //   - Analysis names a non-existent     -> error pointing the caller at
 //     role/agent                          queryActiveAgentRoles / queryActiveAgentsForUser.
 //   - Lock violation on extend          -> propagated from the
-//                                          validator (the GA can retry
-//                                          with action="create").
+//     validator (the GA can retry
+//     with action="create").
 func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if i == nil || i.agents == nil {
 		return nil, fmt.Errorf("agents integration not initialized -- AgentRegistry is nil")
@@ -150,13 +150,13 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 // prompt is contracted to return. Loosely typed: extra fields are
 // ignored, missing optional fields are zero values.
 type factoryDecision struct {
-	Action         string   `json:"action"`
-	TargetAgentId  string   `json:"targetAgentId"`
-	RoleSlug       string   `json:"roleSlug"`
-	DomainIds      []string `json:"domainIds"`
-	LiveSourceIds  []string `json:"liveSourceIds"`
-	ToolSlugs      []string `json:"toolSlugs"`
-	Reasoning      string   `json:"reasoning"`
+	Action        string   `json:"action"`
+	TargetAgentId string   `json:"targetAgentId"`
+	RoleSlug      string   `json:"roleSlug"`
+	DomainIds     []string `json:"domainIds"`
+	LiveSourceIds []string `json:"liveSourceIds"`
+	ToolSlugs     []string `json:"toolSlugs"`
+	Reasoning     string   `json:"reasoning"`
 }
 
 // agentSnapshot is the compact view of an existing v1:agents:agent
@@ -174,14 +174,14 @@ type agentSnapshot struct {
 
 // roleSnapshot is the compact view of a v1:agents:agentRole row.
 type roleSnapshot struct {
-	Slug                  string
-	Name                  string
-	Category              string
-	Tier                  string
-	LockedDomainIds       []string
-	DefaultDomainIds      []string
-	LockedToolSlugs       []string
-	DefaultToolSlugs      []string
+	Slug             string
+	Name             string
+	Category         string
+	Tier             string
+	LockedDomainIds  []string
+	DefaultDomainIds []string
+	LockedToolSlugs  []string
+	DefaultToolSlugs []string
 	// ForbiddenToolSlugs is the role's explicit opt-out list -- tool
 	// slugs the agent factory MUST NOT grant even when its default
 	// behavior would. Today the agentFactoryAnalyze prompt grants
@@ -249,7 +249,7 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 		"goal":              goal,
 		"existingAgents":    existingForPrompt(existing),
 		"roleCatalog":       roleCatalogForPrompt(roles),
-		"domainCatalog":    []any{}, // populated by a future commit; the prompt tolerates empty
+		"domainCatalog":     []any{}, // populated by a future commit; the prompt tolerates empty
 		"liveSourceCatalog": []any{},
 		"toolCatalog":       []any{},
 		"now":               time.Now().UTC().Format(time.RFC3339),

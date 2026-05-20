@@ -1251,44 +1251,44 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				"agentName", winner.AgentName,
 			)
 		} else {
-		// VOICE PATH: single TTS call for the full response.
-		//
-		// We previously split the response into sentences and POSTed
-		// each one to /agent-response-sentence in a sequential loop.
-		// Each POST blocked on the bridge's HandleAgentSentence (TTS
-		// call + LiveKit publish), so the browser heard silence
-		// between sentences while the bridge was mid-API-call on the
-		// next one -- the "robotic / choppy" delivery the user
-		// flagged. The intent was pipelining ("audio from sentence 1
-		// plays while sentence 2 is being synthesized"), but because
-		// cognition only splits AFTER the full LLM response is in
-		// hand and then dispatches sequentially, we got N round-trip
-		// costs and N-1 audible gaps with zero TTFT win.
-		//
-		// One TTS call per response -> one OGG-Opus stream -> smooth
-		// playback. When real token-level streaming gets wired
-		// through cognition (so the first sentence can synthesize
-		// while later tokens are still being generated), per-sentence
-		// dispatch comes back -- properly pipelined.
+			// VOICE PATH: single TTS call for the full response.
+			//
+			// We previously split the response into sentences and POSTed
+			// each one to /agent-response-sentence in a sequential loop.
+			// Each POST blocked on the bridge's HandleAgentSentence (TTS
+			// call + LiveKit publish), so the browser heard silence
+			// between sentences while the bridge was mid-API-call on the
+			// next one -- the "robotic / choppy" delivery the user
+			// flagged. The intent was pipelining ("audio from sentence 1
+			// plays while sentence 2 is being synthesized"), but because
+			// cognition only splits AFTER the full LLM response is in
+			// hand and then dispatches sequentially, we got N round-trip
+			// costs and N-1 audible gaps with zero TTFT win.
+			//
+			// One TTS call per response -> one OGG-Opus stream -> smooth
+			// playback. When real token-level streaming gets wired
+			// through cognition (so the first sentence can synthesize
+			// while later tokens are still being generated), per-sentence
+			// dispatch comes back -- properly pipelined.
 
-		// Resolve the winning agent's canonical voice to a provider
-		// voice id before forwarding to the bridge. The agent record
-		// stores a canonical name (alto, tenor, ...); the bridge
-		// expects the provider-specific id (alloy, English-US-Male-1,
-		// ...). resolvedVoiceModel is "" for legacy agents missing a
-		// canonical voice -- voice.ResolveVoice falls back to the
-		// provider default in that case so audio still plays.
-		resolvedVoiceModel := resolveAgentVoice(agent)
+			// Resolve the winning agent's canonical voice to a provider
+			// voice id before forwarding to the bridge. The agent record
+			// stores a canonical name (alto, tenor, ...); the bridge
+			// expects the provider-specific id (alloy, English-US-Male-1,
+			// ...). resolvedVoiceModel is "" for legacy agents missing a
+			// canonical voice -- voice.ResolveVoice falls back to the
+			// provider default in that case so audio still plays.
+			resolvedVoiceModel := resolveAgentVoice(agent)
 
-		// Initiative C, Phase 11: Bridge Agent's TTS notify path was
-		// deleted here. The Python voice-agent owns voice synthesis
-		// now via the VoiceAgent* gRPC contract; cognition's job on
-		// the voice path stops at landing the GA's reply utterance
-		// in chat (which insertSIResponse does below). The voice-agent
-		// subscribes to those rows + streams the prose to Aura-2.
-		_ = resolvedVoiceModel
-		_ = winnerParticipant
-		_ = agent
+			// Initiative C, Phase 11: Bridge Agent's TTS notify path was
+			// deleted here. The Python voice-agent owns voice synthesis
+			// now via the VoiceAgent* gRPC contract; cognition's job on
+			// the voice path stops at landing the GA's reply utterance
+			// in chat (which insertSIResponse does below). The voice-agent
+			// subscribes to those rows + streams the prose to Aura-2.
+			_ = resolvedVoiceModel
+			_ = winnerParticipant
+			_ = agent
 		} // end !voiceStreamed
 	}
 
@@ -1911,18 +1911,18 @@ func parseAgentRole(description string) string {
 	}
 	// Map of role labels (as they appear in descriptions) to role slugs.
 	roleMap := map[string]string{
-		"assistant":       "assistant",
-		"accounting & finance":    "accounting-finance",
-		"data & analytics":        "data-analytics",
+		"assistant":                "assistant",
+		"accounting & finance":     "accounting-finance",
+		"data & analytics":         "data-analytics",
 		"engineering & technology": "engineering-technology",
-		"human resources":         "human-resources",
-		"legal & compliance":      "legal-compliance",
-		"marketing & branding":    "marketing-branding",
-		"operations & logistics":  "operations-logistics",
-		"product management":      "product-management",
-		"sales & business dev":    "sales-business-dev",
-		"customer success":        "customer-success",
-		"creative & design":       "creative-design",
+		"human resources":          "human-resources",
+		"legal & compliance":       "legal-compliance",
+		"marketing & branding":     "marketing-branding",
+		"operations & logistics":   "operations-logistics",
+		"product management":       "product-management",
+		"sales & business dev":     "sales-business-dev",
+		"customer success":         "customer-success",
+		"creative & design":        "creative-design",
 	}
 	dl := strings.ToLower(d)
 	for label, slug := range roleMap {
@@ -2334,7 +2334,6 @@ func polyphonDirectAddressWinner(decision *polyphon.ScoreDecision, candidates []
 	return nil
 }
 
-
 // ---------------------------------------------------------------------
 // Multi-agent chime-in chain
 // ---------------------------------------------------------------------
@@ -2385,8 +2384,8 @@ func polyphonDirectAddressWinner(decision *polyphon.ScoreDecision, candidates []
 
 const (
 	// Greetings to the room: broad participation, no score gate.
-	maxGreetingChimeIns           = 3
-	minGreetingChimeInScore       = 0.0
+	maxGreetingChimeIns     = 3
+	minGreetingChimeInScore = 0.0
 
 	// Other turns: narrow participation, must clear ResponseThreshold.
 	maxConversationalChimeIns     = 2

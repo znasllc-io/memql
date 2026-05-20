@@ -19,8 +19,8 @@ const (
 	EventBridgeComponentName = common.ComponentName("nodeEventBridge")
 	eventBridgeOrder         = 46 // after PeerManager (45), before NodeServer (48)
 
-	defaultTTL        = 3
-	defaultDedupSize  = 8192
+	defaultTTL       = 3
+	defaultDedupSize = 8192
 )
 
 // EventBridge connects the local events.Bus to the distributed NodeService

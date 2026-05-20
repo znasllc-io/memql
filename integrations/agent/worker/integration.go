@@ -23,8 +23,8 @@ import (
 //   - dispatchComputer -- workerComputer.<action> dispatch entry
 //   - listWorkers      -- list the caller's connected workers
 //   - status           -- live three-state availability check
-//                         (connected / disconnected / unconfigured),
-//                         matches the agentReply prompt's seed
+//     (connected / disconnected / unconfigured),
+//     matches the agentReply prompt's seed
 //
 // The first two route through the same Dispatcher; the
 // discriminator lives in the args. Calls land here from the agent
@@ -202,10 +202,10 @@ func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any
 // logic but lives in the integration so the agent can call it as a
 // runtime tool. Three-state result:
 //
-//   "connected"    -- registry has a live worker for the owner
-//   "disconnected" -- no online worker, but a non-revoked
-//                     v1:worker:registration row exists
-//   "unconfigured" -- no rows at all for the owner
+//	"connected"    -- registry has a live worker for the owner
+//	"disconnected" -- no online worker, but a non-revoked
+//	                  v1:worker:registration row exists
+//	"unconfigured" -- no rows at all for the owner
 //
 // The detail field carries the connected worker's name when
 // status="connected" so the agent has a natural-language echo.

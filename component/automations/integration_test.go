@@ -442,7 +442,6 @@ func TestEventBusTrigger(t *testing.T) {
 	}
 }
 
-
 // TestEvaluatorCompoundConditions tests that the evaluator handles compound conditions
 // with semicolon (AND) and comma (OR) operators correctly.
 func TestEvaluatorCompoundConditions(t *testing.T) {

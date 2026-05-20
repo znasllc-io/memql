@@ -43,18 +43,18 @@ const (
 	// climb past 100 iterations when chaining many narrate-ask-click
 	// cycles; 200 is the ceiling before we assume the agent is stuck
 	// in a loop and bail.
-	maxSIToolLoopMaxIterations = 200
-	maxSIToolLoopMaxToolCallsPerIt     = 12
+	maxSIToolLoopMaxIterations     = 200
+	maxSIToolLoopMaxToolCallsPerIt = 12
 
 	defaultWebhookTimeoutSeconds = 30
 	maxWebhookTimeoutSeconds     = 600
 
-	envMaxResults                  = "MEMORY_ENGINE_MAX_RESULTS"
-	envMaxWindow                   = "MEMORY_ENGINE_MAX_WINDOW"
-	envCacheSize                   = "MEMORY_ENGINE_CACHE_MAX_ITEMS"
-	envCacheMaxTTL                 = "CACHE_MAX_TTL"
-	envSICacheDefaultEnable        = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
-	envSICacheMaxSeconds           = "MEMQL_SI_CACHE_MAX_SECONDS"
+	envMaxResults           = "MEMORY_ENGINE_MAX_RESULTS"
+	envMaxWindow            = "MEMORY_ENGINE_MAX_WINDOW"
+	envCacheSize            = "MEMORY_ENGINE_CACHE_MAX_ITEMS"
+	envCacheMaxTTL          = "CACHE_MAX_TTL"
+	envSICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
+	envSICacheMaxSeconds    = "MEMQL_SI_CACHE_MAX_SECONDS"
 	// Canonical names for the unified tool-loop knobs. The agent
 	// streaming loop in integrations/agent/streaming.go reads the same
 	// two env vars so there's exactly one place to tune walkthrough

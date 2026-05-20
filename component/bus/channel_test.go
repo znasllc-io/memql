@@ -129,8 +129,8 @@ func TestChannelTelemetryHooks(t *testing.T) {
 	}
 	ch := NewChannelWithHooks("test", cfg, hooks)
 
-	ch.Send(1)   // succeeds
-	ch.Send(2)   // drops (full)
+	ch.Send(1) // succeeds
+	ch.Send(2) // drops (full)
 
 	if sendCount.Load() != 1 {
 		t.Errorf("expected 1 send hook call, got %d", sendCount.Load())

@@ -161,8 +161,8 @@ mutation mutationCreateSpaceShorthand {
 // `mutationCreateDailySpace` was unloadable).
 func TestSignatureBoundMutationAcceptsMultipleFileTopUses(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cognition:space":    {Name: "v1:cognition:space"},
-		"v1:identity:request":   {Name: "v1:identity:request"},
+		"v1:cognition:space":  {Name: "v1:cognition:space"},
+		"v1:identity:request": {Name: "v1:identity:request"},
 	})
 	src := `use cognition.concepts.{ space }
 use identity.concepts.{ request }

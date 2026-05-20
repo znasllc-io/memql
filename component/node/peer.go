@@ -69,8 +69,8 @@ type PeerManager struct {
 
 	// onStatusChange is invoked on every actual health transition. Set via
 	// SetStatusChangeHandler during bootstrap. nil handler == no-op.
-	statusMu        sync.RWMutex
-	onStatusChange  StatusChangeHandler
+	statusMu       sync.RWMutex
+	onStatusChange StatusChangeHandler
 
 	logger *slog.Logger
 }

@@ -1684,13 +1684,13 @@ func (c *Compiler) valueToString(v any) string {
 // matching the raw string with regex. Supported rewrites:
 //
 //   - first(stepName) / first(stepName).path
-//         → $steps.stepName.result.Bundle.nodes.0[.path]
+//     → $steps.stepName.result.Bundle.nodes.0[.path]
 //   - last(stepName) / last(stepName).path
-//         → $steps.stepName.result.Bundle.nodes.-1[.path]
+//     → $steps.stepName.result.Bundle.nodes.-1[.path]
 //   - stepName.metadata.field (bare ident-token containing dots)
-//         → $steps.stepName.metadata.field
+//     → $steps.stepName.metadata.field
 //   - step("name"), step("name").metadata, step("name").result etc.
-//         → $steps.name.metadata / $steps.name.result (legacy sugar)
+//     → $steps.name.metadata / $steps.name.result (legacy sugar)
 //
 // Everything that doesn't match one of these shapes passes through
 // verbatim in the canonical spacing parseConditionExpression produces.

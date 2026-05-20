@@ -302,12 +302,12 @@ func (i *Integration) handleFSStat(_ context.Context, ws *workspace, args map[st
 		OK:     true,
 		Action: "fs_stat",
 		Payload: map[string]any{
-			"path":      pathArg,
-			"exists":    true,
-			"isDir":     info.IsDir(),
-			"size":      info.Size(),
-			"mode":      fmt.Sprintf("%o", info.Mode().Perm()),
-			"modTime":   info.ModTime().UTC().Format(time.RFC3339),
+			"path":    pathArg,
+			"exists":  true,
+			"isDir":   info.IsDir(),
+			"size":    info.Size(),
+			"mode":    fmt.Sprintf("%o", info.Mode().Perm()),
+			"modTime": info.ModTime().UTC().Format(time.RFC3339),
 		},
 	}
 }
@@ -364,13 +364,13 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 		OK:     resp.StatusCode < 400,
 		Action: "http_fetch",
 		Payload: map[string]any{
-			"url":        url,
-			"method":     method,
-			"status":     resp.StatusCode,
-			"headers":    headers,
-			"body":       string(bodyBytes),
-			"bytes":      len(bodyBytes),
-			"truncated":  truncated,
+			"url":       url,
+			"method":    method,
+			"status":    resp.StatusCode,
+			"headers":   headers,
+			"body":      string(bodyBytes),
+			"bytes":     len(bodyBytes),
+			"truncated": truncated,
 		},
 	}
 }
@@ -480,4 +480,3 @@ func stringMap(arg any) envMap {
 	}
 	return out
 }
-

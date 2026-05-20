@@ -77,13 +77,13 @@ var (
 
 // Construct captures the generator's view of a single DSL declaration.
 type Construct struct {
-	Kind         string // "query" | "mutation" | "logic"
-	Name         string // function name as it appears in DSL + wire
-	Concept      string // signature-bound concept (queries / mutations only); empty for logic
-	Description  string // from @description annotation
-	Args         []ArgField
-	ShapeName    string // for queries: the shape the result projects through
-	Origin       string // file:line for traceability in generated comments
+	Kind        string // "query" | "mutation" | "logic"
+	Name        string // function name as it appears in DSL + wire
+	Concept     string // signature-bound concept (queries / mutations only); empty for logic
+	Description string // from @description annotation
+	Args        []ArgField
+	ShapeName   string // for queries: the shape the result projects through
+	Origin      string // file:line for traceability in generated comments
 }
 
 // ArgField is one field in the construct's args block.

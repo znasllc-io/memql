@@ -63,20 +63,20 @@ type Mention struct {
 
 // AgentCandidate represents an SI agent being evaluated by the score engine.
 type AgentCandidate struct {
-	ID              string                 `json:"id"`
-	ParticipantId   string                 `json:"participantId"`
-	Name            string                 `json:"name"`
-	Description     string                 `json:"description,omitempty"`
-	Personality     string                 `json:"personality,omitempty"`
-	Role            string                 `json:"role,omitempty"`            // e.g. "assistant", "accounting-finance"
-	Domains         []string               `json:"domains,omitempty"`
-	Keywords        []string               `json:"keywords,omitempty"`
-	SpeakWhen       string                 `json:"speakWhen,omitempty"`       // "asked", "relevant", "always"
-	InterruptStyle  string                 `json:"interruptStyle,omitempty"`  // "polite", "assertive", "passive"
-	ContinuationBehavior string            `json:"continuationBehavior,omitempty"` // "add_context", "disagree", "summarize"
-	ProviderConfig  map[string]interface{} `json:"providerConfig,omitempty"`
-	Capabilities    map[string]interface{} `json:"capabilities,omitempty"`
-	ProfileEmbedding []float32             `json:"-"` // Pre-loaded from node_vectors for vector domain scoring
+	ID                   string                 `json:"id"`
+	ParticipantId        string                 `json:"participantId"`
+	Name                 string                 `json:"name"`
+	Description          string                 `json:"description,omitempty"`
+	Personality          string                 `json:"personality,omitempty"`
+	Role                 string                 `json:"role,omitempty"` // e.g. "assistant", "accounting-finance"
+	Domains              []string               `json:"domains,omitempty"`
+	Keywords             []string               `json:"keywords,omitempty"`
+	SpeakWhen            string                 `json:"speakWhen,omitempty"`            // "asked", "relevant", "always"
+	InterruptStyle       string                 `json:"interruptStyle,omitempty"`       // "polite", "assertive", "passive"
+	ContinuationBehavior string                 `json:"continuationBehavior,omitempty"` // "add_context", "disagree", "summarize"
+	ProviderConfig       map[string]interface{} `json:"providerConfig,omitempty"`
+	Capabilities         map[string]interface{} `json:"capabilities,omitempty"`
+	ProfileEmbedding     []float32              `json:"-"` // Pre-loaded from node_vectors for vector domain scoring
 }
 
 // ScoringFactor represents a single factor contributing to an agent's score.
@@ -101,12 +101,12 @@ type AgentScore struct {
 
 // ScoreDecision is the output of the score engine for a given utterance.
 type ScoreDecision struct {
-	SpaceId       string       `json:"spaceId"`
-	UtteranceId   string       `json:"utteranceId"`
-	Winner        *AgentScore  `json:"winner,omitempty"`
-	Scores        []AgentScore `json:"scores"`
-	Action        string       `json:"action"`     // "respond", "continue", "silence"
-	Confidence    string       `json:"confidence"`  // "high", "medium", "low" -- determines whether SI router is invoked
+	SpaceId           string            `json:"spaceId"`
+	UtteranceId       string            `json:"utteranceId"`
+	Winner            *AgentScore       `json:"winner,omitempty"`
+	Scores            []AgentScore      `json:"scores"`
+	Action            string            `json:"action"`     // "respond", "continue", "silence"
+	Confidence        string            `json:"confidence"` // "high", "medium", "low" -- determines whether SI router is invoked
 	Continuation      bool              `json:"continuation"`
 	ConversationPhase ConversationPhase `json:"conversationPhase,omitempty"`
 	ResponseDelay     time.Duration     `json:"-"`
@@ -195,55 +195,55 @@ func DefaultScoringWeights() ScoringWeights {
 
 // TranscriptEntry is a single entry in the shared conversation transcript.
 type TranscriptEntry struct {
-	ID            string    `json:"id"`
-	SpaceId       string    `json:"spaceId"`
-	SpeakerId     string    `json:"speakerId"`
-	SpeakerName   string    `json:"speakerName"`
-	SpeakerType   string    `json:"speakerType"` // "human" or "agent"
-	Text          string    `json:"text"`
-	Timestamp     time.Time `json:"timestamp"`
-	UtteranceId   string    `json:"utteranceId,omitempty"`
+	ID          string    `json:"id"`
+	SpaceId     string    `json:"spaceId"`
+	SpeakerId   string    `json:"speakerId"`
+	SpeakerName string    `json:"speakerName"`
+	SpeakerType string    `json:"speakerType"` // "human" or "agent"
+	Text        string    `json:"text"`
+	Timestamp   time.Time `json:"timestamp"`
+	UtteranceId string    `json:"utteranceId,omitempty"`
 }
 
 // PolyphonSession tracks the state of a multi-agent conversation in a space.
 type PolyphonSession struct {
 	mu sync.RWMutex
 
-	SpaceId              string            `json:"spaceId"`
-	Platform             VoicePlatform     `json:"platform"`
-	Humans               []SessionParticipant `json:"humans"`
-	Agents               []SessionAgent    `json:"agents"`
-	Transcript           []TranscriptEntry `json:"transcript"`
-	ConsecutiveAgentTurns int              `json:"consecutiveAgentTurns"`
-	LastSpeakerId        string            `json:"lastSpeakerId,omitempty"`
-	LastSpeakerType      string            `json:"lastSpeakerType,omitempty"` // "human" or "agent"
-	LastAgentId          string            `json:"lastAgentId,omitempty"`
-	LastAddressedAgentId string            `json:"lastAddressedAgentId,omitempty"` // Conversational thread: who was last addressed by name
-	LastAddressedAt      time.Time         `json:"lastAddressedAt,omitempty"`      // When the thread was established
-	HandoffChainDepth    int               `json:"handoffChainDepth"`              // Hops in the current handoff chain; reset on non-handoff outcomes.
-	AgentTurnCounts      map[string]int    `json:"agentTurnCounts"`
-	StateMachine         *ConversationStateMachine `json:"-"`
-	Prediction           *PredictiveState  `json:"prediction,omitempty"`
-	PendingEvents        []map[string]any  `json:"pendingEvents,omitempty"` // Queue for notifications to surface
-	CompactedSummary     string            `json:"-"` // Zone 1: SI-generated summary of old messages
-	LastCompactionAt     time.Time         `json:"-"` // When compaction last ran
-	CompactionIndex      int               `json:"-"` // Transcript index up to which summary covers
-	CreatedAt            time.Time         `json:"createdAt"`
-	LastActivityAt       time.Time         `json:"lastActivityAt"`
+	SpaceId               string                    `json:"spaceId"`
+	Platform              VoicePlatform             `json:"platform"`
+	Humans                []SessionParticipant      `json:"humans"`
+	Agents                []SessionAgent            `json:"agents"`
+	Transcript            []TranscriptEntry         `json:"transcript"`
+	ConsecutiveAgentTurns int                       `json:"consecutiveAgentTurns"`
+	LastSpeakerId         string                    `json:"lastSpeakerId,omitempty"`
+	LastSpeakerType       string                    `json:"lastSpeakerType,omitempty"` // "human" or "agent"
+	LastAgentId           string                    `json:"lastAgentId,omitempty"`
+	LastAddressedAgentId  string                    `json:"lastAddressedAgentId,omitempty"` // Conversational thread: who was last addressed by name
+	LastAddressedAt       time.Time                 `json:"lastAddressedAt,omitempty"`      // When the thread was established
+	HandoffChainDepth     int                       `json:"handoffChainDepth"`              // Hops in the current handoff chain; reset on non-handoff outcomes.
+	AgentTurnCounts       map[string]int            `json:"agentTurnCounts"`
+	StateMachine          *ConversationStateMachine `json:"-"`
+	Prediction            *PredictiveState          `json:"prediction,omitempty"`
+	PendingEvents         []map[string]any          `json:"pendingEvents,omitempty"` // Queue for notifications to surface
+	CompactedSummary      string                    `json:"-"`                       // Zone 1: SI-generated summary of old messages
+	LastCompactionAt      time.Time                 `json:"-"`                       // When compaction last ran
+	CompactionIndex       int                       `json:"-"`                       // Transcript index up to which summary covers
+	CreatedAt             time.Time                 `json:"createdAt"`
+	LastActivityAt        time.Time                 `json:"lastActivityAt"`
 }
 
 // SessionParticipant represents a human participant in a Polyphon session.
 type SessionParticipant struct {
-	ParticipantId string `json:"participantId"`
-	DisplayName   string `json:"displayName"`
+	ParticipantId string    `json:"participantId"`
+	DisplayName   string    `json:"displayName"`
 	JoinedAt      time.Time `json:"joinedAt"`
 }
 
 // SessionAgent represents an SI agent participant in a Polyphon session.
 type SessionAgent struct {
-	AgentId       string `json:"agentId"`
-	ParticipantId string `json:"participantId"`
-	Name          string `json:"name"`
+	AgentId       string    `json:"agentId"`
+	ParticipantId string    `json:"participantId"`
+	Name          string    `json:"name"`
 	JoinedAt      time.Time `json:"joinedAt"`
 }
 
@@ -384,10 +384,10 @@ func (s *PolyphonSession) LastAgentSpokeAt(agentId string) time.Time {
 // during a heartbeat tick. The heartbeat runs continuously per active space,
 // evaluating whether the score engine should intervene.
 type HeartbeatAction struct {
-	Type      string         `json:"type"`      // "idle", "re-engage", "notify", "proactive"
-	AgentId   string         `json:"agentId"`   // Which agent should act
+	Type      string         `json:"type"`    // "idle", "re-engage", "notify", "proactive"
+	AgentId   string         `json:"agentId"` // Which agent should act
 	AgentName string         `json:"agentName"`
-	Reason    string         `json:"reason"`    // Why this action was chosen
+	Reason    string         `json:"reason"`            // Why this action was chosen
 	Payload   map[string]any `json:"payload,omitempty"` // Action-specific data
 }
 

@@ -10,10 +10,10 @@ import (
 // file under the root, sorted, slash-separated paths.
 func TestWalkMemqlFiles_HappyPath(t *testing.T) {
 	root := fstest.MapFS{
-		"a.memql":             {Data: []byte("// a")},
-		"cognition/b.memql":   {Data: []byte("// b")},
-		"common/c.memql":      {Data: []byte("// c")},
-		"common/sub/d.memql":  {Data: []byte("// d")},
+		"a.memql":            {Data: []byte("// a")},
+		"cognition/b.memql":  {Data: []byte("// b")},
+		"common/c.memql":     {Data: []byte("// c")},
+		"common/sub/d.memql": {Data: []byte("// d")},
 	}
 	got, err := WalkMemqlFiles(root)
 	if err != nil {
@@ -53,10 +53,10 @@ func TestWalkMemqlFiles_SkipsUnderscoreFiles(t *testing.T) {
 // for entire directories.
 func TestWalkMemqlFiles_SkipsUnderscoreDirs(t *testing.T) {
 	root := fstest.MapFS{
-		"a.memql":                {Data: []byte("// a")},
-		"_disabled/x.memql":      {Data: []byte("// skip")},
-		"_disabled/sub/y.memql":  {Data: []byte("// skip")},
-		"keep/z.memql":           {Data: []byte("// z")},
+		"a.memql":               {Data: []byte("// a")},
+		"_disabled/x.memql":     {Data: []byte("// skip")},
+		"_disabled/sub/y.memql": {Data: []byte("// skip")},
+		"keep/z.memql":          {Data: []byte("// z")},
 	}
 	got, err := WalkMemqlFiles(root)
 	if err != nil {
@@ -72,11 +72,11 @@ func TestWalkMemqlFiles_SkipsUnderscoreDirs(t *testing.T) {
 // files (templates, docs, json) aren't returned.
 func TestWalkMemqlFiles_IgnoresNonMemqlExtensions(t *testing.T) {
 	root := fstest.MapFS{
-		"a.memql":        {Data: []byte("// a")},
+		"a.memql":         {Data: []byte("// a")},
 		"agentReply.tmpl": {Data: []byte("template")},
-		"schema.json":    {Data: []byte("{}")},
-		"CLAUDE.md":      {Data: []byte("docs")},
-		"notes.txt":      {Data: []byte("text")},
+		"schema.json":     {Data: []byte("{}")},
+		"CLAUDE.md":       {Data: []byte("docs")},
+		"notes.txt":       {Data: []byte("text")},
 	}
 	got, err := WalkMemqlFiles(root)
 	if err != nil {

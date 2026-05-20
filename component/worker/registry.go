@@ -62,9 +62,9 @@ type Worker struct {
 	dispatchFn   DispatchFunc
 	cancelStream func()
 
-	mu          sync.Mutex
+	mu           sync.Mutex
 	activePerCap map[string]uint32
-	queue       []chan struct{}
+	queue        []chan struct{}
 }
 
 // DispatchFunc is the worker-side dispatch hook owned by the

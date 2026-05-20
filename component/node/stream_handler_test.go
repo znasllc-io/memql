@@ -17,10 +17,10 @@ import (
 // to exercise the unary-like handlers (handleEventForward, etc.). Most of
 // the bidi surface is unused by these handlers; stubs return defaults.
 type fakeStream struct {
-	mu       sync.Mutex
-	sent     []*nodev1.NodeServerMessage
-	recvCh   chan *nodev1.NodeClientMessage
-	ctx      context.Context
+	mu     sync.Mutex
+	sent   []*nodev1.NodeServerMessage
+	recvCh chan *nodev1.NodeClientMessage
+	ctx    context.Context
 }
 
 func newFakeStream() *fakeStream {
@@ -45,12 +45,12 @@ func (f *fakeStream) Recv() (*nodev1.NodeClientMessage, error) {
 	return msg, nil
 }
 
-func (f *fakeStream) SendMsg(m any) error                  { return nil }
-func (f *fakeStream) RecvMsg(m any) error                  { return nil }
-func (f *fakeStream) SetHeader(md metadata.MD) error       { return nil }
-func (f *fakeStream) SendHeader(md metadata.MD) error      { return nil }
-func (f *fakeStream) SetTrailer(md metadata.MD)            {}
-func (f *fakeStream) Context() context.Context             { return f.ctx }
+func (f *fakeStream) SendMsg(m any) error             { return nil }
+func (f *fakeStream) RecvMsg(m any) error             { return nil }
+func (f *fakeStream) SetHeader(md metadata.MD) error  { return nil }
+func (f *fakeStream) SendHeader(md metadata.MD) error { return nil }
+func (f *fakeStream) SetTrailer(md metadata.MD)       {}
+func (f *fakeStream) Context() context.Context        { return f.ctx }
 
 // TestHandleEventForward_PublishesLocally is the regression guard for the
 // shipped "cognition receives the utterance event but handleUtteranceFor

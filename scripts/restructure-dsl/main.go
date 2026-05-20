@@ -50,21 +50,21 @@ const (
 )
 
 var (
-	useConceptRe = regexp.MustCompile(`(?m)^@useConcept\(([^)]+)\)`)
+	useConceptRe  = regexp.MustCompile(`(?m)^@useConcept\(([^)]+)\)`)
 	conceptDeclRe = regexp.MustCompile(`(?m)^concept[ \t]+([A-Za-z][A-Za-z0-9]*)[ \t]*\{`)
 )
 
 // clusterParent maps a sub-concept path-segment to its parent name.
 // Sub-concepts get merged into the parent's entity file (Q3 signal 1).
 var clusterParent = map[string]string{
-	"cognition/space/context":              "space",
-	"cognition/participant/presence":       "participant",
-	"cognition/turn/state":                 "turn",
-	"cognition/text/chunk":                 "textChunk",
-	"cognition/client/tool/request":        "clientTools",
-	"cognition/client/tool/response":       "clientTools",
-	"copresent/guardrail/health":           "guardrailHealth",
-	"copresent/unmet/capability":           "unmetCapability",
+	"cognition/space/context":        "space",
+	"cognition/participant/presence": "participant",
+	"cognition/turn/state":           "turn",
+	"cognition/text/chunk":           "textChunk",
+	"cognition/client/tool/request":  "clientTools",
+	"cognition/client/tool/response": "clientTools",
+	"copresent/guardrail/health":     "guardrailHealth",
+	"copresent/unmet/capability":     "unmetCapability",
 }
 
 // bareNameCluster maps a bare concept name to its (domain, target) so
@@ -86,28 +86,28 @@ var bareNameCluster = map[[2]string]string{
 // parallelCluster maps groups of parallel-shape concepts (Q3 signal 2)
 // to a single entity file in their domain.
 var parallelCluster = map[string]string{
-	"cognition/audioOverride":  "cognition/presence",
-	"cognition/videoOverride":  "cognition/presence",
-	"cognition/micState":       "cognition/presence",
-	"cluster/cluster":          "cluster/topology",
-	"cluster/database":         "cluster/topology",
-	"cluster/identityProvider": "cluster/topology",
-	"platform/globalSecret":    "platform/secrets",
-	"platform/partitionSecret": "platform/secrets",
-	"platform/globalVariable":  "platform/variables",
+	"cognition/audioOverride":    "cognition/presence",
+	"cognition/videoOverride":    "cognition/presence",
+	"cognition/micState":         "cognition/presence",
+	"cluster/cluster":            "cluster/topology",
+	"cluster/database":           "cluster/topology",
+	"cluster/identityProvider":   "cluster/topology",
+	"platform/globalSecret":      "platform/secrets",
+	"platform/partitionSecret":   "platform/secrets",
+	"platform/globalVariable":    "platform/variables",
 	"platform/partitionVariable": "platform/variables",
-	"knowledge/spreadsheetRow": "knowledge/items",
-	"knowledge/imageRegion":    "knowledge/items",
-	"knowledge/validationEvent": "knowledge/items",
+	"knowledge/spreadsheetRow":   "knowledge/items",
+	"knowledge/imageRegion":      "knowledge/items",
+	"knowledge/validationEvent":  "knowledge/items",
 }
 
 // crossDomainConceptRelocate moves concepts that today live in
 // common/ to their natural domain (Q10).
 var crossDomainConceptRelocate = map[string]string{
-	"common/agent":            "copresent/agent",
-	"common/documentChunk":    "knowledge/document",   // cluster with document
-	"common/knowledgeDomain":  "knowledge/domain",
-	"common/knowledgeBridge":  "knowledge/domain",     // cluster with domain
+	"common/agent":           "copresent/agent",
+	"common/documentChunk":   "knowledge/document", // cluster with document
+	"common/knowledgeDomain": "knowledge/domain",
+	"common/knowledgeBridge": "knowledge/domain", // cluster with domain
 }
 
 // crossCuttingBuiltins are integrations that are not domain-scoped

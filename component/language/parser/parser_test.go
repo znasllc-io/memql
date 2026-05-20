@@ -1596,7 +1596,6 @@ func TestParser_ErrorFunctionEmpty(t *testing.T) {
 	}
 }
 
-
 func TestParser_SpecDefinition(t *testing.T) {
 	input := `
 @enabled

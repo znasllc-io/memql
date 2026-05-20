@@ -54,7 +54,8 @@ func ParseNodeId(fullId string) (concept, shortId string, err error) {
 //
 // Returns: {concept}:{shortId}
 // Example: BuildNodeId("v1:cognition:participant", "a9f3b7c2") →
-//          "v1:cognition:participant:a9f3b7c2"
+//
+//	"v1:cognition:participant:a9f3b7c2"
 //
 // If shortId is empty, returns concept unchanged.
 func BuildNodeId(concept, shortId string) string {

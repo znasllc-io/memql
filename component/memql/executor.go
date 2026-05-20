@@ -527,8 +527,6 @@ func moreRecentNode(a, b memorynodes.MemoryNode) memorynodes.MemoryNode {
 	return b
 }
 
-
-
 func normalizeIntrinsicFieldName(field string) string {
 	trimmed := strings.TrimSpace(field)
 	if trimmed == "" {
@@ -1110,4 +1108,3 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 
 	return nil
 }
-

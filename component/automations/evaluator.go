@@ -1703,7 +1703,6 @@ func toNumber(v any) float64 {
 	}
 }
 
-
 // GetLength returns the length of a collection value.
 func GetLength(v any) int {
 	if v == nil {

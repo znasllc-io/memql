@@ -11,10 +11,10 @@ import (
 // were formatted as "payload.field!=nil<nil>" instead of "payload.field!=nil".
 func TestUnaryOperatorsCompile(t *testing.T) {
 	tests := []struct {
-		name         string
-		source       string
-		expectedQuery string
-		shouldContain string
+		name             string
+		source           string
+		expectedQuery    string
+		shouldContain    string
 		shouldNotContain string
 	}{
 		{
@@ -23,7 +23,7 @@ func TestUnaryOperatorsCompile(t *testing.T) {
 func (Query) testMissing() {
 	concept==v1:test;payload.field==nil
 }`,
-			expectedQuery: `concept=="v1:test";payload.field==nil`,
+			expectedQuery:    `concept=="v1:test";payload.field==nil`,
 			shouldNotContain: "<nil>",
 		},
 		{
@@ -32,7 +32,7 @@ func (Query) testMissing() {
 func (Query) testNotMissing() {
 	concept==v1:test;payload.field!=nil
 }`,
-			expectedQuery: `concept=="v1:test";payload.field!=nil`,
+			expectedQuery:    `concept=="v1:test";payload.field!=nil`,
 			shouldNotContain: "<nil>",
 		},
 		{
@@ -41,7 +41,7 @@ func (Query) testNotMissing() {
 func (Query) testMultiple() {
 	concept==v1:test;payload.field1!=nil;payload.field2!=nil
 }`,
-			shouldContain: "payload.field1!=nil",
+			shouldContain:    "payload.field1!=nil",
 			shouldNotContain: "<nil>",
 		},
 		{
@@ -58,7 +58,7 @@ func (Automation) testAutomation(_ any) {
 
   return step1
 }`,
-			shouldContain: `payload.slaDeadline!=nil`,
+			shouldContain:    `payload.slaDeadline!=nil`,
 			shouldNotContain: "<nil>",
 		},
 	}
@@ -87,7 +87,7 @@ func (Automation) testAutomation(_ any) {
 			// For automations, check the step queries
 			if len(result.Automations) > 0 {
 				automation := result.Automations[0]
-				
+
 				// Get steps and check queries
 				if steps, ok := automation.JSON["steps"].([]any); ok {
 					for _, step := range steps {
@@ -135,13 +135,13 @@ func (Query) testCombined() {
 		`payload.optionalField!=nil`,
 		`payload.count>5`,
 	}
-	
+
 	for _, part := range expectedParts {
 		if !strings.Contains(query, part) {
 			t.Errorf("query missing expected part %q\nfull query: %s", part, query)
 		}
 	}
-	
+
 	// Should NOT contain <nil>
 	if strings.Contains(query, "<nil>") {
 		t.Errorf("query should not contain '<nil>', got: %s", query)

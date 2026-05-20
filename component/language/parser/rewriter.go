@@ -793,11 +793,11 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 // translateStepCall converts a step body into the legacy call
 // expression. Supported shapes:
 //
-//   `<kind> <bareName> { <args> }` -- kind is logic / mutation /
-//     query / automation; produces `<kind><PascalCase(bare)>({ args })`.
-//   `publishEvent { <args> }`      -- builtin; `publishEvent({ args })`.
-//   `<prefixedName> { <args> }`    -- direct form.
-//   `<name>(<args>)`               -- already parenthesised; passthrough.
+//	`<kind> <bareName> { <args> }` -- kind is logic / mutation /
+//	  query / automation; produces `<kind><PascalCase(bare)>({ args })`.
+//	`publishEvent { <args> }`      -- builtin; `publishEvent({ args })`.
+//	`<prefixedName> { <args> }`    -- direct form.
+//	`<name>(<args>)`               -- already parenthesised; passthrough.
 func translateStepCall(body string) (string, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {

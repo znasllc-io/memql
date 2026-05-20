@@ -213,10 +213,10 @@ func extractFirstAgentIdFromParticipants(payload any) string {
 // resolveInitialChannelMode returns the effective audio or video
 // publication mode for the GA at session-start time. Layers, top
 // wins:
-//   1. Active v1:cognition:{audio,video}override row for this
-//      (space, agent) pair (the orb-corner toggle's output).
-//   2. Agent record's audioControl / videoControl default.
-//   3. "mirror_user" fallback.
+//  1. Active v1:cognition:{audio,video}override row for this
+//     (space, agent) pair (the orb-corner toggle's output).
+//  2. Agent record's audioControl / videoControl default.
+//  3. "mirror_user" fallback.
 //
 // Read-only; failures fall through to "mirror_user" silently so a
 // transient query error doesn't break session-start.

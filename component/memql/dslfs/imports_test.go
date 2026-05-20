@@ -9,40 +9,40 @@ import (
 // TestResolveImport_HappyPaths locks the common-case resolutions.
 func TestResolveImport_HappyPaths(t *testing.T) {
 	cases := []struct {
-		name         string
+		name          string
 		importingFile string
-		rawPath      string
-		want         string
+		rawPath       string
+		want          string
 	}{
 		{
-			name:         "sibling file, default extension",
+			name:          "sibling file, default extension",
 			importingFile: "cognition/queries/spaceParticipants.memql",
-			rawPath:      "./other",
-			want:         "cognition/queries/other.memql",
+			rawPath:       "./other",
+			want:          "cognition/queries/other.memql",
 		},
 		{
-			name:         "sibling file, explicit extension",
+			name:          "sibling file, explicit extension",
 			importingFile: "cognition/queries/spaceParticipants.memql",
-			rawPath:      "./other.memql",
-			want:         "cognition/queries/other.memql",
+			rawPath:       "./other.memql",
+			want:          "cognition/queries/other.memql",
 		},
 		{
-			name:         "parent directory",
+			name:          "parent directory",
 			importingFile: "cognition/queries/spaceParticipants.memql",
-			rawPath:      "../participant",
-			want:         "cognition/participant.memql",
+			rawPath:       "../participant",
+			want:          "cognition/participant.memql",
 		},
 		{
-			name:         "grandparent directory",
+			name:          "grandparent directory",
 			importingFile: "cognition/queries/sub/foo.memql",
-			rawPath:      "../../participant",
-			want:         "cognition/participant.memql",
+			rawPath:       "../../participant",
+			want:          "cognition/participant.memql",
 		},
 		{
-			name:         "cross-directory sibling",
+			name:          "cross-directory sibling",
 			importingFile: "cognition/queries/foo.memql",
-			rawPath:      "../../common/space",
-			want:         "common/space.memql",
+			rawPath:       "../../common/space",
+			want:          "common/space.memql",
 		},
 	}
 	for _, c := range cases {
@@ -84,7 +84,7 @@ func TestResolveImport_RejectsURL(t *testing.T) {
 func TestResolveImport_RejectsRootEscape(t *testing.T) {
 	cases := []struct {
 		importingFile string
-		rawPath      string
+		rawPath       string
 	}{
 		{"foo.memql", "../escape"},
 		{"a/b.memql", "../../../escape"},

@@ -104,10 +104,12 @@ func (s *CodeProfileSubscriber) Stop(_ context.Context) {
 // alongside the rest of the component graph. Order is chosen to
 // match the engine phase's other lightweight subscribers (>5,
 // well after database + concept seeder).
-func (s *CodeProfileSubscriber) IsRunning() bool             { return s.running.Load() }
-func (s *CodeProfileSubscriber) Order() int                  { return 10 }
-func (s *CodeProfileSubscriber) ComponentName() common.ComponentName { return CodeProfileSubscriberComponent }
-func (s *CodeProfileSubscriber) Ready() <-chan struct{}      { return s.readyCh }
+func (s *CodeProfileSubscriber) IsRunning() bool { return s.running.Load() }
+func (s *CodeProfileSubscriber) Order() int      { return 10 }
+func (s *CodeProfileSubscriber) ComponentName() common.ComponentName {
+	return CodeProfileSubscriberComponent
+}
+func (s *CodeProfileSubscriber) Ready() <-chan struct{} { return s.readyCh }
 
 // runSweeper drops expired profile entries on a 1-minute cadence.
 // Cheap (single map walk under a write lock) and bounded by however

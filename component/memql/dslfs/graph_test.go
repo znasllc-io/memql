@@ -74,11 +74,11 @@ func TestImportGraph_StableOrdering(t *testing.T) {
 
 // TestImportGraph_Diamond locks the diamond-DAG ordering.
 //
-//	    a
-//	   / \
-//	  b   c
-//	   \ /
-//	    d
+//	  a
+//	 / \
+//	b   c
+//	 \ /
+//	  d
 //
 // Expected: d, b, c, a (alphabetical tie-break between b and c).
 func TestImportGraph_Diamond(t *testing.T) {

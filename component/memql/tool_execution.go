@@ -238,16 +238,17 @@ func compileToolSchema(tool *Tool) (*jsonschema.Schema, error) {
 // formatToolValidationError renders a jsonschema validation error
 // into a single-paragraph string the LLM can read and react to.
 // jsonschema's Error() output is multi-line + path-prefixed
-// ("jsonschema: '' does not validate ..." \n "  at '/foo': required
+// ("jsonschema: ” does not validate ..." \n "  at '/foo': required
 // field missing"). Strategy:
-//   1. Walk the lines, skip empty + the leading "jsonschema:" header.
-//   2. Take the FIRST real rule failure (most specific concrete
-//      reason) and stamp the tool name on it.
-//   3. Strip the leading "- " bullet that jsonschema adds for
-//      nested rule failures.
+//  1. Walk the lines, skip empty + the leading "jsonschema:" header.
+//  2. Take the FIRST real rule failure (most specific concrete
+//     reason) and stamp the tool name on it.
+//  3. Strip the leading "- " bullet that jsonschema adds for
+//     nested rule failures.
 //
 // Result example:
-//   `tool "requestComputerUseScope": invalid arguments: at '': missing property 'intent'`
+//
+//	`tool "requestComputerUseScope": invalid arguments: at '': missing property 'intent'`
 func formatToolValidationError(toolName string, err error) error {
 	if err == nil {
 		return nil

@@ -43,10 +43,10 @@ import (
 // Args (validated by the tool JSON schema on the product side --
 // tools/v1/copresent/):
 //
-//   goal    (string, required) -- the task for System in plain English.
-//   context (string, optional) -- short factual context from the
-//                                 delegator (current space, user name,
-//                                 whatever System needs to disambiguate).
+//	goal    (string, required) -- the task for System in plain English.
+//	context (string, optional) -- short factual context from the
+//	                              delegator (current space, user name,
+//	                              whatever System needs to disambiguate).
 func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[string]any) (*ToolCallResult, error) {
 	// §O observability: capture a wall-clock start so the release log
 	// can report how long the full takeover took. Useful signal for
@@ -331,43 +331,43 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 		if invoker := ClientToolInvokerFromContext(ctx); invoker != nil {
 			uiSnapshotCtx := WithActingAgentRole(ctx, targetRole)
 			snap, snapErr := invoker.InvokeClientTool(uiSnapshotCtx, "uiReadState", "{}", targetRole)
-		if snapErr != nil {
-			if e.Logger != nil {
-				e.Logger.Info("delegateTakeover: uiReadState snapshot skipped",
-					"error", snapErr,
-				)
-			}
-		} else if snap != nil && !snap.IsError {
-			// Client returns the state as one or more "text" content
-			// blocks carrying stringified JSON. Concatenate and trim.
-			// (json/image/resource content types aren't used for
-			// client-execution tools on this wire.)
-			uiStateRaw := ""
-			for _, c := range snap.Content {
-				if c.Type == "text" {
-					uiStateRaw += c.Text
-				}
-			}
-			uiStateRaw = strings.TrimSpace(uiStateRaw)
-			if uiStateRaw != "" {
-				// Try to parse it back into a map so the template
-				// can reach individual fields (route, visible op-ids,
-				// etc.). Fall back to passing the raw JSON string if
-				// parsing fails -- the template supports both shapes.
-				var parsed map[string]any
-				if err := json.Unmarshal([]byte(uiStateRaw), &parsed); err == nil {
-					data["uiState"] = parsed
-				} else {
-					data["uiStateRaw"] = uiStateRaw
-				}
+			if snapErr != nil {
 				if e.Logger != nil {
-					e.Logger.Info("delegateTakeover: uiReadState snapshot attached",
-						"snapshotLen", len(uiStateRaw),
+					e.Logger.Info("delegateTakeover: uiReadState snapshot skipped",
+						"error", snapErr,
 					)
+				}
+			} else if snap != nil && !snap.IsError {
+				// Client returns the state as one or more "text" content
+				// blocks carrying stringified JSON. Concatenate and trim.
+				// (json/image/resource content types aren't used for
+				// client-execution tools on this wire.)
+				uiStateRaw := ""
+				for _, c := range snap.Content {
+					if c.Type == "text" {
+						uiStateRaw += c.Text
+					}
+				}
+				uiStateRaw = strings.TrimSpace(uiStateRaw)
+				if uiStateRaw != "" {
+					// Try to parse it back into a map so the template
+					// can reach individual fields (route, visible op-ids,
+					// etc.). Fall back to passing the raw JSON string if
+					// parsing fails -- the template supports both shapes.
+					var parsed map[string]any
+					if err := json.Unmarshal([]byte(uiStateRaw), &parsed); err == nil {
+						data["uiState"] = parsed
+					} else {
+						data["uiStateRaw"] = uiStateRaw
+					}
+					if e.Logger != nil {
+						e.Logger.Info("delegateTakeover: uiReadState snapshot attached",
+							"snapshotLen", len(uiStateRaw),
+						)
+					}
 				}
 			}
 		}
-	}
 	}
 
 	// Override the acting-agent role on ctx so tools' AllowedRoles
@@ -438,11 +438,11 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 // template is applied), leaving Bundle.Nodes empty. So we read the
 // OutputPayload and walk the expected structures:
 //   - []map[string]any   (single-concept, shape template produces a list
-//                          of rendered records)
+//     of rendered records)
 //   - []any of maps      (same, weakly-typed)
 //   - map[string]any     (single record, shape returned just one hit)
 //   - structpb.Value variants (when the engine has marshalled through
-//                          structpb during cross-node transport)
+//     structpb during cross-node transport)
 //
 // Returns nil when no record can be found or parsed. When parsing
 // succeeds but the first entry is empty we still return an empty map

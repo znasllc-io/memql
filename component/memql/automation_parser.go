@@ -31,31 +31,33 @@ import (
 // allowedAutomationAnnotations enumerates the annotations an
 // `automation NAME` declaration may carry.
 //
-//   @description("text")              documentation
-//   @enabled / @disabled               lifecycle
-//   @deprecated("migration hint")      surfaces a warning at use
+//	@description("text")              documentation
+//	@enabled / @disabled               lifecycle
+//	@deprecated("migration hint")      surfaces a warning at use
 //
 // Trigger surface (one of @trigger or @schedule is required):
-//   @trigger(event="...", concept=..., partition="*")
-//                                     event-driven trigger
-//   @trigger(event="<system-event>")   non-graph triggers (system.startup,
-//                                     cognition.capability.unmet, etc.)
-//   @schedule("0 */5 * * * *")         cron-driven trigger
-//   @async                             dispatch async (default: sync)
-//   @filter("expr")                    additional filter on triggering events
+//
+//	@trigger(event="...", concept=..., partition="*")
+//	                                  event-driven trigger
+//	@trigger(event="<system-event>")   non-graph triggers (system.startup,
+//	                                  cognition.capability.unmet, etc.)
+//	@schedule("0 */5 * * * *")         cron-driven trigger
+//	@async                             dispatch async (default: sync)
+//	@filter("expr")                    additional filter on triggering events
 //
 // Dependency declarations:
-//   @useConcept(<bareName>)
-//   @useShape(<bareName>)
-//   @useSpec(<name>)
-//   @useTrait(<name>)
-//   @useQuery(<name>)                  automations read via queries
-//   @useMutation(<name>)               automations write via mutations
-//   @useLogic(<name>)                  step bodies call logic blocks
-//   @useBuiltin(<name>)
-//   @usePrompt(<name>)
-//   @useTool(<name>)
-//   @useAutomation(<name>)             nested-automation step references
+//
+//	@useConcept(<bareName>)
+//	@useShape(<bareName>)
+//	@useSpec(<name>)
+//	@useTrait(<name>)
+//	@useQuery(<name>)                  automations read via queries
+//	@useMutation(<name>)               automations write via mutations
+//	@useLogic(<name>)                  step bodies call logic blocks
+//	@useBuiltin(<name>)
+//	@usePrompt(<name>)
+//	@useTool(<name>)
+//	@useAutomation(<name>)             nested-automation step references
 var allowedAutomationAnnotations = map[string]bool{
 	"description":   true,
 	"enabled":       true,

@@ -89,4 +89,3 @@ func lintFunctionNaming(fn *parser.FunctionDef) []Warning {
 		Suggestion: fmt.Sprintf("Rename %q to %q", fn.Name, suggested),
 	}}
 }
-

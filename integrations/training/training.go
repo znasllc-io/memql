@@ -2,46 +2,46 @@
 // CoPresent's Training panel. Three steps wired together inside one
 // capability call so the frontend gets a single round-trip:
 //
-//   A. Update the agent's capabilities.domains + capabilities.tools to
-//      match what the user dragged into the training ground.
-//      For every domain in the NEW set (i.e. domains that weren't on
-//      the agent before), eagerly embed any chunks attached to that
-//      domain that don't yet have a row in node_vectors. This warms
-//      the vector index so the agent's first chat has fast, accurate
-//      retrieval -- no lazy-embed-on-first-search latency.
+//	A. Update the agent's capabilities.domains + capabilities.tools to
+//	   match what the user dragged into the training ground.
+//	   For every domain in the NEW set (i.e. domains that weren't on
+//	   the agent before), eagerly embed any chunks attached to that
+//	   domain that don't yet have a row in node_vectors. This warms
+//	   the vector index so the agent's first chat has fast, accurate
+//	   retrieval -- no lazy-embed-on-first-search latency.
 //
-//   B. Compute and persist a per-agent identity embedding -- a vector
-//      of the agent's full profile (name + role + personality +
-//      knowledge domain labels + tool labels) keyed to the agent's
-//      id in the SAME node_vectors table the document chunks use.
-//      Lets the planner / router do similarity-based agent selection
-//      ("which agent in this space best fits this question?") in
-//      milliseconds instead of regenerating a context summary each
-//      time. Falls under the same ON CONFLICT path so re-training
-//      replaces the prior identity vector.
+//	B. Compute and persist a per-agent identity embedding -- a vector
+//	   of the agent's full profile (name + role + personality +
+//	   knowledge domain labels + tool labels) keyed to the agent's
+//	   id in the SAME node_vectors table the document chunks use.
+//	   Lets the planner / router do similarity-based agent selection
+//	   ("which agent in this space best fits this question?") in
+//	   milliseconds instead of regenerating a context summary each
+//	   time. Falls under the same ON CONFLICT path so re-training
+//	   replaces the prior identity vector.
 //
-//   C. Run a one-shot LLM call that distills the agent's profile into
-//      a compact, well-tuned system prompt and write it to
-//      agent.systemPrompt on the agent record. The runtime uses this
-//      as a baseline system message that augments the per-turn
-//      agentReply prompt -- quality + latency win at chat time, one
-//      LLM call at training time.
+//	C. Run a one-shot LLM call that distills the agent's profile into
+//	   a compact, well-tuned system prompt and write it to
+//	   agent.systemPrompt on the agent record. The runtime uses this
+//	   as a baseline system message that augments the per-turn
+//	   agentReply prompt -- quality + latency win at chat time, one
+//	   LLM call at training time.
 //
 // Capability exposed via a single DSL builtin (builtinTrainAgent) so
 // the frontend can invoke it through the existing
 // client.executeQueryAsync surface. Returns a summary the frontend
 // uses for its post-train toast / counter:
 //
-//   {
-//     "agentId":             "<id>",
-//     "domainsAdded":        int,   // domains in new set but not old
-//     "domainsRemoved":      int,   // domains in old set but not new
-//     "chunksEmbedded":      int,   // chunks that received fresh vectors
-//     "chunksAlready":       int,   // chunks already embedded
-//     "identityVectorWrote": bool,  // option B succeeded
-//     "systemPromptWrote":   bool,  // option C succeeded
-//     "elapsedMs":           int,
-//   }
+//	{
+//	  "agentId":             "<id>",
+//	  "domainsAdded":        int,   // domains in new set but not old
+//	  "domainsRemoved":      int,   // domains in old set but not new
+//	  "chunksEmbedded":      int,   // chunks that received fresh vectors
+//	  "chunksAlready":       int,   // chunks already embedded
+//	  "identityVectorWrote": bool,  // option B succeeded
+//	  "systemPromptWrote":   bool,  // option C succeeded
+//	  "elapsedMs":           int,
+//	}
 //
 // B + C are best-effort: if either step fails the agent's
 // capabilities + chunk index from step A are still durable, so the
@@ -380,13 +380,13 @@ func (i *Integration) trainAgentHandler(
 		perDomainStats = append(perDomainStats, domainEntry)
 	}
 	lifecycle.markTaskSucceeded(ctx, 0, map[string]any{
-		"chunksEmbedded":    chunksEmbedded,
-		"chunksAlready":     chunksAlready,
-		"domainsAdded":      len(addedDomains),
-		"domainsAddedList":  addedDomains,
-		"domainsRemoved":    removedCount,
-		"domainsSeeded":     domainsSeeded,
-		"perDomainStats":    perDomainStats,
+		"chunksEmbedded":   chunksEmbedded,
+		"chunksAlready":    chunksAlready,
+		"domainsAdded":     len(addedDomains),
+		"domainsAddedList": addedDomains,
+		"domainsRemoved":   removedCount,
+		"domainsSeeded":    domainsSeeded,
+		"perDomainStats":   perDomainStats,
 	})
 
 	// ---------------------------------------------------------------
@@ -468,7 +468,7 @@ func (i *Integration) trainAgentHandler(
 	// rationale as step B.
 	// ---------------------------------------------------------------
 	lifecycle.markTaskRunning(ctx, 2)
-	systemPromptWrote := false  // set true after the final atomic apply succeeds AND distilled was non-empty.
+	systemPromptWrote := false // set true after the final atomic apply succeeds AND distilled was non-empty.
 	distillErr := ""
 	// Same single-retry pattern as step B. The LLM call is more
 	// expensive than the embedding call, so we keep attempts at 2
@@ -669,17 +669,17 @@ func (i *Integration) trainAgentHandler(
 		"agentId":             agentId,
 		"agentName":           agentName,
 		"domainsAdded":        len(addedDomains),
-		"domainsAddedList":    addedDomains,        // actual ids, not just count
+		"domainsAddedList":    addedDomains, // actual ids, not just count
 		"domainsRemoved":      removedCount,
-		"domainsRemovedList":  removedDomainsList,  // actual ids (computed at beginPlan time)
-		"domainsSeeded":       domainsSeeded,       // how many of addedDomains were freshly seeded
-		"perDomainStats":      perDomainStats,      // per-domain breakdown {domainId, chunks, seeded, refreshed}
-		"toolsList":           newTools,            // the agent's full tool set after this training
+		"domainsRemovedList":  removedDomainsList, // actual ids (computed at beginPlan time)
+		"domainsSeeded":       domainsSeeded,      // how many of addedDomains were freshly seeded
+		"perDomainStats":      perDomainStats,     // per-domain breakdown {domainId, chunks, seeded, refreshed}
+		"toolsList":           newTools,           // the agent's full tool set after this training
 		"chunksEmbedded":      chunksEmbedded,
 		"chunksAlready":       chunksAlready,
 		"identityVectorWrote": identityVectorWrote,
 		"systemPromptWrote":   systemPromptWrote,
-		"bridgeId":            bridgeId,         // empty when no bridge generated (1 domain or failed)
+		"bridgeId":            bridgeId, // empty when no bridge generated (1 domain or failed)
 		"elapsedMs":           elapsed.Milliseconds(),
 		// Retry-plan ids -- empty when the step succeeded, populated
 		// when the in-handler retry exhausted and a background
@@ -693,8 +693,8 @@ func (i *Integration) trainAgentHandler(
 		// Partial-success surface (consumed by the canvas card +
 		// possibly the Tasks panel later). Empty list = fully
 		// successful from the seed perspective.
-		"failedSeedDomains":  failedSeedDomains,
-		"failedSeedReasons":  failedSeedReasons,
+		"failedSeedDomains": failedSeedDomains,
+		"failedSeedReasons": failedSeedReasons,
 	}
 
 	// 5. Plan -> succeeded + emit training.completed canvas card

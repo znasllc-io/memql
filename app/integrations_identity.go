@@ -282,8 +282,8 @@ func (a *App) integrationsIdentity() {
 			codeId, plain, hash,
 			in.ClientId, in.RedirectURI, in.State,
 			in.UserId,
-			"",  // identityId -- no specific credential row tracked for SSO mint
-			"",  // magicLinkRequestId -- the original sign-in's magic link, not surfaced
+			"", // identityId -- no specific credential row tracked for SSO mint
+			"", // magicLinkRequestId -- the original sign-in's magic link, not surfaced
 			expiresAt,
 		); err != nil {
 			return identityweb.MintSSOAuthCodeResult{}, fmt.Errorf("sso mint: persist: %w", err)
@@ -556,4 +556,3 @@ func (a *App) shutdownIdentityService(ctx context.Context) error {
 	}
 	return svc.Shutdown(ctx)
 }
-

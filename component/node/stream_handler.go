@@ -84,12 +84,12 @@ type nodeService struct {
 	logger                   *slog.Logger
 	identity                 *Identity
 	peerManager              *PeerManager
-	queryExecutor            QueryExecutor                  // set via SetQueryExecutor for cross-node query forwarding
-	aiForwardHandler         SIForwardHandler               // worker-side handler; nil on BFF binaries
-	aiForwardResponse        SIForwardResponseSink          // BFF-side response sink; nil on worker binaries
-	workbenchForwardHandler  WorkbenchForwardHandler        // workbench-side handler; nil on non-workbench binaries
-	workbenchForwardResponse WorkbenchForwardResponseSink   // agent-side response sink; nil on non-agent binaries
-	eventInbound             EventInbound                   // bridges peer-forwarded events onto the local bus
+	queryExecutor            QueryExecutor                // set via SetQueryExecutor for cross-node query forwarding
+	aiForwardHandler         SIForwardHandler             // worker-side handler; nil on BFF binaries
+	aiForwardResponse        SIForwardResponseSink        // BFF-side response sink; nil on worker binaries
+	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
+	workbenchForwardResponse WorkbenchForwardResponseSink // agent-side response sink; nil on non-agent binaries
+	eventInbound             EventInbound                 // bridges peer-forwarded events onto the local bus
 }
 
 // Stream handles a bidirectional streaming connection from a peer node.

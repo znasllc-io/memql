@@ -23,17 +23,17 @@ import (
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
 	*component.Component
-	relationships relationshipRegistry
-	concepts      concept.Registry
-	specs         *SpecRegistry
-	functions     *FunctionRegistry
-	tools         *ToolRegistry
-	prompts       *PromptRegistry
-	agents          *AgentRegistry
-	seeds           *SeedRegistry
+	relationships    relationshipRegistry
+	concepts         concept.Registry
+	specs            *SpecRegistry
+	functions        *FunctionRegistry
+	tools            *ToolRegistry
+	prompts          *PromptRegistry
+	agents           *AgentRegistry
+	seeds            *SeedRegistry
 	seedMaterializer *SeedMaterializer
-	providers       *ProviderRegistry
-	policies      *PolicyRegistry
+	providers        *ProviderRegistry
+	policies         *PolicyRegistry
 	// policyFunctions holds parsed `func (Policy)` definitions
 	// (cross-cutting decision policies under dsl/v1/policies/
 	// {core,bff}/...). Separate from `policies` which holds the
@@ -45,30 +45,30 @@ type MemQLEngine struct {
 	// resolves every allow-listed key to its zero value (sensitive
 	// -> false, non-sensitive -> ""). Wired via SetConfigSnapshot
 	// from app bootstrap.
-	configSnapshot interface{} // *busv1.ConfigSnapshot, kept as interface{} to avoid an import cycle through engine.go itself.
-	shapes         *ShapeRegistry
-	schemaIdx     *schemaIndex
-	db            *bun.DB
-	dbGetter      func() *bun.DB // Function that returns current DB (handles reconnection)
-	dbMu          sync.RWMutex
-	initialized   bool
-	config        engineConfig
-	siCacheConfig siCacheConfig
-	cache         *resultCache
-	siRuntime     *siRuntime
-	eventBus      *events.Bus
-	serviceVersion string
+	configSnapshot          interface{} // *busv1.ConfigSnapshot, kept as interface{} to avoid an import cycle through engine.go itself.
+	shapes                  *ShapeRegistry
+	schemaIdx               *schemaIndex
+	db                      *bun.DB
+	dbGetter                func() *bun.DB // Function that returns current DB (handles reconnection)
+	dbMu                    sync.RWMutex
+	initialized             bool
+	config                  engineConfig
+	siCacheConfig           siCacheConfig
+	cache                   *resultCache
+	siRuntime               *siRuntime
+	eventBus                *events.Bus
+	serviceVersion          string
 	builtinExecutorHandlers map[string]builtinExecutorHandler
 	// builtinPreserveOrder lists the FQNs (integration.X.Y) whose
 	// handlers return pre-ordered slices. Populated alongside
 	// builtinExecutorHandlers at registration time; read from the
 	// dispatch path to decide whether to stamp monotonic CreatedAt on
 	// the returned nodes. See IntegrationCapability.PreserveOrder.
-	builtinPreserveOrder    map[string]bool
-	integrations            *IntegrationRegistry
-	wiring                  *bus.Wiring
-	partition               string // active partition for data isolation
-	metadataCollector       metadataCollectorInterface
+	builtinPreserveOrder map[string]bool
+	integrations         *IntegrationRegistry
+	wiring               *bus.Wiring
+	partition            string // active partition for data isolation
+	metadataCollector    metadataCollectorInterface
 	// logicRunner wires multi-step Logic dispatch through the
 	// automation step runner. Set via SetLogicRunner from app bootstrap;
 	// when nil, multi-step Logic invocations fall back to the

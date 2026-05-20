@@ -132,4 +132,3 @@ func LoadUnifiedPolicyFunctions(logger *slog.Logger, registry *PolicyFunctionReg
 	}
 	return total, nil
 }
-

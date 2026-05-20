@@ -7,7 +7,7 @@
 // Why this is separate from integrations/knowledge:
 //
 //   - knowledge owns the document-chunk INGESTION pipeline: chunker
-//     + embedder + idempotent chunk row writes. It's a write-side
+//   - embedder + idempotent chunk row writes. It's a write-side
 //     protocol adapter -- it reaches into pgvector and MemoryNodes
 //     because that's the integration's core job.
 //   - similarity owns RETRIEVAL. The retrieval path does not care
@@ -19,13 +19,13 @@
 //
 // DSL surface (see queries/v1/common/builtin/builtinSimilarTo.memql):
 //
-//     similarTo({
-//       text:    "<free-form query>",
-//       concept: "v1:common:documentChunk",
-//       domains: ["copresent-ui"],   // optional
-//       limit:   5,                   // default 5
-//       provider: "embedding3Small"   // default
-//     })
+//	similarTo({
+//	  text:    "<free-form query>",
+//	  concept: "v1:common:documentChunk",
+//	  domains: ["copresent-ui"],   // optional
+//	  limit:   5,                   // default 5
+//	  provider: "embedding3Small"   // default
+//	})
 //
 // The handler embeds the text via the named embedding provider,
 // runs the generic pgvector cosine join (with a CTE that picks the

@@ -11,7 +11,8 @@ import (
 
 // humanizeToolCall converts a raw tool name and arguments into a user-facing label.
 // e.g., clawExecuteTask({"task":"write unit tests"}) → "Writing unit tests"
-//       clawReadFile({"path":"/src/main.go"})        → "Reading main.go"
+//
+//	clawReadFile({"path":"/src/main.go"})        → "Reading main.go"
 func humanizeToolCall(toolName, rawArgs string) string {
 	var args map[string]any
 	if rawArgs != "" {

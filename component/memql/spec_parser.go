@@ -16,23 +16,23 @@ import (
 // kinds share runtime contract (atomic boolean predicate registered
 // in SpecRegistry) but differ in their author surface:
 //
-//   spec  -- requires exactly one of @useConcept(N) or @useShape(N).
-//            Body fields under <N>.X are rewritten to payload.X at
-//            load time (before the expression parser sees the body).
-//   trait -- concept-agnostic. Forbids @useConcept + @useShape.
+//	spec  -- requires exactly one of @useConcept(N) or @useShape(N).
+//	         Body fields under <N>.X are rewritten to payload.X at
+//	         load time (before the expression parser sees the body).
+//	trait -- concept-agnostic. Forbids @useConcept + @useShape.
 //
 // Replaces the legacy pipeline (spec_rewrite -> trait_rewrite -> general
 // parser -> ConvertSpecDef). The new path:
 //
-//   1. parseSpecMemQL identifies the keyword (`spec` or `trait`),
-//      reads annotations into a typed decl, captures the body brace
-//      contents verbatim.
-//   2. The bare-name body translation pass applies the
-//      `@useConcept(N)` / `@useShape(N)` `<N>.X -> payload.X` rewrite.
-//   3. languageParser.ParseExpression turns the translated body into
-//      the canonical ExpressionNode.
-//   4. classifySpecKind walks the expression and labels the spec as
-//      row-spec (SQL pushdown) or context-spec (in-process).
+//  1. parseSpecMemQL identifies the keyword (`spec` or `trait`),
+//     reads annotations into a typed decl, captures the body brace
+//     contents verbatim.
+//  2. The bare-name body translation pass applies the
+//     `@useConcept(N)` / `@useShape(N)` `<N>.X -> payload.X` rewrite.
+//  3. languageParser.ParseExpression turns the translated body into
+//     the canonical ExpressionNode.
+//  4. classifySpecKind walks the expression and labels the spec as
+//     row-spec (SQL pushdown) or context-spec (in-process).
 //
 // Unknown annotations are hard-rejected. Mixed-reference bodies
 // (payload + caller) are hard-rejected. Missing bindings on a spec
@@ -312,4 +312,3 @@ func (p *specMemQLParser) buildSpec(decl *specDecl, origin string) (*Spec, error
 		IsTrait:        decl.isTrait,
 	}, nil
 }
-

@@ -10,16 +10,16 @@ import (
 type ContextKind int
 
 const (
-	ContextTopLevel      ContextKind = iota // Outside any definition
-	ContextAnnotation                       // After @
-	ContextAnnotationArgs                   // Inside @trigger(...)
-	ContextFuncBody                         // Inside func body { ... }
-	ContextFuncCallArgs                     // Inside someFunc(...)
-	ContextConceptFilter                    // After concept==
-	ContextFieldAccess                      // After node.payload. or event.payload.
-	ContextReceiver                         // Inside func (...) receiver declaration
-	ContextUseDeclaration                   // After "use "
-	ContextConceptDef                       // Inside concept { ... }
+	ContextTopLevel       ContextKind = iota // Outside any definition
+	ContextAnnotation                        // After @
+	ContextAnnotationArgs                    // Inside @trigger(...)
+	ContextFuncBody                          // Inside func body { ... }
+	ContextFuncCallArgs                      // Inside someFunc(...)
+	ContextConceptFilter                     // After concept==
+	ContextFieldAccess                       // After node.payload. or event.payload.
+	ContextReceiver                          // Inside func (...) receiver declaration
+	ContextUseDeclaration                    // After "use "
+	ContextConceptDef                        // Inside concept { ... }
 )
 
 // CursorContext describes the syntactic context at a cursor position.

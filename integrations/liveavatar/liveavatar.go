@@ -61,9 +61,9 @@ type Integration struct {
 	logger          *slog.Logger
 	httpClient      *http.Client
 
-	voiceMu          sync.Mutex
-	cachedVoiceId    string
-	cachedVoiceSeen  bool
+	voiceMu         sync.Mutex
+	cachedVoiceId   string
+	cachedVoiceSeen bool
 }
 
 // New constructs a LiveAvatar integration. The secret/variable

@@ -824,4 +824,3 @@ func splitRelationshipField(field string) ([]string, error) {
 	}
 	return result, nil
 }
-

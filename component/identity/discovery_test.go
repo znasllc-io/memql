@@ -90,9 +90,9 @@ func TestDiscoveryHandler_DevDefaults(t *testing.T) {
 		},
 	}
 	envValues := map[string]string{
-		"MEMQL_DISCOVERY_CLIENT_ID":    "cockpit",
+		"MEMQL_DISCOVERY_CLIENT_ID":     "cockpit",
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT": "localhost:50050",
-		"MEMQL_DISCOVERY_CLUSTER_NAME": "local",
+		"MEMQL_DISCOVERY_CLUSTER_NAME":  "local",
 	}
 	env := func(k string) string { return envValues[k] }
 

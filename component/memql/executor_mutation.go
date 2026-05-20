@@ -570,7 +570,6 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	return result, nil
 }
 
-
 func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id string) bool {
 	if e.db == nil {
 		return false

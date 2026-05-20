@@ -10,7 +10,9 @@ import (
 // hard-stop semantics.
 //
 // Per Q6: pre-call check rejects when
-//   parentPlan.tokenSpent + estimatedCallCost > parentPlan.tokenBudget
+//
+//	parentPlan.tokenSpent + estimatedCallCost > parentPlan.tokenBudget
+//
 // UNLESS parentPlan.tokenCapDisabled = true (in which case the call
 // proceeds and observability records the overage).
 //
@@ -33,17 +35,17 @@ type PlanLookup interface {
 
 // TokenState is the snapshot a TokenBudget reads to make its check.
 type TokenState struct {
-	Budget         int  // Plan.tokenBudget (0 = use default)
-	Spent          int  // Plan.tokenSpent
-	AllocatedToCh  int  // Plan.tokenAllocatedToChildren
-	CapDisabled    bool // Plan.tokenCapDisabled
+	Budget        int  // Plan.tokenBudget (0 = use default)
+	Spent         int  // Plan.tokenSpent
+	AllocatedToCh int  // Plan.tokenAllocatedToChildren
+	CapDisabled   bool // Plan.tokenCapDisabled
 }
 
 // EngineTokenBudget is the default implementation. Reads the Plan's
 // token state via the injected lookup, applies the Q6 hard-stop
 // rule.
 type EngineTokenBudget struct {
-	Lookup       PlanLookup
+	Lookup        PlanLookup
 	DefaultBudget int // workspace default; used when Plan.tokenBudget is zero
 }
 

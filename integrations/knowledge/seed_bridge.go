@@ -359,9 +359,9 @@ func (i *Integration) generateBridgeContent(
 	// "A" because the source LLM call already ran with the same
 	// tier-A safety posture as per-domain content.
 	bridgeAsDomain := StandardDomain{
-		ID:    bridgeId,
-		Name:  fmt.Sprintf("Bridge: %s", combinationKey),
-		Tier:  "A",
+		ID:   bridgeId,
+		Name: fmt.Sprintf("Bridge: %s", combinationKey),
+		Tier: "A",
 	}
 
 	written := 0

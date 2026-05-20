@@ -92,13 +92,13 @@ func (d *DatabaseIntegration) handleStats(ctx context.Context, _ map[string]any,
 	stats := sqlDB.Stats()
 
 	payloadBytes, _ := json.Marshal(map[string]any{
-		"maxOpen":     stats.MaxOpenConnections,
-		"open":        stats.OpenConnections,
-		"inUse":       stats.InUse,
-		"idle":        stats.Idle,
-		"waitCount":   stats.WaitCount,
+		"maxOpen":      stats.MaxOpenConnections,
+		"open":         stats.OpenConnections,
+		"inUse":        stats.InUse,
+		"idle":         stats.Idle,
+		"waitCount":    stats.WaitCount,
 		"waitDuration": stats.WaitDuration.String(),
-		"queriedAt":   time.Now().UTC().Format(time.RFC3339),
+		"queriedAt":    time.Now().UTC().Format(time.RFC3339),
 	})
 
 	return []memorynodes.MemoryNode{{

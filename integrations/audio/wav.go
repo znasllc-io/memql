@@ -38,13 +38,13 @@ func WAVHeader(pcmDataSize int, sampleRate, numChannels, bitsPerSample int) []by
 
 	// fmt subchunk
 	copy(header[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(header[16:20], 16)                      // Subchunk1Size (16 for PCM)
-	binary.LittleEndian.PutUint16(header[20:22], wavFormatPCM)            // AudioFormat (1 = PCM)
-	binary.LittleEndian.PutUint16(header[22:24], uint16(numChannels))     // NumChannels
-	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))      // SampleRate
-	binary.LittleEndian.PutUint32(header[28:32], uint32(byteRate))        // ByteRate
-	binary.LittleEndian.PutUint16(header[32:34], uint16(blockAlign))      // BlockAlign
-	binary.LittleEndian.PutUint16(header[34:36], uint16(bitsPerSample))   // BitsPerSample
+	binary.LittleEndian.PutUint32(header[16:20], 16)                    // Subchunk1Size (16 for PCM)
+	binary.LittleEndian.PutUint16(header[20:22], wavFormatPCM)          // AudioFormat (1 = PCM)
+	binary.LittleEndian.PutUint16(header[22:24], uint16(numChannels))   // NumChannels
+	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))    // SampleRate
+	binary.LittleEndian.PutUint32(header[28:32], uint32(byteRate))      // ByteRate
+	binary.LittleEndian.PutUint16(header[32:34], uint16(blockAlign))    // BlockAlign
+	binary.LittleEndian.PutUint16(header[34:36], uint16(bitsPerSample)) // BitsPerSample
 
 	// data subchunk
 	copy(header[36:40], "data")
@@ -121,4 +121,3 @@ func ChunkPCMToWAV(pcmData []byte, sampleRate, numChannels, bitsPerSample, targe
 
 	return chunks
 }
-

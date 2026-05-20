@@ -784,10 +784,10 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 			})
 		}
 		evaluator.SetVariableResolver(e.createVariableResolver())
-	evaluator.SetSystemVariableResolver(e.createSystemVariableResolver())
-	evaluator.SetSecretResolver(e.createSecretResolver())
-	evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
-	evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
+		evaluator.SetSystemVariableResolver(e.createSystemVariableResolver())
+		evaluator.SetSecretResolver(e.createSecretResolver())
+		evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
+		evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
 		evaluator.SetLogger(e.logger)
 
 		stepCtx := &StepContext{
@@ -833,7 +833,6 @@ func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[stri
 	event := events.NewEvent(topic, kind, payload)
 	e.eventBus.Publish(event)
 }
-
 
 // navigatePath navigates a dot-separated path in a value.
 func navigatePath(value any, path string) any {

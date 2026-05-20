@@ -145,7 +145,6 @@ func (i *Integration) handleSetApiKey(ctx context.Context, args map[string]any, 
 	}, nil
 }
 
-
 func (i *Integration) handleListModels(_ context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if i.providers == nil {
 		return nil, fmt.Errorf("integration.router.listModels: provider registry not available")

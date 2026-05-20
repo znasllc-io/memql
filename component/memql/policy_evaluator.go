@@ -442,13 +442,13 @@ func evaluatePolicyExpressionWithCtx(goCtx context.Context, engine *MemQLEngine,
 // inside a policy body. Supported calls:
 //
 //   - `policy("<name>", { ... })`  — recurses through EvaluatePolicy
-//                                    so cycle detection, tier checks,
-//                                    and trace propagation reuse the
-//                                    existing machinery.
+//     so cycle detection, tier checks,
+//     and trace propagation reuse the
+//     existing machinery.
 //   - `spec("<name>")`             — context-spec lookup; runs the
-//                                    spec's body in-process against
-//                                    the auth context and returns a
-//                                    bool. Row-specs are rejected.
+//     spec's body in-process against
+//     the auth context and returns a
+//     bool. Row-specs are rejected.
 //
 // Any other call name is an error — the policy body grammar doesn't
 // admit ad-hoc DSL function calls.

@@ -202,26 +202,26 @@ func clearRefreshCookie(w http.ResponseWriter, baseURL, sameSiteOverride string)
 //
 //  2. The SameSite preference. Three sources, in priority order:
 //     (a) override -- the runtime clusterSettings value, when the
-//         admin has explicitly picked one. Empty string falls
-//         through to (b).
+//     admin has explicitly picked one. Empty string falls
+//     through to (b).
 //     (b) IDENTITY_REFRESH_COOKIE_SAMESITE env var. Operator-set
-//         on the identity binary's environment. Empty falls
-//         through to (c).
+//     on the identity binary's environment. Empty falls
+//     through to (c).
 //     (c) "lax" default.
 //
 //     Valid values:
 //     - "lax": the cookie rides on top-level navigations and on
-//       cross-origin XHR-with-credentials when the requesting
-//       origin shares an eTLD+1 with the cookie's domain. Right
-//       choice for the common "same-site self-hosted" topology
-//       (app.acme.com + identity.acme.com); avoids Safari ITP
-//       scrutiny that SameSite=None invites.
+//     cross-origin XHR-with-credentials when the requesting
+//     origin shares an eTLD+1 with the cookie's domain. Right
+//     choice for the common "same-site self-hosted" topology
+//     (app.acme.com + identity.acme.com); avoids Safari ITP
+//     scrutiny that SameSite=None invites.
 //     - "none": the cookie rides on every cross-site request as
-//       long as Secure is set. Required for true cross-site
-//       deployments where the SPA and identity service live under
-//       different eTLD+1s (app.copresent.ai + auth.znasllc.io).
-//       Browsers (especially Safari) treat the cookie as
-//       third-party and apply ITP / cross-site-tracking rules.
+//     long as Secure is set. Required for true cross-site
+//     deployments where the SPA and identity service live under
+//     different eTLD+1s (app.copresent.ai + auth.znasllc.io).
+//     Browsers (especially Safari) treat the cookie as
+//     third-party and apply ITP / cross-site-tracking rules.
 //
 // Default flipped from "none" to "lax" on 2026-05-09 -- the previous
 // default was wrong for the most common self-hosted topology and

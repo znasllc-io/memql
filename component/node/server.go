@@ -21,7 +21,7 @@ const (
 // NodeServer implements the NodeService gRPC server for inter-node
 // communication. It implements common.Dependency.
 type NodeServer struct {
-	address           string
+	address                  string
 	logger                   *slog.Logger
 	lifecycle                common.Lifecycle
 	listener                 net.Listener

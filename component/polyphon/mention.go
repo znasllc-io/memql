@@ -146,7 +146,7 @@ func isGreetingPrefix(s string) bool {
 // words). The latter catches the common "I'm talking to A, then break to
 // ask B something" pattern where the @B sits mid-utterance:
 //
-//   "alright before we do that @Sofia can you change the appearance"
+//	"alright before we do that @Sofia can you change the appearance"
 //
 // without a suffix check, the only signal is "...that" (5-token prefix,
 // neither greeting nor referent prep), which falls to the default

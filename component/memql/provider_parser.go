@@ -51,9 +51,9 @@ type providerMemQLParser struct {
 type providerDecl struct {
 	name        string
 	description string
-	typeName    string            // "OpenAI", "Anthropic", "OpenAIStream", etc.
+	typeName    string // "OpenAI", "Anthropic", "OpenAIStream", etc.
 	model       string
-	modality    string            // "text", "tts", "stt" (default: "text")
+	modality    string // "text", "tts", "stt" (default: "text")
 	isDefault   bool
 	isBase      bool              // true for @base provider definitions (no func keyword)
 	extendsName string            // name of base provider to inherit from via @extends
@@ -437,4 +437,3 @@ func (p *providerMemQLParser) readProviderName() string {
 	}
 	return b.String()
 }
-

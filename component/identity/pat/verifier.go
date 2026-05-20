@@ -13,13 +13,13 @@ import (
 
 // Sentinel errors callers branch on.
 var (
-	ErrEmptyAuthToken    = errors.New("pat.Verifier: empty token")
-	ErrPATNotFound       = errors.New("pat.Verifier: token not recognized")
-	ErrPATRevoked        = errors.New("pat.Verifier: token has been revoked")
-	ErrPATUserNotFound   = errors.New("pat.Verifier: PAT row found but owning user is missing")
-	ErrPATUserSuspended  = errors.New("pat.Verifier: PAT owner is suspended")
-	ErrJWTUnverifiable   = errors.New("pat.Verifier: JWT path requires Issuer")
-	ErrUserStoreMissing  = errors.New("pat.Verifier: UserLookup not wired")
+	ErrEmptyAuthToken   = errors.New("pat.Verifier: empty token")
+	ErrPATNotFound      = errors.New("pat.Verifier: token not recognized")
+	ErrPATRevoked       = errors.New("pat.Verifier: token has been revoked")
+	ErrPATUserNotFound  = errors.New("pat.Verifier: PAT row found but owning user is missing")
+	ErrPATUserSuspended = errors.New("pat.Verifier: PAT owner is suspended")
+	ErrJWTUnverifiable  = errors.New("pat.Verifier: JWT path requires Issuer")
+	ErrUserStoreMissing = errors.New("pat.Verifier: UserLookup not wired")
 )
 
 // Source identifies which credential family produced the claims.
