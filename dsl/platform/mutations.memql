@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use platform.concepts.{ globalSecret, globalVariable, missingCapability, partition, partitionSecret, partitionVariable }
+
 @enabled
-@useConcept(partition)
 @description("Create or re-register a v1:platform:partition row.")
-mutation mutationCreatePartition {
+mutation partition mutationCreatePartition {
   args {
     name           string  @required
     displayName    string
@@ -36,9 +37,8 @@ mutation mutationCreatePartition {
 // docs/ROADMAP.md for the planned admin tooling.
 
 @enabled
-@useConcept(partition)
 @description("Soft-delete a partition (mark draining)")
-mutation mutationDeletePartition {
+mutation partition mutationDeletePartition {
   args {
     name           string  @required
     partitionType  string
@@ -80,7 +80,7 @@ mutation mutationDeletePartition {
 @enabled
 @useConcept(policyTrace)
 @description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
-mutation mutationInsertPolicyTrace {
+mutation policyTrace mutationInsertPolicyTrace {
   args {
     policyName       string  @required
     tier             string  @required
@@ -131,9 +131,8 @@ mutation mutationInsertPolicyTrace {
 // component/secret.Encrypt before this mutation is called.
 
 @enabled
-@useConcept(globalSecret)
 @description("Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutation mutationSetGlobalSecret {
+mutation globalSecret mutationSetGlobalSecret {
   args {
     id              string  @required
     name            string  @required
@@ -166,9 +165,8 @@ mutation mutationSetGlobalSecret {
 // `make variable-set SCOPE=global` to populate instance defaults.
 
 @enabled
-@useConcept(globalVariable)
 @description("Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.")
-mutation mutationSetGlobalVariable {
+mutation globalVariable mutationSetGlobalVariable {
   args {
     id           string  @required
     name         string  @required
@@ -200,9 +198,8 @@ mutation mutationSetGlobalVariable {
 // ciphertext remains in the time-series history under the same id.
 
 @enabled
-@useConcept(partitionSecret)
 @description("Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutation mutationSetPartitionSecret {
+mutation partitionSecret mutationSetPartitionSecret {
   args {
     id              string  @required
     name            string  @required
@@ -236,9 +233,8 @@ mutation mutationSetPartitionSecret {
 // and by automations that write per-tenant config.
 
 @enabled
-@useConcept(partitionVariable)
 @description("Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.")
-mutation mutationSetPartitionVariable {
+mutation partitionVariable mutationSetPartitionVariable {
   args {
     id           string  @required
     name         string  @required
@@ -267,9 +263,8 @@ mutation mutationSetPartitionVariable {
 // grants reference it by name, so renames are forbidden.
 
 @enabled
-@useConcept(partition)
 @description("Update partition display fields / config / type")
-mutation mutationUpdatePartition {
+mutation partition mutationUpdatePartition {
   args {
     name           string  @required
     displayName    string
@@ -289,9 +284,8 @@ mutation mutationUpdatePartition {
 }
 
 @enabled
-@useConcept(missingCapability)
 @description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call mutationBumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
-mutation mutationLogMissingCapability {
+mutation missingCapability mutationLogMissingCapability {
   args {
     missingId       string  @required
     kind            string  @required
@@ -322,9 +316,8 @@ mutation mutationLogMissingCapability {
 }
 
 @enabled
-@useConcept(missingCapability)
 @description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount, refreshes lastSeenAt, optionally appends to exampleGoals. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
-mutation mutationBumpMissingCapabilitySighting {
+mutation missingCapability mutationBumpMissingCapabilitySighting {
   args {
     missingId       string  @required
     sightingCount   int     @required
@@ -339,9 +332,8 @@ mutation mutationBumpMissingCapabilitySighting {
 }
 
 @enabled
-@useConcept(missingCapability)
 @description("Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.")
-mutation mutationUpdateMissingCapabilityStatus {
+mutation missingCapability mutationUpdateMissingCapabilityStatus {
   args {
     missingId   string  @required
     status      string  @required

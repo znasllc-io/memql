@@ -3,6 +3,7 @@ package memql
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
@@ -78,12 +79,26 @@ type seedDecl struct {
 
 	// Use clause -- binds the file's target concept by namespace.concept name.
 	// Loader resolves this to the canonical concept id (e.g. v1:agents:agent).
-	useNamespace string
-	useConcept   string
+	// Populated by either the legacy file-top `use <ns>.<concept>` form OR
+	// by the canonical `seed <Concept> <name>` signature shape (in which
+	// case signatureConcept is also set and useNamespace stays empty --
+	// the loader resolves the concept via the file's Form B imports).
+	useNamespace     string
+	useConcept       string
+	signatureConcept string       // set when concept binding came from signature
+	imports          []seedImport // Form B file-top imports
 
 	// Body -- generic field/block tree. Field validation happens at
 	// load time against the bound concept's schema.
 	body seedBlock
+}
+
+// seedImport records a single Form B file-top `use module.{ names }`
+// import. The loader uses these to resolve a signature-bound concept
+// name to its source module.
+type seedImport struct {
+	module string
+	names  []string
 }
 
 // seedBlock is one `{ ... }` worth of field assignments + nested
@@ -152,9 +167,33 @@ func (p *seedMemQLParser) parse(origin string) (*seedDecl, error) {
 
 		if p.MatchWord("seed") {
 			p.SkipWhitespaceAndComments()
-			decl.name = p.ReadWord()
-			if decl.name == "" {
+			first := p.ReadWord()
+			if first == "" {
 				return nil, fmt.Errorf("%s:%d:%d: expected seed name after 'seed'", origin, p.Line, p.Col)
+			}
+			p.SkipWhitespaceAndComments()
+			// Two-identifier signature `seed <Concept> <name> { ... }`
+			// is the canonical post-migration shape; the single-
+			// identifier form `seed <name> { ... }` is the legacy
+			// shape that still requires a file-top `use ns.concept`
+			// clause. We disambiguate by peeking past the next word.
+			if !p.EOF() && p.Peek() != '{' {
+				second := p.ReadWord()
+				if second != "" {
+					// `seed Concept name { ... }` -- concept binding
+					// lives in the signature. Reject a duplicate
+					// Form A `use` clause.
+					if decl.useConcept != "" && decl.useConcept != first {
+						return nil, fmt.Errorf("%s:%d:%d: seed %q binds concept %q in its signature but file-top `use %s.%s` already bound %q", origin, p.Line, p.Col, second, first, decl.useNamespace, decl.useConcept, decl.useConcept)
+					}
+					decl.useConcept = first
+					decl.signatureConcept = first
+					decl.name = second
+				} else {
+					decl.name = first
+				}
+			} else {
+				decl.name = first
 			}
 			if err := p.parseBlockBody(&decl.body); err != nil {
 				return nil, fmt.Errorf("%s:%d:%d: %w", origin, p.Line, p.Col, err)
@@ -174,7 +213,7 @@ func (p *seedMemQLParser) parse(origin string) (*seedDecl, error) {
 		return nil, fmt.Errorf("%s: no seed declaration found", origin)
 	}
 	if decl.useConcept == "" {
-		return nil, fmt.Errorf("%s: seed %q requires a `use <namespace>.<concept>` clause at the file top", origin, decl.name)
+		return nil, fmt.Errorf("%s: seed %q must bind a concept -- either via the canonical signature `seed <Concept> %s { ... }` or via the legacy file-top `use <namespace>.<concept>` clause", origin, decl.name, decl.name)
 	}
 	return decl, nil
 }
@@ -183,27 +222,89 @@ func (p *seedMemQLParser) parse(origin string) (*seedDecl, error) {
 // use-clause
 // -----------------------------------------------------------------
 
+// parseUseClause consumes a file-top `use` statement in either of the
+// two shapes the migration recognises:
+//
+//	Form A (legacy): use <namespace>.<concept>
+//	Form B (canonical): use <module.path>.{ name1, name2, ... }
+//
+// Form A binds the seed file's concept directly. Form B names a
+// module and lists imported constructs; the seed's concept binding
+// comes from the signature `seed <Concept> <name>` (validated by the
+// loader against this file's import list).
 func (p *seedMemQLParser) parseUseClause(decl *seedDecl) error {
 	p.SkipWhitespaceInline()
-	ns := p.ReadWord()
-	if ns == "" {
-		return fmt.Errorf("expected namespace identifier after `use`")
+	// Read all dotted path segments. We accumulate segments while
+	// the next char is `.` followed by an alphanumeric; we stop
+	// (and treat as Form B) when next is `.{`. Form A is a 2-segment
+	// path (`<ns>.<concept>`) with no trailing `.{`.
+	parts := []string{}
+	seg := p.ReadWord()
+	if seg == "" {
+		return fmt.Errorf("expected module path after `use`")
 	}
-	p.SkipWhitespaceInline()
-	if p.EOF() || p.Peek() != '.' {
-		return fmt.Errorf("expected `.` between namespace and concept in `use` clause")
+	parts = append(parts, seg)
+	for {
+		p.SkipWhitespaceInline()
+		if p.EOF() || p.Peek() != '.' {
+			break
+		}
+		// Lookahead past the dot. If next is `{`, this is the Form B
+		// brace body marker -- bail out of the segment-accumulation
+		// loop with the dot still queued.
+		if p.HasNext() && p.PeekAt(1) == '{' {
+			break
+		}
+		p.Advance() // consume '.'
+		p.SkipWhitespaceInline()
+		nextSeg := p.ReadWord()
+		if nextSeg == "" {
+			return fmt.Errorf("expected path segment after `.` in `use` clause")
+		}
+		parts = append(parts, nextSeg)
 	}
-	p.Advance() // consume '.'
-	p.SkipWhitespaceInline()
-	concept := p.ReadWord()
-	if concept == "" {
-		return fmt.Errorf("expected concept identifier after `.` in `use` clause")
+
+	// Form B: `.{ name, name, ... }` follows the path.
+	if !p.EOF() && p.Peek() == '.' && p.HasNext() && p.PeekAt(1) == '{' {
+		modulePath := strings.Join(parts, ".")
+		p.Advance() // consume '.'
+		p.Advance() // consume '{'
+		var names []string
+		for {
+			p.SkipWhitespaceAndComments()
+			if p.EOF() {
+				return fmt.Errorf("unexpected EOF inside `use %s.{ ... }`", modulePath)
+			}
+			if p.Peek() == '}' {
+				p.Advance()
+				break
+			}
+			n := p.ReadWord()
+			if n == "" {
+				return fmt.Errorf("expected imported name in `use %s.{ ... }`", modulePath)
+			}
+			names = append(names, n)
+			p.SkipWhitespaceAndComments()
+			if !p.EOF() && p.Peek() == ',' {
+				p.Advance()
+			}
+		}
+		if len(names) == 0 {
+			return fmt.Errorf("`use %s.{ ... }` must list at least one name", modulePath)
+		}
+		decl.imports = append(decl.imports, seedImport{module: modulePath, names: names})
+		return nil
+	}
+
+	// Form A: exactly `<ns>.<concept>` (2 segments).
+	if len(parts) != 2 {
+		return fmt.Errorf("expected `use <namespace>.<concept>` or `use <path>.{ names }`, got %d-segment path %q", len(parts), strings.Join(parts, "."))
 	}
 	if decl.useConcept != "" {
-		return fmt.Errorf("multiple `use` clauses in one seed file (had %s.%s, now %s.%s)", decl.useNamespace, decl.useConcept, ns, concept)
+		return fmt.Errorf("multiple `use` clauses in one seed file (had %s.%s, now %s.%s)", decl.useNamespace, decl.useConcept, parts[0], parts[1])
 	}
-	decl.useNamespace = ns
-	decl.useConcept = concept
+	decl.useNamespace = parts[0]
+	decl.useConcept = parts[1]
 	return nil
 }
 

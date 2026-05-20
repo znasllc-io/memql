@@ -3,10 +3,14 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use agents.concepts.{ agentAuthorization }
+use identity.concepts.{ user }
+use observability.concepts.{ invocation }
+use worker.concepts.{ registration }
+
 @enabled
-@useConcept(invocation)
 @description("Insert a worker tool-invocation telemetry row.")
-mutation mutationCreateWorkerInvocation {
+mutation invocation mutationCreateWorkerInvocation {
   args {
     invocationId   string  @required
     ownerUserId    string  @required
@@ -73,9 +77,8 @@ mutation mutationCreateWorkerInvocation {
 // registering user.
 
 @enabled
-@useConcept(registration)
 @description("Create a worker registration row on first connect.")
-mutation mutationCreateWorkerRegistration {
+mutation registration mutationCreateWorkerRegistration {
   args {
     registrationId       string  @required
     ownerUserId          string  @required
@@ -121,9 +124,8 @@ mutation mutationCreateWorkerRegistration {
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
 @enabled
-@useConcept(registration)
 @description("Revoke a worker registration.")
-mutation mutationRevokeWorker {
+mutation registration mutationRevokeWorker {
   args {
     registrationId  string  @required
     revokedAt       string  @required
@@ -152,9 +154,8 @@ mutation mutationRevokeWorker {
 // passes the WORKER_INVOCATION_RETENTION_DAYS window.
 
 @enabled
-@useConcept(invocation)
 @description("Soft-delete a worker invocation row past retention.")
-mutation mutationSoftDeleteWorkerInvocation {
+mutation invocation mutationSoftDeleteWorkerInvocation {
   args {
     invocationId  string  @required
   }
@@ -165,9 +166,8 @@ mutation mutationSoftDeleteWorkerInvocation {
 }
 
 @enabled
-@useConcept(user)
 @description("Set User.preferences.computerUseEnabled.")
-mutation mutationToggleComputerUseEnabled {
+mutation user mutationToggleComputerUseEnabled {
   args {
     userId   string  @required
     enabled  bool    @required
@@ -181,9 +181,8 @@ mutation mutationToggleComputerUseEnabled {
 }
 
 @enabled
-@useConcept(agentAuthorization)
 @description("Set computerUseScope on an agent authorization row.")
-mutation mutationUpdateAgentAuthScope {
+mutation agentAuthorization mutationUpdateAgentAuthScope {
   args {
     authorizationId   string  @required
     computerUseScope  string  @required
@@ -206,9 +205,8 @@ mutation mutationUpdateAgentAuthScope {
 // flushes to the database every 60s or on disconnect.
 
 @enabled
-@useConcept(registration)
 @description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
-mutation mutationUpdateWorkerLastSeen {
+mutation registration mutationUpdateWorkerLastSeen {
   args {
     registrationId       string  @required
     lastSeenAt           string  @required

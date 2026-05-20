@@ -2,16 +2,12 @@
 //
 // Food + beverage + events role seeds. Tier A.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Culinary technique, kitchen operations, menu engineering, and food cost control.")
-seed chef_professional {
-  id:                    "chef_professional"
+seed agentRole chef_professional {
   slug:                  "chef_professional"
   name:                  "Professional Chef"
-  description:           "Culinary technique, kitchen operations, menu engineering, and food cost control."
   category:              "hospitality"
   lockedDomainIds:       ["culinary_technique"]
   defaultDomainIds:      ["menu_engineering", "food_safety", "recipes", "kitchen_management", "food_costing"]
@@ -20,14 +16,10 @@ seed chef_professional {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Wine regions, grape varieties, service, food pairing, and cellar management.")
-seed sommelier {
-  id:                    "sommelier"
+seed agentRole sommelier {
   slug:                  "sommelier"
   name:                  "Sommelier"
-  description:           "Wine regions, grape varieties, service, food pairing, and cellar management."
   category:              "hospitality"
   lockedDomainIds:       ["wine_education"]
   defaultDomainIds:      ["food_pairing", "service_etiquette", "cellar_management"]
@@ -36,14 +28,10 @@ seed sommelier {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Espresso, brewing methods, milk technique, and bean / roast knowledge.")
-seed barista {
-  id:                    "barista"
+seed agentRole barista {
   slug:                  "barista"
   name:                  "Barista & Coffee Specialist"
-  description:           "Espresso, brewing methods, milk technique, and bean / roast knowledge."
   category:              "hospitality"
   lockedDomainIds:       ["coffee_specialty"]
   defaultDomainIds:      ["brewing_methods", "espresso_technique", "milk_steaming"]
@@ -52,14 +40,10 @@ seed barista {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution.")
-seed event_planner {
-  id:                    "event_planner"
+seed agentRole event_planner {
   slug:                  "event_planner"
   name:                  "Event Planner"
-  description:           "Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution."
   category:              "hospitality"
   lockedDomainIds:       ["event_planning"]
   defaultDomainIds:      ["vendor_management", "budgeting_forecasting", "stakeholder_communications", "venue_management"]

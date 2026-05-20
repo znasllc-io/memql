@@ -155,16 +155,23 @@ func compileSeedDecl(decl *seedDecl) (*SeedDefinition, error) {
 	if decl == nil {
 		return nil, fmt.Errorf("nil seed declaration")
 	}
+	// Default scope to "global" -- the dominant case post-migration.
+	// @scope("perUser") still required explicitly because the
+	// materializer fans out per user rather than writing one row.
 	if decl.scope == "" {
-		return nil, fmt.Errorf("seed %q has no @scope annotation (require @scope(\"global\") or @scope(\"perUser\"))", decl.name)
+		decl.scope = "global"
 	}
-	if decl.useConcept == "" || decl.useNamespace == "" {
-		return nil, fmt.Errorf("seed %q has no `use` clause", decl.name)
+	if decl.useConcept == "" {
+		return nil, fmt.Errorf("seed %q has no concept binding (declare via canonical `seed <Concept> %s { ... }` signature or legacy file-top `use <ns>.<concept>` clause)", decl.name, decl.name)
 	}
 
 	if decl.scope == "global" {
+		// Auto-derive `id` from the seed declaration name if the body
+		// didn't supply one. The seed name IS the row's local id for
+		// global seeds -- writing it twice was the pre-migration norm.
 		if _, ok := decl.body.fields["id"]; !ok {
-			return nil, fmt.Errorf("@scope(\"global\") seed %q must declare an `id` field in the body", decl.name)
+			decl.body.fields["id"] = seedValue{kind: seedString, str: decl.name}
+			decl.body.keys = append([]string{"id"}, decl.body.keys...)
 		}
 	}
 	if decl.scope == "perUser" {

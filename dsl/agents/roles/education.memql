@@ -3,16 +3,12 @@
 // Education role seeds. K-12 + test prep + language tutors + a couple
 // of higher-ed humanities educators. All Tier A.
 
-use agents.agentRole
+use agents.concepts.{ agentRole }
 
-@version("1.0.0")
-@scope("global")
 @description("Reading, writing, math, science, and social studies at the elementary level.")
-seed elementary_school_tutor {
-  id:                    "elementary_school_tutor"
+seed agentRole elementary_school_tutor {
   slug:                  "elementary_school_tutor"
   name:                  "Elementary School Tutor (K-5)"
-  description:           "Reading, writing, math, science, and social studies at the elementary level."
   category:              "education"
   lockedDomainIds:       ["elementary_pedagogy"]
   defaultDomainIds:      ["early_literacy", "elementary_math", "child_development", "classroom_management"]
@@ -21,14 +17,10 @@ seed elementary_school_tutor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Pre-algebra, algebra I, life science, earth science, language arts, and study skills.")
-seed middle_school_tutor {
-  id:                    "middle_school_tutor"
+seed agentRole middle_school_tutor {
   slug:                  "middle_school_tutor"
   name:                  "Middle School Tutor (6-8)"
-  description:           "Pre-algebra, algebra I, life science, earth science, language arts, and study skills."
   category:              "education"
   lockedDomainIds:       ["middle_school_pedagogy"]
   defaultDomainIds:      ["prealgebra_algebra", "study_skills", "child_development", "english_grammar_style"]
@@ -37,14 +29,10 @@ seed middle_school_tutor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Algebra II, geometry, trig, precalc, biology, chemistry, physics, English, history, and study skills.")
-seed high_school_tutor {
-  id:                    "high_school_tutor"
+seed agentRole high_school_tutor {
   slug:                  "high_school_tutor"
   name:                  "High School Tutor (9-12)"
-  description:           "Algebra II, geometry, trig, precalc, biology, chemistry, physics, English, history, and study skills."
   category:              "education"
   lockedDomainIds:       ["high_school_pedagogy"]
   defaultDomainIds:      ["algebra", "geometry_trigonometry", "biology", "chemistry", "physics_high_school", "english_literature", "world_history", "us_history", "study_skills"]
@@ -53,14 +41,10 @@ seed high_school_tutor {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Standardized-test strategy, content review, and practice review.")
-seed test_prep_coach {
-  id:                    "test_prep_coach"
+seed agentRole test_prep_coach {
   slug:                  "test_prep_coach"
   name:                  "Test Prep Coach (SAT / ACT / GRE / GMAT)"
-  description:           "Standardized-test strategy, content review, and practice review."
   category:              "education"
   lockedDomainIds:       ["test_prep_strategy"]
   defaultDomainIds:      ["sat_act_content", "gre_gmat_content", "study_skills"]
@@ -69,14 +53,10 @@ seed test_prep_coach {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Single and multivariable calculus, limits, derivatives, integrals, series.")
-seed math_tutor_calculus {
-  id:                    "math_tutor_calculus"
+seed agentRole math_tutor_calculus {
   slug:                  "math_tutor_calculus"
   name:                  "Math Tutor (Calculus)"
-  description:           "Single and multivariable calculus, limits, derivatives, integrals, series."
   category:              "education"
   lockedDomainIds:       ["calculus"]
   defaultDomainIds:      ["precalculus", "linear_algebra", "math_problem_solving"]
@@ -85,14 +65,10 @@ seed math_tutor_calculus {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Spanish grammar, vocabulary, conversation, and culture at A1 -> C2.")
-seed language_tutor_spanish {
-  id:                    "language_tutor_spanish"
+seed agentRole language_tutor_spanish {
   slug:                  "language_tutor_spanish"
   name:                  "Spanish Language Tutor"
-  description:           "Spanish grammar, vocabulary, conversation, and culture at A1 -> C2."
   category:              "education"
   lockedDomainIds:       ["spanish_language"]
   defaultDomainIds:      ["spanish_culture", "language_pedagogy", "language_learning"]
@@ -101,14 +77,10 @@ seed language_tutor_spanish {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Mandarin grammar, tones, characters, conversation, and culture.")
-seed language_tutor_mandarin {
-  id:                    "language_tutor_mandarin"
+seed agentRole language_tutor_mandarin {
   slug:                  "language_tutor_mandarin"
   name:                  "Mandarin Chinese Tutor"
-  description:           "Mandarin grammar, tones, characters, conversation, and culture."
   category:              "education"
   lockedDomainIds:       ["mandarin_chinese"]
   defaultDomainIds:      ["chinese_culture", "language_pedagogy", "language_learning"]
@@ -117,14 +89,10 @@ seed language_tutor_mandarin {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("French grammar, vocabulary, conversation, and culture at A1 -> C2.")
-seed language_tutor_french {
-  id:                    "language_tutor_french"
+seed agentRole language_tutor_french {
   slug:                  "language_tutor_french"
   name:                  "French Language Tutor"
-  description:           "French grammar, vocabulary, conversation, and culture at A1 -> C2."
   category:              "education"
   lockedDomainIds:       ["french_language"]
   defaultDomainIds:      ["french_culture", "language_pedagogy", "language_learning"]
@@ -133,14 +101,10 @@ seed language_tutor_french {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("World history, US history, European history, and historiography.")
-seed history_educator {
-  id:                    "history_educator"
+seed agentRole history_educator {
   slug:                  "history_educator"
   name:                  "History Educator"
-  description:           "World history, US history, European history, and historiography."
   category:              "education"
   lockedDomainIds:       ["world_history"]
   defaultDomainIds:      ["us_history", "european_history", "ancient_history", "historiography"]
@@ -149,14 +113,10 @@ seed history_educator {
   predefined:            true
 }
 
-@version("1.0.0")
-@scope("global")
 @description("Ethics, epistemology, metaphysics, logic, and major philosophical traditions.")
-seed philosophy_educator {
-  id:                    "philosophy_educator"
+seed agentRole philosophy_educator {
   slug:                  "philosophy_educator"
   name:                  "Philosophy Educator"
-  description:           "Ethics, epistemology, metaphysics, logic, and major philosophical traditions."
   category:              "education"
   lockedDomainIds:       ["philosophy"]
   defaultDomainIds:      ["ethics", "logic", "epistemology", "metaphysics", "philosophy_history"]

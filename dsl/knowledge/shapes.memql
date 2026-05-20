@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use knowledge.concepts.{ document, domainEntitySchema, entityIndex, imageRegion, knowledgeDomain, spreadsheetRow, validationEvent }
+
 @row
-@useConcept(document)
 @description("Comprehensive Document projection. Backs the Knowledge page detail view + the plan.completed canvas card's structured-result preview + the validation card.")
-shape documentFull {
+shape document documentFull {
   row.id
   payload.attachmentId
   payload.planId
@@ -33,9 +34,8 @@ shape documentFull {
 }
 
 @row
-@useConcept(domainEntitySchema)
 @description("DomainEntitySchema projection. Backs the entity-schema-confirmation card + the domain settings drawer.")
-shape domainEntitySchemaFull {
+shape domainEntitySchema domainEntitySchemaFull {
   row.id
   payload.domainId
   payload.entityKind
@@ -50,9 +50,8 @@ shape domainEntitySchemaFull {
 }
 
 @row
-@useConcept(entityIndex)
 @description("EntityIndex projection. Used by the analyzer for dedup lookups + by the per-item drawer to render the matched canonical entry side-by-side with the incoming row.")
-shape entityIndexFull {
+shape entityIndex entityIndexFull {
   row.id
   payload.domainId
   payload.entityKind
@@ -66,9 +65,8 @@ shape entityIndexFull {
 }
 
 @row
-@useConcept(imageRegion)
 @description("Comprehensive ImageRegion projection. Backs the per-region drawer on the validation card + visual retrieval.")
-shape imageRegionFull {
+shape imageRegion imageRegionFull {
   row.id
   payload.documentId
   payload.regionSeq
@@ -85,9 +83,8 @@ shape imageRegionFull {
 }
 
 @row
-@useConcept(spreadsheetRow)
 @description("Comprehensive SpreadsheetRow projection. Backs the per-item drawer on the validation card + the dedup-resolution UI.")
-shape spreadsheetRowFull {
+shape spreadsheetRow spreadsheetRowFull {
   row.id
   payload.documentId
   payload.rowSeq
@@ -104,9 +101,8 @@ shape spreadsheetRowFull {
 }
 
 @row
-@useConcept(validationEvent)
 @description("Comprehensive ValidationEvent projection. Backs the audit history drawer on Document detail.")
-shape validationEventFull {
+shape validationEvent validationEventFull {
   row.id
   payload.targetConceptType
   payload.targetId
@@ -119,9 +115,8 @@ shape validationEventFull {
 }
 
 @row
-@useConcept(knowledgeDomain)
 @description("Knowledge domain projection used by the Trainer Agent dispatch path (Q3 + Q9 of the planner-redesign work). Carries the cadence fields the refresh cron consumes (refreshCadenceDays, lastSeededAt, staleSignalCount) plus the descriptive fields the Planner Agent needs to decide whether a stale signal warrants an immediate refresh vs waiting for the cadence backstop.")
-shape knowledgeDomainFull {
+shape knowledgeDomain knowledgeDomainFull {
   row.id
   payload.name
   payload.description

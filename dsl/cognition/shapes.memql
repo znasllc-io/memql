@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.concepts.{ audioOverride, context, micState, participant, session, space, utterance, videoOverride }
+
 @row
-@useConcept(audioOverride)
 @description("Per-(space, agent) audio override projection")
-shape audioOverrideFull {
+shape audioOverride audioOverrideFull {
   row.id
   payload.spaceId
   payload.agentId
@@ -17,9 +18,8 @@ shape audioOverrideFull {
 }
 
 @row
-@useConcept(micState)
 @description("Per-(space, user) mic state projection")
-shape micStateFull {
+shape micState micStateFull {
   row.id
   payload.spaceId
   payload.userId
@@ -29,9 +29,8 @@ shape micStateFull {
 }
 
 @row
-@useConcept(participant)
 @description("Comprehensive participant projection with all fields")
-shape participantFull {
+shape participant participantFull {
   row.id
   payload.spaceId
   payload.userId
@@ -47,9 +46,8 @@ shape participantFull {
 }
 
 @row
-@useConcept(session)
 @description("Comprehensive session projection with device + stream state")
-shape sessionFull {
+shape session sessionFull {
   row.id
   payload.humanInput
   payload.aiOutput
@@ -59,9 +57,8 @@ shape sessionFull {
 }
 
 @row
-@useConcept(context)
 @description("Comprehensive space context snapshot projection")
-shape spaceContextFull {
+shape context spaceContextFull {
   row.id
   payload.spaceId
   payload.snapshot
@@ -71,9 +68,8 @@ shape spaceContextFull {
 }
 
 @row
-@useConcept(space)
 @description("Comprehensive space projection with all fields")
-shape spaceFull {
+shape space spaceFull {
   row.id
   payload.name
   payload.description
@@ -98,9 +94,8 @@ shape spaceFull {
 }
 
 @row
-@useConcept(utterance)
 @description("Comprehensive utterance projection with all fields")
-shape utteranceFull {
+shape utterance utteranceFull {
   row.id
   payload.spaceId
   payload.participantId
@@ -120,9 +115,8 @@ shape utteranceFull {
 }
 
 @row
-@useConcept(videoOverride)
 @description("Per-(space, agent) video override projection")
-shape videoOverrideFull {
+shape videoOverride videoOverrideFull {
   row.id
   payload.spaceId
   payload.agentId

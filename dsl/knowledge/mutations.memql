@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use knowledge.concepts.{ document, documentChunk, domainEntitySchema, entityIndex, imageRegion, knowledgeBridge, knowledgeDomain, spreadsheetRow, validationEvent }
+
 @enabled
-@useConcept(document)
 @description("Attach a validated Document to a knowledge domain. Triggers lazy embedding of typed items into documentChunk for that domain.")
-mutation mutationAttachDocumentToDomain {
+mutation document mutationAttachDocumentToDomain {
   args {
     documentId       string  @required
     attachedDomains  object  @required
@@ -24,9 +25,8 @@ mutation mutationAttachDocumentToDomain {
 // breakdown of an attachment.
 
 @enabled
-@useConcept(document)
 @description("Insert a v1:knowledge:document row. Lands as unvalidated; user validates from the plan.completed card.")
-mutation mutationCreateDocument {
+mutation document mutationCreateDocument {
   args {
     documentId    string
     attachmentId  string  @required
@@ -60,9 +60,8 @@ mutation mutationCreateDocument {
 }
 
 @enabled
-@useConcept(documentChunk)
 @description("Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the CoPresent UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.")
-mutation mutationCreateDocumentChunk {
+mutation documentChunk mutationCreateDocumentChunk {
   args {
     chunkId            string  @required
     domainId           string  @required
@@ -90,9 +89,8 @@ mutation mutationCreateDocumentChunk {
 }
 
 @enabled
-@useConcept(domainEntitySchema)
 @description("Insert a per-domain entity schema. Called by the entity-inference Plan after the user confirms the proposed schema on the domain-setup card.")
-mutation mutationCreateDomainEntitySchema {
+mutation domainEntitySchema mutationCreateDomainEntitySchema {
   args {
     schemaId                string
     domainId                string  @required
@@ -119,9 +117,8 @@ mutation mutationCreateDomainEntitySchema {
 }
 
 @enabled
-@useConcept(entityIndex)
 @description("Insert a v1:knowledge:entityIndex row when an item is validated as 'new' against a domain. Future dedup checks against the same keyHash will surface this row.")
-mutation mutationCreateEntityIndexEntry {
+mutation entityIndex mutationCreateEntityIndexEntry {
   args {
     entryId            string
     domainId           string  @required
@@ -147,9 +144,8 @@ mutation mutationCreateEntityIndexEntry {
 }
 
 @enabled
-@useConcept(imageRegion)
 @description("Insert a v1:knowledge:imageRegion. Called per-region by the image analyzer.")
-mutation mutationCreateImageRegion {
+mutation imageRegion mutationCreateImageRegion {
   args {
     regionId     string
     documentId   string  @required
@@ -171,9 +167,8 @@ mutation mutationCreateImageRegion {
 }
 
 @enabled
-@useConcept(knowledgeBridge)
 @description("Insert a v1:common:knowledgeBridge row. Caller is the knowledge integration's bridge generator -- one bridge per unique (roleSlug, sortedDomainIds) pair across the whole tenant.")
-mutation mutationCreateKnowledgeBridge {
+mutation knowledgeBridge mutationCreateKnowledgeBridge {
   args {
     bridgeId        string  @required
     roleSlug        string  @required
@@ -197,9 +192,8 @@ mutation mutationCreateKnowledgeBridge {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Create or replace a knowledge domain. Use the slug as domainId (e.g. 'business_administration', 'copresent_ui') so agents can reference domains by a stable human-readable id. v1: optional scope + ownerId support workspace + private domains (Q21). v2: source + refreshCadenceDays support the citation registry + per-domain freshness cadence picker.")
-mutation mutationCreateKnowledgeDomain {
+mutation knowledgeDomain mutationCreateKnowledgeDomain {
   args {
     domainId             string  @required
     name                 string  @required
@@ -239,9 +233,8 @@ mutation mutationCreateKnowledgeDomain {
 }
 
 @enabled
-@useConcept(spreadsheetRow)
 @description("Insert a v1:knowledge:spreadsheetRow. Called per-row by the analyzer during a Document's structured breakdown.")
-mutation mutationCreateSpreadsheetRow {
+mutation spreadsheetRow mutationCreateSpreadsheetRow {
   args {
     rowId        string
     documentId   string  @required
@@ -261,9 +254,8 @@ mutation mutationCreateSpreadsheetRow {
 }
 
 @enabled
-@useConcept(validationEvent)
 @description("Append-only audit log entry for a validation status transition.")
-mutation mutationCreateValidationEvent {
+mutation validationEvent mutationCreateValidationEvent {
   args {
     eventId            string
     targetConceptType  string  @required
@@ -287,9 +279,8 @@ mutation mutationCreateValidationEvent {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Soft-delete a knowledge domain by flipping active=false. Agents that reference the domain keep working; the domain just stops appearing in the builder picker.")
-mutation mutationDeleteKnowledgeDomain {
+mutation knowledgeDomain mutationDeleteKnowledgeDomain {
   args {
     domainId             string  @required
     name                 string  @required
@@ -323,9 +314,8 @@ mutation mutationDeleteKnowledgeDomain {
 // on retrain.
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Stamp lastSeededAt + seederRecipeVersion on a knowledge domain after a successful seeder run. Partial update via update() -- only the freshness fields change; everything else inherits from the prior row.")
-mutation mutationMarkKnowledgeDomainSeeded {
+mutation knowledgeDomain mutationMarkKnowledgeDomainSeeded {
   args {
     domainId             string  @required
     lastSeededAt         string  @required
@@ -346,9 +336,8 @@ mutation mutationMarkKnowledgeDomainSeeded {
 // so callers can compose without coupling.
 
 @enabled
-@useConcept(document)
 @description("Update a Document's validationStatus + validatedBy/validatedAt. Append-only; new version with the new status wins.")
-mutation mutationUpdateDocumentValidation {
+mutation document mutationUpdateDocumentValidation {
   args {
     documentId        string  @required
     validationStatus  string  @required
@@ -364,9 +353,8 @@ mutation mutationUpdateDocumentValidation {
 }
 
 @enabled
-@useConcept(spreadsheetRow)
 @description("Update a SpreadsheetRow's validation / dedup state. Append-only; new version with new fields wins.")
-mutation mutationUpdateSpreadsheetRow {
+mutation spreadsheetRow mutationUpdateSpreadsheetRow {
   args {
     rowId                 string  @required
     validationStatus      string
@@ -390,9 +378,8 @@ mutation mutationUpdateSpreadsheetRow {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Per Q9 event-driven refresh: increment a knowledge domain's staleSignalCount. The Planner Agent calls this when it detects degraded responses citing the domain (low-confidence citations, contradicted-by-fresh-source results, etc.). When staleSignalCount crosses a threshold (the Planner Agent's own policy; default 3), the Planner may spawn a trainSpecialist Plan with mode='refresh' rather than waiting for the cadence backstop.")
-mutation mutationMarkKnowledgeDomainStale {
+mutation knowledgeDomain mutationMarkKnowledgeDomainStale {
   args {
     domainId           string  @required
     staleSignalCount   int     @required
@@ -404,9 +391,8 @@ mutation mutationMarkKnowledgeDomainStale {
 }
 
 @enabled
-@useConcept(knowledgeDomain)
 @description("Per Q9 refresh path: zero out the staleSignalCount and stamp lastSeededAt to now() after a trainSpecialist Plan with mode='refresh' completes. Idempotent; safe to re-run.")
-mutation mutationResetStaleAfterRefresh {
+mutation knowledgeDomain mutationResetStaleAfterRefresh {
   args {
     domainId       string  @required
     lastSeededAt   string  @required

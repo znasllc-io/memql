@@ -3,17 +3,17 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use knowledge.concepts.{ documentChunk, knowledgeDomain }
+
 @row
-@useConcept(documentChunk)
 @description("Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without paying for full-chunk-payload bandwidth.")
-shape documentChunkDomainLite {
+shape documentChunk documentChunkDomainLite {
   payload.domainId
 }
 
 @row
-@useConcept(documentChunk)
 @description("Document chunk projection including the source reference and ordering.")
-shape documentChunkFull {
+shape documentChunk documentChunkFull {
   row.id
   payload.domainId
   payload.text
@@ -40,9 +40,8 @@ shape documentChunkFull {
 // the leading comment block above the function.
 
 @row
-@useConcept(knowledgeDomain)
 @description("Knowledge domain projection for the agent builder picker, delegateTakeover retrieval, the citation registry's domain lookup (replier.go), the training pipeline's domain freshness check (training.go's domainNeedsRefresh), and the Knowledge panel's row + modal renderers (cadence badge, last-updated, next-refresh).")
-shape knowledgeDomainFull {
+shape knowledgeDomain knowledgeDomainFull {
   row.id
   payload.name
   payload.description

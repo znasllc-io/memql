@@ -17,13 +17,12 @@
 //   - `agentId` is computed as `assistant-<userId>` (not declared
 //     in the body; @scope("perUser") seeds may not declare an id).
 
-use agents.agent
+use agents.concepts.{ agent }
 
-@version("1.0.0")
 @scope("perUser")
 @templateFile("templates/assistant.tmpl")
 @description("Per-user Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
-seed assistant {
+seed agent assistant {
   name:        "Assistant"
   description: "Designated fallback when no specialist fits."
   personality: "Friendly, capable, proactive."

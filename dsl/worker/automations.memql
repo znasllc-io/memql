@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use worker.logic.{ logicKillSwitchSuspendsRunningPlans, logicWorkerInvocationRetentionSweep }
+
 @enabled
 @trigger(event="node.updated", concept="v1:identity:user", partition="*")
 @description("Suspend the user's worker-using plans when computerUseEnabled flips false.")
-@useLogic(logicKillSwitchSuspendsRunningPlans)
 automation killSwitchSuspendsRunningPlans {
   step run {
     logic killSwitchSuspendsRunningPlans { event: event }
@@ -34,7 +35,6 @@ automation killSwitchSuspendsRunningPlans {
 @enabled
 @trigger(schedule="0 30 2 * * *")
 @description("Daily 02:30 UTC sweep: soft-delete worker-invocation rows past retention.")
-@useLogic(logicWorkerInvocationRetentionSweep)
 automation workerInvocationRetentionSweep {
   step run {
     logic workerInvocationRetentionSweep { event: event }

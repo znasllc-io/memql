@@ -3,10 +3,12 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use observability.concepts.{ invocation }
+use worker.concepts.{ registration }
+
 @row
-@useConcept(invocation)
 @description("Full projection of a v1:worker:invocation row. Backs the per-plan and per-user invocation feeds.")
-shape workerInvocationFull {
+shape invocation workerInvocationFull {
   row.id
   payload.ownerUserId
   payload.workerId
@@ -32,9 +34,8 @@ shape workerInvocationFull {
 }
 
 @row
-@useConcept(registration)
 @description("Full projection of a v1:worker:registration row. Backs the /me/workers panel + /admin/workers + the agent-side dispatch routing path. Includes lastSeenAt so the frontend can compute online/offline state.")
-shape workerRegistrationFull {
+shape registration workerRegistrationFull {
   row.id
   payload.ownerUserId
   payload.identityId

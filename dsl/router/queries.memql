@@ -3,10 +3,11 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use router.concepts.{ budget }
+
 @enabled
-@useConcept(budget)
 @description("Returns all active budget rows for the current partition.")
-query queryRouterBudgets {
+query budget queryRouterBudgets {
   args {
     scope  string
   }
