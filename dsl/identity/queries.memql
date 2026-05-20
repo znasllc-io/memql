@@ -6,6 +6,12 @@
 use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, partitionAccess, user, workerPairingCode }
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Called by the auth middleware (`component/auth/access/middleware.go`)
+// under system context to build the PartitionACL. Goes away
+// entirely with #56 (partition removal); no point in caller-
+// scoping it.
+@public
 @description("Active partition grants held by a user; used to build the PartitionACL for request authorization.")
 query partitionAccess queryAccessForUser {
   args {
@@ -109,6 +115,12 @@ query user queryActiveUsers {
 //
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Admin-only audit view (no Go callers; consumed by the admin
+// UI under elevated context). Proper admin gating via a
+// `requiresClusterOwner` spec is a #54 follow-up once the admin
+// surface is consolidated.
+@public
 @description("Audit events where actorUserId equals the supplied userId. Pair with queryAuditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent queryAuditEventsByActor {
   args {
@@ -142,6 +154,10 @@ query auditEvent queryAuditEventsByActor {
 //
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Companion of `queryAuditEventsByActor`; same admin-only audit
+// view. Proper admin gating is a #54 follow-up.
+@public
 @description("Audit events where targetId equals the supplied userId. Pair with queryAuditEventsByActor for full per-user history (no OR operator in the filter grammar yet).")
 query auditEvent queryAuditEventsByTarget {
   args {
@@ -684,6 +700,10 @@ query partitionAccess queryMembersOfPartition {
 // grantedBy from non-admins), that split lands here.
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Alias of `queryAccessForUser` for the cockpit Settings tab.
+// Goes away with #56 (partition removal).
+@public
 @description("Partitions accessible to a user, returned as partition-access grants.")
 query partitionAccess queryPartitionsForUser {
   args {
@@ -715,6 +735,14 @@ query partitionAccess queryPartitionsForUser {
 //
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Backs the user-facing /me/pats page; the caller has already
+// been authenticated by the web layer and the userId arg is
+// the authenticated subject. Tightening to `args.userId ==
+// actor.userId` is a #54 follow-up; it requires the web
+// handler to stop accepting an explicit userId and let the
+// query derive it from the actor instead.
+@public
 @description("List PAT (api_key) identities owned by a user, in patSummary shape (no credentials).")
 query identity queryPatIdentitiesForUser {
   args {
@@ -1090,6 +1118,12 @@ query identity queryWorkerTokenByKeyHash {
 //   userId (string, required) - v1:identity:user.id
 
 @enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Backs the per-user worker-token list (`/me/workers` and the
+// cockpit Workers tab). Same auth shape as the PAT list above
+// (web-layer authentication; userId is the authenticated
+// subject). Tightening tracked under #54.
+@public
 @description("List worker-token identities owned by a user.")
 query identity queryWorkerTokensForUser {
   args {

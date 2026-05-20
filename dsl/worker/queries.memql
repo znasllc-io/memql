@@ -48,7 +48,12 @@ query invocation queryInvocationsForPlan {
 // Arguments:
 //   ownerUserId (string, required) - v1:identity:user.id
 
+// `@public` marks this query as intentionally not caller-scoped.
+// The only known callsite is the worker invocation retention sweep
+// (system actor). Splitting into self + system variants tracked
+// under #54.
 @enabled
+@public
 @description("List worker invocations belonging to a user.")
 query invocation queryInvocationsForUser {
   args {
@@ -111,7 +116,14 @@ query registration queryWorkerByIdentityId {
 //   Array of registration rows in workerRegistrationFull shape,
 //   most recently seen first.
 
+// `@public` marks this query as intentionally not caller-scoped.
+// Callsites: the worker dispatcher's "has any worker registered"
+// probe (`integrations/agent/worker/integration.go:workerHasConfigured`)
+// and the worker registration sweep (`component/worker/store.go`),
+// both system-actor paths. Splitting into self + system variants
+// tracked under #54.
 @enabled
+@public
 @description("List all workers owned by a user.")
 query registration queryWorkersForUser {
   args {
