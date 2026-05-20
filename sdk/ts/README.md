@@ -22,6 +22,7 @@ do raw gRPC). Internally organized by concern:
 |---|---|
 | `client/` | Connection, dispatcher, queries, subscriptions -- the wire-level baseline. Mirrors `sdk/go/client/`. |
 | `voice/` | Voice helpers: push-to-talk transcription, room-voice (LiveKit) session helpers. Mirrors `sdk/go/voice/`. |
+| `sense/` | MemQL Sense: tokenize / diagnose / complete / hover / signatureHelp over `.memql` source. Mirrors `sdk/go/sense/`. |
 | `chat/` | Chat state machine: subscribe to `v1:cognition:utterance`, send utterances, observe assistant replies. |
 | `computer-use/` | Worker pairing, scope-elevation card subscription, kill switch. (Future.) |
 | `identity/` | Magic-link auth, token rotation, partition access. (Future.) |
