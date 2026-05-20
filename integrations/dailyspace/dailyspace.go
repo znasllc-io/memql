@@ -84,7 +84,7 @@ func (d *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "ensureForUser",
-			Description: "Ensure today's daily space exists for the given user. Reads the user's preferences.timezone to compute their local date key; calls mutationCreateDailySpace idempotently on the deterministic id daily-<userShortId>-<dateKey>. No-op when preferences.dailySpaceEnabled is false. Safe to call repeatedly -- the underlying insert collapses on id collision.",
+			Description: "Ensure today's daily space exists for the given user. Reads the user's preferences.timezone to compute their local date key; calls mutationCreateDailySpace idempotently on a content-addressed deterministic id derived from (kind=daily, userId, dateKey) via core/id.Engine.MustFromMap. No-op when preferences.dailySpaceEnabled is false. Safe to call repeatedly -- the underlying insert collapses on id collision.",
 			Handler:     d.handleEnsureForUser,
 			ArgsSchema: map[string]string{
 				"userId": "string (required) -- canonical or short v1:identity:user.id",
@@ -203,16 +203,20 @@ func (d *Integration) ensureForUser(ctx context.Context, userId string) (ensureR
 	out.DateKey = dateKey
 	out.TzUsed = tzUsed
 
-	shortUserId := userId
-	if _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
-		shortUserId = parsed
-	}
-	// Deterministic id matches the schema's documented pattern
-	// `daily-{userShortId}-{dateKey}` -- the engine collapses repeat
-	// inserts on id collision so every call after the first lands as
-	// a no-op. The id is partition-scoped automatically by the
-	// mutation's @useConcept path; we pass the short form.
-	spaceId := fmt.Sprintf("daily-%s-%s", shortUserId, dateKey)
+	// Deterministic content-addressed id via the canonical helper.
+	// Same (userId, dateKey) always produces the same id, so repeat
+	// calls collapse on the engine's id-conflict path. The
+	// `kind: "daily"` factor namespaces the hash away from any
+	// unrelated content-addressed row that might happen to mix the
+	// same fields. No hand-rolled "daily-" string prefix -- the row's
+	// `kind` payload field is the canonical discriminator; the id
+	// itself is opaque per the post-PR-83 helper rule.
+	shortUserId := string(id.New().MustFromMap(map[string]any{
+		"kind":    "daily",
+		"userId":  userId,
+		"dateKey": dateKey,
+	}))
+	spaceId := shortUserId
 	out.SpaceId = spaceId
 
 	// Display name biased toward "the user's daily" rather than the
