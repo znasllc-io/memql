@@ -19,7 +19,15 @@ query agent queryActiveAgents {
   shape   agentFull
 }
 
+// `@public` marks this query as intentionally not caller-scoped --
+// the only callsite is the worker dispatcher (`integrations/agent/
+// worker/store.go:AgentAuthorization`), which runs under the agent
+// node's system actor when resolving an outgoing worker call's
+// scope grants. Splitting into a caller-self variant + a system-
+// only variant is tracked as a follow-up under #54 once the worker
+// dispatcher's auth model is settled.
 @enabled
+@public
 @description("All active standing authorizations granted by a user, across all agents and plan kinds.")
 query agentAuthorization queryAgentAuthorizationsForUser {
   args {
@@ -93,7 +101,16 @@ query agent queryAllAgents {
   shape   agentFull
 }
 
+// `@public` marks this query as intentionally not caller-scoped.
+// Both callsites are system-actor paths: the planner agent loop
+// (`integrations/planner/agent_loop.go:loadSpecialists`, runs under
+// `systemActorContext`) and the agent factory's dedupe lookup
+// (`integrations/agents/factory.go:loadExistingAgents`, called from
+// inside the agent tool loop). A user-facing entry point would
+// instead want a `queryMyActiveAgents` variant scoped by
+// `actor.userId`; splitting tracked as a follow-up under #54.
 @enabled
+@public
 @description("Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows.")
 query agent queryActiveAgentsForUser {
   args {

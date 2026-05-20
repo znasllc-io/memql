@@ -127,7 +127,13 @@ query spreadsheetRow querySpreadsheetRowsForDocument {
   shape   spreadsheetRowFull
 }
 
+// `@public` marks this query as intentionally not caller-scoped.
+// Audit history of validation transitions on a target row;
+// visibility follows the target's own scope (whoever can read the
+// target can read its validation history). If we ever want per-row
+// gating on audit reads, file under #54.
 @enabled
+@public
 @description("Audit history of validation transitions for a specific target row.")
 query validationEvent queryValidationEventsForTarget {
   args {
