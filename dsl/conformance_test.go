@@ -4,11 +4,15 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 )
+
+// itoa is a small wrapper to make exemption-map line refs more readable.
+func itoa(i int) string { return strconv.Itoa(i) }
 
 // TestFilterSyntaxCanonical asserts that every filter clause in the
 // tree references payload fields via `payload.X` (or `?.payload.X`
@@ -136,6 +140,102 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 		for _, v := range violations {
 			t.Errorf("  %s:%d  %s   → use %s", v.file, v.line, v.text, v.hint)
 		}
+	}
+}
+
+// TestNoShortIdConceptPrefix asserts that no .memql file constructs
+// a node-id shortId with a concept-name (or sub-type discriminator)
+// prefix. The canonical id format is `{partition}:{concept}:{shortId}`
+// (`docs/core/identifiers.md`); the shortId should be the bare unique
+// part (uuid / hash / slug), never `concat("<conceptName>-", ...)`
+// or any equivalent string-concatenation pattern.
+//
+// Background (issue #53): pre-fix, the tree had `concat("ga-",
+// hash(email))` for General Assistant agentIds and `concat("session-",
+// id)` for sessionIds. Both duplicate information already in the
+// canonical position of the id (concept name) or in a payload field
+// (e.g. the agent's `role="assistant"` discriminator). The cleanup
+// stripped the prefixes and moved the discrimination, where needed,
+// into payload fields.
+//
+// The test fails on any new occurrence of `concat("<knownPrefix>-",
+// ...)` in a .memql file. New names should be added to the list when
+// they're identified as anti-patterns.
+func TestNoShortIdConceptPrefix(t *testing.T) {
+	bannedPrefixes := []string{
+		// concept-name prefixes
+		"agent-", "user-", "session-", "role-", "space-", "plan-",
+		"task-", "delegation-", "partition-",
+		// sub-type discriminators (move into payload fields instead)
+		"ga-", "specialist-",
+		// legacy identity-side prefixes (now redundant with `:user:` /
+		// `:identity:` concept names + the polymorphic concept's
+		// `identityType` discriminator field)
+		"pat-", "wkr-", "wpc-", "sess-", "ml-", "ar-", "ac-",
+	}
+	type violation struct {
+		file   string
+		line   int
+		text   string
+		prefix string
+	}
+	var violations []violation
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	// Known exemptions tied to follow-up issues. Lines listed here use
+	// the prefix legitimately for partition-naming (the partition row
+	// stores per-user partition state); these go away wholesale with
+	// the partitioning removal in issue #56. Until then they're an
+	// acknowledged hole, not a regression.
+	exemptions := map[string]bool{
+		"identity/logic.memql:412": true, // partition name (issue #56 will remove the partition concept entirely)
+		"identity/logic.memql:426": true, // partition lookup-by-name (same; issue #56)
+	}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") {
+			continue
+		}
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		for lineno, line := range strings.Split(string(raw), "\n") {
+			// Skip line comments + block-comment spans (line-level only).
+			trimmed := strings.TrimLeft(line, " \t")
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			for _, prefix := range bannedPrefixes {
+				needle := `concat("` + prefix
+				if strings.Contains(line, needle) {
+					locKey := p + ":" + itoa(lineno+1)
+					if exemptions[locKey] {
+						continue
+					}
+					violations = append(violations, violation{
+						file:   p,
+						line:   lineno + 1,
+						text:   strings.TrimSpace(line),
+						prefix: prefix,
+					})
+				}
+			}
+		}
+	}
+	if len(violations) > 0 {
+		t.Errorf("found %d shortId-prefix anti-patterns (issue #53):", len(violations))
+		for _, v := range violations {
+			t.Errorf("  %s:%d  %q in: %s", v.file, v.line, v.prefix, v.text)
+		}
+		t.Logf("\nThe canonical id format is `{partition}:{concept}:{shortId}`; the\nshortId should be the bare unique part (uuid/hash/slug), never\nprefixed with the concept name or a sub-type discriminator. If the\nprefix is a real discriminator (e.g. 'ga-' vs specialists), move it\ninto a payload field (e.g. agent.role='assistant').")
 	}
 }
 

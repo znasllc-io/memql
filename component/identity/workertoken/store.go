@@ -41,7 +41,7 @@ type Row struct {
 
 // NewId mints a new worker-token identity slug ("wkr-<32 hex>").
 func NewId() (string, error) {
-	return identity.NewRandomId("wkr-")
+	return identity.NewRandomId("")
 }
 
 // CanonicalId converts a bare slug to the canonical id form.

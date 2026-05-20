@@ -272,7 +272,7 @@ func (a *App) integrationsIdentity() {
 		if err != nil {
 			return identityweb.MintSSOAuthCodeResult{}, fmt.Errorf("sso mint: gen code: %w", err)
 		}
-		codeId, err := identity.NewRandomId("ac-")
+		codeId, err := identity.NewRandomId("")
 		if err != nil {
 			return identityweb.MintSSOAuthCodeResult{}, fmt.Errorf("sso mint: gen code id: %w", err)
 		}

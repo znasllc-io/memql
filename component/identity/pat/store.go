@@ -50,7 +50,7 @@ type PATRow struct {
 // passes this to Create; the engine stamps the canonical
 // "_system:v1:identity:identity:" prefix on persist.
 func NewId() (string, error) {
-	return identity.NewRandomId("pat-")
+	return identity.NewRandomId("")
 }
 
 // CanonicalId converts a bare slug to the canonical id form. Useful

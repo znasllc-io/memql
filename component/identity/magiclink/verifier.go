@@ -170,7 +170,7 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 	} else {
 		// First login: create the user.
 		newUser = true
-		uid, err := identity.NewRandomId("user-")
+		uid, err := identity.NewRandomId("")
 		if err != nil {
 			return nil, fmt.Errorf("magiclink: generate user id: %w", err)
 		}
@@ -286,7 +286,7 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 	if err != nil {
 		return nil, fmt.Errorf("magiclink: generate auth code: %w", err)
 	}
-	codeId, err := identity.NewRandomId("ac-")
+	codeId, err := identity.NewRandomId("")
 	if err != nil {
 		return nil, fmt.Errorf("magiclink: generate code id: %w", err)
 	}

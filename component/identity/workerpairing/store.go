@@ -48,7 +48,7 @@ func (r Row) IsExpired(now time.Time) bool {
 }
 
 // NewId mints a fresh pairing-code identity slug ("wpc-<32 hex>").
-func NewId() (string, error) { return identity.NewRandomId("wpc-") }
+func NewId() (string, error) { return identity.NewRandomId("") }
 
 // CanonicalId converts a bare slug to the canonical id form.
 func CanonicalId(slugOrFull string) string {
