@@ -490,16 +490,14 @@ func (c *Concept) validate(variant string, payload any) error {
 // insert time instead of silently in the DB. See
 // docs/core/identifiers.md ("Anti-patterns").
 //
-// Three legitimate shapes for nodeId:
+// Two legitimate shapes for nodeId post-#56 phase 6:
 //
 //  1. Bare shortId with no colons -- the engine prepends
-//     {partition}:{concept}:. ANY shortId containing ':' falls
-//     through to one of the other two shapes and must be qualified.
-//  2. Concept-prefixed: starts with c.Name+":". The engine prepends
-//     {partition}:.
-//  3. Fully qualified: ParseNodeId succeeds AND the parsed concept
-//     matches c.Name. Used by dispatch-site composers (see
-//     composeReplyId in cognition for the canonical example).
+//     {concept}:. ANY shortId containing ':' falls through to
+//     shape (2) and must be qualified.
+//  2. Concept-qualified: starts with c.Name+":". Used by
+//     dispatch-site composers (see composeReplyId in cognition for
+//     the canonical example).
 //
 // Anything else is a caller bug.
 func (c *Concept) validateShortId(nodeId string) error {
@@ -514,18 +512,13 @@ func (c *Concept) validateShortId(nodeId string) error {
 	if !strings.ContainsRune(trimmed, ':') {
 		return nil
 	}
-	// Shape (2): concept-prefixed.
+	// Shape (2): concept-qualified.
 	if strings.HasPrefix(trimmed, c.Name+":") {
 		return nil
 	}
-	// Shape (3): fully qualified.
-	_, parsedConcept, _, err := id.ParseNodeId(trimmed)
-	if err == nil && parsedConcept == c.Name {
-		return nil
-	}
 	return fmt.Errorf(
-		"shortId %q must be a bare slug/UUID (no colons), the concept-prefixed form (%q), or a fully-qualified id whose concept is %q; got something else (see docs/core/identifiers.md)",
-		trimmed, c.Name+":<short>", c.Name,
+		"shortId %q must be a bare slug/UUID (no colons) or the concept-prefixed form (%q); got something else (see docs/core/identifiers.md)",
+		trimmed, c.Name+":<short>",
 	)
 }
 
@@ -537,15 +530,11 @@ func (c *Concept) storageId(nodeId string) string {
 	if trimmed == "" {
 		return ""
 	}
-	// If the ID already looks fully qualified (has partition + concept prefix), return as-is.
-	if id.HasPartition(trimmed) {
+	// Already concept-qualified -> return as-is.
+	if strings.HasPrefix(trimmed, c.Name+":") {
 		return trimmed
 	}
-	// If the ID already has the concept prefix but no partition, prepend partition.
-	if strings.HasPrefix(trimmed, c.Name+":") {
-		return id.DefaultPartition + ":" + trimmed
-	}
-	return id.BuildNodeId(id.DefaultPartition, c.Name, trimmed)
+	return id.BuildNodeId(c.Name, trimmed)
 }
 
 func extractSchemaId(raw json.RawMessage) string {

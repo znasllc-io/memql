@@ -15,22 +15,19 @@ many ad-hoc "strip the prefix here" band-aids stop being mysterious.
 Every stored node in memQL has a fully-qualified id of the shape:
 
 ```
-{partition}:{concept}:{shortId}
+{concept}:{shortId}
 ```
 
 Examples:
 
-| Full id | partition | concept | shortId |
-|---|---|---|---|
-| `default:v1:cognition:utterance:474e57df-...` | `default` | `v1:cognition:utterance` | `474e57df-...` |
-| `_system:v1:cluster:node:bff-local` | `_system` | `v1:cluster:node` | `bff-local` |
-| `acme:v1:agents:agent:a9f3b7c2...` | `acme` | `v1:agents:agent` | `a9f3b7c2...` |
+| Full id | concept | shortId |
+|---|---|---|
+| `v1:cognition:utterance:474e57df-...` | `v1:cognition:utterance` | `474e57df-...` |
+| `v1:cluster:node:bff-local` | `v1:cluster:node` | `bff-local` |
+| `v1:agents:agent:a9f3b7c2...` | `v1:agents:agent` | `a9f3b7c2...` |
 
 Where:
 
-- **partition** -- `"default"` for unscoped tenant data, `"_system"`
-  for `@scope("global")` concepts, or a tenant-chosen string in
-  multi-tenant deploys. Always present in stored ids.
 - **concept** -- exactly three colon-delimited segments
   (`{version}:{domain}:{entity}`, e.g. `v1:cognition:utterance`).
   This matches the on-disk concept folder layout
@@ -44,6 +41,10 @@ The full id is what the database stores in the `id` column of
 events, gRPC subscription payloads). Treat it as the canonical
 address of a node.
 
+> **History:** the format used to carry a leading `{partition}:`
+> segment. That dimension was removed in #56 phase 6; every id is now
+> a plain `{concept}:{shortId}`.
+
 ---
 
 ## Composition rules
@@ -51,31 +52,20 @@ address of a node.
 There's exactly one way memQL composes a full id, in `core/id`:
 
 ```go
-id.BuildNodeId(partition, concept, shortId)
-// returns "{partition}:{concept}:{shortId}"
+id.BuildNodeId(concept, shortId)
+// returns "{concept}:{shortId}"
 ```
 
-Empty partition defaults to `id.DefaultPartition` (`"default"`).
-Helpers in the same package answer the inverse questions:
+The inverse:
 
 ```go
-id.HasPartition("default:v1:cognition:utterance:abc")  // true
-id.HasPartition("v1:cognition:utterance:abc")          // false (no partition prefix)
-
-id.ParseNodeId("default:v1:cognition:utterance:abc")
-// → partition="default", concept="v1:cognition:utterance", shortId="abc"
-
-id.StripPartition("default:v1:cognition:utterance:abc")
-// → ("default", "v1:cognition:utterance:abc")
-
-id.PrependPartition("default", "v1:cognition:utterance:abc")
-// → "default:v1:cognition:utterance:abc"
+id.ParseNodeId("v1:cognition:utterance:abc")
+// → concept="v1:cognition:utterance", shortId="abc"
 ```
 
 Use these. Do **not** hand-roll `strings.Split(":", id)` or
-`strings.LastIndex(id, ":")` -- those break on partitions that
-themselves contain colons (rare but legal) and they couple every
-caller to the format.
+`strings.LastIndex(id, ":")` -- those break on shortIds that contain
+colons (rare but legal) and they couple every caller to the format.
 
 ---
 
@@ -92,13 +82,11 @@ insert("v1:cognition:utterance", id="abc-123", payload={...})
 ```
 
 The engine's `Concept.Create()` method composes the full id at
-write time using `Concept.storageId(partition, nodeId)` -- that
-function calls `id.BuildNodeId(partition, c.Name, trimmed)` if
-the supplied id isn't already partition-qualified. The partition
-comes from the request context via `MemQLEngine.resolvePartition(ctx)`.
+write time using `Concept.storageId(nodeId)` -- that function calls
+`id.BuildNodeId(c.Name, trimmed)` if the supplied id isn't already
+concept-qualified.
 
-This is the path almost every mutation takes. Callers don't need
-to know the partition.
+This is the path almost every mutation takes.
 
 ### 2. The dispatch-site composer (when the id has to be known up-front)
 
@@ -125,19 +113,9 @@ The cognition handler composes that string at dispatch time:
 ```go
 // integrations/cognition/cognition_handler.go
 func composeReplyId(ctx context.Context) string {
-    partition := memql.PartitionFromContext(ctx)
-    if partition == "" {
-        partition = id.DefaultPartition
-    }
-    return id.BuildNodeId(partition, memorynodes.ConceptCognitionUtterance, uuid.NewString())
+    return id.BuildNodeId(memorynodes.ConceptCognitionUtterance, uuid.NewString())
 }
 ```
-
-The result is byte-identical to what `Concept.Create` would have
-produced if the bare UUID had been passed through the normal
-mutation path. When the utterance later goes through `insertSIResponse`,
-the engine sees an already-qualified id (`id.HasPartition` returns
-true) and stores it unchanged.
 
 If you find yourself adding a "stamp the id on auxiliary nodes"
 flow, follow the same recipe. Compose the full id once at the
@@ -155,7 +133,7 @@ These are the band-aids this doc exists to prevent:
   stamp the canonical full id, not the bare UUID. The reader has
   to compare it to a real `utterance.id` somewhere.
 
-- **Re-deriving the partition on the read side.** If consumers
+- **Re-deriving the concept on the read side.** If consumers
   end up calling `lastIndexOf(':')` or splitting on `:` to "match"
   ids, that's a sign the producer disagreed with the canonical
   form. Fix the producer.
@@ -166,11 +144,10 @@ These are the band-aids this doc exists to prevent:
 - **Building a "shortId" by gluing in another row's full
   canonical id.** This produced two landed bugs:
   - The seed materializer wrote per-user agent rows with shortIds
-    like `trainerAgent-_system:v1:identity:user:user-30bf...` by
+    like `trainerAgent-v1:identity:user:user-30bf...` by
     concatenating `def.Name + "-" + userId` where `userId` was the
-    full canonical id. The result has a colon, so the storage
-    layer's `HasPartition()` returns true and the row gets stored
-    without the engine-prepended `{partition}:{concept}:`.
+    full canonical id. The result has colons and the storage
+    layer's validator rejects it.
     Strip the user's id down to its shortId first (use
     `id.ParseNodeId`), then concatenate: `def.Name + "-" + shortUserId`.
   - The checkpoint writer wrote `"checkpoint:" + executionId` as
@@ -178,30 +155,17 @@ These are the band-aids this doc exists to prevent:
     Concept is already in the canonical position; the shortId
     should be just `executionId`.
 
-  As of 2026-05-17 `Concept.Create` rejects writes whose nodeId
-  doesn't match one of the three legitimate shapes -- bare slug
-  with no colons, concept-prefixed (`v1:x:y:<short>`), or fully
-  qualified (`{partition}:v1:x:y:<short>`). See
-  `validateShortId` in `component/database/memory-nodes/concept.go`.
+  `Concept.Create` rejects writes whose nodeId doesn't match one of
+  the two legitimate shapes -- bare slug with no colons, or
+  concept-prefixed (`v1:x:y:<short>`). See `validateShortId` in
+  `component/database/memory-nodes/concept.go`.
 
-- **Prefixing the shortId with the concept name** (issue #53,
-  fixed 2026-05-20). Old: `_system:v1:agents:agent:ga-<hash>`,
-  `_system:v1:identity:user:user-<hash>`,
-  `_system:v1:cognition:session:session-<hash>`, plus every
-  `NewRandomId("<prefix>-")` site under `component/identity/`
-  (`pat-`, `wkr-`, `wpc-`, `ml-`, `ar-`, `ac-`, `sess-`). The
-  concept is already in the canonical position; duplicating it in
-  the shortId reads as redundant noise and produces inconsistent
+- **Prefixing the shortId with the concept name** (issue #53).
+  The concept is already in the canonical position; duplicating it
+  in the shortId reads as redundant noise and produces inconsistent
   ids depending on the writer. **Rule:** the shortId is the bare
-  unique part (uuid / hash / slug) and nothing else. If the
-  prefix was a sub-type discriminator (`ga-` distinguishing GA
-  from specialists), move it to a payload field on the concept
-  (`agent.role="assistant"` already carried the GA-vs-specialist
-  distinction). For the polymorphic `v1:identity:identity`
-  concept, the existing `identityType` enum field (`api_key` /
-  `worker_token` / `oauth` / `magic_link` / `service_account`)
-  is the discriminator -- the shortId prefix was redundant.
-  Conformance test: `dsl.TestNoShortIdConceptPrefix`.
+  unique part (uuid / hash / slug) and nothing else. Conformance
+  test: `dsl.TestNoShortIdConceptPrefix`.
 
 The CoPresent frontend has a `stripConceptPrefix` helper for the
 remaining legitimate cases (extracting a short id for a
@@ -216,9 +180,7 @@ for matching ids that are supposed to come from canonical sources.
 | You need... | Use |
 |---|---|
 | Compose a full id at mutation call time | Just pass the bare shortId; engine composes |
-| Compose a full id at dispatch time (you'll reference it before insert) | `id.BuildNodeId(partition, concept, shortId)` |
-| Get partition from request context | `memql.PartitionFromContext(ctx)` (falls back to `id.DefaultPartition`) |
-| Check if an id is already qualified | `id.HasPartition(id)` |
+| Compose a full id at dispatch time (you'll reference it before insert) | `id.BuildNodeId(concept, shortId)` |
 | Split a full id into parts | `id.ParseNodeId(id)` |
 | Cognition: mint a replyId for a streaming agent reply | `composeReplyId(ctx)` in `integrations/cognition/cognition_handler.go` |
 

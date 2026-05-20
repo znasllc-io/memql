@@ -261,7 +261,7 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 	// stored without the proper {partition}:{concept}: prefix.
 	// See docs/core/identifiers.md.
 	shortUserId := userId
-	if _, _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
+	if _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
 		shortUserId = parsed
 	}
 	rowId := def.Name + "-" + shortUserId

@@ -203,7 +203,7 @@ func (d *Integration) ensureForUser(ctx context.Context, userId string) (ensureR
 	out.TzUsed = tzUsed
 
 	shortUserId := userId
-	if _, _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
+	if _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
 		shortUserId = parsed
 	}
 	// Deterministic id matches the schema's documented pattern

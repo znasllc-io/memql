@@ -11,7 +11,10 @@ import (
 type partitionContextKey struct{}
 
 // ContextWithPartition returns a new context carrying the given partition.
-// Used for per-request partition override in multi-tenant (Cloud SaaS) mode.
+// Carried on the wire by the gRPC envelope; the engine no longer
+// derives storage scoping from it. Kept on the request ctx so legacy
+// log fields keep populating until envelope.partition is dropped in
+// #56 phase 8.
 func ContextWithPartition(ctx context.Context, partition string) context.Context {
 	return context.WithValue(ctx, partitionContextKey{}, partition)
 }
@@ -25,8 +28,9 @@ func PartitionFromContext(ctx context.Context) string {
 	return ""
 }
 
-// resolvePartition returns the active partition for a request.
-// Priority: context override > engine default > "default".
+// resolvePartition returns the envelope's partition for a request,
+// falling back to the engine default. No longer used by the storage
+// layer; remaining callers are event-topic + log-field producers.
 func (e *MemQLEngine) resolvePartition(ctx context.Context) string {
 	if ctx != nil {
 		if p := PartitionFromContext(ctx); p != "" {
@@ -36,13 +40,8 @@ func (e *MemQLEngine) resolvePartition(ctx context.Context) string {
 	return e.Partition()
 }
 
-// partitionForConcept returns the partition a read/write should
-// target for the given concept. Post-#56 every concept lives in one
-// partition (id.DefaultPartition); the per-concept @scope distinction
-// is gone. Kept as a single entry point during the multi-step
-// partition removal -- once the partition column itself is dropped
-// from the Postgres schema (later commit on this branch), every
-// caller can just stop asking the question.
+// partitionForConcept returns the request's active partition. Storage
+// scoping no longer uses this -- only event-topic + log fields do.
 func (e *MemQLEngine) partitionForConcept(ctx context.Context, conceptName string) string {
 	_ = conceptName
 	return e.resolvePartition(ctx)
@@ -57,8 +56,7 @@ func (e *MemQLEngine) CanonicalizeIdValue(ctx context.Context, value, conceptTyp
 }
 
 // canonicalizeIdValue normalizes an id-shaped value to the canonical
-// `<partition>:<conceptType>:<bareSlug>` form, using the concept's
-// @scope to pick the right partition prefix.
+// `<conceptType>:<bareSlug>` form.
 //
 // Shared by:
 //   - canonicalId() builtin in mutation + automation runtime
@@ -68,17 +66,17 @@ func (e *MemQLEngine) CanonicalizeIdValue(ctx context.Context, value, conceptTyp
 //
 // Behavior:
 //
-//	value=""                                       -> "" (no-op for missing/optional ids)
-//	bare slug                                      -> prepend the concept's partition + type
-//	canonical id with matching concept             -> as-is
-//	canonical id with matching concept, wrong part -> re-partition to the concept's expected partition
-//	canonical id with a DIFFERENT concept          -> error (caller has the wrong type tag)
+//	value=""                              -> "" (no-op for missing/optional ids)
+//	bare slug                             -> prepend the concept type
+//	canonical id with matching concept    -> as-is
+//	canonical id with a DIFFERENT concept -> error (caller has the wrong type tag)
 //
 // The "wrong concept" branch errors loudly: silently rewriting it
 // could mask real authoring bugs (passing a userId to canonicalId
 // (..., "v1:cognition:space")). The other branches always succeed
 // -- this is the contract callers depend on for stable id derivation.
 func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptType string) (string, error) {
+	_ = ctx
 	value = strings.TrimSpace(value)
 	conceptType = strings.TrimSpace(conceptType)
 	if value == "" {
@@ -98,20 +96,20 @@ func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptTyp
 	if err != nil || c == nil {
 		return "", fmt.Errorf("canonicalId: unknown concept %q", conceptType)
 	}
-
-	// Every concept lives in one partition post-#56 -- the @scope-
-	// derived branch is gone. Honor the request envelope's partition
-	// the same way as for any other write/read.
 	_ = c
-	expectedPartition := e.resolvePartition(ctx)
 
-	if !id.HasPartition(value) {
-		// Bare slug: compose canonical id.
-		return id.BuildNodeId(expectedPartition, conceptType, value), nil
+	// Bare slug (no colons): compose `concept:slug`.
+	if !strings.ContainsRune(value, ':') {
+		return id.BuildNodeId(conceptType, value), nil
 	}
 
-	// Already partition-qualified. Parse to verify the concept matches.
-	gotPartition, gotConcept, gotShortId, perr := id.ParseNodeId(value)
+	// Already concept-qualified.
+	if strings.HasPrefix(value, conceptType+":") {
+		return value, nil
+	}
+
+	// Parse to detect "wrong concept" tag.
+	gotConcept, _, perr := id.ParseNodeId(value)
 	if perr != nil {
 		return "", fmt.Errorf("canonicalId: malformed id %q: %w", value, perr)
 	}
@@ -119,14 +117,7 @@ func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptTyp
 		return "", fmt.Errorf("canonicalId: id %q is under concept %q, expected %q (caller passed the wrong type tag)",
 			value, gotConcept, conceptType)
 	}
-	if gotPartition == expectedPartition {
-		return value, nil
-	}
-	// Same concept, wrong partition -- re-partition to the canonical
-	// home. Tolerates legacy callers that handed us a "default:" id
-	// for a global concept (or vice versa) that should now live in
-	// _system / the envelope's partition.
-	return id.BuildNodeId(expectedPartition, conceptType, gotShortId), nil
+	return value, nil
 }
 
 // canonicalizeRelationshipFields walks a payload object and rewrites
@@ -135,7 +126,7 @@ func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptTyp
 // `payload` in place.
 //
 // Why insert-time auto-canon: queries on payload fields use the raw
-// stored value (`payload.userId == "_system:v1:identity:user:user-abc"`).
+// stored value (`payload.userId == "v1:identity:user:user-abc"`).
 // If two callers store the same logical reference under different
 // shapes ("user-abc" vs canonical), `==` doesn't match across them.
 // Canonicalizing on insert collapses the two forms into one stored

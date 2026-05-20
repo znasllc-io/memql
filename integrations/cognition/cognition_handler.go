@@ -17,7 +17,6 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -35,29 +34,21 @@ const humanUtteranceDebounce = 400 * time.Millisecond
 
 // composeReplyId generates the canonical id for a new agent reply turn.
 //
-// memQL's node-id convention is "{partition}:{concept}:{shortId}". Every
-// stored utterance lives at that fully-qualified address. The chunks
-// emitted while the reply streams carry the same id in their `replyId`
-// field so consumers (the chat surface, transcription views) can key
-// the in-flight bubble by it AND still match the same string when the
+// memQL's node-id convention is "{concept}:{shortId}". Every stored
+// utterance lives at that fully-qualified address. The chunks emitted
+// while the reply streams carry the same id in their `replyId` field
+// so consumers (the chat surface, transcription views) can key the
+// in-flight bubble by it AND still match the same string when the
 // commit lands. Streaming-to-commit becomes an in-place update on one
 // React element -- no remount, no avatar flicker, no duplicate bubble.
 //
-// We compose the full form here at the dispatch site rather than passing
-// a bare UUID because every consumer should see the same canonical
-// string. Doing the prefixing on the writer side and the un-prefixing on
-// the reader side is the band-aid; this is the fix.
-//
-// Partition resolution mirrors what the engine does at insert time:
-// PartitionFromContext, falling back to id.DefaultPartition. Result is
-// byte-identical to what Concept.Create would have produced if we had
-// passed the bare UUID.
+// We compose the full form here at the dispatch site rather than
+// passing a bare UUID because every consumer should see the same
+// canonical string. Result is byte-identical to what Concept.Create
+// would have produced if we had passed the bare UUID.
 func composeReplyId(ctx context.Context) string {
-	partition := memql.PartitionFromContext(ctx)
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
-	return id.BuildNodeId(partition, memorynodes.ConceptCognitionUtterance, uuid.NewString())
+	_ = ctx
+	return id.BuildNodeId(memorynodes.ConceptCognitionUtterance, uuid.NewString())
 }
 
 // recordLatestHumanUtterance stores this utterance ID as the space's most

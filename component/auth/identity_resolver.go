@@ -60,8 +60,7 @@ func (r *IdentityResolver) LoadFromClaims(ctx context.Context, claims map[string
 		return nil, errors.New("identity resolver: missing subject claim")
 	}
 
-	if !strings.HasPrefix(subject, "default:v1:identity:user:") &&
-		!strings.HasPrefix(subject, "v1:identity:user:") {
+	if !strings.HasPrefix(subject, "v1:identity:user:") {
 		return nil, ErrUserNotProvisioned
 	}
 	userId := subject

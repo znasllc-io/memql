@@ -15,10 +15,8 @@ import (
 )
 
 // canonicalIdentityIdPrefix is what the engine prepends to a bare PAT
-// slug when persisting a v1:identity:identity row. Identity is
-// @scope("global"), so the partition is always _system regardless of
-// the request envelope.
-const canonicalIdentityIdPrefix = "default:v1:identity:identity:"
+// slug when persisting a v1:identity:identity row.
+const canonicalIdentityIdPrefix = "v1:identity:identity:"
 
 // Store wraps the memQL engine with typed PAT operations: Create,
 // Revoke, Lookup, BumpLastUsed, ListForUser. Mirrors the existing
@@ -36,7 +34,7 @@ type Store struct {
 // shaped query (LookupByKeyHash, LookupById). The list paths use
 // patSummary which deliberately excludes credentials.
 type PATRow struct {
-	ID             string // canonical id ("default:v1:identity:identity:pat-...")
+	ID             string // canonical id ("v1:identity:identity:pat-...")
 	UserId         string
 	Label          string
 	KeyHash        string
@@ -48,7 +46,7 @@ type PATRow struct {
 
 // NewId mints a new PAT identity slug ("pat-<32 hex>"). The caller
 // passes this to Create; the engine stamps the canonical
-// "default:v1:identity:identity:" prefix on persist.
+// "v1:identity:identity:" prefix on persist.
 func NewId() (string, error) {
 	return identity.NewRandomId("")
 }
@@ -322,9 +320,9 @@ func rowFromNode(n *memqlv1.MemoryNode) *PATRow {
 	return row
 }
 
-// bareSlug strips the canonical "default:v1:identity:identity:"
-// prefix off an id, returning the per-instance slug. The mutations
-// expect the slug rather than the full id (the engine re-prepends).
+// bareSlug strips the canonical "v1:identity:identity:" prefix off
+// an id, returning the per-instance slug. The mutations expect the
+// slug rather than the full id (the engine re-prepends).
 func bareSlug(id string) string {
 	if strings.HasPrefix(id, canonicalIdentityIdPrefix) {
 		return strings.TrimPrefix(id, canonicalIdentityIdPrefix)

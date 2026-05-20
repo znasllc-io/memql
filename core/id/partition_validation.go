@@ -38,8 +38,8 @@ var partitionNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 // seeds one). Adding to this list later requires a data migration if
 // any deployment already used the name.
 var reservedPartitionNames = map[string]struct{}{
-	SystemPartition: {},
-	"":              {},
+	"_system": {},
+	"":        {},
 }
 
 // NormalizePartitionName lowercases and trims the input, matching the
