@@ -25,9 +25,11 @@ jobs:
           fetch-depth: 0  # full history required for `gitleaks git .`
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.1'
+          go-version: '1.26.2'
           cache: true
       - name: install gitleaks
-        run: go install github.com/gitleaks/gitleaks/v8@v8.30.1
+        # The GitHub org moved to gitleaks/gitleaks but the Go module path
+        # is still the original zricethezav/gitleaks namespace.
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
       - name: scan
         run: gitleaks git . --no-banner
