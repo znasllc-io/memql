@@ -70,6 +70,14 @@ var allowedQueryAnnotations = map[string]bool{
 	"useQuery":    true,
 	"useLogic":    true,
 	"useBuiltin":  true,
+	// `@public` is a parse-only marker introduced by issue #54
+	// (per-row authorization audit). It carries no runtime
+	// semantics; the validator treats it as the author's explicit
+	// acknowledgement that this query is intentionally readable
+	// without a caller-scope filter (concept catalogs, login-path
+	// lookups before authentication, etc.). Documented in
+	// `docs/auth/per-row-authz-audit.md`.
+	"public": true,
 }
 
 // parseQueryMemQL is the dedicated entry point for query sources.
