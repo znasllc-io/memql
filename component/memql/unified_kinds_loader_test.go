@@ -3,7 +3,10 @@ package memql
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestUnifiedLoadersCoverNewTree verifies each of the 5 per-kind
@@ -104,5 +107,30 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 		if fn, err := fnReg2.Get(name); err != nil || fn == nil {
 			t.Errorf("function registry missing %q (err=%v) -- the slice extractor probably dropped the function name (signature-bound concept regex regression)", name, err)
 		}
+	}
+	// nil-registry path skips concept resolution; the live engine runs
+	// LoadUnifiedFunctions with the populated default registry and
+	// that's the surface that actually has to be green at dev-refresh
+	// time. LoadUnifiedConcepts populates the global registry; we
+	// pass DefaultRegistry() into LoadUnifiedFunctions here so the
+	// signature-bound concept resolution branch fires.
+	if _, err := LoadUnifiedConcepts(logger); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	conceptRegistry := memoryNodes.DefaultRegistry()
+	fnReg3 := newFunctionRegistry()
+	if _, _, err := LoadUnifiedFunctions(logger, fnReg3, conceptRegistry); err != nil {
+		t.Fatalf("LoadUnifiedFunctions (with concept registry): %v", err)
+	}
+	// Spot-check a mutation that depends on signature-bound concept
+	// resolution -- without it the function loads but BoundConcept
+	// is empty and the runtime errors with `concept "globalSecret"
+	// not found`.
+	if fn, err := fnReg3.Get("mutationSetGlobalSecret"); err != nil || fn == nil {
+		t.Errorf("mutationSetGlobalSecret missing after full load: err=%v", err)
+	} else if fn.BoundConcept == "" {
+		t.Errorf("mutationSetGlobalSecret.BoundConcept empty -- signature-bound concept resolution regressed")
+	} else if !strings.Contains(fn.BoundConcept, "globalSecret") {
+		t.Errorf("mutationSetGlobalSecret.BoundConcept = %q, expected to contain 'globalSecret'", fn.BoundConcept)
 	}
 }
