@@ -19,18 +19,16 @@ type (
 
 	// CreateParams describes the payload persisted when creating a new concept record.
 	CreateParams struct {
-		Partition string
-		Actor     string
-		Payload   map[string]any
-		ID        string
-		Concept   string
-		Clock     func() time.Time
-		Metadata  map[string]string
+		Actor    string
+		Payload  map[string]any
+		ID       string
+		Concept  string
+		Clock    func() time.Time
+		Metadata map[string]string
 	}
 
 	// QueryParams configures filters applied when querying concept records.
 	QueryParams struct {
-		Partition      string
 		IDs            []string
 		Concept        string
 		IncludeDeleted bool
@@ -41,11 +39,10 @@ type (
 
 	// DeleteParams describes the deletion tombstone persisted for a concept record.
 	DeleteParams struct {
-		Partition string
-		Actor     string
-		ID        string
-		Reason    string
-		Clock     func() time.Time
+		Actor  string
+		ID     string
+		Reason string
+		Clock  func() time.Time
 	}
 )
 
@@ -73,10 +70,6 @@ func (db *MemoryNodesDatabase) CreateMemoryNode(ctx context.Context, node *Memor
 		return errors.New("memory node is nil")
 	}
 
-	if strings.TrimSpace(node.Partition) == "" {
-		return errors.New("memory node partition is required")
-	}
-
 	if strings.TrimSpace(node.ID) == "" {
 		return errors.New("memory node id is required")
 	}
@@ -90,16 +83,16 @@ func (db *MemoryNodesDatabase) CreateMemoryNode(ctx context.Context, node *Memor
 		return ErrBunNotConfigured
 	}
 
-	// ON CONFLICT DO NOTHING on the (partition, id, createdAt) PK
-	// dedups same-microsecond duplicate inserts (React StrictMode
-	// double-fire, concurrent ensure flows). The post-exec error
-	// switch below still catches OTHER 23505 violations (the
+	// ON CONFLICT DO NOTHING on the (id, createdAt) PK dedups
+	// same-microsecond duplicate inserts (React StrictMode double-fire,
+	// concurrent ensure flows). The post-exec error switch below still
+	// catches OTHER 23505 violations (the
 	// idx_active_participant_space_agent index, etc) -- only the PK
 	// race is silenced. See InsertMemoryNode in component/memql/
 	// executor.go for the same fix at the engine layer.
 	_, err := bunDB.NewInsert().
 		Model(node).
-		On("CONFLICT (\"partition\", id, \"createdAt\") DO NOTHING").
+		On("CONFLICT (id, \"createdAt\") DO NOTHING").
 		Exec(ctx)
 	if err != nil {
 		// Detect PostgreSQL unique constraint violations (error code 23505).
@@ -177,10 +170,6 @@ func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params Query
 
 	var nodes []MemoryNode
 	query := bunDB.NewSelect().Model(&nodes)
-
-	if partition := strings.TrimSpace(params.Partition); partition != "" {
-		query = query.Where("partition = ?", partition)
-	}
 
 	if trimmed := sanitizeIdentifiers(params.IDs); len(trimmed) > 0 {
 		query = query.Where("id IN (?)", bun.In(trimmed))

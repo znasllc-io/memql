@@ -20,7 +20,7 @@ import (
 // on first load.
 func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
-		"v1:identity:user":   {Name: "v1:identity:user", Scope: "global"},
+		"v1:identity:user":   {Name: "v1:identity:user"},
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 		"v1:cognition:participant": {
 			Name: "v1:cognition:participant",
@@ -181,7 +181,7 @@ func (e errNotFound) Error() string { return "concept not found: " + e.name }
 
 func TestCanonicalizeIdValue(t *testing.T) {
 	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
-		"v1:identity:user":    {Name: "v1:identity:user", Scope: "global"},
+		"v1:identity:user":    {Name: "v1:identity:user"},
 		"v1:cognition:space":  {Name: "v1:cognition:space"}, // partition-scoped
 		"v1:agents:agent":  {Name: "v1:agents:agent"}, // partition-scoped
 	})
@@ -259,7 +259,7 @@ func TestCanonicalizeIdValue(t *testing.T) {
 
 func TestCanonicalizeRelationshipFields(t *testing.T) {
 	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
-		"v1:identity:user":   {Name: "v1:identity:user", Scope: "global"},
+		"v1:identity:user":   {Name: "v1:identity:user"},
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 		"v1:cognition:participant": {
 			Name: "v1:cognition:participant",
@@ -324,7 +324,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 		// For concepts that store relationship arrays (e.g. groupIds).
 		// Reuses a synthetic concept to exercise the slice path.
 		eng := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
-			"v1:identity:user": {Name: "v1:identity:user", Scope: "global"},
+			"v1:identity:user": {Name: "v1:identity:user"},
 			"v1:identity:group": {
 				Name: "v1:identity:group",
 				Relationships: []memoryNodes.RelationshipDefinition{

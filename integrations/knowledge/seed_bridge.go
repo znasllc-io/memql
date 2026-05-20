@@ -403,10 +403,9 @@ func (i *Integration) ensureKnowledgeBridgeHandler(
 		"roleSlug":       roleSlug,
 		"combinationKey": CombinationKeyFor(domainIds),
 	})
-	partition := i.resolvePartition(ctx)
+	_ = i.resolvePartition(ctx)
 	return []memorynodesNode{
 		{
-			Partition: partition,
 			ID:        fmt.Sprintf("knowledgeBridge-result:%d", time.Now().UnixNano()),
 			Concept:   "v1:common:knowledgeBridge",
 			Payload:   payload,

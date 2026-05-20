@@ -72,15 +72,14 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		return nil, fmt.Errorf("invalid payload JSON for update() mutation: %w", err)
 	}
 
-	// Look up the latest existing row by id under the concept's
-	// effective partition (same partitioning rules as executeInsert
-	// uses for the write).
+	// Look up the latest existing row by id. Partition is still used
+	// downstream for the event publish topic; the Query call itself no
+	// longer filters on partition post-#56 phase 3.
 	readPartition := e.partitionForConcept(ctx, conceptMeta.Name)
 	store := &bunStore{db: e.database()}
 	priorNodes, err := conceptMeta.Query(ctx, store, memorynodes.QueryParams{
-		Partition: readPartition,
-		IDs:       []string{id},
-		Limit:     1,
+		IDs:   []string{id},
+		Limit: 1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update(): read latest row for concept %q id %q: %w", conceptName, id, err)
@@ -332,19 +331,13 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 		}
 	}
 
-	// Resolve the partition against the concept's scope. Global-scoped
-	// concepts (@scope("global") in the .memql file) always land in the
-	// reserved _system partition; everything else follows the request
-	// envelope via resolvePartition. Setting it explicitly -- rather
-	// than letting Concept.Create fall through to DefaultPartition --
-	// means writes now honor envelope.partition the same way reads do,
-	// so tenant data actually ends up where the tenant asked for.
+	// Partition is still used downstream for the event publish topic;
+	// Concept.Create no longer takes it post-#56 phase 3.
 	writePartition := e.partitionForConcept(ctx, conceptMeta.Name)
 	createParams := memorynodes.CreateParams{
-		Actor:     actor,
-		Partition: writePartition,
-		ID:        strings.TrimSpace(mutation.ID),
-		Payload:   payload,
+		Actor:   actor,
+		ID:      strings.TrimSpace(mutation.ID),
+		Payload: payload,
 	}
 
 	// Collect contextual metadata from the request context.

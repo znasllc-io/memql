@@ -36,16 +36,6 @@ type (
 		Description   string                     `json:"description,omitempty"`
 		Relationships []RelationshipDefinition   `json:"relationships,omitempty"`
 
-		// Scope controls how the partition dimension is applied for
-		// this concept. Empty string (default) means "partition" --
-		// reads/writes honor the request envelope's partition. Value
-		// "global" means the concept lives in the reserved _system
-		// partition regardless of the envelope, used for
-		// infrastructure metadata (cluster topology, partition
-		// registry) that must be visible from any tenant's view.
-		// Set via @scope("global") on the concept's .memql file.
-		Scope string `json:"scope,omitempty"`
-
 		// Version is the explicit version prefix declared via
 		// @version("vN"). Empty means the version was derived from
 		// the concepts/vN/... directory layout.
@@ -65,7 +55,6 @@ type (
 
 	// Node represents a memory node materialized through a concept accessor.
 	Node struct {
-		Partition string
 		ID        string
 		Concept   string
 		Type      string
@@ -78,17 +67,6 @@ type (
 )
 
 // UnmarshalJSON normalizes relationship definitions authored with either camelCase or snake_case keys.
-// IsGlobal reports whether this concept is global-scoped. Global
-// concepts live in the reserved _system partition and are visible
-// regardless of the caller's envelope partition. Used for
-// infrastructure metadata (cluster topology, partition registry).
-func (c *Concept) IsGlobal() bool {
-	if c == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(c.Scope), "global")
-}
-
 func (r *RelationshipDefinition) UnmarshalJSON(data []byte) error {
 	type alias struct {
 		Type          string `json:"type"`
@@ -138,17 +116,11 @@ func (c *Concept) SetContentIdSalt(salt string) {
 }
 
 // DeriveContentId generates a deterministic content-addressed ID from the payload.
-// The partition is included in the hash input so that identical payloads in
-// different partitions produce different content IDs.
 // Uses the same algorithm and salt as Create() for exact ID prediction.
-func (c *Concept) DeriveContentId(partition string, payload map[string]any) string {
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
+func (c *Concept) DeriveContentId(payload map[string]any) string {
 	input := map[string]any{
-		"partition": partition,
-		"concept":   c.Name,
-		"payload":   payload,
+		"concept": c.Name,
+		"payload": payload,
 	}
 	if c.contentIdSalt != "" {
 		input["salt"] = c.contentIdSalt
@@ -170,17 +142,12 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 	payloadId := strings.TrimSpace(stringFromPayload(payload["id"]))
 	payload = StripReservedPayloadFields(payload)
 
-	partition := strings.TrimSpace(params.Partition)
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
-
 	nodeId := strings.TrimSpace(params.ID)
 	if nodeId == "" {
 		nodeId = payloadId
 	}
 	if nodeId == "" {
-		nodeId = c.DeriveContentId(partition, payload)
+		nodeId = c.DeriveContentId(payload)
 	}
 
 	validationPayload := clonePayload(payload)
@@ -196,7 +163,7 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 	if err := c.validateShortId(nodeId); err != nil {
 		return Node{}, fmt.Errorf("concept %q: %w", c.Name, err)
 	}
-	storageId := c.storageId(partition, nodeId)
+	storageId := c.storageId(nodeId)
 	if storageId == "" {
 		return Node{}, fmt.Errorf("concept storage id is required")
 	}
@@ -217,7 +184,6 @@ func (c *Concept) Create(ctx context.Context, store Store, params CreateParams) 
 	}
 
 	node := &MemoryNode{
-		Partition: partition,
 		ID:        storageId,
 		Concept:   c.Name,
 		Type:      nodeType,
@@ -274,13 +240,8 @@ func (c *Concept) Delete(ctx context.Context, store Store, params DeleteParams) 
 		return Node{}, fmt.Errorf("actor is required")
 	}
 
-	partition := strings.TrimSpace(params.Partition)
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
-
 	payload := map[string]any{
-		"id":      c.storageId(partition, nodeId),
+		"id":      c.storageId(nodeId),
 		"deleted": true,
 	}
 	if reason := strings.TrimSpace(params.Reason); reason != "" {
@@ -307,7 +268,6 @@ func (c *Concept) Delete(ctx context.Context, store Store, params DeleteParams) 
 	}
 
 	node := &MemoryNode{
-		Partition: partition,
 		ID:        payload["id"].(string),
 		Concept:   c.Name,
 		CreatedAt: now,
@@ -338,22 +298,16 @@ func (c *Concept) Query(ctx context.Context, store Store, params QueryParams) ([
 		return nil, fmt.Errorf("concept store is required")
 	}
 
-	partition := strings.TrimSpace(params.Partition)
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
-
 	compositeIds := make([]string, 0, len(params.IDs))
 	for _, raw := range params.IDs {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
-			if storageId := c.storageId(partition, trimmed); storageId != "" {
+			if storageId := c.storageId(trimmed); storageId != "" {
 				compositeIds = append(compositeIds, storageId)
 			}
 		}
 	}
 
 	queryParams := QueryParams{
-		Partition:      partition,
 		IDs:            compositeIds,
 		Concept:        c.Name,
 		CreatedBy:      strings.TrimSpace(params.CreatedBy),
@@ -504,7 +458,6 @@ func toNode(node *MemoryNode) Node {
 		return Node{}
 	}
 	return Node{
-		Partition: strings.TrimSpace(node.Partition),
 		ID:        strings.TrimSpace(node.ID),
 		Concept:   strings.TrimSpace(node.Concept),
 		Type:      strings.TrimSpace(node.Type),
@@ -576,7 +529,7 @@ func (c *Concept) validateShortId(nodeId string) error {
 	)
 }
 
-func (c *Concept) storageId(partition, nodeId string) string {
+func (c *Concept) storageId(nodeId string) string {
 	if c == nil {
 		return ""
 	}
@@ -584,18 +537,15 @@ func (c *Concept) storageId(partition, nodeId string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if partition == "" {
-		partition = id.DefaultPartition
-	}
 	// If the ID already looks fully qualified (has partition + concept prefix), return as-is.
 	if id.HasPartition(trimmed) {
 		return trimmed
 	}
 	// If the ID already has the concept prefix but no partition, prepend partition.
 	if strings.HasPrefix(trimmed, c.Name+":") {
-		return partition + ":" + trimmed
+		return id.DefaultPartition + ":" + trimmed
 	}
-	return id.BuildNodeId(partition, c.Name, trimmed)
+	return id.BuildNodeId(id.DefaultPartition, c.Name, trimmed)
 }
 
 func extractSchemaId(raw json.RawMessage) string {
