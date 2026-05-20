@@ -250,7 +250,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	if err != nil {
 		return fmt.Errorf("magiclink: generate token: %w", err)
 	}
-	requestId, err := identity.NewRandomId("ml-")
+	requestId, err := identity.NewRandomId("")
 	if err != nil {
 		return fmt.Errorf("magiclink: generate request id: %w", err)
 	}
@@ -346,7 +346,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 // handleAccessRequest creates a v1:identity:accessRequest row instead
 // of issuing a magic link (waitlist mode).
 func (i *Issuer) handleAccessRequest(ctx context.Context, email string, in IssueInput) error {
-	requestId, err := identity.NewRandomId("ar-")
+	requestId, err := identity.NewRandomId("")
 	if err != nil {
 		return fmt.Errorf("magiclink: generate access-request id: %w", err)
 	}
