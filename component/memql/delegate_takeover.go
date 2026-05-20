@@ -202,7 +202,7 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 	// delegation respects what the target was configured with. The
 	// caller doesn't get to broaden the delegatee's powers by
 	// delegating to it. Expanded via ExpandCapabilitySlugs so
-	// capability slugs (copresent_control) become concrete primitive
+	// capability slugs (copresent-control) become concrete primitive
 	// names the tool-loop can filter for.
 	rawTools := extractAgentTools(targetRecord)
 	expandedTools := ExpandCapabilitySlugs(rawTools)
@@ -240,7 +240,7 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 	// the turn runs without the block and the agent can still call
 	// similarTo on-demand mid-takeover.
 	targetDomains := stringSliceFromRecord(targetRecord, "capabilities.domains")
-	// If the target agent has operator tools, always include copresent_ui
+	// If the target agent has operator tools, always include copresent-ui
 	// in the retrieval domain set. Same contract as the direct path in
 	// replier.go: UI-driving agents need app knowledge regardless of
 	// what their stored domains say. Computed here (hoisted from the
@@ -249,13 +249,13 @@ func (e *MemQLEngine) executeDelegateTakeover(ctx context.Context, args map[stri
 	if targetHasOperator {
 		found := false
 		for _, d := range targetDomains {
-			if d == "copresent_ui" {
+			if d == "copresent-ui" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			targetDomains = append(append([]string{}, targetDomains...), "copresent_ui")
+			targetDomains = append(append([]string{}, targetDomains...), "copresent-ui")
 		}
 	}
 	if e.Logger != nil {

@@ -33,9 +33,9 @@ var AgentSuggestSchemaJSON = json.RawMessage(`{
         "role": {
           "type": "string",
           "enum": [
-            "accounting_finance","human_resources","customer_service",
-            "quality_assurance","sales_marketing","it_support","legal_compliance",
-            "operations","project_management","research_development","training_education"
+            "accounting-finance","human-resources","customer-service",
+            "quality-assurance","sales-marketing","it-support","legal-compliance",
+            "operations","project-management","research-development","training-education"
           ]
         },
         "gender": {"type": "string", "enum": ["male", "female"]},
@@ -97,11 +97,11 @@ const agentSuggestSystemPrompt = `Configure an AI agent from a user description.
 
 Required fields:
 - name: single word (e.g. Aria, Atlas, Nova, Felix, Jade, Penny)
-- role: one of: accounting_finance, human_resources, customer_service, quality_assurance, sales_marketing, it_support, legal_compliance, operations, project_management, research_development, training_education. DO NOT suggest assistant -- every user is auto-provisioned exactly one Assistant already (a per-user singleton), so the create-agent flow rejects that role.
+- role: one of: accounting-finance, human-resources, customer-service, quality-assurance, sales-marketing, it-support, legal-compliance, operations, project-management, research-development, training-education. DO NOT suggest assistant -- every user is auto-provisioned exactly one Assistant already (a per-user singleton), so the create-agent flow rejects that role.
 - gender: "male" or "female" (default: female)
 - personalityStyles: 2-4 from: friendly, professional, assertive, empathetic, analytical, creative, patient, concise
-- knowledgeDomains: 3-6 relevant domains. Pick from the catalog the user implied; "business_administration" is the org-wide baseline domain a specialist can opt into when general business literacy is part of the role.
-- tools: role-relevant tools (core tools data_query, document_search, calendar_access, notifications, email_compose, task_management are auto-added)
+- knowledgeDomains: 3-6 relevant domains. Pick from the catalog the user implied; "business-administration" is the org-wide baseline domain a specialist can opt into when general business literacy is part of the role.
+- tools: role-relevant tools (core tools data-query, document-search, calendar-access, notifications, email-compose, task-management are auto-added)
 - existingMatches: IMPORTANT -- compare the user description against the existing agents listed below. For each existing agent with 50%+ functional overlap, add an entry: {agentId: "<id>", name: "<name>", similarity: "exact"|"high"|"moderate", recommendation: "use_existing"|"modify_existing"|"create_new", reasoning: "<why>"}. Return empty array [] if no agents overlap.
 
 Rules: default to female gender unless specified. Return valid JSON only.`
@@ -141,7 +141,7 @@ func BuildAgentSuggestMessages(description string, existingAgents []ExistingAgen
 
 // PostProcessAgentSuggestion validates agent IDs and enforces required
 // defaults (core tools, name without spaces, valid role). The
-// business_administration knowledge domain is no longer force-added
+// business-administration knowledge domain is no longer force-added
 // here -- it's a regular catalog domain specialists can opt into and
 // it's auto-attached + locked only on the Assistant via
 // provisionAssistant. Forcing it on every suggested specialist
@@ -180,12 +180,12 @@ func PostProcessAgentSuggestion(suggestion map[string]any, existingAgents []Exis
 	// the frontend picker also excludes it and would render an
 	// undefined value if the suggestion slipped through.
 	if role, ok := s["role"].(string); ok && role == "assistant" {
-		s["role"] = "customer_service"
+		s["role"] = "customer-service"
 	}
 
 	// Ensure core tools
 	if tools, ok := s["tools"].([]any); ok {
-		coreTools := []string{"data_query", "document_search", "calendar_access", "notifications", "email_compose", "task_management"}
+		coreTools := []string{"data-query", "document-search", "calendar-access", "notifications", "email-compose", "task-management"}
 		have := make(map[string]bool, len(tools))
 		for _, t := range tools {
 			if ts, ok := t.(string); ok {

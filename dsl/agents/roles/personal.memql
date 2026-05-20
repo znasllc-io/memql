@@ -8,229 +8,229 @@
 use agents.concepts.{ agentRole }
 
 @description("Household finance education: budgeting, debt, savings, retirement, taxes, insurance. Information only.")
-seed agentRole personal_finance_advisor {
-  slug:                  "personal_finance_advisor"
+seed agentRole personal-finance-advisor {
+  slug:                  "personal-finance-advisor"
   name:                  "Personal Finance Advisor"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["personal_finance", "personal_budgeting"]
-  defaultDomainIds:      ["personal_taxes", "personal_investing", "personal_insurance", "estate_planning_personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["personal-finance", "personal-budgeting"]
+  defaultDomainIds:      ["personal-taxes", "personal-investing", "personal-insurance", "estate-planning-personal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general financial education. Always recommend a licensed financial planner / CPA / attorney for personalized advice on taxes, investments, or estate planning."
   predefined:            true
 }
 
 @description("Day-to-day household operations: chores, inventory, vendors, calendar, and routines.")
-seed agentRole household_manager {
-  slug:                  "household_manager"
+seed agentRole household-manager {
+  slug:                  "household-manager"
   name:                  "Household Manager"
   category:              "personal"
-  lockedDomainIds:       ["household_maintenance"]
-  defaultDomainIds:      ["home_inventory", "household_chores", "personal_finance", "personal_budgeting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["household-maintenance"]
+  defaultDomainIds:      ["home-inventory", "household-chores", "personal-finance", "personal-budgeting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Child development, behavior, schooling, family routines, and parenting strategies.")
-seed agentRole parenting_coach {
-  slug:                  "parenting_coach"
+seed agentRole parenting-coach {
+  slug:                  "parenting-coach"
   name:                  "Parenting Coach"
   category:              "personal"
-  lockedDomainIds:       ["parenting", "child_development"]
-  defaultDomainIds:      ["school_education_personal", "nutrition", "mental_health"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["parenting", "child-development"]
+  defaultDomainIds:      ["school-education-personal", "nutrition", "mental-health"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Healthy habits across nutrition, fitness, sleep, mental health, and mindfulness. Information only.")
-seed agentRole health_wellness_coach {
-  slug:                  "health_wellness_coach"
+seed agentRole health-wellness-coach {
+  slug:                  "health-wellness-coach"
   name:                  "Health & Wellness Coach"
   category:              "personal"
   tier:                  "B"
   lockedDomainIds:       ["nutrition", "fitness"]
-  defaultDomainIds:      ["mental_health", "sleep_hygiene", "mindfulness", "medical_records_personal", "stress_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["mental-health", "sleep-hygiene", "mindfulness", "medical-records-personal", "stress-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general wellness information. Always recommend a licensed healthcare provider for personal medical or mental-health concerns."
   predefined:            true
 }
 
 @description("General fitness programming: strength, cardio, mobility, recovery. Information only.")
-seed agentRole fitness_coach {
-  slug:                  "fitness_coach"
+seed agentRole fitness-coach {
+  slug:                  "fitness-coach"
   name:                  "Fitness Coach"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["fitness", "exercise_science"]
-  defaultDomainIds:      ["nutrition", "sleep_hygiene", "stretching_mobility", "strength_training"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["fitness", "exercise-science"]
+  defaultDomainIds:      ["nutrition", "sleep-hygiene", "stretching-mobility", "strength-training"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general fitness information. Always recommend consulting a doctor before starting a new exercise program and a certified trainer for personalized programming."
   predefined:            true
 }
 
 @description("Training plans (5K -> marathon), form, gear, race strategy. Information only.")
-seed agentRole running_coach {
-  slug:                  "running_coach"
+seed agentRole running-coach {
+  slug:                  "running-coach"
   name:                  "Running Coach"
   category:              "personal"
-  lockedDomainIds:       ["running_training"]
-  defaultDomainIds:      ["fitness", "exercise_science", "race_nutrition", "injury_prevention_running"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["running-training"]
+  defaultDomainIds:      ["fitness", "exercise-science", "race-nutrition", "injury-prevention-running"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Asana, pranayama, sequencing, and yoga philosophy for practice and teaching.")
-seed agentRole yoga_instructor {
-  slug:                  "yoga_instructor"
+seed agentRole yoga-instructor {
+  slug:                  "yoga-instructor"
   name:                  "Yoga Instructor"
   category:              "personal"
-  lockedDomainIds:       ["yoga_practice"]
-  defaultDomainIds:      ["meditation", "anatomy_basics", "mindfulness", "yoga_philosophy"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["yoga-practice"]
+  defaultDomainIds:      ["meditation", "anatomy-basics", "mindfulness", "yoga-philosophy"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Periodization, lift technique, programming for strength + power.")
-seed agentRole strength_coach {
-  slug:                  "strength_coach"
+seed agentRole strength-coach {
+  slug:                  "strength-coach"
   name:                  "Strength & Conditioning Coach"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["strength_training"]
-  defaultDomainIds:      ["exercise_science", "fitness", "injury_prevention_running", "powerlifting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["strength-training"]
+  defaultDomainIds:      ["exercise-science", "fitness", "injury-prevention-running", "powerlifting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Home-cook meal planning: recipes, dietary preferences, weekly menus, grocery lists.")
-seed agentRole meal_planning_chef {
-  slug:                  "meal_planning_chef"
+seed agentRole meal-planning-chef {
+  slug:                  "meal-planning-chef"
   name:                  "Meal Planning Chef"
   category:              "personal"
-  lockedDomainIds:       ["recipes", "meal_planning"]
-  defaultDomainIds:      ["dietary_restrictions", "nutrition", "food_safety"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["recipes", "meal-planning"]
+  defaultDomainIds:      ["dietary-restrictions", "nutrition", "food-safety"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Trip planning, itineraries, document requirements, lodging, transit, and personal budgeting.")
-seed agentRole travel_planner {
-  slug:                  "travel_planner"
+seed agentRole travel-planner {
+  slug:                  "travel-planner"
   name:                  "Travel Planner"
   category:              "personal"
-  lockedDomainIds:       ["travel_planning"]
-  defaultDomainIds:      ["travel_documents", "restaurant_dining", "personal_finance", "destination_research"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["travel-planning"]
+  defaultDomainIds:      ["travel-documents", "restaurant-dining", "personal-finance", "destination-research"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Self-directed learning: language, course-work, book summaries, study skills.")
-seed agentRole learning_companion {
-  slug:                  "learning_companion"
+seed agentRole learning-companion {
+  slug:                  "learning-companion"
   name:                  "Learning Companion"
   category:              "personal"
-  lockedDomainIds:       ["learning_methods"]
-  defaultDomainIds:      ["language_learning", "online_courses", "book_summaries", "personal_growth", "study_skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["learning-methods"]
+  defaultDomainIds:      ["language-learning", "online-courses", "book-summaries", "personal-growth", "study-skills"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Communication, conflict resolution, milestone celebrations, gift planning. Education only.")
-seed agentRole relationships_social {
-  slug:                  "relationships_social"
+seed agentRole relationships-social {
+  slug:                  "relationships-social"
   name:                  "Relationships & Social Companion"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["relationships_communication"]
-  defaultDomainIds:      ["life_events_celebrations", "gifts", "conflict_resolution"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["relationships-communication"]
+  defaultDomainIds:      ["life-events-celebrations", "gifts", "conflict-resolution"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general communication and relationship information. For serious relationship distress or mental-health concerns, recommend a licensed therapist or counselor."
   predefined:            true
 }
 
 @description("Daily pet care: feeding, training, grooming, common health issues. Information only.")
-seed agentRole pet_care_specialist {
-  slug:                  "pet_care_specialist"
+seed agentRole pet-care-specialist {
+  slug:                  "pet-care-specialist"
   name:                  "Pet Care Specialist"
   category:              "personal"
-  lockedDomainIds:       ["pet_care"]
-  defaultDomainIds:      ["pet_training", "pet_health", "animal_nutrition"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["pet-care"]
+  defaultDomainIds:      ["pet-training", "pet-health", "animal-nutrition"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Repairs, upgrades, gardening, sustainability, and home-inventory maintenance.")
-seed agentRole home_improvement_diy {
-  slug:                  "home_improvement_diy"
+seed agentRole home-improvement-diy {
+  slug:                  "home-improvement-diy"
   name:                  "Home Improvement / DIY"
   category:              "personal"
-  lockedDomainIds:       ["diy_repairs"]
-  defaultDomainIds:      ["gardening", "sustainability", "home_inventory", "household_maintenance"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["diy-repairs"]
+  defaultDomainIds:      ["gardening", "sustainability", "home-inventory", "household-maintenance"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Meditation practice, journaling prompts, stress-management techniques.")
-seed agentRole mindfulness_coach {
-  slug:                  "mindfulness_coach"
+seed agentRole mindfulness-coach {
+  slug:                  "mindfulness-coach"
   name:                  "Mindfulness & Meditation Coach"
   category:              "personal"
   lockedDomainIds:       ["mindfulness"]
-  defaultDomainIds:      ["journaling", "personal_growth", "mental_health", "meditation"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["journaling", "personal-growth", "mental-health", "meditation"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Movies, TV, music, books, podcasts, dining: recommendations and discussion partner.")
-seed agentRole entertainment_curator {
-  slug:                  "entertainment_curator"
+seed agentRole entertainment-curator {
+  slug:                  "entertainment-curator"
   name:                  "Entertainment Curator"
   category:              "personal"
-  lockedDomainIds:       ["entertainment_media"]
-  defaultDomainIds:      ["music_appreciation", "book_summaries", "restaurant_dining", "film_appreciation"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["entertainment-media"]
+  defaultDomainIds:      ["music-appreciation", "book-summaries", "restaurant-dining", "film-appreciation"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Aging-in-place planning, eldercare options, medication management, end-of-life documents. Information only.")
-seed agentRole senior_care_advisor {
-  slug:                  "senior_care_advisor"
+seed agentRole senior-care-advisor {
+  slug:                  "senior-care-advisor"
   name:                  "Senior Care Advisor"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["elder_care"]
-  defaultDomainIds:      ["end_of_life_planning", "medical_records_personal", "estate_planning_personal", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["elder-care"]
+  defaultDomainIds:      ["end-of-life-planning", "medical-records-personal", "estate-planning-personal", "personal-legal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general information. Always recommend licensed practitioners for medical care, estate attorneys for legal documents, and certified eldercare advisors for personal situations."
   predefined:            true
 }
 
 @description("Home-buying / selling, mortgages, neighborhood research, inspections, closings. Information only.")
-seed agentRole real_estate_advisor {
-  slug:                  "real_estate_advisor"
+seed agentRole real-estate-advisor {
+  slug:                  "real-estate-advisor"
   name:                  "Real Estate Educator"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["real_estate_listings"]
-  defaultDomainIds:      ["mortgage_shopping", "neighborhood_research", "home_inspection", "property_taxes", "lease_agreements", "closing_process", "personal_finance", "personal_taxes"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["real-estate-listings"]
+  defaultDomainIds:      ["mortgage-shopping", "neighborhood-research", "home-inspection", "property-taxes", "lease-agreements", "closing-process", "personal-finance", "personal-taxes"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general real estate information. Recommend a licensed realtor, attorney, or lender for any actual transaction."
   predefined:            true

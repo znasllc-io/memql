@@ -7,13 +7,13 @@
 use agents.concepts.{ agentRole }
 
 @description("Residential and light-commercial construction: scheduling, subs, permits, scopes of work.")
-seed agentRole general_contractor {
-  slug:                  "general_contractor"
+seed agentRole general-contractor {
+  slug:                  "general-contractor"
   name:                  "General Contractor"
   category:              "trades"
-  lockedDomainIds:       ["construction_fundamentals"]
-  defaultDomainIds:      ["building_codes", "project_data", "trades_safety", "estimating", "subcontractor_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["construction-fundamentals"]
+  defaultDomainIds:      ["building-codes", "project-data", "trades-safety", "estimating", "subcontractor-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -24,9 +24,9 @@ seed agentRole electrician {
   name:                  "Electrical Trades"
   category:              "trades"
   tier:                  "B"
-  lockedDomainIds:       ["electrical_trades"]
-  defaultDomainIds:      ["building_codes", "trades_safety", "circuit_design_basics", "electrical_troubleshooting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["electrical-trades"]
+  defaultDomainIds:      ["building-codes", "trades-safety", "circuit-design-basics", "electrical-troubleshooting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general electrical information. Live electrical work is dangerous and frequently licensed by jurisdiction; recommend a licensed electrician for any actual work."
   predefined:            true
@@ -37,21 +37,21 @@ seed agentRole plumber {
   slug:                  "plumber"
   name:                  "Plumbing Trades"
   category:              "trades"
-  lockedDomainIds:       ["plumbing_trades"]
-  defaultDomainIds:      ["building_codes", "trades_safety", "diy_repairs", "water_systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["plumbing-trades"]
+  defaultDomainIds:      ["building-codes", "trades-safety", "diy-repairs", "water-systems"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Heating, ventilation, A/C, refrigeration: principles, sizing, common faults, controls.")
-seed agentRole hvac_technician {
-  slug:                  "hvac_technician"
+seed agentRole hvac-technician {
+  slug:                  "hvac-technician"
   name:                  "HVAC Technician"
   category:              "trades"
-  lockedDomainIds:       ["hvac_systems"]
-  defaultDomainIds:      ["building_codes", "trades_safety", "energy_efficiency", "refrigerant_handling"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["hvac-systems"]
+  defaultDomainIds:      ["building-codes", "trades-safety", "energy-efficiency", "refrigerant-handling"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -62,20 +62,20 @@ seed agentRole carpenter {
   name:                  "Carpentry"
   category:              "trades"
   lockedDomainIds:       ["carpentry"]
-  defaultDomainIds:      ["woodworking", "building_codes", "trades_safety", "joinery_techniques", "diy_repairs"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["woodworking", "building-codes", "trades-safety", "joinery-techniques", "diy-repairs"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Passenger-car diagnostics and repair: engine, drivetrain, brakes, electrical, scan tools.")
-seed agentRole automotive_mechanic {
-  slug:                  "automotive_mechanic"
+seed agentRole automotive-mechanic {
+  slug:                  "automotive-mechanic"
   name:                  "Automotive Mechanic"
   category:              "trades"
-  lockedDomainIds:       ["automotive_repair"]
-  defaultDomainIds:      ["vehicle_diagnostics", "trades_safety", "engine_systems", "vehicle_electrical"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["automotive-repair"]
+  defaultDomainIds:      ["vehicle-diagnostics", "trades-safety", "engine-systems", "vehicle-electrical"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -86,20 +86,20 @@ seed agentRole welder {
   name:                  "Welding"
   category:              "trades"
   lockedDomainIds:       ["welding"]
-  defaultDomainIds:      ["metallurgy_basics", "trades_safety", "weld_inspection"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["metallurgy-basics", "trades-safety", "weld-inspection"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Landscape design, installation, and maintenance: plants, irrigation, hardscape, seasonal care.")
-seed agentRole landscaping_grounds {
-  slug:                  "landscaping_grounds"
+seed agentRole landscaping-grounds {
+  slug:                  "landscaping-grounds"
   name:                  "Landscaping & Grounds"
   category:              "trades"
   lockedDomainIds:       ["landscaping"]
-  defaultDomainIds:      ["horticulture", "irrigation_systems", "gardening", "lawn_care"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["horticulture", "irrigation-systems", "gardening", "lawn-care"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

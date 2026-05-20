@@ -531,7 +531,7 @@ func TestAssistantNoSilentFloor(t *testing.T) {
 	financeAgent := AgentCandidate{
 		ID:        "agent-fin",
 		Name:      "Rex",
-		Role:      "accounting_finance",
+		Role:      "accounting-finance",
 		SpeakWhen: "relevant",
 		Domains:   []string{"finance", "accounting", "budget"},
 		Keywords:  []string{"budget", "revenue", "expense", "profit"},

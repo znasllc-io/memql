@@ -55,7 +55,7 @@ type Replier struct {
 	// data so the agent reasons about workerHost / workerComputer
 	// availability BEFORE dispatching. Wired from the agent build's
 	// app.setupAgentReplier when the worker subsystem is alive;
-	// nil on builds without computer_use to keep the prompt clean.
+	// nil on builds without computer-use to keep the prompt clean.
 	//
 	// Implementations should return ("connected", "<hostname>") when
 	// the agent's owner has at least one online worker, ("disconnected",
@@ -66,7 +66,7 @@ type Replier struct {
 }
 
 // ComputerUseStatusFn is the agent-build hook that resolves
-// computer_use availability for an agent. agentId is the
+// computer-use availability for an agent. agentId is the
 // v1:agents:agent.id of the speaker; the implementation queries
 // the agent's owner + worker registry and the agent's standing
 // authorization row, and returns:
@@ -76,7 +76,7 @@ type Replier struct {
 //     line altogether.
 //   - detail: connected worker's hostname when status="connected";
 //     empty otherwise.
-//   - scope: the agent's CURRENT standing computer_use scope --
+//   - scope: the agent's CURRENT standing computer-use scope --
 //     observe / interact / full / "" (empty = no standing grant).
 //     The agent reads this each turn so it knows whether it
 //     actually needs to call requestComputerUseScope before a worker
@@ -314,16 +314,16 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 		}
 	}
 
-	// Inject computer_use availability so the agent reasons about
+	// Inject computer-use availability so the agent reasons about
 	// workerHost / workerComputer BEFORE dispatching, AND so the
 	// retrieval-domain auto-include below can see the capability is
 	// active. The hook is nil on builds without the worker subsystem.
 	//
 	// Ordering matters: this runs BEFORE the RAG retrieval block so
-	// the auto-include of the computer_use domain (which gates on
+	// the auto-include of the computer-use domain (which gates on
 	// data["computerUseStatus"]) actually fires. An earlier
 	// arrangement put this hook AFTER retrieval, which silently
-	// dropped computer_use from the retrieval set and starved the
+	// dropped computer-use from the retrieval set and starved the
 	// agent of the per-task approval / scope-tier guidance.
 	if r.ComputerUseStatus != nil {
 		status, detail, scope := r.ComputerUseStatus(ctx, msg.AgentId)
@@ -346,10 +346,10 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	}
 
 	// Workbench availability is a flat bool: the agent's expanded
-	// tool list has workbenchHost iff it holds the workbench_use slug.
+	// tool list has workbenchHost iff it holds the workbench-use slug.
 	// Universal capability -- on by default for most agents -- but we
 	// still gate the prompt block on the tool's presence so an agent
-	// explicitly stripped of workbench_use doesn't see workbench
+	// explicitly stripped of workbench-use doesn't see workbench
 	// guidance it can't act on.
 	for _, name := range toolNames {
 		if name == "workbenchHost" {
@@ -364,8 +364,8 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// takeovers (the user's assistant driving UI without
 	// going through delegation) also see app-knowledge in their prompt.
 	//
-	// Server-side contract: if the agent has copresent_control (i.e.
-	// operatorEnabled==true), ALWAYS include `copresent_ui` in the
+	// Server-side contract: if the agent has copresent-control (i.e.
+	// operatorEnabled==true), ALWAYS include `copresent-ui` in the
 	// retrieval domain set -- regardless of what's in the agent's
 	// stored capabilities.domains. The agent can't drive the UI
 	// competently without app knowledge, and forgetting to tick the
@@ -381,10 +381,10 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	var retrievedChunks []RetrievedChunk
 	domains := domainsFromAssistant(data)
 	if op, _ := data["operatorEnabled"].(bool); op {
-		domains = ensureDomain(domains, "copresent_ui")
+		domains = ensureDomain(domains, "copresent-ui")
 	}
-	// Computer Use mirrors the copresent_ui auto-injection. The
-	// computer_use knowledge domain is the operational manual for
+	// Computer Use mirrors the copresent-ui auto-injection. The
+	// computer-use knowledge domain is the operational manual for
 	// the capability -- scope tiers, per-task approval flow,
 	// post-approval execution, plan-outcome semantics, "things you
 	// must never do." When the agent has the capability (signaled
@@ -396,26 +396,26 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// knowledge to TALK about Computer Use without holding the
 	// capability themselves.
 	if cu, _ := data["computerUseStatus"].(string); cu != "" {
-		domains = ensureDomain(domains, "computer_use")
+		domains = ensureDomain(domains, "computer-use")
 	}
 	// Workbench mirrors the same pattern. When the agent's expanded
 	// tool list carries workbenchHost (the slug-expansion product of
-	// workbench_use), attach the workbench knowledge domain so the
+	// workbench-use), attach the workbench knowledge domain so the
 	// operational manual chunks are retrievable. workbenchAvailable
 	// is set by toolNamesIncludeWorkbench below as a signal of the
 	// slug being held; this domain attach mirrors that signal.
 	if wa, _ := data["workbenchAvailable"].(bool); wa {
 		domains = ensureDomain(domains, "workbench")
 	}
-	// recent_chat auto-attach mirrors the copresent_ui /
-	// computer_use pattern: tool requires domain, domain doesn't require
+	// recent-chat auto-attach mirrors the copresent-ui /
+	// computer-use pattern: tool requires domain, domain doesn't require
 	// tool. Phase 5 of the chat-architecture plan -- every agent that
 	// is dispatching for a non-empty spaceId is acting as a space
 	// participant, so the two-thread chat contract applies. 1-on-1 /
 	// direct interactions (no spaceId) skip the domain so we don't pay
 	// retrieval cost when chat-thread context is irrelevant.
 	if strings.TrimSpace(msg.SpaceId) != "" {
-		domains = ensureDomain(domains, "recent_chat")
+		domains = ensureDomain(domains, "recent-chat")
 	}
 	if len(domains) > 0 {
 		if query := latestUserQuery(msg); query != "" {
@@ -1163,7 +1163,7 @@ const tangentialCiteSimilarityFloor = 0.55
 //     ANY domain, trust its judgment about which other ones to skip
 //     (we don't second-guess the model's primary cite work).
 //   - One citation per UNIQUE domainId, not per chunk. Multiple
-//     chunks from "hist_ancient" all roll into one acknowledgment
+//     chunks from "hist-ancient" all roll into one acknowledgment
 //     line.
 //   - Skips chunks whose Citation label is empty (appStructure +
 //     bridges -- these are intentionally uncited per the citation
@@ -1594,12 +1594,12 @@ func extractReplyText(result any) string {
 
 // toolNamesFromAssistant extracts the flat list of tool names from the
 // prompt data's "assistant.tools" array, expanding capability slugs
-// (like "copresent_control") into concrete tool names before returning.
+// (like "copresent-control") into concrete tool names before returning.
 // Returns nil when absent.
 //
 // Architecture note (2026-04-22): the System-agent-as-singleton-callback
 // pattern was retired. Any agent whose capabilities include the
-// copresent_control slug now drives the UI directly via the operator
+// copresent-control slug now drives the UI directly via the operator
 // primitives -- no delegation hop through a special "System" role.
 // delegateTakeover stays registered as a general-purpose
 // "delegate to another agent" tool for future use but is NO LONGER
@@ -1627,7 +1627,7 @@ func toolNamesFromAssistant(data map[string]any) []string {
 		}
 	}
 
-	// Expand capability slugs (copresent_control -> uiClick / uiType / …)
+	// Expand capability slugs (copresent-control -> uiClick / uiType / …)
 	// into concrete tool names the dispatcher can resolve. Concrete
 	// names passed through unchanged; unknown slugs pass through so the
 	// tool-loop's own filter can produce a clear "unknown tool" error.
@@ -1789,13 +1789,13 @@ func citeNothing(_ map[string]any, _ string) string {
 // short-circuit happens BEFORE the lookup. If the catalog grows more
 // system-owned domains, add them here. Future cleanup: collapse this
 // set with the seedKnowledgeDomains automation's special-cases (it
-// also hardcodes `copresent_ui` for `source = "appStructure"` at
+// also hardcodes `copresent-ui` for `source = "appStructure"` at
 // insert time -- see integrations/knowledge/seed.go).
 var appStructureDomainIds = map[string]bool{
-	"copresent_ui":           true,
-	"computer_use":           true,
+	"copresent-ui":           true,
+	"computer-use":           true,
 	"workbench":              true,
-	"recent_chat": true,
+	"recent-chat": true,
 }
 
 func isAppStructureDomain(domainId string) bool {
@@ -1812,7 +1812,7 @@ func domainDisplayName(domain map[string]any) string {
 		return strings.TrimSpace(name)
 	}
 	if id, ok := domain["id"].(string); ok && strings.TrimSpace(id) != "" {
-		// Pretty-print fallback: "customer_relations" -> "Customer Relations"
+		// Pretty-print fallback: "customer-relations" -> "Customer Relations"
 		return prettifyDomainId(id)
 	}
 	return ""
@@ -1844,7 +1844,7 @@ func prettifyDomainId(id string) string {
 // assignment so the formatter still works.
 //
 // Canonical-id construction: chunk.payload.domainId is the BARE slug
-// (e.g. "customer_relations"). v1:common:knowledgeDomain rows live at
+// (e.g. "customer-relations"). v1:common:knowledgeDomain rows live at
 // canonical id `<partition>:v1:common:knowledgeDomain:<slug>`, and
 // queryKnowledgeDomainById's `?.id == args.domainId` filter compares
 // against the FULL canonical form -- bare slugs never match. We
@@ -1874,7 +1874,7 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		//    v1:common:knowledgeBridge instead of knowledgeDomain;
 		//    the lookup would always miss. Source: crossDomainBridge.
 		//
-		// 2. App-structure domain (currently just "copresent_ui")
+		// 2. App-structure domain (currently just "copresent-ui")
 		//    seeds its chunks into the `copresent-ui` partition by
 		//    design (system-owned, isolated from tenant data), but
 		//    the knowledgeDomain row itself lives in `default`. The
@@ -1928,7 +1928,7 @@ func (r *Replier) enrichChunksForRender(ctx context.Context, chunks []map[string
 		// model emits a structured `citations` array via the
 		// respondToUser envelope and the frontend wraps the chosen
 		// matchedPhrase. We pass `citationDomainId` separately so the
-		// prompt can show "[citationId=customer_relations]" alongside
+		// prompt can show "[citationId=customer-relations]" alongside
 		// the label, giving the model the exact id to put in the
 		// envelope. Linkable-source detection still gates whether the
 		// id is exposed (bridges + appStructure intentionally don't
@@ -1972,8 +1972,8 @@ func isLinkableSource(source string) bool {
 // domain slug.
 //
 //	chunkId = "default:v1:common:documentChunk:seed-3767..."
-//	bareSlug = "customer_relations"
-//	-> "default:v1:common:knowledgeDomain:customer_relations"
+//	bareSlug = "customer-relations"
+//	-> "default:v1:common:knowledgeDomain:customer-relations"
 //
 // We pull the partition (first segment) from the chunk id and join
 // with the knowledgeDomain concept prefix + slug. If the chunk id
@@ -2003,7 +2003,7 @@ func canonicalDomainIdFromChunkId(chunkId, bareSlug string) string {
 // chunks that share the same domain.
 //
 // `domainId` is expected to be the FULL canonical id (e.g.
-// "default:v1:common:knowledgeDomain:customer_relations"). Bare
+// "default:v1:common:knowledgeDomain:customer-relations"). Bare
 // slugs won't match the query's `?.id == args.domainId` filter --
 // see canonicalDomainIdFromChunkId for the reconstruction.
 //

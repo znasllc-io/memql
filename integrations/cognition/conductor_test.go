@@ -798,8 +798,8 @@ func TestPlanValidation_KeepsDifferentiatingReference(t *testing.T) {
 	// match would have triggered the old false positive.
 	candidates := []polyphon.AgentCandidate{
 		candidate("p-sofia", "agent-sofia", "Sofia", "assistant"),
-		candidate("p-atlas", "agent-atlas", "Atlas", "engineering_technology"),
-		candidate("p-moss", "agent-moss", "Moss", "legal_compliance"),
+		candidate("p-atlas", "agent-atlas", "Atlas", "engineering-technology"),
+		candidate("p-moss", "agent-moss", "Moss", "legal-compliance"),
 	}
 	plan := validatePlanJSON(t, raw, candidates)
 	if len(plan.Sequence) != 1 {

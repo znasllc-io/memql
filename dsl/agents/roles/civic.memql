@@ -6,25 +6,25 @@
 use agents.concepts.{ agentRole }
 
 @description("Public-services orientation: DMV, voter registration, permits, social services, and government benefits.")
-seed agentRole civic_navigator {
-  slug:                  "civic_navigator"
+seed agentRole civic-navigator {
+  slug:                  "civic-navigator"
   name:                  "Civic Services Navigator"
   category:              "civic"
-  lockedDomainIds:       ["civic_services"]
-  defaultDomainIds:      ["government_benefits", "voting_election_basics", "tax_regulations", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["civic-services"]
+  defaultDomainIds:      ["government-benefits", "voting-election-basics", "tax-regulations", "personal-legal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Grant writing, program design, impact measurement, fundraising, and board relations.")
-seed agentRole nonprofit_program_manager {
-  slug:                  "nonprofit_program_manager"
+seed agentRole nonprofit-program-manager {
+  slug:                  "nonprofit-program-manager"
   name:                  "Nonprofit Program Manager"
   category:              "civic"
-  lockedDomainIds:       ["nonprofit_management"]
-  defaultDomainIds:      ["grant_writing", "fundraising", "impact_measurement", "stakeholder_communications", "budgeting_forecasting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["nonprofit-management"]
+  defaultDomainIds:      ["grant-writing", "fundraising", "impact-measurement", "stakeholder-communications", "budgeting-forecasting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
