@@ -116,10 +116,11 @@ mutation space mutationCreateDailySpace {
     spaceId       string  @required
     name          string  @required
     dailyDateKey  string  @required
+    ownerUserId   string  @required
   }
   insert space {
     id: args.spaceId
-    ownerUserId: actor.userId
+    args.ownerUserId
     args.name
     args.dailyDateKey
     kind: "daily"
