@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 150" width="600" height="150" role="img" aria-label="memQL — AI-native memory graph">
+  <defs>
+    <style type="text/css"><![CDATA[
+      .word { font-family: 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 700; font-size: 56px; fill: #1a1a1a; }
+      .word-accent { fill: #1a4f8b; }
+      .tag { font-family: 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 500; font-size: 13px; fill: #666; letter-spacing: 2px; }
+      .node { fill: #1a4f8b; }
+      .edge { stroke: #1a4f8b; stroke-width: 2; fill: none; stroke-linecap: round; }
+      .pulse { fill: none; stroke: #1a4f8b; stroke-width: 1.5; opacity: 0.35; }
+    ]]></style>
+  </defs>
+
+  <!-- Graph + time-series glyph -->
+  <g transform="translate(40,45)">
+    <line class="edge" x1="8" y1="35" x2="48" y2="14"/>
+    <line class="edge" x1="48" y1="14" x2="88" y2="42"/>
+    <line class="edge" x1="8" y1="35" x2="48" y2="58"/>
+    <line class="edge" x1="48" y1="58" x2="88" y2="42"/>
+    <line class="edge" x1="48" y1="14" x2="48" y2="58"/>
+    <circle class="node" cx="8"  cy="35" r="6"/>
+    <circle class="node" cx="48" cy="14" r="6"/>
+    <circle class="node" cx="48" cy="58" r="6"/>
+    <circle class="node" cx="88" cy="42" r="6"/>
+    <circle class="pulse" cx="88" cy="42" r="14"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="170" y="78" class="word">mem<tspan class="word-accent">QL</tspan></text>
+  <text x="172" y="106" class="tag">AI-NATIVE MEMORY GRAPH</text>
+</svg>

@@ -1,6 +1,59 @@
-# memQL
+<p align="center">
+  <img src="assets/logo.svg" alt="memQL" width="500">
+</p>
 
-**Time-series memory graph database with MemQL DSL query language**
+<h1 align="center">memQL</h1>
+
+<p align="center">
+  <strong>AI-native time-series memory graph with a single DSL.</strong><br>
+  Unifies concepts, queries, agent workflows, and voice into deployable primitives.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/znasllc-io/memql?color=blue" alt="License"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/znasllc-io/memql" alt="Go version">
+  <img src="https://img.shields.io/github/last-commit/znasllc-io/memql" alt="Last commit">
+  <a href="https://goreportcard.com/report/github.com/znasllc-io/memql"><img src="https://goreportcard.com/badge/github.com/znasllc-io/memql" alt="Go Report Card"></a>
+</p>
+
+<p align="center"><sub><em>Designed and built with Claude as co-author.</em></sub></p>
+
+> **Pre-1.0 / actively developed.** API surface and DSL syntax are still evolving.
+
+---
+
+## What is memQL?
+
+memQL is a distributed time-series memory graph with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes.
+
+It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a memQL cluster.
+
+## Why memQL?
+
+Agent and voice deployments today are integration-heavy. Most of the engineering effort is plumbing — keeping state consistent across a vector store, an orchestrator, a tool registry, and a model provider. memQL collapses that plumbing: concepts and queries live in the same place; tools, automations, and workflows reference them directly; the engine handles consistency, time-series storage, and execution.
+
+## Example
+
+```
+@version("1.0.0")
+@namespace("acme")
+concept ticket {
+  id          string   @required
+  subject     string   @required
+  priority    string
+  createdAt   datetime @required
+}
+
+@enabled
+@handler(type="query", query="concept==v1:acme:ticket && ticket.priority==args.priority")
+@executionTime("fast")
+@description("List tickets by priority")
+tool listByPriority {
+  priority string @required
+}
+```
+
+A concept (schema) and an LLM-callable tool in the same file, same language. Add queries, mutations, or event-driven automations right next to them.
 
 ---
 
