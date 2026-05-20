@@ -9,9 +9,8 @@ import (
 // mutation syntax with an `insert` block.
 func TestParseMutationMemQL_GoldenPath(t *testing.T) {
 	src := `@enabled
-@useConcept(space)
 @description("Create a cognition space.")
-mutation mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -40,9 +39,8 @@ mutation mutationCreateSpace {
 // TestParseMutationMemQL_UpdateForm exercises the partial-update
 // counterpart: `update <concept> { id: ..., fieldA: ... }`.
 func TestParseMutationMemQL_UpdateForm(t *testing.T) {
-	src := `@useConcept(user)
-@description("Stamp dataExportLastAt on a user row.")
-mutation mutationBumpUserExport {
+	src := `@description("Stamp dataExportLastAt on a user row.")
+mutation user mutationBumpUserExport {
   args {
     userId  string  @required
   }
@@ -64,9 +62,8 @@ mutation mutationBumpUserExport {
 // TestParseMutationMemQL_RejectsUnknownAnnotation locks the
 // per-construct annotation allow-list.
 func TestParseMutationMemQL_RejectsUnknownAnnotation(t *testing.T) {
-	src := `@useConcept(space)
-@bogusKnob
-mutation mutationFoo {
+	src := `@bogusKnob
+mutation space mutationFoo {
   args { id string @required }
   insert space {
     id: args.id
@@ -90,13 +87,11 @@ func TestParseMutationMemQL_AcceptsMutationOnlyAnnotations(t *testing.T) {
 		`@destructive`,
 		`@requiresConfirmation`,
 		`@actor("system")`,
-		`@useMutation(other)`,
 	}
 	for _, ann := range mutationOnly {
 		t.Run(ann, func(t *testing.T) {
 			src := ann + `
-@useConcept(space)
-mutation mutationFoo {
+mutation space mutationFoo {
   args { id string @required }
   insert space {
     id: args.id

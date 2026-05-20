@@ -319,17 +319,15 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 		return decl, nil
 	}
 
-	// Form A: optional `as <alias>`.
+	// Reject Form A (`use <ns>.<concept> [as <alias>]`). The legacy
+	// single-binding shape was retired in the import-model pivot --
+	// every `use` clause must now be Form B `use <path>.{ names }`.
 	if p.check(TokenKeywordAs) {
-		p.advance()
-		if !p.check(TokenIdentifier) {
-			return nil, newParseErrorf(&p.current, "expected alias name after 'as', got %q", p.current.Literal)
-		}
-		decl.Alias = p.current.Literal
-		p.advance()
+		return nil, newParseErrorf(&p.current, "`use %s as <alias>` is retired -- use Form B `use <module>.{ <name> }` instead (alias support removed; rename the construct at source if names collide)", path)
 	}
-
-	return decl, nil
+	// A bare `use <ns>.<concept>` (no `.{` body, no `as`) is also Form
+	// A and similarly rejected.
+	return nil, newParseErrorf(&p.current, "`use %s` is the retired Form A shape -- declare the dependency as Form B `use <module>.{ %s }` instead (file-top import block names the source module + lists the constructs pulled into local scope)", path, path)
 }
 
 // parseDefinition parses a single definition (function).

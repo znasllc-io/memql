@@ -112,26 +112,10 @@ func TestExtractImports_OnlyImports(t *testing.T) {
 	}
 }
 
-// TestExtractImports_LegacyUseStripped locks that legacy `use`
-// declarations are consumed but don't pollute Imports.
-func TestExtractImports_LegacyUseStripped(t *testing.T) {
-	source := `use cognition.participant
-
-import (
-	"./foo"
-)
-
-shape body {
-  row.id
-}`
-	file, err := ExtractImports(source)
-	if err != nil {
-		t.Fatalf("ExtractImports: %v", err)
-	}
-	if len(file.Imports) != 1 {
-		t.Errorf("got %d imports, want 1", len(file.Imports))
-	}
-}
+// (TestExtractImports_LegacyUseStripped was retired in PR C
+// together with the Form A `use <ns>.<concept>` parser arm. Form A
+// is no longer accepted at the lex/parse layer; ExtractImports
+// would now reject the example source it used to validate.)
 
 // TestExtractImports_BadImportSurfaces locks that malformed import
 // blocks DO error even when the rest of the file would be tolerated.

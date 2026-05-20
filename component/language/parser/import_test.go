@@ -77,45 +77,11 @@ func TestParser_ImportBlock_SingleLine(t *testing.T) {
 	}
 }
 
-// TestParser_ImportBlock_CoexistsWithUse locks the transitional
-// state where a file carries both legacy `use` declarations and
-// new `import` blocks. Commit 3 removes the `use` arm; until then
-// both must parse.
-func TestParser_ImportBlock_CoexistsWithUse(t *testing.T) {
-	source := `import (
-		"./cognition/participant"
-	)
-	use cognition.space`
-	file, err := ParseFile(source)
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-	if len(file.Imports) != 1 {
-		t.Fatalf("Imports: want 1, got %d", len(file.Imports))
-	}
-	if len(file.Uses) != 1 {
-		t.Fatalf("Uses: want 1, got %d", len(file.Uses))
-	}
-}
-
-// TestParser_ImportBlock_OrderUseFirst locks the reverse order:
-// `use` first, then `import`. The parser accepts either ordering.
-func TestParser_ImportBlock_OrderUseFirst(t *testing.T) {
-	source := `use cognition.space
-	import (
-		"./cognition/participant"
-	)`
-	file, err := ParseFile(source)
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-	if len(file.Imports) != 1 {
-		t.Fatalf("Imports: want 1, got %d", len(file.Imports))
-	}
-	if len(file.Uses) != 1 {
-		t.Fatalf("Uses: want 1, got %d", len(file.Uses))
-	}
-}
+// (The two tests that asserted legacy `use <ns>.<concept>` coexistence
+// with the Go-style `import (...)` block were retired in PR C
+// together with the Form A `use` parser arm; Form A now hard-fails
+// at parse time. See TestParseUseDeclaration_FormA_BareConcept_Rejected
+// in use_decl_form_b_test.go for the lockdown contract.)
 
 // TestParser_ImportBlock_MissingPath locks the error path when an
 // import block opens but contains no string entry.

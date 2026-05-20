@@ -314,7 +314,6 @@ logic logicPurgeExpiredArchivedSpaces {
 // "voice moved back to your Team chat" card lands -- handled by a
 // sibling automation when needed (deferred until the frontend wiring
 // shows the need).
-@useMutation(mutationCreateCanvasState)
 @description("Phase 7 of chat-architecture. Triggered when a user's activeSpaceId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.")
 logic logicVoiceMigrationOnSecondHuman {
   args {

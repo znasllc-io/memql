@@ -10,9 +10,16 @@ import (
 // construct source. kindLabel is the construct keyword used in the
 // error message; allowed is the construct's allow-list.
 //
-// Returns nil when every top-level `@name` is in the allow-list.
-// Returns an error citing the offending name + the full allow-list
-// on the first mismatch.
+// Also hard-rejects the legacy @use* family of annotations
+// (@useConcept / @useShape / @useQuery / @useMutation / @useLogic /
+// @useBuiltin / @useTrait / @useSpec / @useTool / @usePrompt /
+// @useProvider / @useAutomation) with a migration-pointing error
+// message. These were retired in the import-model pivot in favour of
+// file-top `use <module>.{ names }` imports plus signature-bound
+// concept binding for seeds / queries / mutations / shapes.
+//
+// Returns nil when every top-level `@name` is in the allow-list and
+// no @use* annotation is present.
 func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]bool) error {
 	bodyStart := findConstructBodyOpen(source, kindLabel)
 	if bodyStart < 0 {
@@ -28,6 +35,9 @@ func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]b
 		name := extractAnnotationIdent(line)
 		if name == "" {
 			continue
+		}
+		if strings.HasPrefix(name, "use") && len(name) > 3 && name[3] >= 'A' && name[3] <= 'Z' {
+			return fmt.Errorf("`@%s(...)` is retired -- declare the dependency via a file-top `use <module>.{ ... }` import instead, and (for seeds/queries/mutations/shapes) put the bound concept in the signature (`%s <Concept> <name> { ... }`)", name, kindLabel)
 		}
 		if !allowed[name] {
 			return fmt.Errorf("unknown %s annotation @%s -- supported: %s", kindLabel, name, FormatAnnotationAllowList(allowed))
