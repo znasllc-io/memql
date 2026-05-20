@@ -231,15 +231,9 @@ func TestRandomSuffix_Charset(t *testing.T) {
 func TestGenerateExecutionID_Format(t *testing.T) {
 	id := generateExecutionId()
 
-	// Should start with "exec-"
-	if len(id) < 5 || id[:5] != "exec-" {
-		t.Errorf("execution ID should start with 'exec-', got %q", id)
-	}
-
-	// Should contain timestamp and random suffix
-	// Format: exec-YYYYMMDD-HHMMSS-XXXXXX
-	if len(id) < 26 {
-		t.Errorf("execution ID should be at least 26 characters, got %d: %q", len(id), id)
+	// Format: YYYYMMDD-HHMMSS-XXXXXX (21 chars)
+	if len(id) < 21 {
+		t.Errorf("execution ID should be at least 21 characters, got %d: %q", len(id), id)
 	}
 }
 

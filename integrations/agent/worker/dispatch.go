@@ -482,11 +482,11 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 }
 
 func newCallId() string {
-	return "call-" + randomHex(12)
+	return randomHex(12)
 }
 
 func newInvocationId() string {
-	return "wkri-" + randomHex(12)
+	return randomHex(12)
 }
 
 func randomHex(n int) string {

@@ -639,8 +639,7 @@ func (s *audioSession) SynthesizeAuto(spaceId, participantId, text, voice string
 		return fmt.Errorf("TTS not available: provider not configured")
 	}
 
-	// Generate auto-prefixed request ID
-	requestId := "auto-" + uuid.NewString()
+	requestId := uuid.NewString()
 
 	// Use defaults if not provided
 	if voice == "" {
