@@ -19,7 +19,7 @@
 
 <p align="center"><sub><em>Designed and built with Claude as co-author.</em></sub></p>
 
-> **Pre-1.0 / actively developed.** API surface and DSL syntax are still evolving.
+> **Status: Alpha / pre-1.0 — not production-ready.** memQL is under active development. The DSL, engine API, and wire surface are still evolving; expect breaking changes between commits. Suitable for experimentation, prototyping, and early-design feedback today.
 
 ---
 
