@@ -39,7 +39,7 @@ import (
 // Use was successfully connected.
 func looksLikeCanonicalUserId(s string) bool {
 	t := strings.TrimSpace(s)
-	return strings.HasPrefix(t, "_system:v1:identity:user:") ||
+	return strings.HasPrefix(t, "default:v1:identity:user:") ||
 		strings.HasPrefix(t, "v1:identity:user:")
 }
 

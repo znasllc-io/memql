@@ -470,7 +470,7 @@ func defaultDisplayName(email string) string {
 // no email going out and the user stuck on a "Sign-in error" page.
 func composeMagicLinkIdentityId(userId, email string) string {
 	bareUser := userId
-	const userCanonicalPrefix = "_system:v1:identity:user:"
+	const userCanonicalPrefix = "default:v1:identity:user:"
 	if strings.HasPrefix(bareUser, userCanonicalPrefix) {
 		bareUser = strings.TrimPrefix(bareUser, userCanonicalPrefix)
 	}

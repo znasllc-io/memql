@@ -119,7 +119,7 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 	selfId := ctx.Identity.ID
 	for _, n := range result.Bundle.Nodes {
 		nodeId := n.GetId()
-		if nodeId == selfId || nodeId == "_system:v1:cluster:node:"+selfId {
+		if nodeId == selfId || nodeId == "default:v1:cluster:node:"+selfId {
 			continue
 		}
 		// Parse payload for address and health.
