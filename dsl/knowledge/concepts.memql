@@ -103,10 +103,10 @@ concept imageRegion {
 
 @version("1.0.0")
 @namespace("common")
-@description("Synthetic 'bridge' that combines multiple knowledge domains for a specific role. Generated per-agent at training time when an agent has 2+ knowledge domains attached: the bridge captures cross-domain connections specific to that combination + role (e.g. how a customer_service agent applies tax_law + accounting differently from a legal_compliance agent applying the same two domains). Hash-keyed by (roleSlug, sortedDomainIds) so identical combinations across agents share the same bridge corpus -- pay for the LLM call once per (role, combo) pair, reuse for all subsequent agents that match. Per docs/planning/knowledge-seeder.md (v2 bridge chunks).")
+@description("Synthetic 'bridge' that combines multiple knowledge domains for a specific role. Generated per-agent at training time when an agent has 2+ knowledge domains attached: the bridge captures cross-domain connections specific to that combination + role (e.g. how a customer-service agent applies tax_law + accounting differently from a legal-compliance agent applying the same two domains). Hash-keyed by (roleSlug, sortedDomainIds) so identical combinations across agents share the same bridge corpus -- pay for the LLM call once per (role, combo) pair, reuse for all subsequent agents that match. Per docs/planning/knowledge-seeder.md (v2 bridge chunks).")
 concept knowledgeBridge {
   bridgeId            string  @required @description("Stable id derived from sha256(roleSlug + ':' + sortedDomainIds.join(',')); shared across agents that have the same role + domain set.")
-  roleSlug            string  @required @description("The role this bridge specialises framing for. customer_service x {accounting, tax_law} is a different bridge from accounting_finance x {accounting, tax_law}.")
+  roleSlug            string  @required @description("The role this bridge specialises framing for. customer-service x {accounting, tax_law} is a different bridge from accounting-finance x {accounting, tax_law}.")
   domainIds           []string @required @description("Sorted list of domain ids this bridge spans. Reading this back gives you the combination key.")
   combinationKey      string  @required @description("Human-readable join of domainIds for at-a-glance debugging in logs / DB. Same content as sorted(domainIds).join(',').")
   chunkCount          int     @description("Number of chunks generated under this bridge id. Cached for status displays.")

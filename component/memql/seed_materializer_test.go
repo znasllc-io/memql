@@ -36,7 +36,7 @@ func TestRenderArgsObject_NestedBlocks(t *testing.T) {
 		"capabilities": map[string]any{
 			"avatar":  true,
 			"claw":    false,
-			"domains": []any{"general", "copresent_ui"},
+			"domains": []any{"general", "copresent-ui"},
 			"tools":   []any{},
 		},
 		"providerConfig": map[string]any{
@@ -56,7 +56,7 @@ func TestRenderArgsObject_NestedBlocks(t *testing.T) {
 	mustContain(t, got, `capabilities: {`)
 	mustContain(t, got, `avatar: true`)
 	mustContain(t, got, `claw: false`)
-	mustContain(t, got, `domains: ["general", "copresent_ui"]`)
+	mustContain(t, got, `domains: ["general", "copresent-ui"]`)
 	mustContain(t, got, `tools: []`)
 	mustContain(t, got, `providerConfig: {`)
 	mustContain(t, got, `llm: {`)
