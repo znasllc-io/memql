@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0  # full history required for `gitleaks git .`
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.2'
+          go-version: '1.26'
           cache: true
       - name: install gitleaks
         # The GitHub org moved to gitleaks/gitleaks but the Go module path
