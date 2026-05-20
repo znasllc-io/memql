@@ -554,8 +554,8 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	}
 	invitationId, _ := guest["invitationId"].(string)
 	spaceId, _ := guest["spaceId"].(string)
-	plainToken, _ := guest["token"].(string)
-	if invitationId == "" || spaceId == "" {
+	tokenHash, _ := guest["tokenHash"].(string)
+	if invitationId == "" || spaceId == "" || tokenHash == "" {
 		return send(&memqlv1.JoinSpaceAsGuestResult{
 			ErrorCode:    "unauthenticated",
 			ErrorMessage: "guest claims missing invitation/space",
@@ -566,7 +566,10 @@ func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMess
 	// denormalized fields on the accept row) and re-check expiry --
 	// the interceptor already looked it up once, but the invitation
 	// may have been revoked between dispatch and handler execution.
-	invite, err := lookupInvitationByTokenHash(s.stream.Context(), s.service.engine, hashGuestToken(plainToken))
+	// Re-lookup uses the tokenHash that the interceptor stowed on
+	// claims; the plain token intentionally never enters the claims
+	// map (log-leak surface).
+	invite, err := lookupInvitationByTokenHash(s.stream.Context(), s.service.engine, tokenHash)
 	if err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "join: lookup", err)
 	}
