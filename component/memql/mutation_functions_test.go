@@ -149,6 +149,65 @@ mutation mutationCreateSpaceShorthand {
 	require.Equal(t, true, payload["active"])
 }
 
+// In the multi-construct file layout, the slicer prepends ALL file-top
+// `use ...` declarations to every emitted slice so the per-construct
+// parser has its imports. The signature-bound concept (`mutation
+// <Concept> <name>`) names the construct's single concept directly,
+// so the file-top use count is unrelated to "one concept per
+// mutation." Counting file-top uses against signature-bound
+// constructs was rejecting every mutation in
+// `cognition/mutations.memql` after the multi-construct consolidation
+// -- surfaced as memql-cockpit#49 (daily-space never created because
+// `mutationCreateDailySpace` was unloadable).
+func TestSignatureBoundMutationAcceptsMultipleFileTopUses(t *testing.T) {
+	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
+		"v1:cognition:space":    {Name: "v1:cognition:space"},
+		"v1:identity:request":   {Name: "v1:identity:request"},
+	})
+	src := `use cognition.concepts.{ space }
+use identity.concepts.{ request }
+
+mutation space mutationCreateDailySpace {
+  args {
+    spaceId       string  @required
+    name          string  @required
+    dailyDateKey  string  @required
+  }
+  insert space {
+    id: args.spaceId
+    args.name
+    args.dailyDateKey
+    kind: "daily"
+    private: true
+    status: "active"
+    active: true
+  }
+}`
+	fn, err := tryParseNewFunctionSyntax("mutationCreateDailySpace", "mutation", src, "test.memql", registry)
+	require.NoError(t, err)
+	require.NotNil(t, fn)
+	require.NotNil(t, fn.MutationTemplate)
+	require.Equal(t, "v1:cognition:space", fn.MutationTemplate.Concept)
+}
+
+// Legacy procedural-form queries / mutations (no signature-bound
+// concept) still get the single-use rule -- their `use` declaration
+// IS the concept binding, so two uses is genuinely ambiguous.
+func TestLegacyProceduralMutationRejectsMultipleUses(t *testing.T) {
+	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
+		"v1:cognition:space":  {Name: "v1:cognition:space"},
+		"v1:identity:request": {Name: "v1:identity:request"},
+	})
+	src := `use cognition.concepts.{ space }
+use identity.concepts.{ request }
+
+func (Mutation) mutationLegacyForm(ctx any) (any, error) {
+  return insert space { id: ctx.input.id }, nil
+}`
+	_, err := tryParseNewFunctionSyntax("mutationLegacyForm", "mutation", src, "test.memql", registry)
+	require.Error(t, err)
+}
+
 func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 	reg := newFunctionRegistry()
 	require.NoError(t, reg.add(&Function{
@@ -183,6 +242,101 @@ func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 // path. Without this, logicBootstrapDefaultPartition and the
 // identity logics hit the "function X is a mutation and cannot
 // be used inside query expressions" guard at call time.
+// A Logic whose body returns a BUILTIN call must substitute ArgRef
+// nodes in the builtin call's args before the builtin executor runs.
+// The Logic→Mutation path already does this via the F.6 hoist; the
+// Logic→Builtin path goes through the regular expandFunctionCall
+// path and must do the same. Without this, the builtin executor
+// receives `args["userId"] = *ArgReference{Path: "event.payload.
+// userId"}` and `asString(...)` returns empty -- which is exactly
+// how memql-cockpit#49's daily-space chain ended up calling
+// `dailyspace.ensureForUser` with empty userId even after the
+// trigger event fired correctly.
+func TestExpandExpression_SubstitutesArgRefsInBuiltinCallArgs(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:         "ensureDailySpaceForUser",
+		FunctionKind: "builtin",
+		Enabled:      true,
+		Executor:     "integration.dailyspace.ensureForUser",
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "userId", Type: "string"},
+			},
+		},
+	}))
+	require.NoError(t, reg.add(&Function{
+		Name:         "logicEnsureDailySpaceOnAuthSession",
+		FunctionKind: "logic",
+		Enabled:      true,
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "event", Type: "object"},
+			},
+		},
+		Expr: &FunctionCallExpression{
+			Name: "ensureDailySpaceForUser",
+			Args: map[string]any{
+				"userId": &ArgReference{Path: "event.payload.userId"},
+			},
+		},
+	}))
+
+	eventMap := map[string]any{
+		"topic": "graph.node.created.v1:identity:authSession",
+		"kind":  "NodeCreated",
+		"payload": map[string]any{
+			"userId": "v1:identity:user:abc123",
+		},
+	}
+
+	// Two input shapes that arrive at this layer in practice:
+	//   - flat {event: ...} (engine's own expression parser produces
+	//     this for tests / programmatic dispatch).
+	//   - positional {"0": {event: ...}} (the language parser produces
+	//     this for `logicX({event: ...})` -- which is what the function
+	//     step emits when an automation fires the Logic).
+	// Both must reach the builtin with the userId resolved to the
+	// nested string. The positional shape was the production-hit one
+	// in memql-cockpit#49 -- the automation step rendered to a query
+	// string parsed back into positional form, and ArgRef
+	// substitution failed because the substitution helper looked up
+	// `event.payload.userId` against `{"0": {event: ...}}` instead of
+	// the flat shape.
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "flat args (engine parser)",
+			args: map[string]any{"event": eventMap},
+		},
+		{
+			name: "positional-wrapped args (language parser, automation step path)",
+			args: map[string]any{"0": map[string]any{"event": eventMap}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &QueryPlan{
+				Root: &FunctionCallExpression{
+					Name: "logicEnsureDailySpaceOnAuthSession",
+					Args: tc.args,
+				},
+			}
+			require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+
+			require.NotNil(t, plan.Root, "expected expanded builtin expression")
+			builtin, ok := plan.Root.(*BuiltinFunctionExpression)
+			require.True(t, ok, "expected BuiltinFunctionExpression, got %T", plan.Root)
+			require.Equal(t, "ensureDailySpaceForUser", builtin.Name)
+			require.Equal(t, "v1:identity:user:abc123", builtin.Args["userId"],
+				"ArgRef substitution must produce the resolved string -- without it the builtin executor sees an *ArgReference and asString() returns empty")
+		})
+	}
+}
+
 func TestResolvePlanFunctions_LogicReturningMutationDispatches(t *testing.T) {
 	reg := newFunctionRegistry()
 	require.NoError(t, reg.add(&Function{

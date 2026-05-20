@@ -46,6 +46,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -83,7 +84,7 @@ func (d *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "ensureForUser",
-			Description: "Ensure today's daily space exists for the given user. Reads the user's preferences.timezone to compute their local date key; calls mutationCreateDailySpace idempotently on the deterministic id daily-<userShortId>-<dateKey>. No-op when preferences.dailySpaceEnabled is false. Safe to call repeatedly -- the underlying insert collapses on id collision.",
+			Description: "Ensure today's daily space exists for the given user. Reads the user's preferences.timezone to compute their local date key; calls mutationCreateDailySpace idempotently on a content-addressed deterministic id derived from (kind=daily, userId, dateKey) via core/id.Engine.MustFromMap. No-op when preferences.dailySpaceEnabled is false. Safe to call repeatedly -- the underlying insert collapses on id collision.",
 			Handler:     d.handleEnsureForUser,
 			ArgsSchema: map[string]string{
 				"userId": "string (required) -- canonical or short v1:identity:user.id",
@@ -202,16 +203,20 @@ func (d *Integration) ensureForUser(ctx context.Context, userId string) (ensureR
 	out.DateKey = dateKey
 	out.TzUsed = tzUsed
 
-	shortUserId := userId
-	if _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
-		shortUserId = parsed
-	}
-	// Deterministic id matches the schema's documented pattern
-	// `daily-{userShortId}-{dateKey}` -- the engine collapses repeat
-	// inserts on id collision so every call after the first lands as
-	// a no-op. The id is partition-scoped automatically by the
-	// mutation's @useConcept path; we pass the short form.
-	spaceId := fmt.Sprintf("daily-%s-%s", shortUserId, dateKey)
+	// Deterministic content-addressed id via the canonical helper.
+	// Same (userId, dateKey) always produces the same id, so repeat
+	// calls collapse on the engine's id-conflict path. The
+	// `kind: "daily"` factor namespaces the hash away from any
+	// unrelated content-addressed row that might happen to mix the
+	// same fields. No hand-rolled "daily-" string prefix -- the row's
+	// `kind` payload field is the canonical discriminator; the id
+	// itself is opaque per the post-PR-83 helper rule.
+	shortUserId := string(id.New().MustFromMap(map[string]any{
+		"kind":    "daily",
+		"userId":  userId,
+		"dateKey": dateKey,
+	}))
+	spaceId := shortUserId
 	out.SpaceId = spaceId
 
 	// Display name biased toward "the user's daily" rather than the
@@ -221,9 +226,16 @@ func (d *Integration) ensureForUser(ctx context.Context, userId string) (ensureR
 	name := fmt.Sprintf("Daily %s", dateKey)
 
 	sysCtx := systemActorContext(ctx)
+	// Pass ownerUserId explicitly: the mutation runs under the
+	// `system:dailyspaceAutomation` actor so the engine's actor-
+	// required gate is satisfied, but the space itself must be
+	// owned by the user we're provisioning for. Without this the
+	// row's payload.ownerUserId is unset (or, worse, an unresolved
+	// `actor.userId` token literal) and downstream queries that
+	// filter on ownership miss the row.
 	mutation := fmt.Sprintf(
-		`mutationCreateDailySpace({spaceId: %q, name: %q, dailyDateKey: %q})`,
-		spaceId, name, dateKey,
+		`mutationCreateDailySpace({spaceId: %q, name: %q, dailyDateKey: %q, ownerUserId: %q})`,
+		spaceId, name, dateKey, userId,
 	)
 	if _, err := d.engine.Execute(sysCtx, mutation); err != nil {
 		return out, fmt.Errorf("dailyspace.ensureForUser(%q): create daily: %w", userId, err)
@@ -353,19 +365,56 @@ func systemActorContext(ctx context.Context) context.Context {
 }
 
 // extractRows normalizes the engine's Execute return into a uniform
-// []map[string]any with payload fields at the top level. Three shapes
-// land here in practice: the slice form ([]map[string]any) the shape-
-// wrapped query paths return directly, the []any heterogeneous list
-// the legacy paths produce, and the {bundle: {nodes: [...]}} envelope
-// the raw concept queries wrap their nodes in.
+// []map[string]any with payload fields at the top level.
 //
-// Mirrors integrations/agents/factory.go's extractRowsFromExecuteResult
-// minus the MemoryNode round-trip -- we never need the intrinsic
-// concept/type/createdBy for daily-space orchestration; just the row
-// fields the shape projected.
+// The engine returns `*memql.ExecuteResult` -- a Go struct, not the
+// untyped `any` shape this function used to expect. Unwrap it via
+// `OutputPayload()` first; for shape-wrapped queries that's the
+// projected map / slice, and for raw bundle queries it's the
+// *GraphBundle which we walk into MemoryNode form.
+//
+// Without the *ExecuteResult branch, every shape-wrapped lookup
+// (queryUserById, queryActiveUsers, ...) silently returned 0 rows
+// here -- that's how memql-cockpit#49 ended up with the daily-space
+// integration reporting `user not found` for a user that clearly
+// existed in the database. The query was returning the user; the
+// extractor was just dropping the result on the floor because the
+// type switch had no case for the *ExecuteResult Go type.
 func extractRows(raw any) []map[string]any {
 	if raw == nil {
 		return nil
+	}
+	// Unwrap the engine's *ExecuteResult to the underlying payload
+	// before walking the value-level shapes below. OutputPayload
+	// returns r.output when set (shape projections) or r.Bundle
+	// otherwise (raw concept queries).
+	if res, ok := raw.(*memql.ExecuteResult); ok && res != nil {
+		raw = res.OutputPayload()
+	}
+	if raw == nil {
+		return nil
+	}
+	// Raw graph-bundle path: walk Nodes -> map shape directly. The
+	// MemoryNode payload field on the Bundle is a structpb.Struct;
+	// AsMap surfaces it as map[string]any.
+	if bundle, ok := raw.(*memqlv1.GraphBundle); ok && bundle != nil {
+		out := make([]map[string]any, 0, len(bundle.GetNodes()))
+		for _, n := range bundle.GetNodes() {
+			if n == nil {
+				continue
+			}
+			row := map[string]any{
+				"id":      n.GetId(),
+				"concept": n.GetConcept(),
+			}
+			if payload := n.GetPayload(); payload != nil {
+				for k, v := range payload.AsMap() {
+					row[k] = v
+				}
+			}
+			out = append(out, row)
+		}
+		return out
 	}
 	switch v := raw.(type) {
 	case []map[string]any:
@@ -379,7 +428,7 @@ func extractRows(raw any) []map[string]any {
 		}
 		return out
 	case map[string]any:
-		// Bundle shape: {bundle: {nodes: [...]}}
+		// Bundle shape (legacy): {bundle: {nodes: [...]}}
 		if bundle, ok := v["bundle"].(map[string]any); ok {
 			if nodes, ok := bundle["nodes"].([]any); ok {
 				out := make([]map[string]any, 0, len(nodes))

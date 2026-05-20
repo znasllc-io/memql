@@ -22,14 +22,20 @@ automation onSpaceCreated {
 		t.Fatalf("NormaliseAutomationSource: %v", err)
 	}
 
-	// The rewriter should have emitted automationSeedWelcomeCurriculum
-	// as a function-call expression, with args translated and event.X
-	// rewritten to ctx.input.X.
+	// The rewriter should emit automationSeedWelcomeCurriculum as a
+	// function-call expression. event.X references pass through
+	// verbatim -- the runtime function-step args resolver resolves
+	// them against the evaluator's `event` binding. (Earlier versions
+	// translated to ctx.input.X, but ctx.input was never a recognised
+	// runtime reference; see memql-cockpit#49.)
 	if !strings.Contains(rewritten, "automationSeedWelcomeCurriculum(") {
 		t.Errorf("expected rewritten source to contain automationSeedWelcomeCurriculum( call, got:\n%s", rewritten)
 	}
-	if !strings.Contains(rewritten, "ctx.input.payload.id") {
-		t.Errorf("expected event.payload.id rewrite to ctx.input.payload.id, got:\n%s", rewritten)
+	if !strings.Contains(rewritten, "event.payload.id") {
+		t.Errorf("expected event.payload.id to ride through verbatim, got:\n%s", rewritten)
+	}
+	if strings.Contains(rewritten, "ctx.input") {
+		t.Errorf("rewriter must not emit ctx.input references, got:\n%s", rewritten)
 	}
 }
 
