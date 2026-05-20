@@ -258,10 +258,7 @@ func (r *ConceptResolver) resolveFunctionDef(def *languageParser.FunctionDef, sy
 }
 
 // resolveAttribute resolves concept references in an attribute.
-// Handles @trigger(on=participant.created) -> @trigger(event="graph.node.created.*.v1:cognition:participant")
-// The emitted pattern uses the current 5-segment partition-aware topic form
-// (graph.node.{action}.{partition}.{concept}) with `*` as the partition
-// wildcard so the trigger matches emitted CDC events across all partitions.
+// Handles @trigger(on=participant.created) -> @trigger(event="graph.node.created.v1:cognition:participant").
 func (r *ConceptResolver) resolveAttribute(attr *languageParser.Attribute, symbols map[string]*symbolEntry) error {
 	if attr.Name != languageParser.AttrTrigger {
 		return nil
@@ -306,13 +303,9 @@ func (r *ConceptResolver) resolveAttribute(attr *languageParser.Attribute, symbo
 		return fmt.Errorf("@trigger on=%s: %w", onStr, err)
 	}
 
-	// Replace on= with event= using the canonical 5-segment topic format.
-	// The `*` in the partition position matches any partition (default, acme,
-	// _system, etc.) and mirrors the convention used by .memql automation
-	// triggers written with the explicit event= form. Emitting the 4-segment
-	// form silently never matched because graph CDC events ship as
-	// graph.node.{action}.{partition}.{concept}.
-	eventTopic := fmt.Sprintf("graph.node.%s.*.%s", eventAction, conceptId)
+	// Replace on= with event= using the canonical topic format
+	// graph.node.{action}.{concept}.
+	eventTopic := fmt.Sprintf("graph.node.%s.%s", eventAction, conceptId)
 	delete(attr.Args, "on")
 	attr.Args["event"] = eventTopic
 

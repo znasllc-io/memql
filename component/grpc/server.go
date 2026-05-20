@@ -972,20 +972,20 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCallTool(envelope, payload.CallTool)
 	case *memqlv1.MemqlClientMessage_ClientToolResult:
 		return s.handleClientToolResult(envelope, payload.ClientToolResult)
-	case *memqlv1.MemqlClientMessage_SIChat:
-		return s.handleAiChat(envelope, payload.SIChat)
-	case *memqlv1.MemqlClientMessage_SISpeech:
-		return s.handleAiSpeech(envelope, payload.SISpeech)
-	case *memqlv1.MemqlClientMessage_SITranscribe:
-		return s.handleAiTranscribe(envelope, payload.SITranscribe)
-	case *memqlv1.MemqlClientMessage_SITranscribeStreamStart:
-		return s.handleAiTranscribeStreamStart(envelope, payload.SITranscribeStreamStart)
-	case *memqlv1.MemqlClientMessage_SITranscribeStreamChunk:
-		return s.handleAiTranscribeStreamChunk(envelope, payload.SITranscribeStreamChunk)
-	case *memqlv1.MemqlClientMessage_SITranscribeStreamEnd:
-		return s.handleAiTranscribeStreamEnd(envelope, payload.SITranscribeStreamEnd)
-	case *memqlv1.MemqlClientMessage_SISuggest:
-		return s.handleAiSuggest(envelope, payload.SISuggest)
+	case *memqlv1.MemqlClientMessage_SiChat:
+		return s.handleAiChat(envelope, payload.SiChat)
+	case *memqlv1.MemqlClientMessage_SiSpeech:
+		return s.handleAiSpeech(envelope, payload.SiSpeech)
+	case *memqlv1.MemqlClientMessage_SiTranscribe:
+		return s.handleAiTranscribe(envelope, payload.SiTranscribe)
+	case *memqlv1.MemqlClientMessage_SiTranscribeStreamStart:
+		return s.handleAiTranscribeStreamStart(envelope, payload.SiTranscribeStreamStart)
+	case *memqlv1.MemqlClientMessage_SiTranscribeStreamChunk:
+		return s.handleAiTranscribeStreamChunk(envelope, payload.SiTranscribeStreamChunk)
+	case *memqlv1.MemqlClientMessage_SiTranscribeStreamEnd:
+		return s.handleAiTranscribeStreamEnd(envelope, payload.SiTranscribeStreamEnd)
+	case *memqlv1.MemqlClientMessage_SiSuggest:
+		return s.handleAiSuggest(envelope, payload.SiSuggest)
 	// MemQL Sense -- language intelligence
 	case *memqlv1.MemqlClientMessage_SenseTokenize:
 		return s.handleSenseTokenize(envelope, payload.SenseTokenize)
@@ -1102,11 +1102,6 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// Enrich context with request metadata for the metadata collector.
 	ctx = s.enrichContextWithMetadata(ctx, envelope)
 
-	// Inject partition from client envelope into context for per-request isolation.
-	if partition := strings.TrimSpace(envelope.GetPartition()); partition != "" {
-		ctx = memqlengine.ContextWithPartition(ctx, partition)
-	}
-
 	// Re-hydrate cross-node provenance: when this envelope arrived via
 	// proxySI / SIForward (BFF -> worker), stampEnvelopeProvenance put
 	// the caller's provenance on envelope.Metadata. We attach it to ctx
@@ -1205,19 +1200,6 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	// Register with the event bus if available
 	if s.service.eventBus != nil {
 		pattern := events.TopicPatternFromSubscriptionKind(msg.GetKind(), msg.GetFilter())
-		// Scope graph subscriptions to the caller's envelope partition.
-		// Emitted graph topics are
-		// `graph.node.{action}.{partition}.{concept}` -- if the client
-		// sent a wildcard for the partition segment, rewrite it to
-		// the concrete envelope value so a session can never observe
-		// other tenants' events. The rewrite uses the literal
-		// envelope.partition (no normalization beyond trimming),
-		// matching the partition that publishes will fire under.
-		// Cluster-owners ride the same rewrite -- they bypass the
-		// per-partition ACL but their subscriptions still scope to
-		// whatever envelope they chose, which is the right
-		// dev/cockpit semantic.
-		pattern = scopeGraphPatternToPartition(pattern, msg.GetKind(), envelope.GetPartition())
 		unsubscribe := s.service.eventBus.Subscribe(pattern, func(event events.Event) {
 			select {
 			case s.eventChan <- event:

@@ -420,7 +420,7 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId string
 	seenIds := make(map[string]struct{})
 	var seenMu sync.Mutex
 
-	pattern := "graph.node.created.*.v1:cognition:utterance"
+	pattern := "graph.node.created.v1:cognition:utterance"
 	subName := fmt.Sprintf("voice-agent-speak-%s-%s", spaceId, gaAgentId)
 	unsubscribe := s.service.eventBus.Subscribe(pattern, func(e events.Event) {
 		reply, ok := extractGAReplyFromEvent(e, spaceId, gaAgentId)
@@ -630,7 +630,7 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 // the reply text back as VoiceAgentTurnDelta + VoiceAgentTurnComplete.
 //
 // The user's final utterance was already inserted by
-// handleVoiceAgentFinalTranscript (which fires graph.node.created.*.v1:cognition:utterance
+// handleVoiceAgentFinalTranscript (which fires graph.node.created.v1:cognition:utterance
 // -- the existing cognition automation handler consumes that and
 // dispatches the GA's reply). Phase 6 just subscribes to the matching
 // reply event with a bounded timeout and translates to the
@@ -687,7 +687,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	// participantType="agent" + participantId=gaAgentId; filter for
 	// that specific shape so other agents' replies (specialists,
 	// chime-ins) don't trigger us.
-	pattern := "graph.node.created.*.v1:cognition:utterance"
+	pattern := "graph.node.created.v1:cognition:utterance"
 
 	replyCh := make(chan voiceAgentReply, 4)
 	unsubscribe := s.service.eventBus.Subscribe(pattern, func(e events.Event) {

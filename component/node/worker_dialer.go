@@ -313,12 +313,12 @@ func (wd *WorkerDialer) run(ctx context.Context, markStarted func()) error {
 
 	if wd.eventBus != nil {
 		unsubCreated := wd.eventBus.Subscribe(
-			"graph.node.created.default.v1:cluster:node",
+			"graph.node.created.v1:cluster:node",
 			func(events.Event) { wd.triggerReconcile() },
 			events.WithSubscriberName("worker_dialer:nodeCreated"),
 		)
 		unsubUpdated := wd.eventBus.Subscribe(
-			"graph.node.updated.default.v1:cluster:node",
+			"graph.node.updated.v1:cluster:node",
 			func(events.Event) { wd.triggerReconcile() },
 			events.WithSubscriberName("worker_dialer:nodeUpdated"),
 		)
@@ -688,12 +688,12 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 			}
 		}
 
-	case *nodev1.NodeServerMessage_SIForwardResponse:
+	case *nodev1.NodeServerMessage_SiForwardResponse:
 		wd.sinkMu.RLock()
 		sink := wd.aiForwardSink
 		wd.sinkMu.RUnlock()
 		if sink != nil {
-			sink.Dispatch(payload.SIForwardResponse)
+			sink.Dispatch(payload.SiForwardResponse)
 		}
 
 	case *nodev1.NodeServerMessage_WorkbenchForwardResponse:

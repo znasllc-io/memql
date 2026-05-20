@@ -57,7 +57,7 @@ func NewPlannerAgentLoop(engine Engine, logger *slog.Logger) *PlannerAgentLoop {
 }
 
 // HandlePlanCreated is the event-bus subscriber for
-// graph.node.created.*.v1:planner:plan. Fires the first Planner Agent
+// graph.node.created.v1:planner:plan. Fires the first Planner Agent
 // invocation for a brand-new Plan: typically returns a 'decompose'
 // decision that stamps the Plan.phases outline.
 //
@@ -170,7 +170,7 @@ func (l *PlannerAgentLoop) ensurePlanLeftPlanning(ctx context.Context, planId st
 }
 
 // HandlePlanUpdated is the event-bus subscriber for
-// graph.node.updated.*.v1:planner:plan that complements
+// graph.node.updated.v1:planner:plan that complements
 // handlePlanApprovedForExecution. Re-invokes the Planner Agent when
 // the Plan transitions in a way that asks for the next decision (e.g.
 // a Task under the Plan transitioned to succeeded/failed and the

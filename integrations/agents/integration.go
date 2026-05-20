@@ -14,7 +14,7 @@
 // in `queued` status, and returns the planId immediately. The
 // dispatch side -- actually running the agent's tool loop -- is owned
 // by the planner integration's agent loop (which subscribes to
-// graph.node.created.*.v1:planner:plan and handles the agentInvocation
+// graph.node.created.v1:planner:plan and handles the agentInvocation
 // kind in a follow-up commit). For now the Plan sits in queued state
 // until that wiring lands; the contract this builtin exposes is
 // already correct so callers can write against it.
@@ -22,7 +22,7 @@
 // DSL callers consume the planId by:
 //
 //   - Fire-and-forget (automation case): ignore the return.
-//   - Subscribe to graph.node.updated.*.v1:planner:plan filtered by
+//   - Subscribe to graph.node.updated.v1:planner:plan filtered by
 //     id==<planId> for lifecycle progression.
 //   - Direct query via queryPlanById to read current state + output.
 //

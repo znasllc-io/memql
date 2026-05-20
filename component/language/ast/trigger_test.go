@@ -8,31 +8,31 @@ import (
 // structured-trigger assembly.
 func TestBuildTriggerTopic_HappyPath_AllFields(t *testing.T) {
 	cases := []struct {
-		event, concept, partition, want string
+		event, concept, want string
 	}{
-		{"node.created", "v1:cognition:participant", "*", "graph.node.created.*.v1:cognition:participant"},
-		{"node.updated", "v1:identity:user", "acme", "graph.node.updated.acme.v1:identity:user"},
-		{"node.deleted", "v1:cluster:node", "_system", "graph.node.deleted._system.v1:cluster:node"},
+		{"node.created", "v1:cognition:participant", "graph.node.created.v1:cognition:participant"},
+		{"node.updated", "v1:identity:user", "graph.node.updated.v1:identity:user"},
+		{"node.deleted", "v1:cluster:node", "graph.node.deleted.v1:cluster:node"},
 	}
 	for _, c := range cases {
-		got, err := BuildTriggerTopic(c.event, c.concept, c.partition)
+		got, err := BuildTriggerTopic(c.event, c.concept)
 		if err != nil {
-			t.Errorf("BuildTriggerTopic(%q, %q, %q): %v", c.event, c.concept, c.partition, err)
+			t.Errorf("BuildTriggerTopic(%q, %q): %v", c.event, c.concept, err)
 			continue
 		}
 		if got != c.want {
-			t.Errorf("BuildTriggerTopic(%q, %q, %q) = %q, want %q", c.event, c.concept, c.partition, got, c.want)
+			t.Errorf("BuildTriggerTopic(%q, %q) = %q, want %q", c.event, c.concept, got, c.want)
 		}
 	}
 }
 
 // TestBuildTriggerTopic_ConceptLess locks the "any concept" case.
 func TestBuildTriggerTopic_ConceptLess(t *testing.T) {
-	got, err := BuildTriggerTopic("node.created", "", "*")
+	got, err := BuildTriggerTopic("node.created", "")
 	if err != nil {
 		t.Fatalf("BuildTriggerTopic: %v", err)
 	}
-	want := "graph.node.created.*"
+	want := "graph.node.created"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -42,19 +42,10 @@ func TestBuildTriggerTopic_ConceptLess(t *testing.T) {
 func TestBuildTriggerTopic_RejectsBadKind(t *testing.T) {
 	cases := []string{"", "created", "node.foo", "graph.node.created"}
 	for _, kind := range cases {
-		_, err := BuildTriggerTopic(kind, "v1:foo:bar", "*")
+		_, err := BuildTriggerTopic(kind, "v1:foo:bar")
 		if err == nil {
 			t.Errorf("expected error for event=%q, got nil", kind)
 		}
-	}
-}
-
-// TestBuildTriggerTopic_RejectsEmptyPartition locks the partition
-// required-non-empty rule.
-func TestBuildTriggerTopic_RejectsEmptyPartition(t *testing.T) {
-	_, err := BuildTriggerTopic("node.created", "v1:foo:bar", "")
-	if err == nil {
-		t.Fatal("expected error for empty partition, got nil")
 	}
 }
 
@@ -62,9 +53,8 @@ func TestBuildTriggerTopic_RejectsEmptyPartition(t *testing.T) {
 // new-shape extraction.
 func TestParseStructuredTriggerArgs_AllFieldsPresent(t *testing.T) {
 	args := map[string]any{
-		"event":     "node.created",
-		"concept":   "cog.participant",
-		"partition": "*",
+		"event":   "node.created",
+		"concept": "cog.participant",
 	}
 	got, err := ParseStructuredTriggerArgs(args)
 	if err != nil {
@@ -76,17 +66,13 @@ func TestParseStructuredTriggerArgs_AllFieldsPresent(t *testing.T) {
 	if !got.HasConcept || got.Concept != "cog.participant" {
 		t.Errorf("Concept = %q (has=%v), want cog.participant (has=true)", got.Concept, got.HasConcept)
 	}
-	if !got.HasPartition || got.Partition != "*" {
-		t.Errorf("Partition = %q (has=%v), want * (has=true)", got.Partition, got.HasPartition)
-	}
 }
 
 // TestParseStructuredTriggerArgs_OmitConcept locks the concept-less
 // case (event-only triggers like cluster.started).
 func TestParseStructuredTriggerArgs_OmitConcept(t *testing.T) {
 	args := map[string]any{
-		"event":     "node.deleted",
-		"partition": "*",
+		"event": "node.deleted",
 	}
 	got, err := ParseStructuredTriggerArgs(args)
 	if err != nil {
@@ -104,16 +90,6 @@ func TestParseStructuredTriggerArgs_RejectsBadEventType(t *testing.T) {
 	_, err := ParseStructuredTriggerArgs(args)
 	if err == nil {
 		t.Fatal("expected error for non-string event=, got nil")
-	}
-}
-
-// TestParseStructuredTriggerArgs_RejectsBadPartitionType locks the
-// type-check on partition=.
-func TestParseStructuredTriggerArgs_RejectsBadPartitionType(t *testing.T) {
-	args := map[string]any{"partition": 42}
-	_, err := ParseStructuredTriggerArgs(args)
-	if err == nil {
-		t.Fatal("expected error for non-string partition=, got nil")
 	}
 }
 

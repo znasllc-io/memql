@@ -487,7 +487,7 @@ func addUsesToFile(filePath, root string, conceptMap map[string]string) (bool, e
 
 	// Now replace concept IDs with leaf names in common positions.
 	// We do NOT replace inside event strings like
-	// "graph.node.created.*.v1:cognition:participant" because those need the
+	// "graph.node.created.v1:cognition:participant" because those need the
 	// full ID at runtime. The resolver handles on= syntax and emits the
 	// canonical 5-segment partition-aware topic form with a `*` partition
 	// wildcard; see ConceptResolver.resolveAttribute.

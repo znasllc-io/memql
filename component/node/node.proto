@@ -197,7 +197,8 @@ message CapabilityResponse {
 message QueryForward {
   string request_id = 1;
   string query = 2;
-  string partition = 3;
+  reserved 3;
+  reserved "partition";
 }
 
 // QueryResponse carries the result of a forwarded query back to the
@@ -226,13 +227,11 @@ message QueryResponse {
 // `auth` carries the originating principal's claims (subject, email,
 // role) so the worker can reconstruct a TokenInfo and enforce the same
 // ACLs it would have applied if the client had connected directly.
-//
-// `partition` is the tenant partition from the original request
-// envelope so partition-scoped queries continue to work after the hop.
 message SIForwardRequest {
   string request_id = 1;
   map<string, string> auth = 2;
-  string partition = 3;
+  reserved 3;
+  reserved "partition";
   bytes memql_envelope = 4;  // Serialized memqlv1.MemqlClientMessage
 }
 
@@ -272,13 +271,12 @@ message SIForwardCancel {
 // variants without exploding the proto with one oneof per action.
 //
 // `auth` carries the originating principal's claims (subject, email,
-// role) so the workbench node can reconstruct the actor context;
-// `partition` is the tenant partition so multi-tenant workbench
-// deployments scope correctly.
+// role) so the workbench node can reconstruct the actor context.
 message WorkbenchForwardRequest {
   string request_id = 1;
   map<string, string> auth = 2;
-  string partition = 3;
+  reserved 3;
+  reserved "partition";
   string plan_id = 4;
   string action = 5;
   bytes args_json = 6;

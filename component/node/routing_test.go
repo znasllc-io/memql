@@ -14,7 +14,7 @@ func TestEvaluateRouting_BlockRules(t *testing.T) {
 		{"telemetry.metrics", true},
 		{"session.opened", true},
 		{"query.executed", true},
-		{"graph.node.created.default.v1:cluster:node", false},
+		{"graph.node.created.v1:cluster:node", false},
 	}
 
 	for _, tt := range tests {
@@ -37,10 +37,10 @@ func TestEvaluateRouting_ForwardRules(t *testing.T) {
 		broadcast  bool
 		targetType NodeType
 	}{
-		{"graph.node.created.default.v1:cluster:node", true, true, ""},
-		{"graph.node.updated.acme.v1:cluster:spawnEvent", true, true, ""},
-		{"graph.node.created.default.v1:cognition:participant", true, true, ""},
-		{"graph.node.updated.acme.v1:cognition:utterance", true, true, ""},
+		{"graph.node.created.v1:cluster:node", true, true, ""},
+		{"graph.node.updated.v1:cluster:spawnEvent", true, true, ""},
+		{"graph.node.created.v1:cognition:participant", true, true, ""},
+		{"graph.node.updated.v1:cognition:utterance", true, true, ""},
 	}
 
 	for _, tt := range tests {
@@ -63,10 +63,10 @@ func TestRegisterRoutingRule_PluginAdds(t *testing.T) {
 	// Verify a product plug-in can add forward rules through
 	// RegisterRoutingRule and have them picked up by defaultRoutingRules.
 	// Uses a namespace that main never ships so the test stays isolated.
-	RegisterRoutingRule(RoutingRule{Pattern: "graph.node.created.*.v1:testproduct:*", TargetType: ""})
+	RegisterRoutingRule(RoutingRule{Pattern: "graph.node.created.v1:testproduct:*", TargetType: ""})
 
 	rules := defaultRoutingRules()
-	d := evaluateRouting(rules, "graph.node.created.default.v1:testproduct:thing")
+	d := evaluateRouting(rules, "graph.node.created.v1:testproduct:thing")
 	if !d.Forward {
 		t.Fatalf("registered rule did not take effect: topic should forward")
 	}

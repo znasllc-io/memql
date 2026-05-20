@@ -112,7 +112,7 @@ func (p Provenance) IsZero() bool {
 // String renders the provenance compactly for log output.
 //
 //	"seed:assistant via=mutationCreateAgent"
-//	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.*.v1:agents:agent via=mutationUpdatePlanStatus"
+//	"automation:reRouteNeedsAgentOnAgentCreate trigger=graph.node.created.v1:agents:agent via=mutationUpdatePlanStatus"
 //	"direct:mutationCreateAgent"
 //	"system:conceptSeeder:v1:cluster:nodeType"
 func (p Provenance) String() string {
