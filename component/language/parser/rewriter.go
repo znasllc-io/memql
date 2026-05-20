@@ -760,7 +760,6 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if stepBody == "" {
 			return nil, fmt.Errorf("step %q: body is empty", stepName)
 		}
-		stepBody = translateEventRefsToCtxInput(stepBody)
 		call, err := translateStepCall(stepBody)
 		if err != nil {
 			return nil, fmt.Errorf("step %q: %w", stepName, err)
@@ -771,29 +770,25 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 	return out, nil
 }
 
-// eventRefMatcher matches whole-word `event` tokens for translation
-// to the legacy `ctx.input` envelope path. eventKeyMatcher recognises
-// `event` when it appears as a KEY in an object literal (immediately
-// before a `:`); those occurrences MUST NOT be rewritten -- the key
-// names the arg, not the value, and clobbering it breaks arg binding
-// for every event-triggered automation that uses the conventional
-// `{ event: event }` plumb-through pattern (see memql-cockpit#49 for
-// the daily-space symptom).
-var (
-	eventRefMatcher = regexp.MustCompile(`\bevent\b`)
-	eventKeyMatcher = regexp.MustCompile(`\bevent(\s*):`)
-)
-
-func translateEventRefsToCtxInput(expr string) string {
-	// Two-pass with a sentinel because Go's RE2 has no negative
-	// lookahead. Step 1: mask `event:` (and `event :`) keys so the
-	// value-side replace can't see them. Step 2: rewrite remaining
-	// `event` tokens to `ctx.input`. Step 3: restore the masked keys.
-	const sentinel = "\x00MEMQL_EVENT_KEY\x00"
-	masked := eventKeyMatcher.ReplaceAllString(expr, sentinel+"$1:")
-	rewritten := eventRefMatcher.ReplaceAllString(masked, "ctx.input")
-	return strings.ReplaceAll(rewritten, sentinel, "event")
-}
+// Historically this file translated `event` references in automation
+// step bodies to the legacy `ctx.input` envelope path. That was a
+// half-purge artifact: the runtime function-step args resolver
+// (`component/automations/steps/function.go::isRuntimeReference`)
+// only recognises `event` and `event.X` as runtime references and
+// dispatches them through `$event.X` against the evaluator -- which
+// has `event` bound to the trigger event map by the automation
+// executor. `ctx.input.X` is NOT a runtime reference, so a translated
+// reference fell through as a literal string ("ctx.input"), arrived
+// at the receiving Logic's validator as `argument "event": expected
+// object, got string`, and broke every event-triggered automation
+// (symptom: memql-cockpit#49 -- daily space never created). And the
+// over-eager `\bevent\b` regex previously clobbered the KEY name in
+// `{ event: event }` too, breaking arg binding entirely.
+//
+// The fix is to stop translating: authors write `event` / `event.X`
+// in step args, the rewriter passes them through verbatim, and the
+// runtime resolves them via the `event` custom binding. Aligns with
+// the broader ctx-envelope purge tracked in #93.
 
 // translateStepCall converts a step body into the legacy call
 // expression. Supported shapes:
