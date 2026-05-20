@@ -110,6 +110,12 @@ func extractLeadingCommentBlock(content string) string {
 //   - Unlimited queries per file
 //   - Automations should be in automations/ directory, not queries/mutations
 func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry) (*Function, error) {
+	// Snapshot the signature-bound concepts BEFORE NormaliseAll
+	// rewrites the struct form to procedural -- once the rewrite runs
+	// the `<kind> <Concept> <name> {` shape is gone and the regex
+	// in extractAllSignatureConceptNames has nothing to match.
+	signatureConcepts := extractAllSignatureConceptNames(content)
+
 	// Apply every struct-form rewriter defensively here too -- callers
 	// that don't go through loadFlatFunctionFile (tests, ad-hoc uses)
 	// would otherwise see a raw struct-form shape the legacy parser
@@ -162,6 +168,16 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		content = translateConceptPathsToPayload(content, name)
 	}
 	for _, name := range extractAllUseShapeNames(content) {
+		content = translateConceptPathsToPayload(content, name)
+	}
+	// Same translation for signature-bound concepts (post-migration
+	// canonical shape, PR #48). Files without legacy @useConcept
+	// annotations still need `<Concept>.X` -> `payload.X` so the
+	// engine reads through its existing payload.X accessor. The
+	// signature concepts were captured from the PRE-rewrite source
+	// above; we just apply the translation against the post-rewrite
+	// content here.
+	for _, name := range signatureConcepts {
 		content = translateConceptPathsToPayload(content, name)
 	}
 
@@ -234,6 +250,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		if id, err := boundConceptFromUseAnnotation(file, registry); err != nil {
 			return nil, fmt.Errorf("function %q: %w", expectedName, err)
 		} else if id != "" {
+			boundConcept = id
+		}
+	}
+	// Post-PR-48 canonical shape: the concept binding lives in the
+	// signature (`mutation <Concept> <name> { ... }`). When no Form A
+	// `use` directive and no legacy `@useConcept` annotation are
+	// present, resolve the signature concept via the registry's
+	// trailing-segment match (same rule the legacy concept-resolver
+	// applied to bare `@useConcept` names). Without this branch the
+	// runtime can't translate the bare concept name (e.g.
+	// `globalSecret`) to its full id (`v1:platform:globalSecret`)
+	// and every mutation that needs the concept binding fails with
+	// "concept ... not found".
+	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
+		resolver := NewConceptResolver(registry)
+		if id, err := resolver.resolveBareConceptName(signatureConcepts[0]); err == nil {
 			boundConcept = id
 		}
 	}
@@ -542,6 +574,41 @@ func extractUseConceptName(source string) (string, bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+// signatureConceptRe matches the canonical post-PR-48 struct-form
+// signature `<kind> <Concept> <name> {` and captures the concept
+// bare name. Used post-migration to feed the same body-rewrite
+// pipeline that `@useConcept` previously drove.
+var signatureConceptRe = regexp.MustCompile(
+	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
+)
+
+// extractAllSignatureConceptNames scans raw .memql source for every
+// signature-bound concept binding (`mutation <Concept> <name> {`,
+// `query <Concept> <name> {`, etc.) and returns the distinct concept
+// names in declaration order. Mirrors extractAllUseConceptNames so
+// post-migration files (signature-bound) and any straggler files
+// (legacy `@useConcept`) feed the same per-name translation pass.
+func extractAllSignatureConceptNames(source string) []string {
+	matches := signatureConceptRe.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		name := m[1]
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // extractAllUseConceptNames scans raw .memql source for every
