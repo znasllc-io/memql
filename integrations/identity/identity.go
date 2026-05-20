@@ -15,7 +15,8 @@ import (
 // IdentityIntegration exposes delegation operations as DSL-callable
 // capabilities. Auth middleware (identity-issued JWT verification)
 // lives in component/identity/verifier/ and component/auth/.
-// Partition-access enforcement lives in component/auth/access.
+// Per-row authorization is enforced inside DSL queries + mutations;
+// see docs/auth/per-row-authz-audit.md.
 type IdentityIntegration struct{}
 
 // NewIdentityIntegration creates an identity integration.

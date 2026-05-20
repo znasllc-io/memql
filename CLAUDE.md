@@ -1009,11 +1009,10 @@ dsl/v1/policies/
     └── ...
 ```
 
-`core` policies are platform invariants — auth interceptors and the
-partition-ACL middleware call only `core/*`. `bff` policies are
-product decisions — they can call `core/*` (downward delegation
-allowed) but `core` MUST NOT call `bff`. The lint at registration
-time enforces this.
+`core` policies are platform invariants — auth interceptors call
+only `core/*`. `bff` policies are product decisions — they can
+call `core/*` (downward delegation allowed) but `core` MUST NOT call
+`bff`. The lint at registration time enforces this.
 
 ### Authoring shape
 
@@ -1108,15 +1107,14 @@ The active partition for partition-scoped requests is taken from the
 gRPC envelope (`MemqlClientMessage.partition`); when absent it defaults
 to `"default"`. Global concepts ignore this field entirely.
 
-**Strict isolation** (shipped 2026-04-27 in cd2950f). Every gRPC
-envelope is checked against the caller's `PartitionACL` by the
-auth-access middleware; mismatched partitions are rejected. The
-subscription handler (`handleSubscribe` +
-`scopeGraphPatternToPartition`) rewrites graph subscription patterns
-server-side so a subscriber that sends a `*` partition wildcard cannot
-observe other tenants' events -- cluster owners ride the same path
-(they bypass the per-partition ACL but still scope by envelope). See
-[docs/auth/access-model.md](docs/auth/access-model.md).
+**Authorization** is enforced per-row inside DSL queries + mutations
+post-#56 phase 4 (see [docs/auth/per-row-authz-audit.md](docs/auth/per-row-authz-audit.md)).
+The PartitionACL middleware was retired in that phase; the
+envelope.partition dimension is still on the wire (phase 5 strips
+the field) but no longer gates dispatch. The subscription handler
+(`handleSubscribe` + `scopeGraphPatternToPartition`) still rewrites
+graph subscription patterns server-side against envelope.partition so
+event topics stay scoped.
 
 **Slug rules.** Partition names are DNS-label-shape: lowercase
 alphanumeric + inner dashes, 1-50 chars, no leading underscore
