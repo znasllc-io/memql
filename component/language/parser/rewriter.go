@@ -948,7 +948,9 @@ func findNextDefinitionIndex(source string) int {
 
 // isInsideStructConstructHeader returns true when `argsLoc` falls
 // inside the body of a struct-form construct.
-var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+// Accepts both `<kind> <name> {` and the post-migration
+// `<kind> <Concept> <name> {` (signature-bound concept; PR #48/49).
+var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
 func isInsideStructConstructHeader(source string, argsLoc int) bool {
 	for _, m := range structConstructHeaderForArgs.FindAllStringIndex(source[:argsLoc], -1) {

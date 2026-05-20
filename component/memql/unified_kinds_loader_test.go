@@ -75,4 +75,34 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	// Force-reference toolReg so the legacy import that used to
 	// hand it to LoadUnifiedAgents doesn't become unused.
 	_ = toolReg
+
+	// Function-shaped constructs (mutations / queries / logic /
+	// automation) go through LoadUnifiedFunctions. After the
+	// import-model migration (PR #48), every query / mutation / shape
+	// declaration carries its concept binding in the SIGNATURE
+	// (`mutation <Concept> <name> { ... }`); the slice extractor's
+	// header regex must tolerate that optional second identifier or
+	// it strips the wrong token as the function name and the
+	// FunctionRegistry ends up with the concept in the slot where
+	// the function name should live. The runtime then can't resolve
+	// any mutation/query call -- "function not found" at every dev
+	// startup. This block guards against that regression.
+	fnReg2 := newFunctionRegistry()
+	total, counts, err := LoadUnifiedFunctions(logger, fnReg2, nil)
+	if err != nil {
+		t.Fatalf("LoadUnifiedFunctions: %v", err)
+	}
+	t.Logf("functions: total=%d counts=%v", total, counts)
+	for _, name := range []string{
+		"mutationSetGlobalSecret",
+		"mutationCreatePartition",
+		"mutationCreateAgentRole",
+		"mutationUpdateNodeHealth",
+		"queryActiveUsers",
+		"queryAllAgents",
+	} {
+		if fn, err := fnReg2.Get(name); err != nil || fn == nil {
+			t.Errorf("function registry missing %q (err=%v) -- the slice extractor probably dropped the function name (signature-bound concept regex regression)", name, err)
+		}
+	}
 }
