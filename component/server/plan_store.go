@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // PlanStore creates Plan + Task records that wrap an attachment's
@@ -356,5 +356,5 @@ func pickDocumentFormat(mime string) string {
 // id isn't appropriate. Currently unused -- attachment-driven Plans
 // key off the attachment id for idempotency.
 func freshPlanId() string {
-	return "plan:" + uuid.New().String()
+	return "plan:" + id.NewShortId()
 }

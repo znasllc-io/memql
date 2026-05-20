@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // MemQLExecutor runs raw MemQL queries.
@@ -35,7 +35,7 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 		return nil, fmt.Errorf("engine not configured")
 	}
 
-	nodeId := strings.TrimSpace(params.SpaceId) + ":" + uuid.New().String()
+	nodeId := strings.TrimSpace(params.SpaceId) + ":" + id.NewShortId()
 
 	var sb strings.Builder
 	sb.WriteString(`mutationCreateAttachment({"attachmentId": `)

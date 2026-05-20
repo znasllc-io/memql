@@ -23,9 +23,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/google/uuid"
-
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
 
@@ -119,7 +118,7 @@ func PushToTalk(
 		chunkBytes = 1280
 	}
 
-	requestId := uuid.NewString()
+	requestId := id.NewShortId()
 	replies, unregister := dispatcher.RegisterStream(requestId)
 	defer unregister()
 

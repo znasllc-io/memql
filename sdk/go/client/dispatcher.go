@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/uuid"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Dispatcher handles message multiplexing over a single gRPC stream.
@@ -141,7 +141,7 @@ func (d *Dispatcher) Run() {
 // Returns the message_id.
 func (d *Dispatcher) Send(msg *memqlv1.MemqlClientMessage) (string, error) {
 	if msg.MessageId == "" {
-		msg.MessageId = uuid.NewString()
+		msg.MessageId = id.NewShortId()
 	}
 	d.sendMu.Lock()
 	err := d.stream.Send(msg)
@@ -155,7 +155,7 @@ func (d *Dispatcher) Send(msg *memqlv1.MemqlClientMessage) (string, error) {
 // SendAndWait sends a message and blocks until a correlated response arrives.
 func (d *Dispatcher) SendAndWait(ctx context.Context, msg *memqlv1.MemqlClientMessage) (*memqlv1.MemqlServerMessage, error) {
 	if msg.MessageId == "" {
-		msg.MessageId = uuid.NewString()
+		msg.MessageId = id.NewShortId()
 	}
 
 	ch := make(chan *memqlv1.MemqlServerMessage, 1)

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -48,7 +47,7 @@ const humanUtteranceDebounce = 400 * time.Millisecond
 // would have produced if we had passed the bare UUID.
 func composeReplyId(ctx context.Context) string {
 	_ = ctx
-	return id.BuildNodeId(memorynodes.ConceptCognitionUtterance, uuid.NewString())
+	return id.BuildNodeId(memorynodes.ConceptCognitionUtterance, id.NewShortId())
 }
 
 // recordLatestHumanUtterance stores this utterance ID as the space's most

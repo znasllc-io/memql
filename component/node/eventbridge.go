@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -139,7 +139,7 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 	}
 
 	// Build the proto EventForward
-	eventId := uuid.New().String()
+	eventId := id.NewShortId()
 
 	// Mark as seen so we don't re-process our own forward
 	eb.seen.Check(eventId)
@@ -175,7 +175,7 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 // client-tool-request), it must layer its own retry/outbox on top.
 func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
 	msg := &nodev1.NodeClientMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_EventForward{
 			EventForward: forward,
 		},
@@ -248,7 +248,7 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 	}
 
 	msg := &nodev1.NodeClientMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_EventForward{
 			EventForward: forwarded,
 		},

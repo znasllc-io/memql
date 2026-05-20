@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // AgentForwarder is the narrow interface cognition uses to ship an
@@ -87,7 +87,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	if requestId == "" {
 		// Defensive: missing replyId is a caller bug; fall back so we
 		// don't crash live cluster traffic.
-		requestId = uuid.NewString()
+		requestId = id.NewShortId()
 	}
 
 	// Use the agent's canonical id (full form

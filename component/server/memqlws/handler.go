@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -165,7 +165,7 @@ func (h *Handler) openStream(ctx context.Context, r *http.Request) (memqlv1.Memq
 
 func (h *Handler) sendClientHello(_ context.Context, stream memqlv1.MemqlService_StreamClient) error {
 	msg := &memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ClientHello{
 			ClientHello: &memqlv1.ClientHello{
 				ClientId:   defaultClientId,
@@ -389,7 +389,7 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 	case *memqlv1.MemqlClientMessage_ExecuteQuery:
 		requestId := normalizeRequestId(msg.GetMessageId(), payload.ExecuteQuery.GetRequestId())
 		if requestId == "" {
-			requestId = uuid.NewString()
+			requestId = id.NewShortId()
 		}
 		// Ensure the forwarded message always has a requestId set so server responses
 		// correlate to the ID we track locally.
@@ -518,7 +518,7 @@ func (s *session) releaseRequest(requestId string) bool {
 
 func (s *session) sendLocalError(requestId string, code codes.Code, message string) error {
 	errMsg := &memqlv1.MemqlServerMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlServerMessage_QueryError{
 			QueryError: &memqlv1.QueryErrorMsg{
 				RequestId: requestId,

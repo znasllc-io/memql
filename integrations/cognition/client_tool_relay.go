@@ -7,11 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // client_tool_relay.go
@@ -292,7 +291,7 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 	content := parseToolResultContent(contentJSON)
 
 	resultEnvelope := &memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ClientToolResult{
 			ClientToolResult: &memqlv1.ClientToolResult{
 				CallId:       callId,
