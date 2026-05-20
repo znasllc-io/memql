@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // NodeType identifies the role a node plays in the cluster.
@@ -111,7 +111,7 @@ func NewIdentity(version string) *Identity {
 
 	nodeId := strings.TrimSpace(os.Getenv("MEMQL_NODE_ID"))
 	if nodeId == "" {
-		nodeId = uuid.New().String()
+		nodeId = id.NewShortId()
 	}
 
 	labels := parseLabels(os.Getenv("MEMQL_NODE_LABELS"))

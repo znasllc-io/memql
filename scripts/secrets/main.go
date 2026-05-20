@@ -43,7 +43,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -52,6 +51,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/secret"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // manifestEntry mirrors one row in scripts/secrets/manifest.yaml.
@@ -453,7 +453,7 @@ func withOperatorAuth(ctx context.Context) context.Context {
 
 func handshake(stream memqlv1.MemqlService_StreamClient) error {
 	hello := &memqlv1.MemqlClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &memqlv1.MemqlClientMessage_ClientHello{
 			ClientHello: &memqlv1.ClientHello{
 				ClientId:   "make-secrets",
@@ -481,12 +481,12 @@ func runMutation(stream memqlv1.MemqlService_StreamClient, mutationName string, 
 		return fmt.Errorf("marshal args: %w", err)
 	}
 	query := fmt.Sprintf("%s(%s)", mutationName, string(argsJSON))
-	msgId := uuid.NewString()
+	msgId := id.NewShortId()
 	msg := &memqlv1.MemqlClientMessage{
 		MessageId: msgId,
 		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
 			ExecuteQuery: &memqlv1.ExecuteQueryMsg{
-				RequestId: uuid.NewString(),
+				RequestId: id.NewShortId(),
 				Query:     query,
 			},
 		},

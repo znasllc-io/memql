@@ -13,12 +13,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // -----------------------------------------------------------------------------
@@ -123,7 +123,7 @@ func (r *SIForwardRouter) Forward(
 		// stop producing chunks for this request_id.
 		if peer.Connection != nil {
 			peer.Connection.Send(&nodev1.NodeClientMessage{
-				MessageId: uuid.NewString(),
+				MessageId: id.NewShortId(),
 				Payload: &nodev1.NodeClientMessage_SiForwardCancel{
 					SiForwardCancel: &nodev1.SIForwardCancel{RequestId: requestId},
 				},
@@ -139,7 +139,7 @@ func (r *SIForwardRouter) Forward(
 		MemqlEnvelope: envBytes,
 	}
 	msg := &nodev1.NodeClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload:   &nodev1.NodeClientMessage_SiForwardRequest{SiForwardRequest: fwd},
 	}
 	if peer.Connection == nil {
@@ -251,7 +251,7 @@ func (r *SIForwardRouter) ForwardContinuation(
 
 	_ = partition
 	entry.peer.Connection.Send(&nodev1.NodeClientMessage{
-		MessageId: uuid.NewString(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_SiForwardRequest{
 			SiForwardRequest: &nodev1.SIForwardRequest{
 				RequestId:     requestId,
@@ -443,7 +443,7 @@ func (h *aiForwardHandlerShim) HandleForwardedRequest(ctx context.Context, req *
 		// clear error so the originating BFF unblocks its client.
 		errBytes := encodeForwardErrorBytes(req.GetRequestId(), "ai forward handler not ready")
 		_ = send(&nodev1.NodeServerMessage{
-			MessageId:   uuid.NewString(),
+			MessageId:   id.NewShortId(),
 			CorrelateTo: req.GetRequestId(),
 			Payload: &nodev1.NodeServerMessage_SiForwardResponse{
 				SiForwardResponse: &nodev1.SIForwardResponse{
@@ -478,7 +478,7 @@ func encodeForwardErrorBytes(requestId string, message string) []byte {
 		},
 	}
 	errMsg := &memqlv1.MemqlServerMessage{
-		MessageId:   uuid.NewString(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
 		Payload:     &memqlv1.MemqlServerMessage_QueryError{QueryError: qe},
 	}
@@ -501,7 +501,7 @@ func (s *service) sendForwardError(
 		},
 	}
 	errMsg := &memqlv1.MemqlServerMessage{
-		MessageId:   uuid.NewString(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
 		Payload:     &memqlv1.MemqlServerMessage_QueryError{QueryError: qe},
 	}
@@ -510,7 +510,7 @@ func (s *service) sendForwardError(
 		return
 	}
 	_ = send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.NewString(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: requestId,
 		Payload: &nodev1.NodeServerMessage_SiForwardResponse{
 			SiForwardResponse: &nodev1.SIForwardResponse{
@@ -551,7 +551,7 @@ func (f *forwardedStream) Send(msg *memqlv1.MemqlServerMessage) error {
 	done := isTerminalServerPayload(msg.GetPayload())
 
 	wrapped := &nodev1.NodeServerMessage{
-		MessageId:   uuid.NewString(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: f.requestId,
 		Payload: &nodev1.NodeServerMessage_SiForwardResponse{
 			SiForwardResponse: &nodev1.SIForwardResponse{
@@ -695,7 +695,7 @@ func (s *streamSession) relayForwardedResponses(
 		// original envelope's message_id, not the worker's view.
 		msg.CorrelateTo = s.safeCorrelate(correlate)
 		if msg.MessageId == "" {
-			msg.MessageId = uuid.NewString()
+			msg.MessageId = id.NewShortId()
 		}
 		s.sendMu.Lock()
 		err := s.stream.Send(msg)

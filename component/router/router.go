@@ -10,11 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Engine is the narrow engine surface the router needs to write
@@ -267,7 +266,7 @@ func (r *Router) RecordsDropped() uint64 {
 
 func (r *Router) stampRequestId(req ResolveRequest) ResolveRequest {
 	if req.RequestId == "" {
-		req.RequestId = uuid.NewString()
+		req.RequestId = id.NewShortId()
 	}
 	return req
 }

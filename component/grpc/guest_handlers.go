@@ -25,13 +25,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
@@ -368,7 +368,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: token mint", err)
 	}
 
-	invitationId := "v1:identity:invitation:" + uuid.NewString()
+	invitationId := "v1:identity:invitation:" + id.NewShortId()
 	// Caller-selectable TTL in whole minutes; fall back to default
 	// when unset / non-positive. Clamp to a sane upper bound so a
 	// malformed client can't persist a year-long guest invite.

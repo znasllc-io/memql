@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcMetadata "google.golang.org/grpc/metadata"
@@ -33,6 +32,7 @@ import (
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
 
@@ -1188,7 +1188,7 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 	}
 	subscriptionId := strings.TrimSpace(msg.GetSubscriptionId())
 	if subscriptionId == "" {
-		subscriptionId = uuid.NewString()
+		subscriptionId = id.NewShortId()
 	}
 
 	// Store the subscription info for matching
@@ -1429,7 +1429,7 @@ func (s *streamSession) handleClientToolResult(_ *memqlv1.MemqlClientMessage, ms
 // the timeout expires. The agent microservice can call this exactly like
 // executeTool; the difference is that the tool body runs in the browser.
 func (s *streamSession) executeClientTool(ctx context.Context, toolName string, args *structpb.Struct, turnId string) ([]*memqlv1.ToolResultContent, error) {
-	callId := uuid.NewString()
+	callId := id.NewShortId()
 	argsJSON := "{}"
 	if args != nil {
 		if bytes, err := json.Marshal(args.AsMap()); err == nil {
@@ -1509,7 +1509,7 @@ func (s *streamSession) InvokeClientTool(
 	argsJSON string,
 	_ string,
 ) (*memqlengine.ToolCallResult, error) {
-	callId := uuid.NewString()
+	callId := id.NewShortId()
 	if argsJSON == "" {
 		argsJSON = "{}"
 	}
@@ -1927,7 +1927,7 @@ func (s *streamSession) sendServerMessage(correlate string, msg *memqlv1.MemqlSe
 	if msg == nil {
 		return nil
 	}
-	msg.MessageId = uuid.NewString()
+	msg.MessageId = id.NewShortId()
 	msg.CorrelateTo = s.safeCorrelate(correlate)
 
 	s.sendMu.Lock()
@@ -1945,7 +1945,7 @@ func (s *streamSession) normalizeRequestId(envelope *memqlv1.MemqlClientMessage,
 			return trimmed
 		}
 	}
-	return uuid.NewString()
+	return id.NewShortId()
 }
 
 func (s *streamSession) safeCorrelate(messageId string) string {
