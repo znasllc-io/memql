@@ -82,7 +82,7 @@ func (m *Middleware) LoadAccessFromClaims(ctx context.Context, claims map[string
 	// Identity-service-issued JWTs carry the canonical user id
 	// directly as `sub`. There is no second-hop lookup -- the cluster
 	// no longer issues tokens whose subject is an external identifier.
-	if !strings.HasPrefix(subject, "_system:v1:identity:user:") &&
+	if !strings.HasPrefix(subject, "default:v1:identity:user:") &&
 		!strings.HasPrefix(subject, "v1:identity:user:") {
 		return nil, ErrUserNotProvisioned
 	}

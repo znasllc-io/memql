@@ -15,7 +15,7 @@ import (
 
 // canonicalIdentityIdPrefix mirrors pat.canonicalIdentityIdPrefix --
 // v1:identity:identity is global-scoped so it lives in _system.
-const canonicalIdentityIdPrefix = "_system:v1:identity:identity:"
+const canonicalIdentityIdPrefix = "default:v1:identity:identity:"
 
 // Store wraps the memQL engine with typed worker-token operations.
 // Mirrors the pat.Store pattern; lookup, create, revoke, list.

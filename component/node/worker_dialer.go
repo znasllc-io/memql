@@ -313,12 +313,12 @@ func (wd *WorkerDialer) run(ctx context.Context, markStarted func()) error {
 
 	if wd.eventBus != nil {
 		unsubCreated := wd.eventBus.Subscribe(
-			"graph.node.created._system.v1:cluster:node",
+			"graph.node.created.default.v1:cluster:node",
 			func(events.Event) { wd.triggerReconcile() },
 			events.WithSubscriberName("worker_dialer:nodeCreated"),
 		)
 		unsubUpdated := wd.eventBus.Subscribe(
-			"graph.node.updated._system.v1:cluster:node",
+			"graph.node.updated.default.v1:cluster:node",
 			func(events.Event) { wd.triggerReconcile() },
 			events.WithSubscriberName("worker_dialer:nodeUpdated"),
 		)

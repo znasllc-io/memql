@@ -16,7 +16,7 @@ import (
 // canonicalIdPrefix mirrors the v1:identity:* convention -- pairing
 // codes are global-scoped so they live in the reserved _system
 // partition.
-const canonicalIdPrefix = "_system:v1:identity:workerPairingCode:"
+const canonicalIdPrefix = "default:v1:identity:workerPairingCode:"
 
 // Store wraps the engine with typed pairing-code operations. Mirrors
 // the workertoken.Store and pat.Store patterns.
