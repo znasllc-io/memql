@@ -167,6 +167,30 @@ These are the band-aids this doc exists to prevent:
   unique part (uuid / hash / slug) and nothing else. Conformance
   test: `dsl.TestNoShortIdConceptPrefix`.
 
+- **Prefixing the shortId with a kind / variant discriminator**
+  (memql-cockpit#49). Same family as the above. The daily-space
+  integration used `fmt.Sprintf("daily-%s-%s", shortUserId,
+  dateKey)` to build the row's shortId. The `daily-` prefix is
+  redundant with `payload.kind == "daily"` (which the mutation
+  already stamps), and the hand-rolled `%s-%s-%s` recipe is
+  exactly what `core/id.Engine.MustFromMap` exists to replace.
+  **Rule:** when a row needs a *deterministic* id derived from
+  some set of factors (so repeat-calls collapse on insert
+  conflict), build it via `id.Engine.MustFromMap(map[string]any{
+  ... }`. Don't hand-roll `fmt.Sprintf` recipes; don't embed
+  concept / kind names in the resulting hash seed (the input map
+  keys are what namespace the hash, not a leading string token).
+  Variant info goes in payload fields the consumer can filter on.
+
+- **Hand-rolling a deterministic id with `sha256.Sum256` /
+  `fmt.Fprintf` etc.** Same anti-pattern; the central helper
+  exists. `core/id.New().MustFromMap(...)` gives you a 64-char hex
+  string that satisfies the determinism + idempotency axioms and
+  centralises the format (so it can change later without touching
+  every minting site). See `augmentPlanId` / `augmentChunkId` in
+  `integrations/knowledge/augment_domain.go` for the migration
+  shape -- those still hand-roll and should move to the helper.
+
 The CoPresent frontend has a `stripConceptPrefix` helper for the
 remaining legitimate cases (extracting a short id for a
 short-channel-key, debug labels, etc.) -- see
@@ -182,6 +206,9 @@ for matching ids that are supposed to come from canonical sources.
 | Compose a full id at mutation call time | Just pass the bare shortId; engine composes |
 | Compose a full id at dispatch time (you'll reference it before insert) | `id.BuildNodeId(concept, shortId)` |
 | Split a full id into parts | `id.ParseNodeId(id)` |
+| Mint a fresh opaque shortId for an instance row | `id.NewShortId()` |
+| Build a deterministic shortId from a stable factor set (so repeat calls collapse on the engine's id-conflict path) | `id.New().MustFromMap(map[string]any{...})` |
+| Build a kebab-case shortId for a catalog row (stable human-chosen name) | `id.Slugify(name)` |
 | Cognition: mint a replyId for a streaming agent reply | `composeReplyId(ctx)` in `integrations/cognition/cognition_handler.go` |
 
 Frontend equivalents:
