@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -103,7 +103,7 @@ func (s *nodeService) Stream(stream nodev1.NodeService_StreamServer) error {
 	hello := firstMsg.GetNodeHello()
 	if hello == nil {
 		return stream.Send(&nodev1.NodeServerMessage{
-			MessageId: uuid.New().String(),
+			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeServerMessage_NodeShutdown{
 				NodeShutdown: &nodev1.NodeShutdown{
 					Reason:       "first message must be NodeHello",
@@ -142,7 +142,7 @@ func (s *nodeService) Stream(stream nodev1.NodeService_StreamServer) error {
 	// server as a peer (see parent_connector / worker_dialer's
 	// NodeWelcome handling).
 	welcome := &nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: firstMsg.MessageId,
 		Payload: &nodev1.NodeServerMessage_NodeWelcome{
 			NodeWelcome: &nodev1.NodeWelcome{
@@ -255,7 +255,7 @@ func (s *nodeService) serverHeartbeatLoop(stream nodev1.NodeService_StreamServer
 // the server-direction envelope type.
 func buildServerHeartbeat() *nodev1.NodeServerMessage {
 	return &nodev1.NodeServerMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeServerMessage_Heartbeat{
 			Heartbeat: &nodev1.NodeHeartbeat{
 				Ts:     timestamppb.New(time.Now()),
@@ -340,7 +340,7 @@ func (s *nodeService) handleSpawnRequest(peerId string, req *nodev1.SpawnRequest
 	)
 
 	_ = stream.Send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: req.RequestId,
 		Payload: &nodev1.NodeServerMessage_SpawnResult{
 			SpawnResult: &nodev1.SpawnResult{
@@ -379,7 +379,7 @@ func (s *nodeService) handleEventForward(peerId string, evt *nodev1.EventForward
 
 	// ACK the event
 	_ = stream.Send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: evt.EventId,
 		Payload: &nodev1.NodeServerMessage_EventAck{
 			EventAck: &nodev1.EventAck{
@@ -404,7 +404,7 @@ func (s *nodeService) handleCapabilityQuery(peerId string, query *nodev1.Capabil
 	}
 
 	_ = stream.Send(&nodev1.NodeServerMessage{
-		MessageId:   uuid.New().String(),
+		MessageId:   id.NewShortId(),
 		CorrelateTo: query.RequestId,
 		Payload: &nodev1.NodeServerMessage_CapabilityResponse{
 			CapabilityResponse: resp,
@@ -464,7 +464,7 @@ func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.SIForwar
 			"peer_id", peerId, "request_id", req.GetRequestId(),
 		)
 		_ = stream.Send(&nodev1.NodeServerMessage{
-			MessageId:   uuid.New().String(),
+			MessageId:   id.NewShortId(),
 			CorrelateTo: req.GetRequestId(),
 			Payload: &nodev1.NodeServerMessage_SiForwardResponse{
 				SiForwardResponse: &nodev1.SIForwardResponse{
@@ -506,7 +506,7 @@ func (s *nodeService) handleWorkbenchForwardRequest(peerId string, req *nodev1.W
 			"peer_id", peerId, "request_id", req.GetRequestId(),
 		)
 		_ = stream.Send(&nodev1.NodeServerMessage{
-			MessageId:   uuid.New().String(),
+			MessageId:   id.NewShortId(),
 			CorrelateTo: req.GetRequestId(),
 			Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
 				WorkbenchForwardResponse: &nodev1.WorkbenchForwardResponse{
@@ -598,7 +598,7 @@ func (s *nodeService) handleQueryForward(peerId string, req *nodev1.QueryForward
 // heartbeat loop to enqueue heartbeats on the existing send channel.
 func buildHeartbeatMessage(health nodev1.NodeHealthStatus) *nodev1.NodeClientMessage {
 	return &nodev1.NodeClientMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_Heartbeat{
 			Heartbeat: &nodev1.NodeHeartbeat{
 				Ts:     timestamppb.New(time.Now()),

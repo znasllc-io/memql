@@ -37,10 +37,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Integration owns the AgentRegistry + Engine pointers and implements
@@ -311,7 +310,7 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 // future iteration will plumb the calling actor through so audit
 // tracks the user-on-whose-behalf the agent ran.
 func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.AgentDefinition, prompt, spaceId string) (string, error) {
-	planId := uuid.New().String()
+	planId := id.NewShortId()
 	// Build the input object the planner agent loop reads when
 	// dispatching: agentName + prompt are the essential signal;
 	// agentRoleSlug is included so the dispatcher doesn't have to

@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -79,9 +79,9 @@ func (r *CapabilityRouter) queryPeers(ctx context.Context, capabilityFQN string)
 		return nil, nil
 	}
 
-	requestId := uuid.New().String()
+	requestId := id.NewShortId()
 	msg := &nodev1.NodeClientMessage{
-		MessageId: uuid.New().String(),
+		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeClientMessage_CapabilityQuery{
 			CapabilityQuery: &nodev1.CapabilityQuery{
 				RequestId:      requestId,

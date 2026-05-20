@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -219,7 +219,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upload to GCS.
-	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, uuid.New().String(), fileName)
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, id.NewShortId(), fileName)
 	gcsURL := ""
 	if h.uploader != nil && h.bucket != "" {
 		gcsURL, err = h.uploader.Upload(ctx, h.bucket, objectName, data, mimeType)

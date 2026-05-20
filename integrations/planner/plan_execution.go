@@ -7,12 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Concept-visibility note: v1:cognition:participant is annotated
@@ -153,7 +152,7 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	// Tasks panel), not as a chat utterance. The participant lookup
 	// would require the v1:cognition:participant concept which is
 	// not loaded on the planner binary by design.
-	requestId := uuid.NewString()
+	requestId := id.NewShortId()
 
 	// History carries one synthetic user-role message with the
 	// Plan's goal. NOT written to chat -- it's prompt context the

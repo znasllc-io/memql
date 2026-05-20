@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/logger"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/integrations/stt"
@@ -288,7 +288,7 @@ func (s *audioSession) handleTextMessage(data []byte) error {
 func (s *audioSession) handleStart(msg *AudioMessage) error {
 	streamId := msg.StreamId
 	if streamId == "" {
-		streamId = uuid.NewString()
+		streamId = id.NewShortId()
 	}
 
 	s.streamsMu.Lock()
@@ -639,7 +639,7 @@ func (s *audioSession) SynthesizeAuto(spaceId, participantId, text, voice string
 		return fmt.Errorf("TTS not available: provider not configured")
 	}
 
-	requestId := uuid.NewString()
+	requestId := id.NewShortId()
 
 	// Use defaults if not provided
 	if voice == "" {

@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // ensureForGoalCapName is the integration capability name the
@@ -321,7 +320,7 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	tools := unionStrings(role.LockedToolSlugs, role.DefaultToolSlugs)
 	tools = unionStrings(tools, decision.ToolSlugs)
 
-	agentId := uuid.New().String()
+	agentId := id.NewShortId()
 	caps := map[string]any{
 		"domains":  domains,
 		"tools":    tools,
