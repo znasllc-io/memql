@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -152,8 +153,16 @@ func resolveWorkerToken(ctx context.Context, resolver WorkerTokenResolver, plain
 	if ident == nil || ident.IdentityId == "" || ident.OwnerUserId == "" {
 		return nil, errors.New("worker: identity not found for token")
 	}
+	// Active==false is how worker tokens are revoked (see
+	// workertoken.Store.Revoke). Reject revoked tokens.
 	if !ident.Active {
 		return nil, errors.New("worker: identity inactive")
+	}
+	// Expiry is optional (ExpiresAt zero = non-expiring). When set,
+	// the bound is inclusive of `now` for backwards-compatibility
+	// with downstream callers that look at expiresAt for display.
+	if !ident.ExpiresAt.IsZero() && !time.Now().Before(ident.ExpiresAt) {
+		return nil, errors.New("worker: identity expired")
 	}
 	return ident, nil
 }
