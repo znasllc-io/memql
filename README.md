@@ -292,7 +292,7 @@ backwards-compat shims; fix both memQL and the consumer at once.
 
 ## License
 
-Proprietary - Znasllc.io
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
