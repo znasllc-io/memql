@@ -44,8 +44,14 @@ logic doFoo {
 
 // Automation struct form rewrites to `func (Automation) NAME(ctx any)`
 // with one `:=` assignment per step. Step bodies of the form
-// `name { args }` translate to `name({ args })`, and `event.X`
-// references translate to `ctx.input.X`.
+// `name { args }` translate to `name({ args })`. `event` and
+// `event.X` references in step args pass through verbatim -- the
+// runtime function-step args resolver recognises them as runtime
+// references and resolves them via the evaluator's `event` binding.
+// (Historically these were translated to `ctx.input.X`, but
+// `ctx.input` is not a recognised runtime reference and the
+// translated value fell through as a literal string; see
+// memql-cockpit#49.)
 func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
 	src := `@enabled
 @trigger(event="graph.node.created.v1:cognition:space")
@@ -63,8 +69,11 @@ automation autoJoinSI {
 	if !strings.Contains(out, "func (Automation) autoJoinSI(ctx any)") {
 		t.Fatalf("expected procedural rewrite; got %q", out)
 	}
-	if !strings.Contains(out, "joinAgents := logicJoinAgents({ spaceId: ctx.input.node.id })") {
-		t.Fatalf("step did not rewrite to assignment + translated call; got %q", out)
+	if !strings.Contains(out, "joinAgents := logicJoinAgents({ spaceId: event.node.id })") {
+		t.Fatalf("step did not rewrite to assignment + verbatim event ref; got %q", out)
+	}
+	if strings.Contains(out, "ctx.input") {
+		t.Fatalf("rewriter must not emit ctx.input references; got %q", out)
 	}
 	if !strings.Contains(out, "return ctx, nil") {
 		t.Fatalf("expected trailing return; got %q", out)
@@ -140,6 +149,12 @@ automation leadClassification {
 	if !strings.Contains(out, "classify.score") || !strings.Contains(out, "classify.label") {
 		t.Fatalf("step output references should ride through verbatim; got %q", out)
 	}
+	if !strings.Contains(out, "event.node.payload.text") || !strings.Contains(out, "event.node.id") {
+		t.Fatalf("event.X references should ride through verbatim; got %q", out)
+	}
+	if strings.Contains(out, "ctx.input") {
+		t.Fatalf("rewriter must not emit ctx.input references; got %q", out)
+	}
 	// First step appears before second in the rewritten body.
 	classifyIdx := strings.Index(out, "classify := ")
 	persistIdx := strings.Index(out, "persist := ")
@@ -150,14 +165,22 @@ automation leadClassification {
 
 // The `{ event: event }` step body is the conventional plumb-through
 // every event-triggered automation uses to forward the trigger event
-// to its receiving logic. The rewriter must translate the VALUE-side
-// `event` (RHS of the `:`) to `ctx.input` while leaving the KEY-side
-// `event` (LHS of the `:`) intact so the args bind under the right
-// name. The previous regex over-matched and produced
-// `{ ctx.input: ctx.input }`, which broke arg binding for every
-// event-triggered automation -- surfaced as the "daily space never
-// shows up" symptom in memql-cockpit#49.
-func TestNormaliseAutomationSource_EventKeyPreservedWhilstValueTranslated(t *testing.T) {
+// to its receiving logic. Both occurrences -- the KEY (LHS of `:`)
+// and the VALUE (RHS of `:`) -- must pass through verbatim.
+// Translation to `ctx.input` was a half-purge artifact that broke
+// runtime resolution two different ways:
+//   1. The previous regex was over-eager and rewrote the KEY too,
+//      producing `{ ctx.input: ctx.input }` and clobbering the arg
+//      name.
+//   2. Even after preserving the key, `ctx.input` is NOT a recognised
+//      runtime reference in `automations/steps/function.go::
+//      isRuntimeReference`, so the translated value fell through as
+//      a literal string `"ctx.input"` and the receiving Logic's
+//      validator rejected it with `argument "event": expected
+//      object, got string`.
+// Both failure modes surfaced as the "daily space never shows up"
+// symptom in memql-cockpit#49.
+func TestNormaliseAutomationSource_EventRefsPassThroughVerbatim(t *testing.T) {
 	src := `@enabled
 @trigger(event="graph.node.created.v1:identity:authSession")
 @useLogic(logicEnsureDailySpaceOnAuthSession)
@@ -170,10 +193,10 @@ automation ensureDailySpaceOnAuthSession {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "run := logicEnsureDailySpaceOnAuthSession({ event: ctx.input })") {
-		t.Fatalf("expected `{ event: ctx.input }` (key preserved, value translated); got %q", out)
+	if !strings.Contains(out, "run := logicEnsureDailySpaceOnAuthSession({ event: event })") {
+		t.Fatalf("expected `{ event: event }` verbatim; got %q", out)
 	}
-	if strings.Contains(out, "ctx.input: ctx.input") {
-		t.Fatalf("rewriter regressed to clobbering the `event` key name; got %q", out)
+	if strings.Contains(out, "ctx.input") {
+		t.Fatalf("rewriter must not emit ctx.input references; got %q", out)
 	}
 }
