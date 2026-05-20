@@ -3,7 +3,7 @@
 // Materialized as one v1:agents:agent row per user by the SeedMaterializer:
 //   - Startup sweep: walks every existing v1:identity:user and writes
 //     `assistant-<userId>`.
-//   - Runtime hook: subscribes to graph.node.created.*.v1:identity:user
+//   - Runtime hook: subscribes to graph.node.created.v1:identity:user
 //     and writes the row on signup.
 //
 // Replaces the legacy `provisionAssistantOnUserCreate` automation

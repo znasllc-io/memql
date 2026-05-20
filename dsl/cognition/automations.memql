@@ -90,7 +90,7 @@ automation purgeExpiredArchivedSpaces {
 //                          private canvas timeline.
 //
 // TRIGGER:
-// graph.node.created.*.v1:identity:user fires on every user-row write
+// graph.node.created.v1:identity:user fires on every user-row write
 // (primary path: mutationSetUserActiveSpace shipping a new version).
 // We filter to rows whose payload.activeSpaceId is non-empty -- a user
 // whose pointer is set has just become active in some space.
@@ -132,7 +132,7 @@ automation voiceMigrationOnSecondHuman {
 // per-user singleton always exists by the time the user looks for it.
 //
 // FIRES:
-// graph.node.created.*.v1:identity:user. Every signup, every admin-
+// graph.node.created.v1:identity:user. Every signup, every admin-
 // created user, every system-bootstrap owner row.
 //
 // IDEMPOTENCY:
@@ -163,7 +163,7 @@ automation provisionDailySpaceOnUserCreate {
 // callers that already have today's daily pay only the read cost.
 //
 // FIRES:
-// graph.node.created.*.v1:identity:authSession.
+// graph.node.created.v1:identity:authSession.
 //
 // SAFETY:
 // Auth sessions can be created at very high frequency during token

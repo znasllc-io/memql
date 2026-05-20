@@ -486,11 +486,7 @@ func normalizeStructuredTriggers(file *languageParser.File) error {
 			if conceptId == "" || !strings.Contains(conceptId, ":") {
 				return fmt.Errorf("automation %q: @trigger concept=%q must be a fully-qualified concept id", fd.Name, parsed.Concept)
 			}
-			partition := parsed.Partition
-			if !parsed.HasPartition || partition == "" {
-				partition = "*"
-			}
-			topic, err := ast.BuildTriggerTopic(eventStr, conceptId, partition)
+			topic, err := ast.BuildTriggerTopic(eventStr, conceptId)
 			if err != nil {
 				return fmt.Errorf("automation %q: @trigger: %w", fd.Name, err)
 			}
@@ -729,17 +725,15 @@ func (l *Loader) validateTrigger(automation *Automation) {
 }
 
 // extractConceptFromTopic extracts the concept ID from a graph CDC event
-// pattern of the form graph.node.{action}.{partition}.{concept}, emitted by
-// BuildTopicWithPartitionAndConcept. The partition segment may be a literal
-// ("default", "acme", "_system") or a wildcard ("*").
+// pattern of the form graph.node.{action}.{concept} emitted by
+// BuildTopicWithConcept.
 //
 // Returns "" when the topic doesn't identify a single concept -- any
-// wildcard in the concept position, fewer than 5 segments, or not a
-// graph.node event. Callers use the return value only for contradiction
-// validation, so a safe empty on ambiguity is correct.
+// wildcard in the concept position, fewer than 4 segments, or not a
+// graph.node event.
 func extractConceptFromTopic(topic string) string {
 	parts := strings.Split(topic, ".")
-	if len(parts) < 5 {
+	if len(parts) < 4 {
 		return ""
 	}
 	if parts[0] != "graph" || parts[1] != "node" {
@@ -747,8 +741,8 @@ func extractConceptFromTopic(topic string) string {
 	}
 
 	// Concepts don't contain dots, so joining any trailing segments with "."
-	// is safe: a 5-segment topic yields parts[4] alone.
-	concept := strings.Join(parts[4:], ".")
+	// is safe: a 4-segment topic yields parts[3] alone.
+	concept := strings.Join(parts[3:], ".")
 	if concept == "" || strings.ContainsAny(concept, "*#") {
 		return ""
 	}

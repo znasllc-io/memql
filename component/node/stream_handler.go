@@ -287,11 +287,11 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_QueryForward:
 		s.handleQueryForward(peerId, payload.QueryForward, stream)
 
-	case *nodev1.NodeClientMessage_SIForwardRequest:
-		s.handleAiForwardRequest(peerId, payload.SIForwardRequest, stream)
+	case *nodev1.NodeClientMessage_SiForwardRequest:
+		s.handleAiForwardRequest(peerId, payload.SiForwardRequest, stream)
 
-	case *nodev1.NodeClientMessage_SIForwardCancel:
-		s.handleAiForwardCancel(peerId, payload.SIForwardCancel)
+	case *nodev1.NodeClientMessage_SiForwardCancel:
+		s.handleAiForwardCancel(peerId, payload.SiForwardCancel)
 
 	case *nodev1.NodeClientMessage_WorkbenchForwardRequest:
 		s.handleWorkbenchForwardRequest(peerId, payload.WorkbenchForwardRequest, stream)
@@ -466,8 +466,8 @@ func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.SIForwar
 		_ = stream.Send(&nodev1.NodeServerMessage{
 			MessageId:   uuid.New().String(),
 			CorrelateTo: req.GetRequestId(),
-			Payload: &nodev1.NodeServerMessage_SIForwardResponse{
-				SIForwardResponse: &nodev1.SIForwardResponse{
+			Payload: &nodev1.NodeServerMessage_SiForwardResponse{
+				SiForwardResponse: &nodev1.SIForwardResponse{
 					RequestId: req.GetRequestId(),
 					Done:      true,
 				},

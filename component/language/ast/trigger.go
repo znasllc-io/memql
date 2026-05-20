@@ -5,16 +5,15 @@ import (
 	"strings"
 )
 
-// Trigger-topic assembly for the structured @trigger form
-// (docs/dsl-import-model-refactor.md decision #6).
+// Trigger-topic assembly for the structured @trigger form.
 //
 // Today authors write:
 //
-//	@trigger(event="graph.node.created.*.v1:cognition:participant")
+//	@trigger(event="graph.node.created.v1:cognition:participant")
 //
-// The new structured form:
+// The structured form:
 //
-//	@trigger(event="node.created", concept=cog.participant, partition="*")
+//	@trigger(event="node.created", concept=cog.participant)
 //
 // The concept reference (`cog.participant`) is a cross-file symbol;
 // the loader resolves it to the canonical concept ID
@@ -22,10 +21,10 @@ import (
 // then this package's BuildTriggerTopic assembles the actual
 // subscription topic string the engine uses.
 
-// allowedEventKinds is the closed set of `event=` values the new
+// allowedEventKinds is the closed set of `event=` values the
 // structured trigger accepts. Mirrors the action segment of the
-// 5-segment topic format the engine emits today
-// (graph.node.{action}.{partition}.{concept}).
+// 4-segment topic format the engine emits
+// (graph.node.{action}.{concept}).
 var allowedEventKinds = map[string]bool{
 	"node.created": true,
 	"node.updated": true,
@@ -38,27 +37,19 @@ func EventKindAllowed(kind string) bool {
 	return allowedEventKinds[kind]
 }
 
-// BuildTriggerTopic assembles the subscription topic from the three
-// structured-trigger fields. Returns an error when any field is
-// malformed or empty (concept may be empty when the trigger is not
-// scoped to a single concept; partition may be "*" for the
-// "any partition" wildcard).
+// BuildTriggerTopic assembles the subscription topic from the
+// structured-trigger fields. Returns an error when the event-kind is
+// malformed or empty. concept may be empty when the trigger is not
+// scoped to a single concept (matches any concept).
 //
-// Format: graph.{event-action-segments}.{partition}.{concept}
+// Format: graph.{event-action-segments}[.{concept}]
 //
-//	event="node.created", concept="v1:cognition:participant", partition="*"
-//	  ==> "graph.node.created.*.v1:cognition:participant"
+//	event="node.created", concept="v1:cognition:participant"
+//	  ==> "graph.node.created.v1:cognition:participant"
 //
-//	event="node.deleted", concept="", partition="*"
-//	  ==> "graph.node.deleted.*" (concept-less, matches any concept)
-//
-//	event="node.updated", concept="v1:foo:bar", partition="acme"
-//	  ==> "graph.node.updated.acme.v1:foo:bar"
-//
-// Callers that want lenient matching across partitions use "*" as
-// the partition; callers that want a specific partition pass that
-// partition name verbatim.
-func BuildTriggerTopic(eventKind, conceptId, partition string) (string, error) {
+//	event="node.deleted", concept=""
+//	  ==> "graph.node.deleted" (concept-less, matches any concept)
+func BuildTriggerTopic(eventKind, conceptId string) (string, error) {
 	if eventKind == "" {
 		return "", fmt.Errorf("event-kind cannot be empty")
 	}
@@ -69,18 +60,15 @@ func BuildTriggerTopic(eventKind, conceptId, partition string) (string, error) {
 		}
 		return "", fmt.Errorf("event %q is not one of the allowed kinds: %s", eventKind, strings.Join(allowed, ", "))
 	}
-	if partition == "" {
-		return "", fmt.Errorf("partition cannot be empty (use \"*\" for any partition)")
-	}
 
-	topic := "graph." + eventKind + "." + partition
+	topic := "graph." + eventKind
 	if conceptId != "" {
 		topic += "." + conceptId
 	}
 	return topic, nil
 }
 
-// ExtractStructuredTriggerArgs pulls the three structured fields
+// ExtractStructuredTriggerArgs pulls the structured fields
 // from an attribute's Args map. Reports which fields were present
 // so the caller can distinguish "missing field" from "field set to
 // the empty string."
@@ -91,18 +79,14 @@ func BuildTriggerTopic(eventKind, conceptId, partition string) (string, error) {
 // responsible for resolving the symbol ref via the per-file alias
 // table before calling BuildTriggerTopic.
 type StructuredTriggerArgs struct {
-	EventKind   string
-	Concept     string
-	Partition   string
-	HasEvent    bool
-	HasConcept  bool
-	HasPartition bool
+	EventKind  string
+	Concept    string
+	HasEvent   bool
+	HasConcept bool
 }
 
-// ParseStructuredTriggerArgs reads `event`, `concept`, and
-// `partition` from the trigger attribute's Args map. Tolerates
-// extra unknown args (e.g. legacy `on=`); the caller decides
-// whether to reject them.
+// ParseStructuredTriggerArgs reads `event` and `concept` from the
+// trigger attribute's Args map. Tolerates extra unknown args.
 func ParseStructuredTriggerArgs(args map[string]any) (*StructuredTriggerArgs, error) {
 	out := &StructuredTriggerArgs{}
 
@@ -127,15 +111,6 @@ func ParseStructuredTriggerArgs(args map[string]any) (*StructuredTriggerArgs, er
 			// resolution pass picks it up.
 			out.Concept = fmt.Sprintf("%v", v)
 		}
-	}
-
-	if v, ok := args["partition"]; ok {
-		s, isStr := v.(string)
-		if !isStr {
-			return nil, fmt.Errorf("@trigger partition= must be a string, got %T", v)
-		}
-		out.Partition = s
-		out.HasPartition = true
 	}
 
 	return out, nil

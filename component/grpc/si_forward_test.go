@@ -60,8 +60,8 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 	serverMsg := &memqlv1.MemqlServerMessage{
 		MessageId:   "resp-1",
 		CorrelateTo: "req-42",
-		Payload: &memqlv1.MemqlServerMessage_SIChatResult{
-			SIChatResult: &memqlv1.SIChatResult{
+		Payload: &memqlv1.MemqlServerMessage_SiChatResult{
+			SiChatResult: &memqlv1.SIChatResult{
 				RequestId: "req-42",
 				Message: &memqlv1.SIChatMessage{
 					Role:    "assistant",
@@ -86,8 +86,8 @@ func TestAiForwardRouter_DispatchRoutesByRequestId(t *testing.T) {
 		if got == nil {
 			t.Fatal("channel delivered nil message")
 		}
-		if got.GetSIChatResult().GetMessage().GetContent() != "hello" {
-			t.Errorf("unexpected content: %q", got.GetSIChatResult().GetMessage().GetContent())
+		if got.GetSiChatResult().GetMessage().GetContent() != "hello" {
+			t.Errorf("unexpected content: %q", got.GetSiChatResult().GetMessage().GetContent())
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timed out waiting for dispatched message")
@@ -227,13 +227,13 @@ func TestAiForwardRouter_ForwardContinuation_PeerWithoutConnection(t *testing.T)
 // marker includes SITranscribeStreamComplete so the BFF's inflight
 // closes on the stream's final message.
 func TestIsTerminalServerPayload_StreamComplete(t *testing.T) {
-	complete := &memqlv1.MemqlServerMessage_SITranscribeStreamComplete{}
+	complete := &memqlv1.MemqlServerMessage_SiTranscribeStreamComplete{}
 	if !isTerminalServerPayload(complete) {
 		t.Error("SITranscribeStreamComplete should be terminal")
 	}
 
 	// Delta must remain non-terminal (many Deltas flow before Complete).
-	delta := &memqlv1.MemqlServerMessage_SITranscribeStreamDelta{}
+	delta := &memqlv1.MemqlServerMessage_SiTranscribeStreamDelta{}
 	if isTerminalServerPayload(delta) {
 		t.Error("SITranscribeStreamDelta must not be terminal")
 	}

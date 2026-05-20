@@ -794,7 +794,7 @@ query auditEvent queryRecentAuditEvents {
 // Phase 4 of the chat-architecture plan. Read-only counterpart of
 // mutationSetUserActiveSpace.
 //
-// Subscribing to graph.node.created.*.v1:identity:user is the
+// Subscribing to graph.node.created.v1:identity:user is the
 // canonical way to react to a switch -- the user concept is global,
 // so the partition slot is _system; the rewriter handles that.
 

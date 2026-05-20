@@ -77,14 +77,14 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 	// Subscribe to the local bus. The handler should be invoked once the
 	// peer event is bridged.
 	received := make(chan events.Event, 1)
-	bus.Subscribe("graph.node.created.default.v1:cognition:utterance", func(e events.Event) {
+	bus.Subscribe("graph.node.created.v1:cognition:utterance", func(e events.Event) {
 		received <- e
 	})
 
 	payload, _ := structpb.NewStruct(map[string]any{"spaceId": "space-1"})
 	svc.handleEventForward("peer-bff", &nodev1.EventForward{
 		EventId:      "evt-abc",
-		Topic:        "graph.node.created.default.v1:cognition:utterance",
+		Topic:        "graph.node.created.v1:cognition:utterance",
 		Kind:         int32(events.KindNodeCreated),
 		Ts:           timestamppb.New(time.Now()),
 		Payload:      payload,
@@ -118,7 +118,7 @@ func TestHandleEventForward_NoInboundDoesNotPanic(t *testing.T) {
 	stream := newFakeStream()
 	svc.handleEventForward("peer", &nodev1.EventForward{
 		EventId: "evt-x",
-		Topic:   "graph.node.created.default.v1:cognition:utterance",
+		Topic:   "graph.node.created.v1:cognition:utterance",
 		Ttl:     3,
 	}, stream)
 
@@ -151,7 +151,7 @@ func TestHandleEventForward_SendsAck(t *testing.T) {
 	stream := newFakeStream()
 	svc.handleEventForward("peer", &nodev1.EventForward{
 		EventId: "evt-ack",
-		Topic:   "graph.node.created.default.v1:cognition:utterance",
+		Topic:   "graph.node.created.v1:cognition:utterance",
 		Ttl:     3,
 	}, stream)
 

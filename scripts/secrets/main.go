@@ -475,7 +475,7 @@ func handshake(stream memqlv1.MemqlService_StreamClient) error {
 	return nil
 }
 
-func runMutation(stream memqlv1.MemqlService_StreamClient, mutationName string, args map[string]any, partition string) error {
+func runMutation(stream memqlv1.MemqlService_StreamClient, mutationName string, args map[string]any, _ string) error {
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("marshal args: %w", err)
@@ -484,7 +484,6 @@ func runMutation(stream memqlv1.MemqlService_StreamClient, mutationName string, 
 	msgId := uuid.NewString()
 	msg := &memqlv1.MemqlClientMessage{
 		MessageId: msgId,
-		Partition: partition,
 		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
 			ExecuteQuery: &memqlv1.ExecuteQueryMsg{
 				RequestId: uuid.NewString(),

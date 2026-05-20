@@ -158,7 +158,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 			eventPayload["payload"] = payloadMap
 		}
 		e.publishEvent(
-			events.BuildTopicWithPartitionAndConcept(events.TopicGraphNodeUpdated, readPartition, conceptMeta.Name),
+			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptMeta.Name),
 			events.KindNodeUpdated,
 			eventPayload,
 		)
@@ -315,9 +315,6 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 		}
 	}
 
-	// Partition is still used downstream for the event publish topic;
-	// Concept.Create no longer takes it post-#56 phase 3.
-	writePartition := e.partitionForConcept(ctx, conceptMeta.Name)
 	createParams := memorynodes.CreateParams{
 		Actor:   actor,
 		ID:      strings.TrimSpace(mutation.ID),
@@ -378,13 +375,8 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// Keep full payload for reference (nested access still works)
 	eventPayload["payload"] = payloadMap
 
-	// Events fire under the concept's actual storage partition, not the
-	// caller's envelope -- so global concepts emit topics like
-	// graph.node.created._system.v1:cluster:node, and subscribers using
-	// "node.*.*.<concept>" (wildcard partition) still match.
-	eventPayload["partition"] = writePartition
 	e.publishEvent(
-		events.BuildTopicWithPartitionAndConcept(events.TopicGraphNodeCreated, writePartition, conceptMeta.Name),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
 		events.KindNodeCreated,
 		eventPayload,
 	)

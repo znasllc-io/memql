@@ -4,7 +4,7 @@
 // the SeedMaterializer (component/memql/seed_materializer.go) walks
 // the `seed` declarations in plannerAgent.memql / trainerAgent.memql /
 // assistant.memql at engine startup, and subscribes to
-// graph.node.created.*.v1:identity:user for runtime fanout. The
+// graph.node.created.v1:identity:user for runtime fanout. The
 // declarations themselves are the source of truth; the materializer
 // turns them into v1:agents:agent rows.
 //
