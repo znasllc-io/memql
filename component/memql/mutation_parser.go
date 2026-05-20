@@ -79,6 +79,14 @@ var allowedMutationAnnotations = map[string]bool{
 	"useMutation":          true,
 	"useLogic":             true,
 	"useBuiltin":           true,
+	// `@public` is a parse-only marker introduced by issue #54
+	// (per-row authorization audit). It carries no runtime
+	// semantics; the validator treats it as the author's explicit
+	// acknowledgement that this mutation is intentionally callable
+	// without a caller-scope check (sign-up / login flows that run
+	// pre-authentication, etc.). Documented in
+	// `docs/auth/per-row-authz-audit.md`.
+	"public": true,
 }
 
 // parseMutationMemQL is the dedicated entry point for mutation
