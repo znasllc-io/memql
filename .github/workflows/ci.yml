@@ -46,6 +46,18 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+  sdk-gen-check:
+    name: sdk-gen-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: regenerate typed SDK and check for drift
+        run: make sdk-gen-check
+
   # DSL-lint gate. Runs `memql-cockpit lint dsl/` once the cockpit
   # binary is available on the runner (it lives in a separate repo,
   # github.com/znasllc-io/memql-cockpit). The gate is wired here as
