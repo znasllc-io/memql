@@ -1,0 +1,38 @@
+# gitleaks configuration for memQL
+#
+# Wired into CI in a follow-up (Wave 2 of the pre/post-OSS security audit, see
+# issue #91). This file establishes the baseline and documents the known false
+# positives so the audit history stays explicit.
+
+title = "memQL gitleaks config"
+
+[extend]
+# Inherit the upstream default rule set.
+useDefault = true
+
+# -----------------------------------------------------------------------------
+# Allowlists
+# -----------------------------------------------------------------------------
+# Each allowlist uses condition = "AND" so that BOTH the regex AND the path
+# constraint must match before a finding is suppressed. This keeps the
+# suppression narrow: the literal dev credential is OK in compose / docs /
+# dev-scripts, but the same string appearing in Go source or anywhere else
+# still trips the scanner.
+
+[[allowlists]]
+description    = "Local Docker Compose Postgres credentials (memql_dev). Dev-only; not a production fallback — see issue #85."
+condition      = "AND"
+regexTarget    = "match"
+regexes        = ['''postgres://memql:memql_dev@''']
+paths = [
+  '''^docker/docker-compose\..*\.ya?ml$''',
+  '''^docker/README\.md$''',
+  '''^scripts/dev/.*''',
+  '''^Makefile$''',
+  '''^CLAUDE\.md$''',
+  '''^DEPLOYMENT_STRATEGY\.md$''',
+  '''^GLOSSARY\.md$''',
+  '''^QUICKSTART\.md$''',
+  '''^README\.md$''',
+  '''^TECH_STACK_AND_PRACTICES\.md$''',
+]
