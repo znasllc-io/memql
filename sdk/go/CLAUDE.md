@@ -86,7 +86,7 @@ sdk/go/
     concept_browser.go    Admin-surface BrowseConcept / GetRowByConceptAndId
     support.go            Result type + executeNamed + renderMemQLValue
   voice/                  Push-to-talk transcription
-  sense/                  (Pending #114) tokenize / diagnose / complete / hover / signature
+  sense/                  Tokenize / Diagnose / Complete / Hover / SignatureHelp
   worker/                 (Pending #117) WorkerService client
 ```
 
