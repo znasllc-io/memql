@@ -28,15 +28,10 @@ import (
 // SQL filters (e.g. privateCanvasStatesForViewer) compare against
 // the canonical id.
 //
-// Accepts both prefixes the auth middleware admits as valid JWT
-// subjects (component/auth/access/middleware.go): the partition-
-// qualified `_system:v1:identity:user:` form AND the bare
-// `v1:identity:user:` form. An overly-strict validator (only the
-// `_system:` form) silently rejected legitimate user ids carried
-// on real chat-turn JWTs, leaving turnContext.OwnerUserId empty,
-// which surfaced to the user as workerStatus / requestComputerUseScope
-// erroring out with "ownerUserId required" -- right after Computer
-// Use was successfully connected.
+// Accepts both prefixes the identity resolver admits as valid JWT
+// subjects (component/auth/identity_resolver.go): the partition-
+// qualified `default:v1:identity:user:` form AND the bare
+// `v1:identity:user:` form.
 func looksLikeCanonicalUserId(s string) bool {
 	t := strings.TrimSpace(s)
 	return strings.HasPrefix(t, "default:v1:identity:user:") ||

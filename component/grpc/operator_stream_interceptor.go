@@ -79,12 +79,12 @@ func NewOperatorAwareStreamInterceptor(
 			return status.Error(codes.Unauthenticated, "operator auth: invalid credential")
 		}
 
-		// Owner role + recognizable subject so access.FallbackFromClaims
-		// stamps an AccessContext with Role=Owner; that hits the
-		// IsClusterOwner() bypass in CheckPartition. The
-		// OperatorAuthClaimKey marker lets audit / handler code
-		// branch when needed (right now nothing branches on it; the
-		// tag is there for log clarity + future use).
+		// Owner role + recognizable subject so auth.FallbackFromClaims
+		// stamps an AccessContext with Role=Owner; per-row authz checks
+		// then hit the IsClusterOwner() bypass. The OperatorAuthClaimKey
+		// marker lets audit / handler code branch when needed (right
+		// now nothing branches on it; the tag is there for log clarity
+		// + future use).
 		claims := map[string]any{
 			"sub":   OperatorSubject,
 			"role":  "owner",

@@ -180,7 +180,7 @@ func newSessionForRotate(svc *service) (*streamSession, *captureStream) {
 // session's identity intact. The stream MUST stay open in this case --
 // the client is expected to fall back to reconnect-with-fresh-token.
 func TestRotateAuth_NilVerifier(t *testing.T) {
-	svc := &service{logger: nil} // no verifier, no accessMW
+	svc := &service{logger: nil} // no verifier, no identityResolver
 	sess, cs := newSessionForRotate(svc)
 
 	err := sess.handleRotateAuth(
@@ -241,11 +241,10 @@ func TestRotateAuth_HappyPath(t *testing.T) {
 	issue, v := newRotateAuthFixture(t)
 	svc := &service{
 		verifier: v,
-		// accessMW left nil so the handler falls into the
+		// identityResolver left nil so the handler falls into the
 		// FallbackFromClaims branch (no DB needed). The contract under
-		// test is the identity swap + the reply shape; partition-ACL
-		// reloading is exercised in the access middleware's own tests.
-		accessMW: nil,
+		// test is the identity swap + the reply shape.
+		identityResolver: nil,
 	}
 	sess, cs := newSessionForRotate(svc)
 

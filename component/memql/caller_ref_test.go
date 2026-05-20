@@ -76,14 +76,11 @@ func TestResolveCallerReferences_OwnerBypass(t *testing.T) {
 	}
 }
 
-func TestResolveCallerReferences_NonOwnerGetsPartitionList(t *testing.T) {
-	ac := &auth.AccessContext{
-		Role: auth.RoleWriter,
-		PartitionACL: auth.PartitionACL{
-			"default": auth.RoleWriter,
-			"acme":    auth.RoleAdmin,
-		},
-	}
+func TestResolveCallerReferences_NonOwnerGetsEmptyPartitionList(t *testing.T) {
+	// Post-#56 phase 4: the PartitionACL is gone; non-owners get an
+	// empty partition list back. The DSL reference itself is stripped
+	// in phase 5.
+	ac := &auth.AccessContext{Role: auth.RoleWriter}
 	ctx := auth.ContextWithAccess(context.Background(), ac)
 	resolved, err := resolveCallerReferences(ctx, parseListPartitionsFilter(t))
 	if err != nil {
@@ -94,15 +91,8 @@ func TestResolveCallerReferences_NonOwnerGetsPartitionList(t *testing.T) {
 	if !ok {
 		t.Fatalf("want []string, got %T", value)
 	}
-	if len(partitions) != 2 {
-		t.Fatalf("want 2 partitions, got %d: %v", len(partitions), partitions)
-	}
-	seen := map[string]bool{}
-	for _, p := range partitions {
-		seen[p] = true
-	}
-	if !seen["default"] || !seen["acme"] {
-		t.Errorf("missing partitions: got %v, want default+acme", partitions)
+	if len(partitions) != 0 {
+		t.Fatalf("want empty list, got %d: %v", len(partitions), partitions)
 	}
 }
 

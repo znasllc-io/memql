@@ -345,7 +345,10 @@ func buildPolicyCtx(ctx context.Context, engine *MemQLEngine, args map[string]an
 		actor["role"] = string(access.Role)
 		actor["identityId"] = access.IdentityId
 		actor["isClusterOwner"] = access.IsClusterOwner()
-		actor["partitions"] = access.AllowedPartitions()
+		// caller.partitions is going away in #56 phase 5; emit an
+		// empty list so the existing DSL surface keeps resolving
+		// until that ships.
+		actor["partitions"] = []string{}
 	}
 	out["actor"] = actor
 	out["partition"] = currentPartitionFromContext(ctx)

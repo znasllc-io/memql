@@ -1,10 +1,20 @@
 # Access Model
 
+> **Status (#56 in progress):** the per-partition ACL layer described
+> below has been retired (phase 4). Authentication + identity stay
+> identical; authorization is enforced **per row** inside DSL queries
+> and mutations -- see
+> [per-row-authz-audit.md](per-row-authz-audit.md) for the four
+> buckets (owned / granted / admin / public) and how each domain
+> classifies its constructs. The remaining `partition` references in
+> this doc reflect historical behavior; later #56 phases strip the
+> envelope dimension entirely.
+
 memQL's authorization has three layers: **authentication** (who are
 you), **identity** (which credential you're using), and
-**authorization** (which partitions you can operate in, and what role
-you hold there). This document describes the data model and the
-enforcement points after the cluster's cutover to the in-house
+**authorization** (per-row checks inside the DSL: ownership /
+grants / admin / public). This document describes the data model and
+the enforcement points after the cluster's cutover to the in-house
 identity service (`component/identity`).
 
 For the registration / first-login flow see

@@ -64,7 +64,8 @@ func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 		actor["role"] = string(access.Role)
 		actor["identityId"] = access.IdentityId
 		actor["isClusterOwner"] = access.IsClusterOwner()
-		actor["partitions"] = access.AllowedPartitions()
+		// caller.partitions is going away in #56 phase 5; emit empty.
+		actor["partitions"] = []string{}
 	}
 	out["actor"] = actor
 	out["partition"] = currentPartitionFromContext(ctx)
