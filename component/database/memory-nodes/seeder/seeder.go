@@ -171,18 +171,6 @@ func (r *Runner) applyConceptSeed(ctx context.Context, bunDB *bun.DB, concept *m
 			}
 		}
 
-		// Global-scoped concepts live in the reserved SystemPartition so
-		// every tenant sees the same topology/metadata. Without this
-		// branch a seed like v1:cluster:nodeType/seed.memql lands in
-		// `default:...` while the matching Create(ctx) calls from
-		// automations land in `_system:...`, and the CLI's
-		// queryClusterNodeTypes returns empty because the query path
-		// filters to _system for global concepts.
-		partition := id.DefaultPartition
-		if concept.IsGlobal() {
-			partition = id.SystemPartition
-		}
-
 		// Insert the record (either new or updated version). Stamp
 		// system-bootstrap provenance so the row's intrinsic
 		// reflects the legacy seed.memql sidecar path (distinct
@@ -190,10 +178,9 @@ func (r *Runner) applyConceptSeed(ctx context.Context, bunDB *bun.DB, concept *m
 		seedCtx := provenance.ContextWithProvenance(ctx,
 			provenance.System("conceptSeeder:"+concept.Name))
 		if _, err := concept.Create(seedCtx, r.store, memoryNodes.CreateParams{
-			Partition: partition,
-			Actor:     recordActor,
-			Payload:   seedPayload,
-			ID:        record.ID,
+			Actor:   recordActor,
+			Payload: seedPayload,
+			ID:      record.ID,
 		}); err != nil {
 			errs = append(errs, fmt.Errorf("concept seeder: %s record %d insert failed: %w", concept.Name, idx, err))
 			continue
@@ -324,17 +311,10 @@ func storageId(concept *memoryNodes.Concept, rawId string) string {
 	if id.HasPartition(trimmed) {
 		return trimmed
 	}
-	// Global-scoped concepts store rows under SystemPartition; the
-	// existence check must look there or it will always miss and the
-	// seeder will insert a new "version" on every restart.
-	partition := id.DefaultPartition
-	if concept.IsGlobal() {
-		partition = id.SystemPartition
-	}
 	if strings.HasPrefix(trimmed, concept.Name+":") {
-		return partition + ":" + trimmed
+		return id.DefaultPartition + ":" + trimmed
 	}
-	return id.BuildNodeId(partition, concept.Name, trimmed)
+	return id.BuildNodeId(id.DefaultPartition, concept.Name, trimmed)
 }
 
 type conceptSeed struct {

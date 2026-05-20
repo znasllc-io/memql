@@ -298,7 +298,6 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 		return nil, fmt.Errorf("knowledge.ingest: resolve provider %q: %w", providerName, err)
 	}
 
-	partition := i.resolvePartition(ctx)
 	stored := 0
 	for seq, chunkText := range chunks {
 		chunkId := chunkIdFor(domainId, sourceRef, seq, chunkText)
@@ -326,7 +325,7 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 			return nil, fmt.Errorf("knowledge.ingest: insert chunk %d: %w", seq, err)
 		}
 
-		if err := i.storeVector(ctx, partition, chunkId, "v1:common:documentChunk", vec); err != nil {
+		if err := i.storeVector(ctx, chunkId, "v1:common:documentChunk", vec); err != nil {
 			return nil, fmt.Errorf("knowledge.ingest: persist vector chunk %d: %w", seq, err)
 		}
 		stored++
@@ -346,16 +345,16 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 // storeVector writes a single pgvector row, mirroring what
 // embedding.storeHandler does. Inlined here so we can call it tightly
 // from the ingest loop without a DSL round-trip per chunk.
-func (i *Integration) storeVector(ctx context.Context, partition, nodeId, conceptName string, vec []float32) error {
+func (i *Integration) storeVector(ctx context.Context, nodeId, conceptName string, vec []float32) error {
 	sqlText := `
-		INSERT INTO node_vectors (partition, id, concept, vector_field, embedding, created_at, updated_at)
-		VALUES ($1, $2, $3, 'content', $4::vector, NOW(), NOW())
-		ON CONFLICT (partition, id, vector_field) DO UPDATE SET
+		INSERT INTO node_vectors (id, concept, vector_field, embedding, created_at, updated_at)
+		VALUES ($1, $2, 'content', $3::vector, NOW(), NOW())
+		ON CONFLICT (id, vector_field) DO UPDATE SET
 		  embedding = EXCLUDED.embedding,
 		  concept = EXCLUDED.concept,
 		  updated_at = NOW()
 	`
-	_, err := i.db().ExecContext(ctx, sqlText, partition, nodeId, conceptName, vectorLiteral(vec))
+	_, err := i.db().ExecContext(ctx, sqlText, nodeId, conceptName, vectorLiteral(vec))
 	return err
 }
 

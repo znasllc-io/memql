@@ -182,7 +182,6 @@ func (i *Integration) trainAgentRetryStepHandler(
 	if err != nil {
 		return nil, fmt.Errorf("training.trainAgentRetryStep: resolve provider %q: %w", providerName, err)
 	}
-	partition := i.resolvePartition(ctx)
 
 	identityVectorWrote := false
 	systemPromptWrote := false
@@ -197,7 +196,7 @@ func (i *Integration) trainAgentRetryStepHandler(
 		if err != nil {
 			return nil, fmt.Errorf("training.trainAgentRetryStep: identity-embed: %w", err)
 		}
-		if err := i.storeVector(ctx, partition, agentId, "v1:agents:agent", vec); err != nil {
+		if err := i.storeVector(ctx, agentId, "v1:agents:agent", vec); err != nil {
 			return nil, fmt.Errorf("training.trainAgentRetryStep: identity-vector store: %w", err)
 		}
 		identityVectorWrote = true
@@ -243,7 +242,6 @@ func (i *Integration) trainAgentRetryStepHandler(
 	summaryJSON, _ := json.Marshal(summary)
 	return []memorynodes.MemoryNode{
 		{
-			Partition: partition,
 			ID:        fmt.Sprintf("training-retry:%s:%d", agentId, time.Now().UnixNano()),
 			Concept:   "v1:copresent:trainingresult",
 			Payload:   summaryJSON,

@@ -1,12 +1,11 @@
 CREATE TABLE IF NOT EXISTS node_vectors (
-  partition    TEXT NOT NULL,
   id           TEXT NOT NULL,
   concept      TEXT NOT NULL,
   vector_field TEXT NOT NULL,
   embedding    vector(1536) NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (partition, id, vector_field)
+  PRIMARY KEY (id, vector_field)
 );
 
 CREATE INDEX IF NOT EXISTS idx_node_vectors_profile_hnsw

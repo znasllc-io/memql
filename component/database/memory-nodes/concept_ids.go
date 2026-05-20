@@ -28,12 +28,6 @@ const (
 )
 
 // Platform domain concepts (v1:platform:*)
-//
-// Secrets and variables come in two flavors:
-//   * global*    -- @scope("global"), live in _system, instance-wide.
-//   * partition* -- partition-scoped, per-tenant overrides. The
-//                   resolveSecret/resolveVariable resolvers fall back
-//                   from partition* to global* automatically.
 const (
 	ConceptPlatformGlobalSecret      = "v1:platform:globalSecret"
 	ConceptPlatformGlobalVariable    = "v1:platform:globalVariable"
@@ -43,10 +37,6 @@ const (
 )
 
 // Identity domain concepts (v1:identity:*)
-//
-// All identity concepts are global-scoped (@scope("global") in their
-// concept.memql) and live in the _system partition. See
-// docs/planning/user-access-model.md for the user/identity/access split.
 const (
 	ConceptIdentityUser            = "v1:identity:user"
 	ConceptIdentityIdentity        = "v1:identity:identity"

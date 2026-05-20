@@ -422,7 +422,7 @@ func (i *Integration) trainAgentHandler(
 			identityErr = fmt.Sprintf("identity-embed: %v", err)
 			i.Logger.Warn("training.trainAgent: identity-embed failed (after retries)",
 				"agentId", agentId, "err", err)
-		} else if err := i.storeVector(ctx, partition, agentId, "v1:agents:agent", vec); err != nil {
+		} else if err := i.storeVector(ctx, agentId, "v1:agents:agent", vec); err != nil {
 			identityErr = fmt.Sprintf("identity-vector store: %v", err)
 			i.Logger.Warn("training.trainAgent: identity-vector store failed",
 				"agentId", agentId, "err", err)
@@ -713,7 +713,6 @@ func (i *Integration) trainAgentHandler(
 	summaryJSON, _ := json.Marshal(summary)
 	return []memorynodes.MemoryNode{
 		{
-			Partition: partition,
 			ID:        fmt.Sprintf("training:%s:%d", agentId, time.Now().UnixNano()),
 			Concept:   "v1:copresent:trainingresult",
 			Payload:   summaryJSON,
@@ -815,7 +814,7 @@ func (i *Integration) embedDomainContent(
 	}
 
 	for _, c := range chunks {
-		has, err := i.hasVector(ctx, partition, c.id)
+		has, err := i.hasVector(ctx, c.id)
 		if err != nil {
 			i.Logger.Warn("training.trainAgent: hasVector check failed",
 				"chunkId", c.id, "err", err)
@@ -831,7 +830,7 @@ func (i *Integration) embedDomainContent(
 				"chunkId", c.id, "err", err)
 			continue
 		}
-		if err := i.storeVector(ctx, partition, c.id, "v1:common:documentChunk", vec); err != nil {
+		if err := i.storeVector(ctx, c.id, "v1:common:documentChunk", vec); err != nil {
 			i.Logger.Warn("training.trainAgent: store vector failed",
 				"chunkId", c.id, "err", err)
 			continue
@@ -1128,13 +1127,13 @@ func (i *Integration) queryChunksForDomain(
 }
 
 // hasVector checks whether a node already has an embedding stored.
-// Cheap point-lookup against the (partition, id, vector_field) PK.
-func (i *Integration) hasVector(ctx context.Context, partition, nodeId string) (bool, error) {
+// Cheap point-lookup against the (id, vector_field) PK.
+func (i *Integration) hasVector(ctx context.Context, nodeId string) (bool, error) {
 	row := i.db().QueryRowContext(
 		ctx,
 		`SELECT 1 FROM node_vectors
-		 WHERE partition = $1 AND id = $2 AND vector_field = 'content' LIMIT 1`,
-		partition, nodeId,
+		 WHERE id = $1 AND vector_field = 'content' LIMIT 1`,
+		nodeId,
 	)
 	var marker int
 	err := row.Scan(&marker)
@@ -1153,18 +1152,18 @@ func (i *Integration) hasVector(ctx context.Context, partition, nodeId string) (
 // here (hasVector check above) but guards against races.
 func (i *Integration) storeVector(
 	ctx context.Context,
-	partition, nodeId, conceptName string,
+	nodeId, conceptName string,
 	vec []float32,
 ) error {
 	sqlText := `
-		INSERT INTO node_vectors (partition, id, concept, vector_field, embedding, created_at, updated_at)
-		VALUES ($1, $2, $3, 'content', $4::vector, NOW(), NOW())
-		ON CONFLICT (partition, id, vector_field) DO UPDATE SET
+		INSERT INTO node_vectors (id, concept, vector_field, embedding, created_at, updated_at)
+		VALUES ($1, $2, 'content', $3::vector, NOW(), NOW())
+		ON CONFLICT (id, vector_field) DO UPDATE SET
 		  embedding = EXCLUDED.embedding,
 		  concept = EXCLUDED.concept,
 		  updated_at = NOW()
 	`
-	_, err := i.db().ExecContext(ctx, sqlText, partition, nodeId, conceptName, vectorLiteral(vec))
+	_, err := i.db().ExecContext(ctx, sqlText, nodeId, conceptName, vectorLiteral(vec))
 	return err
 }
 
