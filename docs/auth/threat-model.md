@@ -208,12 +208,66 @@ Each defense in §4 lands with negative tests:
 
 ---
 
-## 7. Future hardening (ordered)
+## 7. Injection surfaces (Wave 4, #87)
+
+The injection-surface audit (Wave 4, issue #87) walked the standard injection vectors against memQL. Most are **closed** by existing design; two are deferred as architectural follow-ups.
+
+### 7.1 SQL injection — closed
+
+Every runtime query goes through Bun ORM with parameterized binds. The DSL → SQL filter compiler (`component/memql/executor_filter.go`) compiles `payload.field == args.x` filter clauses to `?`-placeholder SQL with bound args. The audit found one `fmt.Sprintf` site, in `component/database/timescaledb.go:182-183`, but it interpolates the table name (a static, hardcoded constant — `memoryNodesTableName`) through `quoteIdentifier()` and never touches user input.
+
+### 7.2 DSL execution sandboxing — strong
+
+The MemQL parser (`component/language/parser/parser.go`) is strict: unknown receivers and unknown step types are rejected at parse time. The DSL has no `eval()` / reflection escape hatch — every external call goes through a registered integration, and integrations are Go code under operator control, not declared in `.memql` files.
+
+`MEMQL_DSL_PATH` overrides let an operator load DSL from disk; the loader (`component/memql/dslfs/dslfs.go`) doesn't validate beyond what the parser does. **Trust assumption:** `MEMQL_DSL_PATH` is operator-controlled (env var injected at startup); the cluster owner can already replace any DSL on disk, so the override doesn't widen the trust boundary.
+
+### 7.3 Prompt templates — low risk
+
+`component/memql/si_prompts.go` uses Go's `text/template` with an empty `FuncMap` — no custom functions, no dangerous primitives like `call`/`env`. Templates themselves are operator-controlled (in `dsl/**/prompts/`); user data is passed as values, not template syntax. A malicious `.tmpl` loaded via `MEMQL_DSL_PATH` could exfiltrate fields from the data object, but `MEMQL_DSL_PATH` is operator-controlled (see §7.2).
+
+The **BFF-side** prompt templates have their own injection surface (LLM data flowing into user-facing prompts); that's handled in `memql-bff-copresent` #15 and the `[[BEGIN UNTRUSTED * ]]` framing.
+
+### 7.4 Path traversal — closed
+
+`integrations/workbench/workspace.go:197-203` (`safeJoin`) does the canonical clean-and-prefix-check pattern. `safePlanId` whitelists allowed chars in the plan-id component. Every fs operation in the workbench goes through `safeJoin`. The DSL loader operates on operator-controlled directory trees only.
+
+### 7.5 Web injection — closed
+
+Templ auto-escapes `{ field }` interpolations. `templ.Raw(...)` is only used for markdown-rendered HTML where content was sanitized upstream. OAuth `redirect_uri` is whitelisted via `Cfg.AllowsRedirectURI` (`component/identity/web/handlers.go:711-712`); arbitrary destinations are rejected.
+
+### 7.6 Tool-call argument validation — deferred (architectural)
+
+`component/memql/si_tool_loop.go:149-158` looks up the tool by name and rejects unknown names, but **does not validate args against the tool's declared schema** before invoking the handler. Each tool handler is expected to validate its own args.
+
+This is by design — every tool defines its own contract — but it leaves a class of bug where a handler that forgets to check a sensitive arg (e.g. `forUserId` or `actor.userId`) can be exploited via LLM-supplied values.
+
+**Trust assumption today:** every tool handler validates its own args. The audit didn't find a concrete violation, but the surface is unprotected at the central dispatch point.
+
+**Upgrade path:** generate a centralised arg-validator from the DSL tool schema (`tools.memql`) and intercept in `si_tool_loop` before dispatch. Rejects unknown arg names, wrong types, out-of-enum values, and (most importantly) auto-injected fields (like `ownerUserId`, `agentId`) that the LLM should never supply. Pending; tracked on #87.
+
+### 7.7 Shell exec — intentional, mitigated, allowlist deferred
+
+`integrations/workbench/dispatch.go:96` invokes `/bin/sh -c <cmd>` where `cmd` is supplied by the calling agent. This is the **workbench tool's reason for existing**: a sandboxed per-Plan workspace that an agent can drive via shell. Mitigations in place:
+
+- Plan-scoped workspace root + `safeJoin` blocks fs escape.
+- 60-second default execution timeout, 1 MiB output cap.
+- Workspace runs as the host process user (no privilege escalation).
+
+**Trust assumption:** the agent is the trust boundary. An agent compromised via prompt injection (see #15) or jailbroken via base-model manipulation can run arbitrary shell commands within the workspace. The kill-switch + plan-level token budgets bound the blast radius.
+
+**Upgrade path:** per-command allowlist (`find`, `grep`, `cat`, `python`, `node`, etc.) or seccomp/AppArmor profile around the exec. Pending; tracked on #87.
+
+---
+
+## 8. Future hardening (ordered)
 
 1. **Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.
 2. **Revocation epoch claim** — closes §5.3.
-3. **Rotate-on-resend for guest invitations** — closes §5.4.
-4. **Voice-agent service-account path** — closes §5.2.
-5. **CSRF framework if any authenticated form POSTs ship** — closes §5.7.
+3. **Centralised tool-call arg validator** — closes §7.6.
+4. **Rotate-on-resend for guest invitations** — closes §5.4.
+5. **Voice-agent service-account path** — closes §5.2.
+6. **Workbench exec allowlist or seccomp profile** — closes §7.7.
+7. **CSRF framework if any authenticated form POSTs ship** — closes §5.7.
 
-Each is tracked as a follow-up beyond Wave 3 closeout.
+Each is tracked as a follow-up beyond Wave 3 / Wave 4 closeout.
