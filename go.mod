@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	cloud.google.com/go/storage v1.60.0
-	github.com/a-h/templ v0.3.1001
+	github.com/a-h/templ v0.3.1020
 	github.com/anthropics/anthropic-sdk-go v1.27.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
