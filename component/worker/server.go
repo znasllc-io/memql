@@ -589,11 +589,11 @@ func stringFallback(primary, fallback string) string {
 }
 
 func newRegistrationId() string {
-	return "wkr-" + randomHex(12)
+	return randomHex(12)
 }
 
 func newCallId() string {
-	return "call-" + randomHex(12)
+	return randomHex(12)
 }
 
 func randomHex(bytes int) string {

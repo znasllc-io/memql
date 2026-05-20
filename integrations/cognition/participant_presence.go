@@ -60,8 +60,11 @@ func presenceRecordId(participantId string) string {
 	if pid == "" {
 		return ""
 	}
-	// Deterministic ID: one presence record per participant (append-only versions).
-	return "presence-" + pid
+	// Deterministic ID: one presence record per participant
+	// (append-only versions). The canonical id format already carries
+	// `:participantPresence:` in the middle position; the shortId
+	// stays the bare participant id.
+	return pid
 }
 
 func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, spaceId, participantId, state, label, reason, lastUtteranceId, lastError string, metadata map[string]any) error {

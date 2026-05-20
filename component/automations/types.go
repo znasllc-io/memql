@@ -690,7 +690,7 @@ func (e *AutomationExecution) AddStepResult(result *StepResult) {
 
 // generateExecutionId creates a unique execution identifier.
 func generateExecutionId() string {
-	return "exec-" + time.Now().Format("20060102-150405") + "-" + randomSuffix()
+	return time.Now().Format("20060102-150405") + "-" + randomSuffix()
 }
 
 // randomSuffix generates a short random string using crypto/rand.

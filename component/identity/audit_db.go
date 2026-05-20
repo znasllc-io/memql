@@ -152,12 +152,13 @@ func writeKVInt(b *strings.Builder, key string, value int, first bool) {
 	b.WriteString(strconv.Itoa(value))
 }
 
-// newAuditEventId returns a 128-bit random hex id prefixed for
-// readability in slog output.
+// newAuditEventId returns a 128-bit random hex id. The canonical
+// id format already carries `:auditEvent:` in the middle position,
+// so the shortId stays a plain hash.
 func newAuditEventId() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	return "ae-" + hex.EncodeToString(buf), nil
+	return hex.EncodeToString(buf), nil
 }
