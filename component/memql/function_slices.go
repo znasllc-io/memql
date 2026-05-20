@@ -43,8 +43,13 @@ type FunctionSlice struct {
 // produce debug-level parse failures on every load.
 var functionDeclHeader = regexp.MustCompile(
 	`(?m)^[ \t]*(?:` +
-		// struct-form: `<kind> NAME {`
-		`(query|mutation|logic|automation)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
+		// struct-form: `<kind> [<concept>] <name> {`. The optional
+		// `<concept>` identifier is the post-migration signature-bound
+		// concept on queries / mutations / shapes / seeds (PR #48 / #49);
+		// logic + automation never bind a concept in the signature, so
+		// for those two the optional segment will always be absent in
+		// authored sources.
+		`(query|mutation|logic|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
 		`|` +
 		// procedural: `func (Kind) NAME(`
 		`func[ \t]*\([ \t]*(Query|Mutation|Logic|Automation|Shape|Tool|Builtin|Prompt|Provider|Policy)[ \t]*\)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(` +
