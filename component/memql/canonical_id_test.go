@@ -54,7 +54,7 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 		}
 		out := engine.canonicalizeRelationshipComparisons(ctx, expr, "v1:cognition:participant")
 		got := out.(*ComparisonExpression)
-		require.Equal(t, "_system:v1:identity:user:user-abc", got.Value)
+		require.Equal(t, "default:v1:identity:user:user-abc", got.Value)
 	})
 
 	t.Run("already-canonical RHS is unchanged (no AST clone)", func(t *testing.T) {
@@ -104,7 +104,7 @@ func TestCanonicalizeRelationshipComparisons(t *testing.T) {
 		out := engine.canonicalizeRelationshipComparisons(ctx, expr, "v1:cognition:participant")
 		got := out.(*LogicalExpression)
 		require.Equal(t, "default:v1:cognition:space:daily-abc", got.Left.(*ComparisonExpression).Value)
-		require.Equal(t, "_system:v1:identity:user:user-xyz", got.Right.(*ComparisonExpression).Value)
+		require.Equal(t, "default:v1:identity:user:user-xyz", got.Right.(*ComparisonExpression).Value)
 	})
 
 	t.Run("no concept context skips rewrites", func(t *testing.T) {
@@ -204,7 +204,7 @@ func TestCanonicalizeIdValue(t *testing.T) {
 			name:        "bare slug for global concept gets _system prefix",
 			value:       "user-abc",
 			conceptType: "v1:identity:user",
-			want:        "_system:v1:identity:user:user-abc",
+			want:        "default:v1:identity:user:user-abc",
 		},
 		{
 			name:        "bare slug for partition concept gets default prefix",
@@ -214,19 +214,19 @@ func TestCanonicalizeIdValue(t *testing.T) {
 		},
 		{
 			name:        "already-canonical value is returned as-is",
-			value:       "_system:v1:identity:user:user-abc",
+			value:       "default:v1:identity:user:user-abc",
 			conceptType: "v1:identity:user",
-			want:        "_system:v1:identity:user:user-abc",
+			want:        "default:v1:identity:user:user-abc",
 		},
 		{
 			name:        "canonical with stale partition is re-partitioned to global",
 			value:       "default:v1:identity:user:user-abc",
 			conceptType: "v1:identity:user",
-			want:        "_system:v1:identity:user:user-abc",
+			want:        "default:v1:identity:user:user-abc",
 		},
 		{
 			name:        "canonical for wrong concept errors (caller passed wrong type tag)",
-			value:       "_system:v1:identity:user:user-abc",
+			value:       "default:v1:identity:user:user-abc",
 			conceptType: "v1:cognition:space",
 			wantErr:     true,
 		},
@@ -276,14 +276,14 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 	t.Run("outgoing fields canonicalize, incoming and untagged fields untouched", func(t *testing.T) {
 		payload := map[string]any{
 			"spaceId":     "daily-2026-05-06",     // bare -> default:v1:cognition:space:daily-...
-			"userId":      "user-abc",             // bare -> _system:v1:identity:user:user-abc
+			"userId":      "user-abc",             // bare -> default:v1:identity:user:user-abc
 			"deliveredTo": "utt-bare",             // incoming -> NOT rewritten
 			"displayName": "Jose",                 // not a relationship field
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
 		require.Equal(t, "default:v1:cognition:space:daily-2026-05-06", payload["spaceId"])
-		require.Equal(t, "_system:v1:identity:user:user-abc", payload["userId"])
+		require.Equal(t, "default:v1:identity:user:user-abc", payload["userId"])
 		require.Equal(t, "utt-bare", payload["deliveredTo"])
 		require.Equal(t, "Jose", payload["displayName"])
 	})
@@ -291,12 +291,12 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 	t.Run("already-canonical values pass through unchanged", func(t *testing.T) {
 		payload := map[string]any{
 			"spaceId": "default:v1:cognition:space:abc",
-			"userId":  "_system:v1:identity:user:user-xyz",
+			"userId":  "default:v1:identity:user:user-xyz",
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
 		require.Equal(t, "default:v1:cognition:space:abc", payload["spaceId"])
-		require.Equal(t, "_system:v1:identity:user:user-xyz", payload["userId"])
+		require.Equal(t, "default:v1:identity:user:user-xyz", payload["userId"])
 	})
 
 	t.Run("missing fields are skipped (relationships optional unless @required)", func(t *testing.T) {
@@ -317,7 +317,7 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)
 		require.Equal(t, "", payload["spaceId"])
-		require.Equal(t, "_system:v1:identity:user:user-abc", payload["userId"])
+		require.Equal(t, "default:v1:identity:user:user-abc", payload["userId"])
 	})
 
 	t.Run("array-of-foreign-keys field canonicalizes each entry", func(t *testing.T) {
@@ -333,13 +333,13 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 			},
 		})
 		payload := map[string]any{
-			"memberIds": []any{"user-a", "_system:v1:identity:user:user-b", "user-c"},
+			"memberIds": []any{"user-a", "default:v1:identity:user:user-b", "user-c"},
 		}
 		err := eng.canonicalizeRelationshipFields(ctx, "v1:identity:group", payload)
 		require.NoError(t, err)
 		got := payload["memberIds"].([]any)
-		require.Equal(t, "_system:v1:identity:user:user-a", got[0])
-		require.Equal(t, "_system:v1:identity:user:user-b", got[1])
-		require.Equal(t, "_system:v1:identity:user:user-c", got[2])
+		require.Equal(t, "default:v1:identity:user:user-a", got[0])
+		require.Equal(t, "default:v1:identity:user:user-b", got[1])
+		require.Equal(t, "default:v1:identity:user:user-c", got[2])
 	})
 }
