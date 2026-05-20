@@ -179,16 +179,59 @@ type symbolEntry struct {
 
 // resolveUseDeclarations resolves each use declaration to a canonical concept ID
 // and returns a symbol table keyed by leaf name.
+//
+// Form B (`use foo.bar.{ name1, name2 }`) resolves each Name via
+// trailing-segment match against the registered concept list. The
+// path itself is just a module hint and doesn't have to align with
+// the canonical concept id. The kind of construct an imported name
+// references (concept / shape / trait / spec / mutation / query /
+// logic / builtin / prompt / provider / tool) is determined by the
+// concept registry's trailing-segment lookup -- non-concept names
+// are tolerated and pass through without a registered concept entry.
+//
+// Form A (`use cognition.space`) is retired but the legacy path is
+// still here for one-off callers that haven't migrated; it treats
+// the full dotted path as the concept id.
 func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDeclaration, version string) (map[string]*symbolEntry, error) {
 	symbols := make(map[string]*symbolEntry, len(uses))
 
 	for _, u := range uses {
-		// Determine if the path includes an explicit version
+		if len(u.Names) > 0 {
+			// Form B: resolve each Name via trailing-segment match.
+			// The path is a module hint -- not a concept id.
+			for _, name := range u.Names {
+				if _, dup := symbols[name]; dup {
+					continue
+				}
+				resolvedId, err := r.resolveBareConceptName(name)
+				if err != nil {
+					// Many Form B imports name non-concept constructs
+					// (shapes / traits / specs / mutations / queries
+					// / logic / builtins). Those don't resolve to a
+					// concept id and that's fine -- they're symbols
+					// the per-file translator handles separately.
+					// Register a name-only entry so the symbol table
+					// can still be consulted for collision-detection.
+					symbols[name] = &symbolEntry{
+						leafName: name,
+						fullPath: u.Path + "." + name,
+					}
+					continue
+				}
+				symbols[name] = &symbolEntry{
+					leafName:   name,
+					resolvedId: resolvedId,
+					fullPath:   u.Path + "." + name,
+				}
+			}
+			continue
+		}
+
+		// Form A (legacy): the path IS the concept id.
 		parts := u.Parts
 		resolvedVersion := version
 		startIdx := 0
 
-		// Check if first part looks like a version (v1, v2, etc.)
 		if len(parts) > 0 && len(parts[0]) >= 2 && parts[0][0] == 'v' && parts[0][1] >= '0' && parts[0][1] <= '9' {
 			resolvedVersion = parts[0]
 			startIdx = 1
@@ -198,20 +241,15 @@ func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDecla
 			return nil, fmt.Errorf("use declaration %q requires at least domain.entity", u.Path)
 		}
 
-		// Build canonical concept ID: version:domain:entity[:sub...]
-		// Dots map to colons: cognition.space.context -> v1:cognition:space:context
 		conceptParts := parts[startIdx:]
 		conceptId := resolvedVersion + ":" + strings.Join(conceptParts, ":")
 
-		// Validate the concept exists in the registry
 		if _, err := r.registry.Get(conceptId); err != nil {
 			return nil, fmt.Errorf("use %s: concept %q not found in registry", u.Path, conceptId)
 		}
 
-		// Store the resolved ID back on the declaration
 		u.ResolvedId = conceptId
 
-		// Register in symbol table
 		leafName := u.LeafName()
 		if existing, ok := symbols[leafName]; ok {
 			return nil, fmt.Errorf("ambiguous reference %q: matches %s and %s (use 'as' alias to disambiguate)",
