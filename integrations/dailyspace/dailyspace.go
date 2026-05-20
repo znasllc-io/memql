@@ -222,9 +222,16 @@ func (d *Integration) ensureForUser(ctx context.Context, userId string) (ensureR
 	name := fmt.Sprintf("Daily %s", dateKey)
 
 	sysCtx := systemActorContext(ctx)
+	// Pass ownerUserId explicitly: the mutation runs under the
+	// `system:dailyspaceAutomation` actor so the engine's actor-
+	// required gate is satisfied, but the space itself must be
+	// owned by the user we're provisioning for. Without this the
+	// row's payload.ownerUserId is unset (or, worse, an unresolved
+	// `actor.userId` token literal) and downstream queries that
+	// filter on ownership miss the row.
 	mutation := fmt.Sprintf(
-		`mutationCreateDailySpace({spaceId: %q, name: %q, dailyDateKey: %q})`,
-		spaceId, name, dateKey,
+		`mutationCreateDailySpace({spaceId: %q, name: %q, dailyDateKey: %q, ownerUserId: %q})`,
+		spaceId, name, dateKey, userId,
 	)
 	if _, err := d.engine.Execute(sysCtx, mutation); err != nil {
 		return out, fmt.Errorf("dailyspace.ensureForUser(%q): create daily: %w", userId, err)
