@@ -4,6 +4,7 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -238,6 +239,189 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 		t.Logf("\nThe canonical id format is `{partition}:{concept}:{shortId}`; the\nshortId should be the bare unique part (uuid/hash/slug), never\nprefixed with the concept name or a sub-type discriminator. If the\nprefix is a real discriminator (e.g. 'ga-' vs specialists), move it\ninto a payload field (e.g. agent.role='assistant').")
 	}
 }
+
+// TestPerRowAuthzClassification scans every query / mutation in the
+// tree and classifies it into one of four buckets:
+//
+//   - owned:   filter references `actor.userId` (caller-scoped read)
+//              or mutation insert/update stamps `ownerUserId`/`userId`
+//              from `actor.userId` (caller-scoped write)
+//   - admin:   filter or body references `actor.isClusterOwner` or
+//              the equivalent `requiresClusterOwner` spec call
+//   - public:  carries the `@public` annotation
+//   - flagged: none of the above AND the construct references a
+//              user-scope field (`payload.ownerUserId`,
+//              `payload.userId`, etc.) -- a candidate for caller-
+//              scoping that the author forgot
+//   - other:   none of the above, no user-scope field referenced
+//              (e.g. concept catalogs, cluster topology, system
+//              metadata reads)
+//
+// The test is INFORMATIONAL today -- it logs aggregate counts and a
+// per-flagged-construct list so the per-domain follow-up PRs (one
+// per domain, per issue #54) can be driven from the output. It does
+// NOT fail the build until every domain has been classified and gap-
+// closed; flipping to hard-fail lands as the last step of #54.
+func TestPerRowAuthzClassification(t *testing.T) {
+	type counts struct {
+		owned   int
+		admin   int
+		public  int
+		flagged int
+		other   int
+	}
+	byDomain := map[string]*counts{}
+	type flag struct {
+		file string
+		line int
+		name string
+		kind string
+	}
+	var flagged []flag
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	headerRe := regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") {
+			continue
+		}
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		src := string(raw)
+		matches := headerRe.FindAllStringSubmatchIndex(src, -1)
+		domain := strings.SplitN(p, "/", 2)[0]
+		if byDomain[domain] == nil {
+			byDomain[domain] = &counts{}
+		}
+		for _, m := range matches {
+			openIdx := m[1] - 1
+			closeIdx := matchingClose(src, openIdx)
+			if closeIdx < 0 {
+				continue
+			}
+			preambleStart := m[0]
+			for k := m[0] - 1; k >= 0; k-- {
+				lineStart := strings.LastIndexByte(src[:k], '\n') + 1
+				line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
+				if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
+					preambleStart = lineStart
+					k = lineStart - 1
+					continue
+				}
+				if line == "" {
+					break
+				}
+				break
+			}
+			preamble := src[preambleStart:m[0]]
+			body := src[m[1]:closeIdx]
+			kind := src[m[2]:m[3]]
+			name := src[m[4]:m[5]]
+
+			hasPublic := strings.Contains(preamble, "@public")
+			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
+				strings.Contains(body, "requiresClusterOwner") ||
+				strings.Contains(body, "caller.isClusterOwner")
+			hasOwner := strings.Contains(body, "actor.userId") ||
+				strings.Contains(body, "caller.userId")
+			referencesUserScope := strings.Contains(body, "payload.ownerUserId") ||
+				strings.Contains(body, "payload.userId") ||
+				strings.Contains(body, "payload.actorUserId") ||
+				strings.Contains(body, "payload.targetId") ||
+				strings.Contains(body, "payload.createdBy")
+			lineNo := strings.Count(src[:m[0]], "\n") + 1
+
+			switch {
+			case hasPublic:
+				byDomain[domain].public++
+			case hasOwner:
+				byDomain[domain].owned++
+			case hasAdmin:
+				byDomain[domain].admin++
+			case referencesUserScope:
+				byDomain[domain].flagged++
+				flagged = append(flagged, flag{p, lineNo, name, kind})
+			default:
+				byDomain[domain].other++
+			}
+		}
+	}
+
+	var domains []string
+	for d := range byDomain {
+		domains = append(domains, d)
+	}
+	sort.Strings(domains)
+	t.Logf("\n=== Per-row authz classification (informational; see docs/auth/per-row-authz-audit.md) ===")
+	t.Logf("%-15s %5s %5s %5s %5s %5s",
+		"domain", "owned", "admin", "public", "FLAG", "other")
+	for _, d := range domains {
+		c := byDomain[d]
+		t.Logf("%-15s %5d %5d %5d %5d %5d",
+			d, c.owned, c.admin, c.public, c.flagged, c.other)
+	}
+	t.Logf("")
+	t.Logf("Flagged constructs (%d) -- candidates for caller-scope gating:", len(flagged))
+	for _, f := range flagged {
+		t.Logf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
+	}
+}
+
+// matchingClose walks src from openIdx (position of `{`) and returns
+// the index of the matching `}`. String + line-comment aware.
+func matchingClose(src string, openIdx int) int {
+	if openIdx < 0 || openIdx >= len(src) || src[openIdx] != '{' {
+		return -1
+	}
+	depth := 0
+	inString := false
+	for i := openIdx; i < len(src); i++ {
+		c := src[i]
+		if inString {
+			if c == '\\' && i+1 < len(src) {
+				i++
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '/':
+			if i+1 < len(src) && src[i+1] == '/' {
+				nl := strings.IndexByte(src[i:], '\n')
+				if nl < 0 {
+					return -1
+				}
+				i += nl
+			}
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 
 // visitFilterPredicates walks every .memql file in the unified tree,
 // extracts filter-clause lines, splits on `;`, and invokes f for
