@@ -308,13 +308,10 @@ func storageId(concept *memoryNodes.Concept, rawId string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if id.HasPartition(trimmed) {
+	if strings.HasPrefix(trimmed, concept.Name+":") {
 		return trimmed
 	}
-	if strings.HasPrefix(trimmed, concept.Name+":") {
-		return id.DefaultPartition + ":" + trimmed
-	}
-	return id.BuildNodeId(id.DefaultPartition, concept.Name, trimmed)
+	return id.BuildNodeId(concept.Name, trimmed)
 }
 
 type conceptSeed struct {

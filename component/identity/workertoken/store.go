@@ -13,9 +13,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// canonicalIdentityIdPrefix mirrors pat.canonicalIdentityIdPrefix --
-// v1:identity:identity is global-scoped so it lives in _system.
-const canonicalIdentityIdPrefix = "default:v1:identity:identity:"
+// canonicalIdentityIdPrefix mirrors pat.canonicalIdentityIdPrefix.
+const canonicalIdentityIdPrefix = "v1:identity:identity:"
 
 // Store wraps the memQL engine with typed worker-token operations.
 // Mirrors the pat.Store pattern; lookup, create, revoke, list.
