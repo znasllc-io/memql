@@ -49,7 +49,7 @@ func systemActorContext(ctx context.Context) context.Context {
 //     see one logical row.
 //
 //  2. After the sweep, Start() subscribes to
-//     graph.node.created.*.v1:identity:user. When a new user lands,
+//     graph.node.created.v1:identity:user. When a new user lands,
 //     the materializer re-runs the perUser sweep just for that one
 //     user. Global seeds are skipped (they don't fan out per user).
 //
@@ -170,7 +170,7 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 	// Runtime hook: re-run perUser materialization on every new user.
 	if bus := m.engine.EventBus(); bus != nil && len(perUser) > 0 {
 		m.unsubscribe = bus.Subscribe(
-			"graph.node.created.*.v1:identity:user",
+			"graph.node.created.v1:identity:user",
 			func(ev events.Event) {
 				userId := extractUserIdFromEvent(ev)
 				if userId == "" {

@@ -41,7 +41,8 @@ message MemqlClientMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
-  string partition = 4;
+  reserved 4;
+  reserved "partition";
   // Caller-stamped provenance for cross-node propagation. When set,
   // the receiver re-hydrates ctx so any rows the request writes are
   // attributed to the originator, not the receiver's default. When
@@ -500,7 +501,8 @@ message MemoryNode {
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Struct payload = 6;
   google.protobuf.Struct schema = 7;
-  string partition = 8;
+  reserved 8;
+  reserved "partition";
   google.protobuf.Struct metadata = 9;
   // Engine-stamped origin metadata; intrinsic alongside id /
   // created_by / created_at. Required on every row at the DB layer
@@ -1044,12 +1046,9 @@ message DomainSubscription {
 // Access / authorization
 // -----------------------------------------------------------------------------
 
-// MyAccessMsg requests the caller's own access record: their cluster-
-// wide role + the set of partition grants they hold. This is the data
-// behind the Cockpit Settings tab's "My Access" section. Servers reject
-// any attempt to query another user's access with this message; admin
-// tooling for "who has access to X" uses the membersOfPartition query
-// instead.
+// MyAccessMsg requests the caller's own identity record: userId,
+// primary email, cluster-wide role. Backs the Cockpit Settings tab's
+// "My Access" section.
 message MyAccessMsg {
   string request_id = 1;
 }
@@ -1059,18 +1058,8 @@ message MyAccessResult {
   string user_id = 2;
   string primary_email = 3;
   UserRole cluster_role = 4;
-  repeated PartitionGrant partitions = 5;
-}
-
-// PartitionGrant is one row from the caller's PartitionACL.
-message PartitionGrant {
-  string partition = 1;
-  UserRole role = 2;
-  string granted_by = 3;
-  string granted_at = 4;       // RFC3339
-  string expires_at = 5;       // RFC3339, empty when no expiry
-  string source = 6;           // grant provenance, e.g. "manual"
-  string source_ref = 7;       // optional back-reference (e.g. external id) for non-manual grants
+  reserved 5;
+  reserved "partitions";
 }
 
 // -----------------------------------------------------------------------------
@@ -1393,12 +1382,8 @@ message ResolveGuestInviteResult {
   string invitee_name = 8;          // suggested name, may be empty
   google.protobuf.Timestamp expires_at = 9;
   string error_message = 10;        // populated when status != "ok"
-  // Partition (workspace) the invited space lives in -- derived from
-  // the space_id's leading segment server-side. The /join/<token>
-  // landing page adopts this for its session so partition-scoped
-  // queries (participant lookup, space metadata) hit the right
-  // tenant. Empty when status != "ok".
-  string partition = 11;
+  reserved 11;
+  reserved "partition";
 }
 
 // JoinSpaceAsGuestMsg is the single atomic op the /join/<token> page

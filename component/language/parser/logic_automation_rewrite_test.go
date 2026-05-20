@@ -48,7 +48,7 @@ logic doFoo {
 // references translate to `ctx.input.X`.
 func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
 	src := `@enabled
-@trigger(event="graph.node.created.*.v1:cognition:space")
+@trigger(event="graph.node.created.v1:cognition:space")
 @useLogic(joinAgents)
 @description("Demo automation.")
 automation autoJoinSI {
@@ -117,7 +117,7 @@ automation foo {
 // `<priorStep>.<field>` -- the dotted suffix rides through verbatim.
 func TestNormaliseAutomationSource_MultipleStepsAndOutputRefs(t *testing.T) {
 	src := `@enabled
-@trigger(event="graph.node.created.*.v1:cognition:privateUtterance")
+@trigger(event="graph.node.created.v1:cognition:privateUtterance")
 @useLogic(classifyLeadIntent, recordLeadIfNeeded)
 automation leadClassification {
   step classify {

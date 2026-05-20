@@ -125,7 +125,8 @@ func NormalizePattern(pattern string) string {
 }
 
 // BuildTopicWithConcept creates a topic string with an optional concept suffix.
-// Deprecated: Use BuildTopicWithPartitionAndConcept for partition-aware topics.
+// Format: baseTopic.{concept}
+// Example: "graph.node.created.v1:cognition:participant"
 func BuildTopicWithConcept(baseTopic, concept string) string {
 	concept = strings.TrimSpace(concept)
 	if concept == "" {
@@ -134,34 +135,18 @@ func BuildTopicWithConcept(baseTopic, concept string) string {
 	return baseTopic + "." + concept
 }
 
-// BuildTopicWithPartitionAndConcept creates a topic string with partition and concept segments.
-// Format: baseTopic.{partition}.{concept}
-// Example: "graph.node.created.acme.v1:cognition:participant"
-func BuildTopicWithPartitionAndConcept(baseTopic, partition, concept string) string {
-	partition = strings.TrimSpace(partition)
-	if partition == "" {
-		partition = "default"
-	}
-	result := baseTopic + "." + partition
-	concept = strings.TrimSpace(concept)
-	if concept != "" {
-		result += "." + concept
-	}
-	return result
-}
-
 // TopicNodeCreated returns the CDC topic for node creation events for the given concept.
-// Example: TopicNodeCreated("acme", "v1:cognition:agent") returns "graph.node.created.acme.v1:cognition:agent".
-func TopicNodeCreated(partition, conceptId string) string {
-	return BuildTopicWithPartitionAndConcept(TopicGraphNodeCreated, partition, conceptId)
+// Example: TopicNodeCreated("v1:cognition:agent") returns "graph.node.created.v1:cognition:agent".
+func TopicNodeCreated(conceptId string) string {
+	return BuildTopicWithConcept(TopicGraphNodeCreated, conceptId)
 }
 
 // TopicNodeUpdated returns the CDC topic for node update events for the given concept.
-func TopicNodeUpdated(partition, conceptId string) string {
-	return BuildTopicWithPartitionAndConcept(TopicGraphNodeUpdated, partition, conceptId)
+func TopicNodeUpdated(conceptId string) string {
+	return BuildTopicWithConcept(TopicGraphNodeUpdated, conceptId)
 }
 
 // TopicNodeDeleted returns the CDC topic for node deletion events for the given concept.
-func TopicNodeDeleted(partition, conceptId string) string {
-	return BuildTopicWithPartitionAndConcept(TopicGraphNodeDeleted, partition, conceptId)
+func TopicNodeDeleted(conceptId string) string {
+	return BuildTopicWithConcept(TopicGraphNodeDeleted, conceptId)
 }

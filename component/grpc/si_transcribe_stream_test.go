@@ -131,11 +131,11 @@ func TestTranscribeStream_PumpDedupesConsecutiveIdenticalText(t *testing.T) {
 		t.Fatalf("expected 2 deltas, got %d (%v)", len(msgs), msgs)
 	}
 
-	d1 := msgs[0].GetSITranscribeStreamDelta()
+	d1 := msgs[0].GetSiTranscribeStreamDelta()
 	if d1 == nil || d1.GetText() != "hello" {
 		t.Errorf("first delta: want text=\"hello\", got %+v", d1)
 	}
-	d2 := msgs[1].GetSITranscribeStreamDelta()
+	d2 := msgs[1].GetSiTranscribeStreamDelta()
 	if d2 == nil || d2.GetText() != "hello world" {
 		t.Errorf("second delta: want text=\"hello world\", got %+v", d2)
 	}
@@ -178,7 +178,7 @@ func TestTranscribeStream_PumpSkipsEmptyText(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 delta, got %d", len(msgs))
 	}
-	if got := msgs[0].GetSITranscribeStreamDelta().GetText(); got != "finally" {
+	if got := msgs[0].GetSiTranscribeStreamDelta().GetText(); got != "finally" {
 		t.Errorf("want text=\"finally\", got %q", got)
 	}
 }

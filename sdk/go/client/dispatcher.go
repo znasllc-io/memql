@@ -35,11 +35,6 @@ type Dispatcher struct {
 	stopCh       chan struct{}                               // closed on any termination
 	unexpectedCh chan struct{}                               // closed only on stream error
 	sendMu       sync.Mutex                                  // serializes writes to the stream
-
-	// partitionMu guards partition. Sent under sendMu, set under
-	// partitionMu so the two don't deadlock.
-	partitionMu sync.RWMutex
-	partition   string // stamped onto every outbound MemqlClientMessage
 }
 
 // NewDispatcher creates a dispatcher for the given stream.
@@ -143,19 +138,10 @@ func (d *Dispatcher) Run() {
 }
 
 // Send sends a message on the stream and assigns a message_id if empty.
-// Returns the message_id. Auto-stamps msg.Partition with the dispatcher's
-// configured partition (set via SetPartition) when the caller didn't
-// already populate it -- so every outbound query / mutation / subscribe
-// runs against the user's currently-selected partition without each
-// call site having to remember.
+// Returns the message_id.
 func (d *Dispatcher) Send(msg *memqlv1.MemqlClientMessage) (string, error) {
 	if msg.MessageId == "" {
 		msg.MessageId = uuid.NewString()
-	}
-	if msg.Partition == "" {
-		d.partitionMu.RLock()
-		msg.Partition = d.partition
-		d.partitionMu.RUnlock()
 	}
 	d.sendMu.Lock()
 	err := d.stream.Send(msg)
@@ -166,33 +152,10 @@ func (d *Dispatcher) Send(msg *memqlv1.MemqlClientMessage) (string, error) {
 	return msg.MessageId, nil
 }
 
-// SetPartition configures the partition name auto-stamped on every
-// subsequent outbound message. Empty string clears it (server then
-// uses its own default of "default"). Safe to call from any goroutine.
-func (d *Dispatcher) SetPartition(name string) {
-	d.partitionMu.Lock()
-	d.partition = name
-	d.partitionMu.Unlock()
-}
-
-// Partition returns the partition name currently being stamped.
-func (d *Dispatcher) Partition() string {
-	d.partitionMu.RLock()
-	defer d.partitionMu.RUnlock()
-	return d.partition
-}
-
 // SendAndWait sends a message and blocks until a correlated response arrives.
 func (d *Dispatcher) SendAndWait(ctx context.Context, msg *memqlv1.MemqlClientMessage) (*memqlv1.MemqlServerMessage, error) {
 	if msg.MessageId == "" {
 		msg.MessageId = uuid.NewString()
-	}
-	// Mirror Send()'s partition-stamping behavior so request/response
-	// calls also target the user's selected partition.
-	if msg.Partition == "" {
-		d.partitionMu.RLock()
-		msg.Partition = d.partition
-		d.partitionMu.RUnlock()
 	}
 
 	ch := make(chan *memqlv1.MemqlServerMessage, 1)
@@ -325,10 +288,10 @@ func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 		return ""
 	}
 	switch p := msg.Payload.(type) {
-	case *memqlv1.MemqlServerMessage_SITranscribeStreamDelta:
-		return p.SITranscribeStreamDelta.GetRequestId()
-	case *memqlv1.MemqlServerMessage_SITranscribeStreamComplete:
-		return p.SITranscribeStreamComplete.GetRequestId()
+	case *memqlv1.MemqlServerMessage_SiTranscribeStreamDelta:
+		return p.SiTranscribeStreamDelta.GetRequestId()
+	case *memqlv1.MemqlServerMessage_SiTranscribeStreamComplete:
+		return p.SiTranscribeStreamComplete.GetRequestId()
 	}
 	return ""
 }

@@ -126,8 +126,8 @@ func PushToTalk(
 	// Send the session-start envelope. Server picks up the request_id
 	// here and routes every Delta/Complete back to it.
 	start := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_SITranscribeStreamStart{
-			SITranscribeStreamStart: &memqlv1.SITranscribeStreamStart{
+		Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamStart{
+			SiTranscribeStreamStart: &memqlv1.SITranscribeStreamStart{
 				RequestId:    requestId,
 				Format:       opts.Audio.Encoding,
 				SampleRate:   opts.Audio.SampleRate,
@@ -179,19 +179,19 @@ func PushToTalk(
 				return nil, fmt.Errorf("voice.PushToTalk: reply channel closed before Complete")
 			}
 			switch p := msg.Payload.(type) {
-			case *memqlv1.MemqlServerMessage_SITranscribeStreamDelta:
+			case *memqlv1.MemqlServerMessage_SiTranscribeStreamDelta:
 				if opts.OnPartial != nil {
 					opts.OnPartial(PartialTranscript{
-						Text:       p.SITranscribeStreamDelta.GetText(),
-						IsFinal:    p.SITranscribeStreamDelta.GetIsFinal(),
-						Confidence: p.SITranscribeStreamDelta.GetConfidence(),
+						Text:       p.SiTranscribeStreamDelta.GetText(),
+						IsFinal:    p.SiTranscribeStreamDelta.GetIsFinal(),
+						Confidence: p.SiTranscribeStreamDelta.GetConfidence(),
 					})
 				}
-			case *memqlv1.MemqlServerMessage_SITranscribeStreamComplete:
+			case *memqlv1.MemqlServerMessage_SiTranscribeStreamComplete:
 				final = &FinalTranscript{
-					Text:       p.SITranscribeStreamComplete.GetText(),
-					DurationMs: p.SITranscribeStreamComplete.GetDurationMs(),
-					Provider:   p.SITranscribeStreamComplete.GetProvider(),
+					Text:       p.SiTranscribeStreamComplete.GetText(),
+					DurationMs: p.SiTranscribeStreamComplete.GetDurationMs(),
+					Provider:   p.SiTranscribeStreamComplete.GetProvider(),
 				}
 				return final, nil
 			}
@@ -223,8 +223,8 @@ func streamAudio(
 		n, err := audio.Read(buf)
 		if n > 0 {
 			chunk := &memqlv1.MemqlClientMessage{
-				Payload: &memqlv1.MemqlClientMessage_SITranscribeStreamChunk{
-					SITranscribeStreamChunk: &memqlv1.SITranscribeStreamChunk{
+				Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamChunk{
+					SiTranscribeStreamChunk: &memqlv1.SITranscribeStreamChunk{
 						RequestId: requestId,
 						// Copy the slice -- buf is reused next iteration.
 						Audio: append([]byte(nil), buf[:n]...),
@@ -247,8 +247,8 @@ func streamAudio(
 
 func sendEnd(dispatcher *client.Dispatcher, requestId string, cancel bool) error {
 	end := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_SITranscribeStreamEnd{
-			SITranscribeStreamEnd: &memqlv1.SITranscribeStreamEnd{
+		Payload: &memqlv1.MemqlClientMessage_SiTranscribeStreamEnd{
+			SiTranscribeStreamEnd: &memqlv1.SITranscribeStreamEnd{
 				RequestId: requestId,
 				Cancel:    cancel,
 			},

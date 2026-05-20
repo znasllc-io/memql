@@ -17,7 +17,7 @@ func TestProvenance_Validate(t *testing.T) {
 		{"unknown kind", Provenance{Kind: "weird", Name: "foo"}, "unknown kind"},
 		{"valid seed", Seed("assistant"), ""},
 		{"valid mutation", Mutation("mutationCreateAgent"), ""},
-		{"valid automation", Automation("reRouteAgent", "graph.node.created.*.v1:agents:agent"), ""},
+		{"valid automation", Automation("reRouteAgent", "graph.node.created.v1:agents:agent"), ""},
 		{"valid direct", Direct("bootstrap.insertDefaultPartition"), ""},
 		{"valid system", System("systemStartup"), ""},
 		{"valid migration", Migration("memqlmigrate"), ""},
@@ -48,8 +48,8 @@ func TestProvenance_String(t *testing.T) {
 		{Seed("assistant").WithVia("mutationCreateAgent"), "seed:assistant via=mutationCreateAgent"},
 		{Direct("frameworkInsert"), "direct:frameworkInsert"},
 		{
-			Automation("re", "graph.node.created.*.v1:agents:agent").WithVia("mutationUpdatePlanStatus"),
-			"automation:re trigger=graph.node.created.*.v1:agents:agent via=mutationUpdatePlanStatus",
+			Automation("re", "graph.node.created.v1:agents:agent").WithVia("mutationUpdatePlanStatus"),
+			"automation:re trigger=graph.node.created.v1:agents:agent via=mutationUpdatePlanStatus",
 		},
 	}
 	for _, tc := range cases {

@@ -467,12 +467,6 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		return send(&memqlv1.ResolveGuestInviteResult{Status: "invalid", ErrorMessage: "no invitation matches this token"})
 	}
 
-	// Partition is going away on the wire in #56 phase 8; the
-	// /join/<token> page no longer needs to adopt it. The proto field
-	// stays populated with "" for compat until the field itself is
-	// removed.
-	partition := ""
-
 	// Derive status from the record.
 	result := &memqlv1.ResolveGuestInviteResult{
 		InvitationId: summary.ID,
@@ -481,7 +475,6 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		InviterName:  summary.InviterName,
 		InviteeEmail: summary.InviteeEmail,
 		InviteeName:  summary.InviteeName,
-		Partition:    partition,
 	}
 	if !summary.ExpiresAt.IsZero() {
 		result.ExpiresAt = timestamppb.New(summary.ExpiresAt)

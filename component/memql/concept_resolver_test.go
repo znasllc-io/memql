@@ -51,7 +51,7 @@ func TestResolveAttribute_TriggerOnSugarEmits5SegmentPattern(t *testing.T) {
 	attr := funcDef.Attributes[0]
 	event, ok := attr.Args["event"]
 	require.True(t, ok, "expected resolver to rewrite on= into event=")
-	require.Equal(t, "graph.node.created.*.v1:cognition:participant", event,
+	require.Equal(t, "graph.node.created.v1:cognition:participant", event,
 		"sugar must emit the canonical 5-segment partition-aware pattern")
 	_, stillHasOn := attr.Args["on"]
 	require.False(t, stillHasOn, "resolver should remove the on= key after rewriting")

@@ -10,7 +10,7 @@ import (
 // rewrites it to `automationNAME({...})` so the compiler can
 // then convert it to a StepTypeAutomation.
 func TestAutomationWithinAutomation_StepKind(t *testing.T) {
-	source := `@trigger(event="graph.node.created.*.v1:cognition:space")
+	source := `@trigger(event="graph.node.created.v1:cognition:space")
 automation onSpaceCreated {
   step welcome {
     automation seedWelcomeCurriculum { spaceId: event.payload.id, userId: event.payload.actor }
