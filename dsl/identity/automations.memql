@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.logic.{ logicAccessRequestExpirySweep, logicAccountDeletionReminder25Days, logicAccountDeletionReminder7Days, logicAccountDeletionSweep, logicAuditEventRetentionSweep, logicMagicLinkExpirySweep, logicOnDelegationCreated, logicProvisionPersonalPartitionOnFirstLogin, logicRevokeExpiredDelegations }
+use identity.logic.{ logicAccessRequestExpirySweep, logicAccountDeletionReminder25Days, logicAccountDeletionReminder7Days, logicAccountDeletionSweep, logicAuditEventRetentionSweep, logicMagicLinkExpirySweep, logicOnDelegationCreated, logicRevokeExpiredDelegations }
 
 @enabled
 @trigger(schedule="0 0 4 * * *")
@@ -241,38 +241,3 @@ automation onDelegationCreated {
   }
 }
 
-// provisionPersonalPartitionOnFirstLogin
-// =======================================
-//
-// On `graph.node.created.*.v1:identity:user`, materialises a
-// per-user "personal" partition for external (non-internal) users
-// and grants them owner role on it. Internal users skip this step
-// entirely -- they receive cluster-wide access via the
-// IDENTITY_INTERNAL_DEFAULT_ROLE that the magic-link verifier
-// stamps on their user row at first-login time.
-//
-// The partition name follows the convention
-// `user-<hash(primaryEmail)>` so it's deterministic + DNS-label-shape
-// (lowercase, dashes only, well under 50 chars). The hash keeps the
-// raw email out of the partition slug, both for readability and for
-// the case where the user later changes their primary email (the
-// partition stays stable).
-//
-// Idempotency:
-// - mutationCreatePartition is keyed on the slug; a re-run produces
-//   a new time-series version of the same partition row. Harmless.
-// - mutationGrantPartitionAccess is keyed on `<userId>:<partition>`;
-//   re-grants are also append-only versions of the same row.
-//
-// Internal-user gating reads `ctx.input.payload.internal`. The User
-// concept stamps a default of `false`, so an external user lands
-// here unconditionally. The internal flag is set by the magic-link
-// verifier when the registering email matches IDENTITY_INTERNAL_DOMAINS.
-@enabled
-@trigger(event="node.created", concept="v1:identity:user", partition="*")
-@description("Materialises a personal partition + owner grant for external users on first-login user creation.")
-automation provisionPersonalPartitionOnFirstLogin {
-  step run {
-    logic provisionPersonalPartitionOnFirstLogin { event: event }
-  }
-}

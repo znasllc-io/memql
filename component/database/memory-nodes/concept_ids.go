@@ -31,18 +31,16 @@ const (
 const (
 	ConceptPlatformGlobalSecret      = "v1:platform:globalSecret"
 	ConceptPlatformGlobalVariable    = "v1:platform:globalVariable"
-	ConceptPlatformPartition         = "v1:platform:partition"
 	ConceptPlatformPartitionSecret   = "v1:platform:partitionSecret"
 	ConceptPlatformPartitionVariable = "v1:platform:partitionVariable"
 )
 
 // Identity domain concepts (v1:identity:*)
 const (
-	ConceptIdentityUser            = "v1:identity:user"
-	ConceptIdentityIdentity        = "v1:identity:identity"
-	ConceptIdentityDelegation      = "v1:identity:delegation"
-	ConceptIdentityPartitionAccess = "v1:identity:partitionAccess"
-	ConceptIdentityAuthSession     = "v1:identity:authSession"
+	ConceptIdentityUser        = "v1:identity:user"
+	ConceptIdentityIdentity    = "v1:identity:identity"
+	ConceptIdentityDelegation  = "v1:identity:delegation"
+	ConceptIdentityAuthSession = "v1:identity:authSession"
 )
 
 // Cluster domain concepts (v1:cluster:*)
@@ -87,14 +85,12 @@ func AllFilesystemConcepts() []string {
 		// platform
 		ConceptPlatformGlobalSecret,
 		ConceptPlatformGlobalVariable,
-		ConceptPlatformPartition,
 		ConceptPlatformPartitionSecret,
 		ConceptPlatformPartitionVariable,
 		// identity
 		ConceptIdentityUser,
 		ConceptIdentityIdentity,
 		ConceptIdentityDelegation,
-		ConceptIdentityPartitionAccess,
 		// cluster
 		ConceptClusterNode,
 		ConceptClusterNodeType,

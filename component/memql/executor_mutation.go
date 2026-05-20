@@ -243,22 +243,6 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 		}
 	}
 
-	// Validate the partition slug at the engine layer so no caller can
-	// land an illegal name in v1:platform:partition -- not the
-	// createPartition mutation, not a raw insert, not an automation.
-	// The slug is reused as the row id, the database PK column value,
-	// and the {partition} segment in event topics, so anything that
-	// breaks DNS-label rules would silently corrupt event routing or
-	// the ID parser. See core/id.ValidatePartitionName for the full
-	// rule set; the same validator is used by the memql-cockpit form
-	// for instant feedback and by the createWorkspace mutation path
-	// (defense in depth).
-	if conceptMeta.Name == memorynodes.ConceptPlatformPartition {
-		if err := validatePlatformPartitionPayload(payload, mutation.ID); err != nil {
-			return nil, err
-		}
-	}
-
 	conceptDefs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
 
 	if mutation.ParentRef != nil {

@@ -110,7 +110,6 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 	t.Logf("functions: total=%d counts=%v", total, counts)
 	for _, name := range []string{
 		"mutationSetGlobalSecret",
-		"mutationCreatePartition",
 		"mutationCreateAgentRole",
 		"mutationUpdateNodeHealth",
 		"queryActiveUsers",
