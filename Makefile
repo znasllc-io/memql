@@ -291,7 +291,21 @@ db:
 # Test targets
 # ---------------------------------------------------------------------------
 
-.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace
+.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check
+
+## Regenerate the typed SDK surface from the DSL tree. Reads every
+## query / mutation / logic under dsl/**/*.memql and emits typed Go
+## methods on sdk/go/client.QueryClient. Re-run after any DSL change
+## that touches a construct's args / signature / shape. The drift
+## gate (sdk-gen-check) catches stale checkouts in CI.
+sdk-gen:
+	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client
+
+## CI gate: regenerate, then diff against the checked-in tree. Fails
+## if the DSL evolved without the generator running. Pair with
+## `make sdk-gen` locally to fix.
+sdk-gen-check:
+	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client
 
 ## Run all tests
 test:
