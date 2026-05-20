@@ -772,11 +772,27 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 }
 
 // eventRefMatcher matches whole-word `event` tokens for translation
-// to the legacy `ctx.input` envelope path.
-var eventRefMatcher = regexp.MustCompile(`\bevent\b`)
+// to the legacy `ctx.input` envelope path. eventKeyMatcher recognises
+// `event` when it appears as a KEY in an object literal (immediately
+// before a `:`); those occurrences MUST NOT be rewritten -- the key
+// names the arg, not the value, and clobbering it breaks arg binding
+// for every event-triggered automation that uses the conventional
+// `{ event: event }` plumb-through pattern (see memql-cockpit#49 for
+// the daily-space symptom).
+var (
+	eventRefMatcher = regexp.MustCompile(`\bevent\b`)
+	eventKeyMatcher = regexp.MustCompile(`\bevent(\s*):`)
+)
 
 func translateEventRefsToCtxInput(expr string) string {
-	return eventRefMatcher.ReplaceAllString(expr, "ctx.input")
+	// Two-pass with a sentinel because Go's RE2 has no negative
+	// lookahead. Step 1: mask `event:` (and `event :`) keys so the
+	// value-side replace can't see them. Step 2: rewrite remaining
+	// `event` tokens to `ctx.input`. Step 3: restore the masked keys.
+	const sentinel = "\x00MEMQL_EVENT_KEY\x00"
+	masked := eventKeyMatcher.ReplaceAllString(expr, sentinel+"$1:")
+	rewritten := eventRefMatcher.ReplaceAllString(masked, "ctx.input")
+	return strings.ReplaceAll(rewritten, sentinel, "event")
 }
 
 // translateStepCall converts a step body into the legacy call
