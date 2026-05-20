@@ -20,7 +20,7 @@ const CodeProfileSubscriberComponent = common.ComponentName("observe.codeProfile
 //
 //  1. A cockpit user (or seed script, or admin tool) inserts a
 //     codeProfile row -- the engine writes it through and emits a
-//     graph.node.created.default.v1:observability:codeProfile event
+//     graph.node.created.v1:observability:codeProfile event
 //     (the codeProfile concept is @scope("global"), so events fire
 //     under _system regardless of the writer's partition envelope).
 //  2. This subscriber matches the pattern, extracts codeReference /
@@ -79,7 +79,7 @@ func (s *CodeProfileSubscriber) Start(_ context.Context) {
 		// subscriber slot on partition-scoped concept events that
 		// can never match.
 		s.unsubscribe = s.bus.Subscribe(
-			"graph.node.created.default.v1:observability:codeProfile",
+			"graph.node.created.v1:observability:codeProfile",
 			s.handle,
 			events.WithSubscriberName("observe.codeProfileSubscriber"),
 		)

@@ -20,7 +20,7 @@ func TestStructuredTrigger_NormalizesToCanonicalTopic(t *testing.T) {
 automation testStructured {
   step noop { logic noopLogic { } }
 }`
-	const legacySource = `@trigger(event="graph.node.created.*.v1:cognition:participant")
+	const legacySource = `@trigger(event="graph.node.created.v1:cognition:participant")
 automation testLegacy {
   step noop { logic noopLogic { } }
 }`
@@ -36,7 +36,7 @@ automation testLegacy {
 	if structured.Trigger.Event != legacy.Trigger.Event {
 		t.Errorf("structured trigger %q != legacy trigger %q", structured.Trigger.Event, legacy.Trigger.Event)
 	}
-	if structured.Trigger.Event != "graph.node.created.*.v1:cognition:participant" {
+	if structured.Trigger.Event != "graph.node.created.v1:cognition:participant" {
 		t.Errorf("unexpected canonical topic: %q", structured.Trigger.Event)
 	}
 }
@@ -57,7 +57,7 @@ automation testDefaultPartition {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if auto.Trigger.Event != "graph.node.updated.*.v1:identity:user" {
+	if auto.Trigger.Event != "graph.node.updated.v1:identity:user" {
 		t.Errorf("expected wildcard partition default, got %q", auto.Trigger.Event)
 	}
 }

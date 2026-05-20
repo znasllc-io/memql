@@ -112,7 +112,7 @@ func WithEngine(engine Engine) PlannerArg {
 }
 
 // WithEventBus wires the event bus the integration subscribes on
-// for graph.node.updated.*.v1:planner:plan events.
+// for graph.node.updated.v1:planner:plan events.
 func WithEventBus(bus *events.Bus) PlannerArg {
 	return func(p *PlannerIntegration) { p.eventBus = bus }
 }
@@ -175,7 +175,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// on kind=scopeElevation && status=running and dispatches
 		// the agent for the actual work.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.*.v1:planner:plan",
+			"graph.node.updated.v1:planner:plan",
 			p.handlePlanApprovedForExecution,
 			events.WithSubscriberName("planner:plan-execution"),
 		))
@@ -185,21 +185,21 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// Updates are handled by the agent loop's HandlePlanUpdated --
 		// log-only for now, deeper re-invoke wiring lands in Phase 4b.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.created.*.v1:planner:plan",
+			"graph.node.created.v1:planner:plan",
 			p.agentLoop.HandlePlanCreated,
 			events.WithSubscriberName("planner:agent-loop-created"),
 		))
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.*.v1:planner:plan",
+			"graph.node.updated.v1:planner:plan",
 			p.agentLoop.HandlePlanUpdated,
 			events.WithSubscriberName("planner:agent-loop-updated"),
 		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: subscriptions registered",
 			"patterns", []string{
-				"graph.node.updated.*.v1:planner:plan (scope-elevation)",
-				"graph.node.created.*.v1:planner:plan (agent loop)",
-				"graph.node.updated.*.v1:planner:plan (agent loop)",
+				"graph.node.updated.v1:planner:plan (scope-elevation)",
+				"graph.node.created.v1:planner:plan (agent loop)",
+				"graph.node.updated.v1:planner:plan (agent loop)",
 			},
 		)
 	}

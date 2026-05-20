@@ -35,18 +35,12 @@ const (
 )
 
 // Event subscription patterns for the cognition integration.
-//
-// Emitted graph CDC topics are 5-segment
-// `graph.node.created.{partition}.{concept}` (see
-// BuildTopicWithPartitionAndConcept in component/events/pattern.go). Patterns
-// with a 4-segment shape silently never fire because the bus matcher requires
-// exact segment count. The `*` in the 4th position is the partition wildcard
-// -- same convention the .memql automation loader uses.
+// Post-#56 phase 8 the topic shape is graph.node.{action}.{concept}.
 const (
-	eventPatternSpaceCreated     = "graph.node.created.*.v1:cognition:space"
-	eventPatternParticipantAdded = "graph.node.created.*.v1:cognition:participant"
-	eventPatternSessionChanged   = "graph.node.created.*.v1:cognition:session"
-	eventPatternUtteranceCreated = "graph.node.created.*.v1:cognition:utterance"
+	eventPatternSpaceCreated     = "graph.node.created.v1:cognition:space"
+	eventPatternParticipantAdded = "graph.node.created.v1:cognition:participant"
+	eventPatternSessionChanged   = "graph.node.created.v1:cognition:session"
+	eventPatternUtteranceCreated = "graph.node.created.v1:cognition:utterance"
 )
 
 // VariableResolver resolves variable values from the v1:platform:partitionVariable concept.
@@ -547,7 +541,7 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	// utterances; Plan / Task lifecycle and the AgentForwarder
 	// dispatch for "Allow on a permission card" rides on the
 	// planner node. The planner integration subscribes to
-	// graph.node.updated.*.v1:planner:plan in its own Start.)
+	// graph.node.updated.v1:planner:plan in its own Start.)
 
 	// Start space context heartbeat for reconciliation.
 	c.startSpaceContextHeartbeat(ctx)

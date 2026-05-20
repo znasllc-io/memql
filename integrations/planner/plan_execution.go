@@ -40,7 +40,7 @@ const systemActorId = "system:planner-integration"
 // "a Plan transitioned to running, dispatch the agent that will
 // execute the work and stamp the terminal status when it's done."
 //
-// Subscription: graph.node.updated.*.v1:planner:plan, filtered to
+// Subscription: graph.node.updated.v1:planner:plan, filtered to
 // kind=scopeElevation && status=running. The frontend's
 // PlanScopeElevationCard.allow path bumps the Plan to running on
 // the user's Allow click; the engine's executeUpdate path emits the
@@ -63,7 +63,7 @@ const systemActorId = "system:planner-integration"
 // directly, publish the task-done card).
 
 // planRoutingFields is the minimal set of identifiers extracted off
-// a graph.node.updated.*.v1:planner:plan event payload to decide
+// a graph.node.updated.v1:planner:plan event payload to decide
 // whether this handler should fire.
 type planRoutingFields struct {
 	ID     string

@@ -299,7 +299,7 @@ logic logicPurgeExpiredArchivedSpaces {
 //                          private canvas timeline.
 //
 // TRIGGER:
-// graph.node.created.*.v1:identity:user fires on every user-row write
+// graph.node.created.v1:identity:user fires on every user-row write
 // (primary path: mutationSetUserActiveSpace shipping a new version).
 // We filter to rows whose payload.activeSpaceId is non-empty -- a user
 // whose pointer is set has just become active in some space.
