@@ -282,30 +282,59 @@ func TestExpandExpression_SubstitutesArgRefsInBuiltinCallArgs(t *testing.T) {
 		},
 	}))
 
-	plan := &QueryPlan{
-		Root: &FunctionCallExpression{
-			Name: "logicEnsureDailySpaceOnAuthSession",
-			Args: map[string]any{
-				"event": map[string]any{
-					"topic": "graph.node.created.v1:identity:authSession",
-					"kind":  "NodeCreated",
-					"payload": map[string]any{
-						"userId": "v1:identity:user:abc123",
-					},
-				},
-			},
+	eventMap := map[string]any{
+		"topic": "graph.node.created.v1:identity:authSession",
+		"kind":  "NodeCreated",
+		"payload": map[string]any{
+			"userId": "v1:identity:user:abc123",
 		},
 	}
-	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
 
-	// The expanded expression should be a BuiltinFunctionExpression
-	// whose Args have the userId substituted to the literal string.
-	require.NotNil(t, plan.Root, "expected expanded builtin expression")
-	builtin, ok := plan.Root.(*BuiltinFunctionExpression)
-	require.True(t, ok, "expected BuiltinFunctionExpression, got %T", plan.Root)
-	require.Equal(t, "ensureDailySpaceForUser", builtin.Name)
-	require.Equal(t, "v1:identity:user:abc123", builtin.Args["userId"],
-		"ArgRef substitution must produce the resolved string -- without it the builtin executor sees an *ArgReference and asString() returns empty")
+	// Two input shapes that arrive at this layer in practice:
+	//   - flat {event: ...} (engine's own expression parser produces
+	//     this for tests / programmatic dispatch).
+	//   - positional {"0": {event: ...}} (the language parser produces
+	//     this for `logicX({event: ...})` -- which is what the function
+	//     step emits when an automation fires the Logic).
+	// Both must reach the builtin with the userId resolved to the
+	// nested string. The positional shape was the production-hit one
+	// in memql-cockpit#49 -- the automation step rendered to a query
+	// string parsed back into positional form, and ArgRef
+	// substitution failed because the substitution helper looked up
+	// `event.payload.userId` against `{"0": {event: ...}}` instead of
+	// the flat shape.
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "flat args (engine parser)",
+			args: map[string]any{"event": eventMap},
+		},
+		{
+			name: "positional-wrapped args (language parser, automation step path)",
+			args: map[string]any{"0": map[string]any{"event": eventMap}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &QueryPlan{
+				Root: &FunctionCallExpression{
+					Name: "logicEnsureDailySpaceOnAuthSession",
+					Args: tc.args,
+				},
+			}
+			require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+
+			require.NotNil(t, plan.Root, "expected expanded builtin expression")
+			builtin, ok := plan.Root.(*BuiltinFunctionExpression)
+			require.True(t, ok, "expected BuiltinFunctionExpression, got %T", plan.Root)
+			require.Equal(t, "ensureDailySpaceForUser", builtin.Name)
+			require.Equal(t, "v1:identity:user:abc123", builtin.Args["userId"],
+				"ArgRef substitution must produce the resolved string -- without it the builtin executor sees an *ArgReference and asString() returns empty")
+		})
+	}
 }
 
 func TestResolvePlanFunctions_LogicReturningMutationDispatches(t *testing.T) {
