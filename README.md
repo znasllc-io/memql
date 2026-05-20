@@ -57,7 +57,7 @@ A concept (schema) and an LLM-callable tool in the same file, same language. Add
 
 ---
 
-## START Quick Start
+## Quick Start
 
 ```bash
 # Start development environment (Docker)
@@ -74,7 +74,7 @@ gcloud run deploy
 
 ---
 
-## DOCS Documentation
+## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Project overview and architecture
 - **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide
@@ -83,7 +83,7 @@ gcloud run deploy
 
 ---
 
-## [BUILD] Tech Stack
+## Tech Stack
 
 ### Backend
 - **Language:** Go 1.26.1+
@@ -123,7 +123,7 @@ gcloud run deploy
 
 ---
 
-## TOOLS Development
+## Development
 
 ### Prerequisites
 
@@ -285,7 +285,7 @@ docker compose -f docker/docker-compose.full.yml down
 
 ---
 
-## [DOCS] MemQL Language
+## MemQL Language
 
 MemQL DSL is a domain-specific query language for time-series memory graphs.
 
@@ -349,7 +349,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-## [HELP] Need Help?
+## Need Help?
 
 1. **Quick start:** [QUICKSTART.md](QUICKSTART.md)
 2. **Find documentation:** [GLOSSARY.md](GLOSSARY.md)
