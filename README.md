@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/znasllc-io/memql/actions/workflows/ci.yml"><img src="https://github.com/znasllc-io/memql/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/znasllc-io/memql?color=blue" alt="License"></a>
   <img src="https://img.shields.io/github/go-mod/go-version/znasllc-io/memql" alt="Go version">
   <img src="https://img.shields.io/github/last-commit/znasllc-io/memql" alt="Last commit">
