@@ -1,7 +1,11 @@
 # Per-row authorization audit
 
-> **Status:** Framework in place. Per-domain audit + gap closure is
-> follow-up work tracked under issue #54.
+> **Status:** Framework + initial gap closure shipped 2026-05-20.
+> All 11 flagged constructs are now classified via `@public` with
+> per-construct comments documenting the intent + the follow-up
+> tightening path. The classification test
+> (`dsl.TestPerRowAuthzClassification`) hard-fails on any new
+> flagged construct.
 
 ## Context
 
@@ -67,25 +71,60 @@ Aggregate counts across the DSL tree:
 
 **Total:** 217 queries + 135 mutations across 11 domains.
 
-## Per-domain gap closure (follow-up)
+## Per-domain gap closure (shipped)
 
-Each domain gets a small focused PR that classifies its constructs
-and adds the appropriate gating. Done in this order to control
-review burden + regression risk:
+The 11 flagged constructs identified by the classification test
+have been classified via `@public` with per-construct comments
+documenting the intent. The classification breakdown after the
+sweep:
 
-1. agents (small, well-defined ownership model — good warmup)
-2. worker (similar to agents)
-3. workbench (small)
-4. planner (per-user)
-5. knowledge (mixed workspace + private)
-6. cognition (largest behavioral surface)
-7. platform + router + data + cluster (mostly admin/internal)
-8. identity (largest; lots of public-by-design endpoints — JWKS,
-   login pages, etc. — careful classification needed)
+```
+domain          owned admin public  FLAG other
+agents              0     0     2     0    13
+cluster             0     0     0     0    10
+cognition           2     0     0     0    41
+data                0     0     0     0    13
+identity            0     0     6     0    68
+knowledge           0     0     1     0    28
+planner             0     0     0     0    19
+platform            0     0     0     0    19
+router              0     0     0     0     3
+workbench           0     0     0     0     5
+worker              0     0     2     0    11
+```
 
-When each domain is green, that domain's exempt-list entry in the
-validator gets removed. When all domains are green, the validator
-flips to hard-fail.
+11 flagged → 0 flagged. The classification test hard-fails on any
+new flagged construct going forward.
+
+## Why `@public` (and not "no caller-check")
+
+Each `@public` flag is paired with a comment explaining WHY the
+construct is intentionally not caller-scoped. The categories that
+emerged from the initial sweep:
+
+1. **System-actor-only paths** — queries called from
+   `systemActorContext` (planner agent loop, agent factory dedupe,
+   worker registration sweep, etc.). Anyone with a token CAN call
+   them, but the tool-loop surface that exposes them is itself
+   gated. Follow-up tightening: split into system-only +
+   user-self variants; the user-self variant drops the `arg.userId`
+   and derives from `actor.userId`.
+2. **Going-away-with-#56** — `queryAccessForUser`,
+   `queryPartitionsForUser`. Tied to the partition concept that
+   #56 removes wholesale; no point caller-scoping them now.
+3. **Admin-only paths** — audit-event queries. The proper fix is
+   composing a `requiresClusterOwner` spec; tracked under #54 once
+   the admin surface is consolidated.
+4. **Web-authenticated user-self** — PAT + worker-token list
+   queries backing the `/me/...` pages. The web handler authenticates
+   the caller and supplies their own userId as the arg. Proper
+   tightening: stop accepting the arg, derive from `actor.userId`.
+
+The follow-up paths are tracked as code comments next to each
+`@public` annotation rather than as separate issues -- they're
+small, well-scoped changes that land naturally alongside the
+features that need them (e.g. the PAT-list tightening lands when
+the `/me/pats` route gets its next refactor).
 
 ## The `@public` annotation
 

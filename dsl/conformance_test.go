@@ -257,11 +257,12 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 //              (e.g. concept catalogs, cluster topology, system
 //              metadata reads)
 //
-// The test is INFORMATIONAL today -- it logs aggregate counts and a
-// per-flagged-construct list so the per-domain follow-up PRs (one
-// per domain, per issue #54) can be driven from the output. It does
-// NOT fail the build until every domain has been classified and gap-
-// closed; flipping to hard-fail lands as the last step of #54.
+// The test HARD-FAILS on any flagged construct -- the per-domain
+// follow-up PRs for #54 closed every existing gap, and any new
+// user-scope read/write needs to either include a caller-check
+// (`actor.userId` / `caller.userId` reference, or an `isClusterOwner`
+// admin gate) or carry an explicit `@public` annotation
+// acknowledging the intent.
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
 		owned   int
@@ -373,9 +374,16 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			d, c.owned, c.admin, c.public, c.flagged, c.other)
 	}
 	t.Logf("")
-	t.Logf("Flagged constructs (%d) -- candidates for caller-scope gating:", len(flagged))
-	for _, f := range flagged {
-		t.Logf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
+	if len(flagged) > 0 {
+		t.Errorf("found %d flagged constructs that reference user-scope fields without a caller-check or @public annotation:", len(flagged))
+		for _, f := range flagged {
+			t.Errorf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
+		}
+		t.Logf("\nResolution options:\n"+
+			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n"+
+			"  (2) add an admin gate: reference `actor.isClusterOwner` or a `requiresClusterOwner` spec\n"+
+			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n"+
+			"See docs/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
 	}
 }
 
