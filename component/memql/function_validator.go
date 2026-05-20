@@ -516,6 +516,28 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 
 	switch node := expr.(type) {
 	case *FunctionCallExpression:
+		// Substitute ArgRef nodes in the call's args before resolving
+		// the target. Without this step, a Logic body like
+		// `return someBuiltin({userId: args.event.payload.userId})`
+		// reaches the builtin executor with `args["userId"] =
+		// *ArgReference{Path: "event.payload.userId"}` instead of the
+		// resolved string -- and the executor's `asString(...)` returns
+		// empty. The Logic-call-mutation path already does this via
+		// `substituteArgRefsAndCallArgs` (F.6); the builtin / nested-
+		// call path needs the same treatment, here in the generic
+		// recursive expansion. Surfaced via memql-cockpit#49 -- daily-
+		// space provisioning fired but every call into
+		// `integration.dailyspace.ensureForUser` saw an empty userId.
+		if args != nil && len(node.Args) > 0 {
+			substituted := make(map[string]any, len(node.Args))
+			for k, val := range node.Args {
+				substituted[k] = substituteArgRefValue(val, args)
+			}
+			node = &FunctionCallExpression{
+				Name: node.Name,
+				Args: substituted,
+			}
+		}
 		// Resolve, validate, and expand the function with its arguments
 		return v.expandFunctionCall(node)
 
