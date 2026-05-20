@@ -26,13 +26,14 @@
 // =============================================================================
 //
 // Every annotation goes above the `concept` keyword. The full author surface
-// is five annotations -- nothing else is recognized.
+// is four annotations -- nothing else is recognized.
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
 //   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
-//   @scope("partition"|"global") Partition scope. Default: partition-scoped.
 //   @type("object"|"collection"|"reference")  Default: object.
+//
+// (`@scope` was retired in #56 -- see section 5.)
 //
 // Other annotations are rejected at load time with
 //   `unknown concept annotation @<name>`.
@@ -107,32 +108,13 @@ concept nestedNs {
 }
 
 // =============================================================================
-//   5. @scope -- partition (default) | global
+//   5. @scope -- retired in #56
 // =============================================================================
 //
-//   - Omitted = partition-scoped. Rows stamp the request envelope's
-//     partition; reads auto-filter on the same partition. Tenant data.
-//   - @scope("global") = rows live in the reserved `_system` partition
-//     regardless of the envelope. Used for infrastructure metadata
-//     (cluster topology, identity, partition registry) that has to be
-//     visible from every tenant's view.
-//   - @scope("partition") is the explicit form of the default; rare in
-//     practice.
-
-@version("1.0.0")
-@namespace("reference")
-@description("Partition-scoped concept (default). Rows live under the request's partition.")
-concept partitionScoped {
-  field string @required
-}
-
-@version("1.0.0")
-@namespace("reference")
-@scope("global")
-@description("Global-scoped concept. Rows live in _system regardless of request envelope.")
-concept globalScoped {
-  field string @required
-}
+// `@scope("global")` (and its companion `@scope("partition")`) were
+// retired in the partition-removal pivot. Every concept lives in one
+// partition; per-concept scope no longer exists. Authoring a `@scope`
+// annotation on a concept is a load-time error.
 
 // =============================================================================
 //   6. @type -- object (default) | collection | reference
