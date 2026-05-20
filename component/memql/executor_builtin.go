@@ -813,7 +813,7 @@ func (e *MemQLEngine) evaluateContentIdExpression(ctx context.Context, args map[
 
 	// Normalize payload same as insert(): clone and strip reserved fields
 	normalizedPayload := normalizePayloadForId(payload)
-	id := concept.DeriveContentId(e.partition, normalizedPayload)
+	id := concept.DeriveContentId(normalizedPayload)
 
 	return preflightResultNode(actor, map[string]any{
 		"valid":   true,
@@ -910,7 +910,7 @@ func (e *MemQLEngine) evaluatePreviewInsertExpression(ctx context.Context, args 
 	}
 
 	// Derive content ID using the already-normalized payload
-	id := concept.DeriveContentId(e.partition, normalizedPayload)
+	id := concept.DeriveContentId(normalizedPayload)
 
 	// Check if exists
 	exists := e.checkNodeExists(ctx, conceptName, id)

@@ -44,25 +44,10 @@ END
 $$;
 --bun:split
 
--- Partitions metadata table
-CREATE TABLE IF NOT EXISTS "Partitions" (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    type TEXT NOT NULL DEFAULT 'standard',
-    config JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
---bun:split
-
--- Seed the default partition
-INSERT INTO "Partitions" (id, name, type)
-VALUES ('default', 'default', 'standard')
-ON CONFLICT (id) DO NOTHING;
---bun:split
-
--- Memory nodes with partition isolation
+-- Memory nodes (no partition column post-#56 phase 3; isolation now
+-- enforced at the DSL layer via caller-scope checks on every
+-- user-scoped read/write -- see docs/auth/per-row-authz-audit.md).
 CREATE TABLE IF NOT EXISTS "MemoryNodes" (
-    partition TEXT NOT NULL DEFAULT 'default',
     id TEXT NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL,
     "createdBy" TEXT NOT NULL,
@@ -71,7 +56,7 @@ CREATE TABLE IF NOT EXISTS "MemoryNodes" (
     metadata JSONB NOT NULL DEFAULT '{}',
     "type" TEXT NOT NULL DEFAULT 'object',
     concept TEXT NOT NULL,
-    PRIMARY KEY (partition, id, "createdAt")
+    PRIMARY KEY (id, "createdAt")
 );
 --bun:split
 
@@ -92,21 +77,20 @@ END
 $$;
 --bun:split
 
-CREATE INDEX IF NOT EXISTS memory_nodes_partition_id_created_at_desc_idx
-    ON "MemoryNodes" (partition, id, "createdAt" DESC);
+CREATE INDEX IF NOT EXISTS memory_nodes_id_created_at_desc_idx
+    ON "MemoryNodes" (id, "createdAt" DESC);
 --bun:split
 
-CREATE INDEX IF NOT EXISTS memory_nodes_partition_concept_idx
-    ON "MemoryNodes" (partition, concept);
+CREATE INDEX IF NOT EXISTS memory_nodes_concept_idx
+    ON "MemoryNodes" (concept);
 --bun:split
 
 CREATE INDEX IF NOT EXISTS memory_nodes_metadata_gin_idx
     ON "MemoryNodes" USING GIN (metadata);
 --bun:split
 
--- Secret memory nodes with partition isolation
+-- Secret memory nodes (same shape as MemoryNodes).
 CREATE TABLE IF NOT EXISTS "SecretMemoryNodes" (
-    partition TEXT NOT NULL DEFAULT 'default',
     id TEXT NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL,
     "createdBy" TEXT NOT NULL,
@@ -115,7 +99,7 @@ CREATE TABLE IF NOT EXISTS "SecretMemoryNodes" (
     metadata JSONB NOT NULL DEFAULT '{}',
     "type" TEXT NOT NULL DEFAULT 'object',
     concept TEXT NOT NULL,
-    PRIMARY KEY (partition, id, "createdAt")
+    PRIMARY KEY (id, "createdAt")
 );
 --bun:split
 
@@ -136,12 +120,12 @@ END
 $$;
 --bun:split
 
-CREATE INDEX IF NOT EXISTS secret_memory_nodes_partition_id_created_at_desc_idx
-    ON "SecretMemoryNodes" (partition, id, "createdAt" DESC);
+CREATE INDEX IF NOT EXISTS secret_memory_nodes_id_created_at_desc_idx
+    ON "SecretMemoryNodes" (id, "createdAt" DESC);
 --bun:split
 
-CREATE INDEX IF NOT EXISTS secret_memory_nodes_partition_concept_idx
-    ON "SecretMemoryNodes" (partition, concept);
+CREATE INDEX IF NOT EXISTS secret_memory_nodes_concept_idx
+    ON "SecretMemoryNodes" (concept);
 --bun:split
 
 CREATE INDEX IF NOT EXISTS secret_memory_nodes_metadata_gin_idx
@@ -174,9 +158,8 @@ BEGIN
         'checked_at', now()
     );
 
-    INSERT INTO "MemoryNodes" (partition, id, "createdAt", "createdBy", schema, payload, "type", concept)
+    INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, "type", concept)
     VALUES (
-        'default',
         status_id,
         status_created_at,
         'system',
@@ -185,7 +168,7 @@ BEGIN
         'object',
         'system.migration'
     )
-    ON CONFLICT (partition, id, "createdAt") DO UPDATE
+    ON CONFLICT (id, "createdAt") DO UPDATE
     SET payload = EXCLUDED.payload,
         schema = EXCLUDED.schema;
 

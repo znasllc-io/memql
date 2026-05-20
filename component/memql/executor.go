@@ -89,7 +89,7 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 	// is the right behavior anyway.
 	_, err := s.db.NewInsert().
 		Model(node).
-		On("CONFLICT (\"partition\", id, \"createdAt\") DO NOTHING").
+		On("CONFLICT (id, \"createdAt\") DO NOTHING").
 		Exec(ctx)
 	return err
 }
@@ -101,10 +101,6 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 
 	var nodes []memorynodes.MemoryNode
 	query := s.db.NewSelect().Model(&nodes)
-
-	if partition := strings.TrimSpace(params.Partition); partition != "" {
-		query = query.Where("partition = ?", partition)
-	}
 
 	if len(params.IDs) > 0 {
 		query = query.Where("id IN (?)", bun.In(params.IDs))

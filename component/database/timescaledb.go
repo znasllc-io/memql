@@ -96,7 +96,6 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 			extensionName    = "timescaledb"
 			statusId         = "system.timescaledb.status"
 			statusCreatedBy  = "system"
-			statusPartition  = "default"
 		)
 
 		statusCreatedAt := time.Unix(0, 0).UTC()
@@ -241,7 +240,6 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 		if payloadErr == nil && schemaErr == nil {
 			type statusRecord struct {
 				bun.BaseModel `bun:"table:MemoryNodes"`
-				Partition     string          `bun:",pk,notnull,default:'default'"`
 				ID            string          `bun:",pk"`
 				CreatedAt     time.Time       `bun:"\"createdAt\",pk"`
 				CreatedBy     string          `bun:"\"createdBy\",notnull"`
@@ -251,7 +249,6 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 			}
 
 			node := &statusRecord{
-				Partition: statusPartition,
 				ID:        statusId,
 				CreatedAt: statusCreatedAt,
 				CreatedBy: statusCreatedBy,
@@ -262,7 +259,7 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 
 			if _, err := bunDB.NewInsert().
 				Model(node).
-				On(`CONFLICT (partition, id, "createdAt") DO UPDATE`).
+				On(`CONFLICT (id, "createdAt") DO UPDATE`).
 				Set("schema = EXCLUDED.schema, payload = EXCLUDED.payload").
 				Exec(ctx); err != nil {
 				logger.Warn("failed to upsert TimescaleDB status node", "error", err)

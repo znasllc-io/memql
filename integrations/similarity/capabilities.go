@@ -198,10 +198,6 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	}
 	embedElapsed := time.Since(embedStart)
 
-	partition := ""
-	if i.partitionFunc != nil {
-		partition = i.partitionFunc(ctx)
-	}
 	vecLiteral := vectorLiteral(vec)
 
 	// Same-shape SQL as the retired knowledge.lookup but parameterised
@@ -216,38 +212,36 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			WITH latest AS (
 				SELECT DISTINCT ON (id) id, payload
 				FROM "MemoryNodes"
-				WHERE partition = $2
-				  AND concept = $3
+				WHERE concept = $2
 				ORDER BY id, "createdAt" DESC
 			)
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.partition = $2 AND nv.id = latest.id
+			JOIN node_vectors nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
-			LIMIT $4
+			LIMIT $3
 		`
-		rows, err = db.QueryContext(ctx, sqlText, vecLiteral, partition, concept, limit)
+		rows, err = db.QueryContext(ctx, sqlText, vecLiteral, concept, limit)
 	} else {
 		sqlText := `
 			WITH latest AS (
 				SELECT DISTINCT ON (id) id, payload
 				FROM "MemoryNodes"
-				WHERE partition = $2
-				  AND concept = $3
-				  AND (payload->>'domainId') = ANY($4)
+				WHERE concept = $2
+				  AND (payload->>'domainId') = ANY($3)
 				ORDER BY id, "createdAt" DESC
 			)
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.partition = $2 AND nv.id = latest.id
+			JOIN node_vectors nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
-			LIMIT $5
+			LIMIT $4
 		`
-		rows, err = db.QueryContext(ctx, sqlText, vecLiteral, partition, concept, pgStringArray(domainIds), limit)
+		rows, err = db.QueryContext(ctx, sqlText, vecLiteral, concept, pgStringArray(domainIds), limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("similarity.similarTo: query: %w", err)

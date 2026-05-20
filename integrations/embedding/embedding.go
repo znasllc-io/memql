@@ -206,8 +206,6 @@ func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("findSimilar: %w", err)
 	}
 
-	partition := i.resolvePartition(ctx)
-
 	// Format embedding as pgvector literal: [0.1,0.2,...]
 	vecLiteral := vectorLiteral(vec)
 
@@ -215,15 +213,14 @@ func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]an
 		SELECT n.id, n.concept, n.payload,
 		       1 - (nv.embedding <=> $1::vector) AS similarity
 		FROM "MemoryNodes" n
-		JOIN node_vectors nv ON n.partition = nv.partition AND n.id = nv.id
-		WHERE n.partition = $2
-		  AND n.concept = $3
-		  AND nv.vector_field = $4
+		JOIN node_vectors nv ON n.id = nv.id
+		WHERE n.concept = $2
+		  AND nv.vector_field = $3
 		ORDER BY nv.embedding <=> $1::vector
-		LIMIT $5
+		LIMIT $4
 	`
 
-	rows, err := i.db().QueryContext(ctx, query, vecLiteral, partition, concept, vectorField, limit)
+	rows, err := i.db().QueryContext(ctx, query, vecLiteral, concept, vectorField, limit)
 	if err != nil {
 		return nil, fmt.Errorf("findSimilar: query: %w", err)
 	}
@@ -293,19 +290,18 @@ func (i *Integration) storeHandler(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("store: %w", err)
 	}
 
-	partition := i.resolvePartition(ctx)
 	vecLiteral := vectorLiteral(vec)
 
 	query := `
-		INSERT INTO node_vectors (partition, id, concept, vector_field, embedding, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5::vector, NOW(), NOW())
-		ON CONFLICT (partition, id, vector_field) DO UPDATE SET
+		INSERT INTO node_vectors (id, concept, vector_field, embedding, created_at, updated_at)
+		VALUES ($1, $2, $3, $4::vector, NOW(), NOW())
+		ON CONFLICT (id, vector_field) DO UPDATE SET
 		  embedding = EXCLUDED.embedding,
 		  concept = EXCLUDED.concept,
 		  updated_at = NOW()
 	`
 
-	_, err = i.db().ExecContext(ctx, query, partition, nodeId, conceptName, vectorField, vecLiteral)
+	_, err = i.db().ExecContext(ctx, query, nodeId, conceptName, vectorField, vecLiteral)
 	if err != nil {
 		return nil, fmt.Errorf("store: insert node_vectors: %w", err)
 	}

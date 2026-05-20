@@ -101,7 +101,6 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Schemas:       schemas,
 		NodeType:      nodeType,
 		Description:   parsed.description,
-		Scope:         parsed.scope,
 		Version:       parsed.version,
 		Relationships: parsed.relationships,
 	}, nil
@@ -113,7 +112,6 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 type parsedConcept struct {
 	description string
 	conceptType string
-	scope       string // "" (partition, default) or "global"
 	version     string // @version("vN") override; empty means derived from path
 	properties  []parsedProperty
 	required        []string

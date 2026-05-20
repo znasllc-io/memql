@@ -1979,40 +1979,34 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 // a re-ingest when a text change is detected, so the new version is
 // the only live copy for its sourceRef. Direct SQL (not a DSL
 // mutation) because seeds run before automations are scheduled and
-// we're already doing direct SQL for the sibling lookups. Partition
-// scoping matches the seed's own resolvePartition so we don't nuke
-// rows in other tenants.
+// we're already doing direct SQL for the sibling lookups.
 func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, sourceRef string) error {
 	if i.db() == nil {
 		return nil
 	}
-	partition := i.resolvePartition(ctx)
 	// Delete embeddings first so we never leave node_vectors rows
 	// dangling against a missing MemoryNodes chunk. The subquery
 	// picks up every chunk id matching the (domain, sourceRef) pair
 	// regardless of version/text hash.
 	vecSQL := `
 		DELETE FROM node_vectors
-		WHERE partition = $1
-		  AND id IN (
+		WHERE id IN (
 		    SELECT id FROM "MemoryNodes"
-		    WHERE partition = $1
-		      AND concept = 'v1:common:documentChunk'
-		      AND (payload->>'domainId') = $2
-		      AND (payload->>'sourceRef') = $3
-		  )
+		    WHERE concept = 'v1:common:documentChunk'
+		      AND (payload->>'domainId') = $1
+		      AND (payload->>'sourceRef') = $2
+		)
 	`
-	if _, err := i.db().ExecContext(ctx, vecSQL, partition, domainId, sourceRef); err != nil {
+	if _, err := i.db().ExecContext(ctx, vecSQL, domainId, sourceRef); err != nil {
 		return fmt.Errorf("delete node_vectors: %w", err)
 	}
 	chunkSQL := `
 		DELETE FROM "MemoryNodes"
-		WHERE partition = $1
-		  AND concept = 'v1:common:documentChunk'
-		  AND (payload->>'domainId') = $2
-		  AND (payload->>'sourceRef') = $3
+		WHERE concept = 'v1:common:documentChunk'
+		  AND (payload->>'domainId') = $1
+		  AND (payload->>'sourceRef') = $2
 	`
-	if _, err := i.db().ExecContext(ctx, chunkSQL, partition, domainId, sourceRef); err != nil {
+	if _, err := i.db().ExecContext(ctx, chunkSQL, domainId, sourceRef); err != nil {
 		return fmt.Errorf("delete MemoryNodes: %w", err)
 	}
 	return nil
