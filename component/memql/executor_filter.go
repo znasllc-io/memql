@@ -123,15 +123,6 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 
 	query := db.NewSelect().Model(&nodes)
 
-	// Auto-inject partition filter -- hard isolation boundary. For
-	// global-scoped concepts (cluster topology, partition registry)
-	// this becomes WHERE partition = '_system' regardless of envelope;
-	// tenant concepts still scope to the envelope's partition.
-	conceptName := extractConceptFromExpression(expr)
-	if partition := e.partitionForConcept(ctx, conceptName); partition != "" {
-		query = query.Where("partition = ?", partition)
-	}
-
 	if filter.sql != "" {
 		query = query.Where(filter.sql, filter.args...)
 	}
@@ -1577,14 +1568,6 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 	var nodes []memorynodes.MemoryNode
 
 	query := db.NewSelect().Model(&nodes)
-
-	// Auto-inject partition filter -- hard isolation boundary. See
-	// partitionForConcept: global concepts query _system regardless
-	// of the caller's envelope.
-	conceptName := extractConceptFromExpression(cmp)
-	if partition := e.partitionForConcept(ctx, conceptName); partition != "" {
-		query = query.Where("partition = ?", partition)
-	}
 
 	if filter.sql != "" {
 		query = query.Where(filter.sql, filter.args...)
