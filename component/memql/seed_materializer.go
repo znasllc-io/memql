@@ -9,10 +9,10 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
-	"github.com/znasllc-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -245,29 +245,57 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 }
 
 // materializePerUser writes one row for a (perUser seed, user)
-// pair. The row id is `<seedName>-<userId>`; the user id is stamped
-// into `ownerUserId` so owner-keyed lookups resolve immediately.
-// Per-seed provenance is stamped on ctx (see materializeGlobal).
+// pair. Dedup keys off (concept, payload.ownerUserId, provenance.name)
+// rather than a deterministic id string: the canonical id format
+// already carries the concept in the middle position, and the seed
+// name is captured in row provenance, so the row's shortId can be
+// opaque. On first sweep for a (seed, user) we mint a UUID; on
+// subsequent sweeps we look up the existing row and reuse its id so
+// the time-series append-only insert lands as a new version of the
+// same logical row instead of a parallel one.
 func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefinition, userId string) error {
 	if userId == "" {
 		return fmt.Errorf("empty userId for per-user seed %q", def.Name)
 	}
-	// Build the row's shortId from the user's SHORT id (the part
-	// after the canonical {partition}:{concept}: prefix), not the
-	// full canonical id. Concatenating with the full id produced
-	// non-canonical compound ids like
-	// "trainerAgent-_system:v1:identity:user:user-30bf..." that
-	// then defeated the storage layer's HasPartition() check and
-	// stored without the proper {partition}:{concept}: prefix.
-	// See docs/core/identifiers.md.
-	shortUserId := userId
-	if _, parsed, err := id.ParseNodeId(userId); err == nil && parsed != "" {
-		shortUserId = parsed
+	rowId, err := m.lookupOrMintPerUserId(ctx, def, userId)
+	if err != nil {
+		return fmt.Errorf("dedup lookup: %w", err)
 	}
-	rowId := def.Name + "-" + shortUserId
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
+}
+
+// lookupOrMintPerUserId returns the existing perUser-seed row id for
+// (def, userId) if one is already present, or a freshly minted UUID
+// otherwise. The lookup is a raw concept query filtered by the
+// (ownerUserId, provenance.name) pair the materializer guarantees on
+// every perUser write. A lookup error falls through to UUID minting
+// (logged at warn level); the cost of an occasional duplicate row is
+// bounded -- AgentRegistry keys by roleSlug, so duplicate seed rows
+// collapse to one in-memory entry even if the DB has both.
+func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedDefinition, userId string) (string, error) {
+	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
+	query := fmt.Sprintf(
+		`concept==%s; payload.ownerUserId==%q; provenance.name==%q`,
+		conceptId, userId, def.Name,
+	)
+	result, err := m.engine.Execute(systemActorContext(ctx), query)
+	if err != nil {
+		if m.engine.Logger != nil {
+			m.engine.Logger.Warn("seed materializer: dedup lookup failed; minting new id",
+				"seed", def.Name, "userId", userId, "error", err)
+		}
+		return uuid.NewString(), nil
+	}
+	if result != nil && result.Bundle != nil {
+		for _, node := range result.Bundle.Nodes {
+			if node != nil && node.Id != "" {
+				return node.Id, nil
+			}
+		}
+	}
+	return uuid.NewString(), nil
 }
 
 // invokeCreateMutation builds the canonical `mutationCreate<Concept>`
