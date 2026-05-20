@@ -175,7 +175,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 	// Deterministic-ish request-node ID keyed by callId so repeated
 	// emits (in theory) would collide rather than stacking. Regardless,
 	// insert() upserts, so this is defensive.
-	requestNodeId := "ctr-" + callId
+	requestNodeId := callId
 
 	mutation := fmt.Sprintf(`mutationEmitClientToolRequest({
 		"requestId": %s,

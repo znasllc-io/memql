@@ -468,5 +468,5 @@ func composeMagicLinkIdentityId(userId, email string) string {
 	bareUser = strings.ToLower(strings.TrimSpace(bareUser))
 	normEmail := strings.ToLower(strings.TrimSpace(email))
 	sum := sha256.Sum256([]byte(bareUser + "|" + normEmail))
-	return "magic-" + hex.EncodeToString(sum[:8])
+	return hex.EncodeToString(sum[:8])
 }
