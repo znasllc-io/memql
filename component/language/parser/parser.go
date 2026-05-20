@@ -4614,7 +4614,7 @@ func (p *Parser) parseEventAccessor() (ExpressionNode, error) {
 
 // parseCallerAccessor parses caller() -- the authenticated user's
 // AccessContext. Typed as CallerRefExpr; runtime resolves dotted
-// paths like caller.userId, caller.role, caller.partitions.
+// paths like caller.userId, caller.role.
 func (p *Parser) parseCallerAccessor() (ExpressionNode, error) {
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err

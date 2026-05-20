@@ -307,12 +307,9 @@ type EventRefExpr struct{}
 //   caller.primaryEmail  -- the caller's primary email
 //   caller.role          -- cluster-wide role (owner / admin / writer / reader)
 //   caller.identityId    -- v1:identity:identity.id used for this request
-//   caller.partitions    -- []string of partition names the caller can access
-//                            (empty for cluster owners, who bypass the ACL)
+//   caller.isOwner       -- bool short-circuit for owner-bypass paths
 //
-// Callable in expression position inside .memql function bodies, used
-// by server-side filters like listPartitions to scope results without
-// the gRPC handler having to intercept.
+// Callable in expression position inside .memql function bodies.
 type CallerRefExpr struct{}
 
 func (*EventRefExpr) node()           {}

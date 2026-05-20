@@ -309,9 +309,9 @@ func (*ArgRefExpression) isExpressionNode() {}
 
 // CallerRefExpression references the caller() accessor -- the
 // authenticated user's AccessContext at query-evaluation time.
-// Dotted paths like caller.userId, caller.role, caller.partitions
-// are resolved by pulling the AccessContext from the request ctx
-// via component/auth.AccessFromContext.
+// Dotted paths like caller.userId / caller.role are resolved by
+// pulling the AccessContext from the request ctx via
+// component/auth.AccessFromContext.
 //
 // Exposed fields (resolved at eval time):
 //
@@ -319,17 +319,10 @@ func (*ArgRefExpression) isExpressionNode() {}
 //   caller.primaryEmail  -- primary email
 //   caller.role          -- cluster-wide role (owner/admin/writer/reader)
 //   caller.identityId    -- v1:identity:identity.id used for the request
-//   caller.partitions    -- []string of partition names the caller has access to
+//   caller.isOwner       -- bool short-circuit for owner-bypass paths
 //
 // When no AccessContext is attached (e.g. no-auth dev mode), the
-// resolver falls back to treating the caller as an owner with all
-// partitions accessible.
-//
-// Phase 4 Step 25 plumbing landed in this commit; end-to-end
-// resolution (wiring AccessFromContext through the evaluator and
-// rewriting queryListPartitions to use caller.partitions) is tracked
-// as a dedicated follow-up so the comparison-operator evaluator can
-// be updated in one focused pass.
+// resolver falls back to treating the caller as an owner.
 type CallerRefExpression struct{}
 
 func (*CallerRefExpression) isExpressionNode() {}

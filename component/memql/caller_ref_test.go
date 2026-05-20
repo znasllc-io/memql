@@ -2,31 +2,32 @@ package memql
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
 
 // findCallerValue walks the expression tree and returns the Value of
-// the first ComparisonExpression whose Field is payload.name.
-func findPayloadNameValue(e ExpressionNode) any {
+// the first ComparisonExpression whose Field is payload.userId.
+func findPayloadUserIdValue(e ExpressionNode) any {
 	switch n := e.(type) {
 	case *LogicalExpression:
-		if v := findPayloadNameValue(n.Left); v != nil {
+		if v := findPayloadUserIdValue(n.Left); v != nil {
 			return v
 		}
-		return findPayloadNameValue(n.Right)
+		return findPayloadUserIdValue(n.Right)
 	case *ComparisonExpression:
-		if len(n.Field.Parts) >= 2 && n.Field.Parts[0] == "payload" && n.Field.Parts[1] == "name" {
+		if len(n.Field.Parts) >= 2 && n.Field.Parts[0] == "payload" && n.Field.Parts[1] == "userId" {
 			return n.Value
 		}
 	}
 	return nil
 }
 
-func parseListPartitionsFilter(t *testing.T) ExpressionNode {
+func parseUserIdFilter(t *testing.T) ExpressionNode {
 	t.Helper()
-	query := `concept==v1:platform:partition; payload.name in caller.partitions`
+	query := `concept==v1:identity:user; payload.userId==caller.userId`
 	tokens, err := tokenize(query)
 	if err != nil {
 		t.Fatalf("tokenize: %v", err)
@@ -39,60 +40,28 @@ func parseListPartitionsFilter(t *testing.T) ExpressionNode {
 	return expr
 }
 
-func TestCallerReferenceParsesAsInRHS(t *testing.T) {
-	expr := parseListPartitionsFilter(t)
-	value := findPayloadNameValue(expr)
+func TestCallerReferenceParsesAsRHS(t *testing.T) {
+	expr := parseUserIdFilter(t)
+	value := findPayloadUserIdValue(expr)
 	ref, ok := value.(*CallerReference)
 	if !ok {
-		t.Fatalf("payload.name value is %T, want *CallerReference", value)
+		t.Fatalf("payload.userId value is %T, want *CallerReference", value)
 	}
-	if ref.Path != "partitions" {
-		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "partitions")
-	}
-}
-
-func TestResolveCallerReferences_NoAccessContext_OwnerBypass(t *testing.T) {
-	// When no AccessContext is attached, we treat the caller as an
-	// owner (dev-mode fallback); caller.partitions resolves to the
-	// owner-wildcard sentinel.
-	resolved, err := resolveCallerReferences(context.Background(), parseListPartitionsFilter(t))
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if _, ok := findPayloadNameValue(resolved).(ownerWildcardSentinel); !ok {
-		t.Fatalf("want ownerWildcardSentinel, got %T", findPayloadNameValue(resolved))
+	if ref.Path != "userId" {
+		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
 	}
 }
 
-func TestResolveCallerReferences_OwnerBypass(t *testing.T) {
-	ac := &auth.AccessContext{Role: auth.RoleOwner}
+func TestResolveCallerReferences_ResolvesUserId(t *testing.T) {
+	ac := &auth.AccessContext{UserId: "user-xyz", Role: auth.RoleWriter}
 	ctx := auth.ContextWithAccess(context.Background(), ac)
-	resolved, err := resolveCallerReferences(ctx, parseListPartitionsFilter(t))
+	resolved, err := resolveCallerReferences(ctx, parseUserIdFilter(t))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if _, ok := findPayloadNameValue(resolved).(ownerWildcardSentinel); !ok {
-		t.Fatalf("owner expected to get wildcard sentinel, got %T", findPayloadNameValue(resolved))
-	}
-}
-
-func TestResolveCallerReferences_NonOwnerGetsEmptyPartitionList(t *testing.T) {
-	// Post-#56 phase 4: the PartitionACL is gone; non-owners get an
-	// empty partition list back. The DSL reference itself is stripped
-	// in phase 5.
-	ac := &auth.AccessContext{Role: auth.RoleWriter}
-	ctx := auth.ContextWithAccess(context.Background(), ac)
-	resolved, err := resolveCallerReferences(ctx, parseListPartitionsFilter(t))
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	value := findPayloadNameValue(resolved)
-	partitions, ok := value.([]string)
-	if !ok {
-		t.Fatalf("want []string, got %T", value)
-	}
-	if len(partitions) != 0 {
-		t.Fatalf("want empty list, got %d: %v", len(partitions), partitions)
+	got := findPayloadUserIdValue(resolved)
+	if got != "user-xyz" {
+		t.Fatalf("got %v, want user-xyz", got)
 	}
 }
 
@@ -134,9 +103,23 @@ func TestResolveCallerReferences_UnknownPathErrors(t *testing.T) {
 	}
 }
 
-func TestResolveCallerReferences_PartitionsNotWithEq(t *testing.T) {
-	_, err := resolveCallerPath(context.Background(), "partitions", OpEq)
-	if err == nil {
-		t.Fatal("expected error when caller.partitions is used with non-in operator")
+func TestParseRejectsCallerPartitions(t *testing.T) {
+	// caller.partitions was retired in #56 phase 5. The parser rejects
+	// it with a migration hint so any stragglers in the tree fail
+	// loudly at load time.
+	for _, path := range []string{"caller.partitions", "caller.partition"} {
+		query := `concept==v1:platform:partition; payload.name == ` + path
+		tokens, err := tokenize(query)
+		if err != nil {
+			t.Fatalf("%s: tokenize: %v", path, err)
+		}
+		p := newParser(tokens, nil)
+		_, err = p.parse()
+		if err == nil {
+			t.Fatalf("%s: expected parser error, got nil", path)
+		}
+		if !strings.Contains(err.Error(), "retired") {
+			t.Fatalf("%s: error %q missing 'retired' migration hint", path, err.Error())
+		}
 	}
 }

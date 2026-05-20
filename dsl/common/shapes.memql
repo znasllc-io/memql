@@ -117,13 +117,11 @@ shape validationRowTrait {
 // bind here via @useShape(callerActor).
 
 @caller
-@description("Caller envelope projection: authenticated actor, role, partition, and now.")
+@description("Caller envelope projection: authenticated actor, role, and now.")
 shape callerActor {
   caller.userId
   caller.role
   caller.identityId
   caller.isClusterOwner
-  caller.partitions
-  caller.partition
   caller.now
 }

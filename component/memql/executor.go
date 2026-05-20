@@ -282,28 +282,23 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 // ownerWildcardSentinel is a marker value used by the caller-reference
 // resolver to signal that the comparison should match every row. It is
 // recognised by compilePayloadComparison and friends, which emit `TRUE`
-// as their SQL fragment when the value is of this type. Cluster owners
-// hit this branch for owner-bypass semantics.
+// as their SQL fragment when the value is of this type. Currently
+// unused on the live caller surface (the partition-aware paths that
+// produced it were retired in #56); kept around for callers that may
+// reintroduce wildcard semantics for a future scalar path.
 type ownerWildcardSentinel struct{}
 
 // resolveCallerReferences walks an expression tree and substitutes every
 // *CallerReference comparison value with a concrete value pulled from
-// the AccessContext on ctx. For owners (and when no AccessContext is
-// attached), `caller.partitions` resolves to ownerWildcardSentinel so
-// the SQL compiler emits TRUE for that comparison -- the classic
-// owner-bypass. For non-owner callers, `caller.partitions` resolves to
-// the list of partition names their ACL grants access to.
+// the AccessContext on ctx.
 //
-// Supported paths (when a non-owner caller is making the request):
+// Supported paths:
 //
-//	caller.partitions -> []string (partition names)
-//	caller.userId     -> string
-//	caller.identityId -> string
-//	caller.role       -> string (owner/admin/writer/reader)
+//	caller.userId       -> string
+//	caller.identityId   -> string
+//	caller.role         -> string (owner/admin/writer/reader)
 //	caller.primaryEmail -> string
-//
-// Only the partitions path emits the ownerWildcardSentinel. Scalar
-// paths return the concrete string value regardless of role.
+//	caller.isOwner      -> bool
 func resolveCallerReferences(ctx context.Context, expr ExpressionNode) (ExpressionNode, error) {
 	if expr == nil {
 		return nil, nil
@@ -343,24 +338,11 @@ func resolveCallerReferences(ctx context.Context, expr ExpressionNode) (Expressi
 }
 
 // resolveCallerPath translates a dotted caller.X path into the scalar
-// or list value that the comparison evaluator expects. op determines
-// the expected shape -- OpIn/OpOut always produce a list (or the
-// owner-wildcard sentinel).
+// value that the comparison evaluator expects.
 func resolveCallerPath(ctx context.Context, path string, op ComparisonOperator) (any, error) {
+	_ = op
 	ac, _ := auth.AccessFromContext(ctx)
 	switch path {
-	case "partitions":
-		// caller.partitions is going away in #56 phase 5. Owners still
-		// get the wildcard sentinel (no-op in the SQL builder); everyone
-		// else gets an empty list. The DSL reference itself is stripped
-		// in phase 5.
-		if op != OpIn && op != OpOut {
-			return nil, fmt.Errorf("caller.partitions must be used with 'in' or 'not in'")
-		}
-		if ac == nil || ac.IsClusterOwner() {
-			return ownerWildcardSentinel{}, nil
-		}
-		return []string{}, nil
 	case "userId":
 		if ac == nil {
 			return "", nil
@@ -388,7 +370,7 @@ func resolveCallerPath(ctx context.Context, path string, op ComparisonOperator) 
 		}
 		return ac.IsClusterOwner(), nil
 	default:
-		return nil, fmt.Errorf("unsupported caller reference path %q (valid: partitions, userId, identityId, role, primaryEmail, isOwner)", path)
+		return nil, fmt.Errorf("unsupported caller reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
 	}
 }
 
