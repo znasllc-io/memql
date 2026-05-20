@@ -28,14 +28,11 @@ import (
 // SQL filters (e.g. privateCanvasStatesForViewer) compare against
 // the canonical id.
 //
-// Accepts both prefixes the identity resolver admits as valid JWT
-// subjects (component/auth/identity_resolver.go): the partition-
-// qualified `default:v1:identity:user:` form AND the bare
-// `v1:identity:user:` form.
+// Accepts the canonical `v1:identity:user:` prefix that the identity
+// resolver admits as a valid JWT subject (see
+// component/auth/identity_resolver.go).
 func looksLikeCanonicalUserId(s string) bool {
-	t := strings.TrimSpace(s)
-	return strings.HasPrefix(t, "default:v1:identity:user:") ||
-		strings.HasPrefix(t, "v1:identity:user:")
+	return strings.HasPrefix(strings.TrimSpace(s), "v1:identity:user:")
 }
 
 // Replier handles AgentGenerateTurnMsg on the agent node. It builds prompt

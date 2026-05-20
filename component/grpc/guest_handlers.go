@@ -32,7 +32,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
-	identifier "github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
@@ -468,19 +467,11 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 		return send(&memqlv1.ResolveGuestInviteResult{Status: "invalid", ErrorMessage: "no invitation matches this token"})
 	}
 
-	// Partition (workspace) is derived from the space id's leading
-	// segment so the /join/<token> page can adopt it for the guest's
-	// session without a second round-trip. The space id format is
-	// `{partition}:v1:cognition:space:{shortId}`; ParseNodeId returns
-	// the partition portion. If the row has no spaceId (shouldn't
-	// happen for a guest invite, but defensive) the field stays
-	// empty and the frontend falls back to "default".
+	// Partition is going away on the wire in #56 phase 8; the
+	// /join/<token> page no longer needs to adopt it. The proto field
+	// stays populated with "" for compat until the field itself is
+	// removed.
 	partition := ""
-	if summary.SpaceId != "" {
-		if p, _, _, err := identifier.ParseNodeId(summary.SpaceId); err == nil {
-			partition = p
-		}
-	}
 
 	// Derive status from the record.
 	result := &memqlv1.ResolveGuestInviteResult{

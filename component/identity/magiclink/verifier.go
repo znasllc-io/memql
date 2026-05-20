@@ -451,7 +451,7 @@ func defaultDisplayName(email string) string {
 // composeMagicLinkIdentityId builds the deterministic bare-slug id
 // used for the per-user magic_link v1:identity:identity row. The
 // engine canonicalizes the bare slug to
-// `_system:v1:identity:identity:<slug>` on insert.
+// `v1:identity:identity:<slug>` on insert.
 //
 // Determinism: hash (normalized userId, normalized email). Stable
 // across email-case changes (fold to lower) and across multiple
@@ -459,18 +459,9 @@ func defaultDisplayName(email string) string {
 // userId being passed in either bare-slug or canonical form -- we
 // strip the canonical prefix before hashing so both shapes hash the
 // same.
-//
-// PRIOR BUG: this used to return `userId + ":magic_link:" + hex`,
-// which produced a malformed id whenever `userId` was canonical
-// (`_system:v1:identity:user:user-XXX:magic_link:XXXX`). The engine's
-// auto-canonicalization of v1:identity:authCode.identityId (which
-// has @relationship to v1:identity:identity) saw the
-// v1:identity:user prefix and rejected the auth-code insert with
-// "wrong type tag," surfacing as ERR-c082fb on /auth/complete with
-// no email going out and the user stuck on a "Sign-in error" page.
 func composeMagicLinkIdentityId(userId, email string) string {
 	bareUser := userId
-	const userCanonicalPrefix = "default:v1:identity:user:"
+	const userCanonicalPrefix = "v1:identity:user:"
 	if strings.HasPrefix(bareUser, userCanonicalPrefix) {
 		bareUser = strings.TrimPrefix(bareUser, userCanonicalPrefix)
 	}

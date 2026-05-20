@@ -6,10 +6,12 @@ import (
 )
 
 // TestValidateShortId pins the contract documented in
-// docs/core/identifiers.md ("Anti-patterns"). The two landed bugs
-// (seed materializer's "trainerAgent-_system:v1:..." compound id,
-// and the checkpoint writer's "checkpoint:<executionId>" duplicate
-// concept name) are codified as failing inputs here.
+// docs/core/identifiers.md ("Anti-patterns"). Post-#56 phase 6 the
+// canonical form is `concept:shortId` (no partition segment); the
+// two landed bugs (seed materializer's "trainerAgent-_system:v1:..."
+// compound id, and the checkpoint writer's
+// "checkpoint:<executionId>" duplicate concept name) are codified
+// as failing inputs here.
 func TestValidateShortId(t *testing.T) {
 	agent := &Concept{Name: "v1:agents:agent"}
 	checkpoint := &Concept{Name: "v1:memql:checkpoint"}
@@ -33,12 +35,23 @@ func TestValidateShortId(t *testing.T) {
 		// Concept-prefixed (shape 2) -- allowed.
 		{"concept-prefixed", agent, "v1:agents:agent:trainerAgent-user-30bf", false, ""},
 
-		// Fully qualified (shape 3) -- allowed when concept matches.
-		{"qualified default partition", agent, "default:v1:agents:agent:abc", false, ""},
-		{"qualified system partition", agent, "_system:v1:agents:agent:abc", false, ""},
-		{"qualified custom partition", agent, "acme:v1:agents:agent:abc", false, ""},
+		// Old partition-prefixed forms are gone post-#56 phase 6.
+		{
+			"qualified default partition is rejected",
+			agent,
+			"default:v1:agents:agent:abc",
+			true,
+			"v1:agents:agent",
+		},
+		{
+			"qualified system partition is rejected",
+			agent,
+			"_system:v1:agents:agent:abc",
+			true,
+			"v1:agents:agent",
+		},
 
-		// The two landed bugs.
+		// The two landed bugs stay rejected.
 		{
 			"seed materializer compound id",
 			agent,
@@ -52,15 +65,6 @@ func TestValidateShortId(t *testing.T) {
 			"checkpoint:exec-20260517-001536-a1z7hw",
 			true,
 			"v1:memql:checkpoint",
-		},
-
-		// Smuggled qualified id pointing at a different concept.
-		{
-			"qualified but wrong concept",
-			agent,
-			"_system:v1:identity:user:user-30bf",
-			true,
-			"v1:agents:agent",
 		},
 	}
 

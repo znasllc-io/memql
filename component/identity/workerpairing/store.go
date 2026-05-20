@@ -13,10 +13,9 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// canonicalIdPrefix mirrors the v1:identity:* convention -- pairing
-// codes are global-scoped so they live in the reserved _system
-// partition.
-const canonicalIdPrefix = "default:v1:identity:workerPairingCode:"
+// canonicalIdPrefix is the engine-stamped prefix on every pairing-
+// code row's id.
+const canonicalIdPrefix = "v1:identity:workerPairingCode:"
 
 // Store wraps the engine with typed pairing-code operations. Mirrors
 // the workertoken.Store and pat.Store patterns.
