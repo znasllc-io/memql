@@ -9,7 +9,6 @@
 
 @version("1.0.0")
 @namespace("agents")
-@scope("global")
 @description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings. Global-scoped: lives in _system alongside v1:identity:user, since per-user platform agents (assistant, plannerAgent, trainerAgent) are infrastructure that every tenant sees the same way -- keyed by ownerUserId payload field, addressed canonically as _system:v1:agents:agent:<seedName>-<userShortId>.")
 concept agent {
   ownerUserId     string  @description("Canonical owning-user pointer. Distinct from the engine-auto-stamped `createdBy` column: createdBy carries the request actor at insert time, which is the user when the agent is created via the Create Agent modal but is the system actor (`system:automation:provisionAssistantOnUserCreate`) when the assistant is auto-seeded by the provisioning automation. Owner-keyed lookups (Computer Use status, worker dispatch routing, agent-context auto-injection for worker tools) read this field first and fall back to createdBy.")
@@ -117,7 +116,6 @@ concept agentAuthorization {
 
 @version("1.0.0")
 @namespace("agents")
-@scope("global")
 @description("First-class catalog of agent roles. A role is the spine of an agent's identity: it determines the locked minimum knowledge domains, the locked minimum tools/integrations (capabilities), and the recommended LLM policy. The role is the contract the assistant fulfills when it auto-creates a specialist mid-conversation -- pick the role, copy its locked + default selections onto the new agent, materialize the row. Lock semantics: lockedDomainIds + lockedToolSlugs are the minimum required set for any agent carrying this role. The cockpit's Studio renders them with a lock icon; mutationUpdateAgent rejects writes that strip a locked id (server-side enforcement, not just UI). defaultDomainIds + defaultToolSlugs are pre-selected when the agent is created but the user / GA may remove them later. Predefined rows ship via integrations/knowledge/role_seed.go and are re-seeded on every startup; user-created roles default to predefined=false and stay fully editable. Per-user roles are global-scoped because routing decisions (cognition / conductor) need to see the same role surface across every partition.")
 concept agentRole {
   slug                   string  @required  @description("Canonical slug -- the value v1:agents:agent.roleSlug points to. Snake_case, stable, never renamed (rename = new row + migration). Examples: 'it_support', 'family_doctor', 'commercial_pilot', 'union_carpenter'.")

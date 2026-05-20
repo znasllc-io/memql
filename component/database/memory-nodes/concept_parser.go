@@ -268,18 +268,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 	case "type":
 		c.conceptType = strings.ToLower(attrString(attr))
 	case "scope":
-		// @scope("global") -- rows live in _system regardless of
-		// request envelope. Only "global" is defined today; omitting
-		// is equivalent to @scope("partition").
-		scope := strings.ToLower(strings.TrimSpace(attrString(attr)))
-		switch scope {
-		case "", "partition":
-			c.scope = ""
-		case "global":
-			c.scope = "global"
-		default:
-			return fmt.Errorf("@scope must be \"partition\" or \"global\", got %q", scope)
-		}
+		// `@scope` was retired in #56 (partition removal). Every
+		// concept lives in one partition; the per-concept scope
+		// distinction is gone. Reject explicitly so stale concept
+		// files surface a clear error instead of silently parsing
+		// to the post-removal default.
+		return fmt.Errorf("`@scope` is retired -- remove the annotation; every concept lives in the default partition post-#56")
 	// @visibility was removed in the genesis simplification. Every
 	// binary now loads every concept; functional specialization
 	// happens at the build-tag layer (which integrations are active),

@@ -36,22 +36,15 @@ func (e *MemQLEngine) resolvePartition(ctx context.Context) string {
 	return e.Partition()
 }
 
-// partitionForConcept returns the partition a read/write should target
-// for the given concept. Global-scoped concepts (via @scope("global"))
-// always live in the reserved _system partition regardless of the
-// caller's envelope; everything else inherits the envelope-derived
-// partition from resolvePartition.
-//
-// Passing an empty conceptName falls back to resolvePartition -- used
-// when the caller doesn't know the concept at query-build time (e.g.
-// multi-concept expressions).
+// partitionForConcept returns the partition a read/write should
+// target for the given concept. Post-#56 every concept lives in one
+// partition (id.DefaultPartition); the per-concept @scope distinction
+// is gone. Kept as a single entry point during the multi-step
+// partition removal -- once the partition column itself is dropped
+// from the Postgres schema (later commit on this branch), every
+// caller can just stop asking the question.
 func (e *MemQLEngine) partitionForConcept(ctx context.Context, conceptName string) string {
-	name := strings.TrimSpace(conceptName)
-	if name != "" && e.concepts != nil {
-		if c, err := e.concepts.Get(name); err == nil && c != nil && c.IsGlobal() {
-			return id.SystemPartition
-		}
-	}
+	_ = conceptName
 	return e.resolvePartition(ctx)
 }
 
@@ -106,12 +99,11 @@ func (e *MemQLEngine) canonicalizeIdValue(ctx context.Context, value, conceptTyp
 		return "", fmt.Errorf("canonicalId: unknown concept %q", conceptType)
 	}
 
-	expectedPartition := id.DefaultPartition
-	if c.IsGlobal() {
-		expectedPartition = id.SystemPartition
-	} else {
-		expectedPartition = e.resolvePartition(ctx)
-	}
+	// Every concept lives in one partition post-#56 -- the @scope-
+	// derived branch is gone. Honor the request envelope's partition
+	// the same way as for any other write/read.
+	_ = c
+	expectedPartition := e.resolvePartition(ctx)
 
 	if !id.HasPartition(value) {
 		// Bare slug: compose canonical id.
