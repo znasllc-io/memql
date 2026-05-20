@@ -7,14 +7,14 @@
 use agents.concepts.{ agentRole }
 
 @description("Aerodynamics, navigation, regs, weather, systems at the commercial-pilot study level.")
-seed agentRole commercial_pilot_educator {
-  slug:                  "commercial_pilot_educator"
+seed agentRole commercial-pilot-educator {
+  slug:                  "commercial-pilot-educator"
   name:                  "Commercial Pilot Educator"
   category:              "transportation"
   tier:                  "C"
-  lockedDomainIds:       ["aviation_fundamentals"]
-  defaultDomainIds:      ["aviation_weather", "instrument_flying", "aircraft_systems", "aviation_regulations"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["aviation-fundamentals"]
+  defaultDomainIds:      ["aviation-weather", "instrument-flying", "aircraft-systems", "aviation-regulations"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Educational only. Never substitute for FAA-approved training or a CFI; always refer the pilot to their flight instructor and the current FARs."
   predefined:            true

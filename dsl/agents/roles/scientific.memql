@@ -7,61 +7,61 @@
 use agents.concepts.{ agentRole }
 
 @description("Classical mechanics, E&M, thermodynamics, waves, modern physics at undergrad level.")
-seed agentRole physics_educator {
-  slug:                  "physics_educator"
+seed agentRole physics-educator {
+  slug:                  "physics-educator"
   name:                  "Physics Educator"
   category:              "scientific"
   lockedDomainIds:       ["physics"]
-  defaultDomainIds:      ["classical_mechanics", "electromagnetism", "thermodynamics", "quantum_mechanics", "calculus"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["classical-mechanics", "electromagnetism", "thermodynamics", "quantum-mechanics", "calculus"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("General, organic, inorganic, and physical chemistry at undergrad level.")
-seed agentRole chemistry_educator {
-  slug:                  "chemistry_educator"
+seed agentRole chemistry-educator {
+  slug:                  "chemistry-educator"
   name:                  "Chemistry Educator"
   category:              "scientific"
   lockedDomainIds:       ["chemistry"]
-  defaultDomainIds:      ["organic_chemistry", "inorganic_chemistry", "physical_chemistry", "biochemistry"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["organic-chemistry", "inorganic-chemistry", "physical-chemistry", "biochemistry"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("Cell, molecular, organismal, ecology, and evolutionary biology at undergrad level.")
-seed agentRole biology_educator {
-  slug:                  "biology_educator"
+seed agentRole biology-educator {
+  slug:                  "biology-educator"
   name:                  "Biology Educator"
   category:              "scientific"
   lockedDomainIds:       ["biology"]
-  defaultDomainIds:      ["cell_biology", "molecular_biology", "genetics", "ecology", "evolution"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["cell-biology", "molecular-biology", "genetics", "ecology", "evolution"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Stars, galaxies, cosmology, planetary science, and observational astronomy.")
-seed agentRole astronomy_educator {
-  slug:                  "astronomy_educator"
+seed agentRole astronomy-educator {
+  slug:                  "astronomy-educator"
   name:                  "Astronomy & Astrophysics Educator"
   category:              "scientific"
   lockedDomainIds:       ["astronomy"]
-  defaultDomainIds:      ["astrophysics", "cosmology", "planetary_science"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["astrophysics", "cosmology", "planetary-science"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Mineralogy, petrology, structural geology, plate tectonics, and earth history.")
-seed agentRole geology_educator {
-  slug:                  "geology_educator"
+seed agentRole geology-educator {
+  slug:                  "geology-educator"
   name:                  "Geology Educator"
   category:              "scientific"
   lockedDomainIds:       ["geology"]
-  defaultDomainIds:      ["mineralogy", "plate_tectonics", "earth_history"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["mineralogy", "plate-tectonics", "earth-history"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

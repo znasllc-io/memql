@@ -4,7 +4,7 @@ package memql
 // into the concrete tool names the tool-calling loop understands.
 //
 // The CoPresent frontend represents tool capabilities as stable
-// high-level slugs (copresent_control, data_query, email_compose, …)
+// high-level slugs (copresent-control, data-query, email-compose, …)
 // because that's what users see in agent-creation UIs. The tool
 // dispatcher, by contrast, works in concrete tool names (uiClick,
 // uiType, uiReadState, …). When an agent's Agent record carries a
@@ -15,16 +15,16 @@ package memql
 //
 // Two capability-slug expansions live here today:
 //
-//   - copresent_control       -- expands into uiClick / uiType / etc.,
+//   - copresent-control       -- expands into uiClick / uiType / etc.,
 //                                the tools that drive the CoPresent SPA.
-//   - computer_use_headless   -- expands into workerHost + the cross-
+//   - computer-use-headless   -- expands into workerHost + the cross-
 //                                cutting trio (workerStatus,
 //                                requestComputerUseScope, canvasPublish).
 //                                Shell / fs / http on the user's machine.
-//   - computer_use_embodied   -- expands into workerComputer + the same
+//   - computer-use-embodied   -- expands into workerComputer + the same
 //                                cross-cutting trio. Mouse / keyboard /
 //                                screenshot on the user's machine.
-//   - workbench_use           -- expands into workbenchHost + canvasPublish.
+//   - workbench-use           -- expands into workbenchHost + canvasPublish.
 //                                Sandboxed Linux execution per-Plan in the
 //                                cluster. Universal: every agent has it
 //                                by default. No scope-request tool (no
@@ -33,12 +33,12 @@ package memql
 //                                service, not a remote process that can
 //                                disconnect).
 //
-// The two computer-use slugs replaced a single legacy `computer_use`
+// The two computer-use slugs replaced a single legacy `computer-use`
 // slug on 2026-05-17. Splitting by mode lets the headless slice be
 // served by the workbench backend without dragging the embodied
 // (GUI-only) tools along. Authorization (scope grants, kill switch,
 // knowledge domain) is still unified under the "computer use"
-// concept because both modes act on the user's machine. workbench_use
+// concept because both modes act on the user's machine. workbench-use
 // is a sibling, not a child -- it's the safer default for headless
 // work and runs entirely inside the cluster.
 //
@@ -47,7 +47,7 @@ package memql
 
 // OperatorPrimitiveNames is the canonical list of tool names
 // registered by the operator subsystem. An agent with the
-// `copresent_control` capability slug can call every one of these.
+// `copresent-control` capability slug can call every one of these.
 //
 // Keep this list in sync with the tool JSON files in
 // tools/v1/copresent/operator/. Missing an entry here means the
@@ -97,7 +97,7 @@ var workerCrossCuttingNames = []string{
 }
 
 // WorkerHeadlessCapabilityNames is the canonical tool list served
-// to agents that hold `computer_use_headless`: shell / fs / http
+// to agents that hold `computer-use-headless`: shell / fs / http
 // on the user's machine, plus the cross-cutting trio. Future
 // sandbox capability will parallel this one (same headless verbs,
 // different backend); the embodied slug is the GUI-only sibling.
@@ -110,7 +110,7 @@ var WorkerHeadlessCapabilityNames = append(
 )
 
 // WorkerEmbodiedCapabilityNames is the canonical tool list served
-// to agents that hold `computer_use_embodied`: mouse / keyboard /
+// to agents that hold `computer-use-embodied`: mouse / keyboard /
 // screenshot on the user's machine, plus the cross-cutting trio.
 // Mode-exclusive -- no sandbox analogue exists since the agent
 // needs a real display.
@@ -122,7 +122,7 @@ var WorkerEmbodiedCapabilityNames = append(
 )
 
 // WorkbenchCapabilityNames is the canonical tool list served to
-// agents that hold `workbench_use`: headless shell / fs / http
+// agents that hold `workbench-use`: headless shell / fs / http
 // operations against a sandboxed per-Plan Linux environment in
 // the cluster, plus canvasPublish so the agent can surface
 // "what I just did" cards (file written, command output) after
@@ -146,15 +146,15 @@ var WorkbenchCapabilityNames = []string{
 // edge case we don't currently use but the expander handles
 // gracefully.
 var capabilitySlugs = map[string][]string{
-	"copresent_control":      OperatorPrimitiveNames,
-	"computer_use_headless":  WorkerHeadlessCapabilityNames,
-	"computer_use_embodied":  WorkerEmbodiedCapabilityNames,
-	"workbench_use":          WorkbenchCapabilityNames,
+	"copresent-control":      OperatorPrimitiveNames,
+	"computer-use-headless":  WorkerHeadlessCapabilityNames,
+	"computer-use-embodied":  WorkerEmbodiedCapabilityNames,
+	"workbench-use":          WorkbenchCapabilityNames,
 }
 
 // ExpandCapabilitySlugs takes a raw tool list from an Agent record
 // (possibly containing both concrete tool names like "uiClick" and
-// capability slugs like "copresent_control") and returns a
+// capability slugs like "copresent-control") and returns a
 // de-duplicated, flat list of concrete tool names.
 //
 // Ordering: concrete names from the input are preserved in order;

@@ -68,7 +68,7 @@ type AgentCandidate struct {
 	Name            string                 `json:"name"`
 	Description     string                 `json:"description,omitempty"`
 	Personality     string                 `json:"personality,omitempty"`
-	Role            string                 `json:"role,omitempty"`            // e.g. "assistant", "accounting_finance"
+	Role            string                 `json:"role,omitempty"`            // e.g. "assistant", "accounting-finance"
 	Domains         []string               `json:"domains,omitempty"`
 	Keywords        []string               `json:"keywords,omitempty"`
 	SpeakWhen       string                 `json:"speakWhen,omitempty"`       // "asked", "relevant", "always"

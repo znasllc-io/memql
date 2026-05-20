@@ -7,70 +7,70 @@
 use agents.concepts.{ agentRole }
 
 @description("Contracts, corporate policies, regulatory frameworks, IP, and audit readiness at a business-level.")
-seed agentRole legal_compliance {
-  slug:                  "legal_compliance"
+seed agentRole legal-compliance {
+  slug:                  "legal-compliance"
   name:                  "Legal & Compliance"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["legal_documents", "contracts_agreements", "regulatory_compliance"]
-  defaultDomainIds:      ["intellectual_property", "labor_law", "risk_management", "tax_regulations", "stakeholder_communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["legal-documents", "contracts-agreements", "regulatory-compliance"]
+  defaultDomainIds:      ["intellectual-property", "labor-law", "risk-management", "tax-regulations", "stakeholder-communications"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general legal and compliance information. For matters specific to a contract, jurisdiction, or dispute, always recommend a licensed attorney in the relevant jurisdiction."
   predefined:            true
 }
 
 @description("General-information immigration-law education: visa categories, process overviews, common forms.")
-seed agentRole immigration_legal_educator {
-  slug:                  "immigration_legal_educator"
+seed agentRole immigration-legal-educator {
+  slug:                  "immigration-legal-educator"
   name:                  "Immigration Law Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["immigration_law"]
-  defaultDomainIds:      ["legal_documents", "regulatory_compliance"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["immigration-law"]
+  defaultDomainIds:      ["legal-documents", "regulatory-compliance"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Information only. Immigration law is highly fact- and jurisdiction-specific; always recommend consulting a licensed immigration attorney."
   predefined:            true
 }
 
 @description("Divorce, custody, adoption, and prenuptial agreement education. Never advice.")
-seed agentRole family_law_educator {
-  slug:                  "family_law_educator"
+seed agentRole family-law-educator {
+  slug:                  "family-law-educator"
   name:                  "Family Law Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["family_law"]
-  defaultDomainIds:      ["legal_documents", "estate_planning_personal", "contracts_personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["family-law"]
+  defaultDomainIds:      ["legal-documents", "estate-planning-personal", "contracts-personal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed family-law attorney for personal situations."
   predefined:            true
 }
 
 @description("Wills, trusts, beneficiary designations, and estate-tax basics. Information only.")
-seed agentRole estate_planning_educator {
-  slug:                  "estate_planning_educator"
+seed agentRole estate-planning-educator {
+  slug:                  "estate-planning-educator"
   name:                  "Estate Planning Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["estate_planning_personal"]
-  defaultDomainIds:      ["personal_taxes", "personal_finance", "personal_insurance", "personal_legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["estate-planning-personal"]
+  defaultDomainIds:      ["personal-taxes", "personal-finance", "personal-insurance", "personal-legal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Estate planning is jurisdiction-specific; always recommend a licensed estate attorney for personal documents."
   predefined:            true
 }
 
 @description("Personal-life legal questions: leases, contracts, basic estate documents. Information only.")
-seed agentRole personal_legal_advisor {
-  slug:                  "personal_legal_advisor"
+seed agentRole personal-legal-advisor {
+  slug:                  "personal-legal-advisor"
   name:                  "Personal Legal Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["personal_legal"]
-  defaultDomainIds:      ["estate_planning_personal", "contracts_personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["personal-legal"]
+  defaultDomainIds:      ["estate-planning-personal", "contracts-personal"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed attorney in the relevant jurisdiction for any actual legal decision."
   predefined:            true

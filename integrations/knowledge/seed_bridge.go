@@ -299,7 +299,7 @@ func (i *Integration) resolveBridgeInputs(
 	return entries, roleLabel
 }
 
-// humanRoleLabel converts a role slug like "customer_service" to
+// humanRoleLabel converts a role slug like "customer-service" to
 // "Customer Service" for the prompt body. Pure string transform;
 // no external lookup needed for the role catalog.
 func humanRoleLabel(slug string) string {
@@ -317,7 +317,7 @@ func humanRoleLabel(slug string) string {
 // the chunks under the bridge id. Returns the number of chunks
 // written (0 is a valid outcome -- the prompt may decline to
 // generate when domains have no real intersection, e.g.
-// {quantum_mechanics, restaurant_dining}).
+// {quantum-mechanics, restaurant-dining}).
 func (i *Integration) generateBridgeContent(
 	ctx context.Context,
 	bridgeId string,

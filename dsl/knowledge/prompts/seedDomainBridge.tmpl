@@ -10,7 +10,7 @@ These bridge chunks fill that gap. They're a small supplementary corpus (~{{if .
 
 **Agent role:** `{{.roleSlug}}` ({{.roleLabel}})
 
-The role MATTERS. A `customer_service` agent at the intersection of `accounting + tax_law` writes bridge content about explaining tax-driven pricing to customers. A `legal_compliance` agent at the same intersection writes bridge content about flagging tax-regulatory exposure. Same domains, different bridge.
+The role MATTERS. A `customer-service` agent at the intersection of `accounting + tax_law` writes bridge content about explaining tax-driven pricing to customers. A `legal-compliance` agent at the same intersection writes bridge content about flagging tax-regulatory exposure. Same domains, different bridge.
 
 **Domains in this combination:**
 
@@ -34,13 +34,13 @@ Each chunk should be:
 
 ## Examples
 
-For role=`accounting_finance`, domains=[accounting, tax_law]:
+For role=`accounting-finance`, domains=[accounting, tax_law]:
 
 > **title:** "Tax-deductible vs book expense: reconciliation rule"
 > **body:** Same expense can be fully deductible for tax (immediate, dollar-for-dollar) AND treated differently on the income statement (depreciated, amortised, or capitalised). The reconciliation lives in the deferred-tax workpapers: book basis - tax basis = temporary difference, multiplied by the effective rate, gives the deferred tax asset or liability. For an accountant who handles both: any expense that hits accounts payable should also flag against the tax-treatment matrix at month-end. Common slip: meals + entertainment partial deductibility (50% limit federally) tracked as if 100% deductible -- catches you at year-end provision.
 > **keyTerms:** ["deferred tax", "book-tax difference", "M-1", "temporary differences"]
 
-For role=`customer_service`, domains=[accounting, tax_law]:
+For role=`customer-service`, domains=[accounting, tax_law]:
 
 > **title:** "Explaining sales tax variance to customers"
 > **body:** Customer-facing situation: identical product, different tax burden across orders. Why: state + local sales-tax rates differ, ship-to vs bill-to address, drop-ship origins, taxable vs exempt customer status (resale certificate, non-profit). The CS-friendly framing: "Your tax was calculated using your shipping address's combined state and local rate. If you have a resale certificate or tax-exempt status we haven't recorded, send it to support and we'll re-issue the order." Don't quote tax law clauses -- customers find that condescending. Don't volunteer rate predictions for future orders -- rates change.

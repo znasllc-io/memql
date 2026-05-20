@@ -5,37 +5,37 @@
 use agents.concepts.{ agentRole }
 
 @description("Visual identity, layout, typography, color, and brand-system design.")
-seed agentRole graphic_designer {
-  slug:                  "graphic_designer"
+seed agentRole graphic-designer {
+  slug:                  "graphic-designer"
   name:                  "Graphic Designer"
   category:              "creative"
-  lockedDomainIds:       ["graphic_design"]
-  defaultDomainIds:      ["typography", "color_theory", "brand_strategy", "layout_design", "design_systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["graphic-design"]
+  defaultDomainIds:      ["typography", "color-theory", "brand-strategy", "layout-design", "design-systems"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("User research, wireframing, prototyping, usability testing, and design-system stewardship.")
-seed agentRole ux_designer {
-  slug:                  "ux_designer"
+seed agentRole ux-designer {
+  slug:                  "ux-designer"
   name:                  "UX Designer"
   category:              "creative"
-  lockedDomainIds:       ["ux_principles"]
-  defaultDomainIds:      ["user_research", "accessibility", "design_systems", "prototyping_tools", "interaction_design", "visual_design"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["ux-principles"]
+  defaultDomainIds:      ["user-research", "accessibility", "design-systems", "prototyping-tools", "interaction-design", "visual-design"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Novels, short fiction, structure, character work, dialogue, and craft.")
-seed agentRole fiction_writer {
-  slug:                  "fiction_writer"
+seed agentRole fiction-writer {
+  slug:                  "fiction-writer"
   name:                  "Fiction Writer"
   category:              "creative"
-  lockedDomainIds:       ["creative_writing", "fiction_craft"]
-  defaultDomainIds:      ["story_structure", "character_development", "english_grammar_style", "publishing_industry"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["creative-writing", "fiction-craft"]
+  defaultDomainIds:      ["story-structure", "character-development", "english-grammar-style", "publishing-industry"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -46,8 +46,8 @@ seed agentRole screenwriter {
   name:                  "Screenwriter"
   category:              "creative"
   lockedDomainIds:       ["screenwriting"]
-  defaultDomainIds:      ["story_structure", "dialogue_craft", "film_industry", "tv_industry"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["story-structure", "dialogue-craft", "film-industry", "tv-industry"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -58,20 +58,20 @@ seed agentRole songwriter {
   name:                  "Songwriter"
   category:              "creative"
   lockedDomainIds:       ["songwriting"]
-  defaultDomainIds:      ["music_theory", "lyric_writing", "music_production_basics"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["music-theory", "lyric-writing", "music-production-basics"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Scales, harmony, voice leading, form, and ear-training pedagogy.")
-seed agentRole music_theory_teacher {
-  slug:                  "music_theory_teacher"
+seed agentRole music-theory-teacher {
+  slug:                  "music-theory-teacher"
   name:                  "Music Theory Teacher"
   category:              "creative"
-  lockedDomainIds:       ["music_theory"]
-  defaultDomainIds:      ["ear_training", "music_history", "composition_fundamentals", "music_pedagogy"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["music-theory"]
+  defaultDomainIds:      ["ear-training", "music-history", "composition-fundamentals", "music-pedagogy"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -82,20 +82,20 @@ seed agentRole photographer {
   name:                  "Photographer"
   category:              "creative"
   lockedDomainIds:       ["photography"]
-  defaultDomainIds:      ["composition_principles", "lighting_techniques", "photo_editing", "camera_systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["composition-principles", "lighting-techniques", "photo-editing", "camera-systems"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Edit theory, pacing, audio, color, and post-production workflow.")
-seed agentRole video_editor {
-  slug:                  "video_editor"
+seed agentRole video-editor {
+  slug:                  "video-editor"
   name:                  "Video Editor"
   category:              "creative"
-  lockedDomainIds:       ["video_editing"]
-  defaultDomainIds:      ["video_production", "color_grading_basics", "audio_post", "post_workflow"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["video-editing"]
+  defaultDomainIds:      ["video-production", "color-grading-basics", "audio-post", "post-workflow"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -106,32 +106,32 @@ seed agentRole illustrator {
   name:                  "Illustrator"
   category:              "creative"
   lockedDomainIds:       ["illustration"]
-  defaultDomainIds:      ["drawing_fundamentals", "color_theory", "digital_illustration_tools"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["drawing-fundamentals", "color-theory", "digital-illustration-tools"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Systems design, mechanics, level design, narrative integration, and prototyping.")
-seed agentRole game_designer {
-  slug:                  "game_designer"
+seed agentRole game-designer {
+  slug:                  "game-designer"
   name:                  "Game Designer"
   category:              "creative"
-  lockedDomainIds:       ["game_design"]
-  defaultDomainIds:      ["game_mechanics", "level_design", "game_narrative", "playtesting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["game-design"]
+  defaultDomainIds:      ["game-mechanics", "level-design", "game-narrative", "playtesting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Hobby creative pursuits: drawing, music, photography, journaling. Encouragement + reference.")
-seed agentRole creative_companion {
-  slug:                  "creative_companion"
+seed agentRole creative-companion {
+  slug:                  "creative-companion"
   name:                  "Creative Companion"
   category:              "creative"
-  lockedDomainIds:       ["creative_arts"]
-  defaultDomainIds:      ["music_appreciation", "photography", "personal_growth", "journaling"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["creative-arts"]
+  defaultDomainIds:      ["music-appreciation", "photography", "personal-growth", "journaling"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
