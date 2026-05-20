@@ -15,15 +15,14 @@ query participant queryActiveHumanParticipants {
   shape   participantFull
 }
 
-func (Query) queryActiveSpaces(ctx any) (any, error) {
-  return shape(
-    concept;
-    traitIsActiveRecord;
-    traitIsNotArchived;
-    ?.createdBy==args.userId;
-    ?.payload.status==coalesce(args.status, "active"),
-    "spaceFull"
-  ), nil
+@enabled
+@description("Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.")
+query space queryActiveSpaces {
+  args {
+    userId  string
+  }
+  filter  traitIsActiveRecord; traitStatusIsActive; traitIsNotArchived; ?.createdBy==args.userId
+  shape   spaceFull
 }
 
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
@@ -487,14 +486,16 @@ func (Query) querySpaceParticipants(ctx any) (any, error) {
   ), nil
 }
 
-func (Query) querySpaceUtterances(ctx any) (any, error) {
-  return shape(
-    concept;
-    ?.payload.spaceId==args.spaceId;
-    ?.payload.participantId==args.participantId;
-    ?.payload.utteranceType==args.utteranceType,
-    "utteranceFull"
-  ), nil
+@enabled
+@description("Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.")
+query utterance querySpaceUtterances {
+  args {
+    spaceId          string  @required
+    participantId    string
+    utteranceType    string
+  }
+  filter  payload.spaceId==args.spaceId; ?.payload.participantId==args.participantId; ?.payload.utteranceType==args.utteranceType
+  shape   utteranceFull
 }
 
 // ---- queries/v1/cognition/userMicStatesForSpace.memql ----
