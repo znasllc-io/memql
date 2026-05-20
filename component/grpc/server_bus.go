@@ -39,13 +39,21 @@ func (s *service) executeQueryViaBus(ctx context.Context, query string, clientId
 
 	// Send to engine via channel
 	if err := s.wiring.EngineRequests.SendBlocking(ctx, req); err != nil {
-		return nil, status.Error(codes.Unavailable, "engine channel unavailable: "+err.Error())
+		eid := generateErrorId()
+		if s.logger != nil {
+			s.logger.Error("engine channel unavailable", "errorId", eid, "error", err, "clientId", clientId)
+		}
+		return nil, status.Errorf(codes.Unavailable, "engine channel unavailable [%s]", eid)
 	}
 
 	// Await response with timeout
 	resp, err := req.Await(ctx, 30*time.Second)
 	if err != nil {
-		return nil, status.Error(codes.DeadlineExceeded, "engine request timed out: "+err.Error())
+		eid := generateErrorId()
+		if s.logger != nil {
+			s.logger.Error("engine request timed out", "errorId", eid, "error", err, "clientId", clientId)
+		}
+		return nil, status.Errorf(codes.DeadlineExceeded, "engine request timed out [%s]", eid)
 	}
 
 	// Extract engine response
@@ -55,13 +63,20 @@ func (s *service) executeQueryViaBus(ctx context.Context, query string, clientId
 	}
 
 	if !execResp.Success {
+		// execResp.Error is the engine-side error message; it is already
+		// shaped for callers and contains no DB internals (engine
+		// wraps DB errors before publishing on the bus). Pass through.
 		return nil, status.Error(codes.Internal, execResp.Error)
 	}
 
 	// Convert the result Value back to a Result proto
 	result, err := convertBusResultToProto(execResp.Result, execResp.TookMs, clientId)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "failed to convert engine result: "+err.Error())
+		eid := generateErrorId()
+		if s.logger != nil {
+			s.logger.Error("convert engine result failed", "errorId", eid, "error", err, "clientId", clientId)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to convert engine result [%s]", eid)
 	}
 
 	return result, nil

@@ -287,7 +287,7 @@ func (h *strictHandler) postAutomationResume() http.HandlerFunc {
 		// Parse JSON body
 		var body PostAutomationResumeJSONRequestBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			WriteSafeError(w, r, nil, http.StatusBadRequest, "bad_request", "invalid request body", err)
 			return
 		}
 
