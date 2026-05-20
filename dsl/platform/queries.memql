@@ -4,6 +4,7 @@
 // files cover the other construct kinds.
 
 use platform.concepts.{ globalVariable, missingCapability, partition }
+use common.traits.{ traitStatusIsActive }
 
 @enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
@@ -101,23 +102,22 @@ query globalVariable queryGlobalVariables {
 
 // ---- queries/v1/platform/listPartitions.memql ----
 
-// Returns partition rows the caller is allowed to see. Cluster-wide
-// owners bypass the ACL (caller.partitions resolves to a
-// match-everything sentinel); everyone else sees only partitions
-// present in their AccessContext.PartitionACL.
-//
-// Post-filter in component/grpc/server.go was retired in the Phase 4
-// Step 26 rollout -- the filter now lives in the query itself.
+// Returns every partition row. Per-partition ACL was retired in #56
+// phase 4; every authenticated caller sees the full list. The
+// v1:platform:partition concept itself is going away in #56 phase 7.
 //
 // The CLI still dedupes to latest-per-id, pins "default" first, and
 // sorts the rest alphabetically because directives like sort() /
 // paginate() / asOf() cannot appear inside a function body (engine
 // init fails). See docs/core/memql-authoring-rules.md gotcha #1.
+//
+// @public: every authenticated caller may list partitions.
 
 @enabled
-@description("List partitions visible to the caller (owner sees all)")
+@description("List partitions")
+@public
 query partition queryListPartitions {
-  filter  payload.name in caller.partitions
+  filter  traitStatusIsActive
 }
 
 // ---- queries/v1/platform/userDefaults.memql ----

@@ -116,8 +116,6 @@ trait traitIsSeedRow {
 //     caller.role            -- cluster-wide role (owner / admin / writer / reader)
 //     caller.identityId      -- credential's identity id (magic-link, oauth, pat, ...)
 //     caller.isClusterOwner  -- bool, true for the cluster owner
-//     caller.partitions      -- []string of partitions the caller may touch
-//     caller.partition       -- current request's partition
 //     caller.now             -- RFC3339 timestamp captured at request start
 //     caller.config.<key>    -- allow-listed config values (see policy_exposable.go)
 

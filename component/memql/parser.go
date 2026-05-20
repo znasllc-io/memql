@@ -2402,9 +2402,9 @@ func (p *parser) parseComparisonValue(op ComparisonOperator) (any, error) {
 			if ident == "arg" {
 				return p.parseLiteralValue() // handles ctx.name as a reference
 			}
-			// The shared lexer emits `caller.partitions` as a single
-			// identifier token (`.` is part of isIdentifierCharNoColon).
-			// Recognise both the bare `caller` and a `caller.X` suffix.
+			// The shared lexer emits `caller.X` as a single identifier
+			// token (`.` is part of isIdentifierCharNoColon). Recognise
+			// both the bare `caller` and a `caller.X` suffix.
 			if ident == "caller" || strings.HasPrefix(ident, "caller.") {
 				return p.parseLiteralValue() // handles caller.X as a reference
 			}
@@ -2639,11 +2639,11 @@ func (p *parser) parseLiteralValue() (any, error) {
 			return nil, p.errorf(tok, "arg(...) is retired — use ctx.<path> instead")
 		}
 		// caller.X -- reference to the authenticated user's AccessContext.
-		// The shared lexer emits `caller.partitions` as a single
-		// identifier token (`.` is part of isIdentifierCharNoColon), so
-		// we match on the prefix and split off the path. Resolved at
-		// execution time via auth.AccessFromContext(ctx); see
-		// resolveCallerReferences in executor.go.
+		// The shared lexer emits `caller.X` as a single identifier token
+		// (`.` is part of isIdentifierCharNoColon), so we match on the
+		// prefix and split off the path. Resolved at execution time via
+		// auth.AccessFromContext(ctx); see resolveCallerReferences in
+		// executor.go.
 		if tok.literal == "caller" || strings.HasPrefix(tok.literal, "caller.") {
 			return p.parseCallerReference()
 		}
@@ -2694,7 +2694,7 @@ type ArgReference struct {
 // user's AccessContext. Created by parsing `caller.X` syntax in
 // comparison-value position; resolved at execution time by reading
 // auth.AccessFromContext(ctx). Dotted paths are supported
-// (`caller.partitions`, `caller.role`, `caller.userId`, etc.).
+// (`caller.userId`, `caller.role`, etc.).
 type CallerReference struct {
 	Path string
 }
@@ -2711,14 +2711,17 @@ func (p *parser) parseCallerReference() (*CallerReference, error) {
 	tok := p.next()
 	literal := strings.TrimSpace(tok.literal)
 	if literal == "caller" {
-		return nil, p.errorf(tok, "caller reference requires a field path, e.g. caller.partitions")
+		return nil, p.errorf(tok, "caller reference requires a field path, e.g. caller.userId")
 	}
 	if !strings.HasPrefix(literal, "caller.") {
 		return nil, p.errorf(tok, "expected caller.X, got %q", literal)
 	}
 	path := strings.TrimSpace(strings.TrimPrefix(literal, "caller."))
 	if path == "" {
-		return nil, p.errorf(tok, "caller reference requires a field path, e.g. caller.partitions")
+		return nil, p.errorf(tok, "caller reference requires a field path, e.g. caller.userId")
+	}
+	if path == "partition" || path == "partitions" {
+		return nil, p.errorf(tok, "caller.%s is retired post-#56 phase 5; reference caller.userId/.role instead", path)
 	}
 	return &CallerReference{Path: path}, nil
 }
