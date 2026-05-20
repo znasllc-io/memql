@@ -39,12 +39,13 @@ type shapeMemQLParser struct {
 
 // shapeDecl represents the parsed top-level shape declaration.
 type shapeDecl struct {
-	name        string
-	description string
-	useConcepts []string       // `@useConcept(name, ...)` -- bare concept names
-	template    map[string]any // body paths translated to `node("...")` entries
-	kindRow     bool
-	kindCaller  bool
+	name             string
+	description      string
+	useConcepts      []string       // ALL bound concepts (annotation + signature)
+	signatureConcept string         // concept from the two-identifier signature, if any
+	template         map[string]any // body paths translated to `node("...")` entries
+	kindRow          bool
+	kindCaller       bool
 }
 
 func (p *shapeMemQLParser) parse(origin string) (*ShapeDefinition, error) {
@@ -198,10 +199,16 @@ func (p *shapeMemQLParser) parseShapeStructDecl(decl *shapeDecl) error {
 		second := p.ReadWord()
 		if second != "" {
 			// Two-identifier form: first is concept, second is shape name.
-			// Treat the signature concept as an implicit @useConcept; the
-			// post-body validator (looks at decl.useConcepts) gives us the
-			// must-be-referenced check for free.
+			// Recorded on the shape definition (UseConcepts list) so
+			// downstream consumers (specs binding to the shape, etc.)
+			// can see the binding -- but tracked separately from the
+			// legacy `@useConcept(name)` annotation list because the
+			// must-be-referenced-in-body validator only fires on
+			// annotation-declared concepts: signature-bound shapes
+			// reference fields as `payload.X` and never need the
+			// `<concept>.X` form the annotation pathway expected.
 			decl.useConcepts = append(decl.useConcepts, first)
+			decl.signatureConcept = first
 			decl.name = second
 		} else {
 			decl.name = first
@@ -234,6 +241,13 @@ func (p *shapeMemQLParser) parseShapeStructDecl(decl *shapeDecl) error {
 			p.Advance() // consume }
 			decl.template = template
 			for _, name := range decl.useConcepts {
+				if name == decl.signatureConcept {
+					// Signature-bound concepts are recorded for
+					// downstream consumers but don't require an
+					// in-body `<name>.X` reference -- the body uses
+					// `payload.X` directly post-migration.
+					continue
+				}
 				if !usedConcepts[name] {
 					return fmt.Errorf("shape %q: @useConcept(%s) declared but %s is never referenced in the body", decl.name, name, name)
 				}

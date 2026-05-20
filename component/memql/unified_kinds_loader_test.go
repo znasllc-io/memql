@@ -21,6 +21,18 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 		t.Fatalf("LoadUnifiedShapes: %v", err)
 	} else {
 		t.Logf("shapes: %d", n)
+		if n < 40 {
+			t.Errorf("shape loader registered %d shapes, expected >= 40 (the dsl tree has ~60). A regression here usually means the parser's must-reference-in-body validator is firing on signature-bound shapes (where the body uses `payload.X` directly and never references `<conceptName>.X`).", n)
+		}
+	}
+	// Spot-check the shapes the identity service magic-link flow
+	// reads at runtime (the regression in this class manifested as
+	// `shape template "magicLinkRequestFull" not found` post-merge
+	// of PR #51).
+	for _, name := range []string{"magicLinkRequestFull", "userFull", "delegationFull"} {
+		if _, ok := shapeReg.Get(name); !ok {
+			t.Errorf("shape registry missing %q -- the parser likely rejected the signature-bound shape with a stale 'must reference in body' validator", name)
+		}
 	}
 
 	providerReg := newProviderRegistry("")
