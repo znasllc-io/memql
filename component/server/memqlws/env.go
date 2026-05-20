@@ -16,6 +16,7 @@ type (
 		MaxConcurrentRequests *int
 		MaxMessageBytes       *int
 		PingIntervalMs        *int
+		OriginPatterns        *string
 	}
 
 	// EnvKeys maps logical option names to environment suffixes.
@@ -25,6 +26,7 @@ type (
 		MaxConcurrentRequests string
 		MaxMessageBytes       string
 		PingIntervalMs        string
+		OriginPatterns        string
 	}
 
 	// EnvLoader configures how environment overrides are loaded.
@@ -42,6 +44,7 @@ var defaultEnvKeys = EnvKeys{
 	MaxConcurrentRequests: "MAX_CONCURRENT_REQUESTS",
 	MaxMessageBytes:       "MAX_MESSAGE_BYTES",
 	PingIntervalMs:        "PING_INTERVAL_MS",
+	OriginPatterns:        "ORIGIN_PATTERNS",
 }
 
 // LoadEnvOptions reads optional overrides using the provided loader configuration.
@@ -89,6 +92,16 @@ func LoadEnvOptions(loader EnvLoader) (EnvOptions, error) {
 	}
 	opts.PingIntervalMs = pingInterval
 
+	// Origin allow-list. Set when the env var is present, even when
+	// the value is "" (which is meaningful -- empty string with the
+	// var set is operator intent to "explicitly disable origin
+	// checking, please log a warning"). Unset means "no override,
+	// inherit the caller's default".
+	if raw, ok := reader.String(keys.OriginPatterns); ok {
+		v := raw
+		opts.OriginPatterns = &v
+	}
+
 	return opts, nil
 }
 
@@ -130,7 +143,26 @@ func (opts EnvOptions) Apply(target *Options) error {
 		target.PingInterval = duration
 	}
 
+	if opts.OriginPatterns != nil {
+		// Comma-separated list. Empty entries are dropped by
+		// sanitizeOriginPatterns inside New().
+		target.OriginPatterns = splitCSV(*opts.OriginPatterns)
+	}
+
 	return nil
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 func durationFromMillis(ms int) (time.Duration, error) {
