@@ -140,11 +140,23 @@ parser's allow-list (search `allowedXAnnotations` in
 | `@enabled` / `@disabled` | Lifecycle on functions / automations / traits / tools / builtins / policies. **Not on specs** -- the engine controls spec lifecycle. |
 | `@deprecated("hint")` | Functions, automations, tools, builtins. |
 | `@internal` | Functions; hides from SI tool surfaces + external docs. |
-| `@useConcept(<bare>)` | Functions, shapes, specs (forbidden on traits). |
-| `@useShape(<bare>)` | Specs, queries, mutations, logic, automations. |
-| `@useSpec` / `@useTrait` / `@useQuery` / `@useMutation` / `@useLogic` / `@useBuiltin` / `@useTool` / `@usePrompt` | Function-style constructs. Every declared use must be referenced in the body or load fails (declared-must-be-used). |
 
-The legacy `@input` wrapper and `@template` body annotation are
+**Cross-construct dependencies do NOT go through annotations.** The
+legacy `@useConcept` / `@useShape` / `@useQuery` / `@useMutation` /
+`@useLogic` / `@useBuiltin` / `@useSpec` / `@useTrait` / `@useTool` /
+`@usePrompt` / `@useProvider` / `@useAutomation` family was retired
+in the import-model pivot (memql PRs #47 / #48 / #49, 2026-05-19) and
+is rejected at parse time. The canonical post-migration shape:
+
+- **File-top Form B imports** declare cross-file dependencies:
+  `use cognition.concepts.{ participant }`,
+  `use common.traits.{ traitIsActiveRecord }`.
+- **Concept binding lives in the construct signature** for seeds /
+  queries / mutations / shapes:
+  `query <Concept> <name> { ... }`, `mutation <Concept> <name> { ... }`,
+  `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
+
+The legacy `@input` wrapper and `@template` body annotation are also
 retired -- the parser rejects them with a migration hint.
 
 ---
