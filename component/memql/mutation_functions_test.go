@@ -242,6 +242,72 @@ func TestResolvePlanFunctions_TopLevelMutationCall(t *testing.T) {
 // path. Without this, logicBootstrapDefaultPartition and the
 // identity logics hit the "function X is a mutation and cannot
 // be used inside query expressions" guard at call time.
+// A Logic whose body returns a BUILTIN call must substitute ArgRef
+// nodes in the builtin call's args before the builtin executor runs.
+// The Logic→Mutation path already does this via the F.6 hoist; the
+// Logic→Builtin path goes through the regular expandFunctionCall
+// path and must do the same. Without this, the builtin executor
+// receives `args["userId"] = *ArgReference{Path: "event.payload.
+// userId"}` and `asString(...)` returns empty -- which is exactly
+// how memql-cockpit#49's daily-space chain ended up calling
+// `dailyspace.ensureForUser` with empty userId even after the
+// trigger event fired correctly.
+func TestExpandExpression_SubstitutesArgRefsInBuiltinCallArgs(t *testing.T) {
+	reg := newFunctionRegistry()
+	require.NoError(t, reg.add(&Function{
+		Name:         "ensureDailySpaceForUser",
+		FunctionKind: "builtin",
+		Enabled:      true,
+		Executor:     "integration.dailyspace.ensureForUser",
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "userId", Type: "string"},
+			},
+		},
+	}))
+	require.NoError(t, reg.add(&Function{
+		Name:         "logicEnsureDailySpaceOnAuthSession",
+		FunctionKind: "logic",
+		Enabled:      true,
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "event", Type: "object"},
+			},
+		},
+		Expr: &FunctionCallExpression{
+			Name: "ensureDailySpaceForUser",
+			Args: map[string]any{
+				"userId": &ArgReference{Path: "event.payload.userId"},
+			},
+		},
+	}))
+
+	plan := &QueryPlan{
+		Root: &FunctionCallExpression{
+			Name: "logicEnsureDailySpaceOnAuthSession",
+			Args: map[string]any{
+				"event": map[string]any{
+					"topic": "graph.node.created.v1:identity:authSession",
+					"kind":  "NodeCreated",
+					"payload": map[string]any{
+						"userId": "v1:identity:user:abc123",
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, resolvePlanFunctions(plan, reg, nil))
+
+	// The expanded expression should be a BuiltinFunctionExpression
+	// whose Args have the userId substituted to the literal string.
+	require.NotNil(t, plan.Root, "expected expanded builtin expression")
+	builtin, ok := plan.Root.(*BuiltinFunctionExpression)
+	require.True(t, ok, "expected BuiltinFunctionExpression, got %T", plan.Root)
+	require.Equal(t, "ensureDailySpaceForUser", builtin.Name)
+	require.Equal(t, "v1:identity:user:abc123", builtin.Args["userId"],
+		"ArgRef substitution must produce the resolved string -- without it the builtin executor sees an *ArgReference and asString() returns empty")
+}
+
 func TestResolvePlanFunctions_LogicReturningMutationDispatches(t *testing.T) {
 	reg := newFunctionRegistry()
 	require.NoError(t, reg.add(&Function{
