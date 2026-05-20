@@ -129,6 +129,18 @@ query space queryArchivedSpaces {
   shape   spaceFull
 }
 
+// ---- queries/v1/cognition/ownedSpaceById.memql ----
+
+@enabled
+@description("Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like GCS uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.")
+query space queryOwnedSpaceById {
+  args {
+    spaceId  string  @required
+  }
+  filter  ?.id==args.spaceId; payload.ownerUserId==actor.userId; traitIsActiveRecord
+  shape   spaceFull
+}
+
 func (Query) queryAudioOverridesForSpace(ctx any) (any, error) {
   // The row's `spaceId` is auto-canonicalized to
   // `<partition>:v1:cognition:space:<slug>` on insert (concept's

@@ -68,6 +68,12 @@ type TextExtractor interface {
 type AttachmentStore interface {
 	// CreateAttachment creates a new v1:common:attachment node and returns the node JSON.
 	CreateAttachment(ctx context.Context, params AttachmentCreateParams) (json.RawMessage, error)
+	// CallerOwnsSpace reports whether the authenticated caller (resolved
+	// server-side via the engine envelope) owns the given space. Used as
+	// an explicit pre-upload ownership gate so cross-tenant uploads are
+	// rejected before any GCS bytes are written. The DSL mutation
+	// re-enforces ownership; this is defense in depth.
+	CallerOwnsSpace(ctx context.Context, spaceId string) (bool, error)
 }
 
 // AISummarizer generates a short summary of text content.
@@ -163,6 +169,25 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if actor == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Defense-in-depth: confirm the caller owns the target space
+	// BEFORE doing any expensive work (multipart parse, file read,
+	// GCS upload). The DSL mutation re-enforces ownership too; this
+	// short-circuits before bytes hit storage.
+	if h.store != nil {
+		owns, err := h.store.CallerOwnsSpace(r.Context(), spaceId)
+		if err != nil {
+			h.logger.Error("attachment ownership check failed", "error", err, "spaceId", spaceId, "actor", actor)
+			http.Error(w, "ownership check failed", http.StatusInternalServerError)
+			return
+		}
+		if !owns {
+			// Generic 404 (not 403) so probing can't distinguish
+			// "space exists but I don't own it" from "space doesn't exist".
+			http.Error(w, "space not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	// Parse multipart form.
