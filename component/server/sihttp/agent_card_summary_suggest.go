@@ -53,7 +53,7 @@ var AgentCardSummarySchemaJSON = json.RawMessage(`{
 type AgentCardSummaryInput struct {
 	Name        string
 	Role        string // "assistant" or "specialist"
-	RoleSlug    string // "it_support" / "accounting_finance" / etc.
+	RoleSlug    string // "it-support" / "accounting-finance" / etc.
 	Description string
 	Personality string
 	Domains     []string

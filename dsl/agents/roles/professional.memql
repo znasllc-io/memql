@@ -13,37 +13,37 @@ seed agentRole assistant {
   name:                  "Assistant"
   category:              "professional"
   tier:                  "A"
-  lockedDomainIds:       ["copresent_ui", "recent_chat", "computer_use"]
-  defaultDomainIds:      ["strategic_planning", "stakeholder_communications", "technical_documentation"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["copresent-ui", "recent-chat", "computer-use"]
+  defaultDomainIds:      ["strategic-planning", "stakeholder-communications", "technical-documentation"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   defaultToolSlugs:      ["uiClick", "uiNarrate", "uiDescribe", "uiAskUser"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Bookkeeping, financial reporting, tax fundamentals, budget cycles, and variance analysis at the corporate level.")
-seed agentRole accounting_finance {
-  slug:                  "accounting_finance"
+seed agentRole accounting-finance {
+  slug:                  "accounting-finance"
   name:                  "Accounting & Finance"
   category:              "professional"
   tier:                  "B"
-  lockedDomainIds:       ["accounting_principles", "financial_data"]
-  defaultDomainIds:      ["tax_regulations", "budgeting_forecasting", "payroll_benefits", "contracts_agreements"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["accounting-principles", "financial-data"]
+  defaultDomainIds:      ["tax-regulations", "budgeting-forecasting", "payroll-benefits", "contracts-agreements"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general accounting and finance information. For tax advice specific to a person's situation, recommend a CPA or licensed tax professional."
   predefined:            true
 }
 
 @description("Recruiting, onboarding, employee relations, benefits administration, and organizational design.")
-seed agentRole human_resources {
-  slug:                  "human_resources"
+seed agentRole human-resources {
+  slug:                  "human-resources"
   name:                  "Human Resources"
   category:              "professional"
   tier:                  "B"
-  lockedDomainIds:       ["employee_records", "talent_acquisition"]
-  defaultDomainIds:      ["labor_law", "training_development", "organizational_design", "payroll_benefits", "performance_assessment"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["employee-records", "talent-acquisition"]
+  defaultDomainIds:      ["labor-law", "training-development", "organizational-design", "payroll-benefits", "performance-assessment"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   defaultToolSlugs:      ["email.send"]
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general HR guidance. For employment-law questions specific to a jurisdiction or case, recommend a labor lawyer."
@@ -51,51 +51,51 @@ seed agentRole human_resources {
 }
 
 @description("Customer-facing support: ticket triage, account questions, SLA tracking, and escalation paths.")
-seed agentRole customer_service {
-  slug:                  "customer_service"
+seed agentRole customer-service {
+  slug:                  "customer-service"
   name:                  "Customer Service"
   category:              "professional"
-  lockedDomainIds:       ["customer_relations", "service_level_agreements"]
-  defaultDomainIds:      ["product_catalog", "ticket_management", "quality_metrics", "sales_pipeline", "training_development"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["customer-relations", "service-level-agreements"]
+  defaultDomainIds:      ["product-catalog", "ticket-management", "quality-metrics", "sales-pipeline", "training-development"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   defaultToolSlugs:      ["email.send"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Defect tracking, inspection workflows, compliance audits, and process-improvement metrics.")
-seed agentRole quality_assurance {
-  slug:                  "quality_assurance"
+seed agentRole quality-assurance {
+  slug:                  "quality-assurance"
   name:                  "Quality Assurance"
   category:              "professional"
-  lockedDomainIds:       ["quality_metrics"]
-  defaultDomainIds:      ["product_catalog", "process_optimization", "technical_documentation", "regulatory_compliance", "service_level_agreements", "data_analysis", "research_methodology"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["quality-metrics"]
+  defaultDomainIds:      ["product-catalog", "process-optimization", "technical-documentation", "regulatory-compliance", "service-level-agreements", "data-analysis", "research-methodology"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Pipeline management, lead generation, campaign analytics, and brand positioning.")
-seed agentRole sales_marketing {
-  slug:                  "sales_marketing"
+seed agentRole sales-marketing {
+  slug:                  "sales-marketing"
   name:                  "Sales & Marketing"
   category:              "professional"
-  lockedDomainIds:       ["sales_pipeline", "customer_relations"]
-  defaultDomainIds:      ["marketing_analytics", "brand_strategy", "lead_generation", "product_catalog", "contracts_agreements", "data_analysis", "stakeholder_communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["sales-pipeline", "customer-relations"]
+  defaultDomainIds:      ["marketing-analytics", "brand-strategy", "lead-generation", "product-catalog", "contracts-agreements", "data-analysis", "stakeholder-communications"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   defaultToolSlugs:      ["email.send"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("End-user IT help, ticket triage, software / hardware / network troubleshooting, account management.")
-seed agentRole it_support {
-  slug:                  "it_support"
+seed agentRole it-support {
+  slug:                  "it-support"
   name:                  "IT Support"
   category:              "professional"
-  lockedDomainIds:       ["technical_documentation", "ticket_management"]
-  defaultDomainIds:      ["network_infrastructure", "cybersecurity", "software_development", "cloud_platforms", "process_optimization", "vendor_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["technical-documentation", "ticket-management"]
+  defaultDomainIds:      ["network-infrastructure", "cybersecurity", "software-development", "cloud-platforms", "process-optimization", "vendor-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -105,192 +105,192 @@ seed agentRole operations {
   slug:                  "operations"
   name:                  "Operations"
   category:              "professional"
-  lockedDomainIds:       ["process_optimization"]
-  defaultDomainIds:      ["logistics_distribution", "vendor_management", "inventory_supply_chain", "quality_metrics", "product_catalog", "budgeting_forecasting", "risk_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["process-optimization"]
+  defaultDomainIds:      ["logistics-distribution", "vendor-management", "inventory-supply-chain", "quality-metrics", "product-catalog", "budgeting-forecasting", "risk-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Plans, milestones, deliverables, stakeholder communications, and project-level risk.")
-seed agentRole project_management {
-  slug:                  "project_management"
+seed agentRole project-management {
+  slug:                  "project-management"
   name:                  "Project Management"
   category:              "professional"
-  lockedDomainIds:       ["project_data"]
-  defaultDomainIds:      ["process_optimization", "budgeting_forecasting", "stakeholder_communications", "risk_management", "quality_metrics", "vendor_management", "data_analysis", "organizational_design"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["project-data"]
+  defaultDomainIds:      ["process-optimization", "budgeting-forecasting", "stakeholder-communications", "risk-management", "quality-metrics", "vendor-management", "data-analysis", "organizational-design"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Experimental design, statistical analysis, innovation portfolios, and IP management for R&D groups.")
-seed agentRole research_development {
-  slug:                  "research_development"
+seed agentRole research-development {
+  slug:                  "research-development"
   name:                  "Research & Development"
   category:              "professional"
-  lockedDomainIds:       ["research_methodology", "data_analysis"]
-  defaultDomainIds:      ["innovation_management", "technical_documentation", "intellectual_property", "product_catalog", "software_development", "budgeting_forecasting"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["research-methodology", "data-analysis"]
+  defaultDomainIds:      ["innovation-management", "technical-documentation", "intellectual-property", "product-catalog", "software-development", "budgeting-forecasting"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("Corporate L&D: curriculum design, performance assessment, instructional design, and learning analytics.")
-seed agentRole training_education {
-  slug:                  "training_education"
+seed agentRole training-education {
+  slug:                  "training-education"
   name:                  "Training & Education"
   category:              "professional"
-  lockedDomainIds:       ["curriculum_design", "training_development"]
-  defaultDomainIds:      ["performance_assessment", "employee_records", "organizational_design", "data_analysis", "technical_documentation", "stakeholder_communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["curriculum-design", "training-development"]
+  defaultDomainIds:      ["performance-assessment", "employee-records", "organizational-design", "data-analysis", "technical-documentation", "stakeholder-communications"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Calendar, correspondence, travel coordination, meeting prep, and inbox triage for a busy executive.")
-seed agentRole executive_assistant {
-  slug:                  "executive_assistant"
+seed agentRole executive-assistant {
+  slug:                  "executive-assistant"
   name:                  "Executive Assistant"
   category:              "professional"
-  lockedDomainIds:       ["stakeholder_communications"]
-  defaultDomainIds:      ["executive_calendar", "travel_planning", "meeting_management", "personal_finance"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["stakeholder-communications"]
+  defaultDomainIds:      ["executive-calendar", "travel-planning", "meeting-management", "personal-finance"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   defaultToolSlugs:      ["email.send"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("SQL, dashboards, A/B testing, descriptive + diagnostic analytics, and stakeholder-friendly insights.")
-seed agentRole data_analyst {
-  slug:                  "data_analyst"
+seed agentRole data-analyst {
+  slug:                  "data-analyst"
   name:                  "Data Analyst"
   category:              "professional"
-  lockedDomainIds:       ["data_analysis"]
-  defaultDomainIds:      ["data_visualization", "experimental_design", "sql_databases", "business_intelligence", "research_methodology", "data_engineering"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["data-analysis"]
+  defaultDomainIds:      ["data-visualization", "experimental-design", "sql-databases", "business-intelligence", "research-methodology", "data-engineering"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("ML model design, statistical modeling, feature engineering, and experiment design.")
-seed agentRole data_scientist {
-  slug:                  "data_scientist"
+seed agentRole data-scientist {
+  slug:                  "data-scientist"
   name:                  "Data Scientist"
   category:              "professional"
-  lockedDomainIds:       ["machine_learning", "data_analysis", "research_methodology"]
-  defaultDomainIds:      ["deep_learning", "experimental_design", "statistical_modeling", "data_engineering", "python_programming"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["machine-learning", "data-analysis", "research-methodology"]
+  defaultDomainIds:      ["deep-learning", "experimental-design", "statistical-modeling", "data-engineering", "python-programming"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("Pipelines, warehouses, lake-houses, streaming systems, schema design, and data-quality tooling.")
-seed agentRole data_engineer {
-  slug:                  "data_engineer"
+seed agentRole data-engineer {
+  slug:                  "data-engineer"
   name:                  "Data Engineer"
   category:              "professional"
-  lockedDomainIds:       ["data_engineering"]
-  defaultDomainIds:      ["sql_databases", "cloud_platforms", "etl_pipelines", "streaming_systems", "data_warehouse_design", "data_governance"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["data-engineering"]
+  defaultDomainIds:      ["sql-databases", "cloud-platforms", "etl-pipelines", "streaming-systems", "data-warehouse-design", "data-governance"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Backend / full-stack engineering: API design, system architecture, code review, debugging, and refactoring.")
-seed agentRole software_engineer {
-  slug:                  "software_engineer"
+seed agentRole software-engineer {
+  slug:                  "software-engineer"
   name:                  "Software Engineer"
   category:              "professional"
-  lockedDomainIds:       ["software_development"]
-  defaultDomainIds:      ["api_design", "system_architecture", "version_control", "testing_strategy", "code_review", "design_patterns", "cybersecurity"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["software-development"]
+  defaultDomainIds:      ["api-design", "system-architecture", "version-control", "testing-strategy", "code-review", "design-patterns", "cybersecurity"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
 
 @description("Web UIs, accessibility, state management, performance, and design-system implementation.")
-seed agentRole frontend_engineer {
-  slug:                  "frontend_engineer"
+seed agentRole frontend-engineer {
+  slug:                  "frontend-engineer"
   name:                  "Frontend Engineer"
   category:              "professional"
-  lockedDomainIds:       ["software_development", "frontend_development"]
-  defaultDomainIds:      ["ux_principles", "accessibility", "css_styling", "javascript_typescript", "performance_optimization", "design_systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["software-development", "frontend-development"]
+  defaultDomainIds:      ["ux-principles", "accessibility", "css-styling", "javascript-typescript", "performance-optimization", "design-systems"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
 
 @description("CI/CD, infrastructure-as-code, observability, incident response, and platform reliability.")
-seed agentRole devops_engineer {
-  slug:                  "devops_engineer"
+seed agentRole devops-engineer {
+  slug:                  "devops-engineer"
   name:                  "DevOps Engineer"
   category:              "professional"
-  lockedDomainIds:       ["cloud_platforms", "infrastructure_as_code"]
-  defaultDomainIds:      ["cybersecurity", "container_orchestration", "observability_monitoring", "incident_response", "ci_cd_pipelines", "site_reliability"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["cloud-platforms", "infrastructure-as-code"]
+  defaultDomainIds:      ["cybersecurity", "container-orchestration", "observability-monitoring", "incident-response", "ci-cd-pipelines", "site-reliability"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
 
 @description("AppSec, threat modeling, vulnerability triage, incident response, and security architecture.")
-seed agentRole security_engineer {
-  slug:                  "security_engineer"
+seed agentRole security-engineer {
+  slug:                  "security-engineer"
   name:                  "Security Engineer"
   category:              "professional"
   tier:                  "B"
   lockedDomainIds:       ["cybersecurity"]
-  defaultDomainIds:      ["application_security", "threat_modeling", "incident_response", "cryptography_basics", "vulnerability_management", "identity_access_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["application-security", "threat-modeling", "incident-response", "cryptography-basics", "vulnerability-management", "identity-access-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general security information. For incident response specific to a breach or active threat, recommend engaging a qualified security responder."
   predefined:            true
 }
 
 @description("Roadmap, customer interviews, prioritization frameworks, OKRs, and cross-functional rollout.")
-seed agentRole product_manager {
-  slug:                  "product_manager"
+seed agentRole product-manager {
+  slug:                  "product-manager"
   name:                  "Product Manager"
   category:              "professional"
-  lockedDomainIds:       ["product_management"]
-  defaultDomainIds:      ["strategic_planning", "data_analysis", "ux_principles", "stakeholder_communications", "user_research", "prioritization_frameworks"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["product-management"]
+  defaultDomainIds:      ["strategic-planning", "data-analysis", "ux-principles", "stakeholder-communications", "user-research", "prioritization-frameworks"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("API docs, runbooks, knowledge-base articles, release notes, and developer onboarding content.")
-seed agentRole technical_writer {
-  slug:                  "technical_writer"
+seed agentRole technical-writer {
+  slug:                  "technical-writer"
   name:                  "Technical Writer"
   category:              "professional"
-  lockedDomainIds:       ["technical_writing"]
-  defaultDomainIds:      ["technical_documentation", "documentation_systems", "content_strategy", "english_grammar_style"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["technical-writing"]
+  defaultDomainIds:      ["technical-documentation", "documentation-systems", "content-strategy", "english-grammar-style"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Requirements elicitation, process mapping, stakeholder facilitation, and impact analysis.")
-seed agentRole business_analyst {
-  slug:                  "business_analyst"
+seed agentRole business-analyst {
+  slug:                  "business-analyst"
   name:                  "Business Analyst"
   category:              "professional"
-  lockedDomainIds:       ["business_analysis"]
-  defaultDomainIds:      ["data_analysis", "process_optimization", "stakeholder_communications", "requirements_engineering", "process_modeling"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["business-analysis"]
+  defaultDomainIds:      ["data-analysis", "process-optimization", "stakeholder-communications", "requirements-engineering", "process-modeling"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Procurement, supplier scorecards, S&OP, demand planning, and logistics performance.")
-seed agentRole supply_chain_manager {
-  slug:                  "supply_chain_manager"
+seed agentRole supply-chain-manager {
+  slug:                  "supply-chain-manager"
   name:                  "Supply Chain Manager"
   category:              "professional"
-  lockedDomainIds:       ["inventory_supply_chain"]
-  defaultDomainIds:      ["logistics_distribution", "vendor_management", "demand_planning", "procurement_sourcing", "risk_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["inventory-supply-chain"]
+  defaultDomainIds:      ["logistics-distribution", "vendor-management", "demand-planning", "procurement-sourcing", "risk-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

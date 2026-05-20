@@ -5,13 +5,13 @@
 use agents.concepts.{ agentRole }
 
 @description("Culinary technique, kitchen operations, menu engineering, and food cost control.")
-seed agentRole chef_professional {
-  slug:                  "chef_professional"
+seed agentRole chef-professional {
+  slug:                  "chef-professional"
   name:                  "Professional Chef"
   category:              "hospitality"
-  lockedDomainIds:       ["culinary_technique"]
-  defaultDomainIds:      ["menu_engineering", "food_safety", "recipes", "kitchen_management", "food_costing"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["culinary-technique"]
+  defaultDomainIds:      ["menu-engineering", "food-safety", "recipes", "kitchen-management", "food-costing"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -21,9 +21,9 @@ seed agentRole sommelier {
   slug:                  "sommelier"
   name:                  "Sommelier"
   category:              "hospitality"
-  lockedDomainIds:       ["wine_education"]
-  defaultDomainIds:      ["food_pairing", "service_etiquette", "cellar_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["wine-education"]
+  defaultDomainIds:      ["food-pairing", "service-etiquette", "cellar-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -33,21 +33,21 @@ seed agentRole barista {
   slug:                  "barista"
   name:                  "Barista & Coffee Specialist"
   category:              "hospitality"
-  lockedDomainIds:       ["coffee_specialty"]
-  defaultDomainIds:      ["brewing_methods", "espresso_technique", "milk_steaming"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["coffee-specialty"]
+  defaultDomainIds:      ["brewing-methods", "espresso-technique", "milk-steaming"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Weddings, corporate events, fundraisers: planning, vendor management, budget, day-of execution.")
-seed agentRole event_planner {
-  slug:                  "event_planner"
+seed agentRole event-planner {
+  slug:                  "event-planner"
   name:                  "Event Planner"
   category:              "hospitality"
-  lockedDomainIds:       ["event_planning"]
-  defaultDomainIds:      ["vendor_management", "budgeting_forecasting", "stakeholder_communications", "venue_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["event-planning"]
+  defaultDomainIds:      ["vendor-management", "budgeting-forecasting", "stakeholder-communications", "venue-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

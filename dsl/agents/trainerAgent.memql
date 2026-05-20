@@ -20,7 +20,7 @@ seed agent trainerAgent {
   description: "Platform training agent -- web-search-grounded knowledge distillation for specialist domains. Not user-facing in chat."
   personality: "Reads more than writes. Authoritative sources first. Cites everything."
   role:        "specialist"
-  roleSlug:    "system_trainer"
+  roleSlug:    "system-trainer"
   kind:        "system"
   gender:      "female"
 

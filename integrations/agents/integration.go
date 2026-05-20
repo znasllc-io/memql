@@ -105,7 +105,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Synchronously query a specialist agent by role. Resolves the specialist by roleSlug, invokes the askSpecialist structured-output prompt with the specialist's persona + the assistant's query, and returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant paraphrases the response into the human-facing reply.",
 			Handler:     i.handleAskSpecialist,
 			ArgsSchema: map[string]string{
-				"role":    "string -- specialist roleSlug (e.g. accounting_finance, human_resources)",
+				"role":    "string -- specialist roleSlug (e.g. accounting-finance, human-resources)",
 				"query":   "string -- what the assistant wants the specialist to answer",
 				"context": "object (optional) -- conversation context attached by the assistant",
 			},

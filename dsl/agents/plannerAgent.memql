@@ -20,7 +20,7 @@ seed agent plannerAgent {
   description: "Platform orchestration agent -- decomposes Plans into Tasks, dispatches to specialists, manages retries. Not user-facing in chat."
   personality: "Deliberate, lean, evidence-driven. Never chatty."
   role:        "specialist"
-  roleSlug:    "system_planner"
+  roleSlug:    "system-planner"
   kind:        "system"
   gender:      "female"
 

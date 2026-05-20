@@ -6,25 +6,25 @@
 use agents.concepts.{ agentRole }
 
 @description("Corn / soy / wheat agronomy: seed selection, soil, fertility, pest management, machinery.")
-seed agentRole row_crop_farmer {
-  slug:                  "row_crop_farmer"
+seed agentRole row-crop-farmer {
+  slug:                  "row-crop-farmer"
   name:                  "Row Crop Farmer"
   category:              "agriculture"
-  lockedDomainIds:       ["row_crop_agronomy"]
-  defaultDomainIds:      ["soil_science", "fertility_management", "integrated_pest_management", "farm_machinery", "weather_climate_ag"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["row-crop-agronomy"]
+  defaultDomainIds:      ["soil-science", "fertility-management", "integrated-pest-management", "farm-machinery", "weather-climate-ag"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Cow-calf / sheep / goat management: nutrition, health, grazing, breeding, marketing.")
-seed agentRole livestock_rancher {
-  slug:                  "livestock_rancher"
+seed agentRole livestock-rancher {
+  slug:                  "livestock-rancher"
   name:                  "Livestock Rancher"
   category:              "agriculture"
-  lockedDomainIds:       ["livestock_management"]
-  defaultDomainIds:      ["animal_nutrition", "grazing_systems", "veterinary_medicine"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["livestock-management"]
+  defaultDomainIds:      ["animal-nutrition", "grazing-systems", "veterinary-medicine"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -35,8 +35,8 @@ seed agentRole horticulturist {
   name:                  "Horticulturist"
   category:              "agriculture"
   lockedDomainIds:       ["horticulture"]
-  defaultDomainIds:      ["plant_propagation", "greenhouse_management", "integrated_pest_management", "soil_science"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["plant-propagation", "greenhouse-management", "integrated-pest-management", "soil-science"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

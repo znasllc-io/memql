@@ -6,121 +6,121 @@
 use agents.concepts.{ agentRole }
 
 @description("Reading, writing, math, science, and social studies at the elementary level.")
-seed agentRole elementary_school_tutor {
-  slug:                  "elementary_school_tutor"
+seed agentRole elementary-school-tutor {
+  slug:                  "elementary-school-tutor"
   name:                  "Elementary School Tutor (K-5)"
   category:              "education"
-  lockedDomainIds:       ["elementary_pedagogy"]
-  defaultDomainIds:      ["early_literacy", "elementary_math", "child_development", "classroom_management"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["elementary-pedagogy"]
+  defaultDomainIds:      ["early-literacy", "elementary-math", "child-development", "classroom-management"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Pre-algebra, algebra I, life science, earth science, language arts, and study skills.")
-seed agentRole middle_school_tutor {
-  slug:                  "middle_school_tutor"
+seed agentRole middle-school-tutor {
+  slug:                  "middle-school-tutor"
   name:                  "Middle School Tutor (6-8)"
   category:              "education"
-  lockedDomainIds:       ["middle_school_pedagogy"]
-  defaultDomainIds:      ["prealgebra_algebra", "study_skills", "child_development", "english_grammar_style"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["middle-school-pedagogy"]
+  defaultDomainIds:      ["prealgebra-algebra", "study-skills", "child-development", "english-grammar-style"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Algebra II, geometry, trig, precalc, biology, chemistry, physics, English, history, and study skills.")
-seed agentRole high_school_tutor {
-  slug:                  "high_school_tutor"
+seed agentRole high-school-tutor {
+  slug:                  "high-school-tutor"
   name:                  "High School Tutor (9-12)"
   category:              "education"
-  lockedDomainIds:       ["high_school_pedagogy"]
-  defaultDomainIds:      ["algebra", "geometry_trigonometry", "biology", "chemistry", "physics_high_school", "english_literature", "world_history", "us_history", "study_skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["high-school-pedagogy"]
+  defaultDomainIds:      ["algebra", "geometry-trigonometry", "biology", "chemistry", "physics-high-school", "english-literature", "world-history", "us-history", "study-skills"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("Standardized-test strategy, content review, and practice review.")
-seed agentRole test_prep_coach {
-  slug:                  "test_prep_coach"
+seed agentRole test-prep-coach {
+  slug:                  "test-prep-coach"
   name:                  "Test Prep Coach (SAT / ACT / GRE / GMAT)"
   category:              "education"
-  lockedDomainIds:       ["test_prep_strategy"]
-  defaultDomainIds:      ["sat_act_content", "gre_gmat_content", "study_skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["test-prep-strategy"]
+  defaultDomainIds:      ["sat-act-content", "gre-gmat-content", "study-skills"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Single and multivariable calculus, limits, derivatives, integrals, series.")
-seed agentRole math_tutor_calculus {
-  slug:                  "math_tutor_calculus"
+seed agentRole math-tutor-calculus {
+  slug:                  "math-tutor-calculus"
   name:                  "Math Tutor (Calculus)"
   category:              "education"
   lockedDomainIds:       ["calculus"]
-  defaultDomainIds:      ["precalculus", "linear_algebra", "math_problem_solving"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["precalculus", "linear-algebra", "math-problem-solving"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
 
 @description("Spanish grammar, vocabulary, conversation, and culture at A1 -> C2.")
-seed agentRole language_tutor_spanish {
-  slug:                  "language_tutor_spanish"
+seed agentRole language-tutor-spanish {
+  slug:                  "language-tutor-spanish"
   name:                  "Spanish Language Tutor"
   category:              "education"
-  lockedDomainIds:       ["spanish_language"]
-  defaultDomainIds:      ["spanish_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["spanish-language"]
+  defaultDomainIds:      ["spanish-culture", "language-pedagogy", "language-learning"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Mandarin grammar, tones, characters, conversation, and culture.")
-seed agentRole language_tutor_mandarin {
-  slug:                  "language_tutor_mandarin"
+seed agentRole language-tutor-mandarin {
+  slug:                  "language-tutor-mandarin"
   name:                  "Mandarin Chinese Tutor"
   category:              "education"
-  lockedDomainIds:       ["mandarin_chinese"]
-  defaultDomainIds:      ["chinese_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["mandarin-chinese"]
+  defaultDomainIds:      ["chinese-culture", "language-pedagogy", "language-learning"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("French grammar, vocabulary, conversation, and culture at A1 -> C2.")
-seed agentRole language_tutor_french {
-  slug:                  "language_tutor_french"
+seed agentRole language-tutor-french {
+  slug:                  "language-tutor-french"
   name:                  "French Language Tutor"
   category:              "education"
-  lockedDomainIds:       ["french_language"]
-  defaultDomainIds:      ["french_culture", "language_pedagogy", "language_learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["french-language"]
+  defaultDomainIds:      ["french-culture", "language-pedagogy", "language-learning"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("World history, US history, European history, and historiography.")
-seed agentRole history_educator {
-  slug:                  "history_educator"
+seed agentRole history-educator {
+  slug:                  "history-educator"
   name:                  "History Educator"
   category:              "education"
-  lockedDomainIds:       ["world_history"]
-  defaultDomainIds:      ["us_history", "european_history", "ancient_history", "historiography"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  lockedDomainIds:       ["world-history"]
+  defaultDomainIds:      ["us-history", "european-history", "ancient-history", "historiography"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
 
 @description("Ethics, epistemology, metaphysics, logic, and major philosophical traditions.")
-seed agentRole philosophy_educator {
-  slug:                  "philosophy_educator"
+seed agentRole philosophy-educator {
+  slug:                  "philosophy-educator"
   name:                  "Philosophy Educator"
   category:              "education"
   lockedDomainIds:       ["philosophy"]
-  defaultDomainIds:      ["ethics", "logic", "epistemology", "metaphysics", "philosophy_history"]
-  lockedToolSlugs:       ["respondToUser", "workbench_use"]
+  defaultDomainIds:      ["ethics", "logic", "epistemology", "metaphysics", "philosophy-history"]
+  lockedToolSlugs:       ["respondToUser", "workbench-use"]
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }

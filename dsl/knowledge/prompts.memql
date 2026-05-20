@@ -7,7 +7,7 @@
 @templateFile("prompts/seedDomainBridge.tmpl")
 @description("Generate ~10 cross-domain 'bridge' chunks for a (role, domain set) combination. Each chunk explicitly addresses how the domains overlap, conflict, or compose for an agent in that role -- the kind of cross-cutting insight per-domain chunks miss because they're scoped to one domain. Per docs/planning/knowledge-seeder.md (v2 bridge chunks). Hash-keyed by (roleSlug, sortedDomainIds) so this prompt fires once per unique combination across the tenant.")
 prompt seedDomainBridge {
-  roleSlug      string  @required @description("Agent role -- shapes how the bridge content frames cross-domain reasoning. customer_service vs accounting_finance change the bridge entirely.")
+  roleSlug      string  @required @description("Agent role -- shapes how the bridge content frames cross-domain reasoning. customer-service vs accounting-finance change the bridge entirely.")
   roleLabel     string  @required @description("Human-readable role name for the prompt body, e.g. 'Customer Service'.")
   domains       []object @required @description("List of {id, name, description} for each domain in this combination. The bridge addresses how these specifically intersect.")
   targetCount   int      @description("Approximate number of bridge chunks to produce. Default 10. Bridges are deliberately smaller than per-domain corpora -- they're supplementary, not the primary content.")

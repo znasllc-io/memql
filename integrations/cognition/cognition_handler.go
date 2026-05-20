@@ -1912,17 +1912,17 @@ func parseAgentRole(description string) string {
 	// Map of role labels (as they appear in descriptions) to role slugs.
 	roleMap := map[string]string{
 		"assistant":       "assistant",
-		"accounting & finance":    "accounting_finance",
-		"data & analytics":        "data_analytics",
-		"engineering & technology": "engineering_technology",
-		"human resources":         "human_resources",
-		"legal & compliance":      "legal_compliance",
-		"marketing & branding":    "marketing_branding",
-		"operations & logistics":  "operations_logistics",
-		"product management":      "product_management",
-		"sales & business dev":    "sales_business_dev",
-		"customer success":        "customer_success",
-		"creative & design":       "creative_design",
+		"accounting & finance":    "accounting-finance",
+		"data & analytics":        "data-analytics",
+		"engineering & technology": "engineering-technology",
+		"human resources":         "human-resources",
+		"legal & compliance":      "legal-compliance",
+		"marketing & branding":    "marketing-branding",
+		"operations & logistics":  "operations-logistics",
+		"product management":      "product-management",
+		"sales & business dev":    "sales-business-dev",
+		"customer success":        "customer-success",
+		"creative & design":       "creative-design",
 	}
 	dl := strings.ToLower(d)
 	for label, slug := range roleMap {
@@ -2781,27 +2781,27 @@ func chimeInContentAngle(agent *agentPayload) string {
 	switch role {
 	case "assistant":
 		return "give the general / orienting angle -- what's the high-level take, not the specialist deep-dive"
-	case "it_support", "engineering_technology":
+	case "it-support", "engineering-technology":
 		return "give the IT / technical angle"
-	case "human_resources":
+	case "human-resources":
 		return "give the HR / people-side angle"
-	case "marketing_branding":
+	case "marketing-branding":
 		return "give the marketing / brand-side angle"
-	case "sales_business_dev":
+	case "sales-business-dev":
 		return "give the sales / business-development angle"
-	case "operations_logistics":
+	case "operations-logistics":
 		return "give the operations / process-side angle"
-	case "accounting_finance":
+	case "accounting-finance":
 		return "give the finance / numbers-side angle"
-	case "legal_compliance":
+	case "legal-compliance":
 		return "give the legal / compliance-side angle"
-	case "product_management":
+	case "product-management":
 		return "give the product-side angle"
-	case "data_analytics":
+	case "data-analytics":
 		return "give the data / analytics angle"
-	case "customer_success":
+	case "customer-success":
 		return "give the customer / retention-side angle"
-	case "creative_design":
+	case "creative-design":
 		return "give the design / creative-side angle"
 	}
 	// No role match -- use the first declared domain if any.
