@@ -219,6 +219,31 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		mux.Handle("GET /static/", staticCacheHeaders(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))))
 	}
 
+	// CSRF middleware (memql#111). Double-submit-cookie pattern:
+	// every GET / HEAD / OPTIONS gets a memql_csrf cookie minted
+	// (or carries an existing one through); every POST / PUT /
+	// PATCH / DELETE on a non-exempt path must echo the cookie
+	// value back via the `_csrf` form field or `X-CSRF-Token`
+	// header. The /login and /setup POSTs are explicitly exempted
+	// because they're unauthenticated entry points -- a CSRF on
+	// /login mints a magic link to an attacker-chosen email which
+	// the attacker can't read; SameSite=Lax on the auth cookie
+	// blocks cross-site cookie attachment on those paths too.
+	secure := s.cookieSecure()
+	csrf := CSRFMiddlewareFunc(CSRFOptions{
+		Secure: &secure,
+		ExemptPaths: []string{
+			"/login",
+			"/setup",
+			// /auth/landing is the cross-browser magic-link
+			// confirmation POST -- unauthenticated; same trust
+			// profile as /login. SameSite=Lax on memql_auth blocks
+			// cross-site cookie attachment.
+			"/auth/landing",
+		},
+		Logger: s.Logger,
+	})
+
 	wrap := func(h http.HandlerFunc) http.HandlerFunc {
 		// SystemActorHandlerFunc stamps "system:identity-svc" when
 		// no upstream auth has attached a TokenInfo. Identity's
@@ -226,7 +251,11 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		// so without this middleware every mutation downstream
 		// fails the engine's actor-required check. See
 		// component/identity/middleware.go for the full rationale.
-		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(CSPHandlerFunc(h)))
+		//
+		// CSRF wraps innermost so the cookie minted on a fresh GET
+		// is set BEFORE the security-headers / CSP layer writes
+		// other headers; ordering is otherwise irrelevant.
+		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(CSPHandlerFunc(csrf(h))))
 	}
 
 	// Pre-auth GET surfaces wrap with redirectIfAuthenticated. If
@@ -273,6 +302,17 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	}
 }
 
+// cookieSecure reports whether cookies the web surface mints
+// should carry the Secure flag. Derived from Cfg.BaseURL --
+// https:// turns on the flag. Tests pass BaseURL=http://localhost
+// and get Secure=false so the cookie still sticks.
+func (s *Server) cookieSecure() bool {
+	if s == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
+}
+
 // LayoutData builds the brand-aware base layout payload for a request.
 // Exported because the sibling admin package needs the same builder
 // to render through the shared templ Layout component.
@@ -294,6 +334,7 @@ func (s *Server) LayoutData(r *http.Request, title string, dataMe bool, navLinks
 		DataMe:            dataMe,
 		Path:              path,
 		Asset:             s.assetURL,
+		CSRFToken:         CSRFTokenFromRequest(r),
 	}
 }
 

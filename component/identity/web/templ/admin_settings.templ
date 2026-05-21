@@ -68,6 +68,7 @@ templ AdminSettings(data AdminSettingsData) {
 				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
 			}
 			<form method="POST" action="/admin/settings" data-submit-once>
+				@CSRFField(data.Layout.CSRFToken)
 				<h2>Branding</h2>
 				<div class="form-row">
 					<label for="brand_name">Brand name</label>

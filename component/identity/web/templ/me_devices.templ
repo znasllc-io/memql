@@ -23,6 +23,7 @@ templ MeDevices(data MeDevicesData) {
 					</div>
 					<hr/>
 					<form method="POST" action="/me/devices/revoke-all" data-submit-once>
+						@CSRFField(data.Layout.CSRFToken)
 						<button type="submit" class="btn btn-danger">
 							Sign out everywhere
 						</button>

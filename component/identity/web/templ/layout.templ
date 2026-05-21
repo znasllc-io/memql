@@ -36,6 +36,25 @@ type LayoutData struct {
 	// wire it; the cache strategy still works (no-store on HTML
 	// + immutable on /static/*) but without the hash bump.
 	Asset func(string) string
+
+	// CSRFToken is the per-request double-submit-cookie token the
+	// templ forms render into their hidden `_csrf` field. Populated
+	// by Server.LayoutData from the request context; empty when no
+	// CSRF middleware is wired (defensive -- the templ helper just
+	// emits nothing in that case rather than failing the render).
+	// See memql#111 + component/identity/web/csrf.go.
+	CSRFToken string
+}
+
+// CSRFField renders the hidden `_csrf` input that every
+// CSRF-protected POST form needs. Emits nothing when CSRFToken is
+// empty so views rendered outside the CSRF-middleware chain
+// (tests, the rare un-mounted path) don't surface a stray hidden
+// input. See memql#111.
+templ CSRFField(token string) {
+	if token != "" {
+		<input type="hidden" name="_csrf" value={ token }/>
+	}
 }
 
 type NavLink struct {

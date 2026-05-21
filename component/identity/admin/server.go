@@ -101,8 +101,23 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 		return
 	}
 
+	// CSRF middleware (memql#111). See the matching block in
+	// component/identity/web/server.go for the design notes; the
+	// admin chain shares the cookie name + same exemptions plus
+	// /admin/establish, which is the unauthenticated POST that
+	// completes the magic-link admin-session bootstrap (no prior
+	// session, no opportunity to embed the form token until AFTER
+	// the cookie lands).
+	secure := strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
+	csrf := identityweb.CSRFMiddlewareFunc(identityweb.CSRFOptions{
+		Secure: &secure,
+		ExemptPaths: []string{
+			"/admin/establish",
+		},
+		Logger: s.Logger,
+	})
 	wrap := func(h http.HandlerFunc) http.HandlerFunc {
-		return identityweb.SecurityHeadersHandlerFunc(identityweb.CSPHandlerFunc(h))
+		return identityweb.SecurityHeadersHandlerFunc(identityweb.CSPHandlerFunc(csrf(h)))
 	}
 	gated := func(h http.HandlerFunc) http.HandlerFunc {
 		return wrap(s.requireAdmin(h))

@@ -49,6 +49,7 @@ templ MeTokens(data MeTokensData) {
 					}
 					<h2 class="card-section">Generate a new token</h2>
 					<form method="POST" action="/me/tokens" class="form-row" data-submit-once>
+						@CSRFField(data.Layout.CSRFToken)
 						<input type="text" name="label" placeholder="e.g. cockpit on laptop" required maxlength="120" pattern="[^&lt;&gt;]+" style="flex:1;"/>
 						<button type="submit" class="btn btn-primary">Generate</button>
 					</form>
@@ -68,7 +69,7 @@ templ MeTokens(data MeTokensData) {
 							</thead>
 							<tbody>
 								for _, t := range data.Tokens {
-									@meTokenRow(t)
+									@meTokenRow(t, data.Layout.CSRFToken)
 								}
 							</tbody>
 						</table>
@@ -79,7 +80,7 @@ templ MeTokens(data MeTokensData) {
 	}
 }
 
-templ meTokenRow(t MeTokenRow) {
+templ meTokenRow(t MeTokenRow, csrfToken string) {
 	<tr>
 		<td>
 			if t.Label != "" {
@@ -106,6 +107,7 @@ templ meTokenRow(t MeTokenRow) {
 		<td>
 			if t.Active {
 				<form method="POST" action="/me/tokens/revoke" style="display:inline;" data-submit-once data-confirm="Revoke this token? CLI clients using it will stop working immediately.">
+					@CSRFField(csrfToken)
 					<input type="hidden" name="id" value={ t.ID }/>
 					<button type="submit" class="btn btn-danger btn-small">
 						Revoke

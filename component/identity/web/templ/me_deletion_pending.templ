@@ -31,6 +31,7 @@ templ MeDeletionPending(data MeDeletionPendingData) {
 					</p>
 					<hr/>
 					<form method="POST" action="/me/settings/cancel-deletion" data-submit-once>
+						@CSRFField(data.Layout.CSRFToken)
 						<button type="submit" class="btn btn-primary">
 							Cancel deletion
 						</button>
