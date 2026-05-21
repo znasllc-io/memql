@@ -116,6 +116,34 @@ func (s *nodeService) Stream(stream nodev1.NodeService_StreamServer) error {
 	peerId := hello.NodeId
 	peerType := hello.NodeType
 
+	// Cross-check NodeHello against the verified node-class token's
+	// binding (#105). When the auth interceptor is installed, every
+	// stream carries a (boundNodeId, boundNodeType) tuple extracted
+	// from the JWT's `node_id` / `node_type` claims; the NodeHello
+	// the peer announces must match. A token minted for nodeId=A
+	// cannot drive a stream that NodeHello's as nodeId=B. When the
+	// interceptor isn't wired the binding is absent and we accept
+	// whatever the peer claims (legacy behavior).
+	if boundId, boundType, ok := NodeBindingFromContext(stream.Context()); ok {
+		if peerId != boundId || peerType != boundType {
+			s.logger.Warn("node hello rejected: token binding mismatch",
+				"hello_id", peerId,
+				"hello_type", peerType,
+				"bound_id", boundId,
+				"bound_type", boundType,
+			)
+			return stream.Send(&nodev1.NodeServerMessage{
+				MessageId: id.NewShortId(),
+				Payload: &nodev1.NodeServerMessage_NodeShutdown{
+					NodeShutdown: &nodev1.NodeShutdown{
+						Reason:       "NodeHello.NodeId / NodeType does not match the verified token's binding",
+						GraceSeconds: 0,
+					},
+				},
+			})
+		}
+	}
+
 	s.logger.Info("peer connected",
 		"peer_id", peerId,
 		"peer_type", peerType,

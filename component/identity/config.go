@@ -75,6 +75,14 @@ const (
 	// max-age policies are enforced separately.
 	DefaultRefreshTokenTTLSeconds = 2_592_000 // 30 days
 
+	// DefaultNodeTokenTTLSeconds is the lifetime of issued node-class
+	// access tokens (#105). 30 days balances "long enough that ops
+	// doesn't rotate weekly" against "short enough that a leaked
+	// node token doesn't outlive its deploy window." There's no
+	// refresh path for node tokens -- they're minted out-of-band
+	// and copied into MEMQL_NODE_TOKEN on the target binary.
+	DefaultNodeTokenTTLSeconds = 30 * 24 * 60 * 60 // 30 days
+
 	// DefaultMagicLinkTTLSeconds is how long a magic-link is valid.
 	DefaultMagicLinkTTLSeconds = 600 // 10 min
 

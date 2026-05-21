@@ -71,6 +71,19 @@ func (a *App) cluster() {
 		}
 	}
 
+	// Install the class="node" JWT enforcement interceptor on
+	// NodeService.Stream when MEMQL_NODE_REQUIRE_AUTH=1 (#105). The
+	// flag is OFF by default so existing clusters keep working
+	// during the rollout window -- ops provisions node tokens, sets
+	// MEMQL_NODE_TOKEN on every binary, then flips the require flag
+	// across the fleet. The verifier comes from the per-binary auth
+	// bootstrap that already runs for the user-facing gRPC surface;
+	// when the verifier isn't enabled (single-node dev) the
+	// interceptor stays unwired even if the flag is on.
+	if nodeServer != nil && nodeRequireAuthEnabled() && a.identityVerifier != nil {
+		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptor(a.identityVerifier, a.Logger))
+	}
+
 	if peerMgr != nil {
 		if nodeIdentity.Type == node.NodeTypeBFF {
 			// BFF-side forwarding: create the router, plug it into the
@@ -342,4 +355,20 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// nodeRequireAuthEnabled reports whether the operator has flipped
+// MEMQL_NODE_REQUIRE_AUTH on. Accepts the conventional truthy
+// values ("1", "true", "yes", case-insensitive) and treats every
+// other value -- including unset -- as off. The default-off posture
+// keeps existing clusters working during the rollout window for
+// #105; once every binary in the fleet has its MEMQL_NODE_TOKEN
+// provisioned, ops flips the flag to enforce.
+func nodeRequireAuthEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_NODE_REQUIRE_AUTH")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

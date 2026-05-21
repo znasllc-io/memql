@@ -25,6 +25,16 @@ const (
 	SourcePAT Source = "pat"
 )
 
+// JWT `class` claim values. Duplicated from
+// component/identity.ClassUser / ClassNode so the verifier package
+// doesn't need to import the identity package (which would invert
+// the layering -- identity is the issuer, verifier is the per-node
+// reader). See #105.
+const (
+	ClassUser = "user"
+	ClassNode = "node"
+)
+
 // VerifiedClaims is the unified shape both the JWT and PAT paths
 // produce. Mirrors pat.Claims plus a precomputed claims map for the
 // auth-context bridge.
@@ -47,6 +57,22 @@ type VerifiedClaims struct {
 	// when the user's current epoch has advanced past the claim. See
 	// memql#106.
 	RevocationEpoch int64
+
+	// Class identifies the credential family the token was minted
+	// for. Populated from the JWT `class` claim; empty claim is
+	// treated as ClassUser for backward compatibility. PATs surface
+	// as a distinct Source (SourcePAT) so they don't need a class
+	// claim. Surface-pinned filters read this to keep cross-class
+	// tokens off the wrong wire (e.g. NodeService.Stream requires
+	// ClassNode). See memql#105.
+	Class string
+	// NodeId / NodeType are populated for Class == ClassNode tokens.
+	// Empty for any other class. The NodeService interceptor
+	// cross-checks NodeHello.NodeId / NodeType against these so a
+	// node-class token minted for one cluster node can't be replayed
+	// to impersonate another.
+	NodeId   string
+	NodeType string
 
 	// ClaimsMap is the value handed to auth.ContextWithClaims +
 	// auth.BuildTokenInfo. Reflects the original JWT body for the
@@ -198,6 +224,13 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 	}
 	cm := map[string]any(mc)
 
+	// Resolve the class claim with the backward-compat fallback:
+	// missing -> ClassUser. Centralized so downstream filters can
+	// switch on it without re-applying the fallback.
+	class := stringClaim(cm, "class")
+	if class == "" {
+		class = ClassUser
+	}
 	out := &VerifiedClaims{
 		UserId:          stringClaim(cm, "sub"),
 		Email:           stringClaim(cm, "email"),
@@ -206,6 +239,9 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 		Internal:        boolClaim(cm, "internal"),
 		SessionId:       stringClaim(cm, "sid"),
 		RevocationEpoch: int64Claim(cm, "revocation_epoch"),
+		Class:           class,
+		NodeId:          stringClaim(cm, "node_id"),
+		NodeType:        stringClaim(cm, "node_type"),
 		Source:          SourceJWT,
 		ClaimsMap:       cm,
 	}

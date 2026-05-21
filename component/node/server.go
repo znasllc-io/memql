@@ -35,6 +35,27 @@ type NodeServer struct {
 	workbenchForwardHandler  WorkbenchForwardHandler
 	workbenchForwardResponse WorkbenchForwardResponseSink
 	eventInbound             EventInbound
+	// authInterceptor is the optional class="node" JWT enforcement
+	// interceptor (#105). Wired by app/cluster.go during bootstrap
+	// when the operator has provisioned per-binary node tokens
+	// (MEMQL_NODE_TOKEN) and flipped MEMQL_NODE_REQUIRE_AUTH=1.
+	// Nil = the legacy "any peer can NodeHello" behavior, retained
+	// for single-node dev + clusters that haven't rolled tokens out
+	// yet.
+	authInterceptor grpc.StreamServerInterceptor
+}
+
+// SetAuthInterceptor installs the class="node" JWT enforcement
+// stream interceptor on NodeService.Stream. Call after construction
+// but BEFORE Start (the interceptor is read once at prepareForRun
+// when the gRPC server is created). Passing nil leaves the
+// interceptor unwired -- legacy "no auth" behavior. See
+// NodeClassStreamInterceptor + #105.
+func (s *NodeServer) SetAuthInterceptor(i grpc.StreamServerInterceptor) {
+	if s == nil {
+		return
+	}
+	s.authInterceptor = i
 }
 
 // SetQueryExecutor installs the executor consulted for inbound
@@ -189,10 +210,20 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 	// Bumping both server + client (peerConnection in connection.go)
 	// to 32 MiB matches the workerService + memqlService bumps.
 	const maxNodeMessageSize = 32 * 1024 * 1024
-	s.grpcServer = grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(maxNodeMessageSize),
 		grpc.MaxSendMsgSize(maxNodeMessageSize),
-	)
+	}
+	if s.authInterceptor != nil {
+		// Install the class="node" enforcement interceptor (#105).
+		// When unset, NodeService.Stream stays unauthenticated --
+		// the legacy default, suitable for single-node dev + the
+		// "trusted network boundary" deployment posture documented
+		// in threat-model §5.1.
+		serverOpts = append(serverOpts, grpc.StreamInterceptor(s.authInterceptor))
+		s.logger.Info("node server: auth interceptor enabled (class=node required)")
+	}
+	s.grpcServer = grpc.NewServer(serverOpts...)
 
 	svc := &nodeService{
 		logger:                   s.logger,
