@@ -497,9 +497,16 @@ func TestStreamInterceptor_EpochCheck_PeriodicCleanupOnHandlerExit(t *testing.T)
 		})
 	require.NoError(t, err)
 
-	// Snapshot the call count just after handler return.
+	// Settle: the ticker goroutine's exit is asynchronous -- the
+	// deferred cancel runs after the handler returns, ctx.Done()
+	// then races whatever in-flight tick happens to be scheduled.
+	// Wait long enough (2.5x Interval) that any last-tick race has
+	// resolved before we snapshot, otherwise CI runners under load
+	// catch the post-return tick and falsely flag the goroutine as
+	// alive. (Reported as a flake on memql#157's CI runs.)
+	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
-	afterReturn := calls
+	afterSettle := calls
 	mu.Unlock()
 
 	// Wait long enough that several more ticks WOULD fire if the
@@ -508,7 +515,7 @@ func TestStreamInterceptor_EpochCheck_PeriodicCleanupOnHandlerExit(t *testing.T)
 
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, afterReturn, calls, "no further resolver calls after handler returns -- goroutine must have stopped")
+	assert.Equal(t, afterSettle, calls, "no further resolver calls after handler returns -- goroutine must have stopped")
 }
 
 func TestVerifyEmptyToken(t *testing.T) {
