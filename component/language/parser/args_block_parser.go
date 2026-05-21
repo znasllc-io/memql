@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -142,8 +143,49 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 				return nil, newParseErrorf(&p.current, "expected `)` after @description on args field %q", name)
 			}
 			p.advance()
+		case "maxLength":
+			// @maxLength(N) -- rune-count cap for string args. Other
+			// arg types accept the annotation at parse time but the
+			// validator only enforces it on strings (the natural
+			// semantics for length).
+			if err := p.expect(TokenParenOpen); err != nil {
+				return nil, err
+			}
+			if !p.check(TokenNumber) {
+				return nil, newParseErrorf(&p.current, "expected number literal inside @maxLength(...) on args field %q", name)
+			}
+			n, convErr := strconv.Atoi(p.current.Literal)
+			if convErr != nil {
+				return nil, newParseErrorf(&p.current, "invalid @maxLength value %q on args field %q: %v", p.current.Literal, name, convErr)
+			}
+			if n < 0 {
+				return nil, newParseErrorf(&p.current, "@maxLength on args field %q must be non-negative, got %d", name, n)
+			}
+			field.MaxLength = n
+			p.advance()
+			if !p.check(TokenParenClose) {
+				return nil, newParseErrorf(&p.current, "expected `)` after @maxLength value on args field %q", name)
+			}
+			p.advance()
+		case "pattern":
+			// @pattern("regex") -- string-only regex match. The
+			// pattern is stored verbatim here; compilation + caching
+			// happens once at function-loader time so invalid patterns
+			// fail loud during DSL parse rather than per-call.
+			if err := p.expect(TokenParenOpen); err != nil {
+				return nil, err
+			}
+			if !p.check(TokenString) {
+				return nil, newParseErrorf(&p.current, "expected string literal inside @pattern(...) on args field %q", name)
+			}
+			field.Pattern = p.current.Literal
+			p.advance()
+			if !p.check(TokenParenClose) {
+				return nil, newParseErrorf(&p.current, "expected `)` after @pattern value on args field %q", name)
+			}
+			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @default, @description)", ann, name)
+			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @default, @description, @maxLength, @pattern)", ann, name)
 		}
 	}
 	return field, nil

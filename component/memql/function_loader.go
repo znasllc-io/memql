@@ -398,7 +398,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 
 	// Handle args assertions populated from the function's args block.
 	if funcDef.ArgsSchema != nil {
-		fn.ArgsSchema = convertArgsSchema(funcDef.ArgsSchema)
+		schema, err := convertArgsSchema(funcDef.ArgsSchema)
+		if err != nil {
+			return nil, fmt.Errorf("function %q args schema: %w", expectedName, err)
+		}
+		fn.ArgsSchema = schema
 	}
 
 	// Extract and convert expression from the body
@@ -1189,10 +1193,12 @@ func reportFunctionError(logger *slog.Logger, origin string, err error) {
 	)
 }
 
-// convertArgsSchema converts languageParser.ArgsSchema to memql.ArgsSchemaConfig
-func convertArgsSchema(assertDef *languageParser.ArgsSchema) *ArgsSchemaConfig {
+// convertArgsSchema converts languageParser.ArgsSchema to memql.ArgsSchemaConfig.
+// Returns an error when a field's regex @pattern fails to compile so
+// malformed DSL fails loud at function-load time rather than per-call.
+func convertArgsSchema(assertDef *languageParser.ArgsSchema) (*ArgsSchemaConfig, error) {
 	if assertDef == nil || len(assertDef.Fields) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	config := &ArgsSchemaConfig{
@@ -1201,16 +1207,22 @@ func convertArgsSchema(assertDef *languageParser.ArgsSchema) *ArgsSchemaConfig {
 	}
 
 	for i, field := range assertDef.Fields {
-		config.Fields[i] = convertArgsField(field)
+		converted, err := convertArgsField(field)
+		if err != nil {
+			return nil, err
+		}
+		config.Fields[i] = converted
 	}
 
-	return config
+	return config, nil
 }
 
-// convertArgsField converts languageParser.ArgsField to memql.FunctionArgsField
-func convertArgsField(field *languageParser.ArgsField) *FunctionArgsField {
+// convertArgsField converts languageParser.ArgsField to memql.FunctionArgsField.
+// Compiles the @pattern regex once here so the validator can match
+// against the cached *regexp.Regexp on every call.
+func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, error) {
 	if field == nil {
-		return nil
+		return nil, nil
 	}
 
 	result := &FunctionArgsField{
@@ -1221,18 +1233,36 @@ func convertArgsField(field *languageParser.ArgsField) *FunctionArgsField {
 		Minimum:              field.Minimum,
 		Maximum:              field.Maximum,
 		Format:               field.Format,
+		MaxLength:            field.MaxLength,
+		Pattern:              field.Pattern,
 		AdditionalProperties: field.AdditionalProperties,
+	}
+
+	if field.Pattern != "" {
+		compiled, err := regexp.Compile(field.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("args field %q: invalid @pattern %q: %w", field.Name, field.Pattern, err)
+		}
+		result.patternRegex = compiled
 	}
 
 	if len(field.Nested) > 0 {
 		result.Nested = make([]*FunctionArgsField, len(field.Nested))
 		for i, nested := range field.Nested {
-			result.Nested[i] = convertArgsField(nested)
+			converted, err := convertArgsField(nested)
+			if err != nil {
+				return nil, err
+			}
+			result.Nested[i] = converted
 		}
 	}
 	if field.Items != nil {
-		result.Items = convertArgsField(field.Items)
+		converted, err := convertArgsField(field.Items)
+		if err != nil {
+			return nil, err
+		}
+		result.Items = converted
 	}
 
-	return result
+	return result, nil
 }

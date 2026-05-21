@@ -387,6 +387,16 @@ type FunctionArgsField struct {
 	Maximum *float64
 	// Format constrains string values (for example, date-time).
 	Format string
+	// MaxLength caps string args at the given rune count. Zero means
+	// no cap. Sourced from `@maxLength(N)` in the DSL.
+	MaxLength int
+	// Pattern is the source-string of the regex a value must match.
+	// Empty means no pattern. Sourced from `@pattern("regex")` in
+	// the DSL. Compiled pattern lives on patternRegex (set during
+	// function-loader translation; nil when Pattern is empty or the
+	// loader hasn't run yet).
+	Pattern      string
+	patternRegex *regexp.Regexp
 	// AdditionalProperties controls unknown keys for object values.
 	AdditionalProperties *bool
 	// Items defines item schema for array values.
@@ -399,10 +409,13 @@ func (f *FunctionArgsField) clone() *FunctionArgsField {
 		return nil
 	}
 	clone := &FunctionArgsField{
-		Name:     f.Name,
-		Type:     f.Type,
-		Optional: f.Optional,
-		Format:   f.Format,
+		Name:         f.Name,
+		Type:         f.Type,
+		Optional:     f.Optional,
+		Format:       f.Format,
+		MaxLength:    f.MaxLength,
+		Pattern:      f.Pattern,
+		patternRegex: f.patternRegex,
 	}
 	if len(f.Enum) > 0 {
 		clone.Enum = append([]any(nil), f.Enum...)
