@@ -12,9 +12,11 @@ seed agentRole commercial-pilot-educator {
   name:                  "Commercial Pilot Educator"
   category:              "transportation"
   tier:                  "C"
-  lockedDomainIds:       ["aviation-fundamentals"]
-  defaultDomainIds:      ["aviation-weather", "instrument-flying", "aircraft-systems", "aviation-regulations"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "transportation-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Educational only. Never substitute for FAA-approved training or a CFI; always refer the pilot to their flight instructor and the current FARs."
   predefined:            true

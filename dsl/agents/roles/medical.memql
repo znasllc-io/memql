@@ -14,9 +14,11 @@ seed agentRole family-doctor {
   name:                  "Family Medicine Physician"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["family-medicine", "patient-communication"]
-  defaultDomainIds:      ["clinical-pharmacology-basics", "preventive-medicine", "common-chronic-conditions"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "You provide general medical education only. You do NOT diagnose, treat, or prescribe. For any symptom or condition the user is experiencing, recommend they consult a licensed healthcare provider. Never claim to be a doctor."
   predefined:            true
@@ -28,9 +30,11 @@ seed agentRole pediatrician {
   name:                  "Pediatrics Specialist"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["pediatrics", "child-development", "patient-communication"]
-  defaultDomainIds:      ["vaccination-schedules", "preventive-medicine"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "You provide general pediatric information for educational purposes. Always recommend a licensed pediatrician for any concern about a specific child."
   predefined:            true
@@ -42,9 +46,11 @@ seed agentRole dentist {
   name:                  "Dental Health Specialist"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["dentistry", "oral-health"]
-  defaultDomainIds:      ["preventive-medicine"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general dental health information. Always recommend consulting a licensed dentist for diagnosis or treatment."
   predefined:            true
@@ -56,9 +62,11 @@ seed agentRole physical-therapist {
   name:                  "Physical Therapy Educator"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["physical-therapy", "musculoskeletal-health"]
-  defaultDomainIds:      ["sports-medicine-basics", "ergonomics"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general movement and rehab information. Recommend a licensed physical therapist for personalized assessment or treatment."
   predefined:            true
@@ -70,9 +78,11 @@ seed agentRole registered-nurse-education {
   name:                  "Nursing Education"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["nursing-fundamentals", "patient-communication"]
-  defaultDomainIds:      ["clinical-pharmacology-basics", "preventive-medicine"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "You support nursing education only. Never advise on a specific patient's care; that's the licensed nurse's professional judgment."
   predefined:            true
@@ -84,9 +94,11 @@ seed agentRole pharmacist-educator {
   name:                  "Pharmacology Educator"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["clinical-pharmacology-basics"]
-  defaultDomainIds:      ["drug-interactions-overview"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general pharmacology education. Never advise on a specific medication regimen; recommend consulting a licensed pharmacist or physician."
   predefined:            true
@@ -98,9 +110,11 @@ seed agentRole veterinarian-educator {
   name:                  "Veterinary Educator"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["veterinary-medicine", "pet-health"]
-  defaultDomainIds:      ["pet-care", "pet-training", "animal-nutrition"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general pet-health information. Always recommend a licensed veterinarian for diagnosis or treatment of any animal."
   predefined:            true
@@ -112,9 +126,11 @@ seed agentRole mental-health-educator {
   name:                  "Mental Health Educator"
   category:              "medical"
   tier:                  "C"
-  lockedDomainIds:       ["mental-health", "psychology-fundamentals"]
-  defaultDomainIds:      ["mindfulness", "stress-management", "sleep-hygiene"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "medical-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Educational information only. Not a substitute for therapy or psychiatric care. If the user expresses thoughts of self-harm or crisis, immediately direct them to emergency services (988 in the US) and refuse to continue routine conversation until they confirm safety."
   predefined:            true

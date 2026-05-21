@@ -533,7 +533,7 @@ QueryClient.prototype.mutationCreateAgentAuthorization = function (this: QueryCl
   return this.executeNamed("mutationCreateAgentAuthorization", buildMutationCreateAgentAuthorization(args), opts);
 };
 
-/** Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope. */
+/** Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope. */
 // Bound concept: agentRole.
 export interface MutationCreateAgentRoleArgs {
   agentRoleId?: string;
@@ -542,12 +542,11 @@ export interface MutationCreateAgentRoleArgs {
   description?: string;
   category?: string;
   tier?: string;
-  lockedDomainIds?: unknown[];
-  defaultDomainIds?: unknown[];
-  availableDomainIds?: unknown[];
-  lockedToolSlugs?: unknown[];
-  defaultToolSlugs?: unknown[];
-  lockedLiveKnowledgeIds?: unknown[];
+  lockedSkillIds?: unknown[];
+  defaultSkillIds?: unknown[];
+  availableSkillIds?: unknown[];
+  forbiddenSkillIds?: unknown[];
+  maxSkills?: number;
   recommendedPolicySlug?: string;
   recommendedGender?: string;
   systemPromptHints?: string;
@@ -563,12 +562,11 @@ export function buildMutationCreateAgentRole(args: MutationCreateAgentRoleArgs):
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
   if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
   if (args.tier !== undefined) parts.push("tier: " + renderMemQLValue(args.tier));
-  if (args.lockedDomainIds !== undefined) parts.push("lockedDomainIds: " + renderMemQLValue(args.lockedDomainIds));
-  if (args.defaultDomainIds !== undefined) parts.push("defaultDomainIds: " + renderMemQLValue(args.defaultDomainIds));
-  if (args.availableDomainIds !== undefined) parts.push("availableDomainIds: " + renderMemQLValue(args.availableDomainIds));
-  if (args.lockedToolSlugs !== undefined) parts.push("lockedToolSlugs: " + renderMemQLValue(args.lockedToolSlugs));
-  if (args.defaultToolSlugs !== undefined) parts.push("defaultToolSlugs: " + renderMemQLValue(args.defaultToolSlugs));
-  if (args.lockedLiveKnowledgeIds !== undefined) parts.push("lockedLiveKnowledgeIds: " + renderMemQLValue(args.lockedLiveKnowledgeIds));
+  if (args.lockedSkillIds !== undefined) parts.push("lockedSkillIds: " + renderMemQLValue(args.lockedSkillIds));
+  if (args.defaultSkillIds !== undefined) parts.push("defaultSkillIds: " + renderMemQLValue(args.defaultSkillIds));
+  if (args.availableSkillIds !== undefined) parts.push("availableSkillIds: " + renderMemQLValue(args.availableSkillIds));
+  if (args.forbiddenSkillIds !== undefined) parts.push("forbiddenSkillIds: " + renderMemQLValue(args.forbiddenSkillIds));
+  if (args.maxSkills !== undefined) parts.push("maxSkills: " + renderMemQLValue(args.maxSkills));
   if (args.recommendedPolicySlug !== undefined) parts.push("recommendedPolicySlug: " + renderMemQLValue(args.recommendedPolicySlug));
   if (args.recommendedGender !== undefined) parts.push("recommendedGender: " + renderMemQLValue(args.recommendedGender));
   if (args.systemPromptHints !== undefined) parts.push("systemPromptHints: " + renderMemQLValue(args.systemPromptHints));
@@ -1621,6 +1619,44 @@ declare module "./query.js" {
 
 QueryClient.prototype.mutationCreateSessionForParticipant = function (this: QueryClient, args: MutationCreateSessionForParticipantArgs = {} as MutationCreateSessionForParticipantArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("mutationCreateSessionForParticipant", buildMutationCreateSessionForParticipant(args), opts);
+};
+
+/** Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side. */
+// Bound concept: skillChangeEvent.
+export interface MutationCreateSkillChangeEventArgs {
+  skillChangeEventId: string;
+  targetAgentId: string;
+  skillId: string;
+  changeKind?: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  actorAgentId?: string;
+  actorUserId?: string;
+  planId?: string;
+}
+
+export function buildMutationCreateSkillChangeEvent(args: MutationCreateSkillChangeEventArgs): string {
+  const parts: string[] = [];
+  parts.push("skillChangeEventId: " + renderMemQLValue(args.skillChangeEventId));
+  parts.push("targetAgentId: " + renderMemQLValue(args.targetAgentId));
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  if (args.changeKind !== undefined) parts.push("changeKind: " + renderMemQLValue(args.changeKind));
+  if (args.before !== undefined) parts.push("before: " + renderMemQLValue(args.before));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  if (args.actorAgentId !== undefined) parts.push("actorAgentId: " + renderMemQLValue(args.actorAgentId));
+  if (args.actorUserId !== undefined) parts.push("actorUserId: " + renderMemQLValue(args.actorUserId));
+  if (args.planId !== undefined) parts.push("planId: " + renderMemQLValue(args.planId));
+  return "mutationCreateSkillChangeEvent({" + parts.join(", ") + "})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    mutationCreateSkillChangeEvent(args: MutationCreateSkillChangeEventArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.mutationCreateSkillChangeEvent = function (this: QueryClient, args: MutationCreateSkillChangeEventArgs = {} as MutationCreateSkillChangeEventArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("mutationCreateSkillChangeEvent", buildMutationCreateSkillChangeEvent(args), opts);
 };
 
 /** Create a space. */

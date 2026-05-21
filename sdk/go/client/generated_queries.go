@@ -204,6 +204,23 @@ func QueryActiveSkillsBuild(args QueryActiveSkillsArgs) string {
 	return "queryActiveSkills({})"
 }
 
+// QueryActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than queryActiveSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N querySkillBySlug round-trips.
+//
+// Bound concept: skill.
+type QueryActiveSkillsFullArgs struct {
+}
+
+// QueryActiveSkillsFull calls the engine query queryActiveSkillsFull.
+func (qc *QueryClient) QueryActiveSkillsFull(ctx context.Context, args QueryActiveSkillsFullArgs) (*Result, error) {
+	call := QueryActiveSkillsFullBuild(args)
+	return qc.executeNamed(ctx, "queryActiveSkillsFull", call)
+}
+
+func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
+	_ = args
+	return "queryActiveSkillsFull({})"
+}
+
 // QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.
 //
 // Bound concept: space.

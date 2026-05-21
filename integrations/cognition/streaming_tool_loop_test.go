@@ -115,6 +115,9 @@ func (e *fakeEngine) ChatStreamWithToolsProviderByName(string) common.ChatStream
 	return nil
 }
 func (e *fakeEngine) ToolDefinitionsForNames([]string) []common.ToolDefinition { return nil }
+func (e *fakeEngine) ResolveSkills(context.Context, []string) (memql.SkillBundle, error) {
+	return memql.SkillBundle{}, nil
+}
 
 // newTestCognition returns a minimal CognitionIntegration sufficient for the
 // streaming tool loop. Logger sinks to io.Discard.

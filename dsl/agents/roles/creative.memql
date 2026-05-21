@@ -9,9 +9,11 @@ seed agentRole graphic-designer {
   slug:                  "graphic-designer"
   name:                  "Graphic Designer"
   category:              "creative"
-  lockedDomainIds:       ["graphic-design"]
-  defaultDomainIds:      ["typography", "color-theory", "brand-strategy", "layout-design", "design-systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -21,9 +23,11 @@ seed agentRole ux-designer {
   slug:                  "ux-designer"
   name:                  "UX Designer"
   category:              "creative"
-  lockedDomainIds:       ["ux-principles"]
-  defaultDomainIds:      ["user-research", "accessibility", "design-systems", "prototyping-tools", "interaction-design", "visual-design"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -33,9 +37,11 @@ seed agentRole fiction-writer {
   slug:                  "fiction-writer"
   name:                  "Fiction Writer"
   category:              "creative"
-  lockedDomainIds:       ["creative-writing", "fiction-craft"]
-  defaultDomainIds:      ["story-structure", "character-development", "english-grammar-style", "publishing-industry"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -45,9 +51,11 @@ seed agentRole screenwriter {
   slug:                  "screenwriter"
   name:                  "Screenwriter"
   category:              "creative"
-  lockedDomainIds:       ["screenwriting"]
-  defaultDomainIds:      ["story-structure", "dialogue-craft", "film-industry", "tv-industry"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -57,9 +65,11 @@ seed agentRole songwriter {
   slug:                  "songwriter"
   name:                  "Songwriter"
   category:              "creative"
-  lockedDomainIds:       ["songwriting"]
-  defaultDomainIds:      ["music-theory", "lyric-writing", "music-production-basics"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -69,9 +79,11 @@ seed agentRole music-theory-teacher {
   slug:                  "music-theory-teacher"
   name:                  "Music Theory Teacher"
   category:              "creative"
-  lockedDomainIds:       ["music-theory"]
-  defaultDomainIds:      ["ear-training", "music-history", "composition-fundamentals", "music-pedagogy"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -81,9 +93,11 @@ seed agentRole photographer {
   slug:                  "photographer"
   name:                  "Photographer"
   category:              "creative"
-  lockedDomainIds:       ["photography"]
-  defaultDomainIds:      ["composition-principles", "lighting-techniques", "photo-editing", "camera-systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -93,9 +107,11 @@ seed agentRole video-editor {
   slug:                  "video-editor"
   name:                  "Video Editor"
   category:              "creative"
-  lockedDomainIds:       ["video-editing"]
-  defaultDomainIds:      ["video-production", "color-grading-basics", "audio-post", "post-workflow"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -105,9 +121,11 @@ seed agentRole illustrator {
   slug:                  "illustrator"
   name:                  "Illustrator"
   category:              "creative"
-  lockedDomainIds:       ["illustration"]
-  defaultDomainIds:      ["drawing-fundamentals", "color-theory", "digital-illustration-tools"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -117,9 +135,11 @@ seed agentRole game-designer {
   slug:                  "game-designer"
   name:                  "Game Designer"
   category:              "creative"
-  lockedDomainIds:       ["game-design"]
-  defaultDomainIds:      ["game-mechanics", "level-design", "game-narrative", "playtesting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -129,9 +149,11 @@ seed agentRole creative-companion {
   slug:                  "creative-companion"
   name:                  "Creative Companion"
   category:              "creative"
-  lockedDomainIds:       ["creative-arts"]
-  defaultDomainIds:      ["music-appreciation", "photography", "personal-growth", "journaling"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "creative-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

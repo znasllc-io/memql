@@ -871,29 +871,28 @@ func MutationCreateAgentAuthorizationBuild(args MutationCreateAgentAuthorization
 	return b.String()
 }
 
-// MutationCreateAgentRole -- Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
+// MutationCreateAgentRole -- Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
 //
 // Bound concept: agentRole.
 type MutationCreateAgentRoleArgs struct {
-	AgentRoleId            string
-	Slug                   string
-	Name                   string
-	Description            string
-	Category               string
-	Tier                   string
-	LockedDomainIds        []any
-	DefaultDomainIds       []any
-	AvailableDomainIds     []any
-	LockedToolSlugs        []any
-	DefaultToolSlugs       []any
-	LockedLiveKnowledgeIds []any
-	RecommendedPolicySlug  string
-	RecommendedGender      string
-	SystemPromptHints      string
-	Active                 bool
-	ActiveSet              bool // set true to send active; required because zero-value bool is ambiguous
-	Predefined             bool
-	PredefinedSet          bool // set true to send predefined; required because zero-value bool is ambiguous
+	AgentRoleId           string
+	Slug                  string
+	Name                  string
+	Description           string
+	Category              string
+	Tier                  string
+	LockedSkillIds        []any
+	DefaultSkillIds       []any
+	AvailableSkillIds     []any
+	ForbiddenSkillIds     []any
+	MaxSkills             int
+	RecommendedPolicySlug string
+	RecommendedGender     string
+	SystemPromptHints     string
+	Active                bool
+	ActiveSet             bool // set true to send active; required because zero-value bool is ambiguous
+	Predefined            bool
+	PredefinedSet         bool // set true to send predefined; required because zero-value bool is ambiguous
 }
 
 // MutationCreateAgentRole calls the engine mutation mutationCreateAgentRole.
@@ -943,33 +942,30 @@ func MutationCreateAgentRoleBuild(args MutationCreateAgentRoleArgs) string {
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
-	b.WriteString("lockedDomainIds: ")
-	b.WriteString(renderMemQLValue(args.LockedDomainIds))
+	b.WriteString("lockedSkillIds: ")
+	b.WriteString(renderMemQLValue(args.LockedSkillIds))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
-	b.WriteString("defaultDomainIds: ")
-	b.WriteString(renderMemQLValue(args.DefaultDomainIds))
+	b.WriteString("defaultSkillIds: ")
+	b.WriteString(renderMemQLValue(args.DefaultSkillIds))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
-	b.WriteString("availableDomainIds: ")
-	b.WriteString(renderMemQLValue(args.AvailableDomainIds))
+	b.WriteString("availableSkillIds: ")
+	b.WriteString(renderMemQLValue(args.AvailableSkillIds))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
-	b.WriteString("lockedToolSlugs: ")
-	b.WriteString(renderMemQLValue(args.LockedToolSlugs))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	b.WriteString("forbiddenSkillIds: ")
+	b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
+	if args.MaxSkills != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxSkills: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxSkills))
 	}
-	b.WriteString("defaultToolSlugs: ")
-	b.WriteString(renderMemQLValue(args.DefaultToolSlugs))
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("lockedLiveKnowledgeIds: ")
-	b.WriteString(renderMemQLValue(args.LockedLiveKnowledgeIds))
 	if args.RecommendedPolicySlug != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
@@ -3143,6 +3139,84 @@ func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParti
 	}
 	b.WriteString("streams: ")
 	b.WriteString(renderMemQLValue(args.Streams))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
+//
+// Bound concept: skillChangeEvent.
+type MutationCreateSkillChangeEventArgs struct {
+	SkillChangeEventId string
+	TargetAgentId      string
+	SkillId            string
+	ChangeKind         string
+	Before             map[string]any
+	After              map[string]any
+	ActorAgentId       string
+	ActorUserId        string
+	PlanId             string
+}
+
+// MutationCreateSkillChangeEvent calls the engine mutation mutationCreateSkillChangeEvent.
+func (qc *QueryClient) MutationCreateSkillChangeEvent(ctx context.Context, args MutationCreateSkillChangeEventArgs) (*Result, error) {
+	call := MutationCreateSkillChangeEventBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateSkillChangeEvent", call)
+}
+
+func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateSkillChangeEvent({")
+	b.WriteString("skillChangeEventId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SkillChangeEventId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetAgentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("skillId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SkillId))
+	if args.ChangeKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("changeKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.ChangeKind))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("before: ")
+	b.WriteString(renderMemQLValue(args.Before))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("after: ")
+	b.WriteString(renderMemQLValue(args.After))
+	if args.ActorAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("actorAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ActorAgentId))
+	}
+	if args.ActorUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("actorUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
+	}
+	if args.PlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
 	b.WriteString("})")
 	return b.String()
 }

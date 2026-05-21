@@ -87,6 +87,11 @@ type MemQLEngine interface {
 	ToolDefinitionsForNames(names []string) []common.ToolDefinition
 	// ExecuteToolByName looks up a tool by name and executes it with the given args.
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
+	// ResolveSkills returns the unioned (domain, tool, liveSource)
+	// surface for a list of v1:agents:skill ids. Phase 2 cut (#158):
+	// the canonical helper every consumer of the new agent shape
+	// calls before reading capabilities.
+	ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error)
 }
 
 // SIProviderRegistry provides access to SI providers.

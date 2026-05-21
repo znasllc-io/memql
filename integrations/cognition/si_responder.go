@@ -587,6 +587,27 @@ func (c *CognitionIntegration) getAgent(ctx context.Context, id string) (*agentP
 	// `AgentGenerateTurnMsg.AgentId` / `ActingAgentIdentity.Id`.
 	agent.ID = id
 
+	// Phase 2 cut (#158): the canonical capability surface is
+	// capabilities.skillIds[]. Resolve the bundle here and stamp
+	// the effective domains/tools/liveSources BACK onto Capabilities
+	// so every downstream accessor (.domains(), .tools(), the
+	// extractStringSlice readers) keeps working unchanged.
+	if agent.Capabilities != nil {
+		if skillIds := extractStringSlice(agent.Capabilities, "skillIds"); len(skillIds) > 0 {
+			if bundle, rerr := c.engine.ResolveSkills(ctx, skillIds); rerr == nil {
+				if len(bundle.DomainIds) > 0 {
+					agent.Capabilities["domains"] = bundle.DomainIds
+				}
+				if len(bundle.ToolSlugs) > 0 {
+					agent.Capabilities["tools"] = bundle.ToolSlugs
+				}
+				if len(bundle.LiveSourceIds) > 0 {
+					agent.Capabilities["liveSources"] = bundle.LiveSourceIds
+				}
+			}
+		}
+	}
+
 	return &agent, nil
 }
 

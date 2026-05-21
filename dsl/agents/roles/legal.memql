@@ -12,9 +12,11 @@ seed agentRole legal-compliance {
   name:                  "Legal & Compliance"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["legal-documents", "contracts-agreements", "regulatory-compliance"]
-  defaultDomainIds:      ["intellectual-property", "labor-law", "risk-management", "tax-regulations", "stakeholder-communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "legal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general legal and compliance information. For matters specific to a contract, jurisdiction, or dispute, always recommend a licensed attorney in the relevant jurisdiction."
   predefined:            true
@@ -26,9 +28,11 @@ seed agentRole immigration-legal-educator {
   name:                  "Immigration Law Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["immigration-law"]
-  defaultDomainIds:      ["legal-documents", "regulatory-compliance"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "legal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Information only. Immigration law is highly fact- and jurisdiction-specific; always recommend consulting a licensed immigration attorney."
   predefined:            true
@@ -40,9 +44,11 @@ seed agentRole family-law-educator {
   name:                  "Family Law Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["family-law"]
-  defaultDomainIds:      ["legal-documents", "estate-planning-personal", "contracts-personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "legal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed family-law attorney for personal situations."
   predefined:            true
@@ -54,9 +60,11 @@ seed agentRole estate-planning-educator {
   name:                  "Estate Planning Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["estate-planning-personal"]
-  defaultDomainIds:      ["personal-taxes", "personal-finance", "personal-insurance", "personal-legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "legal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Estate planning is jurisdiction-specific; always recommend a licensed estate attorney for personal documents."
   predefined:            true
@@ -68,9 +76,11 @@ seed agentRole personal-legal-advisor {
   name:                  "Personal Legal Educator"
   category:              "legal"
   tier:                  "B"
-  lockedDomainIds:       ["personal-legal"]
-  defaultDomainIds:      ["estate-planning-personal", "contracts-personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "legal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Information only. Always recommend a licensed attorney in the relevant jurisdiction for any actual legal decision."
   predefined:            true

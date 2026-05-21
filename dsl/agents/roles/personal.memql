@@ -13,9 +13,11 @@ seed agentRole personal-finance-advisor {
   name:                  "Personal Finance Advisor"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["personal-finance", "personal-budgeting"]
-  defaultDomainIds:      ["personal-taxes", "personal-investing", "personal-insurance", "estate-planning-personal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general financial education. Always recommend a licensed financial planner / CPA / attorney for personalized advice on taxes, investments, or estate planning."
   predefined:            true
@@ -26,9 +28,11 @@ seed agentRole household-manager {
   slug:                  "household-manager"
   name:                  "Household Manager"
   category:              "personal"
-  lockedDomainIds:       ["household-maintenance"]
-  defaultDomainIds:      ["home-inventory", "household-chores", "personal-finance", "personal-budgeting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -38,9 +42,11 @@ seed agentRole parenting-coach {
   slug:                  "parenting-coach"
   name:                  "Parenting Coach"
   category:              "personal"
-  lockedDomainIds:       ["parenting", "child-development"]
-  defaultDomainIds:      ["school-education-personal", "nutrition", "mental-health"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -51,9 +57,11 @@ seed agentRole health-wellness-coach {
   name:                  "Health & Wellness Coach"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["nutrition", "fitness"]
-  defaultDomainIds:      ["mental-health", "sleep-hygiene", "mindfulness", "medical-records-personal", "stress-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general wellness information. Always recommend a licensed healthcare provider for personal medical or mental-health concerns."
   predefined:            true
@@ -65,9 +73,11 @@ seed agentRole fitness-coach {
   name:                  "Fitness Coach"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["fitness", "exercise-science"]
-  defaultDomainIds:      ["nutrition", "sleep-hygiene", "stretching-mobility", "strength-training"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general fitness information. Always recommend consulting a doctor before starting a new exercise program and a certified trainer for personalized programming."
   predefined:            true
@@ -78,9 +88,11 @@ seed agentRole running-coach {
   slug:                  "running-coach"
   name:                  "Running Coach"
   category:              "personal"
-  lockedDomainIds:       ["running-training"]
-  defaultDomainIds:      ["fitness", "exercise-science", "race-nutrition", "injury-prevention-running"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -90,9 +102,11 @@ seed agentRole yoga-instructor {
   slug:                  "yoga-instructor"
   name:                  "Yoga Instructor"
   category:              "personal"
-  lockedDomainIds:       ["yoga-practice"]
-  defaultDomainIds:      ["meditation", "anatomy-basics", "mindfulness", "yoga-philosophy"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -103,9 +117,11 @@ seed agentRole strength-coach {
   name:                  "Strength & Conditioning Coach"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["strength-training"]
-  defaultDomainIds:      ["exercise-science", "fitness", "injury-prevention-running", "powerlifting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -115,9 +131,11 @@ seed agentRole meal-planning-chef {
   slug:                  "meal-planning-chef"
   name:                  "Meal Planning Chef"
   category:              "personal"
-  lockedDomainIds:       ["recipes", "meal-planning"]
-  defaultDomainIds:      ["dietary-restrictions", "nutrition", "food-safety"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -127,9 +145,11 @@ seed agentRole travel-planner {
   slug:                  "travel-planner"
   name:                  "Travel Planner"
   category:              "personal"
-  lockedDomainIds:       ["travel-planning"]
-  defaultDomainIds:      ["travel-documents", "restaurant-dining", "personal-finance", "destination-research"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -139,9 +159,11 @@ seed agentRole learning-companion {
   slug:                  "learning-companion"
   name:                  "Learning Companion"
   category:              "personal"
-  lockedDomainIds:       ["learning-methods"]
-  defaultDomainIds:      ["language-learning", "online-courses", "book-summaries", "personal-growth", "study-skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -152,9 +174,11 @@ seed agentRole relationships-social {
   name:                  "Relationships & Social Companion"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["relationships-communication"]
-  defaultDomainIds:      ["life-events-celebrations", "gifts", "conflict-resolution"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general communication and relationship information. For serious relationship distress or mental-health concerns, recommend a licensed therapist or counselor."
   predefined:            true
@@ -165,9 +189,11 @@ seed agentRole pet-care-specialist {
   slug:                  "pet-care-specialist"
   name:                  "Pet Care Specialist"
   category:              "personal"
-  lockedDomainIds:       ["pet-care"]
-  defaultDomainIds:      ["pet-training", "pet-health", "animal-nutrition"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -177,9 +203,11 @@ seed agentRole home-improvement-diy {
   slug:                  "home-improvement-diy"
   name:                  "Home Improvement / DIY"
   category:              "personal"
-  lockedDomainIds:       ["diy-repairs"]
-  defaultDomainIds:      ["gardening", "sustainability", "home-inventory", "household-maintenance"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -189,9 +217,11 @@ seed agentRole mindfulness-coach {
   slug:                  "mindfulness-coach"
   name:                  "Mindfulness & Meditation Coach"
   category:              "personal"
-  lockedDomainIds:       ["mindfulness"]
-  defaultDomainIds:      ["journaling", "personal-growth", "mental-health", "meditation"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -201,9 +231,11 @@ seed agentRole entertainment-curator {
   slug:                  "entertainment-curator"
   name:                  "Entertainment Curator"
   category:              "personal"
-  lockedDomainIds:       ["entertainment-media"]
-  defaultDomainIds:      ["music-appreciation", "book-summaries", "restaurant-dining", "film-appreciation"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -214,9 +246,11 @@ seed agentRole senior-care-advisor {
   name:                  "Senior Care Advisor"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["elder-care"]
-  defaultDomainIds:      ["end-of-life-planning", "medical-records-personal", "estate-planning-personal", "personal-legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general information. Always recommend licensed practitioners for medical care, estate attorneys for legal documents, and certified eldercare advisors for personal situations."
   predefined:            true
@@ -228,9 +262,11 @@ seed agentRole real-estate-advisor {
   name:                  "Real Estate Educator"
   category:              "personal"
   tier:                  "B"
-  lockedDomainIds:       ["real-estate-listings"]
-  defaultDomainIds:      ["mortgage-shopping", "neighborhood-research", "home-inspection", "property-taxes", "lease-agreements", "closing-process", "personal-finance", "personal-taxes"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "personal-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general real estate information. Recommend a licensed realtor, attorney, or lender for any actual transaction."
   predefined:            true

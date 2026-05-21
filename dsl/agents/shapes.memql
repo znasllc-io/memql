@@ -83,7 +83,7 @@ shape agent agentMinimalForDedupe {
 }
 
 @row
-@description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the lock + default lists for the materialization step; recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
+@description("Full projection of an agentRole catalog row. Carries every field the cockpit's role picker + the agent-creation factory need: slug + display + category + tier for the picker; the skill-id lock + default + forbidden lists + maxSkills cap for the materialization step (Phase 2 cut: #158 -- replaces the seven flat domain/tool/liveKnowledge lists with a single skill-id surface); recommended policy / gender / system-prompt hints for the agent's initial values. predefined is included so the UI can render predefined rows as locked.")
 shape agentRole agentRoleFull {
   row.id
   payload.slug
@@ -91,13 +91,11 @@ shape agentRole agentRoleFull {
   payload.description
   payload.category
   payload.tier
-  payload.lockedDomainIds
-  payload.defaultDomainIds
-  payload.availableDomainIds
-  payload.lockedToolSlugs
-  payload.defaultToolSlugs
-  payload.forbiddenToolSlugs
-  payload.lockedLiveKnowledgeIds
+  payload.lockedSkillIds
+  payload.defaultSkillIds
+  payload.availableSkillIds
+  payload.forbiddenSkillIds
+  payload.maxSkills
   payload.recommendedPolicySlug
   payload.recommendedGender
   payload.systemPromptHints

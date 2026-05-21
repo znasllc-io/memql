@@ -199,6 +199,26 @@ QueryClient.prototype.queryActiveSkills = function (this: QueryClient, args: Que
   return this.executeNamed("queryActiveSkills", buildQueryActiveSkills(args), opts);
 };
 
+/** List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than queryActiveSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N querySkillBySlug round-trips. */
+// Bound concept: skill.
+export interface QueryActiveSkillsFullArgs {
+}
+
+export function buildQueryActiveSkillsFull(args: QueryActiveSkillsFullArgs): string {
+  void args;
+  return "queryActiveSkillsFull({})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    queryActiveSkillsFull(args?: QueryActiveSkillsFullArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.queryActiveSkillsFull = function (this: QueryClient, args: QueryActiveSkillsFullArgs = {} as QueryActiveSkillsFullArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("queryActiveSkillsFull", buildQueryActiveSkillsFull(args), opts);
+};
+
 /** Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list. */
 // Bound concept: space.
 export interface QueryActiveSpacesArgs {

@@ -10,9 +10,11 @@ seed agentRole civic-navigator {
   slug:                  "civic-navigator"
   name:                  "Civic Services Navigator"
   category:              "civic"
-  lockedDomainIds:       ["civic-services"]
-  defaultDomainIds:      ["government-benefits", "voting-election-basics", "tax-regulations", "personal-legal"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "civic-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -22,9 +24,11 @@ seed agentRole nonprofit-program-manager {
   slug:                  "nonprofit-program-manager"
   name:                  "Nonprofit Program Manager"
   category:              "civic"
-  lockedDomainIds:       ["nonprofit-management"]
-  defaultDomainIds:      ["grant-writing", "fundraising", "impact-measurement", "stakeholder-communications", "budgeting-forecasting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "civic-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

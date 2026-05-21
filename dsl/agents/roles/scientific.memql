@@ -11,9 +11,11 @@ seed agentRole physics-educator {
   slug:                  "physics-educator"
   name:                  "Physics Educator"
   category:              "scientific"
-  lockedDomainIds:       ["physics"]
-  defaultDomainIds:      ["classical-mechanics", "electromagnetism", "thermodynamics", "quantum-mechanics", "calculus"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "scientific-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -23,9 +25,11 @@ seed agentRole chemistry-educator {
   slug:                  "chemistry-educator"
   name:                  "Chemistry Educator"
   category:              "scientific"
-  lockedDomainIds:       ["chemistry"]
-  defaultDomainIds:      ["organic-chemistry", "inorganic-chemistry", "physical-chemistry", "biochemistry"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "scientific-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -35,9 +39,11 @@ seed agentRole biology-educator {
   slug:                  "biology-educator"
   name:                  "Biology Educator"
   category:              "scientific"
-  lockedDomainIds:       ["biology"]
-  defaultDomainIds:      ["cell-biology", "molecular-biology", "genetics", "ecology", "evolution"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "scientific-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -47,9 +53,11 @@ seed agentRole astronomy-educator {
   slug:                  "astronomy-educator"
   name:                  "Astronomy & Astrophysics Educator"
   category:              "scientific"
-  lockedDomainIds:       ["astronomy"]
-  defaultDomainIds:      ["astrophysics", "cosmology", "planetary-science"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "scientific-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -59,9 +67,11 @@ seed agentRole geology-educator {
   slug:                  "geology-educator"
   name:                  "Geology Educator"
   category:              "scientific"
-  lockedDomainIds:       ["geology"]
-  defaultDomainIds:      ["mineralogy", "plate-tectonics", "earth-history"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "scientific-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
