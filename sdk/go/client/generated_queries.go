@@ -2624,6 +2624,28 @@ func QueryWorkspaceForPlanBuild(args QueryWorkspaceForPlanArgs) string {
 	return b.String()
 }
 
+// SkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
+//
+// Bound concept: skillChangeEvent.
+type SkillChangeEventsForAgentArgs struct {
+	TargetAgentId string
+}
+
+// SkillChangeEventsForAgent calls the engine query skillChangeEventsForAgent.
+func (qc *QueryClient) SkillChangeEventsForAgent(ctx context.Context, args SkillChangeEventsForAgentArgs) (*Result, error) {
+	call := SkillChangeEventsForAgentBuild(args)
+	return qc.executeNamed(ctx, "skillChangeEventsForAgent", call)
+}
+
+func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
+	var b strings.Builder
+	b.WriteString("skillChangeEventsForAgent({")
+	b.WriteString("targetAgentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
 //
 // Bound concept: skill.

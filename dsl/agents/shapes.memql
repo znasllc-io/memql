@@ -5,7 +5,7 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, skill }
+use agents.concepts.{ agent, agentAuthorization, agentRole, skill, skillChangeEvent }
 
 @row
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
@@ -136,4 +136,19 @@ shape skill skillFull {
   payload.mintedByAgentId
   row.createdAt
   row.createdBy
+}
+
+@row
+@description("Full skillChangeEvent projection. Carries the changeKind + before/after snapshots + actor attribution (agent or user) + originating Plan link so the cockpit trace viewer (cockpit#125) can render an agent's skill-attach history inline with the plan task detail. Phase 3 surface (memql#159); rows are append-only.")
+shape skillChangeEvent skillChangeEventFull {
+  row.id
+  payload.targetAgentId
+  payload.skillId
+  payload.changeKind
+  payload.before
+  payload.after
+  payload.actorAgentId
+  payload.actorUserId
+  payload.planId
+  row.createdAt
 }
