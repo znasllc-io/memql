@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -51,7 +52,17 @@ func (a *App) transportBase() {
 	// users authenticate through the HTTP magic-link / OAuth /
 	// admin paths wired by transportIdentity.
 	if a.identityVerifier != nil {
-		base := verifier.StreamInterceptor(a.identityVerifier, a.Logger)
+		// Delegation resolver (memql#112). When the verified JWT
+		// subject has an active delegation row, the resolver builds a
+		// DelegationContext (role-ceiling-clamped, scope-narrowed,
+		// lifetime-checked) and the interceptor stamps it on the
+		// request ctx. Audit emit goes through a SlogAuditLogger
+		// rooted in a.Logger -- on the identity binary the boot
+		// path also wires a DB sink on top (see app/integrations_identity.go),
+		// but the resolver itself only needs the slog stream.
+		delegationAuditor := &identity.SlogAuditLogger{Logger: a.Logger}
+		delegationResolver := identity.NewEngineDelegationResolver(a.engine, delegationAuditor, a.Logger)
+		base := verifier.StreamInterceptor(a.identityVerifier, a.Logger, delegationResolver)
 		sessionChecked := memqlgrpc.NewSessionRevocationStreamInterceptor(base, a.engine, a.Logger)
 		guestChecked := memqlgrpc.NewGuestAwareStreamInterceptor(sessionChecked, a.engine, a.Logger)
 		operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(guestChecked, a.Logger)
