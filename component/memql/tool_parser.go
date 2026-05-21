@@ -43,13 +43,14 @@ type toolMemQLParser struct {
 
 // toolField represents a parsed field declaration in a tool body.
 type toolField struct {
-	name        string
-	typeName    string
-	elementType string // element type for `[]T` slice fields; "" for non-slice
-	required    bool
-	description string
-	enumValues  []string
-	defaultVal  string
+	name         string
+	typeName     string
+	elementType  string // element type for `[]T` slice fields; "" for non-slice
+	required     bool
+	autoInjected bool // @autoInjected -- server stamp wins; LLM-supplied values dropped at dispatch
+	description  string
+	enumValues   []string
+	defaultVal   string
 }
 
 // toolDecl represents the parsed top-level tool declaration.
@@ -306,6 +307,18 @@ func (p *toolMemQLParser) parseField() (*toolField, error) {
 			switch ann {
 			case "required":
 				field.required = true
+			case "autoInjected":
+				// Marker annotation -- no args. Signals the central
+				// validator (component/memql/si_tool_loop.go) that
+				// the server stamps this field's value at dispatch
+				// time, and any LLM-supplied value must be dropped
+				// before the handler runs. Closes the "LLM forges
+				// ownerUserId / agentId / etc." attack surface
+				// (memql#107). Prose-only "Auto-injected by the
+				// agent runtime; LLM should NOT supply this." in
+				// the @description is no longer load-bearing -- the
+				// annotation is.
+				field.autoInjected = true
 			case "description":
 				val, err := p.ParseParenString()
 				if err != nil {
@@ -356,6 +369,7 @@ func (d *toolDecl) toTool(origin string) (*Tool, error) {
 
 	properties := make(map[string]any)
 	var required []string
+	var autoInjected []string
 
 	for _, f := range d.fields {
 		prop := map[string]any{}
@@ -400,6 +414,9 @@ func (d *toolDecl) toTool(origin string) (*Tool, error) {
 		if f.required {
 			required = append(required, f.name)
 		}
+		if f.autoInjected {
+			autoInjected = append(autoInjected, f.name)
+		}
 	}
 
 	schema["properties"] = properties
@@ -413,10 +430,11 @@ func (d *toolDecl) toTool(origin string) (*Tool, error) {
 	}
 
 	tool := &Tool{
-		Name:        d.name,
-		Description: d.description,
-		InputSchema: json.RawMessage(schemaJSON),
-		Origin:      origin,
+		Name:               d.name,
+		Description:        d.description,
+		InputSchema:        json.RawMessage(schemaJSON),
+		AutoInjectedFields: autoInjected,
+		Origin:             origin,
 	}
 
 	// Handler
