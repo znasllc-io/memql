@@ -51,6 +51,17 @@ type Tool struct {
 	// assistant-role agents.
 	AllowedRoles []string `json:"allowedRoles,omitempty"`
 
+	// AutoInjectedFields enumerates argument names marked
+	// `@autoInjected` in the tool definition -- fields whose value
+	// is stamped server-side at dispatch time (spaceId,
+	// ownerUserId, agentId, etc.). The central validator in
+	// si_tool_loop drops any LLM-supplied value for these fields
+	// before the handler runs, and the server-side default (via
+	// common.ToolDefaultsFromContext) is the only source of truth.
+	// Closes the "LLM forges ownerUserId" attack surface
+	// (memql#107).
+	AutoInjectedFields []string `json:"autoInjectedFields,omitempty"`
+
 	// Origin tracks where this tool was loaded from (file path).
 	Origin string `json:"-"`
 }
@@ -164,6 +175,9 @@ func (t *Tool) clone() *Tool {
 	}
 	if len(t.AllowedRoles) > 0 {
 		cloned.AllowedRoles = append([]string(nil), t.AllowedRoles...)
+	}
+	if len(t.AutoInjectedFields) > 0 {
+		cloned.AutoInjectedFields = append([]string(nil), t.AutoInjectedFields...)
 	}
 
 	return cloned

@@ -134,19 +134,13 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 				_ = json.Unmarshal([]byte(rawArgs), &args)
 			}
 
-			// Inject context-provided defaults into tool args.
-			if defaults := common.ToolDefaultsFromContext(ctx); len(defaults) > 0 {
-				if args == nil {
-					args = make(map[string]any)
-				}
-				for k, v := range defaults {
-					if _, exists := args[k]; !exists {
-						args[k] = v
-					}
-				}
-			}
-
+			// Look up the tool BEFORE merging defaults so the merge
+			// can consult tool.AutoInjectedFields (memql#107). The
+			// merge overwrites LLM-supplied values for auto-injected
+			// fields with the server's default, or drops them when
+			// the server has no default.
 			tool, err := e.tools.Get(toolName)
+			args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
 			var toolResult *ToolCallResult
 			if err != nil {
 				toolResult = &ToolCallResult{
@@ -405,16 +399,14 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 			if rawArgs != "" {
 				_ = json.Unmarshal([]byte(rawArgs), &args)
 			}
-			if defaults := common.ToolDefaultsFromContext(ctx); len(defaults) > 0 {
-				if args == nil {
-					args = make(map[string]any)
-				}
-				for k, v := range defaults {
-					if _, exists := args[k]; !exists {
-						args[k] = v
-					}
-				}
-			}
+			// Apply tool defaults + @autoInjected validator
+			// (memql#107). The goroutine below re-resolves the tool
+			// for dispatch; this lookup is just so the merge can
+			// consult tool.AutoInjectedFields. Lookup failure is OK
+			// -- the dispatch path's unknown-tool branch rejects the
+			// call.
+			tool, _ := e.tools.Get(tn)
+			args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
 
 			pending = append(pending, pendingCall{
 				index:   i,
