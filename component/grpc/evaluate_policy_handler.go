@@ -19,10 +19,10 @@ import (
 // Error contract (see EvaluatePolicyResult.error_code in
 // memql.proto):
 //
-//   POLICY_UNKNOWN              -- policy_name does not resolve
-//   POLICY_NOT_FRONTEND_VISIBLE -- policy lacks @frontend_visible
-//   POLICY_TIER_MISMATCH        -- policy is not tier=bff
-//   POLICY_RUNTIME_ERROR        -- evaluation errored at runtime
+//	POLICY_UNKNOWN              -- policy_name does not resolve
+//	POLICY_NOT_FRONTEND_VISIBLE -- policy lacks @frontend_visible
+//	POLICY_TIER_MISMATCH        -- policy is not tier=bff
+//	POLICY_RUNTIME_ERROR        -- evaluation errored at runtime
 func (s *streamSession) handleEvaluatePolicy(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.EvaluatePolicyMsg) error {
 	requestId := ""
 	if msg != nil {

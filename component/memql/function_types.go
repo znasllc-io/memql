@@ -315,11 +315,11 @@ func (*ArgRefExpression) isExpressionNode() {}
 //
 // Exposed fields (resolved at eval time):
 //
-//   caller.userId        -- v1:identity:user.id
-//   caller.primaryEmail  -- primary email
-//   caller.role          -- cluster-wide role (owner/admin/writer/reader)
-//   caller.identityId    -- v1:identity:identity.id used for the request
-//   caller.isOwner       -- bool short-circuit for owner-bypass paths
+//	caller.userId        -- v1:identity:user.id
+//	caller.primaryEmail  -- primary email
+//	caller.role          -- cluster-wide role (owner/admin/writer/reader)
+//	caller.identityId    -- v1:identity:identity.id used for the request
+//	caller.isOwner       -- bool short-circuit for owner-bypass paths
 //
 // When no AccessContext is attached (e.g. no-auth dev mode), the
 // resolver falls back to treating the caller as an owner.

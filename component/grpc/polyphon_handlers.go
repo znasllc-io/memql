@@ -165,4 +165,3 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 	ctx = auth.ContextWithClaims(ctx, claims)
 	return auth.ContextWithToken(ctx, token)
 }
-

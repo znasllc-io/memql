@@ -23,9 +23,9 @@ import (
 // FunctionSlice is one extracted function declaration with its
 // preamble and inferred kind / name.
 type FunctionSlice struct {
-	Source string                       // slice text (preamble + declaration body)
-	Kind   languageParser.FunctionType  // Query / Mutation / Logic / Automation / Spec / Shape / Tool / etc.
-	Name   string                       // function name from the header
+	Source string                      // slice text (preamble + declaration body)
+	Kind   languageParser.FunctionType // Query / Mutation / Logic / Automation / Spec / Shape / Tool / etc.
+	Name   string                      // function name from the header
 }
 
 // functionDeclHeader matches every top-level function-style header

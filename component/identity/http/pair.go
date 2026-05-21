@@ -436,4 +436,3 @@ func (s *Server) writeRedeemError(w http.ResponseWriter, status int, code, messa
 		Error:     message,
 	})
 }
-

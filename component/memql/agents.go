@@ -376,4 +376,3 @@ func getStringArrayField(m map[string]any, key string) []string {
 	}
 	return out
 }
-

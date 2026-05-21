@@ -119,4 +119,3 @@ func (c *CognitionIntegration) generateStreaming(
 
 	return c.runStreamingToolLoop(ctx, streamProvider, messages, tools, spaceId, participantId, replyId, "stream")
 }
-

@@ -106,12 +106,12 @@ func deriveGRPCEndpoint(identityURL string, env func(string) string) string {
 }
 
 // deriveClientId picks the client id the cockpit should use. Order:
-//   1. MEMQL_DISCOVERY_CLIENT_ID explicit override.
-//   2. The first registered client's clientId. Operators register
-//      the cockpit alongside the CoPresent SPA via
-//      IDENTITY_REGISTERED_CLIENTS.
-//   3. Empty -- cockpit will refuse to use the discovery shortcut
-//      and prompt for explicit flags.
+//  1. MEMQL_DISCOVERY_CLIENT_ID explicit override.
+//  2. The first registered client's clientId. Operators register
+//     the cockpit alongside the CoPresent SPA via
+//     IDENTITY_REGISTERED_CLIENTS.
+//  3. Empty -- cockpit will refuse to use the discovery shortcut
+//     and prompt for explicit flags.
 func deriveClientId(cfg Config, env func(string) string) string {
 	if v := strings.TrimSpace(env("MEMQL_DISCOVERY_CLIENT_ID")); v != "" {
 		return v

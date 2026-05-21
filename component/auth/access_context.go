@@ -7,10 +7,10 @@ import "context"
 // on a connection (after the identity-issued JWT has been validated)
 // and attached to every subsequent ctx on that stream.
 //
-//   UserId         v1:identity:user.id
-//   PrimaryEmail   denormalized from the user record
-//   Role           cluster-wide role (owner / admin / writer / reader)
-//   IdentityId     which v1:identity:identity the caller authenticated with
+//	UserId         v1:identity:user.id
+//	PrimaryEmail   denormalized from the user record
+//	Role           cluster-wide role (owner / admin / writer / reader)
+//	IdentityId     which v1:identity:identity the caller authenticated with
 //
 // Per-row authorization (see docs/auth/per-row-authz-audit.md) is the
 // only gate post-#56; the partition-ACL dimension that previously

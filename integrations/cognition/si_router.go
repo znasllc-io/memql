@@ -989,7 +989,7 @@ func buildRoutingSchema(candidates []polyphon.AgentCandidate) json.RawMessage {
 				"type":        "boolean",
 				"description": "true if an agent should speak, false if silence is the right answer.",
 			},
-			"agentId":   agentIdProperty,
+			"agentId": agentIdProperty,
 			"agentName": map[string]any{
 				"type":        "string",
 				"description": "Chosen agent's display name. Must match the agent with agentId.",

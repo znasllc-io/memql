@@ -39,12 +39,12 @@ func (m *mockStream) Recv() (*memqlv1.MemqlServerMessage, error) {
 }
 
 // Implement remaining grpc.ClientStream methods as no-ops.
-func (m *mockStream) Header() (metadata.MD, error)          { return nil, nil }
-func (m *mockStream) Trailer() metadata.MD                  { return nil }
-func (m *mockStream) CloseSend() error                      { close(m.recvCh); return nil }
-func (m *mockStream) Context() context.Context               { return context.Background() }
-func (m *mockStream) SendMsg(any) error                      { return nil }
-func (m *mockStream) RecvMsg(any) error                      { return nil }
+func (m *mockStream) Header() (metadata.MD, error) { return nil, nil }
+func (m *mockStream) Trailer() metadata.MD         { return nil }
+func (m *mockStream) CloseSend() error             { close(m.recvCh); return nil }
+func (m *mockStream) Context() context.Context     { return context.Background() }
+func (m *mockStream) SendMsg(any) error            { return nil }
+func (m *mockStream) RecvMsg(any) error            { return nil }
 
 func TestDispatcherCorrelation(t *testing.T) {
 	stream := newMockStream()

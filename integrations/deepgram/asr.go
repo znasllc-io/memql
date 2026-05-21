@@ -77,11 +77,11 @@ func (c *ASRClient) StartStream(ctx context.Context, config polyphon.ASRConfig) 
 	conn.SetReadLimit(512 * 1024)
 
 	s := &deepgramASRStream{
-		conn:                conn,
-		results:             make(chan polyphon.ASRResult, 16),
-		done:                make(chan struct{}),
-		logger:              c.logger,
-		clientEOUTimeoutMs:  c.cfg.ClientEOUTimeoutMs,
+		conn:               conn,
+		results:            make(chan polyphon.ASRResult, 16),
+		done:               make(chan struct{}),
+		logger:             c.logger,
+		clientEOUTimeoutMs: c.cfg.ClientEOUTimeoutMs,
 	}
 	go s.receiveLoop(ctx)
 	s.startWatchdog()

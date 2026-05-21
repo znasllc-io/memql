@@ -69,13 +69,13 @@ func findRepoRoot() (string, error) {
 // --- Part 1: Migrate JSON concepts to concept.memql ---
 
 type conceptMetadata struct {
-	Description     string                `json:"description"`
-	Type            string                `json:"type"`
-	CacheTTLSeconds *int64                `json:"cacheTTLSeconds"`
-	SkipDeleted     *bool                 `json:"skipDeleted"`
-	EnforceRequired *bool                 `json:"enforceRequired"`
-	DefaultFilter   string                `json:"defaultFilter"`
-	Relationships   []relationshipMeta    `json:"relationships"`
+	Description     string             `json:"description"`
+	Type            string             `json:"type"`
+	CacheTTLSeconds *int64             `json:"cacheTTLSeconds"`
+	SkipDeleted     *bool              `json:"skipDeleted"`
+	EnforceRequired *bool              `json:"enforceRequired"`
+	DefaultFilter   string             `json:"defaultFilter"`
+	Relationships   []relationshipMeta `json:"relationships"`
 }
 
 type relationshipMeta struct {
@@ -87,20 +87,20 @@ type relationshipMeta struct {
 }
 
 type jsonSchema struct {
-	ID                   string                    `json:"$id"`
-	AdditionalProperties *bool                     `json:"additionalProperties"`
-	Properties           map[string]jsonProperty   `json:"properties"`
-	Required             []string                  `json:"required"`
+	ID                   string                  `json:"$id"`
+	AdditionalProperties *bool                   `json:"additionalProperties"`
+	Properties           map[string]jsonProperty `json:"properties"`
+	Required             []string                `json:"required"`
 }
 
 type jsonProperty struct {
-	Type        any               `json:"type"`
-	Description string            `json:"description"`
-	Default     any               `json:"default"`
-	Enum        []any             `json:"enum"`
-	Format      string            `json:"format"`
+	Type        any                     `json:"type"`
+	Description string                  `json:"description"`
+	Default     any                     `json:"default"`
+	Enum        []any                   `json:"enum"`
+	Format      string                  `json:"format"`
 	Properties  map[string]jsonProperty `json:"properties"`
-	Items       *jsonProperty     `json:"items"`
+	Items       *jsonProperty           `json:"items"`
 }
 
 func migrateConceptsToMemQL(root string) error {
@@ -425,8 +425,8 @@ func buildConceptMap(root string) (map[string]string, error) {
 		if len(parts) < 2 {
 			return nil
 		}
-		id := strings.Join(parts, ":")                  // v1:domain:entity(:sub)*
-		useName := strings.Join(parts[1:], ".")         // domain.entity.sub
+		id := strings.Join(parts, ":")          // v1:domain:entity(:sub)*
+		useName := strings.Join(parts[1:], ".") // domain.entity.sub
 		m[id] = useName
 		return nil
 	})

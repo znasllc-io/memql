@@ -34,22 +34,23 @@ import (
 // allowedLogicAnnotations enumerates the annotations a `logic NAME`
 // block may carry. Anything else is hard-rejected at parse time.
 //
-//   @description("text")            documentation
-//   @enabled  /  @disabled          lifecycle (toggle without delete)
-//   @deprecated("migration hint")   surfaces a warning at use
+//	@description("text")            documentation
+//	@enabled  /  @disabled          lifecycle (toggle without delete)
+//	@deprecated("migration hint")   surfaces a warning at use
 //
 // Dependency declarations (every named target referenced in the body
 // must have a matching declaration):
-//   @useConcept(<bareName>)
-//   @useShape(<bareName>)
-//   @useSpec(<name>)
-//   @useTrait(<name>)
-//   @useQuery(<name>)
-//   @useMutation(<name>)
-//   @useLogic(<name>)
-//   @useBuiltin(<name>)
-//   @usePrompt(<name>)
-//   @useTool(<name>)
+//
+//	@useConcept(<bareName>)
+//	@useShape(<bareName>)
+//	@useSpec(<name>)
+//	@useTrait(<name>)
+//	@useQuery(<name>)
+//	@useMutation(<name>)
+//	@useLogic(<name>)
+//	@useBuiltin(<name>)
+//	@usePrompt(<name>)
+//	@useTool(<name>)
 var allowedLogicAnnotations = map[string]bool{
 	"description": true,
 	"enabled":     true,

@@ -161,4 +161,3 @@ func (p *policyMemQLParser) parseDecorator(cfg *PolicyConfig) error {
 	}
 	return nil
 }
-

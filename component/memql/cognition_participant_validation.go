@@ -27,28 +27,28 @@ const participantPerUserAgentCap = 3
 // Behavior summary (SI participants only -- human participants pass
 // through untouched):
 //
-//   1. forUserId is server-stamped from the authenticated caller for
-//      non-elevated callers when the field is missing. A non-elevated
-//      caller who supplies an explicit forUserId that does not match
-//      their authenticated subject is rejected outright -- silently
-//      overriding would mask a buggy / malicious client.
+//  1. forUserId is server-stamped from the authenticated caller for
+//     non-elevated callers when the field is missing. A non-elevated
+//     caller who supplies an explicit forUserId that does not match
+//     their authenticated subject is rejected outright -- silently
+//     overriding would mask a buggy / malicious client.
 //
-//   2. Elevated actors (system / owner / developer / admin / writer)
-//      may supply any forUserId. The autoJoinSI automation relies on
-//      this to land the owner GA with forUserId = space-creator.
+//  2. Elevated actors (system / owner / developer / admin / writer)
+//     may supply any forUserId. The autoJoinSI automation relies on
+//     this to land the owner GA with forUserId = space-creator.
 //
-//   3. Per-user-per-space 3-cap. Counts current-active SI participants
-//      in the same space that share the resolved forUserId, excluding
-//      the participant id being inserted. Reject when post-insert
-//      count would exceed 3 (i.e., new row is status='active' AND
-//      current count is already at the cap with the new id not
-//      already counted).
+//  3. Per-user-per-space 3-cap. Counts current-active SI participants
+//     in the same space that share the resolved forUserId, excluding
+//     the participant id being inserted. Reject when post-insert
+//     count would exceed 3 (i.e., new row is status='active' AND
+//     current count is already at the cap with the new id not
+//     already counted).
 //
-//   4. GA-pin protection. If the latest version of the participant id
-//      being superseded carries isGroupGA=true and the new row's
-//      status is 'left', reject for non-elevated callers. The owner
-//      GA cannot be removed via the Roster tab; only system actors
-//      (e.g., space-deletion cleanup) may demote it.
+//  4. GA-pin protection. If the latest version of the participant id
+//     being superseded carries isGroupGA=true and the new row's
+//     status is 'left', reject for non-elevated callers. The owner
+//     GA cannot be removed via the Roster tab; only system actors
+//     (e.g., space-deletion cleanup) may demote it.
 //
 // Called from executor.executeInsert; not part of the public API.
 func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, payload map[string]any, mutationId, actor string) error {

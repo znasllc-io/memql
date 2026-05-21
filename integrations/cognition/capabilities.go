@@ -156,4 +156,3 @@ func (c *CognitionIntegration) handleTrackPresence(ctx context.Context, args map
 
 	return []memorynodes.MemoryNode{node}, nil
 }
-

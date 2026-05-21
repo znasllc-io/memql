@@ -401,7 +401,6 @@ func (s *Server) SetConceptRegistry(reg memoryNodes.Registry) {
 	s.conceptRegistry = reg
 }
 
-
 // EventBus returns the event bus used by the gRPC server.
 func (s *Server) EventBus() *events.Bus {
 	if s == nil {
@@ -412,18 +411,18 @@ func (s *Server) EventBus() *events.Bus {
 
 type service struct {
 	memqlv1.UnimplementedMemqlServiceServer
-	logger          *slog.Logger
-	engine          *memqlengine.MemQLEngine
-	eventBus        *events.Bus
-	sttProvider     stt.StreamingProvider
-	wiring          *bus.Wiring
-	sense           *sense.Service
-	scoreEngine     *polyphon.ScoreEngine
-	roomProvider    polyphon.RoomProvider
-	conceptRegistry memoryNodes.Registry
+	logger           *slog.Logger
+	engine           *memqlengine.MemQLEngine
+	eventBus         *events.Bus
+	sttProvider      stt.StreamingProvider
+	wiring           *bus.Wiring
+	sense            *sense.Service
+	scoreEngine      *polyphon.ScoreEngine
+	roomProvider     polyphon.RoomProvider
+	conceptRegistry  memoryNodes.Registry
 	identityResolver *auth.IdentityResolver
-	aiForwarder     *SIForwardRouter // non-nil on BFF binaries; proxies AI/voice to workers
-	verifier        *verifier.Verifier // re-verifies presented tokens for in-stream rotation; nil on no-auth nodes
+	aiForwarder      *SIForwardRouter   // non-nil on BFF binaries; proxies AI/voice to workers
+	verifier         *verifier.Verifier // re-verifies presented tokens for in-stream rotation; nil on no-auth nodes
 
 	// agentReplier handles AgentGenerateTurnMsg on agent nodes. Non-nil
 	// only on agent binaries (set via Server.SetAgentReplier during app
@@ -688,10 +687,10 @@ type streamSession struct {
 
 func newStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer, identity auth.UserIdentity) *streamSession {
 	sess := &streamSession{
-		service:   svc,
-		stream:    stream,
-		logger:    svc.logger,
-		identity:  identity,
+		service:    svc,
+		stream:     stream,
+		logger:     svc.logger,
+		identity:   identity,
 		eventChan:  make(chan events.Event, 256),
 		closeChan:  make(chan struct{}),
 		voiceTurns: make(map[string]context.CancelFunc),

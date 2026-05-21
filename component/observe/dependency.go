@@ -115,7 +115,7 @@ func (c *SinkComponent) Stop(ctx context.Context) {
 // surface. Ready closes when Start has finished its setup
 // regardless of whether the DB resolved (the runtime should not
 // block other components on us being healthy).
-func (c *SinkComponent) IsRunning() bool             { return c.running.Load() }
-func (c *SinkComponent) Order() int                  { return c.order }
+func (c *SinkComponent) IsRunning() bool                     { return c.running.Load() }
+func (c *SinkComponent) Order() int                          { return c.order }
 func (c *SinkComponent) ComponentName() common.ComponentName { return ComponentName }
-func (c *SinkComponent) Ready() <-chan struct{}      { return c.readyCh }
+func (c *SinkComponent) Ready() <-chan struct{}              { return c.readyCh }

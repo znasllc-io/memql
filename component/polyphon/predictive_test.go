@@ -7,10 +7,10 @@ import (
 
 func TestPatternBasedPrediction(t *testing.T) {
 	tests := []struct {
-		name           string
-		phase          ConversationPhase
-		wantTopics     bool
-		wantNextAgent  bool
+		name          string
+		phase         ConversationPhase
+		wantTopics    bool
+		wantNextAgent bool
 	}{
 		{"greeting phase anticipates introductions", PhaseGreeting, true, true},
 		{"exploration phase anticipates domain questions", PhaseExploration, true, true},
@@ -105,8 +105,8 @@ func TestParsePredictionResult(t *testing.T) {
 
 	t.Run("map input", func(t *testing.T) {
 		input := map[string]any{
-			"likelyNextAgent": "Kai",
-			"confidence":      0.6,
+			"likelyNextAgent":   "Kai",
+			"confidence":        0.6,
 			"anticipatedTopics": []any{"design"},
 		}
 		state, err := parsePredictionResult(input)

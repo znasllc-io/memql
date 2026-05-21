@@ -83,10 +83,10 @@ func (s *STTIntegration) handleTranscribe(ctx context.Context, args map[string]a
 	}
 
 	payloadBytes, _ := json.Marshal(map[string]any{
-		"text":         text,
-		"provider":     s.provider.Name(),
-		"format":       format,
-		"sampleRate":   sampleRate,
+		"text":          text,
+		"provider":      s.provider.Name(),
+		"format":        format,
+		"sampleRate":    sampleRate,
 		"transcribedAt": time.Now().UTC().Format(time.RFC3339),
 	})
 

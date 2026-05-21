@@ -244,18 +244,18 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 // tree and classifies it into one of four buckets:
 //
 //   - owned:   filter references `actor.userId` (caller-scoped read)
-//              or mutation insert/update stamps `ownerUserId`/`userId`
-//              from `actor.userId` (caller-scoped write)
+//     or mutation insert/update stamps `ownerUserId`/`userId`
+//     from `actor.userId` (caller-scoped write)
 //   - admin:   filter or body references `actor.isClusterOwner` or
-//              the equivalent `requiresClusterOwner` spec call
+//     the equivalent `requiresClusterOwner` spec call
 //   - public:  carries the `@public` annotation
 //   - flagged: none of the above AND the construct references a
-//              user-scope field (`payload.ownerUserId`,
-//              `payload.userId`, etc.) -- a candidate for caller-
-//              scoping that the author forgot
+//     user-scope field (`payload.ownerUserId`,
+//     `payload.userId`, etc.) -- a candidate for caller-
+//     scoping that the author forgot
 //   - other:   none of the above, no user-scope field referenced
-//              (e.g. concept catalogs, cluster topology, system
-//              metadata reads)
+//     (e.g. concept catalogs, cluster topology, system
+//     metadata reads)
 //
 // The test HARD-FAILS on any flagged construct -- the per-domain
 // follow-up PRs for #54 closed every existing gap, and any new
@@ -379,10 +379,10 @@ func TestPerRowAuthzClassification(t *testing.T) {
 		for _, f := range flagged {
 			t.Errorf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
 		}
-		t.Logf("\nResolution options:\n"+
-			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n"+
-			"  (2) add an admin gate: reference `actor.isClusterOwner` or a `requiresClusterOwner` spec\n"+
-			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n"+
+		t.Logf("\nResolution options:\n" +
+			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n" +
+			"  (2) add an admin gate: reference `actor.isClusterOwner` or a `requiresClusterOwner` spec\n" +
+			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n" +
 			"See docs/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
 	}
 }
@@ -429,7 +429,6 @@ func matchingClose(src string, openIdx int) int {
 	}
 	return -1
 }
-
 
 // visitFilterPredicates walks every .memql file in the unified tree,
 // extracts filter-clause lines, splits on `;`, and invokes f for

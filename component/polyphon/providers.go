@@ -157,12 +157,12 @@ type AgentRoomConfig struct {
 
 // RoomInfo describes the current state of an audio room.
 type RoomInfo struct {
-	RoomName   string             `json:"roomName"`
-	RoomSID    string             `json:"roomSID"`
-	SpaceId    string             `json:"spaceId"`
-	Active     bool               `json:"active"`
-	Humans     []RoomParticipant  `json:"humans"`
-	Agents     []RoomParticipant  `json:"agents"`
+	RoomName string            `json:"roomName"`
+	RoomSID  string            `json:"roomSID"`
+	SpaceId  string            `json:"spaceId"`
+	Active   bool              `json:"active"`
+	Humans   []RoomParticipant `json:"humans"`
+	Agents   []RoomParticipant `json:"agents"`
 }
 
 // RoomParticipant describes a participant in a room.

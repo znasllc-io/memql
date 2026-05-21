@@ -30,15 +30,15 @@ import (
 // UI affordances. The cognition pipeline doesn't force agents out of
 // reactive states when picking a turn winner.
 const (
-	presenceStateIdle          = "idle"
-	presenceStateThinking      = "thinking"
-	presenceStateTyping        = "typing"
-	presenceStateUsingTool     = "using_tool"
-	presenceStateWorking       = "working"
-	presenceStateResponding    = "responding"
-	presenceStateWaiting       = "waiting"
-	presenceStateNeedsHuman    = "needs_human"
-	presenceStateError         = "error"
+	presenceStateIdle       = "idle"
+	presenceStateThinking   = "thinking"
+	presenceStateTyping     = "typing"
+	presenceStateUsingTool  = "using_tool"
+	presenceStateWorking    = "working"
+	presenceStateResponding = "responding"
+	presenceStateWaiting    = "waiting"
+	presenceStateNeedsHuman = "needs_human"
+	presenceStateError      = "error"
 	// Reactive states (phase 3): set by the heartbeat-driven topic
 	// listener and standing-task scheduler when an agent is doing
 	// background work outside the primary turn-taking loop.
@@ -112,4 +112,3 @@ func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, sp
 	_, err := c.engine.Execute(ctx, query)
 	return err
 }
-

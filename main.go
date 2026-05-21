@@ -24,13 +24,13 @@ const (
 )
 
 var (
-	fatalWithLoggerFn        = logger.FatalWithLogger
-	fatalFn                  = logger.Fatal
-	loadServiceEnvOptionsFn  = service.LoadDefaultServiceEnvOptions
-	startDependenciesFn      = startDependencies
-	waitForShutdownSignalFn  = waitForShutdownSignal
-	stopDependenciesFn       = stopDependencies
-	resolveVersionFn         = resolveServiceVersion
+	fatalWithLoggerFn       = logger.FatalWithLogger
+	fatalFn                 = logger.Fatal
+	loadServiceEnvOptionsFn = service.LoadDefaultServiceEnvOptions
+	startDependenciesFn     = startDependencies
+	waitForShutdownSignalFn = waitForShutdownSignal
+	stopDependenciesFn      = stopDependencies
+	resolveVersionFn        = resolveServiceVersion
 )
 
 func main() {

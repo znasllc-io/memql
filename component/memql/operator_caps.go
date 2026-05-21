@@ -146,10 +146,10 @@ var WorkbenchCapabilityNames = []string{
 // edge case we don't currently use but the expander handles
 // gracefully.
 var capabilitySlugs = map[string][]string{
-	"copresent-control":      OperatorPrimitiveNames,
-	"computer-use-headless":  WorkerHeadlessCapabilityNames,
-	"computer-use-embodied":  WorkerEmbodiedCapabilityNames,
-	"workbench-use":          WorkbenchCapabilityNames,
+	"copresent-control":     OperatorPrimitiveNames,
+	"computer-use-headless": WorkerHeadlessCapabilityNames,
+	"computer-use-embodied": WorkerEmbodiedCapabilityNames,
+	"workbench-use":         WorkbenchCapabilityNames,
 }
 
 // ExpandCapabilitySlugs takes a raw tool list from an Agent record

@@ -447,11 +447,11 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 			OwnerUserId:   req.OwnerUserId,
 			CorrelationId: req.CorrelationId,
 			Detail: map[string]any{
-				"requestedScope":     gate.requiredScope,
+				"requestedScope":      gate.requiredScope,
 				"requestedCapability": gate.requiredCapability,
-				"errorMessage":       gate.errorMessage,
-				"planId":             req.PlanId,
-				"taskId":             req.TaskId,
+				"errorMessage":        gate.errorMessage,
+				"planId":              req.PlanId,
+				"taskId":              req.TaskId,
 			},
 			Timestamp: d.clock(),
 		})

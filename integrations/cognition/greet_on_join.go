@@ -331,7 +331,6 @@ func agentWantsGreeting(agent *agentPayload) bool {
 	return false
 }
 
-
 // greetingExists is the dedup probe -- true when an utterance with
 // payload.source.kind=="agentGreeting" already exists for the given
 // (space, agent). Mirrors the queryHasSIResponseForReply traversal

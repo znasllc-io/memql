@@ -228,7 +228,6 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 	return result, nil
 }
 
-
 func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExpression, conceptContext string) (compiledExpression, error) {
 	if expr == nil {
 		return compiledExpression{}, fmt.Errorf("comparison expression is nil")
@@ -1168,7 +1167,6 @@ func normalizeCollectionValues(value any) (*normalizedCollection, error) {
 	return collection, nil
 }
 
-
 func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpression, payloadCache map[string]map[string]any) (bool, error) {
 	if cmp == nil {
 		return true, nil
@@ -1553,7 +1551,6 @@ func valueInCollection(actual any, collection *normalizedCollection) (bool, erro
 		return false, fmt.Errorf("unsupported collection kind %v", collection.kind)
 	}
 }
-
 
 func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExpression, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
 	db := e.database()

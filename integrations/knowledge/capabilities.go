@@ -5,12 +5,12 @@
 //
 // Capabilities exposed to the DSL:
 //
-//   integration.knowledge.ingest  -- split a document into chunks, embed each,
-//                                    and persist both the chunk rows and their
-//                                    vectors. Safe to re-run for the same
-//                                    sourceRef -- duplicate chunks are replaced
-//                                    (content-hashed id + ON CONFLICT in
-//                                    node_vectors).
+//	integration.knowledge.ingest  -- split a document into chunks, embed each,
+//	                                 and persist both the chunk rows and their
+//	                                 vectors. Safe to re-run for the same
+//	                                 sourceRef -- duplicate chunks are replaced
+//	                                 (content-hashed id + ON CONFLICT in
+//	                                 node_vectors).
 //
 // Retrieval used to live here too (knowledge.lookup + knowledgeLookup
 // builtin) but has moved to integrations/similarity (the generic

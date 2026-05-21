@@ -25,7 +25,7 @@ func TestIsLocalHost(t *testing.T) {
 		// they pair with a real cert and require the encryption key.
 		{"identity.acme.com", false},
 		{"identity.staging.acme.com", false},
-		{"local.io", false},                     // local-only-as-TLD-label, not dev shape
+		{"local.io", false},                      // local-only-as-TLD-label, not dev shape
 		{"localdev.example.com", false},          // "local" must be a full label, not a substring
 		{"identity.localdev.example.com", false}, // ditto
 	}

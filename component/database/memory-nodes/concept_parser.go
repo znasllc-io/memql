@@ -110,13 +110,13 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 // JSON-Schema builder. Kept around so the builder doesn't need to know
 // about the shared AST's ConceptDecl shape.
 type parsedConcept struct {
-	description string
-	conceptType string
-	version     string // @version("vN") override; empty means derived from path
-	properties  []parsedProperty
-	required        []string
-	relationships   []RelationshipDefinition
-	noAdditional    bool // default true for concept.memql
+	description   string
+	conceptType   string
+	version       string // @version("vN") override; empty means derived from path
+	properties    []parsedProperty
+	required      []string
+	relationships []RelationshipDefinition
+	noAdditional  bool // default true for concept.memql
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema

@@ -93,9 +93,9 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 		ctx = ensureContext(ctx)
 
 		const (
-			extensionName    = "timescaledb"
-			statusId         = "system.timescaledb.status"
-			statusCreatedBy  = "system"
+			extensionName   = "timescaledb"
+			statusId        = "system.timescaledb.status"
+			statusCreatedBy = "system"
 		)
 
 		statusCreatedAt := time.Unix(0, 0).UTC()

@@ -138,4 +138,3 @@ func TestChunkPCMToWAV_SmallInput(t *testing.T) {
 		t.Error("Small chunk doesn't start with RIFF")
 	}
 }
-

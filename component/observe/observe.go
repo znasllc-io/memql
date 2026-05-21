@@ -101,7 +101,7 @@ const EnvLevelVar = "MEMQL_OBSERVE_LEVEL"
 
 var (
 	mu           sync.RWMutex
-	defaultLevel = LevelOff
+	defaultLevel      = LevelOff
 	sink         Sink = slogSink{} // safe default; replaced by Register
 )
 

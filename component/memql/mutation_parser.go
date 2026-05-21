@@ -24,37 +24,41 @@ import (
 // allowedMutationAnnotations enumerates the annotations a
 // `mutation NAME` declaration may carry.
 //
-//   @description("text")              documentation
-//   @enabled / @disabled               lifecycle
-//   @deprecated("migration hint")      surfaces a warning at use
-//   @internal                          hide from external surfaces
+//	@description("text")              documentation
+//	@enabled / @disabled               lifecycle
+//	@deprecated("migration hint")      surfaces a warning at use
+//	@internal                          hide from external surfaces
 //
 // Mutation-specific behaviour:
-//   @idempotent                        mark as safe to retry
-//   @destructive                       semantic flag: deletes data
-//   @requiresConfirmation              UI / SI must confirm before invoking
-//   @actor("system" | "caller")        which actor identity stamps createdBy
+//
+//	@idempotent                        mark as safe to retry
+//	@destructive                       semantic flag: deletes data
+//	@requiresConfirmation              UI / SI must confirm before invoking
+//	@actor("system" | "caller")        which actor identity stamps createdBy
 //
 // Performance / reliability:
-//   @timeout("30s")                    hard execution cap
-//   @rateLimit(requests=N, per="1h")   per-caller throttle
-//   @retry(N)                          retry count on failure
-//   @audit                             emit v1:identity:auditEvent on call
+//
+//	@timeout("30s")                    hard execution cap
+//	@rateLimit(requests=N, per="1h")   per-caller throttle
+//	@retry(N)                          retry count on failure
+//	@audit                             emit v1:identity:auditEvent on call
 //
 // Access control:
-//   @role("admin")
-//   @permission("...")
+//
+//	@role("admin")
+//	@permission("...")
 //
 // Dependency declarations:
-//   @useConcept(<bareName>)            REQUIRED -- a mutation always
-//                                      writes to exactly one concept
-//   @useShape(<bareName>)
-//   @useSpec(<name>)
-//   @useTrait(<name>)
-//   @useQuery(<name>)                  mutations may read via queries
-//   @useMutation(<name>)               mutations may compose mutations
-//   @useLogic(<name>)
-//   @useBuiltin(<name>)
+//
+//	@useConcept(<bareName>)            REQUIRED -- a mutation always
+//	                                   writes to exactly one concept
+//	@useShape(<bareName>)
+//	@useSpec(<name>)
+//	@useTrait(<name>)
+//	@useQuery(<name>)                  mutations may read via queries
+//	@useMutation(<name>)               mutations may compose mutations
+//	@useLogic(<name>)
+//	@useBuiltin(<name>)
 var allowedMutationAnnotations = map[string]bool{
 	"description":          true,
 	"enabled":              true,

@@ -46,4 +46,3 @@ func TestEvaluator_EvaluateValue_Pretty(t *testing.T) {
 		t.Fatalf("expected non-empty pretty string")
 	}
 }
-

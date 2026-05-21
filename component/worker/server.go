@@ -182,12 +182,12 @@ func (s *server) admitRegistration(
 			TargetType:  "worker",
 			OwnerUserId: registration.OwnerUserId,
 			Detail: map[string]any{
-				"name":          registration.Name,
-				"capabilities":  registration.Capabilities,
-				"buildTag":      registration.BuildTag,
-				"version":       registration.Version,
-				"sourceIP":      sourceIP,
-				"connectedAt":   now.Format(time.RFC3339),
+				"name":         registration.Name,
+				"capabilities": registration.Capabilities,
+				"buildTag":     registration.BuildTag,
+				"version":      registration.Version,
+				"sourceIP":     sourceIP,
+				"connectedAt":  now.Format(time.RFC3339),
 			},
 			Timestamp: now,
 		})
@@ -259,10 +259,10 @@ type streamSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu       sync.Mutex
-	pending  map[string]chan *memqlv1.ToolResult
-	sendMu   sync.Mutex
-	sendErr  error
+	mu        sync.Mutex
+	pending   map[string]chan *memqlv1.ToolResult
+	sendMu    sync.Mutex
+	sendErr   error
 	closeOnce sync.Once
 }
 
@@ -323,9 +323,9 @@ func (s *streamSession) close() {
 				TargetType:  "worker",
 				OwnerUserId: s.worker.OwnerUserId,
 				Detail: map[string]any{
-					"name":                  s.worker.Name,
-					"connectedAt":           s.worker.ConnectedAt.Format(time.RFC3339),
-					"pendingCallsAborted":   pendingCount,
+					"name":                s.worker.Name,
+					"connectedAt":         s.worker.ConnectedAt.Format(time.RFC3339),
+					"pendingCallsAborted": pendingCount,
 				},
 				Timestamp: time.Now().UTC(),
 			})
@@ -567,10 +567,10 @@ func permissionStatusToMap(p *memqlv1.PermissionStatus) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"accessibility":   p.GetAccessibility(),
+		"accessibility":    p.GetAccessibility(),
 		"screen_recording": p.GetScreenRecording(),
-		"x11_display":     p.GetX11Display(),
-		"detail":          p.GetDetail(),
+		"x11_display":      p.GetX11Display(),
+		"detail":           p.GetDetail(),
 	}
 }
 

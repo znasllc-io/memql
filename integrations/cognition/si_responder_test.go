@@ -9,12 +9,12 @@ import (
 func TestExtractUtteranceFromEventReadsFlattenedSource(t *testing.T) {
 	event := events.Event{
 		Payload: map[string]any{
-			"nodeId":         "utt-1",
-			"spaceId":        "space-1",
-			"participantId":  "participant-1",
-			"text":           "hello",
-			"utteranceType":  "speech",
-			"source":         map[string]any{"inputMethod": "realtimeVoice", "transcriptOnly": true},
+			"nodeId":          "utt-1",
+			"spaceId":         "space-1",
+			"participantId":   "participant-1",
+			"text":            "hello",
+			"utteranceType":   "speech",
+			"source":          map[string]any{"inputMethod": "realtimeVoice", "transcriptOnly": true},
 			"participantType": "human",
 		},
 	}

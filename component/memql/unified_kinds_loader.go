@@ -19,9 +19,9 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	memqldsl "github.com/znasllc-io/memql/dsl"
-	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 // extractAdapter bridges ExtractKeywordSlices to the

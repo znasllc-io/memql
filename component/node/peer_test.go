@@ -109,7 +109,7 @@ func TestPeerManager_ByCapability(t *testing.T) {
 		NodeId:       "cognition-1",
 		NodeType:     string(NodeTypeCognition),
 		Address:      "c1:50052",
-		Capabilities: []string{  "integration.cognition.scoreUtterance",   "integration.cognition.trackPresence"},
+		Capabilities: []string{"integration.cognition.scoreUtterance", "integration.cognition.trackPresence"},
 	})
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:       "agent-1",
@@ -118,7 +118,7 @@ func TestPeerManager_ByCapability(t *testing.T) {
 		Capabilities: []string{"integration.claw.executeTask"},
 	})
 
-	results := pm.ByCapability(  "integration.cognition.scoreUtterance")
+	results := pm.ByCapability("integration.cognition.scoreUtterance")
 	if len(results) != 1 {
 		t.Errorf("expected 1 peer with scoreUtterance, got %d", len(results))
 	}
@@ -307,7 +307,7 @@ func TestPeerManager_StatusChangeOnRemove(t *testing.T) {
 	pm := NewPeerManager(testIdentity(), testLogger())
 
 	var got nodev1.NodeHealthStatus
-	pm.SetStatusChangeHandler(func(_ context.Context, p *nodev1.PeerInfo, _ , newh nodev1.NodeHealthStatus, _ time.Time) {
+	pm.SetStatusChangeHandler(func(_ context.Context, p *nodev1.PeerInfo, _, newh nodev1.NodeHealthStatus, _ time.Time) {
 		if p.NodeId == "ghost" {
 			got = newh
 		}

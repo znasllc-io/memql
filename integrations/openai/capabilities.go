@@ -64,11 +64,11 @@ func (v *VoiceIntegration) handleSynthesize(ctx context.Context, args map[string
 	}
 
 	payloadBytes, _ := json.Marshal(map[string]any{
-		"audio":        base64.StdEncoding.EncodeToString(audioData),
-		"format":       "pcm16",
-		"provider":     "openai",
-		"textLength":   len(text),
-		"audioBytes":   len(audioData),
+		"audio":         base64.StdEncoding.EncodeToString(audioData),
+		"format":        "pcm16",
+		"provider":      "openai",
+		"textLength":    len(text),
+		"audioBytes":    len(audioData),
 		"synthesizedAt": time.Now().UTC().Format(time.RFC3339),
 	})
 

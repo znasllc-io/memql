@@ -147,12 +147,12 @@ type SealOptions struct {
 // SealResult reports what Seal actually did, so callers can render
 // useful status messages.
 type SealResult struct {
-	MasterKey       string          // the key used (newly generated, reused, or supplied)
-	FirstTime       bool            // OutPath did not exist before this run
-	ReusedKeyFromEnv bool           // first-time path, key came from MEMQL_MASTER_KEY in env
-	EntriesWritten  int             // number of entries in the envelope
-	ManifestSource  string          // manifest.Source if validation ran
-	Reconcile       ReconcileAction // what happened to the in-envelope MEMQL_MASTER_KEY
+	MasterKey        string          // the key used (newly generated, reused, or supplied)
+	FirstTime        bool            // OutPath did not exist before this run
+	ReusedKeyFromEnv bool            // first-time path, key came from MEMQL_MASTER_KEY in env
+	EntriesWritten   int             // number of entries in the envelope
+	ManifestSource   string          // manifest.Source if validation ran
+	Reconcile        ReconcileAction // what happened to the in-envelope MEMQL_MASTER_KEY
 }
 
 // Seal validates a set of env entries against the manifest, encrypts

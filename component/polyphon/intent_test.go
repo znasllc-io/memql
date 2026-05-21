@@ -4,11 +4,11 @@ import "testing"
 
 func TestClassifyIntent(t *testing.T) {
 	tests := []struct {
-		name       string
-		text       string
-		mentions   []Mention
-		prevEntry  *TranscriptEntry
-		wantIntent IntentType
+		name        string
+		text        string
+		mentions    []Mention
+		prevEntry   *TranscriptEntry
+		wantIntent  IntentType
 		wantMinConf float64
 		wantMaxConf float64
 	}{
@@ -19,9 +19,9 @@ func TestClassifyIntent(t *testing.T) {
 			wantMinConf: 0.2, wantMaxConf: 0.4,
 		},
 		{
-			name:     "addressee mention returns direct_address",
-			text:     "Sofia, check this",
-			mentions: []Mention{{Name: "Sofia", Role: MentionRoleAddressee}},
+			name:        "addressee mention returns direct_address",
+			text:        "Sofia, check this",
+			mentions:    []Mention{{Name: "Sofia", Role: MentionRoleAddressee}},
 			wantIntent:  IntentDirectAddress,
 			wantMinConf: 0.9, wantMaxConf: 1.0,
 		},
@@ -74,16 +74,16 @@ func TestClassifyIntent(t *testing.T) {
 			wantMinConf: 0.8, wantMaxConf: 0.9,
 		},
 		{
-			name:      "short follow-up after agent (<=5 words)",
-			text:      "in this space",
-			prevEntry: &TranscriptEntry{SpeakerType: "agent"},
+			name:        "short follow-up after agent (<=5 words)",
+			text:        "in this space",
+			prevEntry:   &TranscriptEntry{SpeakerType: "agent"},
 			wantIntent:  IntentFollowUp,
 			wantMinConf: 0.7, wantMaxConf: 0.9,
 		},
 		{
-			name:      "medium follow-up after agent (6-10 words)",
-			text:      "I meant the second option on the left",
-			prevEntry: &TranscriptEntry{SpeakerType: "agent"},
+			name:        "medium follow-up after agent (6-10 words)",
+			text:        "I meant the second option on the left",
+			prevEntry:   &TranscriptEntry{SpeakerType: "agent"},
 			wantIntent:  IntentFollowUp,
 			wantMinConf: 0.5, wantMaxConf: 0.7,
 		},

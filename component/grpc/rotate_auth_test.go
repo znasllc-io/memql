@@ -61,10 +61,10 @@ func (c *captureStream) Recv() (*memqlv1.MemqlClientMessage, error) {
 
 func (c *captureStream) SetHeader(metadata.MD) error  { return nil }
 func (c *captureStream) SendHeader(metadata.MD) error { return nil }
-func (c *captureStream) SetTrailer(metadata.MD)      {}
-func (c *captureStream) Context() context.Context    { return c.ctx }
-func (c *captureStream) SendMsg(any) error           { return nil }
-func (c *captureStream) RecvMsg(any) error           { return nil }
+func (c *captureStream) SetTrailer(metadata.MD)       {}
+func (c *captureStream) Context() context.Context     { return c.ctx }
+func (c *captureStream) SendMsg(any) error            { return nil }
+func (c *captureStream) RecvMsg(any) error            { return nil }
 
 func (c *captureStream) lastSent() *memqlv1.MemqlServerMessage {
 	c.mu.Lock()

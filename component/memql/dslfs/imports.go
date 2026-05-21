@@ -89,8 +89,8 @@ func ResolveImport(importingFile, rawPath string) (string, error) {
 // be a legal identifier; reserved engine names cannot be used as
 // aliases.
 var (
-	aliasIdentRe   = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-	reservedAlias  = map[string]bool{"actor": true, "now": true, "partition": true, "config": true, "trace": true}
+	aliasIdentRe     = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	reservedAlias    = map[string]bool{"actor": true, "now": true, "partition": true, "config": true, "trace": true}
 	ErrAliasReserved = errors.New("alias collides with reserved engine identifier")
 )
 

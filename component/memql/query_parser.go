@@ -25,31 +25,34 @@ import (
 // allowedQueryAnnotations enumerates the annotations a `query NAME`
 // declaration may carry.
 //
-//   @description("text")            documentation
-//   @enabled / @disabled             lifecycle
-//   @deprecated("migration hint")    surfaces a warning at use
-//   @internal                        hide from external surfaces (docs, SI tools)
+//	@description("text")            documentation
+//	@enabled / @disabled             lifecycle
+//	@deprecated("migration hint")    surfaces a warning at use
+//	@internal                        hide from external surfaces (docs, SI tools)
 //
 // Performance / behaviour annotations:
-//   @cacheTTL("5m")                  cache hint (see engine cache subsystem)
-//   @timeout("30s")                  hard execution cap
-//   @rateLimit(requests=N, per="1h") per-caller throttle
-//   @retry(N)                        retry count on failure
-//   @audit                           emit v1:identity:auditEvent on call
+//
+//	@cacheTTL("5m")                  cache hint (see engine cache subsystem)
+//	@timeout("30s")                  hard execution cap
+//	@rateLimit(requests=N, per="1h") per-caller throttle
+//	@retry(N)                        retry count on failure
+//	@audit                           emit v1:identity:auditEvent on call
 //
 // Access control:
-//   @role("admin")                   required cluster role
-//   @permission("...")               required permission key
+//
+//	@role("admin")                   required cluster role
+//	@permission("...")               required permission key
 //
 // Dependency declarations (every named target referenced in the
 // body must be declared):
-//   @useConcept(<bareName>)
-//   @useShape(<bareName>)
-//   @useSpec(<name>)
-//   @useTrait(<name>)
-//   @useQuery(<name>)        -- queries may compose other queries
-//   @useLogic(<name>)        -- queries may invoke logic blocks
-//   @useBuiltin(<name>)
+//
+//	@useConcept(<bareName>)
+//	@useShape(<bareName>)
+//	@useSpec(<name>)
+//	@useTrait(<name>)
+//	@useQuery(<name>)        -- queries may compose other queries
+//	@useLogic(<name>)        -- queries may invoke logic blocks
+//	@useBuiltin(<name>)
 var allowedQueryAnnotations = map[string]bool{
 	"description": true,
 	"enabled":     true,

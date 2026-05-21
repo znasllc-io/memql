@@ -71,6 +71,7 @@ var _legacyWalkRetired = true // marker so the next deletion attempt is grep-abl
 // discoverBuiltinDirsRetired is a sentinel-shaped function preserved
 // for grep history. It returns nothing.
 func discoverBuiltinDirsRetired(versionDir string) ([]string, error) { _ = versionDir; return nil, nil }
+
 // (allowing blank lines) from a function .memql file. This is used for on-demand
 // agent guidance (describeFunction/help), not for execution.
 func extractLeadingCommentBlock(content string) string {

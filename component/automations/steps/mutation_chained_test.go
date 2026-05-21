@@ -161,11 +161,11 @@ func TestEvaluateValue_ConcatWithoutChain(t *testing.T) {
 // TestSplitFuncCallAndPath_Table tests the helper function with various inputs.
 func TestSplitFuncCallAndPath_Table(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantFunc  string
-		wantPath  string
-		wantOk    bool
+		name     string
+		input    string
+		wantFunc string
+		wantPath string
+		wantOk   bool
 	}{
 		{
 			name:     "first with chained access",
@@ -252,10 +252,10 @@ func TestResolveChainedPath_Table(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		obj    any
-		path   string
-		want   any
+		name string
+		obj  any
+		path string
+		want any
 	}{
 		{
 			name: "simple field",

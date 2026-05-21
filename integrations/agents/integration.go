@@ -5,7 +5,7 @@
 //   - dsl/_reference/_agent.memql      syntax reference
 //   - component/memql/agents.go        AgentDefinition + AgentRegistry
 //   - dsl/agents/builtins.memql        builtin declaration that points
-//                                      at this integration via @executor
+//     at this integration via @executor
 //
 // Contract (async):
 //
@@ -77,7 +77,7 @@ func (i *Integration) IntegrationName() string { return "agents" }
 //
 //   - `invoke`        -- the agent() builtin's async dispatch path.
 //   - `ensureForGoal` -- the Assistant's agent-factory tool
-//                        backing builtin (see factory.go).
+//     backing builtin (see factory.go).
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{

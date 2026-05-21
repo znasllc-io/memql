@@ -48,9 +48,9 @@ type ExecutorRequest struct {
 
 // ExecutorResult is what an executor returns when its Task succeeds.
 type ExecutorResult struct {
-	Output       map[string]interface{} // per-kind output payload
-	TokensSpent  int                    // LLM tokens spent inside the executor (rolled up into Plan.tokenSpent)
-	DurationMs   int64                  // wall-clock duration
+	Output      map[string]interface{} // per-kind output payload
+	TokensSpent int                    // LLM tokens spent inside the executor (rolled up into Plan.tokenSpent)
+	DurationMs  int64                  // wall-clock duration
 }
 
 // ProgressCallback is invoked by the executor to stream live
@@ -68,8 +68,8 @@ type ProgressEvent struct {
 // Self-registration via RegisterContainerExecutor at init() time;
 // the planner queries by Task.executorBackend at dispatch time.
 type ExecutorRegistry struct {
-	mu        sync.RWMutex
-	backends  map[string]ContainerExecutor
+	mu       sync.RWMutex
+	backends map[string]ContainerExecutor
 }
 
 var defaultExecutorRegistry = &ExecutorRegistry{

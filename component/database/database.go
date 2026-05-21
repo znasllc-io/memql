@@ -287,10 +287,10 @@ func defaultConfig() *config {
 
 			// Configure connection pool limits to prevent exhaustion
 			// These are sensible defaults; can be overridden via environment variables
-			db.SetMaxOpenConns(25)                   // Max 25 concurrent connections
-			db.SetMaxIdleConns(5)                    // Keep 5 idle connections warm
-			db.SetConnMaxLifetime(1 * time.Hour)     // Rotate connections hourly
-			db.SetConnMaxIdleTime(10 * time.Minute)  // Close idle connections after 10min
+			db.SetMaxOpenConns(25)                  // Max 25 concurrent connections
+			db.SetMaxIdleConns(5)                   // Keep 5 idle connections warm
+			db.SetConnMaxLifetime(1 * time.Hour)    // Rotate connections hourly
+			db.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
 
 			return db, nil
 		},

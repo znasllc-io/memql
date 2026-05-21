@@ -24,13 +24,13 @@ type resultCache struct {
 // metrics for the query result cache. Counters are since process
 // start; subtract two snapshots to get a rate over an interval.
 type ResultCacheStats struct {
-	Hits       uint64  `json:"hits"`
-	Misses     uint64  `json:"misses"`
-	HitRatio   float64 `json:"hitRatio"`
-	KeysAdded  uint64  `json:"keysAdded"`
-	KeysEvicted uint64 `json:"keysEvicted"`
-	CostAdded   uint64 `json:"costAdded"`
-	CostEvicted uint64 `json:"costEvicted"`
+	Hits        uint64  `json:"hits"`
+	Misses      uint64  `json:"misses"`
+	HitRatio    float64 `json:"hitRatio"`
+	KeysAdded   uint64  `json:"keysAdded"`
+	KeysEvicted uint64  `json:"keysEvicted"`
+	CostAdded   uint64  `json:"costAdded"`
+	CostEvicted uint64  `json:"costEvicted"`
 }
 
 func newResultCache(size int64) (*resultCache, error) {

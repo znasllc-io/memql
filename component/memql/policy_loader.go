@@ -11,9 +11,9 @@ import (
 // startup. Policies are immutable for the life of the process -- we
 // reload on restart, not at runtime. Keyed by policy name.
 type PolicyRegistry struct {
-	mu       sync.RWMutex
-	byName   map[string]*PolicyConfig
-	byRole   map[string]string // role -> policy name (first @preferredRole wins)
+	mu     sync.RWMutex
+	byName map[string]*PolicyConfig
+	byRole map[string]string // role -> policy name (first @preferredRole wins)
 }
 
 func newPolicyRegistry() *PolicyRegistry {

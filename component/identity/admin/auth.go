@@ -29,12 +29,12 @@ type claimsCtxKey struct{}
 //
 //   - Authorization: Bearer <jwt>     -- API consumers / curl debug.
 //   - Cookie memql_admin=<jwt>        -- browser sessions established
-//                                        via /admin/establish.
+//     via /admin/establish.
 //
 // Failure modes:
 //
 //   - No token       -> 302 redirect to /admin/login (HTML clients)
-//                       or 401 JSON for XHR requests.
+//     or 401 JSON for XHR requests.
 //   - Invalid token  -> 401 with audit event admin_auth_failed.
 //   - Wrong role     -> 403 with audit event admin_auth_forbidden.
 func (s *AdminServer) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
@@ -333,4 +333,3 @@ func clientIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
-

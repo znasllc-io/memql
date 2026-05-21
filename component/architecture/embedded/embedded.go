@@ -28,8 +28,8 @@
 package embedded
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 
 	"github.com/znasllc-io/memql/component/architecture/model"
 )

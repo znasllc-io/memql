@@ -125,9 +125,9 @@ func (i *IdentityIntegration) handleRevokeDelegation(ctx context.Context, args m
 	}
 
 	payloadBytes, _ := json.Marshal(map[string]any{
-		"delegationId":    delegationId,
-		"active":          false,
-		"revokedAt":       time.Now().UTC().Format(time.RFC3339),
+		"delegationId":     delegationId,
+		"active":           false,
+		"revokedAt":        time.Now().UTC().Format(time.RFC3339),
 		"revokedBySubject": caller.Subject,
 	})
 

@@ -14,7 +14,7 @@ type mockProvider struct {
 	capabilities []IntegrationCapability
 }
 
-func (m *mockProvider) IntegrationName() string              { return m.name }
+func (m *mockProvider) IntegrationName() string               { return m.name }
 func (m *mockProvider) Capabilities() []IntegrationCapability { return m.capabilities }
 
 func TestIntegrationRegistry_Register(t *testing.T) {

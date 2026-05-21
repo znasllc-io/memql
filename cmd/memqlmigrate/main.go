@@ -262,12 +262,12 @@ var resultNavigationSegments = map[string]string{
 // identifiers of the shapes:
 //
 //  1. `stepName.accessor` (exactly two segments)
-//       → `stepName.Accessor()` (method form)
+//     → `stepName.Accessor()` (method form)
 //
 //  2. `stepName.accessor.path.to.x` (three or more segments where
 //     segment[1] is a result-navigation accessor like `first`, `last`,
 //     `empty`, `count`, `nodes`, `ran`)
-//       → `stepName.Accessor().path.to.x` (method form followed by a
+//     → `stepName.Accessor().path.to.x` (method form followed by a
 //     post-call dotted chain, now that the parser accepts chained
 //     access after a call expression — see
 //     component/language/parser/parser.go parseValue().)
@@ -329,7 +329,10 @@ func rewriteSliceSyntax(src []byte) ([]byte, error) {
 	// input is reassembled from the original bytes so we preserve
 	// surrounding whitespace and comments; we only substitute the
 	// matched run's byte range.
-	type edit struct{ start, end int; replacement string }
+	type edit struct {
+		start, end  int
+		replacement string
+	}
 	var edits []edit
 	for i := 0; i+3 < len(tokens); i++ {
 		if tokens[i].Type != langparser.TokenIdentifier || tokens[i].Literal != "array" {

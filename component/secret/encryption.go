@@ -16,16 +16,16 @@
 //
 // Per-value ciphertext format (concept rows):
 //
-//   base64( nonce(24B) || secretbox_seal(plaintext) )
+//	base64( nonce(24B) || secretbox_seal(plaintext) )
 //
 // Whole-blob ciphertext format (genesis.znas and similar):
 //
-//   "ZNAS"  4B magic
-//   0x01    1B format version
-//   0x01    1B algorithm tag (1 = secretbox)
-//   0x0000  2B reserved (must be zero)
-//   nonce(24B)
-//   secretbox_seal(plaintext)
+//	"ZNAS"  4B magic
+//	0x01    1B format version
+//	0x01    1B algorithm tag (1 = secretbox)
+//	0x0000  2B reserved (must be zero)
+//	nonce(24B)
+//	secretbox_seal(plaintext)
 //
 // Helpers are pure -- they don't mutate shared state and are safe to
 // call concurrently.

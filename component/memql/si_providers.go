@@ -38,8 +38,8 @@ const (
 type ProviderModality string
 
 const (
-	ModalityText ProviderModality = "text" // Text input → text output (chat, stream)
-	ModalityTTS  ProviderModality = "tts"  // Text input → audio output (text-to-speech)
+	ModalityText      ProviderModality = "text"      // Text input → text output (chat, stream)
+	ModalityTTS       ProviderModality = "tts"       // Text input → audio output (text-to-speech)
 	ModalitySTT       ProviderModality = "stt"       // Audio input → text output (speech-to-text)
 	ModalityEmbedding ProviderModality = "embedding" // Text input → vector output (embeddings)
 	// The following modalities are declared so provider .memql files can
@@ -845,21 +845,21 @@ func authConceptResolver(envKey string) (string, bool) {
 // order:
 //
 //  1. v1:platform:globalSecret    -- via systemSecretResolver, trying both
-//                              the prefixed and bare-name forms (see
-//                              authConceptLookupNames).
+//     the prefixed and bare-name forms (see
+//     authConceptLookupNames).
 //  2. v1:platform:globalVariable  -- same, for non-sensitive auth fields
-//                              like baseURL.
+//     like baseURL.
 //  3. OS env                -- bootstrap-window fallback. Providers
-//                              load eagerly during engine init, but
-//                              `make dev-refresh` wipes the database
-//                              before re-seeding -- so on first boot
-//                              concept storage is empty when
-//                              providers load, and only the env keeps
-//                              them alive until the seed completes.
-//                              Retiring this requires either
-//                              lazy/per-request provider auth
-//                              resolution or a post-seed engine
-//                              reload; tracked as future work.
+//     load eagerly during engine init, but
+//     `make dev-refresh` wipes the database
+//     before re-seeding -- so on first boot
+//     concept storage is empty when
+//     providers load, and only the env keeps
+//     them alive until the seed completes.
+//     Retiring this requires either
+//     lazy/per-request provider auth
+//     resolution or a post-seed engine
+//     reload; tracked as future work.
 //
 // If all three layers miss, the provider fails to load with a message
 // telling the operator how to seed it.
@@ -1297,9 +1297,9 @@ func (p *openSIProvider) CallChatWithTools(ctx context.Context, messages []commo
 	openAITools := toOpenAITools(tools)
 
 	req := openai.ChatCompletionRequest{
-		Model:    p.model,
-		Messages: openAIMessages,
-		Tools:    openAITools,
+		Model:      p.model,
+		Messages:   openAIMessages,
+		Tools:      openAITools,
 		ToolChoice: "auto",
 		// Prefer sequential tool calls for determinism/simplicity.
 		ParallelToolCalls: false,

@@ -513,7 +513,6 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 	return auth.ContextWithToken(ctx, token)
 }
 
-
 // findSIParticipant finds an active SI participant in a space.
 // Returns the participant with its node ID populated (needed for creating utterances).
 // Delegates to the siParticipantForSpace MemQL query function.
@@ -1138,7 +1137,7 @@ func extractUtteranceFromEvent(event events.Event) (*utterancePayload, error) {
 	// Extract utterance fields - they may be at top level (flattened) or in payload.
 	var (
 		spaceId, participantId, text, utteranceType string
-		source                                       map[string]string
+		source                                      map[string]string
 	)
 
 	// Try flattened fields first (how the event is emitted)
@@ -1217,7 +1216,6 @@ func sourceMapFromAny(v any) map[string]string {
 	}
 	return nil
 }
-
 
 // hasSIResponseForReply checks whether an SI response already exists for a given utterance.
 // Delegates to the hasSIResponseForReply MemQL query function.

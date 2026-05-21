@@ -181,9 +181,9 @@ func (e errNotFound) Error() string { return "concept not found: " + e.name }
 
 func TestCanonicalizeIdValue(t *testing.T) {
 	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
-		"v1:identity:user":    {Name: "v1:identity:user"},
-		"v1:cognition:space":  {Name: "v1:cognition:space"}, // partition-scoped
-		"v1:agents:agent":  {Name: "v1:agents:agent"}, // partition-scoped
+		"v1:identity:user":   {Name: "v1:identity:user"},
+		"v1:cognition:space": {Name: "v1:cognition:space"}, // partition-scoped
+		"v1:agents:agent":    {Name: "v1:agents:agent"},    // partition-scoped
 	})
 	ctx := context.Background()
 
@@ -269,10 +269,10 @@ func TestCanonicalizeRelationshipFields(t *testing.T) {
 
 	t.Run("outgoing fields canonicalize, incoming and untagged fields untouched", func(t *testing.T) {
 		payload := map[string]any{
-			"spaceId":     "daily-2026-05-06",     // bare -> default:v1:cognition:space:daily-...
-			"userId":      "user-abc",             // bare -> v1:identity:user:user-abc
-			"deliveredTo": "utt-bare",             // incoming -> NOT rewritten
-			"displayName": "Jose",                 // not a relationship field
+			"spaceId":     "daily-2026-05-06", // bare -> default:v1:cognition:space:daily-...
+			"userId":      "user-abc",         // bare -> v1:identity:user:user-abc
+			"deliveredTo": "utt-bare",         // incoming -> NOT rewritten
+			"displayName": "Jose",             // not a relationship field
 		}
 		err := engine.canonicalizeRelationshipFields(ctx, "v1:cognition:participant", payload)
 		require.NoError(t, err)

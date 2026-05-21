@@ -21,11 +21,11 @@ const DefaultCheckpointTTL = 24 * time.Hour
 
 // Checkpoint errors.
 var (
-	ErrCheckpointNotFound       = errors.New("checkpoint not found")
-	ErrCheckpointExpired        = errors.New("checkpoint expired")
-	ErrAutomationChanged        = errors.New("automation definition changed since checkpoint was saved")
-	ErrCheckpointInvalid        = errors.New("checkpoint is invalid")
-	ErrNonRetryableStep         = errors.New("step is not safely retryable (mutation or webhook)")
+	ErrCheckpointNotFound = errors.New("checkpoint not found")
+	ErrCheckpointExpired  = errors.New("checkpoint expired")
+	ErrAutomationChanged  = errors.New("automation definition changed since checkpoint was saved")
+	ErrCheckpointInvalid  = errors.New("checkpoint is invalid")
+	ErrNonRetryableStep   = errors.New("step is not safely retryable (mutation or webhook)")
 )
 
 // SaveCheckpoint persists an execution checkpoint to MemQL.

@@ -381,6 +381,7 @@ func isSimpleShapeIdent(s string) bool {
 	}
 	return true
 }
+
 // toShapeDefinition converts a parsed shape declaration to a ShapeDefinition.
 func (d *shapeDecl) toShapeDefinition(origin string) (*ShapeDefinition, error) {
 	if d.template == nil {
@@ -397,4 +398,3 @@ func (d *shapeDecl) toShapeDefinition(origin string) (*ShapeDefinition, error) {
 		UseConcepts: d.useConcepts,
 	}, nil
 }
-

@@ -307,16 +307,16 @@ func (l *planLifecycle) completePlan(
 	// will pick the retry up over the next 5min / 30min / 2h.
 	cardPayload := map[string]any{
 		"variant":             "training.completed",
-		"planId":              l.planId,                  // lets the card link directly to the Tasks panel row
+		"planId":              l.planId, // lets the card link directly to the Tasks panel row
 		"agentId":             summary["agentId"],
 		"agentName":           agentName,
 		"domainsAdded":        intFromAny(summary["domainsAdded"]),
-		"domainsAddedList":    summary["domainsAddedList"],   // actual ids, named on the card
+		"domainsAddedList":    summary["domainsAddedList"], // actual ids, named on the card
 		"domainsRemoved":      intFromAny(summary["domainsRemoved"]),
 		"domainsRemovedList":  summary["domainsRemovedList"], // actual ids
 		"domainsSeeded":       intFromAny(summary["domainsSeeded"]),
-		"perDomainStats":      summary["perDomainStats"],     // per-domain breakdown for the expanded view
-		"toolsList":           summary["toolsList"],          // full tool set after training
+		"perDomainStats":      summary["perDomainStats"], // per-domain breakdown for the expanded view
+		"toolsList":           summary["toolsList"],      // full tool set after training
 		"chunksEmbedded":      intFromAny(summary["chunksEmbedded"]),
 		"chunksAlready":       intFromAny(summary["chunksAlready"]),
 		"identityVectorWrote": boolFromAny(summary["identityVectorWrote"]),
@@ -329,8 +329,8 @@ func (l *planLifecycle) completePlan(
 		// kicker copy ("Training complete" -> "Training partially
 		// complete") and to render a per-domain failure section.
 		// Empty list = fully successful.
-		"failedSeedDomains":   summary["failedSeedDomains"],
-		"failedSeedReasons":   summary["failedSeedReasons"],
+		"failedSeedDomains": summary["failedSeedDomains"],
+		"failedSeedReasons": summary["failedSeedReasons"],
 	}
 	cardJSON := mustJSON(cardPayload)
 	stateId := l.planId + ":completed"
@@ -433,8 +433,8 @@ func retryWithBackoff[T any](
 // historical bucket has enough samples to take over from the
 // heuristic.
 func heuristicEstimateTrain(addedDomainsCount int) (p50Ms, p90Ms int64) {
-	const baselineMs int64 = 4000      // B + C combined baseline
-	const perNewDomainMs int64 = 3000  // step A per added domain
+	const baselineMs int64 = 4000     // B + C combined baseline
+	const perNewDomainMs int64 = 3000 // step A per added domain
 	p50 := baselineMs + perNewDomainMs*int64(addedDomainsCount)
 	p90 := p50 * 2
 	return p50, p90

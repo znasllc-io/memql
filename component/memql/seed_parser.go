@@ -105,9 +105,9 @@ type seedImport struct {
 // blocks. Maps preserve declaration-order via the keys slice so we
 // can render deterministic error messages.
 type seedBlock struct {
-	keys    []string             // insertion order
-	fields  map[string]seedValue // key -> value
-	nested  map[string]seedBlock // key -> nested block
+	keys   []string             // insertion order
+	fields map[string]seedValue // key -> value
+	nested map[string]seedBlock // key -> nested block
 }
 
 // seedValue is a typed scalar or scalar-array from a body field

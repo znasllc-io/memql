@@ -453,7 +453,6 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 	return val
 }
 
-
 // getAttachmentsForPromptCached returns attachment summaries for a space with TTL caching.
 // Only summaries (not full transcriptions) are returned so prompt size stays bounded.
 func (c *CognitionIntegration) getAttachmentsForPromptCached(ctx context.Context, spaceId string) []map[string]any {
@@ -541,4 +540,3 @@ func (c *CognitionIntegration) getAttachmentsForPrompt(ctx context.Context, spac
 	}
 	return summaries
 }
-

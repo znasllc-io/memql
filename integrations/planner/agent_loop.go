@@ -5,14 +5,14 @@
 // On each v1:planner:plan transition that needs the Planner Agent's next
 // decision, the loop:
 //
-//   1. Loads the current Plan + all child Tasks.
-//   2. Invokes the plannerAgent prompt (system prompt at
-//      dsl/agents/prompts/plannerAgent.tmpl, paired with a strong-reasoning
-//      provider) with the current state.
-//   3. Parses the agent's structured-output decision.
-//   4. Dispatches the decision against the engine (write Plan.phases on
-//      'decompose', insert Task on 'dispatchTask', mark Plan terminal on
-//      'markPlanSucceeded' / 'markPlanFailed', etc.).
+//  1. Loads the current Plan + all child Tasks.
+//  2. Invokes the plannerAgent prompt (system prompt at
+//     dsl/agents/prompts/plannerAgent.tmpl, paired with a strong-reasoning
+//     provider) with the current state.
+//  3. Parses the agent's structured-output decision.
+//  4. Dispatches the decision against the engine (write Plan.phases on
+//     'decompose', insert Task on 'dispatchTask', mark Plan terminal on
+//     'markPlanSucceeded' / 'markPlanFailed', etc.).
 //
 // Phase 4 scope: scaffolding + the simplest decisions (decompose, succeed,
 // fail) wired end-to-end. The richer actions (createSpecialist /

@@ -252,4 +252,3 @@ func TestParseSeedMemQL_Rejects(t *testing.T) {
 		})
 	}
 }
-

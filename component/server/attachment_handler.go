@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	maxAttachmentBytes     = 25 * 1024 * 1024 // 25 MB
-	maxMultipartMemory     = 32 * 1024 * 1024 // 32 MB
-	attachmentFormFileKey  = "file"
+	maxAttachmentBytes    = 25 * 1024 * 1024 // 25 MB
+	maxMultipartMemory    = 32 * 1024 * 1024 // 32 MB
+	attachmentFormFileKey = "file"
 
 	attachmentStatusProcessing = "processing"
 	attachmentStatusReady      = "ready"
@@ -112,13 +112,13 @@ type AttachmentResponse struct {
 
 // AttachmentHandler handles POST /spaces/{spaceId}/attachments.
 type AttachmentHandler struct {
-	logger        *slog.Logger
-	bucket        string
-	uploader      FileUploader
-	extractor     TextExtractor
-	store         AttachmentStore
-	summarizer    AISummarizer // optional
-	planStore     PlanStore    // optional; when set, every successful upload spawns an analyzeFile Plan + plan.completed canvas card
+	logger     *slog.Logger
+	bucket     string
+	uploader   FileUploader
+	extractor  TextExtractor
+	store      AttachmentStore
+	summarizer AISummarizer // optional
+	planStore  PlanStore    // optional; when set, every successful upload spawns an analyzeFile Plan + plan.completed canvas card
 }
 
 // AttachmentHandlerOptions configures an AttachmentHandler.

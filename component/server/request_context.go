@@ -37,4 +37,3 @@ func requestFromContext(ctx context.Context) (*http.Request, bool) {
 	}
 	return nil, false
 }
-

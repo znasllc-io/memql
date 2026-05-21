@@ -261,4 +261,3 @@ func bareSpaceSlug(spaceId string) string {
 	}
 	return spaceId
 }
-

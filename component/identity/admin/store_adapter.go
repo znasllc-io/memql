@@ -10,12 +10,12 @@
 // navigation. To keep the admin surface usable without inventing a
 // second cookie domain, we accept TWO authentication modes:
 //
-//   1. Authorization: Bearer <jwt> header — useful for API-style
-//      consumers and for ad-hoc curl debugging.
-//   2. memql_admin cookie carrying the JWT — set when an admin
-//      successfully completes the /admin/establish flow (paste the
-//      access token from the SPA developer console). Cookies stay
-//      scoped to the identity domain.
+//  1. Authorization: Bearer <jwt> header — useful for API-style
+//     consumers and for ad-hoc curl debugging.
+//  2. memql_admin cookie carrying the JWT — set when an admin
+//     successfully completes the /admin/establish flow (paste the
+//     access token from the SPA developer console). Cookies stay
+//     scoped to the identity domain.
 //
 // For Phase 6 simplicity the user-facing /admin/login page asks the
 // operator to paste the JWT manually. Subsequent phases can wire a

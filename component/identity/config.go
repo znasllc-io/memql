@@ -507,11 +507,11 @@ type LiveTokenSettings struct {
 // payload). Missing-but-required values are caught later by Validate.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Enabled:                         envBool("IDENTITY_ENABLED", false),
-		BaseURL:                         strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/"),
-		JWTAudience:                     envString("IDENTITY_JWT_AUDIENCE", "memql"),
-		KeyDir:                          envString("IDENTITY_KEY_DIR", DefaultKeyDir),
-		KeyEncryptionKey:                os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
+		Enabled:          envBool("IDENTITY_ENABLED", false),
+		BaseURL:          strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/"),
+		JWTAudience:      envString("IDENTITY_JWT_AUDIENCE", "memql"),
+		KeyDir:           envString("IDENTITY_KEY_DIR", DefaultKeyDir),
+		KeyEncryptionKey: os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
 		Bootstrap: BootstrapConfig{
 			Domain:              strings.TrimRight(os.Getenv("IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
 			OwnerEmail:          os.Getenv("IDENTITY_BOOTSTRAP_OWNER_EMAIL"),

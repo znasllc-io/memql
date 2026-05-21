@@ -121,4 +121,3 @@ func tokenFromGRPCMetadata(ctx context.Context) (string, error) {
 	}
 	return tok, nil
 }
-

@@ -45,8 +45,8 @@ const (
 
 // Cluster domain concepts (v1:cluster:*)
 const (
-	ConceptClusterNode      = "v1:cluster:node"
-	ConceptClusterNodeType  = "v1:cluster:nodeType"
+	ConceptClusterNode       = "v1:cluster:node"
+	ConceptClusterNodeType   = "v1:cluster:nodeType"
 	ConceptClusterSpawnEvent = "v1:cluster:spawnEvent"
 )
 

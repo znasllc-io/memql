@@ -19,27 +19,27 @@ import (
 // All dependencies are required:
 //
 //   - Cfg     -- the immutable identity Config snapshot. Drives brand
-//                fallbacks and CORS rules. Live overrides come through
-//                Settings.
+//     fallbacks and CORS rules. Live overrides come through
+//     Settings.
 //   - Engine  -- memql engine for queries / mutations against the
-//                v1:identity:* concept tree.
+//     v1:identity:* concept tree.
 //   - Issuer  -- JWT issuer used to validate the admin's access token
-//                on every request.
+//     on every request.
 //   - Keys    -- key manager, exposed for the JWKS rotation page.
 //   - Audit   -- audit logger; Phase 6 emits admin_* events for every
-//                operator action.
+//     operator action.
 //   - Settings-- LiveSettings reader so brand fields render the same
-//                values the public web pages use. Optional; falls back
-//                to the immutable Config.
+//     values the public web pages use. Optional; falls back
+//     to the immutable Config.
 //   - RotateNow- callback wired by the integration layer that triggers
-//                an immediate key rotation. Kept as a callback so the
-//                admin package doesn't depend on the higher-level
-//                Service struct.
+//     an immediate key rotation. Kept as a callback so the
+//     admin package doesn't depend on the higher-level
+//     Service struct.
 //   - WebServer-- handle to the public web server; used to share the
-//                LayoutData builder so admin pages render through the
-//                same templ Layout component as the public pages.
+//     LayoutData builder so admin pages render through the
+//     same templ Layout component as the public pages.
 //   - Logger  -- slog logger; component label "identity-admin" added
-//                during Mount.
+//     during Mount.
 type AdminServer struct {
 	Cfg       identity.Config
 	Engine    identity.EngineExecutor
@@ -213,4 +213,3 @@ func (s *AdminServer) render(w http.ResponseWriter, r *http.Request, name string
 		s.Logger.Error("admin: render failed", "name", name, "error", err)
 	}
 }
-

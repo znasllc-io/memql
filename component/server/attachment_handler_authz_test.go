@@ -17,9 +17,9 @@ import (
 // stubAttachmentStore lets a test drive only the bits of the
 // AttachmentStore interface that the ownership-check path exercises.
 type stubAttachmentStore struct {
-	owns      bool
-	ownsErr   error
-	createErr error
+	owns         bool
+	ownsErr      error
+	createErr    error
 	createdCount int
 }
 

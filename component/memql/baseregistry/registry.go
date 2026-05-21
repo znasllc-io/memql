@@ -28,8 +28,8 @@ import (
 type Registry[T any] struct {
 	mu       sync.RWMutex
 	byName   map[string]*T
-	kind     string          // construct label used in error messages
-	clone    func(*T) *T     // egress copy; identity if no copy is needed
+	kind     string             // construct label used in error messages
+	clone    func(*T) *T        // egress copy; identity if no copy is needed
 	validate func(string) error // ingress name validator; nil = no check
 }
 

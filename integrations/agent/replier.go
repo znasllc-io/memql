@@ -1792,10 +1792,10 @@ func citeNothing(_ map[string]any, _ string) string {
 // also hardcodes `copresent-ui` for `source = "appStructure"` at
 // insert time -- see integrations/knowledge/seed.go).
 var appStructureDomainIds = map[string]bool{
-	"copresent-ui":           true,
-	"computer-use":           true,
-	"workbench":              true,
-	"recent-chat": true,
+	"copresent-ui": true,
+	"computer-use": true,
+	"workbench":    true,
+	"recent-chat":  true,
 }
 
 func isAppStructureDomain(domainId string) bool {

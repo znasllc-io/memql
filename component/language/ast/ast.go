@@ -303,11 +303,11 @@ type EventRefExpr struct{}
 // authenticated user's AccessContext at query-evaluation time.
 // Exposed fields (resolved by the runtime):
 //
-//   caller.userId        -- v1:identity:user.id
-//   caller.primaryEmail  -- the caller's primary email
-//   caller.role          -- cluster-wide role (owner / admin / writer / reader)
-//   caller.identityId    -- v1:identity:identity.id used for this request
-//   caller.isOwner       -- bool short-circuit for owner-bypass paths
+//	caller.userId        -- v1:identity:user.id
+//	caller.primaryEmail  -- the caller's primary email
+//	caller.role          -- cluster-wide role (owner / admin / writer / reader)
+//	caller.identityId    -- v1:identity:identity.id used for this request
+//	caller.isOwner       -- bool short-circuit for owner-bypass paths
 //
 // Callable in expression position inside .memql function bodies.
 type CallerRefExpr struct{}

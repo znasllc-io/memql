@@ -43,10 +43,10 @@ var ErrUserNotProvisioned = errors.New("auth: user not provisioned in database")
 // PrimaryEmail, and IdentityId populated.
 //
 // The lookup walks:
-//   1. `sub` must already be a canonical v1:identity:user id (every
-//      identity-service-issued JWT carries one). Anything else is
-//      rejected with ErrUserNotProvisioned.
-//   2. queryUserById(userId) -> user row (for Role + email).
+//  1. `sub` must already be a canonical v1:identity:user id (every
+//     identity-service-issued JWT carries one). Anything else is
+//     rejected with ErrUserNotProvisioned.
+//  2. queryUserById(userId) -> user row (for Role + email).
 //
 // If step 2 returns no rows, ErrUserNotProvisioned is returned so the
 // caller can decide whether to short-circuit with a claims-based

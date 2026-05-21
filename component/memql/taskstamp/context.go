@@ -18,13 +18,13 @@
 //
 // Use:
 //
-//     ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
-//         AgentId: "...", OwnerUserId: "...", SpaceId: "...",
-//         // PlanId + SemanticTaskId set by the caller when a real Plan
-//         // is being executed; left empty for ad-hoc chat tool calls
-//         // (the stamper materializes synthetic rows on first call).
-//     })
-//     result, err := stamper.ExecuteToolByName(ctx, toolName, args)
+//	ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
+//	    AgentId: "...", OwnerUserId: "...", SpaceId: "...",
+//	    // PlanId + SemanticTaskId set by the caller when a real Plan
+//	    // is being executed; left empty for ad-hoc chat tool calls
+//	    // (the stamper materializes synthetic rows on first call).
+//	})
+//	result, err := stamper.ExecuteToolByName(ctx, toolName, args)
 //
 // What the stamper does on each call (when PlanContext is present):
 //

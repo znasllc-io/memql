@@ -459,7 +459,6 @@ func (d *toolDecl) toTool(origin string) (*Tool, error) {
 	return tool, nil
 }
 
-
 // parseParenArgs parses (key="value", key2="value2") or (key=number)
 // -- tool/builtin-specific @rateLimit(...) / @args(...) shape.
 func (p *toolMemQLParser) parseParenArgs() (map[string]string, error) {
