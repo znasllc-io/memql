@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -166,7 +167,18 @@ func (pc *peerConnection) connectOnce(ctx context.Context, onMessage func(*nodev
 	}()
 
 	client := nodev1.NewNodeServiceClient(conn)
-	stream, err := client.Stream(ctx)
+	// Attach the class="node" bearer token to outbound metadata so
+	// the remote NodeServer's class-pin interceptor can verify. When
+	// the local Identity has no BearerToken (single-node dev /
+	// clusters not yet rolled onto node tokens) the context passes
+	// through unchanged and the legacy "any peer can NodeHello"
+	// behavior holds end-to-end. See #105.
+	streamCtx := ctx
+	if pc.identity != nil && pc.identity.BearerToken != "" {
+		streamCtx = metadata.AppendToOutgoingContext(streamCtx,
+			"authorization", "Bearer "+pc.identity.BearerToken)
+	}
+	stream, err := client.Stream(streamCtx)
 	if err != nil {
 		return err
 	}

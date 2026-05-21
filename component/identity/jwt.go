@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -54,9 +55,40 @@ type AccessTokenClaims struct {
 	Partitions      map[string]string `json:"partitions,omitempty"`
 	SessionId       string            `json:"sid,omitempty"`
 	RevocationEpoch int64             `json:"revocation_epoch,omitempty"`
+	// Class identifies the credential family the JWT was minted for:
+	// "user" (magic-link / OAuth interactive sessions; default when
+	// the claim is omitted, for backwards compatibility) or "node"
+	// (cluster-internal binary; minted via IssueNodeAccessToken).
+	// Surface-pinned filters (NodeService.Stream requires
+	// class="node"; the cockpit's user-facing surfaces reject
+	// class="node") read this to keep cross-class tokens off the
+	// wrong wire. See #105.
+	Class string `json:"class,omitempty"`
+	// NodeId binds a class="node" token to a specific v1:cluster:node.id.
+	// The NodeService interceptor cross-checks NodeHello.NodeId
+	// against this value -- a token minted for nodeId=A cannot drive
+	// a stream that announces nodeId=B. Empty for any other class.
+	NodeId string `json:"node_id,omitempty"`
+	// NodeType is the build-tag-derived role the node binary serves
+	// ("bff", "voice", "cognition", "agent", "planner", "workbench").
+	// Cross-checked against NodeHello.NodeType the same way as
+	// NodeId. Empty for any other class.
+	NodeType string `json:"node_type,omitempty"`
 
 	jwt.RegisteredClaims
 }
+
+// Class string constants for the `class` claim. Centralized so
+// callers don't sprinkle bare string literals through the codebase.
+const (
+	// ClassUser is the default class for human-driven sessions
+	// (magic-link, OAuth refresh). Empty class claim is treated as
+	// ClassUser for backward compatibility.
+	ClassUser = "user"
+	// ClassNode marks a cluster-internal node service-account token
+	// (#105). NodeService.Stream rejects every other class.
+	ClassNode = "node"
+)
 
 // JWTIssuer mints access tokens. Wraps a KeyManager for signing-key
 // material plus a Config for issuer / audience / TTL.
@@ -105,6 +137,14 @@ type IssueInput struct {
 	Partitions      map[string]string
 	SessionId       string
 	RevocationEpoch int64
+	// Class identifies the credential family this token is being
+	// minted for. Defaults to ClassUser when empty -- existing
+	// magic-link / OAuth-refresh mint sites don't need to set this
+	// explicitly; node-token mints (IssueNodeAccessToken) stamp
+	// ClassNode + the node id / type fields below.
+	Class    string
+	NodeId   string
+	NodeType string
 	// TTLOverride is the per-call access-token lifetime. When > 0,
 	// it replaces the issuer's boot-time default for THIS issuance
 	// only. The HTTP handlers read the runtime-tunable value from
@@ -136,6 +176,13 @@ func (j *JWTIssuer) IssueAccessToken(in IssueInput, now time.Time) (string, time
 		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
 	}
 
+	// Normalize the class. Empty / "user" both serialize to the
+	// omit-empty case, which keeps existing tokens unchanged. Node
+	// tokens carry "node" explicitly + the bound nodeId / nodeType.
+	class := strings.TrimSpace(in.Class)
+	if class == ClassUser {
+		class = ""
+	}
 	claims := AccessTokenClaims{
 		Email:           in.Email,
 		Name:            in.Name,
@@ -146,6 +193,9 @@ func (j *JWTIssuer) IssueAccessToken(in IssueInput, now time.Time) (string, time
 		Partitions:      in.Partitions,
 		SessionId:       in.SessionId,
 		RevocationEpoch: in.RevocationEpoch,
+		Class:           class,
+		NodeId:          in.NodeId,
+		NodeType:        in.NodeType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,
 			Subject:   in.UserId,
@@ -214,6 +264,88 @@ func (j *JWTIssuer) VerifyAccessToken(raw string, now time.Time) (*AccessTokenCl
 		return nil, errors.New("unexpected claims type")
 	}
 	return claims, nil
+}
+
+// NodeIssueInput is the per-call payload for IssueNodeAccessToken.
+// Node tokens authenticate cluster-internal binaries on
+// NodeService.Stream and carry no human-directory fields.
+//
+// Subject (the JWT `sub` claim) is the v1:identity:identity row id
+// of the node_token credential -- NOT a v1:identity:user.id. The
+// NodeService interceptor reads the bound NodeId / NodeType from
+// the class-specific claims (NOT from sub).
+//
+// TTL: defaults to identity.DefaultNodeTokenTTLSeconds when zero.
+// There's no refresh-token path for node tokens; ops rotates them
+// out-of-band by minting a fresh one and restarting the target
+// binary with the new MEMQL_NODE_TOKEN.
+type NodeIssueInput struct {
+	// IdentityId is the v1:identity:identity row carrying the
+	// node_token credential. Used as the JWT subject so admin
+	// tooling can correlate the token back to its credential row
+	// for revoke / rotate.
+	IdentityId string
+	// NodeId is the v1:cluster:node row id the token binds to.
+	// Stamped onto the `node_id` claim; the NodeService interceptor
+	// cross-checks NodeHello.NodeId against it.
+	NodeId string
+	// NodeType is the build-tag-derived role ("bff", "voice",
+	// "cognition", "agent", "planner", "workbench"). Stamped onto
+	// the `node_type` claim; cross-checked against NodeHello.NodeType.
+	NodeType string
+	// TTLOverride is the per-call lifetime. Zero falls back to
+	// DefaultNodeTokenTTLSeconds.
+	TTLOverride time.Duration
+}
+
+// IssueNodeAccessToken mints a class="node" JWT bound to the given
+// v1:identity:identity row + v1:cluster:node id + node type. Same
+// signing-key material as the user-token path -- the verifier
+// validates both with the same JWKS-published EdDSA key.
+func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (string, time.Time, error) {
+	if strings.TrimSpace(in.IdentityId) == "" {
+		return "", time.Time{}, errors.New("identity: NodeIssueInput.IdentityId required")
+	}
+	if strings.TrimSpace(in.NodeId) == "" {
+		return "", time.Time{}, errors.New("identity: NodeIssueInput.NodeId required")
+	}
+	if strings.TrimSpace(in.NodeType) == "" {
+		return "", time.Time{}, errors.New("identity: NodeIssueInput.NodeType required")
+	}
+	mat := j.keys.Current()
+	if mat == nil {
+		return "", time.Time{}, errors.New("identity: no current signing key (was KeyManager.Load() called?)")
+	}
+	ttl := in.TTLOverride
+	if ttl <= 0 {
+		ttl = time.Duration(DefaultNodeTokenTTLSeconds) * time.Second
+	}
+	expiresAt := now.Add(ttl)
+	jti, err := newJTI()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
+	}
+	claims := AccessTokenClaims{
+		Class:    ClassNode,
+		NodeId:   in.NodeId,
+		NodeType: in.NodeType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    j.issuer,
+			Subject:   in.IdentityId,
+			Audience:  jwt.ClaimStrings{j.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        jti,
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = mat.KID
+	signed, err := tok.SignedString(mat.Private)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: sign node access token: %w", err)
+	}
+	return signed, expiresAt, nil
 }
 
 // newJTI returns a 128-bit random hex id suitable for the JWT `jti`

@@ -130,6 +130,12 @@ Each of the items below is a place where the audit explicitly *chose* a tradeoff
 
 ### 5.1 Inter-node mesh trust (F1)
 
+**Now mitigated when `MEMQL_NODE_REQUIRE_AUTH=1` (#105 / PR forthcoming):** a dedicated `class="node"` JWT type plus the matching surface pin at the `NodeService.Stream` gRPC interceptor. See [`docs/auth/node-jwt.md`](node-jwt.md) for the provisioning + rotation flow.
+
+Legacy posture (the default until ops flips the flag): NodeService.Stream had no auth at all -- the legacy text below describes that posture.
+
+
+
 `NodeService.Stream` validates the inbound JWT but does **not** require a per-node service-account credential. Any binary that holds a valid identity-issued JWT is treated as a peer and may call `NodeHello`, `PeerIntroduction`, `EventForward`, `QueryForward`, `AiForwardRequest`, or `WorkbenchForwardRequest`.
 
 **Trust assumption:** the cluster runs inside a trusted network boundary (private VPC, Kubernetes namespace, mTLS-terminated load balancer). An attacker who can reach `NodeService.Stream` from outside the boundary AND who holds a valid JWT is by design out of model — the JWT alone shouldn't be enough to reach this surface.
@@ -288,7 +294,7 @@ This is by design — every tool defines its own contract — but it leaves a cl
 
 ## 8. Future hardening (ordered)
 
-1. **Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.
+1. ~~**Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.~~ Shipped via #105 (opt-in via `MEMQL_NODE_REQUIRE_AUTH=1`).
 2. ~~**Revocation epoch claim** — closes §5.3.~~ Shipped via #106 / PR #148.
 3. **Centralised tool-call arg validator** — closes §7.6.
 4. **Rotate-on-resend for guest invitations** — closes §5.4.

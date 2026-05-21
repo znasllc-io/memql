@@ -71,6 +71,15 @@ type Identity struct {
 
 	// Labels contains arbitrary metadata key-value pairs.
 	Labels map[string]string
+
+	// BearerToken is the class="node" JWT this binary presents on
+	// every outbound NodeService.Stream dial. Read from
+	// MEMQL_NODE_TOKEN at startup; empty when no auth is required
+	// (single-node dev / clusters that haven't rolled tokens out).
+	// The peerConnection wraps its context with this token before
+	// opening the stream so the remote NodeServer's class-pin
+	// interceptor can verify. See #105.
+	BearerToken string
 }
 
 // CompiledNodeType returns the node type this binary was built for.
@@ -124,6 +133,7 @@ func NewIdentity(version string) *Identity {
 		ParentAddress: strings.TrimSpace(os.Getenv("MEMQL_PARENT_ADDRESS")),
 		Flavor:        strings.TrimSpace(os.Getenv("MEMQL_NODE_FLAVOR")),
 		Labels:        labels,
+		BearerToken:   strings.TrimSpace(os.Getenv("MEMQL_NODE_TOKEN")),
 	}
 }
 
