@@ -120,7 +120,34 @@ mutation agent mutationUpdateAgent {
 }
 
 @enabled
-@description("Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.")
+@description("Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.")
+mutation skillChangeEvent mutationCreateSkillChangeEvent {
+  args {
+    skillChangeEventId  string  @required
+    targetAgentId       string  @required
+    skillId             string  @required
+    changeKind          string
+    before              object
+    after               object
+    actorAgentId        string
+    actorUserId         string
+    planId              string
+  }
+  insert skillChangeEvent {
+    id: args.skillChangeEventId
+    args.targetAgentId
+    args.skillId
+    changeKind: coalesce(args.changeKind, "attached")
+    before: coalesce(args.before, {})
+    after: coalesce(args.after, {})
+    args.actorAgentId
+    args.actorUserId
+    args.planId
+  }
+}
+
+@enabled
+@description("Insert (or version) a v1:agents:agentRole catalog row. Called by the SeedMaterializer when it walks role seed declarations under dsl/agents/roles/ (the materializer stamps the seed body's `id` into `agentRoleId`); also callable directly when a user mints a custom (non-predefined) role from the UI. predefined=true marks the row as locked in the UI; user-created roles default to false and remain fully editable. Phase 2 cut (#158): the args surface collapses the seven flat lockedDomain / defaultDomain / availableDomain / lockedTool / defaultTool / forbiddenTool / lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.")
 mutation agentRole mutationCreateAgentRole {
   args {
     agentRoleId             string
@@ -129,12 +156,11 @@ mutation agentRole mutationCreateAgentRole {
     description             string
     category                string
     tier                    string
-    lockedDomainIds         array
-    defaultDomainIds        array
-    availableDomainIds      array
-    lockedToolSlugs         array
-    defaultToolSlugs        array
-    lockedLiveKnowledgeIds  array
+    lockedSkillIds          array
+    defaultSkillIds         array
+    availableSkillIds       array
+    forbiddenSkillIds       array
+    maxSkills               integer
     recommendedPolicySlug   string
     recommendedGender       string
     systemPromptHints       string
@@ -148,12 +174,11 @@ mutation agentRole mutationCreateAgentRole {
     args.description
     category: coalesce(args.category, "professional")
     tier: coalesce(args.tier, "A")
-    lockedDomainIds: coalesce(args.lockedDomainIds, [])
-    defaultDomainIds: coalesce(args.defaultDomainIds, [])
-    availableDomainIds: coalesce(args.availableDomainIds, [])
-    lockedToolSlugs: coalesce(args.lockedToolSlugs, [])
-    defaultToolSlugs: coalesce(args.defaultToolSlugs, [])
-    lockedLiveKnowledgeIds: coalesce(args.lockedLiveKnowledgeIds, [])
+    lockedSkillIds: coalesce(args.lockedSkillIds, [])
+    defaultSkillIds: coalesce(args.defaultSkillIds, [])
+    availableSkillIds: coalesce(args.availableSkillIds, [])
+    forbiddenSkillIds: coalesce(args.forbiddenSkillIds, [])
+    maxSkills: coalesce(args.maxSkills, 5)
     args.recommendedPolicySlug
     args.recommendedGender
     args.systemPromptHints

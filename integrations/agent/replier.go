@@ -909,19 +909,25 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 	if role, ok := row["role"].(string); ok && role != "" {
 		acting.Role = role
 	}
-	// capabilities is a nested map; pull domains / keywords / tools
-	// off it. The agentFull shape carries the whole capabilities
-	// blob under "capabilities" -- domains/keywords/tools live
-	// inside it.
+	// capabilities is a nested map. Phase 2 cut (#158): the
+	// canonical capability surface is capabilities.skillIds[];
+	// effective domains + tools are resolved by unioning across
+	// the referenced v1:agents:skill rows. keywords[] stays
+	// per-agent (turn-shaping hints, not capability declarations).
 	if caps, ok := row["capabilities"].(map[string]any); ok {
-		if v := stringSlice(caps["domains"]); len(v) > 0 {
-			acting.Domains = v
-		}
 		if v := stringSlice(caps["keywords"]); len(v) > 0 {
 			acting.Keywords = v
 		}
-		if v := stringSlice(caps["tools"]); len(v) > 0 {
-			acting.Tools = v
+		skillIds := stringSlice(caps["skillIds"])
+		if len(skillIds) > 0 {
+			if bundle, rerr := r.engine.ResolveSkills(ctx, skillIds); rerr == nil {
+				if len(bundle.DomainIds) > 0 {
+					acting.Domains = bundle.DomainIds
+				}
+				if len(bundle.ToolSlugs) > 0 {
+					acting.Tools = bundle.ToolSlugs
+				}
+			}
 		}
 	}
 

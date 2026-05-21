@@ -74,4 +74,11 @@ type IntegrationEngineAccess interface {
 
 	// ExecuteToolByName looks up a tool by name and executes it with the given args.
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
+
+	// ResolveSkills returns the unioned (domain, tool, liveSource)
+	// surface for a list of v1:agents:skill ids -- the canonical
+	// helper every consumer of the new agent shape calls before
+	// reading capabilities (Phase 2 cut: #158). Unknown ids are
+	// warn-logged and skipped; empty input yields an empty bundle.
+	ResolveSkills(ctx context.Context, skillIds []string) (SkillBundle, error)
 }

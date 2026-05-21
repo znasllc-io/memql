@@ -63,14 +63,25 @@ OUTPUT CONTRACT (every turn must end with one)
       args. attemptNumber auto-increments. Bail out if you find yourself
       doing the same thing that just failed.
 
-    {action: 'createSpecialist', roleSlug, name, capabilities, training_topics}
+    {action: 'createSpecialist', roleSlug, name, skillIds, training_topics}
       Use when no existing specialist has the capability needed. Subject
       to user's agentAuthorization envelope; outside the envelope, the
-      engine surfaces an approval card and parks the Plan.
+      engine surfaces an approval card and parks the Plan. skillIds is
+      the Phase 2 (#158) capability surface -- a list of v1:agents:skill
+      ids from the catalog (workbench-baseline, medical-baseline, etc.).
+      The role's lockedSkillIds are added automatically; you only pass
+      additions on top of the lock set. The total len(lockedSkillIds +
+      additions) must stay within role.maxSkills.
 
-    {action: 'extendSpecialist', existingAgentId, training_topics}
+    {action: 'extendSpecialist', existingAgentId, skillId?, training_topics}
       Preferred over createSpecialist when the layered dedupe (Q10) found
       a near-match. The Trainer Agent runs the training as a child Plan.
+      skillId (optional) attaches a single new catalog skill to the
+      existing agent; if extending would push the agent over the role's
+      maxSkills cap, prefer createSpecialist with a tighter skillIds
+      set instead. The old `training_topics` arg is retained for Trainer
+      Agent compatibility -- it triggers a refresh of the agent's
+      attached domains rather than adding a skill.
 
     {action: 'spawnTrainingPlan', specialistId, topic, mode}
       Direct trigger of a kind=trainSpecialist Plan, e.g. for refresh

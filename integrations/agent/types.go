@@ -39,6 +39,11 @@ type MemQLEngine interface {
 	// Used by the RAG retrieval path in handleStreaming to invoke the
 	// similarTo builtin.
 	Execute(ctx context.Context, query string) (any, error)
+	// ResolveSkills returns the unioned (domain, tool, liveSource)
+	// surface for a list of v1:agents:skill ids. Phase 2 cut (#158):
+	// the canonical helper every consumer of the new agent shape
+	// calls before reading capabilities.
+	ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error)
 }
 
 // DeltaSink is what Handle() emits into as a turn produces output. The gRPC

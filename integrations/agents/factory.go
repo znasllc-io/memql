@@ -148,46 +148,55 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 
 // factoryDecision mirrors the JSON schema the agentFactoryAnalyze
 // prompt is contracted to return. Loosely typed: extra fields are
-// ignored, missing optional fields are zero values.
+// ignored, missing optional fields are zero values. Phase 2 cut
+// (#158): SkillIds replaces the per-domain / per-tool lists.
 type factoryDecision struct {
 	Action        string   `json:"action"`
 	TargetAgentId string   `json:"targetAgentId"`
 	RoleSlug      string   `json:"roleSlug"`
-	DomainIds     []string `json:"domainIds"`
-	LiveSourceIds []string `json:"liveSourceIds"`
-	ToolSlugs     []string `json:"toolSlugs"`
+	SkillIds      []string `json:"skillIds"`
 	Reasoning     string   `json:"reasoning"`
 }
 
 // agentSnapshot is the compact view of an existing v1:agents:agent
-// row the factory needs for analysis + extension.
+// row the factory needs for analysis + extension. SkillIds is the
+// canonical capability surface (Phase 2 cut #158); the legacy Domains
+// / Tools fields are resolved at snapshot time via SkillResolver so
+// the dedupe + extension code paths that read them still work without
+// rewriting every callsite.
 type agentSnapshot struct {
 	Id           string
 	Name         string
 	RoleSlug     string
 	Kind         string // "system" | "user" -- read from agent.kind so loadExistingAgents can filter platform infrastructure out of the dedupe candidate pool
-	Domains      []string
-	Tools        []string
+	SkillIds     []string
+	Domains      []string // resolved union across SkillIds
+	Tools        []string // resolved union across SkillIds
 	OwnerUserId  string
 	Capabilities map[string]any // raw capabilities sub-object for partial-update merge
 }
 
 // roleSnapshot is the compact view of a v1:agents:agentRole row.
+// Phase 2 cut (#158): the seven flat lockedDomain / defaultDomain /
+// availableDomain / lockedTool / defaultTool / forbiddenTool /
+// lockedLiveKnowledge fields collapse onto the five skill-id fields
+// the catalog now carries.
 type roleSnapshot struct {
-	Slug             string
-	Name             string
-	Category         string
-	Tier             string
-	LockedDomainIds  []string
-	DefaultDomainIds []string
-	LockedToolSlugs  []string
-	DefaultToolSlugs []string
-	// ForbiddenToolSlugs is the role's explicit opt-out list -- tool
-	// slugs the agent factory MUST NOT grant even when its default
-	// behavior would. Today the agentFactoryAnalyze prompt grants
-	// workbench_use universally; a role with workbench_use here
-	// suppresses that default. Empty for almost every role.
-	ForbiddenToolSlugs    []string
+	Slug              string
+	Name              string
+	Category          string
+	Tier              string
+	LockedSkillIds    []string
+	DefaultSkillIds   []string
+	AvailableSkillIds []string
+	// ForbiddenSkillIds is the role's explicit opt-out list -- skill
+	// ids the agent factory MUST NOT grant even when its default
+	// behavior would. Mirrors the old forbiddenToolSlugs semantic;
+	// use sparingly for Tier-C medical roles that should never carry
+	// operator-computer-use, regulated finance roles whose audit
+	// story can't tolerate workbench shell access, etc.
+	ForbiddenSkillIds     []string
+	MaxSkills             int
 	RecommendedPolicySlug string
 	SystemPromptHints     string
 }
@@ -272,10 +281,12 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 	return decision, nil
 }
 
-// extendAgent unions the decision's domains + tools onto the target
-// agent's current capabilities and writes via mutationUpdateAgent.
+// extendAgent unions the decision's skillIds onto the target agent's
+// current capabilities.skillIds and writes via mutationUpdateAgent.
 // Lock removal is rejected server-side by validateAgentLockedItems;
-// extensions only ADD ids, never remove, so the path is safe.
+// extensions only ADD ids, never remove, so the path is safe. The
+// effective max-skills cap is also enforced server-side -- a decision
+// that would push the agent over the cap rejects loudly.
 func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot, decision factoryDecision) (agentSnapshot, error) {
 	if decision.TargetAgentId == "" {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=extend but targetAgentId is empty")
@@ -284,14 +295,12 @@ func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot,
 	if !ok {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=extend targetAgentId %q not found", decision.TargetAgentId)
 	}
-	mergedDomains := unionStrings(target.Domains, decision.DomainIds)
-	mergedTools := unionStrings(target.Tools, decision.ToolSlugs)
+	mergedSkills := unionStrings(target.SkillIds, decision.SkillIds)
 	caps := map[string]any{}
 	for k, v := range target.Capabilities {
 		caps[k] = v
 	}
-	caps["domains"] = mergedDomains
-	caps["tools"] = mergedTools
+	caps["skillIds"] = mergedSkills
 	payload := map[string]any{"capabilities": caps}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -301,8 +310,13 @@ func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot,
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute mutationUpdateAgent: %w", err)
 	}
-	target.Domains = mergedDomains
-	target.Tools = mergedTools
+	target.SkillIds = mergedSkills
+	// Refresh the resolved Domains / Tools so callers reading them
+	// see the post-extension surface.
+	if bundle, rerr := i.engine.ResolveSkills(ctx, mergedSkills); rerr == nil {
+		target.Domains = bundle.DomainIds
+		target.Tools = bundle.ToolSlugs
+	}
 	return target, nil
 }
 
@@ -315,15 +329,12 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	if !ok {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=create but roleSlug %q not in catalog", decision.RoleSlug)
 	}
-	domains := unionStrings(role.LockedDomainIds, role.DefaultDomainIds)
-	domains = unionStrings(domains, decision.DomainIds)
-	tools := unionStrings(role.LockedToolSlugs, role.DefaultToolSlugs)
-	tools = unionStrings(tools, decision.ToolSlugs)
+	skillIds := unionStrings(role.LockedSkillIds, role.DefaultSkillIds)
+	skillIds = unionStrings(skillIds, decision.SkillIds)
 
 	agentId := id.NewShortId()
 	caps := map[string]any{
-		"domains":  domains,
-		"tools":    tools,
+		"skillIds": skillIds,
 		"keywords": []string{},
 		// Default capability bools follow the role-baseline pattern.
 		// Future iteration may push these onto the role catalog
@@ -356,29 +367,33 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute mutationCreateAgent: %w", err)
 	}
-	return agentSnapshot{
+	snap := agentSnapshot{
 		Id:       agentId,
 		Name:     role.Name,
 		RoleSlug: role.Slug,
-		Domains:  domains,
-		Tools:    tools,
-	}, nil
+		SkillIds: skillIds,
+	}
+	if bundle, rerr := i.engine.ResolveSkills(ctx, skillIds); rerr == nil {
+		snap.Domains = bundle.DomainIds
+		snap.Tools = bundle.ToolSlugs
+	}
+	return snap, nil
 }
 
 // factoryDecisionSchema is the JSON Schema enforced on the
 // agentFactoryAnalyze output. Strict so the prompt's contract is
-// load-bearing rather than aspirational.
+// load-bearing rather than aspirational. Phase 2 cut (#158): the
+// model now returns skillIds instead of separate domainIds/toolSlugs/
+// liveSourceIds lists -- the skill catalog is the bundling surface.
 var factoryDecisionSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["action", "roleSlug", "domainIds", "toolSlugs", "reasoning"],
+  "required": ["action", "roleSlug", "skillIds", "reasoning"],
   "additionalProperties": false,
   "properties": {
     "action":         {"type": "string", "enum": ["match", "extend", "create"]},
     "targetAgentId":  {"type": "string"},
     "roleSlug":       {"type": "string"},
-    "domainIds":      {"type": "array", "items": {"type": "string"}},
-    "liveSourceIds":  {"type": "array", "items": {"type": "string"}},
-    "toolSlugs":      {"type": "array", "items": {"type": "string"}},
+    "skillIds":       {"type": "array", "items": {"type": "string"}},
     "reasoning":      {"type": "string"}
   }
 }`)
@@ -452,15 +467,15 @@ func agentSnapshotFromRow(row map[string]any) (agentSnapshot, bool) {
 	if caps == nil {
 		caps = map[string]any{}
 	}
-	domains := stringSliceFromAny(caps["domains"])
-	tools := stringSliceFromAny(caps["tools"])
+	// Phase 2 cut (#158): SkillIds is the source of truth for the
+	// capability surface. Resolved Domains / Tools are filled by the
+	// caller via engine.ResolveSkills when the consumer needs them.
 	return agentSnapshot{
 		Id:           id,
 		Name:         name,
 		RoleSlug:     roleSlug,
 		Kind:         kind,
-		Domains:      domains,
-		Tools:        tools,
+		SkillIds:     stringSliceFromAny(caps["skillIds"]),
 		Capabilities: caps,
 	}, true
 }
@@ -479,14 +494,31 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 		Name:                  stringField(payload, "name"),
 		Category:              stringField(payload, "category"),
 		Tier:                  stringField(payload, "tier"),
-		LockedDomainIds:       stringSliceFromAny(payload["lockedDomainIds"]),
-		DefaultDomainIds:      stringSliceFromAny(payload["defaultDomainIds"]),
-		LockedToolSlugs:       stringSliceFromAny(payload["lockedToolSlugs"]),
-		DefaultToolSlugs:      stringSliceFromAny(payload["defaultToolSlugs"]),
-		ForbiddenToolSlugs:    stringSliceFromAny(payload["forbiddenToolSlugs"]),
+		LockedSkillIds:        stringSliceFromAny(payload["lockedSkillIds"]),
+		DefaultSkillIds:       stringSliceFromAny(payload["defaultSkillIds"]),
+		AvailableSkillIds:     stringSliceFromAny(payload["availableSkillIds"]),
+		ForbiddenSkillIds:     stringSliceFromAny(payload["forbiddenSkillIds"]),
+		MaxSkills:             intFromAnyLoose(payload["maxSkills"]),
 		RecommendedPolicySlug: stringField(payload, "recommendedPolicySlug"),
 		SystemPromptHints:     stringField(payload, "systemPromptHints"),
 	}, true
+}
+
+// intFromAnyLoose handles the float64 default JSON unmarshal produces
+// for numeric payload fields, plus typed int variants for callers
+// that pass them directly.
+func intFromAnyLoose(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case int32:
+		return int(x)
+	}
+	return 0
 }
 
 func stringField(m map[string]any, key string) string {
@@ -575,8 +607,7 @@ func existingForPrompt(agents []agentSnapshot) []map[string]any {
 			"name":     a.Name,
 			"roleSlug": a.RoleSlug,
 			"capabilities": map[string]any{
-				"domains": a.Domains,
-				"tools":   a.Tools,
+				"skillIds": a.SkillIds,
 			},
 		})
 	}
@@ -587,15 +618,15 @@ func roleCatalogForPrompt(roles []roleSnapshot) []map[string]any {
 	out := make([]map[string]any, 0, len(roles))
 	for _, r := range roles {
 		out = append(out, map[string]any{
-			"slug":               r.Slug,
-			"name":               r.Name,
-			"category":           r.Category,
-			"tier":               r.Tier,
-			"lockedDomainIds":    r.LockedDomainIds,
-			"defaultDomainIds":   r.DefaultDomainIds,
-			"lockedToolSlugs":    r.LockedToolSlugs,
-			"defaultToolSlugs":   r.DefaultToolSlugs,
-			"forbiddenToolSlugs": r.ForbiddenToolSlugs,
+			"slug":              r.Slug,
+			"name":              r.Name,
+			"category":          r.Category,
+			"tier":              r.Tier,
+			"lockedSkillIds":    r.LockedSkillIds,
+			"defaultSkillIds":   r.DefaultSkillIds,
+			"availableSkillIds": r.AvailableSkillIds,
+			"forbiddenSkillIds": r.ForbiddenSkillIds,
+			"maxSkills":         r.MaxSkills,
 		})
 	}
 	return out

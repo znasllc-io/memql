@@ -10,7 +10,7 @@
 prompt plannerAgent {
   plan          object  @required @description("Current v1:planner:plan row with goal, phases, status, tokenBudget, tokenSpent, retryThreshold.")
   tasks         []object         @description("All v1:planner:task rows under this plan, semantic + toolInvocation, sorted by createdAt. Lets the Planner see what's been attempted and what's still queued.")
-  specialists   []object @required @description("Agents available in the space, with roleSlug, capabilities.tools, capabilities.domains, and lineage. The Planner picks dispatch targets from this list.")
+  specialists   []object @required @description("Agents available in the space, with roleSlug, capabilities.skillIds (the post-Phase-2 capability surface, resolved by the planner-side renderer into effective tools + domains for the prompt block), and lineage. The Planner picks dispatch targets from this list.")
   feedbackResponse object       @description("User's response when resuming from an awaitingFeedback parking event. Carries {response, respondedBy, respondedAt}.")
   partition     string  @required @description("Active partition envelope -- needed when proposing createSpecialist (the new agent lands in this partition).")
   now           string  @required @description("RFC3339 wall-clock at invocation. Lets the Planner reason about elapsed time, deadlines, refresh windows.")
@@ -40,13 +40,11 @@ prompt askSpecialist {
 
 @defaultProvider("strongReasoning")
 @templateFile("prompts/agentFactoryAnalyze.tmpl")
-@description("Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, domainIds: []string, liveSourceIds: []string, toolSlugs: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog + existing agents, and issues the appropriate mutation.")
+@description("Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide whether to match, extend, or create an agent. Phase 2 cut (#158): the output contract collapses the separate domainIds / liveSourceIds / toolSlugs lists into a single skillIds[] -- the v1:agents:skill catalog is the bundling unit. Output JSON contract: { action: 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, skillIds: []string, reasoning: string }. The ensureAgent executor reads the structured output, validates against the role catalog (the role's maxSkills cap + forbiddenSkillIds + lockedSkillIds) + the skill catalog, and issues the appropriate mutation.")
 prompt agentFactoryAnalyze {
   goal              string    @required @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
-  existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {domains, tools}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
-  roleCatalog       []object  @required @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedDomainIds, defaultDomainIds, lockedToolSlugs, defaultToolSlugs, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
-  domainCatalog     []object  @required @description("Compact snapshot of v1:common:knowledgeDomain rows -- [{id, name, category, scope}]. The factory references domain ids by their stable slug-style id.")
-  liveSourceCatalog []object            @description("Compact snapshot of v1:knowledge:liveSource rows -- [{id, name, sourceType, refreshIntervalMs}]. The factory references live-source ids when the role needs streams (inventory, market data, etc.).")
-  toolCatalog       []object  @required @description("Compact snapshot of registered tools -- [{name, description, allowedRoles}]. The factory must pick toolSlugs from this set. Tools whose allowedRoles excludes the chosen roleSlug cannot be selected.")
+  existingAgents    []object  @required @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {skillIds}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
+  roleCatalog       []object  @required @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedSkillIds, defaultSkillIds, availableSkillIds, forbiddenSkillIds, maxSkills, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
+  skillCatalog      []object  @required @description("Compact snapshot of the v1:agents:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
   now               string    @required @description("RFC3339 wall-clock.")
 }

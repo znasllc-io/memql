@@ -111,6 +111,13 @@ func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name str
 	return a.Engine.ExecuteToolByName(ctx, name, args)
 }
 
+func (a *CognitionEngineAdapter) ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error) {
+	if a == nil || a.Engine == nil {
+		return memql.SkillBundle{}, fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.ResolveSkills(ctx, skillIds)
+}
+
 // CognitionProviderAdapter wraps MemQLEngine.s provider registry to satisfy cognition.SIProviderRegistry.
 type CognitionProviderAdapter struct {
 	Engine *memql.MemQLEngine
