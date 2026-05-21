@@ -140,6 +140,37 @@ concept agentRole {
 
 @version("1.0.0")
 @namespace("agents")
+@description("First-class capability bundle: a named unit of (knowledgeDomains + toolSlugs + liveSources) that the Planner Agent attaches to agents in createSpecialist / extendSpecialist. After the full skills rollout (#157 -> #158 -> #159) the agent factory pulls skills off the catalog rather than threading parallel flat lists; this concept is the spine of that surface. Phase 1 (this PR) lands the schema + a 13-row predefined catalog; consumers don't read skills yet. Phase 2 migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.")
+concept skill {
+  slug           string  @required  @description("Canonical slug -- stable, kebab-case identifier. Examples: workbench-baseline, copresent-ui, go-backend-engineering. Never renamed (rename = new row + migration).")
+  name           string  @required  @description("Display name shown in the role manager and the agent edit modal. Example: 'CoPresent UI'.")
+  description    string  @description("One- or two-line description of what an agent with this skill can do. Surfaced in tooltips + the skill picker's expanded view.")
+  category       enum("professional", "personal", "creative", "scientific", "medical", "legal", "trades", "education", "civic", "hospitality", "agriculture", "transportation", "energy", "financial", "specialized", "hobby", "foundational", "engineering", "product")  @description("Coarse grouping mirroring agentRole.category, with three additional buckets for cross-cutting platform skills (foundational, engineering, product) that don't fit the user-domain taxonomy. The role manager groups skills by this field in the picker.")
+  tags           []string  @description("UI grouping labels for cross-cutting product surfaces (e.g. ['copresent', 'voice']). Purely cosmetic; no behavioral effect. Lets a single skill appear in multiple curated lists without forcing a category change.")
+  domainIds      []string  @description("v1:common:knowledgeDomain.id references the skill bundles. The agent factory copies these onto the agent's capabilities.domains at attach time (Phase 2). Load-time validation: every id MUST resolve to a known knowledgeDomain seed; the materializer refuses unknown ids on startup.")
+  toolSlugs      []string  @description("Tool / integration slugs the skill grants. Mirrors agentRole.lockedToolSlugs semantics: every id ends up on the agent's capabilities.tools when the skill is attached. Composes through the existing tool-slug expansion (e.g. operator-computer-use expands to workerHost + workerComputer + cross-cutting trio).")
+  liveSourceIds  []string  @description("v1:knowledge:liveSource.id references for live-knowledge bindings. Empty for most skills; populated for skills that need a current-state feed (e.g. inventory, weather, market data). Phase 2 wires these into the agent's capabilities.liveSources surface.")
+  tier           enum("A", "B", "C")  @required  @default("A")  @description("Safety tier mirroring v1:common:knowledgeDomain.tier. The materializer enforces skill.tier >= max(tier across domainIds[]) at load time: a skill cannot bundle a Tier-C medical domain while declaring itself Tier-A. A = general; B = safety-relevant (advisory disclaimer flows downstream); C = high-stakes regulated. Phase 2 propagates the tier onto the agent's effective tier and onto the system-prompt disclaimer injection.")
+  predefined     bool    @default("false")  @description("True for catalog rows seeded by dsl/agents/skills/*.memql on every startup. Predefined rows are LOCKED in the cockpit's Skills admin view: slug / category / tier / domain+tool composition are read-only; only tags / description edits are accepted. User-created skills default to predefined=false and stay fully editable.")
+  active         bool    @default("true")  @description("Soft-deactivate flag. Inactive skills disappear from the picker but agents that already carry the skill keep functioning. Lets us retire a poorly-shaped catalog row without churning every agent that bound to it.")
+}
+
+@version("1.0.0")
+@namespace("agents")
+@description("Append-only audit log for every skill attach / reconfigure event on an agent. Mirrors v1:knowledge:validationEvent: denormalized state lives on the agent row for fast queries; this event log carries the per-mutation history the planner trace viewer (cockpit#125) and audits replay against. Two writes per attach (the agent row update + the event row); cheap. Phase 1 lands the concept; Phase 2 starts writing rows from the agent factory. detached is reserved for a future phase -- v1 is append-only because no consumer currently reads the negative path.")
+concept skillChangeEvent {
+  targetAgentId   string  @required  @description("v1:agents:agent.id whose skill set changed. Pair with createdAt to reconstruct an agent's skill timeline.")
+  skillId         string  @required  @description("v1:agents:skill.id that was attached or reconfigured. The event log entries are denormalized by skillId so the audit / trace viewer can answer 'when was X attached to Y'.")
+  changeKind      enum("attached", "skillReconfigured")  @required  @description("attached = a new skill was added to the agent. skillReconfigured = an already-attached skill's composition shifted under the agent (downstream domain edits propagated through; rare but possible). detached is reserved for a future phase; v1 is append-only.")
+  before          object  @description("Snapshot of the agent's capability shape (domainIds, toolSlugs, liveSourceIds) BEFORE the change. Empty {} for the very first attach to a freshly created agent. Stored verbatim so a future replay tool can rewind state without re-querying the row history.")
+  after           object  @description("Snapshot of the agent's capability shape AFTER the change. Same key set as before. Used by the planner trace viewer to diff what the planner's mintSkill / extendSpecialist run actually added.")
+  actorAgentId    string  @description("v1:agents:agent.id of the agent that drove the change -- the Planner Agent for planner-driven attaches, empty for human-driven changes. Mutually distinguishable from actorUserId; exactly one of the two is set per event.")
+  actorUserId     string  @description("v1:identity:user.id of the human that drove the change (cockpit Skills admin view, agent edit modal). Empty for planner-driven attaches.")
+  planId          string  @description("v1:planner:plan.id of the Plan that the change happened under, if any. Lets the trace viewer surface 'attached during Plan X' attribution + group co-occurring attaches under the same Plan.")
+}
+
+@version("1.0.0")
+@namespace("agents")
 @description("Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across takeovers so the operator agent can learn the user's app usage patterns and shortcut repeat work.")
 concept operatorMemory {
   userId  string  @required  @description("ID of the user this memory belongs to. One-to-one with v1:identity:user.")
