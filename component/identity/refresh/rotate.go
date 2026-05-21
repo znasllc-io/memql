@@ -237,6 +237,7 @@ func (r *Rotator) Rotate(ctx context.Context, in RotateInput) (*RotateResult, er
 		tokenInput.FamilyName = user.LastName
 		tokenInput.Role = user.Role
 		tokenInput.Internal = user.Internal
+		tokenInput.RevocationEpoch = user.RevocationEpoch
 	} else if err != nil && r.Logger != nil {
 		r.Logger.Warn("refresh: user lookup failed",
 			slog.String("user_id", row.UserId),

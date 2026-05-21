@@ -91,6 +91,47 @@ mutation user mutationBumpUserDataExport {
   }
 }
 
+// ---- mutations/v1/identity/bumpUserRevocationEpoch.memql ----
+
+// bumpUserRevocationEpoch
+// =======================
+//
+// Sets revocationEpoch on a v1:identity:user row. Callers compute
+// the new value (current + 1) in Go because the MemQL grammar
+// doesn't have an arithmetic operator on payload fields yet; we
+// pass the next value through.
+//
+// This is the bulk-revoke admin path: bumping the row invalidates
+// every JWT this user holds whose revocation_epoch claim is below
+// the new value. The verifier rejects them on the next stream-open
+// (immediate) and the per-stream re-check loop closes long-lived
+// open streams within ~5 minutes (see memql#106 +
+// component/identity/verifier/interceptor.go).
+//
+// Partial-update via update() so the caller doesn't have to re-pass
+// every @required field on the user. Only revocationEpoch changes.
+//
+// Arguments:
+//   userId    (string, required)  - v1:identity:user.id
+//   newEpoch  (int, required)     - the new monotonic value to stamp.
+//                                   Must be strictly greater than the
+//                                   current value; the caller is
+//                                   responsible for the read-then-+1
+//                                   round-trip.
+
+@enabled
+@description("Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.")
+mutation user mutationBumpUserRevocationEpoch {
+  args {
+    userId    string  @required
+    newEpoch  int     @required
+  }
+  update user {
+    id: args.userId
+    revocationEpoch: args.newEpoch
+  }
+}
+
 // ---- mutations/v1/identity/cancelScheduledDeletion.memql ----
 
 // cancelScheduledDeletion

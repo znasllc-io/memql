@@ -277,6 +277,34 @@ func MutationBumpUserDataExportBuild(args MutationBumpUserDataExportArgs) string
 	return b.String()
 }
 
+// MutationBumpUserRevocationEpoch -- Stamp revocationEpoch on the user row. Bulk-revoke admin path for memql#106. Caller computes the +1 in Go.
+//
+// Bound concept: user.
+type MutationBumpUserRevocationEpochArgs struct {
+	UserId   string
+	NewEpoch int
+}
+
+// MutationBumpUserRevocationEpoch calls the engine mutation mutationBumpUserRevocationEpoch.
+func (qc *QueryClient) MutationBumpUserRevocationEpoch(ctx context.Context, args MutationBumpUserRevocationEpochArgs) (*Result, error) {
+	call := MutationBumpUserRevocationEpochBuild(args)
+	return qc.executeNamed(ctx, "mutationBumpUserRevocationEpoch", call)
+}
+
+func MutationBumpUserRevocationEpochBuild(args MutationBumpUserRevocationEpochArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationBumpUserRevocationEpoch({")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("newEpoch: ")
+	b.WriteString(fmt.Sprintf("%v", args.NewEpoch))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCancelScheduledDeletion -- Cancel a scheduled account deletion (clears deletionScheduledAt).
 //
 // Bound concept: user.

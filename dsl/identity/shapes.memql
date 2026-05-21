@@ -225,6 +225,7 @@ shape user userFull {
   payload.suspendedReason
   payload.lastSeenAt
   payload.activeSpaceId
+  payload.revocationEpoch
   row.createdAt
 }
 
