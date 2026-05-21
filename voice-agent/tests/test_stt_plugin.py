@@ -24,7 +24,7 @@ def stub_cfg() -> Config:
         livekit_api_secret="secret",
         deepgram_api_key="dg-key",
         memql_grpc_addr="bff:50051",
-        voice_agent_shared_token="t",
+        voice_agent_token="t",
         avatar_vendor="anam",
         anam_api_key=None,
         simli_api_key=None,

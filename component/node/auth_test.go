@@ -198,9 +198,8 @@ func TestNodeClassStreamInterceptor_RejectsExpiredNodeToken(t *testing.T) {
 }
 
 // TestNodeClassStreamInterceptor_NoopWhenVerifierNil confirms the
-// backward-compat path: bootstrap that hasn't enabled
-// MEMQL_NODE_REQUIRE_AUTH passes a nil verifier and every stream
-// admits unchanged.
+// single-node-binary path: when no verifier is configured the
+// interceptor is a pass-through and every stream admits unchanged.
 func TestNodeClassStreamInterceptor_NoopWhenVerifierNil(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	interceptor := node.NodeClassStreamInterceptor(nil, logger)

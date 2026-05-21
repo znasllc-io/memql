@@ -14,7 +14,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in (
         "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
         "MEMQL_DEEPGRAM_API_KEY", "MEMQL_GRPC_ADDR",
-        "VOICE_AGENT_SHARED_TOKEN", "MEMQL_AVATAR_VENDOR",
+        "VOICE_AGENT_TOKEN", "MEMQL_AVATAR_VENDOR",
         "ANAM_API_KEY", "SIMLI_API_KEY",
         "ANAM_DEFAULT_AVATAR_ID", "ANAM_DEFAULT_PERSONA_NAME",
         "ANAM_DEFAULT_PERSONA_ID",
@@ -28,7 +28,7 @@ def _seed_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIVEKIT_API_SECRET", "secret")
     monkeypatch.setenv("MEMQL_DEEPGRAM_API_KEY", "dg-key")
     monkeypatch.setenv("MEMQL_GRPC_ADDR", "bff:50051")
-    monkeypatch.setenv("VOICE_AGENT_SHARED_TOKEN", "shared-token")
+    monkeypatch.setenv("VOICE_AGENT_TOKEN", "shared-token")
 
 
 def test_load_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

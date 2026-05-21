@@ -60,7 +60,7 @@ Required:
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
 | `MEMQL_GRPC_ADDR` | memql cluster gRPC address (e.g. bff:50051) |
-| `VOICE_AGENT_SHARED_TOKEN` | shared-secret auth to memql -- matches `MEMQL_VOICE_AGENT_SHARED_TOKEN` on the cluster side |
+| `VOICE_AGENT_TOKEN` | identity-issued `class="voice_agent"` JWT bearer. Minted via `JWTIssuer.IssueVoiceAgentAccessToken` on the cluster side -- see `docs/auth/voice-agent-jwt.md`. |
 
 Optional:
 

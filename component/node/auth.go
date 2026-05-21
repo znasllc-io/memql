@@ -55,9 +55,9 @@ func NodeBindingFromContext(ctx context.Context) (nodeId, nodeType string, ok bo
 //
 // `v` is the per-node verifier (the same one bff/voice/cognition/etc.
 // use for the user-facing gRPC surface). When nil the returned
-// interceptor is a no-op -- callers wire it only when
-// MEMQL_NODE_REQUIRE_AUTH=1 (or equivalent operator config) so
-// single-node dev runs unaffected.
+// interceptor is a no-op pass-through; single-node dev binaries
+// without a verifier configured run the mesh unauthenticated
+// (there's no inter-node traffic in that case anyway).
 //
 // The interceptor stamps the (nodeId, nodeType) binding onto the
 // stream's context via withNodeBinding so the Stream() handler can

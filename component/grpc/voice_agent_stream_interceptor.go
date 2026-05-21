@@ -2,7 +2,6 @@ package memql
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,85 +12,79 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity/verifier"
 )
 
-// voiceAgentTokenPrefix is the conventional prefix for shared-secret
-// tokens issued to the voice-agent process. The interceptor strips it
-// and constant-time-compares the remainder against the configured
-// MEMQL_VOICE_AGENT_SHARED_TOKEN.
-const voiceAgentTokenPrefix = "mql_va_"
-
-// NewVoiceAgentStreamInterceptor wraps `base` and recognizes the
-// shared-secret used by the Python voice-agent (LiveKit Agents 1.5).
+// NewVoiceAgentStreamInterceptor wraps `base` and admits the Python
+// voice-agent process via a class="voice_agent" identity-issued JWT
+// (#109). The JWT is verified through the per-node verifier (the
+// same one wired for every other authenticated surface); on
+// successful verification the call is admitted only when the
+// dispatched payload is one of the VoiceAgent* message types --
+// every other surface is rejected with PermissionDenied so a
+// leaked voice-agent credential can't drive other RPCs.
 //
-// Auth shape: Authorization: Bearer mql_va_<shared-secret>
+// Auth shape: `Authorization: Bearer <eyJ...>` where the JWT
+// carries `class="voice_agent"` and an `instance_id` (stamped via
+// the verifier into VerifiedClaims.NodeId for audit attribution).
 //
-// When the supplied bearer matches the expected token, the call is
-// admitted ONLY if the dispatched payload is one of the VoiceAgent*
-// message types. Every other surface is rejected with PermissionDenied
-// regardless of secret validity. This mirrors the worker-token /
-// guest-token interceptor approach: per-identity-type surface pinning.
-//
-// Phase 2 ships this with a shared-secret. A follow-up will swap to a
-// proper service-account identity row + JWT, but the surface-pinning
-// stays identical -- callers won't notice the auth-source change.
-//
-// If `expectedToken` is empty the interceptor is a no-op (the voice
-// path isn't configured for this build), and any incoming Bearer with
-// the mql_va_ prefix is rejected.
+// Non-voice-agent bearers fall through to `base` (the rest of the
+// auth chain). A nil `v` parameter disables the voice-agent admit
+// path entirely; intended for tests and binaries that don't run
+// the voice-agent surface.
 func NewVoiceAgentStreamInterceptor(
 	base grpc.StreamServerInterceptor,
-	expectedToken string,
+	v *verifier.Verifier,
 	logger *slog.Logger,
 ) grpc.StreamServerInterceptor {
-	expectedToken = strings.TrimSpace(expectedToken)
-	expectedBytes := []byte(expectedToken)
-
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		scheme, token := schemeAndTokenFromMetadata(ss.Context())
-		isVoiceAgent := strings.EqualFold(scheme, "Bearer") && strings.HasPrefix(token, voiceAgentTokenPrefix)
+		ctx := ss.Context()
+		scheme, token := schemeAndTokenFromMetadata(ctx)
 
-		if !isVoiceAgent {
+		// Only JWT-shaped bearers are candidates for the voice-agent
+		// path. PAT (mql_pat_) and worker-token (mql_wkr_) bearers
+		// are reserved for other surfaces and pre-screened here so
+		// we don't waste a verifier round-trip on them.
+		if v == nil || !strings.EqualFold(scheme, "Bearer") || token == "" || hasReservedTokenPrefix(token) {
 			if base == nil {
 				return status.Error(codes.Internal, "auth not configured")
 			}
 			return base(srv, ss, info, handler)
 		}
 
-		// We have what looks like a voice-agent token. If the cluster
-		// has no expected token configured, reject (defense in depth --
-		// don't accidentally accept an attacker-supplied prefix on a
-		// build that isn't supposed to be running the voice path).
-		if expectedToken == "" {
-			return status.Error(codes.Unauthenticated, "voice-agent path not configured on this node")
-		}
-
-		// Constant-time compare the post-prefix portion of the token.
-		// Trim the prefix; what remains is the shared secret.
-		supplied := strings.TrimPrefix(token, voiceAgentTokenPrefix)
-		if subtle.ConstantTimeCompare([]byte(supplied), expectedBytes) != 1 {
-			if logger != nil {
-				logger.Warn("voice-agent token rejected", "method", info.FullMethod)
+		vc, err := v.VerifyBearer(ctx, token)
+		if err != nil || vc == nil || vc.Source != verifier.SourceJWT || vc.Class != verifier.ClassVoiceAgent {
+			// Not a voice-agent JWT (could be a regular user JWT
+			// for a different surface). Hand off to the base chain
+			// which re-runs VerifyBearer (cheap; JWKS hit was
+			// cached on the first call) and decides.
+			if base == nil {
+				return status.Error(codes.Internal, "auth not configured")
 			}
-			return status.Error(codes.Unauthenticated, "invalid voice-agent token")
+			return base(srv, ss, info, handler)
 		}
 
-		// Admit. Stamp a synthetic actor identity onto the context so
-		// downstream handlers see a system-actor on every graph write.
-		// Surface-pinning happens per-message inside handleMessage in
-		// server.go; the in-stream check below short-circuits any
-		// non-VoiceAgent payload that slips through.
-		//
-		// IMPORTANT: call `handler` directly, NOT `base`. base is
-		// the rest of the auth chain (verifier / session-revocation
-		// / guest / operator) and the verifier rejects the
-		// shared-secret token as not being a valid JWT. The
-		// worker-token + guest-token interceptors do the same: when
-		// the alt-auth scheme is admitted, we skip the rest of the
-		// chain and go straight to the gRPC handler.
-		ctx := withVoiceAgentClaims(ss.Context())
+		if logger != nil {
+			logger.Debug("voice-agent admitted",
+				"instance_id", vc.NodeId,
+				"method", info.FullMethod)
+		}
+		ctx = withVoiceAgentClaims(ctx, vc)
 		return handler(srv, &voiceAgentStream{ServerStream: ss, ctx: ctx, logger: logger})
 	}
+}
+
+// hasReservedTokenPrefix reports whether `token` starts with one of
+// the bearer-prefix schemes that aren't JWTs (PAT, worker token).
+// Used to short-circuit the voice-agent verifier path on bearers
+// that can't possibly be voice-agent JWTs.
+func hasReservedTokenPrefix(token string) bool {
+	for _, p := range []string{"mql_pat_", "mql_wkr_"} {
+		if strings.HasPrefix(token, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // voiceAgentStream wraps the gRPC ServerStream so we can:
@@ -169,15 +162,22 @@ func payloadTypeName(payload any) string {
 	return strings.TrimPrefix(full, "*memqlv1.MemqlClientMessage_")
 }
 
-// withVoiceAgentClaims stamps a system-actor identity for the
-// voice-agent service. Distinct from the polyphon system actor so
-// audit + telemetry can tell voice-agent traffic apart from legacy
-// bridge-agent traffic during the Phase 10 cutover window.
-func withVoiceAgentClaims(ctx context.Context) context.Context {
+// withVoiceAgentClaims stamps a system-actor identity onto the
+// context, with the verified token's instance_id pulled across for
+// audit attribution. Downstream handlers see a system-actor on
+// every graph write so audit + telemetry can attribute voice-agent
+// traffic to the specific process that produced it.
+func withVoiceAgentClaims(ctx context.Context, vc *verifier.VerifiedClaims) context.Context {
+	instanceId := ""
+	if vc != nil {
+		instanceId = vc.NodeId
+	}
 	claims := map[string]any{
-		"sub":   "voice-agent",
-		"email": "voice-agent@memql.internal",
-		"role":  "system",
+		"sub":         "voice-agent",
+		"email":       "voice-agent@memql.internal",
+		"role":        "system",
+		"class":       verifier.ClassVoiceAgent,
+		"instance_id": instanceId,
 	}
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)

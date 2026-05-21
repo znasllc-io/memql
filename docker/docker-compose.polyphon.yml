@@ -85,12 +85,12 @@ services:
       # value lives where the rest of the dev env lives.
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
-      # MEMQL_VOICE_AGENT_SHARED_TOKEN is sourced from .env.local via
-      # env_file (defined in docker-compose.full.yml's bff service).
-      # We don't re-declare it here because the `environment:` block
-      # overrides env_file and `${VAR:-}` would evaluate against an
-      # unset host shell var, shadowing the real value with empty.
-      # Same footgun as the voice-agent block fixed in e9d1013.
+      # VOICE_AGENT_TOKEN (the class="voice_agent" JWT) is sourced
+      # from .env.local via env_file (defined in
+      # docker-compose.full.yml's bff service). We don't re-declare
+      # it here because the `environment:` block overrides env_file
+      # and `${VAR:-}` would evaluate against an unset host shell
+      # var, shadowing the real value with empty.
     depends_on:
       - livekit
 

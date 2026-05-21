@@ -26,13 +26,14 @@ const (
 )
 
 // JWT `class` claim values. Duplicated from
-// component/identity.ClassUser / ClassNode so the verifier package
+// component/identity.Class* constants so the verifier package
 // doesn't need to import the identity package (which would invert
 // the layering -- identity is the issuer, verifier is the per-node
-// reader). See #105.
+// reader). See #105 / #109.
 const (
-	ClassUser = "user"
-	ClassNode = "node"
+	ClassUser       = "user"
+	ClassNode       = "node"
+	ClassVoiceAgent = "voice_agent"
 )
 
 // VerifiedClaims is the unified shape both the JWT and PAT paths

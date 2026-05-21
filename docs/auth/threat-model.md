@@ -130,9 +130,9 @@ Each of the items below is a place where the audit explicitly *chose* a tradeoff
 
 ### 5.1 Inter-node mesh trust (F1)
 
-**Now mitigated when `MEMQL_NODE_REQUIRE_AUTH=1` (#105 / PR forthcoming):** a dedicated `class="node"` JWT type plus the matching surface pin at the `NodeService.Stream` gRPC interceptor. See [`docs/auth/node-jwt.md`](node-jwt.md) for the provisioning + rotation flow.
+`NodeService.Stream` is pinned to `class="node"` identity-issued JWTs (#105). The verifier on every cluster node rejects every other class -- user JWTs, PATs, and worker tokens are all unable to drive the mesh. Provisioning + rotation: see [`docs/auth/node-jwt.md`](node-jwt.md).
 
-Legacy posture (the default until ops flips the flag): NodeService.Stream had no auth at all -- the legacy text below describes that posture.
+Single-node dev (the default BFF-only run) doesn't open inter-node streams; the interceptor is a no-op pass-through when the per-node verifier isn't configured.
 
 
 
@@ -142,13 +142,11 @@ Legacy posture (the default until ops flips the flag): NodeService.Stream had no
 
 **Upgrade path:** introduce a per-node service-account claim (`identity.node`) issued at provisioning time and required by the `NodeService.Stream` interceptor; existing user JWTs would be rejected at this surface. Pending; tracked separately.
 
-### 5.2 Voice-agent shared secret (F4)
+### 5.2 Voice-agent service-account (F4)
 
-The Python voice-agent authenticates via `MEMQL_VOICE_AGENT_SHARED_TOKEN`. The interceptor uses `subtle.ConstantTimeCompare` for the comparison (timing-attack resistant). Rotation requires a coordinated restart of the voice-agent + the memQL binaries that hold the env var.
+The Python voice-agent authenticates via an identity-issued `class="voice_agent"` JWT (#109). The interceptor on `MemqlService.Stream` admits the class and pins the call to `VoiceAgent*` payload types -- a leaked credential can't drive other RPCs. Provisioning + rotation: see [`docs/auth/voice-agent-jwt.md`](voice-agent-jwt.md).
 
-**Trust assumption:** voice-agent is a single-tenant, single-instance, internal service. Multi-tenant voice-agent deployments would need a service-account JWT path (same shape as §5.1) instead of a shared secret.
-
-**Upgrade path:** mint a `voice_agent` identity type with a JWT lifecycle the cluster can rotate without a restart.
+**Trust assumption:** voice-agent is a single-tenant, single-instance, internal service. Multi-tenant voice-agent deployments would need a tenant-scoped claim (out of scope for #109).
 
 ### 5.3 Session revocation on long-lived streams (F7)
 
@@ -294,11 +292,11 @@ This is by design — every tool defines its own contract — but it leaves a cl
 
 ## 8. Future hardening (ordered)
 
-1. ~~**Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.~~ Shipped via #105 (opt-in via `MEMQL_NODE_REQUIRE_AUTH=1`).
+1. ~~**Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.~~ Shipped via #105.
 2. ~~**Revocation epoch claim** — closes §5.3.~~ Shipped via #106 / PR #148.
 3. **Centralised tool-call arg validator** — closes §7.6.
 4. **Rotate-on-resend for guest invitations** — closes §5.4.
-5. **Voice-agent service-account path** — closes §5.2.
+5. ~~**Voice-agent service-account path** — closes §5.2.~~ Shipped via #109.
 6. **Workbench exec allowlist or seccomp profile** — closes §7.7.
 7. **CSRF framework if any authenticated form POSTs ship** — closes §5.7.
 

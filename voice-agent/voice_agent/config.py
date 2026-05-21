@@ -23,7 +23,11 @@ class Config:
 
     # memql gRPC
     memql_grpc_addr: str
-    voice_agent_shared_token: str
+    # Identity-issued class="voice_agent" JWT bearer presented on
+    # every MemqlService.Stream dial. Minted via
+    # JWTIssuer.IssueVoiceAgentAccessToken on the cluster side; see
+    # docs/auth/voice-agent-jwt.md.
+    voice_agent_token: str
 
     # Avatar
     avatar_vendor: str  # 'anam' | 'simli' | 'none'
@@ -87,7 +91,7 @@ def load_config() -> Config:
         livekit_api_secret=_get_required("LIVEKIT_API_SECRET"),
         deepgram_api_key=_get_required("MEMQL_DEEPGRAM_API_KEY"),
         memql_grpc_addr=_get_required("MEMQL_GRPC_ADDR"),
-        voice_agent_shared_token=_get_required("VOICE_AGENT_SHARED_TOKEN"),
+        voice_agent_token=_get_required("VOICE_AGENT_TOKEN"),
         avatar_vendor=_get("MEMQL_AVATAR_VENDOR", "anam").lower(),
         anam_api_key=_get("ANAM_API_KEY") or None,
         simli_api_key=_get("SIMLI_API_KEY") or None,

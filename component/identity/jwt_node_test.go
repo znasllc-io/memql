@@ -83,6 +83,64 @@ func TestIssueNodeAccessToken_RejectsEmptyFields(t *testing.T) {
 	}
 }
 
+// TestIssueVoiceAgentAccessToken_StampsClass pins the load-bearing
+// contract for #109: the voice-agent mint path stamps
+// class="voice_agent" plus the instance_id on the NodeId slot.
+// Downstream the voice-agent interceptor reads class to admit.
+func TestIssueVoiceAgentAccessToken_StampsClass(t *testing.T) {
+	dir := t.TempDir()
+	km, err := identity.NewKeyManager(dir, "")
+	require.NoError(t, err)
+	require.NoError(t, km.Load())
+	iss, err := identity.NewJWTIssuer(km, identity.Config{
+		Enabled:     true,
+		BaseURL:     "https://identity.test",
+		JWTAudience: "memql",
+		KeyDir:      dir,
+	})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	tok, exp, err := iss.IssueVoiceAgentAccessToken(identity.VoiceAgentIssueInput{
+		IdentityId: "v1:identity:identity:va-prod-1",
+		InstanceId: "voice-agent-prod-us-east-1",
+	}, now)
+	require.NoError(t, err)
+	require.NotEmpty(t, tok)
+	assert.True(t, exp.After(now))
+
+	claims, err := iss.VerifyAccessToken(tok, now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, identity.ClassVoiceAgent, claims.Class)
+	assert.Equal(t, "voice-agent-prod-us-east-1", claims.NodeId)
+	assert.Equal(t, "v1:identity:identity:va-prod-1", claims.Subject)
+}
+
+// TestIssueVoiceAgentAccessToken_RejectsEmptyFields locks input
+// validation at the mint surface.
+func TestIssueVoiceAgentAccessToken_RejectsEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	km, err := identity.NewKeyManager(dir, "")
+	require.NoError(t, err)
+	require.NoError(t, km.Load())
+	iss, err := identity.NewJWTIssuer(km, identity.Config{
+		Enabled:     true,
+		BaseURL:     "https://identity.test",
+		JWTAudience: "memql",
+		KeyDir:      dir,
+	})
+	require.NoError(t, err)
+
+	cases := []identity.VoiceAgentIssueInput{
+		{InstanceId: "va-1"},
+		{IdentityId: "v1:identity:identity:x"},
+	}
+	for _, in := range cases {
+		_, _, err := iss.IssueVoiceAgentAccessToken(in, time.Now().UTC())
+		require.Error(t, err)
+	}
+}
+
 // TestIssueAccessToken_DefaultsToEmptyClass keeps existing user
 // tokens unchanged: the class claim is the omit-empty case for the
 // default mint path, so pre-#105 verifiers (which don't read it)

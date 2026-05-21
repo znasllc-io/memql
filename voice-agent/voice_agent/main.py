@@ -121,7 +121,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # via an extra ParticipantConnected lookup.
     ga_agent_id = f"{space_id}-ga"
 
-    client = MemqlGrpcClient(cfg.memql_grpc_addr, cfg.voice_agent_shared_token)
+    client = MemqlGrpcClient(cfg.memql_grpc_addr, cfg.voice_agent_token)
     await client.connect()
     persona = await resolve_persona(
         client=client,
