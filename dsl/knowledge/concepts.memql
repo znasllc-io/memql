@@ -6,6 +6,7 @@
 @version("1.0.0")
 @namespace("knowledge")
 @description("A user-uploaded file (or chat-promoted segment) that's been analyzed and structured into queryable items. Container concept that owns metadata + back-references; the actual structured content lives in per-format item concepts (v1:knowledge:spreadsheetRow for tabular, v1:knowledge:imageRegion for visual, v1:common:documentChunk for text-style breakdowns of PDFs / markdown / plain text). Per the v1 brainstorm Q8 hybrid model: one Document container query gives the Knowledge page its listing, typed per-format item queries give analytic surfaces (e.g. spreadsheet row column-filters) without JSON-path indirection.")
+@displayCard(primary="fileName", secondary="format", tertiary="uploadedBy", status="validationStatus")
 concept document {
   attachmentId      string  @required @description("Back-reference to v1:common:attachment. The bytes live in GCS via the attachment row; this Document carries the analyzed projection.")
   planId            string  @required @description("Back-reference to the v1:planner:plan that produced this analysis. Used by the Tasks page expand-drawer + by re-analysis triggers.")
@@ -120,6 +121,7 @@ concept knowledgeBridge {
 @version("1.0.0")
 @namespace("common")
 @description("A knowledge domain that agents can specialise in. First-class replacement for the hardcoded domain list that used to live in the frontend. Each domain can have document chunks ingested into it for retrieval-augmented generation, and can declare which tool slugs REQUIRE it (so the UI auto-adds it when the user picks a tool like copresent_control). Per Q21: user-created domains carry a scope (workspace = visible to all in partition; private = visible only to owner) plus an ownerId; seeded domains stay workspace-scoped with ownerId null (system-owned). Per docs/planning/knowledge-seeder.md: seeded domains carry a tier (A=auto-seed, B=auto-seed with disclaimer, C=high-stakes, do-not-auto-seed) that drives the seeder pipeline's content strategy.")
+@displayCard(primary="name", secondary="category", tertiary="scope", status="active")
 concept knowledgeDomain {
   name         string  @required  @description("Display name, e.g. 'CoPresent UI' or 'Business Administration'.")
   description  string  @description("One-line description of what this domain covers.")

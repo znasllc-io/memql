@@ -27,6 +27,7 @@ concept accessRequest {
 @version("1.0.0")
 @namespace("identity")
 @description("Append-only audit log entry. Captures security-relevant events (auth, identity, authorization, configuration, admin) with actor + target + source attribution. Global scope so any cluster operator can read the full trail. Retention controlled by IDENTITY_AUDIT_LOG_RETENTION_DAYS via the daily auditEventRetentionSweep automation. The prevEventHash field is reserved for future hash-chain tamper-resistance; written but not validated in MVP.")
+@displayCard(primary="action", secondary="category", tertiary="actorEmail", status="outcome")
 concept auditEvent {
   occurredAt      datetime  @required  @description("When the event happened. May lag createdAt by milliseconds because the row is written after the event completes.")
   category        enum("auth", "identity", "authorization", "configuration", "admin", "data")  @required  @description("Coarse grouping for filtering and retention policy hooks.")
@@ -207,6 +208,7 @@ concept identity {
 @version("1.0.0")
 @namespace("identity")
 @description("Token-hashed invitation credential. Maps an invitee (existing user by ID, or external guest by email + token) to an optional product scope hint. The identity layer owns the lifecycle (pending/accepted/expired/cancelled) and the auth primitive; product layers populate spaceId/spaceName and any display-name denormalizations they need. Global-scoped: an unauthenticated /join/<token> resolve has no envelope partition, and even authenticated invitees may live in a different partition than the inviter, so token -> invitation lookup must work without a partition context. Product-side rows that REFERENCE invitations (e.g. v1:copresent:participation) stay partition-scoped on the partition where the work actually happens.")
+@displayCard(primary="inviteeEmail", secondary="kind", tertiary="inviterName", status="status")
 concept invitation {
   active        bool                                                                          @description("Whether the invitation is active. Set false to soft-cancel.")
   expiresAt     datetime                                                                      @description("Absolute expiration timestamp (guest kind only; null for user kind).")
@@ -248,6 +250,7 @@ concept magicLinkRequest {
 @version("1.0.0")
 @namespace("identity")
 @description("A person (or synthetic principal). Owns identities. Same record cluster-wide.")
+@displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")
   displayName     string  @required  @description("Display name shown in the UI. By convention this is firstName + ' ' + lastName when both are populated; the admin / setup wizard maintain that invariant. Standalone field (rather than a derived computed view) because legacy rows pre-date the firstName/lastName split and we want a stable display value to fall back on.")

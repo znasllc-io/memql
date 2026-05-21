@@ -1023,6 +1023,22 @@ message ConceptInfo {
   string entity = 4;
   string description = 5;
   string type = 6;
+
+  // DisplayCard carries the per-concept rendering hints declared
+  // via the `@displayCard(...)` DSL annotation. Concept-agnostic
+  // clients (cockpit's Concepts tab, future generic browsers)
+  // project rows through these slot names instead of carrying
+  // per-concept rendering code. Absent when the concept didn't
+  // declare the annotation -- clients should fall back to a
+  // generic id+intrinsics rendering. See memql#160.
+  DisplayCard display_card = 7;
+}
+
+message DisplayCard {
+  string primary = 1;
+  string secondary = 2;
+  string tertiary = 3;
+  string status = 4;
 }
 
 // ConceptsSubscribeMsg requests CDC subscription filters grouped by domain.

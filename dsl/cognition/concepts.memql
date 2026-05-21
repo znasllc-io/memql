@@ -206,6 +206,7 @@ concept session {
 @namespace("cognition")
 @type("collection")
 @description("Persistent rooms where humans and AI assistants meet, converse, and interact. Every space is a multi-participant room with a bounded capacity for humans and for agents -- there is no longer a 1:1 vs group distinction.")
+@displayCard(primary="name", secondary="kind", tertiary="ownerUserId", status="status")
 concept space {
   ownerUserId  string  @required  @description("v1:identity:user.id of the space owner. The owner is the human whose assistant is wired into the space (the only AI presence that speaks to humans). Stamped at create time from the request actor; the @relationship below pins the parent.")
   active  bool  @default("true")  @description("Whether the space is active. Set to false for soft delete.")
