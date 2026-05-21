@@ -60,6 +60,40 @@ query delegation queryActiveDelegationsForAgent {
   shape   delegationFull
 }
 
+// ---- queries/v1/identity/activeDelegationsByIdentitySubject.memql ----
+
+// queryActiveDelegationsByIdentitySubject - Get Active Delegations by Identity Subject
+// =====================================================================================
+//
+// Returns active (non-revoked) delegations whose identitySubject matches the
+// caller-supplied authenticated subject id. Used by the per-request
+// DelegationResolver on the gRPC auth hot path: post-JWT-verify the verifier
+// hands the verified subject here, and the resolver applies role-ceiling +
+// lifetime + scope narrowing on top of whatever rows come back.
+//
+// Lifetime + role-ceiling + scope checks all live in Go (resolver-side); this
+// query is the raw subject -> active rows lookup. Returning everything (and
+// letting Go pick) means a future "prefer the most-recently-created" tiebreak
+// doesn't need a schema change.
+//
+// Reference: memql#112.
+//
+// Arguments:
+//   identitySubject (string, required) - authenticated subject id of the delegating identity
+//
+// Returns:
+//   Zero or more delegation rows in delegationFull shape.
+
+@enabled
+@description("Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.")
+query delegation queryActiveDelegationsByIdentitySubject {
+  args {
+    identitySubject  string  @required
+  }
+  filter  payload.identitySubject==args.identitySubject; traitIsActiveRecord
+  shape   delegationFull
+}
+
 @enabled
 @description("Active users in the cluster, optionally filtered by role or group membership. Both args are optional -- omit them to list all active users (the identity admin portal's user-list view).")
 query user queryActiveUsers {

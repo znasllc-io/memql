@@ -121,6 +121,28 @@ func QueryActiveAgentsForUserBuild(args QueryActiveAgentsForUserArgs) string {
 	return b.String()
 }
 
+// QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
+//
+// Bound concept: delegation.
+type QueryActiveDelegationsByIdentitySubjectArgs struct {
+	IdentitySubject string
+}
+
+// QueryActiveDelegationsByIdentitySubject calls the engine query queryActiveDelegationsByIdentitySubject.
+func (qc *QueryClient) QueryActiveDelegationsByIdentitySubject(ctx context.Context, args QueryActiveDelegationsByIdentitySubjectArgs) (*Result, error) {
+	call := QueryActiveDelegationsByIdentitySubjectBuild(args)
+	return qc.executeNamed(ctx, "queryActiveDelegationsByIdentitySubject", call)
+}
+
+func QueryActiveDelegationsByIdentitySubjectBuild(args QueryActiveDelegationsByIdentitySubjectArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActiveDelegationsByIdentitySubject({")
+	b.WriteString("identitySubject: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveDelegationsForAgent -- Get all active delegations for a given agent ID
 //
 // Bound concept: delegation.
