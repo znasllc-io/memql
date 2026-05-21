@@ -82,6 +82,15 @@ func (i *Integration) handleExec(ctx context.Context, ws *workspace, args map[st
 	if strings.TrimSpace(cmd) == "" {
 		return errResult("exec", "missing_arg", "exec requires `cmd`")
 	}
+	// Allowlist gate: the agent's tool-loop is the trust boundary;
+	// a compromised agent can otherwise run arbitrary shell against
+	// the workspace. Defense-in-depth on top of the per-call
+	// rlimits + timeout + output cap. See
+	// integrations/workbench/exec_allowlist.go for the curated set
+	// and memql#110 for the rationale.
+	if err := EnforceExecAllowlist(cmd); err != nil {
+		return errResult("exec", "command_not_allowed", err.Error())
+	}
 	cwdArg, _ := args["cwd"].(string)
 	cwd, err := ws.safeJoin(cwdArg)
 	if err != nil {
