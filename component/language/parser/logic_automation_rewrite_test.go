@@ -42,7 +42,7 @@ logic doFoo {
 	}
 }
 
-// Automation struct form rewrites to `func (Automation) NAME(ctx any)`
+// Automation struct form rewrites to `func (Automation) NAME(_ any)`
 // with one `:=` assignment per step. Step bodies of the form
 // `name { args }` translate to `name({ args })`. `event` and
 // `event.X` references in step args pass through verbatim -- the
@@ -51,7 +51,8 @@ logic doFoo {
 // (Historically these were translated to `ctx.input.X`, but
 // `ctx.input` is not a recognised runtime reference and the
 // translated value fell through as a literal string; see
-// memql-cockpit#49.)
+// memql-cockpit#49.) Per issue #93 the parameter is `_` and there
+// is no `return ctx, nil` trailing line.
 func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
 	src := `@enabled
 @trigger(event="graph.node.created.v1:cognition:space")
@@ -66,8 +67,11 @@ automation autoJoinSI {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "func (Automation) autoJoinSI(ctx any)") {
-		t.Fatalf("expected procedural rewrite; got %q", out)
+	if !strings.Contains(out, "func (Automation) autoJoinSI(_ any)") {
+		t.Fatalf("expected procedural rewrite with `_` placeholder param; got %q", out)
+	}
+	if strings.Contains(out, "(ctx any)") {
+		t.Fatalf("rewriter must not emit `ctx any` parameter; got %q", out)
 	}
 	if !strings.Contains(out, "joinAgents := logicJoinAgents({ spaceId: event.node.id })") {
 		t.Fatalf("step did not rewrite to assignment + verbatim event ref; got %q", out)
@@ -75,8 +79,8 @@ automation autoJoinSI {
 	if strings.Contains(out, "ctx.input") {
 		t.Fatalf("rewriter must not emit ctx.input references; got %q", out)
 	}
-	if !strings.Contains(out, "return ctx, nil") {
-		t.Fatalf("expected trailing return; got %q", out)
+	if strings.Contains(out, "return ctx, nil") {
+		t.Fatalf("rewriter must not emit trailing `return ctx, nil`; got %q", out)
 	}
 }
 

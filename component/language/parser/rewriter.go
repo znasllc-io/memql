@@ -5,7 +5,15 @@
 // { args, insert <concept> { ... } }`, `logic NAME { args, body }`,
 // `automation NAME { step <name> { ... } }`, plus file-top `args { ... }`
 // blocks. The general parser's grammar reads the older procedural
-// form (`func (Query) NAME(ctx any) (any, error) { ... }`).
+// form (`func (Query) NAME(_ any) (any, error) { return <expr>, nil }`).
+//
+// Per issue #93, the rewriter's procedural output uses `_ any` as
+// the parameter (purely a placeholder slot -- bodies reference
+// args via `args.X`, resolved against the args block) and does
+// not emit `return ctx, nil` trailers. The engine parser still
+// recognises both `args.X` and `ctx.X` for backwards-compatibility
+// with non-rewriter call sites (policy evaluator); that recognition
+// is a separate cleanup.
 //
 // This file is the bridge: every struct-form input gets translated
 // to the equivalent procedural source string before the parser
@@ -60,17 +68,6 @@ func findMatchingCloseBrace(s string, openIdx int) int {
 		}
 	}
 	return -1
-}
-
-// translateArgsRefsToCtx used to swap `args.X` references for the
-// legacy `ctx.X` envelope form during the transition window before
-// the parser learned `args.X` natively. F.3 of the ctx-envelope
-// purge added native `args.X` recognition to the engine parser and
-// the mutation-template parser, so this translation is a no-op now
-// (preserved as a function call site for the rewriter; remove the
-// helper once every emit site has been audited).
-func translateArgsRefsToCtx(expr string) string {
-	return expr
 }
 
 // fileTopUseDecl matches a file-top `use <ns>.<concept>` declaration.
@@ -212,11 +209,11 @@ func rewriteEachBlock(
 
 // emitFuncHeader writes the procedural function preamble: optional
 // file-top `args { ... }` block, then the receiver-style function
-// signature. Returns the parameter name (`ctx` if args are present,
-// otherwise `_`).
-func emitFuncHeader(sb *strings.Builder, receiver, name, argsText, returns string) string {
-	hasArgs := strings.TrimSpace(argsText) != ""
-	if hasArgs {
+// signature. The parameter is always `_` -- the body references
+// args via `args.X` (resolved against the args block), so the
+// function parameter itself is purely a placeholder slot.
+func emitFuncHeader(sb *strings.Builder, receiver, name, argsText, returns string) {
+	if strings.TrimSpace(argsText) != "" {
 		sb.WriteString("args {\n")
 		sb.WriteString(argsText)
 		if !strings.HasSuffix(strings.TrimRight(argsText, " \t"), "\n") {
@@ -224,17 +221,12 @@ func emitFuncHeader(sb *strings.Builder, receiver, name, argsText, returns strin
 		}
 		sb.WriteString("}\n")
 	}
-	param := "_"
-	if hasArgs {
-		param = "ctx"
-	}
-	sb.WriteString(fmt.Sprintf("func (%s) %s(%s any)", receiver, name, param))
+	sb.WriteString(fmt.Sprintf("func (%s) %s(_ any)", receiver, name))
 	if returns != "" {
 		sb.WriteString(" ")
 		sb.WriteString(returns)
 	}
 	sb.WriteString(" {\n")
-	return param
 }
 
 // extractArgsBlock pulls the `args { ... }` block out of a struct
@@ -309,8 +301,8 @@ func LooksLikeStructQuery(source string) bool {
 }
 
 // NormaliseQuerySource rewrites every `query NAME { ... }` block in
-// the source to the procedural `func (Query) NAME(ctx any) (any,
-// error) { ctx.output = <expr>; return ctx, nil }` form.
+// the source to the procedural `func (Query) NAME(_ any) (any,
+// error) { return <expr>, nil }` form.
 func NormaliseQuerySource(source string) (string, error) {
 	return rewriteEachBlock(source, queryStructHeader, "struct-form query", true, emitQuery)
 }
@@ -365,7 +357,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 		case strings.HasPrefix(line, "concept"):
 			return nil, fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead")
 		case strings.HasPrefix(line, "filter"):
-			out.filter = translateArgsRefsToCtx(strings.TrimSpace(strings.TrimPrefix(line, "filter")))
+			out.filter = strings.TrimSpace(strings.TrimPrefix(line, "filter"))
 		case strings.HasPrefix(line, "shape"):
 			out.shape = strings.TrimSpace(strings.TrimPrefix(line, "shape"))
 		case strings.HasPrefix(line, "sort"):
@@ -516,11 +508,11 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		return nil, fmt.Errorf("mutation body cannot mix `insert <name> { ... }` and `update <name> { ... }`")
 	case hasInsert:
 		out.writeKind = "insert"
-		out.writeBody = translateArgsRefsToCtx(insertRaw)
+		out.writeBody = insertRaw
 		out.writeTarget = insertName
 	case hasUpdate:
 		out.writeKind = "update"
-		out.writeBody = translateArgsRefsToCtx(updateRaw)
+		out.writeBody = updateRaw
 		out.writeTarget = updateName
 	default:
 		return nil, fmt.Errorf("mutation body must contain exactly one `insert <conceptName> { ... }` or `update <conceptName> { ... }` block")
@@ -629,8 +621,9 @@ func LooksLikeStructLogic(source string) bool {
 }
 
 // NormaliseLogicSource rewrites every `logic NAME { ... }` block to
-// the procedural `func (Logic) NAME(ctx any) (any, error) { ... }`
-// form.
+// the procedural `func (Logic) NAME(_ any) (any, error) { ... }`
+// form. The body keeps its own trailing `return <expr>`; the
+// rewriter no longer appends `return ctx, nil`.
 func NormaliseLogicSource(source string) (string, error) {
 	return rewriteEachBlock(source, logicStructHeader, "struct-form logic", false, emitLogic)
 }
@@ -653,13 +646,13 @@ func emitLogic(name, _conceptId, body string) (string, error) {
 	if close < 0 {
 		return "", fmt.Errorf("`body { ... }` block missing closing brace")
 	}
-	bodyText := translateArgsRefsToCtx(body[open+1 : close])
+	bodyText := body[open+1 : close]
 
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Logic", name, argsText, "(any, error)")
 	sb.WriteString(bodyText)
 	if !containsTrailingReturn(bodyText) {
-		sb.WriteString("\n  return ctx, nil\n")
+		return "", fmt.Errorf("logic %q body must end with a `return <expr>` terminator", name)
 	}
 	sb.WriteString("}")
 	return sb.String(), nil
@@ -723,7 +716,7 @@ func emitAutomation(name, _conceptId, body string) (string, error) {
 		return "", fmt.Errorf("at least one `step` is required")
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("func (Automation) %s(ctx any) {\n", name))
+	sb.WriteString(fmt.Sprintf("func (Automation) %s(_ any) {\n", name))
 	for _, s := range steps {
 		sb.WriteString("  ")
 		sb.WriteString(s.name)
@@ -731,7 +724,7 @@ func emitAutomation(name, _conceptId, body string) (string, error) {
 		sb.WriteString(s.call)
 		sb.WriteString("\n")
 	}
-	sb.WriteString("  return ctx, nil\n}")
+	sb.WriteString("}")
 	return sb.String(), nil
 }
 
@@ -884,77 +877,15 @@ func LooksLikeFileTopArgs(source string) bool {
 	return true
 }
 
-// NormaliseFileTopArgs translates `args.X` references to `ctx.X`
-// inside the function body that follows each file-top `args { ... }`
-// block. The args block itself stays in the source -- the parser
-// ingests it natively and attaches it to the next FunctionDef.
+// NormaliseFileTopArgs used to translate `args.X` references to
+// `ctx.X` inside the function body that follows each file-top
+// `args { ... }` block. The engine parser learned `args.X` natively
+// in F.3 of the ctx-envelope purge, so the translation is a no-op
+// now -- the function stays in the NormaliseAll chain only to
+// preserve the structural detection (LooksLikeFileTopArgs gates
+// whether the chain runs at all) without churning callers.
 func NormaliseFileTopArgs(source string) (string, error) {
-	cursor := 0
-	for {
-		loc := fileTopArgsHeader.FindStringIndex(source[cursor:])
-		if loc == nil {
-			return source, nil
-		}
-		absStart := cursor + loc[0]
-		if isInsideStructConstructHeader(source, absStart) {
-			cursor = absStart + loc[1] - loc[0]
-			continue
-		}
-
-		openIdx := cursor + loc[1] - 1
-		closeIdx := findMatchingCloseBrace(source, openIdx)
-		if closeIdx < 0 {
-			return "", fmt.Errorf("file-top `args { ... }` block: missing closing brace")
-		}
-
-		after := source[closeIdx+1:]
-		defStart := findNextDefinitionIndex(after)
-		if defStart < 0 {
-			cursor = closeIdx + 1
-			continue
-		}
-		defOpenBrace := strings.Index(after[defStart:], "{")
-		if defOpenBrace < 0 {
-			cursor = closeIdx + 1
-			continue
-		}
-		defOpen := defStart + defOpenBrace
-		defClose := findMatchingCloseBrace(after, defOpen)
-		if defClose < 0 {
-			cursor = closeIdx + 1
-			continue
-		}
-		bodyAbsStart := closeIdx + 1 + defStart
-		bodyAbsEnd := closeIdx + 1 + defClose + 1
-		bodyTranslated := translateArgsRefsToCtx(source[bodyAbsStart:bodyAbsEnd])
-		source = source[:bodyAbsStart] + bodyTranslated + source[bodyAbsEnd:]
-
-		cursor = closeIdx + 1
-	}
-}
-
-// definitionLeadingTokens matches the start of any procedural /
-// declarative construct, so the file-top args translator can find
-// the function body it should rewrite into.
-var definitionLeadingTokens = regexp.MustCompile(`(?m)^[ \t]*(func|builtin|tool|prompt|provider|shape|spec|query|mutation|automation|policy)\b`)
-
-func findNextDefinitionIndex(source string) int {
-	loc := definitionLeadingTokens.FindStringIndex(source)
-	if loc == nil {
-		return -1
-	}
-	insert := loc[0]
-	for insert > 0 {
-		prevNL := strings.LastIndex(source[:insert-1], "\n")
-		lineStart := prevNL + 1
-		line := strings.TrimSpace(source[lineStart : insert-1])
-		if line == "" || strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-			insert = lineStart
-			continue
-		}
-		break
-	}
-	return insert
+	return source, nil
 }
 
 // isInsideStructConstructHeader returns true when `argsLoc` falls

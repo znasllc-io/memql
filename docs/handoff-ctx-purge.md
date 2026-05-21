@@ -81,16 +81,18 @@ or `v1:identity:authSession` lands.
 - `translateArgsRefsToCtx` is a no-op -- `args.X` passes through to
   the engine parser, which learned `args.X` natively in F.3
 
-Carry-overs:
+Carry-overs (now landed via issue #93):
 
-- `emitFuncHeader` still emits `(ctx any)` as the parameter name
-  (just a placeholder identifier; the parser's
-  `validateGoStyleFunctionSignature` only checks the type). Renaming
-  to `_` / `args` is cosmetic and can land alongside F.4.
-- `emitLogic` still appends a trailing `return ctx, nil` when the
-  body has no explicit terminator. Bodies the rewriter touches in
-  practice all carry their own `return <expr>`, so this is dead
-  emission -- safe to clean up alongside F.2.
+- `emitFuncHeader` emits `(_ any)` as the parameter name. Bodies
+  reference args via `args.X` (resolved against the args block);
+  the function parameter itself is purely a placeholder slot.
+- `emitLogic` no longer appends a trailing `return ctx, nil`.
+  Logic bodies must carry their own `return <expr>` terminator;
+  bodies without one are rejected with a clear error.
+- `emitAutomation` emits `func (Automation) NAME(_ any) { ... }`
+  with no trailing `return ctx, nil` -- automation bodies are
+  a step sequence, not an expression.
+- `translateArgsRefsToCtx` was a no-op since F.3 and is deleted.
 
 ### F.2 -- Parser: drop the ctx.output body parsers _(LANDED)_
 
