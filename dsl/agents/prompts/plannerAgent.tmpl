@@ -83,6 +83,37 @@ OUTPUT CONTRACT (every turn must end with one)
       Agent compatibility -- it triggers a refresh of the agent's
       attached domains rather than adding a skill.
 
+    {action: 'mintSkill', name, slug, description, category, tier,
+     domainIds, toolSlugs, liveSourceIds, tags, justification}
+      Phase 3 (memql#159). Mint a brand-new v1:agents:skill catalog row
+      when NO existing skill covers a needed capability. Subject to the
+      user's agentAuthorization envelope (action='mintSkill' +
+      skillTierAllowlist on the planner's grant). In-envelope mints
+      execute immediately and the new skill becomes attachable on the
+      next iteration. Out-of-envelope mints surface a canvas approval
+      card (data.variant='mintSkillApprovalRequested') and park the
+      Plan with feedbackReason='mint_skill_approval_required' --
+      approve / approve-and-allow / reject lands via the canvas, the
+      planner picks up from the feedbackResponse on the next turn.
+
+      Catalog-search-before-mint heuristic (PREFER existing skills):
+        - Name similarity OR description overlap with an existing skill
+        - (domainIds ∪ toolSlugs ∪ liveSourceIds) overlap > 60% with
+          an existing skill
+        - In either case: emit 'extendSpecialist' with the matching
+          skillId instead of minting a near-duplicate.
+
+      mintSkill is the LAST RESORT. The skill catalog is small + curated
+      for a reason; minting too aggressively dilutes it.
+
+      Tier rule: the minted skill's tier MUST be >= max(tier across
+      domainIds). Tier-A skills cannot bundle Tier-B/C domains; the
+      mutation rejects load-time-style if violated.
+
+      `justification` is required and surfaces verbatim in the canvas
+      approval card so the user understands why the planner wants
+      this mint -- 1-2 sentences naming the gap.
+
     {action: 'spawnTrainingPlan', specialistId, topic, mode}
       Direct trigger of a kind=trainSpecialist Plan, e.g. for refresh
       cycles. The Trainer picks it up.

@@ -120,6 +120,41 @@ mutation agent mutationUpdateAgent {
 }
 
 @enabled
+@description("Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.")
+mutation skill mutationMintSkill {
+  args {
+    skillId            string
+    slug               string  @required
+    name               string  @required
+    description        string
+    category           string
+    tags               array
+    domainIds          array
+    toolSlugs          array
+    liveSourceIds      array
+    tier               string  @required
+    originatingPlanId  string
+    mintedByAgentId    string
+  }
+  insert skill {
+    id: coalesce(args.skillId, args.slug)
+    args.slug
+    args.name
+    args.description
+    category: coalesce(args.category, "specialized")
+    tags: coalesce(args.tags, [])
+    domainIds: coalesce(args.domainIds, [])
+    toolSlugs: coalesce(args.toolSlugs, [])
+    liveSourceIds: coalesce(args.liveSourceIds, [])
+    args.tier
+    predefined: false
+    active: true
+    args.originatingPlanId
+    args.mintedByAgentId
+  }
+}
+
+@enabled
 @description("Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.")
 mutation skillChangeEvent mutationCreateSkillChangeEvent {
   args {

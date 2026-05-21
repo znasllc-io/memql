@@ -118,7 +118,7 @@ shape skill skillSummary {
 }
 
 @row
-@description("Full skill projection: the catalog row plus its bundle composition. Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, and the agent factory's attach path (Phase 2). Keeps domainIds / toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will do to an agent.")
+@description("Full skill projection: the catalog row plus its bundle composition + Phase 3 mint provenance. Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, the trace viewer's mint-event detail, and the agent factory's attach path (Phase 2). Keeps domainIds / toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will do to an agent. originatingPlanId / mintedByAgentId are empty for predefined catalog rows and populated for planner-minted ones.")
 shape skill skillFull {
   row.id
   payload.slug
@@ -132,6 +132,8 @@ shape skill skillFull {
   payload.tier
   payload.predefined
   payload.active
+  payload.originatingPlanId
+  payload.mintedByAgentId
   row.createdAt
   row.createdBy
 }

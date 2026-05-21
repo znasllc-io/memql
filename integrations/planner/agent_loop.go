@@ -362,6 +362,13 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// catalogs and picks match-vs-extend-vs-create on its own. We
 		// pass the Plan's goal verbatim; the factory does the matching.
 		return l.ensureSpecialistForPlan(ctx, planId, iter)
+	case "mintSkill":
+		// Phase 3 (memql#159): authority gate + catalog-search
+		// heuristic + mutationMintSkill dispatch. In-envelope mints
+		// execute immediately; out-of-envelope mints surface a canvas
+		// approval card and park the Plan with
+		// feedbackReason='mint_skill_approval_required'.
+		return l.handleMintSkill(ctx, planId, d)
 	case "spawnTrainingPlan", "retry":
 		// Still parked. spawnTrainingPlan minted a kind=trainSpecialist
 		// child Plan; the Trainer Agent picks that up via its own loop
@@ -714,8 +721,10 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 // --- decision shape + parser ----------------------------------------------
 
 // plannerDecision is the structured-output envelope the plannerAgent
-// prompt is contracted to emit. The eight valid action values live in
-// dispatchDecision above.
+// prompt is contracted to emit. The valid action values live in
+// dispatchDecision above. Phase 3 (memql#159) added the mintSkill
+// payload fields at the bottom; unmarshaling tolerates their absence
+// on non-mintSkill actions (omitempty + zero-value semantics).
 type plannerDecision struct {
 	Action      string         `json:"action"`
 	PlanOutline []phaseOutline `json:"plan_outline,omitempty"`
@@ -732,6 +741,21 @@ type plannerDecision struct {
 	ErrorMessage   string          `json:"errorMessage,omitempty"`
 	FeedbackReason string          `json:"feedbackReason,omitempty"`
 	Question       string          `json:"question,omitempty"`
+
+	// mintSkill payload (Phase 3 / memql#159). Populated only when
+	// Action == "mintSkill"; the handler in mint_skill_handler.go
+	// runs the authority gate + catalog-search heuristic on these
+	// fields before issuing mutationMintSkill.
+	Name          string   `json:"name,omitempty"`
+	Slug          string   `json:"slug,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	Tier          string   `json:"tier,omitempty"`
+	DomainIds     []string `json:"domainIds,omitempty"`
+	ToolSlugs     []string `json:"toolSlugs,omitempty"`
+	LiveSourceIds []string `json:"liveSourceIds,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Justification string   `json:"justification,omitempty"`
 }
 
 // outputAsMap decodes plannerDecision.Output into a map. When the

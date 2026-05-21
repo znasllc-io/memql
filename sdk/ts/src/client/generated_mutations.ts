@@ -2605,6 +2605,50 @@ QueryClient.prototype.mutationMarkKnowledgeDomainStale = function (this: QueryCl
   return this.executeNamed("mutationMarkKnowledgeDomainStale", buildMutationMarkKnowledgeDomainStale(args), opts);
 };
 
+/** Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+// Bound concept: skill.
+export interface MutationMintSkillArgs {
+  skillId?: string;
+  slug: string;
+  name: string;
+  description?: string;
+  category?: string;
+  tags?: unknown[];
+  domainIds?: unknown[];
+  toolSlugs?: unknown[];
+  liveSourceIds?: unknown[];
+  tier: string;
+  originatingPlanId?: string;
+  mintedByAgentId?: string;
+}
+
+export function buildMutationMintSkill(args: MutationMintSkillArgs): string {
+  const parts: string[] = [];
+  if (args.skillId !== undefined) parts.push("skillId: " + renderMemQLValue(args.skillId));
+  parts.push("slug: " + renderMemQLValue(args.slug));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
+  if (args.tags !== undefined) parts.push("tags: " + renderMemQLValue(args.tags));
+  if (args.domainIds !== undefined) parts.push("domainIds: " + renderMemQLValue(args.domainIds));
+  if (args.toolSlugs !== undefined) parts.push("toolSlugs: " + renderMemQLValue(args.toolSlugs));
+  if (args.liveSourceIds !== undefined) parts.push("liveSourceIds: " + renderMemQLValue(args.liveSourceIds));
+  parts.push("tier: " + renderMemQLValue(args.tier));
+  if (args.originatingPlanId !== undefined) parts.push("originatingPlanId: " + renderMemQLValue(args.originatingPlanId));
+  if (args.mintedByAgentId !== undefined) parts.push("mintedByAgentId: " + renderMemQLValue(args.mintedByAgentId));
+  return "mutationMintSkill({" + parts.join(", ") + "})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    mutationMintSkill(args: MutationMintSkillArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.mutationMintSkill = function (this: QueryClient, args: MutationMintSkillArgs = {} as MutationMintSkillArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("mutationMintSkill", buildMutationMintSkill(args), opts);
+};
+
 /** Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback. */
 // Bound concept: taskState.
 export interface MutationPersistTaskStateArgs {
