@@ -68,12 +68,27 @@ const (
 )
 
 // Token represents a lexical token.
+//
+// Position fields are 1-indexed (Line, Column) plus a byte offset
+// (Pos). EndLine / EndCol / EndPos point to the FIRST position
+// after the token -- i.e. half-open [Column, EndCol). For
+// single-character tokens, EndCol == Column + 1. For string
+// tokens, the end positions span the closing quote AND the
+// content (Literal strips quotes + decodes escapes, so its length
+// no longer matches the source span -- the EndCol field is the
+// authoritative source-length record).
+//
+// Tokenize() populates the End* fields after each scan; the
+// individual scan functions don't have to stamp them themselves.
 type Token struct {
 	Type    TokenType
 	Literal string
 	Pos     int
 	Line    int
 	Column  int
+	EndPos  int
+	EndLine int
+	EndCol  int
 }
 
 // String returns a human-readable representation of the token.
@@ -208,13 +223,36 @@ func NewLexer(input string) *Lexer {
 	}
 }
 
-// Tokenize converts the entire input into a slice of tokens.
+// Tokenize converts the entire input into a slice of tokens. Each
+// token's End* fields are stamped from the lexer's post-scan
+// position so consumers can read the source span without
+// re-implementing per-token length math. Specifically:
+// `len(Literal)` doesn't match the source length for string tokens
+// (quotes are stripped, escape sequences are decoded), so a span
+// derived from `Column + len(Literal)` would be too short by at
+// least 2 (the quotes) -- which surfaced as a trailing-cell color
+// bleed in the cockpit's viewer (memql-cockpit#114).
 func (l *Lexer) Tokenize() ([]Token, error) {
 	var tokens []Token
 	for {
 		tok, err := l.NextToken()
 		if err != nil {
 			return nil, err
+		}
+		// The scan functions advance l.pos / l.line / l.column past
+		// the consumed token before returning. Capturing those values
+		// HERE -- before the next NextToken's skipWhitespace fires --
+		// gives us the half-open end-position of the just-returned
+		// token. TokenEOF is its own case: the EOF token has zero
+		// width, so End* == start.
+		if tok.Type == TokenEOF {
+			tok.EndPos = tok.Pos
+			tok.EndLine = tok.Line
+			tok.EndCol = tok.Column
+		} else {
+			tok.EndPos = l.pos
+			tok.EndLine = l.line
+			tok.EndCol = l.column
 		}
 		tokens = append(tokens, tok)
 		if tok.Type == TokenEOF {

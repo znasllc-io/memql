@@ -91,13 +91,19 @@ func mapTokenType(pt parser.Token) Token {
 		tokenType = "identifier"
 	}
 
-	endCol := pt.Column + len(pt.Literal)
+	// Use the lexer-stamped end positions instead of computing them
+	// from len(Literal). For TokenString the Literal has quotes
+	// stripped and escapes decoded, so length-based math undershoots
+	// the source span by at least 2 (the quote chars) -- and more
+	// when escape sequences are present. The bug surfaced in the
+	// cockpit's viewer as the trailing 1-2 cells of every string
+	// rendering unstyled (memql-cockpit#114).
 	return Token{
 		Type:    tokenType,
 		Literal: pt.Literal,
 		Range: Range{
 			Start: Position{Line: pt.Line, Column: pt.Column},
-			End:   Position{Line: pt.Line, Column: endCol},
+			End:   Position{Line: pt.EndLine, Column: pt.EndCol},
 		},
 	}
 }
