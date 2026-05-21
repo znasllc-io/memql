@@ -6,9 +6,7 @@ package embedding
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,6 +15,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // EmbeddingProviderFunc resolves an EmbeddingSIProvider by name from the engine.
@@ -361,8 +360,11 @@ func (i *Integration) storeCache(ctx context.Context, key, provider string, vec 
 
 // cacheKey generates a deterministic key for the embedding cache.
 func cacheKey(text, provider string) string {
-	h := sha256.Sum256([]byte(text + "|" + provider))
-	return hex.EncodeToString(h[:])
+	return string(id.New().MustFromMap(map[string]any{
+		"kind":     "embedding-cache",
+		"text":     text,
+		"provider": provider,
+	}))
 }
 
 // vectorLiteral formats a float32 slice as a pgvector literal: [0.1,0.2,...].

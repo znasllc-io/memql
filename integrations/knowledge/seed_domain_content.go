@@ -25,14 +25,13 @@ package knowledge
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // seedDomainContentSchemaJSON is the structured-output schema the LLM
@@ -478,9 +477,12 @@ func (i *Integration) storeSeedChunk(
 // run. The seed-vs-augment origin is captured in row provenance, not
 // in the id string.
 func seedChunkId(recipeVersion, domainId string, chunkIndex int) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "seed:%s:%s:%d", recipeVersion, domainId, chunkIndex)
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return string(id.New().MustFromMap(map[string]any{
+		"kind":          "seed-chunk",
+		"recipeVersion": recipeVersion,
+		"domainId":      domainId,
+		"chunkIndex":    chunkIndex,
+	}))
 }
 
 // lookupSeededDomain resolves a StandardDomain from the standardDomains

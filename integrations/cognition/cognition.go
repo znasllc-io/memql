@@ -5,7 +5,6 @@ package cognition
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/logger"
 	"github.com/znasllc-io/memql/integrations"
 	"golang.org/x/sync/singleflight"
@@ -373,10 +373,11 @@ func (c *CognitionIntegration) getOrComputeProfileEmbedding(ctx context.Context,
 	return vec
 }
 
-// sha256Short returns the first 16 hex chars of the SHA-256 hash of s.
+// sha256Short returns a stable content-addressed hash of s used to
+// fingerprint cached profile text (in-memory only). The exact format
+// is implementation-defined; only equality matters.
 func sha256Short(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return fmt.Sprintf("%x", h[:8])
+	return string(id.New().FromString(s))
 }
 
 // buildAgentProfileText creates a combined text description of an agent's profile,
