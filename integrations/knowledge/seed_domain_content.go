@@ -441,16 +441,22 @@ func (i *Integration) storeSeedChunk(
 	//   <!--seed:{json}-->\n\n{title}\n\n{body}
 	// Marker is HTML-comment-shaped so most retrieval paths pass it
 	// through cleanly; downstream displays can strip it via regex.
+	// Sanitize the title before indexing so role markers / markdown
+	// headers in seed content don't ride into the retrieval pool.
+	// Defense-in-depth on top of the prompt-render-time framing
+	// (bff-copresent PR #25); see SanitizeChunkTitle's doc-comment
+	// for the full rule set and bff-copresent#29 for the rationale.
+	cleanTitle := SanitizeChunkTitle(c.Title)
 	metadata := map[string]any{
 		"seedSource":    seedSource,
 		"seedTier":      d.Tier,
 		"recipeVersion": recipeVersion,
 		"chunkKind":     c.Kind,
-		"chunkTitle":    c.Title,
+		"chunkTitle":    cleanTitle,
 		"keyTerms":      c.KeyTerms,
 	}
 	metadataJSON, _ := json.Marshal(metadata)
-	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), c.Title, c.Body)
+	enrichedBody := fmt.Sprintf("<!--seed:%s-->\n\n## %s\n\n%s", string(metadataJSON), cleanTitle, c.Body)
 
 	insertQuery := fmt.Sprintf(
 		`mutationCreateDocumentChunk({chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d})`,
