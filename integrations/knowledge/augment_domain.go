@@ -29,14 +29,13 @@ package knowledge
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // augmentDomainAnalyzeSchemaJSON constrains the analyser to a small,
@@ -465,28 +464,31 @@ func (i *Integration) lookupDomainMeta(ctx context.Context, domainId string) (st
 // augment-vs-seed origin is captured in row provenance, not in the
 // id string.
 func augmentPlanId(domainId, topic, sourceUtteranceId string) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "augment:%s:%s:%s", domainId, topic, sourceUtteranceId)
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return string(id.New().MustFromMap(map[string]any{
+		"kind":               "augment-plan",
+		"domainId":           domainId,
+		"topic":              topic,
+		"sourceUtteranceId":  sourceUtteranceId,
+	}))
 }
 
 // augmentChunkId derives a deterministic chunk id under a Plan.
 // Same hashing pattern as seedChunkId; origin is captured in
 // provenance.
 func augmentChunkId(planId string, chunkIndex int) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "%s:%d", planId, chunkIndex)
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return string(id.New().MustFromMap(map[string]any{
+		"kind":       "augment-chunk",
+		"planId":     planId,
+		"chunkIndex": chunkIndex,
+	}))
 }
 
-// shortTopicHash reduces a topic string to a short hash for use in
-// the recipeVersion field on the domain freshness stamp. Keeps the
-// stamp's recipeVersion namespace clean -- "augment-{8hex}" never
-// collides with seed recipe versions like "v1" / "v2".
+// shortTopicHash reduces a topic string to a hash for use in the
+// recipeVersion field on the domain freshness stamp. The recipeVersion
+// namespace stays clean -- "augment-{hash}" never collides with seed
+// recipe versions like "v1" / "v2" regardless of the hash length.
 func shortTopicHash(topic string) string {
-	h := sha256.New()
-	h.Write([]byte(topic))
-	return hex.EncodeToString(h.Sum(nil))[:8]
+	return string(id.New().FromString(topic))
 }
 
 // newAnalyzeResultNode wraps the analyse payload as a synthetic memory

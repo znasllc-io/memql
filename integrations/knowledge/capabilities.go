@@ -27,9 +27,7 @@ package knowledge
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -37,6 +35,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Integration exposes knowledge-base capabilities to the DSL.
@@ -380,9 +379,14 @@ func (i *Integration) resolvePartition(ctx context.Context) string {
 // keeps both as time-series versions under their own ids instead of
 // silently overwriting.
 func chunkIdFor(domainId, sourceRef string, seq int, text string) string {
-	h := sha256.Sum256([]byte(domainId + "|" + sourceRef + "|" + fmt.Sprint(seq) + "|" + text))
-	short := hex.EncodeToString(h[:])[:16]
-	return fmt.Sprintf("%s:%s:%d:%s", sanitizeSegment(domainId), sanitizeSegment(sourceRef), seq, short)
+	hash := string(id.New().MustFromMap(map[string]any{
+		"kind":      "knowledge-chunk",
+		"domainId":  domainId,
+		"sourceRef": sourceRef,
+		"seq":       seq,
+		"text":      text,
+	}))
+	return fmt.Sprintf("%s:%s:%d:%s", sanitizeSegment(domainId), sanitizeSegment(sourceRef), seq, hash)
 }
 
 func sanitizeSegment(s string) string {

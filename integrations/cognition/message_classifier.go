@@ -2,8 +2,6 @@ package cognition
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Phase 2 of the llm-driven-decisions plan: replace the
@@ -260,12 +260,11 @@ func classifyUnknown(reason string) MessageClassification {
 // embedded in messageClassificationSchemaJSON so a schema bump
 // invalidates the entire prior cache automatically.
 func (mc *messageClassifier) cacheKey(userText, lastAgentText string) string {
-	h := sha256.New()
-	h.Write([]byte("messageClassification.v1|"))
-	h.Write([]byte(userText))
-	h.Write([]byte("|"))
-	h.Write([]byte(lastAgentText))
-	return hex.EncodeToString(h.Sum(nil))
+	return string(id.New().MustFromMap(map[string]any{
+		"kind":          "messageClassification.v1",
+		"userText":      userText,
+		"lastAgentText": lastAgentText,
+	}))
 }
 
 func (mc *messageClassifier) lookup(key string) (MessageClassification, bool) {

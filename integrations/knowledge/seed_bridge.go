@@ -33,8 +33,6 @@ package knowledge
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -42,6 +40,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // memorynodesMemoryNodeAlias makes memorynodes.MemoryNode reachable
@@ -122,9 +121,12 @@ func BridgeId(roleSlug string, domainIds []string) string {
 	}
 	sort.Strings(cleaned)
 	combinationKey := strings.Join(cleaned, ",")
-	h := sha256.New()
-	fmt.Fprintf(h, "%s:%s:%s", bridgeRecipeVersion, role, combinationKey)
-	return "bridge-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return "bridge-" + string(id.New().MustFromMap(map[string]any{
+		"kind":           "bridge",
+		"recipeVersion":  bridgeRecipeVersion,
+		"role":           role,
+		"combinationKey": combinationKey,
+	}))
 }
 
 // CombinationKeyFor exposes the canonical, sorted-and-deduped

@@ -2,8 +2,6 @@ package cognition
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // =============================================================================
@@ -709,14 +708,13 @@ func (c *CognitionIntegration) logPlanTrace(t planTrace) {
 	}
 }
 
-// shortHash returns a 12-char SHA-256 prefix of s. Used to fingerprint
-// inputs so identical-input plans can be correlated across runs.
+// shortHash returns a stable content-addressed fingerprint of s.
+// Used so identical-input plans can be correlated across runs.
 func shortHash(s string) string {
 	if s == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:6])
+	return string(id.New().FromString(s))
 }
 
 // candidateRosterFingerprint hashes the participant ids of the
