@@ -14,12 +14,3 @@ query budget queryRouterBudgets {
   filter  ?.payload.scope==args.scope; traitIsActiveRecord
   shape   budgetFull
 }
-
-func (Query) queryRouterRecentCalls(ctx any) (any, error) {
-  return shape(
-    concept;
-    ?.call.vendor==args.vendor;
-    ?.call.outcome==args.outcome,
-    "callFull"
-  ), nil
-}

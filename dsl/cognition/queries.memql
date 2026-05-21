@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ context, micState, participant, session, space, utterance }
+use cognition.concepts.{ audioOverride, context, micState, participant, session, space, utterance, videoOverride }
 
 @enabled
 @description("Get active human participants in a space")
@@ -140,19 +140,20 @@ query space queryOwnedSpaceById {
   shape   spaceFull
 }
 
-func (Query) queryAudioOverridesForSpace(ctx any) (any, error) {
-  // The row's `spaceId` is auto-canonicalized to
-  // `<partition>:v1:cognition:space:<slug>` on insert (concept's
-  // @relationship annotation drives this). The frontend passes
-  // whatever it has -- usually the bare slug. Canonicalize the
-  // arg before the equality check so both forms resolve to the
-  // same value and the comparison matches.
-  return shape(
-    concept;
-    ?.audioOverride.spaceId==canonicalId(args.spaceId, "v1:cognition:space");
-    ?.audioOverride.active==true,
-    "audioOverrideFull"
-  ), nil
+// The row's `spaceId` is auto-canonicalized to
+// `<partition>:v1:cognition:space:<slug>` on insert (concept's
+// @relationship annotation drives this). The frontend passes
+// whatever it has -- usually the bare slug. Canonicalize the
+// arg before the equality check so both forms resolve to the
+// same value and the comparison matches.
+@enabled
+@description("Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.")
+query audioOverride queryAudioOverridesForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); traitIsActiveRecord
+  shape   audioOverrideFull
 }
 
 // ---- queries/v1/cognition/expiredArchivedSpaces.memql ----
@@ -219,31 +220,31 @@ query utterance queryGreetingUtterance {
   shape   utteranceFull
 }
 
-func (Query) queryGroupGAForSpace(ctx any) (any, error) {
-  // Callers MUST pass the canonical spaceId
-  // (`<partition>:v1:cognition:space:<slug>`). Using `canonicalId()`
-  // inside this predicate triggers the executor's "unsupported
-  // literal type *ast.CanonicalIdExpr" error path -- the SQL fast-
-  // path doesn't pre-evaluate canonicalId() when the rest of the
-  // WHERE chain includes a bool comparison, and the in-memory
-  // fallback comparator can't evaluate the AST node. Pre-
-  // canonicalize on the Go side instead.
-  //
-  // We intentionally do NOT filter by `isGroupGA==true`: the
-  // participant-update mutations (status flips, presence touch)
-  // re-insert the row without carrying the original isGroupGA flag,
-  // and memql's time-series semantics return the latest version --
-  // which often has isGroupGA missing/false even though the
-  // underlying participant IS the GA. Filtering by participantType
-  // + status is sufficient under v1 (each user has at most one
-  // active SI participant per space; that's their GA).
-  return shape(
-    concept;
-    payload.spaceId==args.spaceId;
-    payload.participantType=="si";
-    traitStatusIsActive,
-    "participantFull"
-  ), nil
+// Callers MUST pass the canonical spaceId
+// (`<partition>:v1:cognition:space:<slug>`). Using `canonicalId()`
+// inside this predicate triggers the executor's "unsupported
+// literal type *ast.CanonicalIdExpr" error path -- the SQL fast-
+// path doesn't pre-evaluate canonicalId() when the rest of the
+// WHERE chain includes a bool comparison, and the in-memory
+// fallback comparator can't evaluate the AST node. Pre-
+// canonicalize on the Go side instead.
+//
+// We intentionally do NOT filter by `isGroupGA==true`: the
+// participant-update mutations (status flips, presence touch)
+// re-insert the row without carrying the original isGroupGA flag,
+// and memql's time-series semantics return the latest version --
+// which often has isGroupGA missing/false even though the
+// underlying participant IS the GA. Filtering by participantType
+// + status is sufficient under v1 (each user has at most one
+// active SI participant per space; that's their GA).
+@enabled
+@description("Active SI (group GA) participant for a space. Callers must pass the canonical spaceId.")
+query participant queryGroupGAForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; traitStatusIsActive
+  shape   participantFull
 }
 
 // ---- queries/v1/cognition/hasSIResponseForReply.memql ----
@@ -466,36 +467,16 @@ query space querySpaceMeta {
   shape   spaceFull
 }
 
-func (Query) querySpaceParticipantPresence(ctx any) (any, error) {
-  return shape(
-    concept;
-    ?.presence.spaceId==args.spaceId;
-    ?.presence.participantId==args.participantId,
-    {
-      node("id"),
-      node("presence.spaceId"),
-      node("presence.participantId"),
-      node("presence.state"),
-      node("presence.label"),
-      node("presence.reason"),
-      node("presence.sinceAt"),
-      node("presence.lastUpdatedAt"),
-      node("presence.lastUtteranceId"),
-      node("presence.lastError"),
-      node("presence.intent"),
-      node("createdAt")
-    }
-  ), nil
-}
-
-func (Query) querySpaceParticipants(ctx any) (any, error) {
-  return shape(
-    concept;
-    ?.payload.spaceId==args.spaceId;
-    ?.payload.status==args.status;
-    ?.payload.participantType==args.participantType,
-    "participantFull"
-  ), nil
+@enabled
+@description("Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.")
+query participant querySpaceParticipants {
+  args {
+    spaceId          string  @required
+    status           string
+    participantType  string
+  }
+  filter  payload.spaceId==args.spaceId; ?.payload.status==args.status; ?.payload.participantType==args.participantType
+  shape   participantFull
 }
 
 @enabled
@@ -531,17 +512,18 @@ query micState queryUserMicStatesForSpace {
   shape   micStateFull
 }
 
-func (Query) queryVideoOverridesForSpace(ctx any) (any, error) {
-  // The row's `spaceId` is auto-canonicalized to
-  // `<partition>:v1:cognition:space:<slug>` on insert (concept's
-  // @relationship annotation drives this). The frontend passes
-  // whatever it has -- usually the bare slug. Canonicalize the
-  // arg before the equality check so both forms resolve to the
-  // same value and the comparison matches.
-  return shape(
-    concept;
-    ?.videoOverride.spaceId==canonicalId(args.spaceId, "v1:cognition:space");
-    ?.videoOverride.active==true,
-    "videoOverrideFull"
-  ), nil
+// The row's `spaceId` is auto-canonicalized to
+// `<partition>:v1:cognition:space:<slug>` on insert (concept's
+// @relationship annotation drives this). The frontend passes
+// whatever it has -- usually the bare slug. Canonicalize the
+// arg before the equality check so both forms resolve to the
+// same value and the comparison matches.
+@enabled
+@description("Active video overrides for every agent in a space. Read by the voice-agent process at session start.")
+query videoOverride queryVideoOverridesForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); traitIsActiveRecord
+  shape   videoOverrideFull
 }
