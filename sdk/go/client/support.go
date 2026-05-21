@@ -189,6 +189,62 @@ func (r *Result) Single() Row {
 	return rows[0]
 }
 
+// RawNodes returns the result's rows preserving the FULL nested
+// MemoryNode wire shape -- intrinsics at the top level (id /
+// concept / type / createdBy / createdAt / schema) PLUS nested
+// `payload`, `metadata`, and `provenance` maps. Unlike Rows(), no
+// flattening is applied; consumers see the same shape the engine
+// produced.
+//
+// This is the path admin / concept-browser surfaces use. The
+// shape-flattening Rows() does is the right call for typed named
+// primitives (one consistent way to read `row.String("foo")`),
+// but it actively drops information that an inspector tool needs:
+// the type / schema / createdBy intrinsics, the metadata envelope,
+// and the provenance record all vanish through Rows(), and the
+// nested payload structure can't be distinguished from intrinsic
+// fields once it's flattened. Concept-browser code (the cockpit's
+// Concepts tab, custom debugging) must call RawNodes() instead.
+//
+// Empty when the result isn't a bundle envelope -- shape-wrapped
+// results have no MemoryNode shape to preserve, so RawNodes()
+// returns nil for them and the consumer should fall back to
+// Rows() if it can handle either envelope.
+func (r *Result) RawNodes() []Row {
+	if r == nil || r.payload == nil {
+		return nil
+	}
+	m, ok := r.payload.(map[string]any)
+	if !ok {
+		return nil
+	}
+	bundle, ok := m["bundle"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	nodes, ok := bundle["nodes"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]Row, 0, len(nodes))
+	for _, n := range nodes {
+		node, ok := n.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Return the node map directly -- it already has the full
+		// nested shape from protojson. Copy into a fresh Row map so
+		// downstream mutations don't reach back into the SDK's
+		// decoded payload.
+		row := Row{}
+		for k, v := range node {
+			row[k] = v
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 // Raw exposes the protojson-decoded payload for the rare consumer
 // that needs to inspect the envelope directly (debugging, adapters
 // to non-SDK code paths). Prefer Rows() / Single() in normal use --
