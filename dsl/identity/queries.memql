@@ -609,6 +609,44 @@ query invitation queryInvitationByTokenHash {
   shape   invitationFull
 }
 
+// ---- queries/v1/identity/invitationByPreviousTokenHash.memql ----
+
+// invitationByPreviousTokenHash - Look Up a Guest Invitation by an Older Token Hash
+// ==================================================================================
+//
+// Companion to queryInvitationByTokenHash. After
+// mutationRotateGuestInvitationToken runs (the resend path), the
+// row's tokenHash is the FRESH hash and previousTokenHash is the
+// one the row carried immediately before. A recipient who clicks
+// the older /join/<token> link presents a token whose hash matches
+// previousTokenHash but NOT tokenHash. This query catches that
+// case so the resolve handler can return a UX-friendly
+// `superseded` status instead of a generic `invalid`.
+//
+// Only matches the one-generation-back history -- two rotations
+// back drops off and the link becomes plain-invalid. Guest auth
+// (Authorization: Guest <token>) still only admits the CURRENT
+// hash via queryInvitationByTokenHash; this query never grants
+// auth, it only feeds the friendlier 404 message.
+//
+// Reference: memql#108.
+//
+// Arguments:
+//   tokenHash (string) - SHA-256 hex digest of the plain token the caller presented
+//
+// Returns:
+//   Zero or one invitation record (latest version, append-only semantics).
+
+@enabled
+@description("Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.")
+query invitation queryInvitationByPreviousTokenHash {
+  args {
+    tokenHash  string  @required
+  }
+  filter  payload.kind=="guest"; payload.previousTokenHash==args.tokenHash
+  shape   invitationFull
+}
+
 // ---- queries/v1/identity/magicLinkRequestByTokenHash.memql ----
 
 // magicLinkRequestByTokenHash - Look up a magic-link request by token hash

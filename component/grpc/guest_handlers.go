@@ -49,21 +49,29 @@ const guestInviteMaxTTL = 24 * time.Hour
 
 // invitationSummary is the minimal projection the guest handlers (and
 // later the guest auth path) read back from an invitation record.
+//
+// The plain token is NOT persisted server-side anymore (see
+// memql#108). On resend, the handler mints a fresh token + hash,
+// rotates the row, and the plain token only exists long enough for
+// the email send-side closure. previousTokenHash is the hash of the
+// token the row carried before the most-recent resend rotation;
+// the resolve handler uses it to return a `superseded` UX status
+// for a just-rotated-out link.
 type invitationSummary struct {
-	ID           string
-	Kind         string
-	Status       string
-	SpaceId      string
-	SpaceName    string
-	InviterId    string
-	InviterName  string
-	InviteeEmail string
-	InviteeName  string
-	Token        string // plain token -- read server-side to re-send the same email on resend
-	TokenHash    string
-	ExpiresAt    time.Time
-	RespondedAt  time.Time
-	CreatedAt    time.Time
+	ID                string
+	Kind              string
+	Status            string
+	SpaceId           string
+	SpaceName         string
+	InviterId         string
+	InviterName       string
+	InviteeEmail      string
+	InviteeName       string
+	TokenHash         string
+	PreviousTokenHash string
+	ExpiresAt         time.Time
+	RespondedAt       time.Time
+	CreatedAt         time.Time
 }
 
 // mintGuestToken returns a fresh 32-byte base64url token and its hex
@@ -154,20 +162,20 @@ func lookupInvitationByTokenHash(ctx context.Context, engine *memqlengine.MemQLE
 	}
 
 	summary := &invitationSummary{
-		ID:           getStr("id"),
-		Kind:         getStr("kind"),
-		Status:       getStr("status"),
-		SpaceId:      getStr("spaceId"),
-		SpaceName:    getStr("spaceName"),
-		InviterId:    getStr("inviterId"),
-		InviterName:  getStr("inviterName"),
-		InviteeEmail: getStr("inviteeEmail"),
-		InviteeName:  getStr("inviteeName"),
-		Token:        getStr("token"),
-		TokenHash:    getStr("tokenHash"),
-		ExpiresAt:    parseTime("expiresAt"),
-		RespondedAt:  parseTime("respondedAt"),
-		CreatedAt:    parseTime("createdAt"),
+		ID:                getStr("id"),
+		Kind:              getStr("kind"),
+		Status:            getStr("status"),
+		SpaceId:           getStr("spaceId"),
+		SpaceName:         getStr("spaceName"),
+		InviterId:         getStr("inviterId"),
+		InviterName:       getStr("inviterName"),
+		InviteeEmail:      getStr("inviteeEmail"),
+		InviteeName:       getStr("inviteeName"),
+		TokenHash:         getStr("tokenHash"),
+		PreviousTokenHash: getStr("previousTokenHash"),
+		ExpiresAt:         parseTime("expiresAt"),
+		RespondedAt:       parseTime("respondedAt"),
+		CreatedAt:         parseTime("createdAt"),
 	}
 	if summary.ID == "" {
 		// Shape sometimes puts id at the top level; fall back to node.id.
@@ -245,18 +253,18 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 			return t
 		}
 		out = append(out, &invitationSummary{
-			ID:           id,
-			Kind:         "guest",
-			Status:       "pending",
-			SpaceId:      getStr("spaceId"),
-			SpaceName:    getStr("spaceName"),
-			InviterId:    getStr("inviterId"),
-			InviterName:  getStr("inviterName"),
-			InviteeEmail: getStr("inviteeEmail"),
-			InviteeName:  getStr("inviteeName"),
-			Token:        getStr("token"),
-			TokenHash:    getStr("tokenHash"),
-			ExpiresAt:    parseTime("expiresAt"),
+			ID:                id,
+			Kind:              "guest",
+			Status:            "pending",
+			SpaceId:           getStr("spaceId"),
+			SpaceName:         getStr("spaceName"),
+			InviterId:         getStr("inviterId"),
+			InviterName:       getStr("inviterName"),
+			InviteeEmail:      getStr("inviteeEmail"),
+			InviteeName:       getStr("inviteeName"),
+			TokenHash:         getStr("tokenHash"),
+			PreviousTokenHash: getStr("previousTokenHash"),
+			ExpiresAt:         parseTime("expiresAt"),
 		})
 	}
 	return out, nil
@@ -360,9 +368,10 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	}
 
 	// Mint a fresh opaque token and its hash. Hash gates the guest-
-	// auth middleware; the plain token gets stored alongside so the
-	// "resend email" button can re-send the same /join/<token> URL
-	// without creating a new invitation.
+	// auth middleware and is the only thing persisted on the row;
+	// the plain token leaves the server in the email and is never
+	// stored. Resend mints a NEW token and rotates the hash via
+	// mutationRotateGuestInvitationToken (see memql#108).
 	plainToken, tokenHash, err := mintGuestToken()
 	if err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: token mint", err)
@@ -381,7 +390,9 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	}
 	expiresAt := now.Add(ttl)
 
-	// Persist the invitation.
+	// Persist the invitation. The plain token is intentionally NOT
+	// in the args -- the row stores only the hash. The plain token
+	// rides in the email below and never lands in the database.
 	args := map[string]any{
 		"invitationId": invitationId,
 		"spaceId":      spaceId,
@@ -390,7 +401,6 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 		"inviterName":  strings.TrimSpace(msg.GetInviterName()),
 		"inviteeEmail": emailAddr,
 		"inviteeName":  strings.TrimSpace(msg.GetGuestName()),
-		"token":        plainToken,
 		"tokenHash":    tokenHash,
 		"expiresAt":    expiresAt.Format(time.RFC3339),
 	}
@@ -459,11 +469,38 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 	}
 
 	ctx := contextWithSystemActor(s.stream.Context())
-	summary, err := lookupInvitationByTokenHash(ctx, s.service.engine, hashGuestToken(plain))
+	tokenHash := hashGuestToken(plain)
+	summary, err := lookupInvitationByTokenHash(ctx, s.service.engine, tokenHash)
 	if err != nil {
 		return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: lookup", err)
 	}
 	if summary == nil {
+		// Current-hash miss. Before declaring the token invalid,
+		// check whether it matches a row's previousTokenHash --
+		// that's the "operator just clicked resend" case. We want
+		// to return `superseded` with the friendlier "check your
+		// latest email" copy instead of a flat `invalid`. See
+		// memql#108.
+		previous, err := lookupInvitationByPreviousTokenHash(ctx, s.service.engine, tokenHash)
+		if err != nil {
+			return s.sendGuestError(requestId, correlate, codes.Internal, "guest_invite: previous lookup", err)
+		}
+		if previous != nil {
+			result := &memqlv1.ResolveGuestInviteResult{
+				InvitationId: previous.ID,
+				SpaceId:      previous.SpaceId,
+				SpaceName:    previous.SpaceName,
+				InviterName:  previous.InviterName,
+				InviteeEmail: previous.InviteeEmail,
+				InviteeName:  previous.InviteeName,
+				Status:       "superseded",
+				ErrorMessage: "This invitation link was superseded by a more recent resend. Please use the latest invitation email you received -- the most-recent link is the one that still works.",
+			}
+			if !previous.ExpiresAt.IsZero() {
+				result.ExpiresAt = timestamppb.New(previous.ExpiresAt)
+			}
+			return send(result)
+		}
 		return send(&memqlv1.ResolveGuestInviteResult{Status: "invalid", ErrorMessage: "no invitation matches this token"})
 	}
 
@@ -496,6 +533,74 @@ func (s *streamSession) handleResolveGuestInvite(envelope *memqlv1.MemqlClientMe
 	}
 
 	return send(result)
+}
+
+// lookupInvitationByPreviousTokenHash runs the companion query that
+// finds an invitation whose previousTokenHash (NOT current
+// tokenHash) matches. Used ONLY by the resolve handler's fallback
+// path so a just-rotated-out link surfaces as `superseded` rather
+// than a flat `invalid`. Never used for guest authentication --
+// the guest stream interceptor only admits the CURRENT tokenHash.
+// See memql#108.
+func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengine.MemQLEngine, tokenHash string) (*invitationSummary, error) {
+	if engine == nil {
+		return nil, fmt.Errorf("engine not configured")
+	}
+	if strings.TrimSpace(tokenHash) == "" {
+		return nil, fmt.Errorf("tokenHash required")
+	}
+	query := fmt.Sprintf(`queryInvitationByPreviousTokenHash({tokenHash: "%s"})`, tokenHash)
+	result, err := engine.Execute(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query invitation by previousTokenHash: %w", err)
+	}
+	if result == nil || result.Bundle == nil || len(result.Bundle.Nodes) == 0 {
+		return nil, nil
+	}
+	node := result.Bundle.Nodes[0]
+	if node == nil || node.Payload == nil {
+		return nil, nil
+	}
+	fields := node.Payload.GetFields()
+	if fields == nil {
+		return nil, nil
+	}
+	getStr := func(key string) string {
+		v, ok := fields[key]
+		if !ok || v == nil {
+			return ""
+		}
+		return strings.TrimSpace(v.GetStringValue())
+	}
+	parseTime := func(key string) time.Time {
+		s := getStr(key)
+		if s == "" {
+			return time.Time{}
+		}
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}
+		}
+		return t
+	}
+	summary := &invitationSummary{
+		ID:                getStr("id"),
+		Kind:              getStr("kind"),
+		Status:            getStr("status"),
+		SpaceId:           getStr("spaceId"),
+		SpaceName:         getStr("spaceName"),
+		InviterId:         getStr("inviterId"),
+		InviterName:       getStr("inviterName"),
+		InviteeEmail:      getStr("inviteeEmail"),
+		InviteeName:       getStr("inviteeName"),
+		TokenHash:         getStr("tokenHash"),
+		PreviousTokenHash: getStr("previousTokenHash"),
+		ExpiresAt:         parseTime("expiresAt"),
+	}
+	if summary.ID == "" {
+		summary.ID = node.Id
+	}
+	return summary, nil
 }
 
 // handleJoinSpaceAsGuest atomically marks a guest invitation accepted
@@ -675,20 +780,20 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 		id = node.Id
 	}
 	return &invitationSummary{
-		ID:           id,
-		Kind:         getStr("kind"),
-		Status:       getStr("status"),
-		SpaceId:      getStr("spaceId"),
-		SpaceName:    getStr("spaceName"),
-		InviterId:    getStr("inviterId"),
-		InviterName:  getStr("inviterName"),
-		InviteeEmail: getStr("inviteeEmail"),
-		InviteeName:  getStr("inviteeName"),
-		Token:        getStr("token"),
-		TokenHash:    getStr("tokenHash"),
-		ExpiresAt:    parseTime("expiresAt"),
-		RespondedAt:  parseTime("respondedAt"),
-		CreatedAt:    parseTime("createdAt"),
+		ID:                id,
+		Kind:              getStr("kind"),
+		Status:            getStr("status"),
+		SpaceId:           getStr("spaceId"),
+		SpaceName:         getStr("spaceName"),
+		InviterId:         getStr("inviterId"),
+		InviterName:       getStr("inviterName"),
+		InviteeEmail:      getStr("inviteeEmail"),
+		InviteeName:       getStr("inviteeName"),
+		TokenHash:         getStr("tokenHash"),
+		PreviousTokenHash: getStr("previousTokenHash"),
+		ExpiresAt:         parseTime("expiresAt"),
+		RespondedAt:       parseTime("respondedAt"),
+		CreatedAt:         parseTime("createdAt"),
 	}, nil
 }
 
@@ -754,11 +859,22 @@ func (s *streamSession) handleCancelGuestInvite(envelope *memqlv1.MemqlClientMes
 	})
 }
 
-// handleResendGuestInviteEmail re-sends the invitation email for an
-// existing pending guest invitation. Server-side lookup of the stored
-// plain token means the /join/<token> URL stays the same across
-// resends -- the email is rebuilt and re-delivered, no new record is
-// created.
+// handleResendGuestInviteEmail rotates the invitation's token and
+// re-sends the invitation email with the NEW /join/<token> URL.
+//
+// Pre-memql#108 behavior was to read a server-stored plain token off
+// the row and replay the same email. That left a recoverable token
+// at rest. We now:
+//   1. Mint a fresh plain token + hash.
+//   2. Call mutationRotateGuestInvitationToken to swap the row's
+//      hash to the new one AND stamp the prior hash as
+//      previousTokenHash (so /join/<oldToken> returns `superseded`
+//      instead of `invalid`).
+//   3. Email the new /join/<token> URL. The old URL no longer
+//      authenticates.
+//
+// The "this link replaces any prior link we sent" copy lives in the
+// email template (set via email.GuestInviteParams.Resend=true).
 func (s *streamSession) handleResendGuestInviteEmail(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.ResendGuestInviteEmailMsg) error {
 	if msg == nil {
 		return nil
@@ -816,18 +932,38 @@ func (s *streamSession) handleResendGuestInviteEmail(envelope *memqlv1.MemqlClie
 			ErrorMessage: "invitation has expired; send a new one",
 		})
 	}
-	if strings.TrimSpace(inv.Token) == "" {
-		// Pre-token-storage invitations can't be resent; caller
-		// should revoke + re-invite instead.
+	if strings.TrimSpace(inv.TokenHash) == "" {
+		// Row carries no current hash -- malformed or pre-rotation
+		// remnant. Caller should revoke + re-invite rather than try
+		// to recover.
 		return send(&memqlv1.ResendGuestInviteEmailResult{
 			InvitationId: invitationId,
 			ErrorCode:    "not_found",
-			ErrorMessage: "invitation has no resendable token; revoke and re-invite",
+			ErrorMessage: "invitation has no tokenHash; revoke and re-invite",
 		})
 	}
 
+	// Mint the replacement token + rotate the row's hash. The new
+	// plain token only lives in this function's frame and the email
+	// body; the row gets the new hash plus the OLD hash on
+	// previousTokenHash so /join/<oldToken> can surface `superseded`.
+	newPlain, newHash, err := mintGuestToken()
+	if err != nil {
+		return s.sendGuestError(requestId, correlate, codes.Internal, "resend: token mint", err)
+	}
+	rotateArgs := map[string]any{
+		"invitationId":      invitationId,
+		"tokenHash":         newHash,
+		"previousTokenHash": inv.TokenHash,
+	}
+	rotateJSON, _ := json.Marshal(rotateArgs)
+	rotateQuery := fmt.Sprintf("mutationRotateGuestInvitationToken(%s)", renderQueryArgs(rotateJSON))
+	if _, err := s.service.engine.Execute(ctx, rotateQuery); err != nil {
+		return s.sendGuestError(requestId, correlate, codes.Internal, "resend: rotate token", err)
+	}
+
 	sender := s.resolveEmailSender()
-	joinURL := joinURLBase + "/join/" + inv.Token
+	joinURL := joinURLBase + "/join/" + newPlain
 	if err := email.SendGuestInvite(ctx, sender, email.GuestInviteParams{
 		To:          inv.InviteeEmail,
 		GuestName:   inv.InviteeName,
@@ -835,9 +971,11 @@ func (s *streamSession) handleResendGuestInviteEmail(envelope *memqlv1.MemqlClie
 		SpaceName:   inv.SpaceName,
 		JoinURL:     joinURL,
 		ExpiresAt:   inv.ExpiresAt,
+		Resend:      true,
 	}); err != nil {
 		if s.logger != nil {
-			s.logger.Error("guest resend: email delivery failed", "error", err, "invitation_id", invitationId)
+			s.logger.Error("guest resend: email delivery failed (token already rotated)",
+				"error", err, "invitation_id", invitationId)
 		}
 		return send(&memqlv1.ResendGuestInviteEmailResult{
 			InvitationId: invitationId,

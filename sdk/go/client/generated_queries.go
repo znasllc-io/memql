@@ -1274,6 +1274,28 @@ func QueryInvitationByIdBuild(args QueryInvitationByIdArgs) string {
 	return b.String()
 }
 
+// QueryInvitationByPreviousTokenHash -- Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
+//
+// Bound concept: invitation.
+type QueryInvitationByPreviousTokenHashArgs struct {
+	TokenHash string
+}
+
+// QueryInvitationByPreviousTokenHash calls the engine query queryInvitationByPreviousTokenHash.
+func (qc *QueryClient) QueryInvitationByPreviousTokenHash(ctx context.Context, args QueryInvitationByPreviousTokenHashArgs) (*Result, error) {
+	call := QueryInvitationByPreviousTokenHashBuild(args)
+	return qc.executeNamed(ctx, "queryInvitationByPreviousTokenHash", call)
+}
+
+func QueryInvitationByPreviousTokenHashBuild(args QueryInvitationByPreviousTokenHashArgs) string {
+	var b strings.Builder
+	b.WriteString("queryInvitationByPreviousTokenHash({")
+	b.WriteString("tokenHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryInvitationByTokenHash -- Returns the invitation whose tokenHash matches the argument. Zero or one result.
 //
 // Bound concept: invitation.
