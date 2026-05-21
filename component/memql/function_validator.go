@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // functionValidator validates and resolves function references in MemQL expressions.
@@ -102,6 +103,18 @@ func validateArgsField(args map[string]any, field *FunctionArgsField, prefix str
 	if strings.TrimSpace(field.Format) != "" {
 		if err := validateFieldFormat(fieldPath, value, field.Format); err != nil {
 			return err
+		}
+	}
+	if field.MaxLength > 0 {
+		s, ok := value.(string)
+		if ok && utf8.RuneCountInString(s) > field.MaxLength {
+			return fmt.Errorf("argument %q: value too long (%d runes, max %d)", fieldPath, utf8.RuneCountInString(s), field.MaxLength)
+		}
+	}
+	if field.patternRegex != nil {
+		s, ok := value.(string)
+		if ok && !field.patternRegex.MatchString(s) {
+			return fmt.Errorf("argument %q: value %q does not match pattern %q", fieldPath, s, field.Pattern)
 		}
 	}
 

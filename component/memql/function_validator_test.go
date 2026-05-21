@@ -1,9 +1,13 @@
 package memql
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
@@ -66,6 +70,110 @@ func TestValidateFunctionArgs_RichSchemas(t *testing.T) {
 		if err := v.validateFunctionArgs(fn, tc); err == nil {
 			t.Fatalf("expected validation error for case %d", idx)
 		}
+	}
+}
+
+// TestValidateFunctionArgs_MaxLength pins the @maxLength contract --
+// strings longer than the cap reject; equal-or-under accept; non-
+// string types are ignored (the cap only makes sense for strings).
+// Drives memql-bff-copresent#27 free-text caps.
+func TestValidateFunctionArgs_MaxLength(t *testing.T) {
+	v := &functionValidator{}
+	fn := &Function{
+		Name: "createSomething",
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "subject", Type: "string", MaxLength: 10},
+			},
+		},
+	}
+
+	// At and under the cap -- accepted.
+	for _, ok := range []string{"", "abc", "1234567890" /* exactly 10 */} {
+		if err := v.validateFunctionArgs(fn, map[string]any{"subject": ok}); err != nil {
+			t.Errorf("len %d: expected accept, got %v", len(ok), err)
+		}
+	}
+
+	// One over -- rejected.
+	if err := v.validateFunctionArgs(fn, map[string]any{"subject": "12345678901"}); err == nil {
+		t.Errorf("len 11: expected reject, got nil")
+	} else if !strings.Contains(err.Error(), "too long") {
+		t.Errorf("expected 'too long' in error, got %v", err)
+	}
+
+	// Multi-byte UTF-8 -- caps are RUNE counts, not bytes. "あいうえお" is
+	// 5 runes (15 bytes); cap is 10 -- accepted.
+	if err := v.validateFunctionArgs(fn, map[string]any{"subject": "あいうえお"}); err != nil {
+		t.Errorf("5-rune multi-byte string: expected accept, got %v", err)
+	}
+
+	// 11 runes -- rejected, regardless of byte count.
+	if err := v.validateFunctionArgs(fn, map[string]any{"subject": "あいうえおあいうえおあ"}); err == nil {
+		t.Errorf("11-rune multi-byte string: expected reject, got nil")
+	}
+}
+
+// TestValidateFunctionArgs_Pattern pins the @pattern contract --
+// strings matching the compiled regex accept; non-matching reject;
+// nil patternRegex is a no-op. Drives memql-bff-copresent#28 ID
+// format enforcement.
+func TestValidateFunctionArgs_Pattern(t *testing.T) {
+	v := &functionValidator{}
+	conceptIdRE := regexp.MustCompile(`^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]+$`)
+	fn := &Function{
+		Name: "lookupConcept",
+		ArgsSchema: &ArgsSchemaConfig{
+			Fields: []*FunctionArgsField{
+				{Name: "id", Type: "string", Pattern: conceptIdRE.String(), patternRegex: conceptIdRE},
+			},
+		},
+	}
+
+	wellFormed := []string{
+		"v1:cognition:space:abc",
+		"v1:agents:agent:40920a36-911a-4fb2-b69a-fadfc3919915",
+		"v1:planner:plan:plan_2026_05_21",
+	}
+	for _, ok := range wellFormed {
+		if err := v.validateFunctionArgs(fn, map[string]any{"id": ok}); err != nil {
+			t.Errorf("well-formed id %q: expected accept, got %v", ok, err)
+		}
+	}
+
+	pathTraversal := []string{
+		"../../etc/passwd",
+		"v1:cognition:space:../escape",
+		"' OR 1=1 --",
+		"v1:cognition:space:",
+		"",
+	}
+	for _, bad := range pathTraversal {
+		if err := v.validateFunctionArgs(fn, map[string]any{"id": bad}); err == nil {
+			t.Errorf("malformed id %q: expected reject, got nil", bad)
+		} else if !strings.Contains(err.Error(), "does not match pattern") {
+			t.Errorf("expected 'does not match pattern' in error, got %v", err)
+		}
+	}
+}
+
+// TestConvertArgsField_InvalidPatternFailsLoad asserts the loader-
+// side compile-on-load contract: an invalid regex in the DSL fails
+// the function-loader pass, so the engine never sees a broken
+// pattern at validation time.
+func TestConvertArgsField_InvalidPatternFailsLoad(t *testing.T) {
+	bad := &languageParser.ArgsField{Name: "id", Type: "string", Pattern: "[invalid"}
+	if _, err := convertArgsField(bad); err == nil {
+		t.Fatalf("expected error for invalid regex, got nil")
+	}
+
+	// Valid regex compiles + populates the cached patternRegex on the
+	// returned field.
+	good := &languageParser.ArgsField{Name: "id", Type: "string", Pattern: `^v1:`}
+	got, err := convertArgsField(good)
+	require.NoError(t, err)
+	if got.patternRegex == nil {
+		t.Errorf("convertArgsField did not populate patternRegex for valid pattern")
 	}
 }
 
