@@ -21,9 +21,15 @@ func New(componentName common.ComponentName, writer io.Writer, level slog.Level)
 
 	writer = ColorizeWriterForComponent(writer, componentName)
 
-	return slog.New(slog.NewJSONHandler(writer, &slog.HandlerOptions{
-		Level: level,
-	})).With("component", componentName)
+	// Wrap the JSON handler with the redacting handler so attribute
+	// keys matching ShouldRedact land as "<redacted>" in the
+	// output. Defense-in-depth: catches the common mistake of
+	// passing a sensitive value as a typed attr (e.g.
+	// slog.Info("login", "password", pw)) without relying on every
+	// caller remembering the discipline. See core/logger/redact.go
+	// for the predicate.
+	base := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: level})
+	return slog.New(NewRedactingHandler(base)).With("component", componentName)
 }
 
 func componentLoggingEnabled(component common.ComponentName) bool {
