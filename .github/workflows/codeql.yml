@@ -8,15 +8,21 @@ on:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 
+# Least-privilege at the workflow level: every step that doesn't
+# need to write security-events gets read-only. security-events:
+# write is hoisted INTO the analyze job only -- the only place
+# SARIF gets uploaded.
 permissions:
-  actions: read
   contents: read
-  security-events: write
 
 jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
