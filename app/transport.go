@@ -66,12 +66,6 @@ func (a *App) transportBase() {
 		sessionChecked := memqlgrpc.NewSessionRevocationStreamInterceptor(base, a.engine, a.Logger)
 		guestChecked := memqlgrpc.NewGuestAwareStreamInterceptor(sessionChecked, a.engine, a.Logger)
 		operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(guestChecked, a.Logger)
-		// Voice-agent (Initiative C): shared-secret token, pinned to
-		// the VoiceAgent* message surface only. Sits outside the
-		// JWT-verified chain because the Python voice-agent is a
-		// service-account caller without an identity JWT yet -- a
-		// follow-up will swap to identity-issued tokens but the
-		// surface-pin stays the same.
 		// Voice-agent: class="voice_agent" identity-issued JWT pinned
 		// to VoiceAgent* payload types (#109). See
 		// docs/auth/voice-agent-jwt.md.
