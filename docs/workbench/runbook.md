@@ -66,6 +66,36 @@ Universal -- `workbench_use` is injected into every role's
 has it. No scope grants, no kill switch, no per-agent gating. The
 blast radius is contained to the per-Plan directory tree.
 
+### 4.1 Exec allowlist
+
+`workbenchHost(action="exec")` runs commands via `/bin/sh -c`, so
+a compromised agent (prompt injection, jailbroken base model)
+could otherwise spawn arbitrary subprocesses. The dispatcher
+enforces a **curated binary allowlist** (memql#110) before the
+shell ever sees the string:
+
+- Allowed: standard file inspection / mutation / text processing
+  / archives / hashing / `curl` + `wget` for fetch / language
+  toolchains (`python3`, `node`, `go`, `git`, etc.) / `jq` + `yq`.
+  Full list in `integrations/workbench/exec_allowlist.go`.
+- Rejected: `sudo`, `bash`, `sh`, `nc`, `ssh`, `iptables`, and
+  every other binary not on the list. Pipelines are
+  tokenized -- a single disallowed binary in any segment rejects
+  the whole command with `command_not_allowed`.
+- Path-bearing binaries (`/usr/bin/python3`, `./helper.sh`) match
+  against their basename so PATH-independence is preserved.
+
+**Known limitation:** subshell substitution (`echo $(curl ...)`)
+isn't parsed; only the outer command's binary is checked. The
+inner `curl` rides through to `/bin/sh` unchecked. This is a
+documented gap with Option A; the architectural fix (Option B:
+seccomp / AppArmor profile) is a follow-up tracked under #110.
+
+Extending the allowlist: file a follow-up to memql#110 with the
+binary name + the use case. Don't bypass the check by routing the
+call through `bash -c` (the bash entry is itself off the list to
+prevent this).
+
 ## 5. Routing preference
 
 The agent's prompt template (`dsl/copresent/prompts/agentReply.tmpl`)
