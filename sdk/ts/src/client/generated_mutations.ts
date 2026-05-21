@@ -3873,6 +3873,30 @@ QueryClient.prototype.mutationUpdateAgentAuthScope = function (this: QueryClient
   return this.executeNamed("mutationUpdateAgentAuthScope", buildMutationUpdateAgentAuthScope(args), opts);
 };
 
+/** Partial update of a v1:agents:agentAuthorization row. Mirrors mutationUpdateAgent semantics: only the fields passed in `payload` change; everything else inherits from the prior row. Backs the canvas mintSkillApprovalRequested card's 'Approve & always allow this tier' action (memql-bff-copresent#38, memql#169) -- the SPA reads the current skillTierAllowlist, appends the approved tier, and writes the whole array back as `{skillTierAllowlist: [...]}`. Per the agentAuthorization concept's revocation contract this is an OWNED write: only the granting user (the row's payload.userId) may update their own authorization grant. */
+// Bound concept: agentAuthorization.
+export interface MutationUpdateAgentAuthorizationArgs {
+  authId: string;
+  payload: Record<string, unknown>;
+}
+
+export function buildMutationUpdateAgentAuthorization(args: MutationUpdateAgentAuthorizationArgs): string {
+  const parts: string[] = [];
+  parts.push("authId: " + renderMemQLValue(args.authId));
+  parts.push("payload: " + renderMemQLValue(args.payload));
+  return "mutationUpdateAgentAuthorization({" + parts.join(", ") + "})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    mutationUpdateAgentAuthorization(args: MutationUpdateAgentAuthorizationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.mutationUpdateAgentAuthorization = function (this: QueryClient, args: MutationUpdateAgentAuthorizationArgs = {} as MutationUpdateAgentAuthorizationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("mutationUpdateAgentAuthorization", buildMutationUpdateAgentAuthorization(args), opts);
+};
+
 /** Update the singleton cluster-settings row from the admin UI. */
 // Bound concept: clusterSettings.
 export interface MutationUpdateClusterSettingsArgs {
