@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	grpcMetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/bus"
+	"github.com/znasllc-io/memql/core/grpctls"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -241,11 +243,21 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// 6K screen capture (~28 MiB base64) with headroom for envelope
 	// metadata.
 	const maxWorkerMessageSize = 32 * 1024 * 1024
-	s.grpcServer = grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		grpc.StreamInterceptor(s.streamInterceptor),
 		grpc.MaxRecvMsgSize(maxWorkerMessageSize),
 		grpc.MaxSendMsgSize(maxWorkerMessageSize),
-	)
+	}
+	// TLS opt-in via MEMQL_GRPC_TLS_CERT_FILE + KEY_FILE. When
+	// unset, the server stays insecure (the legacy default suitable
+	// for deployments behind a TLS-terminating proxy). See
+	// docs/auth/threat-model.md §6 + component/grpc/tls.go.
+	if tlsCfg, err := grpctls.LoadServerTLSConfig(s.logger); err != nil {
+		return ctx, nil, fmt.Errorf("grpc server: tls config: %w", err)
+	} else if tlsCfg != nil {
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+	}
+	s.grpcServer = grpc.NewServer(serverOpts...)
 	identityResolver := auth.NewIdentityResolver(&engineQueryRunner{engine: s.engine}, s.logger)
 	svc := &service{
 		logger:           s.logger,
