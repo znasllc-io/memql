@@ -202,6 +202,28 @@ func accessSummaryFromProto(p *memqlv1.MyAccessResult) *AccessSummary {
 // Concept
 // =============================================================================
 
+// DisplayCard carries the per-concept rendering hints declared via
+// the `@displayCard(...)` DSL annotation. Concept-agnostic clients
+// (the cockpit's Concepts tab, future generic browsers) project
+// rows through these slot names instead of carrying per-concept
+// rendering code. Nil when the concept didn't declare the
+// annotation. See memql#160.
+type DisplayCard struct {
+	// Primary is the payload field that names the row (e.g. "name"
+	// for agents, "title" for spaces, "goal" for plans). Always set
+	// when DisplayCard is non-nil; the loader rejects annotations
+	// missing the primary slot.
+	Primary string
+	// Secondary is contextual (role, kind, type discriminator).
+	// Optional.
+	Secondary string
+	// Tertiary is extra context (owner, parent space). Optional.
+	Tertiary string
+	// Status is a boolean or short enum that drives a colored badge
+	// in the row chrome. Optional.
+	Status string
+}
+
 // Concept is the SDK-owned projection of memqlv1.ConceptInfo.
 // Used by QueryClient.ListConcepts.
 type Concept struct {
@@ -211,6 +233,10 @@ type Concept struct {
 	Entity      string
 	Description string
 	Type        string
+	// DisplayCard is the per-concept rendering hint set. Nil when
+	// the concept's DSL declaration didn't carry `@displayCard(...)`.
+	// See memql#160.
+	DisplayCard *DisplayCard
 }
 
 // conceptsFromProto translates a []*memqlv1.ConceptInfo slice into
@@ -222,14 +248,23 @@ func conceptsFromProto(in []*memqlv1.ConceptInfo) []Concept {
 		if c == nil {
 			continue
 		}
-		out = append(out, Concept{
+		concept := Concept{
 			Id:          c.GetId(),
 			Version:     c.GetVersion(),
 			Domain:      c.GetDomain(),
 			Entity:      c.GetEntity(),
 			Description: c.GetDescription(),
 			Type:        c.GetType(),
-		})
+		}
+		if dc := c.GetDisplayCard(); dc != nil {
+			concept.DisplayCard = &DisplayCard{
+				Primary:   dc.GetPrimary(),
+				Secondary: dc.GetSecondary(),
+				Tertiary:  dc.GetTertiary(),
+				Status:    dc.GetStatus(),
+			}
+		}
+		out = append(out, concept)
 	}
 	return out
 }

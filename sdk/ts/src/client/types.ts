@@ -22,6 +22,26 @@ export interface AccessSummary {
   clusterRole: Role;
 }
 
+// DisplayCard carries the per-concept rendering hints declared via
+// the `@displayCard(...)` DSL annotation. Concept-agnostic clients
+// project rows through these slot names instead of carrying
+// per-concept rendering code. Undefined when the concept didn't
+// declare the annotation. See memql#160.
+export interface DisplayCard {
+  // primary is the payload field that names the row (e.g. "name"
+  // for agents, "title" for spaces). Always non-empty when
+  // DisplayCard is present; the loader rejects annotations missing
+  // the primary slot.
+  primary: string;
+  // secondary is contextual (role, kind). Optional.
+  secondary?: string;
+  // tertiary is extra context (owner, parent space). Optional.
+  tertiary?: string;
+  // status is a boolean or short enum that drives a colored badge.
+  // Optional.
+  status?: string;
+}
+
 export interface Concept {
   id: string;
   version: string;
@@ -29,6 +49,10 @@ export interface Concept {
   entity: string;
   description: string;
   type: string;
+  // displayCard is the per-concept rendering hint set. Undefined
+  // when the concept's DSL declaration didn't carry
+  // `@displayCard(...)`. See memql#160.
+  displayCard?: DisplayCard;
 }
 
 export type SubscriptionKind =
@@ -173,14 +197,27 @@ export function roleFromWire(r: UserRoleWire | undefined): Role {
 
 export function conceptsFromWire(in_: ConceptInfoWire[] | undefined): Concept[] {
   if (!in_) return [];
-  return in_.map((c) => ({
-    id: c.id ?? "",
-    version: c.version ?? "",
-    domain: c.domain ?? "",
-    entity: c.entity ?? "",
-    description: c.description ?? "",
-    type: c.type ?? "",
-  }));
+  return in_.map((c) => {
+    const concept: Concept = {
+      id: c.id ?? "",
+      version: c.version ?? "",
+      domain: c.domain ?? "",
+      entity: c.entity ?? "",
+      description: c.description ?? "",
+      type: c.type ?? "",
+    };
+    // memql#160: surface the per-concept rendering hints when the
+    // concept declared @displayCard(...).
+    if (c.displayCard) {
+      concept.displayCard = {
+        primary: c.displayCard.primary ?? "",
+        secondary: c.displayCard.secondary,
+        tertiary: c.displayCard.tertiary,
+        status: c.displayCard.status,
+      };
+    }
+    return concept;
+  });
 }
 
 export function accessSummaryFromWire(p: MyAccessResultPayload | undefined): AccessSummary | null {

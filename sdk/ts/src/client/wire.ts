@@ -130,6 +130,13 @@ export interface ConceptsListResultPayload {
   systemTopics?: string[];
 }
 
+export interface DisplayCardWire {
+  primary?: string;
+  secondary?: string;
+  tertiary?: string;
+  status?: string;
+}
+
 export interface ConceptInfoWire {
   id?: string;
   version?: string;
@@ -137,6 +144,7 @@ export interface ConceptInfoWire {
   entity?: string;
   description?: string;
   type?: string;
+  displayCard?: DisplayCardWire;
 }
 
 export interface MyAccessResultPayload {
