@@ -1,0 +1,53 @@
+name: sbom
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+# Generates a CycloneDX SBOM for the Go module tree on every release
+# (and on go.mod / go.sum changes for main, so the published SBOM
+# tracks current state). The artifact is uploaded to the release
+# when triggered by a release event, and stashed as a workflow
+# artifact otherwise.
+
+jobs:
+  sbom:
+    name: cyclonedx-gomod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # write only when uploading to a release asset
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: install cyclonedx-gomod
+        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
+      - name: generate SBOM
+        run: |
+          mkdir -p sbom
+          cyclonedx-gomod mod -licenses -json -output sbom/memql.cdx.json
+          cyclonedx-gomod mod -licenses -output sbom/memql.cdx.xml
+      - name: upload SBOM as workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom/
+          retention-days: 90
+      - name: attach SBOM to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            sbom/memql.cdx.json
+            sbom/memql.cdx.xml
