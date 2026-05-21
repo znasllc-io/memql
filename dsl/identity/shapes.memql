@@ -162,8 +162,8 @@ shape invitation invitationFull {
   payload.inviteeId
   payload.inviteeEmail
   payload.inviteeName
-  payload.token
   payload.tokenHash
+  payload.previousTokenHash
   payload.expiresAt
   payload.status
   payload.respondedAt

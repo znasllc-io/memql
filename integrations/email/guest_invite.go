@@ -11,6 +11,13 @@ import (
 // GuestInviteParams carries the per-invite data used to render and
 // send the guest-invitation email. All fields are caller-sanitized
 // strings; the renderer HTML-escapes anything that lands in the body.
+//
+// Resend == true switches the subject + body to the "this replaces
+// any prior link" copy. The previous URL no longer authenticates
+// post-#108 (memql#108 swapped the resend path from "replay the
+// stored token" to "mint + rotate"); calling it out in the email
+// keeps recipients from getting confused when an older link
+// suddenly stops working.
 type GuestInviteParams struct {
 	To          string    // Guest's email address
 	GuestName   string    // Optional suggested name; may be empty
@@ -18,6 +25,7 @@ type GuestInviteParams struct {
 	SpaceName   string    // Display name of the space
 	JoinURL     string    // Full join link, e.g. https://app.copresent.ai/join/<token>
 	ExpiresAt   time.Time // Absolute expiration
+	Resend      bool      // true when this is a resend (token was just rotated)
 }
 
 // formatRelativeDuration returns a human-friendly "in X minutes"
@@ -84,14 +92,29 @@ func SendGuestInvite(ctx context.Context, sender Sender, p GuestInviteParams) er
 	}
 
 	subject := fmt.Sprintf("%s invited you to %s", inviter, space)
+	if p.Resend {
+		subject = fmt.Sprintf("Updated link: %s invited you to %s", inviter, space)
+	}
+
+	resendTextNote := ""
+	resendHTMLNote := ""
+	if p.Resend {
+		resendTextNote = "This link replaces any prior invitation we sent you. " +
+			"If you received an earlier email, please ignore that link and use this one instead.\n\n"
+		resendHTMLNote = `<p style="background:#fef3c7; border-left:4px solid #d97706; padding:12px 16px; margin:16px 0; font-size:14px; color:#78350f;">` +
+			`<strong>Updated link inside.</strong> This link replaces any prior invitation we sent you. ` +
+			`If you received an earlier email, please ignore that link and use this one instead.` +
+			`</p>`
+	}
 
 	text := fmt.Sprintf(
 		"%s,\n\n"+
 			"%s has invited you to join \"%s\".\n\n"+
+			"%s"+
 			"Click the link below to join as a guest. You don't need an account:\n\n"+
 			"  %s\n\n"+
 			"This link expires %s. If you weren't expecting this invitation, just ignore this email.\n",
-		greeting, inviter, space, p.JoinURL, expiresHuman,
+		greeting, inviter, space, resendTextNote, p.JoinURL, expiresHuman,
 	)
 
 	htmlBody := fmt.Sprintf(`<!doctype html>
@@ -99,6 +122,7 @@ func SendGuestInvite(ctx context.Context, sender Sender, p GuestInviteParams) er
   <body style="font-family: -apple-system, Segoe UI, Helvetica, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
     <p>%s,</p>
     <p><strong>%s</strong> has invited you to join <strong>%s</strong>.</p>
+    %s
     <p>Click the button below to join as a guest. You don't need an account.</p>
     <p style="margin: 24px 0;">
       <a href="%s" style="display:inline-block; background:#4f46e5; color:#fff; padding:12px 20px; border-radius:9999px; text-decoration:none; font-weight:600;">Join %s</a>
@@ -110,6 +134,7 @@ func SendGuestInvite(ctx context.Context, sender Sender, p GuestInviteParams) er
 		html.EscapeString(greeting),
 		html.EscapeString(inviter),
 		html.EscapeString(space),
+		resendHTMLNote,
 		html.EscapeString(p.JoinURL),
 		html.EscapeString(space),
 		html.EscapeString(p.JoinURL),
