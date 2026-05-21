@@ -33,15 +33,17 @@ PushHandler = Callable[[Any], Awaitable[None]]
 class MemqlGrpcClient:
     """Async wrapper around the bidirectional MemqlService.Stream RPC.
 
-    Authentication is via metadata header `authorization: Bearer <shared_token>`.
-    The memql side validates this against `MEMQL_VOICE_AGENT_SHARED_TOKEN`
-    and admits the resulting identity to the VoiceAgent* message surface
-    only.
+    Authentication is via metadata header
+    `authorization: Bearer <voice_agent_token>`. The voice_agent_token
+    is an identity-issued class="voice_agent" JWT; the memql side
+    verifies it via the cluster's JWKS endpoint and admits the
+    resulting identity to the VoiceAgent* message surface only.
+    See docs/auth/voice-agent-jwt.md for the provisioning flow.
     """
 
-    def __init__(self, addr: str, shared_token: str) -> None:
+    def __init__(self, addr: str, voice_agent_token: str) -> None:
         self.addr = addr
-        self.shared_token = shared_token
+        self.voice_agent_token = voice_agent_token
         self.channel: grpc.aio.Channel | None = None
         self.stream: Any = None  # bidi call -- type depends on generated stub
         self._send_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=256)
@@ -77,18 +79,12 @@ class MemqlGrpcClient:
         logger.info("connecting to memql gRPC at %s", self.addr)
         self.channel = grpc.aio.insecure_channel(self.addr)
         stub = memql_pb2_grpc.MemqlServiceStub(self.channel)
-        # The voice-agent stream interceptor on the memql side admits
-        # tokens whose bearer starts with "mql_va_" and compares the
-        # post-prefix portion against MEMQL_VOICE_AGENT_SHARED_TOKEN.
-        # We prepend the prefix here so callers' env var holds the
-        # clean secret (no knowledge of the prefix convention needed).
-        # Re-prepending an already-prefixed token is a no-op.
-        token = self.shared_token
-        if not token.startswith("mql_va_"):
-            token = "mql_va_" + token
+        # The voice-agent stream interceptor on the memql side
+        # verifies the bearer as a class="voice_agent" JWT and
+        # admits it to the VoiceAgent* message surface only.
         self.stream = stub.Stream(
             self._send_iter(),
-            metadata=[("authorization", f"Bearer {token}")],
+            metadata=[("authorization", f"Bearer {self.voice_agent_token}")],
         )
         self._read_task = asyncio.create_task(self._read_loop())
         self._connected.set()

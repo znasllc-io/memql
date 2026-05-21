@@ -507,8 +507,10 @@ cannot write graph rows directly; memql does that server-side.
 
 Env:
 - `MEMQL_DEEPGRAM_API_KEY` -- Deepgram (STT + TTS).
-- `MEMQL_VOICE_AGENT_SHARED_TOKEN` (memql side) /
-  `VOICE_AGENT_SHARED_TOKEN` (voice-agent side) -- shared secret.
+- `VOICE_AGENT_TOKEN` (voice-agent side) -- identity-issued
+  `class="voice_agent"` JWT (#109). Mint via
+  `JWTIssuer.IssueVoiceAgentAccessToken`; see
+  `docs/auth/voice-agent-jwt.md` for the provisioning flow.
 - `MEMQL_AVATAR_VENDOR` -- `anam` (default) or `simli` or `none`.
 - `ANAM_API_KEY` / `SIMLI_API_KEY` -- vendor keys.
 

@@ -72,7 +72,10 @@ func (a *App) transportBase() {
 		// service-account caller without an identity JWT yet -- a
 		// follow-up will swap to identity-issued tokens but the
 		// surface-pin stays the same.
-		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, voiceAgentSharedToken(), a.Logger)
+		// Voice-agent: class="voice_agent" identity-issued JWT pinned
+		// to VoiceAgent* payload types (#109). See
+		// docs/auth/voice-agent-jwt.md.
+		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
 		// Panic recovery wraps the entire chain. A panic anywhere
 		// downstream is caught here, logged with stack + error id,
 		// and surfaced to the client as codes.Internal with the

@@ -88,6 +88,12 @@ const (
 	// ClassNode marks a cluster-internal node service-account token
 	// (#105). NodeService.Stream rejects every other class.
 	ClassNode = "node"
+	// ClassVoiceAgent marks the Python voice-agent process's
+	// service-account token (#109). MemqlService.Stream's
+	// voice-agent interceptor admits this class and pins the call
+	// to VoiceAgent* payload types -- a leaked voice-agent token
+	// can't drive other RPCs.
+	ClassVoiceAgent = "voice_agent"
 )
 
 // JWTIssuer mints access tokens. Wraps a KeyManager for signing-key
@@ -344,6 +350,83 @@ func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (stri
 	signed, err := tok.SignedString(mat.Private)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("identity: sign node access token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// VoiceAgentIssueInput is the per-call payload for
+// IssueVoiceAgentAccessToken. Voice-agent tokens authenticate the
+// Python voice-agent process on MemqlService.Stream; the
+// interceptor pins the surface to VoiceAgent* payload types so a
+// leaked credential can't drive other RPCs.
+//
+// Subject is the v1:identity:identity row id of the
+// voice_agent_token credential -- NOT a v1:identity:user.id.
+type VoiceAgentIssueInput struct {
+	// IdentityId is the v1:identity:identity row carrying the
+	// voice_agent_token credential. Used as the JWT subject so
+	// admin tooling can correlate the token back to its credential
+	// row for revoke / rotate.
+	IdentityId string
+	// InstanceId is the operator-chosen voice-agent instance label
+	// (e.g. "voice-agent-prod-us-east-1"). Stamped onto a
+	// surface-specific claim so audit can attribute traffic to a
+	// specific process.
+	InstanceId string
+	// TTLOverride is the per-call lifetime. Zero falls back to
+	// DefaultVoiceAgentTokenTTLSeconds.
+	TTLOverride time.Duration
+}
+
+// IssueVoiceAgentAccessToken mints a class="voice_agent" JWT bound
+// to the given v1:identity:identity row + instance id. The
+// interceptor admits these tokens on MemqlService.Stream and pins
+// the call to VoiceAgent* payload types; a leaked credential can't
+// drive other RPCs.
+func (j *JWTIssuer) IssueVoiceAgentAccessToken(in VoiceAgentIssueInput, now time.Time) (string, time.Time, error) {
+	if strings.TrimSpace(in.IdentityId) == "" {
+		return "", time.Time{}, errors.New("identity: VoiceAgentIssueInput.IdentityId required")
+	}
+	if strings.TrimSpace(in.InstanceId) == "" {
+		return "", time.Time{}, errors.New("identity: VoiceAgentIssueInput.InstanceId required")
+	}
+	mat := j.keys.Current()
+	if mat == nil {
+		return "", time.Time{}, errors.New("identity: no current signing key (was KeyManager.Load() called?)")
+	}
+	ttl := in.TTLOverride
+	if ttl <= 0 {
+		ttl = time.Duration(DefaultVoiceAgentTokenTTLSeconds) * time.Second
+	}
+	expiresAt := now.Add(ttl)
+	jti, err := newJTI()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
+	}
+	// Reuse the NodeId claim slot for the instance id -- the claims
+	// struct is shared across class types, and adding a third
+	// per-class binding field would clutter every other JWT's
+	// payload. The verifier reads NodeId without interpretation
+	// (no class-specific cross-check on the voice-agent path); the
+	// interceptor uses it purely for audit logging.
+	claims := AccessTokenClaims{
+		Class:  ClassVoiceAgent,
+		NodeId: in.InstanceId,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    j.issuer,
+			Subject:   in.IdentityId,
+			Audience:  jwt.ClaimStrings{j.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        jti,
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = mat.KID
+	signed, err := tok.SignedString(mat.Private)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: sign voice-agent access token: %w", err)
 	}
 	return signed, expiresAt, nil
 }

@@ -35,13 +35,11 @@ type NodeServer struct {
 	workbenchForwardHandler  WorkbenchForwardHandler
 	workbenchForwardResponse WorkbenchForwardResponseSink
 	eventInbound             EventInbound
-	// authInterceptor is the optional class="node" JWT enforcement
-	// interceptor (#105). Wired by app/cluster.go during bootstrap
-	// when the operator has provisioned per-binary node tokens
-	// (MEMQL_NODE_TOKEN) and flipped MEMQL_NODE_REQUIRE_AUTH=1.
-	// Nil = the legacy "any peer can NodeHello" behavior, retained
-	// for single-node dev + clusters that haven't rolled tokens out
-	// yet.
+	// authInterceptor is the class="node" JWT enforcement interceptor
+	// (#105). Wired by app/cluster.go from the per-binary verifier;
+	// nil when the verifier isn't configured (single-node dev),
+	// which leaves NodeService.Stream unauthenticated -- the
+	// single-node binary doesn't open inter-node streams either way.
 	authInterceptor grpc.StreamServerInterceptor
 }
 
@@ -49,7 +47,7 @@ type NodeServer struct {
 // stream interceptor on NodeService.Stream. Call after construction
 // but BEFORE Start (the interceptor is read once at prepareForRun
 // when the gRPC server is created). Passing nil leaves the
-// interceptor unwired -- legacy "no auth" behavior. See
+// interceptor unwired for single-node binaries. See
 // NodeClassStreamInterceptor + #105.
 func (s *NodeServer) SetAuthInterceptor(i grpc.StreamServerInterceptor) {
 	if s == nil {
@@ -215,11 +213,9 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		grpc.MaxSendMsgSize(maxNodeMessageSize),
 	}
 	if s.authInterceptor != nil {
-		// Install the class="node" enforcement interceptor (#105).
-		// When unset, NodeService.Stream stays unauthenticated --
-		// the legacy default, suitable for single-node dev + the
-		// "trusted network boundary" deployment posture documented
-		// in threat-model §5.1.
+		// class="node" enforcement (#105). When unset, the binary
+		// runs single-node mode (no inter-node traffic), so
+		// installing nothing is fine.
 		serverOpts = append(serverOpts, grpc.StreamInterceptor(s.authInterceptor))
 		s.logger.Info("node server: auth interceptor enabled (class=node required)")
 	}
