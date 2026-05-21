@@ -291,21 +291,31 @@ db:
 # Test targets
 # ---------------------------------------------------------------------------
 
-.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check
+.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
-## query / mutation / logic under dsl/**/*.memql and emits typed Go
-## methods on sdk/go/client.QueryClient. Re-run after any DSL change
+## query / mutation / logic under dsl/**/*.memql and emits typed
+## methods on both the Go SDK (sdk/go/client.QueryClient) and the TS
+## SDK (sdk/ts/src/client/QueryClient). Re-run after any DSL change
 ## that touches a construct's args / signature / shape. The drift
 ## gate (sdk-gen-check) catches stale checkouts in CI.
 sdk-gen:
-	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client
+	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
 ## CI gate: regenerate, then diff against the checked-in tree. Fails
 ## if the DSL evolved without the generator running. Pair with
 ## `make sdk-gen` locally to fix.
 sdk-gen-check:
-	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client
+	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
+
+## Install TS SDK dev dependencies (typescript). Idempotent.
+sdk-ts-install:
+	cd sdk/ts && npm install --no-audit --no-fund
+
+## Typecheck the TS SDK. Runs `tsc --noEmit` against sdk/ts. CI gates
+## the generated TS surface through this target. Requires node + npm.
+sdk-ts-typecheck:
+	cd sdk/ts && npm run typecheck
 
 ## Run all tests
 test:
