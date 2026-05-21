@@ -87,7 +87,7 @@ sdk/go/
     support.go            Result type + executeNamed + renderMemQLValue
   voice/                  Push-to-talk transcription
   sense/                  Tokenize / Diagnose / Complete / Hover / SignatureHelp
-  worker/                 (Pending #117) WorkerService client
+  worker/                 WorkerService dial + TLS + stream lifecycle
 ```
 
 ---
