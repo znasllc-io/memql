@@ -2,8 +2,6 @@ package identity
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +9,7 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -727,27 +726,30 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// NewRandomId returns a 128-bit random hex id with the given prefix.
-// Exported so the magiclink and refresh subpackages can mint ids
-// without re-implementing the same loop.
+// NewRandomId returns a fresh opaque instance-row shortId with the
+// given prefix. Delegates to core/id.NewShortId so every identity row
+// shares the same wire format as the rest of memql (currently a
+// 36-char UUIDv4). Callers in magiclink / refresh / pat /
+// workerpairing / workertoken / http all pass an empty prefix; the
+// parameter is preserved because the engine's id-validation path is
+// strict about leading characters and a non-empty prefix is the
+// documented way to namespace a class of ids without altering the
+// shortId core. The error return is preserved for source
+// compatibility but is always nil now -- id.NewShortId does not fail.
 func NewRandomId(prefix string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return prefix + hex.EncodeToString(buf), nil
+	return prefix + id.NewShortId(), nil
 }
 
 // NewRequestId is the convenience id minter used by the web/wizard
-// path. Falls back to a deterministic-but-unique string if rand.Read
-// somehow fails (which would itself be a fatal-class error in
-// production but should not crash the wizard).
+// path. The underlying NewRandomId never errors now (id.NewShortId
+// cannot fail), so the historical fallback branch is unreachable;
+// the function still returns the bare string for caller ergonomics.
 func NewRequestId() string {
-	id, err := NewRandomId("")
-	if err != nil {
+	idStr, _ := NewRandomId("")
+	if idStr == "" {
 		return fmt.Sprintf("fallback-%d", len([]byte("fallback")))
 	}
-	return id
+	return idStr
 }
 
 // ---------------------------------------------------------------------------
