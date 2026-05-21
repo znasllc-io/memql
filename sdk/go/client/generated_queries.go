@@ -457,6 +457,28 @@ func QueryArchivedSpacesBuild(args QueryArchivedSpacesArgs) string {
 	return b.String()
 }
 
+// QueryAudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
+//
+// Bound concept: audioOverride.
+type QueryAudioOverridesForSpaceArgs struct {
+	SpaceId string
+}
+
+// QueryAudioOverridesForSpace calls the engine query queryAudioOverridesForSpace.
+func (qc *QueryClient) QueryAudioOverridesForSpace(ctx context.Context, args QueryAudioOverridesForSpaceArgs) (*Result, error) {
+	call := QueryAudioOverridesForSpaceBuild(args)
+	return qc.executeNamed(ctx, "queryAudioOverridesForSpace", call)
+}
+
+func QueryAudioOverridesForSpaceBuild(args QueryAudioOverridesForSpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAudioOverridesForSpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAuditEventsByActor -- Audit events where actorUserId equals the supplied userId. Pair with queryAuditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
 //
 // Bound concept: auditEvent.
@@ -1132,6 +1154,28 @@ func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryGroupGAForSpace -- Active SI (group GA) participant for a space. Callers must pass the canonical spaceId.
+//
+// Bound concept: participant.
+type QueryGroupGAForSpaceArgs struct {
+	SpaceId string
+}
+
+// QueryGroupGAForSpace calls the engine query queryGroupGAForSpace.
+func (qc *QueryClient) QueryGroupGAForSpace(ctx context.Context, args QueryGroupGAForSpaceArgs) (*Result, error) {
+	call := QueryGroupGAForSpaceBuild(args)
+	return qc.executeNamed(ctx, "queryGroupGAForSpace", call)
+}
+
+func QueryGroupGAForSpaceBuild(args QueryGroupGAForSpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGroupGAForSpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -1912,6 +1956,44 @@ func QuerySpaceMetaBuild(args QuerySpaceMetaArgs) string {
 	return b.String()
 }
 
+// QuerySpaceParticipants -- Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.
+//
+// Bound concept: participant.
+type QuerySpaceParticipantsArgs struct {
+	SpaceId         string
+	Status          string
+	ParticipantType string
+}
+
+// QuerySpaceParticipants calls the engine query querySpaceParticipants.
+func (qc *QueryClient) QuerySpaceParticipants(ctx context.Context, args QuerySpaceParticipantsArgs) (*Result, error) {
+	call := QuerySpaceParticipantsBuild(args)
+	return qc.executeNamed(ctx, "querySpaceParticipants", call)
+}
+
+func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
+	var b strings.Builder
+	b.WriteString("querySpaceParticipants({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.Status != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
+	}
+	if args.ParticipantType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("participantType: ")
+		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
 //
 // Bound concept: utterance.
@@ -2284,6 +2366,28 @@ func QueryValidationLogBuild(args QueryValidationLogArgs) string {
 		b.WriteString("action: ")
 		b.WriteString(fmt.Sprintf("%q", args.Action))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryVideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
+//
+// Bound concept: videoOverride.
+type QueryVideoOverridesForSpaceArgs struct {
+	SpaceId string
+}
+
+// QueryVideoOverridesForSpace calls the engine query queryVideoOverridesForSpace.
+func (qc *QueryClient) QueryVideoOverridesForSpace(ctx context.Context, args QueryVideoOverridesForSpaceArgs) (*Result, error) {
+	call := QueryVideoOverridesForSpaceBuild(args)
+	return qc.executeNamed(ctx, "queryVideoOverridesForSpace", call)
+}
+
+func QueryVideoOverridesForSpaceBuild(args QueryVideoOverridesForSpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryVideoOverridesForSpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
 	return b.String()
 }
