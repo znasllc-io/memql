@@ -40,6 +40,14 @@ type VerifiedClaims struct {
 	ExpiresAt  time.Time
 	Source     Source
 
+	// RevocationEpoch is the per-user counter snapshot the token was
+	// minted at. Populated from the JWT `revocation_epoch` claim;
+	// always 0 for PATs (PAT revocation is row-state, not claim-state).
+	// Used by EpochResolver-equipped interceptors to invalidate tokens
+	// when the user's current epoch has advanced past the claim. See
+	// memql#106.
+	RevocationEpoch int64
+
 	// ClaimsMap is the value handed to auth.ContextWithClaims +
 	// auth.BuildTokenInfo. Reflects the original JWT body for the
 	// JWT path; synthesized for the PAT path so downstream RBAC
@@ -191,14 +199,15 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 	cm := map[string]any(mc)
 
 	out := &VerifiedClaims{
-		UserId:    stringClaim(cm, "sub"),
-		Email:     stringClaim(cm, "email"),
-		Name:      stringClaim(cm, "name"),
-		Role:      stringClaim(cm, "role"),
-		Internal:  boolClaim(cm, "internal"),
-		SessionId: stringClaim(cm, "sid"),
-		Source:    SourceJWT,
-		ClaimsMap: cm,
+		UserId:          stringClaim(cm, "sub"),
+		Email:           stringClaim(cm, "email"),
+		Name:            stringClaim(cm, "name"),
+		Role:            stringClaim(cm, "role"),
+		Internal:        boolClaim(cm, "internal"),
+		SessionId:       stringClaim(cm, "sid"),
+		RevocationEpoch: int64Claim(cm, "revocation_epoch"),
+		Source:          SourceJWT,
+		ClaimsMap:       cm,
 	}
 	if exp, ok := numericDate(cm, "exp"); ok {
 		out.ExpiresAt = exp
@@ -259,6 +268,27 @@ func boolClaim(m map[string]any, key string) bool {
 		return v
 	}
 	return false
+}
+
+// int64Claim extracts a JWT numeric claim into an int64. JSON numbers
+// arrive as float64 on the jwt.MapClaims path; we fan out the integer
+// types for completeness so a code path that hands us int / int64
+// directly (synthesized claims maps in tests) still works.
+func int64Claim(m map[string]any, key string) int64 {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case int32:
+		return int64(v)
+	}
+	return 0
 }
 
 func numericDate(m map[string]any, key string) (time.Time, bool) {

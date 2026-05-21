@@ -267,6 +267,7 @@ concept user {
   legalAcceptance []object  @description("Append-only history of legal-document acceptances. Each entry: {documentType: 'tos'|'privacy', version: string, acceptedAt: datetime, sourceIP: string}. Audit trail for compliance -- never edited, only appended.")
   deletionScheduledAt datetime  @description("Set when the user requested account deletion. The accountDeletionSweep cron hard-deletes the row IDENTITY_DELETION_COOLDOWN_DAYS later. Cleared by mutationCancelScheduledDeletion if the user reverses the request during the cooldown.")
   dataExportLastAt datetime  @description("Timestamp of the most recent /me/export download. Drives rate-limiting per IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS.")
+  revocationEpoch  int       @default("0")  @description("Monotonically-increasing per-user counter. Stamped into every JWT this user is issued; the verifier rejects any JWT whose revocation_epoch claim is below the user's current value. Bumping this field invalidates every token issued before the bump, on the next stream-open or periodic in-stream re-check (default ~5 minutes). Bulk-revoke / role-change / security-event tooling is the intended writer. See memql#106.")
 }
 
 @version("1.0.0")

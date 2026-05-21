@@ -55,19 +55,20 @@ type AuthCodeRow struct {
 
 // UserRow projects a v1:identity:user row.
 type UserRow struct {
-	ID           string
-	DisplayName  string
-	FirstName    string
-	LastName     string
-	PrimaryEmail string
-	Phone        string
-	PrimaryRole  string
-	Gender       string
-	Birthdate    string
-	Role         string
-	Active       bool
-	Internal     bool
-	CreatedAt    time.Time
+	ID              string
+	DisplayName     string
+	FirstName       string
+	LastName        string
+	PrimaryEmail    string
+	Phone           string
+	PrimaryRole     string
+	Gender          string
+	Birthdate       string
+	Role            string
+	Active          bool
+	Internal        bool
+	RevocationEpoch int64
+	CreatedAt       time.Time
 }
 
 // AuthSessionRow projects a v1:identity:authSession row.
@@ -304,6 +305,56 @@ func (s *Store) LookupUserByEmail(ctx context.Context, email string) (*UserRow, 
 	return userRowFromNode(nodes[0]), nil
 }
 
+// BumpUserRevocationEpoch reads the user's current revocationEpoch,
+// computes current+1, and persists it via
+// mutationBumpUserRevocationEpoch. Returns the new value. Used by
+// the bulk-revoke admin path (memql#106).
+//
+// Note: this is a non-transactional read-then-write. Concurrent
+// bumps can collide on the same target value (both observe N, both
+// write N+1, one no-op for revocation purposes); the user-visible
+// outcome is still "tokens minted before the first bump are
+// invalidated," which is the property the feature guarantees. If
+// strict monotonicity ever matters, swap the mutation for a CAS
+// shape that takes (expectedCurrent, newEpoch).
+func (s *Store) BumpUserRevocationEpoch(ctx context.Context, userId string) (int64, error) {
+	if strings.TrimSpace(userId) == "" {
+		return 0, errors.New("identity.store: BumpUserRevocationEpoch: userId required")
+	}
+	user, err := s.LookupUserById(ctx, userId)
+	if err != nil {
+		return 0, fmt.Errorf("identity.store: lookup before epoch bump: %w", err)
+	}
+	if user == nil {
+		return 0, fmt.Errorf("identity.store: BumpUserRevocationEpoch: user %q not found", userId)
+	}
+	next := user.RevocationEpoch + 1
+	var b strings.Builder
+	b.WriteString(`mutationBumpUserRevocationEpoch({`)
+	writeKVString(&b, "userId", userId, true)
+	writeKVInt(&b, "newEpoch", int(next), false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return 0, fmt.Errorf("identity.store: bump revocation epoch: %w", err)
+	}
+	return next, nil
+}
+
+// CurrentUserRevocationEpoch implements verifier.EpochResolver
+// against the identity Store. Falls back to 0 (the steady-state
+// value for never-bumped users) when the user row can't be found --
+// matches the issued-token value of 0 so the comparison passes.
+func (s *Store) CurrentUserRevocationEpoch(ctx context.Context, userId string) (int64, error) {
+	user, err := s.LookupUserById(ctx, userId)
+	if err != nil {
+		return 0, err
+	}
+	if user == nil {
+		return 0, nil
+	}
+	return user.RevocationEpoch, nil
+}
+
 // userRowFromNode projects a memQL node onto UserRow. Shared by every
 // LookupUserBy* path so they all surface the same fields.
 func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
@@ -312,19 +363,20 @@ func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
 	}
 	g := newFieldGetter(node)
 	return &UserRow{
-		ID:           firstNonEmpty(g.str("id"), node.GetId()),
-		DisplayName:  g.str("displayName"),
-		FirstName:    g.str("firstName"),
-		LastName:     g.str("lastName"),
-		PrimaryEmail: g.str("primaryEmail"),
-		Phone:        g.str("phone"),
-		PrimaryRole:  g.str("primaryRole"),
-		Gender:       g.str("gender"),
-		Birthdate:    g.str("birthdate"),
-		Role:         g.str("role"),
-		Active:       g.boolField("active"),
-		Internal:     g.boolField("internal"),
-		CreatedAt:    g.time("createdAt"),
+		ID:              firstNonEmpty(g.str("id"), node.GetId()),
+		DisplayName:     g.str("displayName"),
+		FirstName:       g.str("firstName"),
+		LastName:        g.str("lastName"),
+		PrimaryEmail:    g.str("primaryEmail"),
+		Phone:           g.str("phone"),
+		PrimaryRole:     g.str("primaryRole"),
+		Gender:          g.str("gender"),
+		Birthdate:       g.str("birthdate"),
+		Role:            g.str("role"),
+		Active:          g.boolField("active"),
+		Internal:        g.boolField("internal"),
+		RevocationEpoch: g.int64Field("revocationEpoch"),
+		CreatedAt:       g.time("createdAt"),
 	}
 }
 
@@ -685,6 +737,21 @@ func (g *fieldGetter) intField(key string) int {
 		return 0
 	}
 	return int(v.GetNumberValue())
+}
+
+func (g *fieldGetter) int64Field(key string) int64 {
+	if g == nil || g.node == nil || g.node.Payload == nil {
+		return 0
+	}
+	fields := g.node.Payload.GetFields()
+	if fields == nil {
+		return 0
+	}
+	v, ok := fields[key]
+	if !ok || v == nil {
+		return 0
+	}
+	return int64(v.GetNumberValue())
 }
 
 func (g *fieldGetter) boolField(key string) bool {

@@ -160,6 +160,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		tokenInput.FamilyName = user.LastName
 		tokenInput.Role = user.Role
 		tokenInput.Internal = user.Internal
+		tokenInput.RevocationEpoch = user.RevocationEpoch
 	} else if err != nil && s.Logger != nil {
 		s.Logger.Warn("token_user_lookup_failed", slog.String("user_id", row.UserId), slog.String("error", err.Error()))
 	}

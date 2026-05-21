@@ -37,15 +37,23 @@ import (
 //	             this specific token" capability if we ever need it.
 //	sid          v1:identity:authSession.id — every refresh keeps the
 //	             same sid so per-device revoke can target it.
+//	revocation_epoch  monotonically-increasing per-user counter snapshot
+//	             at issue time. The verifier rejects any JWT whose claim
+//	             is below the user's current revocationEpoch row value;
+//	             admin "revoke all tokens for this user NOW" tooling
+//	             bumps the row, which invalidates every prior token at
+//	             the next stream-open or periodic in-stream re-check.
+//	             See memql#106.
 type AccessTokenClaims struct {
-	Email      string            `json:"email,omitempty"`
-	Name       string            `json:"name,omitempty"`
-	GivenName  string            `json:"given_name,omitempty"`
-	FamilyName string            `json:"family_name,omitempty"`
-	Role       string            `json:"role,omitempty"`
-	Internal   bool              `json:"internal,omitempty"`
-	Partitions map[string]string `json:"partitions,omitempty"`
-	SessionId  string            `json:"sid,omitempty"`
+	Email           string            `json:"email,omitempty"`
+	Name            string            `json:"name,omitempty"`
+	GivenName       string            `json:"given_name,omitempty"`
+	FamilyName      string            `json:"family_name,omitempty"`
+	Role            string            `json:"role,omitempty"`
+	Internal        bool              `json:"internal,omitempty"`
+	Partitions      map[string]string `json:"partitions,omitempty"`
+	SessionId       string            `json:"sid,omitempty"`
+	RevocationEpoch int64             `json:"revocation_epoch,omitempty"`
 
 	jwt.RegisteredClaims
 }
@@ -87,15 +95,16 @@ func NewJWTIssuer(km *KeyManager, cfg Config) (*JWTIssuer, error) {
 // IssueInput is the per-call payload for IssueAccessToken. Caller
 // supplies the user identity; the issuer fills in iat/exp/iss/aud/jti.
 type IssueInput struct {
-	UserId     string
-	Email      string
-	Name       string
-	GivenName  string
-	FamilyName string
-	Role       string
-	Internal   bool
-	Partitions map[string]string
-	SessionId  string
+	UserId          string
+	Email           string
+	Name            string
+	GivenName       string
+	FamilyName      string
+	Role            string
+	Internal        bool
+	Partitions      map[string]string
+	SessionId       string
+	RevocationEpoch int64
 	// TTLOverride is the per-call access-token lifetime. When > 0,
 	// it replaces the issuer's boot-time default for THIS issuance
 	// only. The HTTP handlers read the runtime-tunable value from
@@ -128,14 +137,15 @@ func (j *JWTIssuer) IssueAccessToken(in IssueInput, now time.Time) (string, time
 	}
 
 	claims := AccessTokenClaims{
-		Email:      in.Email,
-		Name:       in.Name,
-		GivenName:  in.GivenName,
-		FamilyName: in.FamilyName,
-		Role:       in.Role,
-		Internal:   in.Internal,
-		Partitions: in.Partitions,
-		SessionId:  in.SessionId,
+		Email:           in.Email,
+		Name:            in.Name,
+		GivenName:       in.GivenName,
+		FamilyName:      in.FamilyName,
+		Role:            in.Role,
+		Internal:        in.Internal,
+		Partitions:      in.Partitions,
+		SessionId:       in.SessionId,
+		RevocationEpoch: in.RevocationEpoch,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,
 			Subject:   in.UserId,
