@@ -5,9 +5,9 @@ package memql
 //
 // Automations are event-triggered workflows. The struct-form body
 // (a list of named `step <name> { ... }` blocks) is rewritten to
-// the procedural `func (Automation) NAME(ctx any) { name :=
-// <callOrBlock>; ...; return ctx, nil }` form; the body grammar
-// lives in the general parser + the automation step-grammar.
+// the procedural `func (Automation) NAME(_ any) { name :=
+// <callOrBlock>; ... }` form; the body grammar lives in the
+// general parser + the automation step-grammar.
 //
 // This parser is a thin shell whose value is the per-construct
 // annotation allow-list -- typos / wrong-construct annotations

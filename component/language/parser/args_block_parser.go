@@ -149,18 +149,6 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	return field, nil
 }
 
-// translateArgsRefsToCtxInRange is a helper that swaps `args.X` for
-// `ctx.X` over a substring of source. Used by the struct rewriters
-// when they construct the procedural function body. Kept here so the
-// args-block surface (declaration + body resolution) lives in one
-// place.
-func translateArgsRefsToCtxRange(source string, start, end int) string {
-	if start < 0 || end > len(source) || start >= end {
-		return source
-	}
-	return source[:start] + translateArgsRefsToCtx(source[start:end]) + source[end:]
-}
-
 // formatArgsBlock renders an *ArgsSchema back into source-form
 // `args { <field>... }` text. Used by the struct rewriters when they
 // move the args block from inside a struct body to file-top.
