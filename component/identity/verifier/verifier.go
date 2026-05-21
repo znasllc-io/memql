@@ -40,6 +40,15 @@ type VerifiedClaims struct {
 	ExpiresAt  time.Time
 	Source     Source
 
+	// RevocationEpoch is the value of v1:identity:user.revocationEpoch
+	// at the moment the JWT was minted. The verifier rejects any
+	// token whose claim is strictly less than the user's current
+	// epoch -- bumping the user's epoch (via
+	// mutationBumpUserRevocationEpoch) invalidates every pre-bump
+	// token. Zero for PATs (PATs have their own revocation surface).
+	// See #106 + threat-model §5.3.
+	RevocationEpoch int64
+
 	// ClaimsMap is the value handed to auth.ContextWithClaims +
 	// auth.BuildTokenInfo. Reflects the original JWT body for the
 	// JWT path; synthesized for the PAT path so downstream RBAC
@@ -55,18 +64,37 @@ type PATVerifier interface {
 	VerifyToken(ctx context.Context, token string) (*pat.Claims, error)
 }
 
+// EpochResolver returns the current v1:identity:user.revocationEpoch
+// for the supplied user id. Implementations typically run a memQL
+// query (queryUserById) and read payload.revocationEpoch. The
+// verifier calls this once per stream-open and again on a periodic
+// in-stream re-check; missing / failed reads (err != nil) are
+// treated as "trust the token" so a transient identity-service
+// outage doesn't disconnect every authenticated stream.
+//
+// Returning (0, nil) is the no-revocation case -- a user who has
+// never been bulk-revoked has epoch 0 by default, and tokens with
+// claim 0 are admitted (the rejection rule is strict-greater).
+//
+// nil resolver disables the epoch check entirely. Useful for the
+// identity service binary, which already owns the source of truth
+// and doesn't need to ask itself.
+type EpochResolver func(ctx context.Context, userId string) (int64, error)
+
 // Verifier is the per-node JWT+PAT verifier. Reads from a JWKSCache
 // to validate JWTs; delegates to PATVerifier for mql_pat_* tokens.
 //
-// The verifier itself is a stateless logic object — JWKSCache and
-// PATVerifier are the only state it depends on.
+// The verifier itself is a stateless logic object — JWKSCache,
+// PATVerifier, and the optional EpochResolver are the only state
+// it depends on.
 type Verifier struct {
-	cache    *JWKSCache
-	cfg      Config
-	pat      PATVerifier
-	logger   *slog.Logger
-	issuer   string
-	audience string
+	cache         *JWKSCache
+	cfg           Config
+	pat           PATVerifier
+	logger        *slog.Logger
+	issuer        string
+	audience      string
+	epochResolver EpochResolver
 }
 
 // New constructs a Verifier. cache must be non-nil and already
@@ -88,6 +116,21 @@ func New(cfg Config, cache *JWKSCache, patVerifier PATVerifier, logger *slog.Log
 		issuer:   cfg.EffectiveIssuer(),
 		audience: cfg.EffectiveAudience(),
 	}, nil
+}
+
+// WithEpochResolver wires the revocation-epoch resolver onto the
+// verifier. Returns the same *Verifier for fluent setup; the
+// resolver is applied in place. Call once during binary bootstrap
+// after the engine is up but before any auth-gated stream starts.
+//
+// Passing nil clears the resolver -- the epoch check becomes a
+// no-op. Useful for tests that don't want to spin up the lookup.
+func (v *Verifier) WithEpochResolver(r EpochResolver) *Verifier {
+	if v == nil {
+		return v
+	}
+	v.epochResolver = r
+	return v
 }
 
 // VerifyBearer validates a bearer token and returns the unified
@@ -191,14 +234,15 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 	cm := map[string]any(mc)
 
 	out := &VerifiedClaims{
-		UserId:    stringClaim(cm, "sub"),
-		Email:     stringClaim(cm, "email"),
-		Name:      stringClaim(cm, "name"),
-		Role:      stringClaim(cm, "role"),
-		Internal:  boolClaim(cm, "internal"),
-		SessionId: stringClaim(cm, "sid"),
-		Source:    SourceJWT,
-		ClaimsMap: cm,
+		UserId:          stringClaim(cm, "sub"),
+		Email:           stringClaim(cm, "email"),
+		Name:            stringClaim(cm, "name"),
+		Role:            stringClaim(cm, "role"),
+		Internal:        boolClaim(cm, "internal"),
+		SessionId:       stringClaim(cm, "sid"),
+		RevocationEpoch: int64Claim(cm, "revocation_epoch"),
+		Source:          SourceJWT,
+		ClaimsMap:       cm,
 	}
 	if exp, ok := numericDate(cm, "exp"); ok {
 		out.ExpiresAt = exp
@@ -211,7 +255,81 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 			}
 		}
 	}
+
+	// Per-stream revocation check. Resolves the user's current
+	// epoch and rejects when the token's claim is stale. No-op when
+	// the resolver isn't wired (e.g. identity service binary), or
+	// when the resolver itself errs (transient lookup failure -- we
+	// don't want to disconnect every authenticated stream because
+	// one DB query timed out). Run AFTER the standard JWT validation
+	// so we don't pay a DB roundtrip for malformed-token requests.
+	if v.epochResolver != nil && out.UserId != "" {
+		current, rerr := v.epochResolver(ctx, out.UserId)
+		if rerr == nil && current > out.RevocationEpoch {
+			return nil, fmt.Errorf("verifier: token revoked (epoch %d, current %d)", out.RevocationEpoch, current)
+		}
+		if rerr != nil {
+			v.warn("verifier: revocation epoch resolve failed (fail-open)", "user_id", out.UserId, "error", rerr)
+		}
+	}
+
 	return out, nil
+}
+
+// BindRevocationWatcher returns a context that gets canceled when
+// the user's revocationEpoch advances past the token's claim. Caller
+// should use the returned context for the duration of the stream;
+// downstream handlers see ctx.Err() == context.Canceled when a bulk-
+// revoke bump invalidates them.
+//
+// No-op (returns parent unchanged) when:
+//   - vc is nil
+//   - the verifier has no EpochResolver wired (resolver is the only
+//     way to know if the epoch has moved)
+//   - RevocationCheckInterval is zero or negative (caller opt-out)
+//   - vc.Source != SourceJWT (PATs have a separate revocation surface)
+//
+// Per-stream goroutine; cheap (one timer, one DB read per interval).
+// The watcher exits when the parent context is canceled OR when the
+// epoch rolls forward.
+func (v *Verifier) BindRevocationWatcher(parent context.Context, vc *VerifiedClaims) context.Context {
+	if v == nil || vc == nil || v.epochResolver == nil {
+		return parent
+	}
+	if vc.Source != SourceJWT {
+		return parent
+	}
+	interval := v.cfg.RevocationCheckInterval
+	if interval <= 0 {
+		return parent
+	}
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current, err := v.epochResolver(ctx, vc.UserId)
+				if err != nil {
+					v.warn("verifier: revocation-watcher resolve failed (continuing)",
+						"user_id", vc.UserId, "error", err)
+					continue
+				}
+				if current > vc.RevocationEpoch {
+					v.warn("verifier: revocation-watcher canceling stream",
+						"user_id", vc.UserId,
+						"token_epoch", vc.RevocationEpoch,
+						"current_epoch", current)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx
 }
 
 // AttachToContext stamps the verified claims onto the context using
@@ -259,6 +377,24 @@ func boolClaim(m map[string]any, key string) bool {
 		return v
 	}
 	return false
+}
+
+// int64Claim extracts a numeric claim as int64. JSON numbers arrive
+// as float64 from jwt.MapClaims; truncate any fractional component.
+// Missing / non-numeric claims return 0 (the no-revocation baseline).
+func int64Claim(m map[string]any, key string) int64 {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	}
+	return 0
 }
 
 func numericDate(m map[string]any, key string) (time.Time, bool) {

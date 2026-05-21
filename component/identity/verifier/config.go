@@ -35,13 +35,20 @@ const (
 	// DefaultJWKSFetchTimeoutSeconds caps a single JWKS HTTP fetch.
 	DefaultJWKSFetchTimeoutSeconds = 10
 
-	// DefaultJWTAudience must match identity.DefaultJWTAudience. We
-	// duplicate the literal here rather than import component/identity
-	// to keep the verifier package importable from non-identity-tagged
-	// builds (identity binaries pull in audit logging, key files, etc.
-	// — none of which a verifier-only consumer should be linking).
-	DefaultJWTAudience = "memql"
+	// DefaultRevocationCheckSeconds is the in-stream re-check cadence
+	// for the bulk-revoke epoch (#106). Streams that ran past this
+	// many seconds since the last check resolve the user's current
+	// revocationEpoch and cancel the stream context if the token's
+	// claim is now stale. Per-stream goroutine; cheap.
+	DefaultRevocationCheckSeconds = 300 // 5 min
 )
+
+// DefaultJWTAudience must match identity.DefaultJWTAudience. We
+// duplicate the literal here rather than import component/identity
+// to keep the verifier package importable from non-identity-tagged
+// builds (identity binaries pull in audit logging, key files, etc.
+// — none of which a verifier-only consumer should be linking).
+const DefaultJWTAudience = "memql"
 
 // Config captures the per-node verifier configuration. All fields are
 // loaded from `IDENTITY_VERIFIER_*` env vars by LoadConfigFromEnv.
@@ -81,6 +88,14 @@ type Config struct {
 	// rather than the public BaseURL.
 	// Env: IDENTITY_VERIFIER_JWKS_URL
 	JWKSURL string
+
+	// RevocationCheckInterval drives the in-stream revocation-epoch
+	// re-check cadence (#106). Per-stream goroutine; cheap. Zero falls
+	// back to DefaultRevocationCheckSeconds. The interval is also the
+	// granularity of bulk-revoke effectiveness: a token bumped at
+	// time T stays usable on already-open streams up to T+interval.
+	// Env: IDENTITY_VERIFIER_REVOCATION_CHECK_SECONDS (default 300)
+	RevocationCheckInterval time.Duration
 }
 
 // Enabled reports whether the verifier should be wired in. Returns
@@ -153,6 +168,7 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 	cfg.JWKSRefreshInterval = envDurationSeconds("IDENTITY_VERIFIER_JWKS_REFRESH_SECONDS", DefaultJWKSRefreshSeconds)
 	cfg.JWKSFetchTimeout = envDurationSeconds("IDENTITY_VERIFIER_JWKS_FETCH_TIMEOUT_SECONDS", DefaultJWKSFetchTimeoutSeconds)
+	cfg.RevocationCheckInterval = envDurationSeconds("IDENTITY_VERIFIER_REVOCATION_CHECK_SECONDS", DefaultRevocationCheckSeconds)
 	return cfg, nil
 }
 

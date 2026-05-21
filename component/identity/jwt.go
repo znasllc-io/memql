@@ -46,6 +46,17 @@ type AccessTokenClaims struct {
 	Internal   bool              `json:"internal,omitempty"`
 	Partitions map[string]string `json:"partitions,omitempty"`
 	SessionId  string            `json:"sid,omitempty"`
+	// RevocationEpoch carries the user's v1:identity:user.revocationEpoch
+	// at the moment the token was minted. The per-node verifier rejects
+	// any token whose epoch is less than the user's current epoch --
+	// bumping it (via mutationBumpUserRevocationEpoch) invalidates every
+	// pre-bump token. Bulk-revoke primitive for compromised-credential /
+	// role-change / forced-relogin flows. See #106 + threat-model §5.3.
+	//
+	// Zero value is acceptable -- new tokens for users who have never
+	// been revoked stamp 0, and the verifier's rejection rule
+	// (`current > token`) is strict-greater so 0/0 admits cleanly.
+	RevocationEpoch int64 `json:"revocation_epoch,omitempty"`
 
 	jwt.RegisteredClaims
 }
@@ -96,6 +107,13 @@ type IssueInput struct {
 	Internal   bool
 	Partitions map[string]string
 	SessionId  string
+	// RevocationEpoch is the user's current v1:identity:user.revocationEpoch.
+	// Stamped onto the JWT so the per-node verifier can reject any
+	// token issued before a bulk-revoke bump. Caller MUST plumb the
+	// fresh value from the user lookup at issuance time -- a stale 0
+	// here means the token survives an admin's revocation bump.
+	// See #106 for the bulk-revoke flow.
+	RevocationEpoch int64
 	// TTLOverride is the per-call access-token lifetime. When > 0,
 	// it replaces the issuer's boot-time default for THIS issuance
 	// only. The HTTP handlers read the runtime-tunable value from
@@ -128,14 +146,15 @@ func (j *JWTIssuer) IssueAccessToken(in IssueInput, now time.Time) (string, time
 	}
 
 	claims := AccessTokenClaims{
-		Email:      in.Email,
-		Name:       in.Name,
-		GivenName:  in.GivenName,
-		FamilyName: in.FamilyName,
-		Role:       in.Role,
-		Internal:   in.Internal,
-		Partitions: in.Partitions,
-		SessionId:  in.SessionId,
+		Email:           in.Email,
+		Name:            in.Name,
+		GivenName:       in.GivenName,
+		FamilyName:      in.FamilyName,
+		Role:            in.Role,
+		Internal:        in.Internal,
+		Partitions:      in.Partitions,
+		SessionId:       in.SessionId,
+		RevocationEpoch: in.RevocationEpoch,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,
 			Subject:   in.UserId,

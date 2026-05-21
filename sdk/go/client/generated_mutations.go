@@ -277,6 +277,34 @@ func MutationBumpUserDataExportBuild(args MutationBumpUserDataExportArgs) string
 	return b.String()
 }
 
+// MutationBumpUserRevocationEpoch -- Set the user's revocationEpoch to the supplied value. Caller must compute new = current + 1 before calling -- mutation body has no arithmetic.
+//
+// Bound concept: user.
+type MutationBumpUserRevocationEpochArgs struct {
+	UserId string
+	Epoch  int
+}
+
+// MutationBumpUserRevocationEpoch calls the engine mutation mutationBumpUserRevocationEpoch.
+func (qc *QueryClient) MutationBumpUserRevocationEpoch(ctx context.Context, args MutationBumpUserRevocationEpochArgs) (*Result, error) {
+	call := MutationBumpUserRevocationEpochBuild(args)
+	return qc.executeNamed(ctx, "mutationBumpUserRevocationEpoch", call)
+}
+
+func MutationBumpUserRevocationEpochBuild(args MutationBumpUserRevocationEpochArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationBumpUserRevocationEpoch({")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("epoch: ")
+	b.WriteString(fmt.Sprintf("%v", args.Epoch))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCancelScheduledDeletion -- Cancel a scheduled account deletion (clears deletionScheduledAt).
 //
 // Bound concept: user.
@@ -4935,7 +4963,10 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 //
 // Bound concept: workspace.
 type MutationProvisionWorkspaceArgs struct {
+	// Synthesized id, typically `{planId}` since one workspace per Plan.
 	WorkspaceId string
+	PlanId      string
+	StorageRoot string
 }
 
 // MutationProvisionWorkspace calls the engine mutation mutationProvisionWorkspace.
@@ -4949,6 +4980,16 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	b.WriteString("mutationProvisionWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storageRoot: ")
+	b.WriteString(fmt.Sprintf("%q", args.StorageRoot))
 	b.WriteString("})")
 	return b.String()
 }

@@ -136,6 +136,7 @@ func (s *Server) startAdminSession(w http.ResponseWriter, r *http.Request, res *
 	displayName := ""
 	firstName := ""
 	lastName := ""
+	var revocationEpoch int64
 	if s.Store != nil {
 		if user, err := s.Store.LookupUserByEmail(r.Context(), res.Email); err == nil && user != nil {
 			role = user.Role
@@ -143,16 +144,18 @@ func (s *Server) startAdminSession(w http.ResponseWriter, r *http.Request, res *
 			displayName = user.DisplayName
 			firstName = user.FirstName
 			lastName = user.LastName
+			revocationEpoch = user.RevocationEpoch
 		}
 	}
 	jwt, _, err := s.Issuer.IssueAccessToken(identity.IssueInput{
-		UserId:     res.UserId,
-		Email:      res.Email,
-		Name:       displayName,
-		GivenName:  firstName,
-		FamilyName: lastName,
-		Role:       role,
-		Internal:   internal,
+		UserId:          res.UserId,
+		Email:           res.Email,
+		Name:            displayName,
+		GivenName:       firstName,
+		FamilyName:      lastName,
+		Role:            role,
+		Internal:        internal,
+		RevocationEpoch: revocationEpoch,
 	}, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("startAdminSession: mint token: %w", err)

@@ -91,6 +91,48 @@ mutation user mutationBumpUserDataExport {
   }
 }
 
+// ---- mutations/v1/identity/bumpUserRevocationEpoch.memql ----
+
+// bumpUserRevocationEpoch
+// =======================
+//
+// Sets the user's revocationEpoch to the supplied value. Bumping
+// the epoch invalidates every access token minted BEFORE the bump:
+// the per-node verifier reads the user's current epoch and rejects
+// any JWT whose `revocation_epoch` claim is less than it.
+//
+// Bulk-revocation primitive for "compromised credentials", "role
+// changed mid-session", and "forced re-login" flows that have to
+// kill long-lived streams without waiting for the access-token TTL.
+//
+// MemQL has no arithmetic primitive in mutation bodies, so the
+// caller passes the new value directly (typically `current + 1`).
+// The admin Go-side helper reads the current value first and
+// computes the increment -- not perfectly atomic under concurrent
+// bumps, but the worst case is "epoch advances by 1 instead of 2"
+// which still invalidates every pre-bump token. Acceptable for a
+// bulk-revoke primitive.
+//
+// Arguments:
+//   userId  (string)  - User node ID
+//   epoch   (int)     - New epoch value. Must be strictly greater
+//                       than the user's current epoch (caller
+//                       enforces). Mutation does not range-check.
+//
+
+@enabled
+@description("Set the user's revocationEpoch to the supplied value. Caller must compute new = current + 1 before calling -- mutation body has no arithmetic.")
+mutation user mutationBumpUserRevocationEpoch {
+  args {
+    userId  string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
+    epoch   int     @required
+  }
+  update user {
+    id: args.userId
+    revocationEpoch: args.epoch
+  }
+}
+
 // ---- mutations/v1/identity/cancelScheduledDeletion.memql ----
 
 // cancelScheduledDeletion

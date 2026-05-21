@@ -258,13 +258,16 @@ func descriptionFor(src string, headerStart int) string {
 }
 
 // parseArgsBlock extracts the args { ... } block from a construct body
-// and returns its fields in source order.
+// and returns its fields in source order. Braces are balance-matched
+// so a `{N,M}` quantifier inside a `@pattern("...")` regex string
+// doesn't terminate the block early (the regex-based extractor
+// otherwise grabs the `}` from inside the regex and truncates the
+// captured args).
 func parseArgsBlock(body string) []ArgField {
-	m := argsBlockRe.FindStringSubmatchIndex(body)
-	if len(m) == 0 {
+	inner, ok := extractArgsBlockBody(body)
+	if !ok {
 		return nil
 	}
-	inner := body[m[2]:m[3]]
 	var out []ArgField
 	for _, fm := range argsFieldRe.FindAllStringSubmatch(inner, -1) {
 		name := fm[1]
@@ -291,6 +294,48 @@ func parseArgsBlock(body string) []ArgField {
 		out = append(out, af)
 	}
 	return out
+}
+
+// extractArgsBlockBody finds the `args { ... }` opening brace inside
+// the construct body and returns the inner text (between braces),
+// using a string-aware brace counter so `}` characters inside
+// double-quoted string literals -- including those introduced by
+// @pattern("...{N,M}...") regex annotations -- don't terminate the
+// block.
+func extractArgsBlockBody(body string) (string, bool) {
+	// Find the `args {` opening. Use the existing argsBlockRe to
+	// locate the start so we share the rule (the first `args {`
+	// after whitespace).
+	m := argsBlockRe.FindStringSubmatchIndex(body)
+	if len(m) == 0 {
+		return "", false
+	}
+	// argsBlockRe captures group 1 starts at the byte after `{`.
+	start := m[2]
+	depth := 1
+	inStr := false
+	escape := false
+	for i := start; i < len(body); i++ {
+		c := body[i]
+		switch {
+		case escape:
+			escape = false
+		case inStr && c == '\\':
+			escape = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// any other char inside a string literal -- skip
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return body[start:i], true
+			}
+		}
+	}
+	return "", false
 }
 
 func shapeRefFor(body string) string {

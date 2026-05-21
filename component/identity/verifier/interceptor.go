@@ -60,6 +60,12 @@ func StreamInterceptor(v *Verifier, logger *slog.Logger, resolver ...auth.Delega
 				"method", info.FullMethod)
 		}
 		ctx = AttachToContext(ctx, vc)
+		// Install the in-stream revocation-epoch watcher. Cancels
+		// the stream's context if the user's epoch advances past
+		// the token's claim mid-stream (see #106 / threat-model §5.3).
+		// No-op when the verifier has no EpochResolver, which keeps
+		// pre-#106 wiring backward-compatible.
+		ctx = v.BindRevocationWatcher(ctx, vc)
 		if dr != nil {
 			if dc, derr := dr.ResolveActiveDelegation(ctx, vc.UserId); derr == nil && dc != nil {
 				ctx = auth.ContextWithDelegation(ctx, dc)

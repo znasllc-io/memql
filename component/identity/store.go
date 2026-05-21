@@ -55,19 +55,20 @@ type AuthCodeRow struct {
 
 // UserRow projects a v1:identity:user row.
 type UserRow struct {
-	ID           string
-	DisplayName  string
-	FirstName    string
-	LastName     string
-	PrimaryEmail string
-	Phone        string
-	PrimaryRole  string
-	Gender       string
-	Birthdate    string
-	Role         string
-	Active       bool
-	Internal     bool
-	CreatedAt    time.Time
+	ID              string
+	DisplayName     string
+	FirstName       string
+	LastName        string
+	PrimaryEmail    string
+	Phone           string
+	PrimaryRole     string
+	Gender          string
+	Birthdate       string
+	Role            string
+	Active          bool
+	Internal        bool
+	RevocationEpoch int64
+	CreatedAt       time.Time
 }
 
 // AuthSessionRow projects a v1:identity:authSession row.
@@ -312,19 +313,20 @@ func userRowFromNode(node *memqlv1.MemoryNode) *UserRow {
 	}
 	g := newFieldGetter(node)
 	return &UserRow{
-		ID:           firstNonEmpty(g.str("id"), node.GetId()),
-		DisplayName:  g.str("displayName"),
-		FirstName:    g.str("firstName"),
-		LastName:     g.str("lastName"),
-		PrimaryEmail: g.str("primaryEmail"),
-		Phone:        g.str("phone"),
-		PrimaryRole:  g.str("primaryRole"),
-		Gender:       g.str("gender"),
-		Birthdate:    g.str("birthdate"),
-		Role:         g.str("role"),
-		Active:       g.boolField("active"),
-		Internal:     g.boolField("internal"),
-		CreatedAt:    g.time("createdAt"),
+		ID:              firstNonEmpty(g.str("id"), node.GetId()),
+		DisplayName:     g.str("displayName"),
+		FirstName:       g.str("firstName"),
+		LastName:        g.str("lastName"),
+		PrimaryEmail:    g.str("primaryEmail"),
+		Phone:           g.str("phone"),
+		PrimaryRole:     g.str("primaryRole"),
+		Gender:          g.str("gender"),
+		Birthdate:       g.str("birthdate"),
+		Role:            g.str("role"),
+		Active:          g.boolField("active"),
+		Internal:        g.boolField("internal"),
+		RevocationEpoch: g.int64Field("revocationEpoch"),
+		CreatedAt:       g.time("createdAt"),
 	}
 }
 
@@ -377,6 +379,39 @@ func (s *Store) CreateUserOnFirstLogin(
 		return fmt.Errorf("identity.store: create user on first login: %w", err)
 	}
 	return nil
+}
+
+// BumpUserRevocationEpoch is the admin-callable bulk-revoke helper:
+// reads the user's current revocationEpoch, writes back current+1
+// via mutationBumpUserRevocationEpoch. Every access token minted
+// before the bump becomes invalid -- the per-node verifier rejects
+// any token whose `revocation_epoch` claim is less than the user's
+// current value (#106).
+//
+// Not strictly atomic under concurrent admin bumps -- the read +
+// write happens in two engine round-trips -- but the worst case is
+// "epoch advances by 1 instead of 2", which still invalidates every
+// pre-bump token. Acceptable for a bulk-revoke primitive.
+//
+// Returns the new (post-bump) epoch on success.
+func (s *Store) BumpUserRevocationEpoch(ctx context.Context, userId string) (int64, error) {
+	if strings.TrimSpace(userId) == "" {
+		return 0, errors.New("identity.store: BumpUserRevocationEpoch: empty userId")
+	}
+	user, err := s.LookupUserById(ctx, userId)
+	if err != nil {
+		return 0, fmt.Errorf("identity.store: BumpUserRevocationEpoch: lookup: %w", err)
+	}
+	if user == nil {
+		return 0, fmt.Errorf("identity.store: BumpUserRevocationEpoch: user %q not found", userId)
+	}
+	next := user.RevocationEpoch + 1
+	query := fmt.Sprintf(`mutationBumpUserRevocationEpoch({userId: %q, epoch: %d})`,
+		escapeMemQLString(userId), next)
+	if _, err := s.Engine.Execute(ctx, query); err != nil {
+		return 0, fmt.Errorf("identity.store: BumpUserRevocationEpoch: %w", err)
+	}
+	return next, nil
 }
 
 // CreateIdentityMagicLink creates a v1:identity:identity row with the
@@ -685,6 +720,24 @@ func (g *fieldGetter) intField(key string) int {
 		return 0
 	}
 	return int(v.GetNumberValue())
+}
+
+// int64Field is the 64-bit variant of intField. Used for fields the
+// JWT carries as int64 (revocationEpoch) so a monotonic counter that
+// eventually exceeds 2^31 still round-trips cleanly.
+func (g *fieldGetter) int64Field(key string) int64 {
+	if g == nil || g.node == nil || g.node.Payload == nil {
+		return 0
+	}
+	fields := g.node.Payload.GetFields()
+	if fields == nil {
+		return 0
+	}
+	v, ok := fields[key]
+	if !ok || v == nil {
+		return 0
+	}
+	return int64(v.GetNumberValue())
 }
 
 func (g *fieldGetter) boolField(key string) bool {
