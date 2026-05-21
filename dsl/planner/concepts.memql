@@ -5,6 +5,7 @@
 @version("1.0.0")
 @namespace("planner")
 @description("A user-visible unit of work the planner orchestrates. Per the v1 brainstorm Q1 (Option D): Plan + Task model where Plans CAN nest via parentPlanId, Tasks always belong to one Plan and never recurse. Plans are the user mental anchor (the thing the user dropped a file for, asked a question about, or kicked off as a workflow); Tasks are the engineer-facing decomposition. Lifecycle covers queued / routing / running (with sub-states for paused / awaitingFeedback / needsAgent), succeeded / failed / cancelled. The planner emits Tasks per Q3's outline+per-phase incremental strategy: the Plan's `phases` array carries the coarse outline, Tasks emerge per phase with a phase tag.")
+@displayCard(primary="goal", secondary="kind", tertiary="spaceId", status="status")
 concept plan {
   spaceId             string  @required @description("v1:cognition:space.id this Plan belongs to. Tasks page is per-space; estimation buckets and budget rollups scope to the space.")
   parentPlanId        string  @description("When set, this Plan is a CHILD Plan -- spawned by a parent Plan's running agent via requestSubPlan, OR spawned as a refinement of a completed Plan via the user's [Refine ...] action on the plan.completed card. Sub-plans inherit parent's authorization (Q4) and carved-out token allocations (Q6). Cancelling a parent cancels all running children; cancelling a child does NOT cancel the parent.")
@@ -62,6 +63,7 @@ concept standingTask {
 @version("1.0.0")
 @namespace("planner")
 @description("One executable step inside a Plan. Two flavors discriminated by `category`: 'semantic' rows are what the Planner Agent decomposes a Plan into (one per logical step); 'toolInvocation' rows are auto-stamped by the engine on every tool call an agent makes (one per call). Tool-call rows attach to their executing semantic row via `parentTaskId`, giving one level of recursion -- semantic Tasks never have a `parentTaskId`, tool-call Tasks always do. Sub-goal nesting still happens at the Plan level via `parentPlanId` (Q1); the recursion here is purely mechanical record-keeping. Per Q13 each Task declares its executionSurface so the planner can route inProcess work to the agent node and containerExecutor work to NemoClaw / homegrown sandboxes.")
+@displayCard(primary="kind", secondary="category", tertiary="planId", status="status")
 concept task {
   planId            string  @required @description("v1:planner:plan.id this Task belongs to. Every Task -- semantic or toolInvocation -- lives under exactly one Plan, even ad-hoc tool calls in chat (which get a synthetic single-Task Plan of kind=adHocAction).")
   category          enum("semantic", "toolInvocation") @required @default("semantic") @description("What kind of record this is. 'semantic' = Planner-created decomposition step (the user-meaningful unit). 'toolInvocation' = engine-auto-stamped record of a tool call by an executing agent. Engine validation: category='toolInvocation' MUST have parentTaskId set pointing at a category='semantic' row; category='semantic' MUST have parentTaskId=null.")

@@ -27,14 +27,26 @@ func (s *streamSession) handleConceptsList(envelope *memqlv1.MemqlClientMessage,
 	infos := make([]*memqlv1.ConceptInfo, 0, len(concepts))
 	for _, c := range concepts {
 		version, domain, entity := parseConceptId(c.Name)
-		infos = append(infos, &memqlv1.ConceptInfo{
+		info := &memqlv1.ConceptInfo{
 			Id:          c.Name,
 			Version:     version,
 			Domain:      domain,
 			Entity:      entity,
 			Description: c.Description,
 			Type:        c.NodeType,
-		})
+		}
+		// Surface the per-concept rendering hints when the concept
+		// declared `@displayCard(...)`. memql#160 -- concept-agnostic
+		// browsers consume this to render row cards uniformly.
+		if c.DisplayCard != nil {
+			info.DisplayCard = &memqlv1.DisplayCard{
+				Primary:   c.DisplayCard.Primary,
+				Secondary: c.DisplayCard.Secondary,
+				Tertiary:  c.DisplayCard.Tertiary,
+				Status:    c.DisplayCard.Status,
+			}
+		}
+		infos = append(infos, info)
 	}
 
 	s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{

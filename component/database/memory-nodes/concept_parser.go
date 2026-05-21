@@ -95,6 +95,17 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		nodeType = NodeTypeObject
 	}
 
+	// Late-pass validation: now that the full property set is
+	// available, verify any @displayCard slot references point at a
+	// real, displayable field. Done here (not inside
+	// applyConceptAttribute) because attributes are folded before
+	// properties on the conceptDeclToParsed path.
+	if parsed.displayCard != nil {
+		if err := validateDisplayCard(conceptName, parsed.displayCard, parsed.properties); err != nil {
+			return nil, err
+		}
+	}
+
 	return &Concept{
 		Name:          conceptName,
 		SchemaId:      conceptName,
@@ -103,7 +114,65 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Description:   parsed.description,
 		Version:       parsed.version,
 		Relationships: parsed.relationships,
+		DisplayCard:   parsed.displayCard,
 	}, nil
+}
+
+// validateDisplayCard checks that every slot in the parsed card
+// names a real top-level property on the concept and that the
+// referenced property has a displayable type (string / enum / bool /
+// datetime / int / float / map -- everything except nested object
+// and array). Returns nil when every slot validates.
+//
+// Slots are optional except primary; an empty value on
+// secondary/tertiary/status means "skip this slot at render time."
+// See memql#160.
+func validateDisplayCard(conceptName string, card *DisplayCard, props []parsedProperty) error {
+	if card == nil {
+		return nil
+	}
+	byName := make(map[string]parsedProperty, len(props))
+	for _, p := range props {
+		byName[p.name] = p
+	}
+	check := func(slot, fieldName string) error {
+		fieldName = strings.TrimSpace(fieldName)
+		if fieldName == "" {
+			return nil
+		}
+		prop, ok := byName[fieldName]
+		if !ok {
+			return fmt.Errorf("@displayCard on concept %q: %s=%q references unknown field (must match a top-level concept property)", conceptName, slot, fieldName)
+		}
+		if !isDisplayableType(prop.typeName) {
+			return fmt.Errorf("@displayCard on concept %q: %s=%q references field of type %q which is not displayable (allowed: string, enum, bool, datetime, int, float)", conceptName, slot, fieldName, prop.typeName)
+		}
+		return nil
+	}
+	if err := check("primary", card.Primary); err != nil {
+		return err
+	}
+	if err := check("secondary", card.Secondary); err != nil {
+		return err
+	}
+	if err := check("tertiary", card.Tertiary); err != nil {
+		return err
+	}
+	if err := check("status", card.Status); err != nil {
+		return err
+	}
+	return nil
+}
+
+// isDisplayableType reports whether a property type can land in a
+// displayCard slot. Object / array / map types are rejected because
+// they don't reduce to a single sensible cell in a row chrome.
+func isDisplayableType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "string", "enum", "bool", "boolean", "datetime", "int", "integer", "float", "number":
+		return true
+	}
+	return false
 }
 
 // parsedConcept is the intermediate representation feeding into the
@@ -117,6 +186,12 @@ type parsedConcept struct {
 	required      []string
 	relationships []RelationshipDefinition
 	noAdditional  bool // default true for concept.memql
+
+	// displayCard is the optional rendering-hint set declared via
+	// `@displayCard(...)`. Validated against the property list AFTER
+	// the property pass (named fields must exist + be displayable).
+	// See memql#160.
+	displayCard *DisplayCard
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -307,10 +382,72 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		if _, _, err := languageAst.ExtractNamespaceAttribute([]*parser.Attribute{attr}); err != nil {
 			return err
 		}
+	case "displayCard":
+		// @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
+		//   -- per-concept rendering hints for concept-agnostic
+		//   clients (the cockpit's Concepts tab, future browsers).
+		//   Field-existence + type-compatibility checks run in
+		//   BuildConceptFromDecl AFTER the property pass, because
+		//   attributes are folded before properties on this code
+		//   path. See memql#160.
+		card, err := parseDisplayCardAttr(attr)
+		if err != nil {
+			return err
+		}
+		c.displayCard = card
 	default:
 		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}
 	return nil
+}
+
+// parseDisplayCardAttr extracts the named args from
+// @displayCard(primary=..., secondary=..., tertiary=..., status=...).
+// Validates that `primary` is non-empty and that no unrecognised
+// argument name was supplied; field-existence checks happen later.
+// Reference: memql#160.
+func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
+	if attr == nil {
+		return nil, fmt.Errorf("@displayCard: nil attribute")
+	}
+	if len(attr.Args) == 0 {
+		return nil, fmt.Errorf("@displayCard requires named arguments (at least primary=\"<field>\")")
+	}
+	out := &DisplayCard{}
+	for k, v := range attr.Args {
+		val := strings.TrimSpace(asString(v))
+		switch k {
+		case "primary":
+			out.Primary = val
+		case "secondary":
+			out.Secondary = val
+		case "tertiary":
+			out.Tertiary = val
+		case "status":
+			out.Status = val
+		default:
+			return nil, fmt.Errorf("@displayCard: unknown argument %q (allowed: primary, secondary, tertiary, status)", k)
+		}
+	}
+	if out.Primary == "" {
+		return nil, fmt.Errorf("@displayCard requires primary=\"<field>\"")
+	}
+	return out, nil
+}
+
+// asString coerces an attribute-arg value (any) to its string
+// form. Used by the displayCard parser; the parser hands us
+// `string` for "..."-quoted args but a bool for bare flags.
+// Anything that isn't string-shaped returns "" so the caller's
+// "primary required" check fires.
+func asString(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // applyPropertyAttribute folds an @annotation into the property

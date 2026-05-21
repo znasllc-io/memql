@@ -27,6 +27,32 @@ type (
 		QueryMemoryNodes(ctx context.Context, params QueryParams) ([]MemoryNode, error)
 	}
 
+	// DisplayCard captures the per-concept rendering hints declared
+	// via the `@displayCard(...)` annotation. Concept-agnostic
+	// clients (the cockpit's Concepts tab, future generic browsers)
+	// project rows through these slot names instead of carrying
+	// per-concept rendering code. Nil when the concept didn't
+	// declare the annotation -- clients should fall back to a
+	// generic "id + intrinsics" rendering.
+	//
+	// See memql#160 for the design notes + slot semantics.
+	DisplayCard struct {
+		// Primary is the payload field that names the row (e.g.
+		// "name" for agents, "title" for spaces, "goal" for plans,
+		// "inviteeEmail" for invitations). Mandatory when the
+		// annotation is present.
+		Primary string `json:"primary"`
+		// Secondary is contextual: a role, a type discriminator, a
+		// kind enum. Optional.
+		Secondary string `json:"secondary,omitempty"`
+		// Tertiary is extra context (owner display, parent space,
+		// short tag). Optional.
+		Tertiary string `json:"tertiary,omitempty"`
+		// Status is a boolean or short-enum field that drives a
+		// colored badge in the row chrome. Optional.
+		Status string `json:"status,omitempty"`
+	}
+
 	// Concept provides runtime helpers for interacting with memory nodes described by a concept definition.
 	Concept struct {
 		Name          string                     `json:"concept"`
@@ -40,6 +66,11 @@ type (
 		// @version("vN"). Empty means the version was derived from
 		// the concepts/vN/... directory layout.
 		Version string `json:"version,omitempty"`
+
+		// DisplayCard carries the per-concept rendering hints
+		// declared via `@displayCard(...)`. Nil when the concept
+		// did not declare the annotation. See memql#160.
+		DisplayCard *DisplayCard `json:"displayCard,omitempty"`
 
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
