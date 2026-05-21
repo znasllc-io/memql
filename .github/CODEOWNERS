@@ -1,0 +1,34 @@
+# CODEOWNERS for znasllc-io/memql
+#
+# Branch-protection on `main` requires code-owner review on every PR
+# that touches a path covered here. Patterns are evaluated last-match-
+# wins; keep the catch-all at the top and the security-sensitive
+# overrides at the bottom.
+
+# Default owner for everything else.
+*                       @znas-io
+
+# CI / workflows / supply-chain
+/.github/                @znas-io
+/.gitleaks.toml          @znas-io
+
+# Auth + transport (security-critical)
+/app/                    @znas-io
+/component/identity/     @znas-io
+/component/grpc/         @znas-io
+/component/server/       @znas-io
+/component/auth/         @znas-io
+/component/worker/       @znas-io
+
+# Build + deploy
+/Dockerfile              @znas-io
+/cloudbuild.yaml         @znas-io
+/cloudbuild.nemoclaw.yaml @znas-io
+/service.yaml            @znas-io
+/service.nemoclaw.yaml   @znas-io
+/infra/                  @znas-io
+/docker/                 @znas-io
+
+# Auth-related docs
+/docs/auth/              @znas-io
+/SECURITY.md             @znas-io

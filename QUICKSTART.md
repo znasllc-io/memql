@@ -158,8 +158,8 @@ bootstrapped yet, identity stamps `clusterSettings` and emails
 the owner magic link automatically -- no `/setup` visit needed.
 
 ```bash
-export IDENTITY_BOOTSTRAP_DOMAIN=staging.acme.com
-export IDENTITY_BOOTSTRAP_OWNER_EMAIL=alex@acme.com
+export IDENTITY_BOOTSTRAP_DOMAIN=staging.example.com
+export IDENTITY_BOOTSTRAP_OWNER_EMAIL=alex@example.com
 export IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME=Alex
 export IDENTITY_BOOTSTRAP_OWNER_LAST_NAME=Stone
 export IDENTITY_BOOTSTRAP_REGISTRATION_MODE=waitlist
