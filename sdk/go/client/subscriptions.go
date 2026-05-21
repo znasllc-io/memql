@@ -10,11 +10,12 @@ import (
 )
 
 // SubscriptionManager handles event subscriptions over the gRPC stream.
-// It demuxes incoming EventNotification messages by subscription_id.
+// It demuxes incoming EventNotification messages by subscription_id and
+// delivers SDK-owned Event values to subscribers.
 type SubscriptionManager struct {
 	dispatcher *Dispatcher
 	mu         sync.Mutex
-	subs       map[string]chan *memqlv1.EventNotification // subscription_id -> channel
+	subs       map[string]chan Event // subscription_id -> channel
 	done       chan struct{}
 }
 
@@ -23,22 +24,25 @@ type SubscriptionManager struct {
 func NewSubscriptionManager(dispatcher *Dispatcher) *SubscriptionManager {
 	sm := &SubscriptionManager{
 		dispatcher: dispatcher,
-		subs:       make(map[string]chan *memqlv1.EventNotification),
+		subs:       make(map[string]chan Event),
 		done:       make(chan struct{}),
 	}
 	go sm.demux()
 	return sm
 }
 
-// Subscribe sends a SubscribeMsg and returns a channel for receiving events.
-func (sm *SubscriptionManager) Subscribe(ctx context.Context, kind memqlv1.SubscriptionKind, filter string) (string, <-chan *memqlv1.EventNotification, error) {
+// Subscribe sends a SubscribeMsg and returns a channel for receiving
+// SDK-owned Event values. The caller drains the channel until it is
+// closed (by Unsubscribe or Stop). `kind` is the SDK-owned
+// SubscriptionKind; the proto enum stays inside the SDK.
+func (sm *SubscriptionManager) Subscribe(ctx context.Context, kind SubscriptionKind, filter string) (string, <-chan Event, error) {
 	subId := id.NewShortId()
 
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_Subscribe{
 			Subscribe: &memqlv1.SubscribeMsg{
 				SubscriptionId: subId,
-				Kind:           kind,
+				Kind:           kind.toProto(),
 				Filter:         filter,
 			},
 		},
@@ -49,7 +53,7 @@ func (sm *SubscriptionManager) Subscribe(ctx context.Context, kind memqlv1.Subsc
 		return "", nil, fmt.Errorf("send subscribe: %w", err)
 	}
 
-	ch := make(chan *memqlv1.EventNotification, 64)
+	ch := make(chan Event, 64)
 	sm.mu.Lock()
 	sm.subs[subId] = ch
 	sm.mu.Unlock()
@@ -98,8 +102,12 @@ func (sm *SubscriptionManager) Stop() {
 	sm.mu.Unlock()
 }
 
-// demux reads from the dispatcher's event channel and routes EventNotifications
-// to the appropriate subscription channel.
+// demux reads from the dispatcher's event channel and routes
+// EventNotifications to the appropriate subscription channel,
+// converting them to the SDK-owned Event shape at the boundary.
+// Events that fail payload decoding are silently dropped -- a
+// malformed payload is a wire-level fault the subscriber can't act
+// on anyway.
 func (sm *SubscriptionManager) demux() {
 	for {
 		select {
@@ -109,20 +117,25 @@ func (sm *SubscriptionManager) demux() {
 			if !ok {
 				return
 			}
-			event := msg.GetEvent()
-			if event == nil {
+			ev := msg.GetEvent()
+			if ev == nil {
 				continue // Not an event notification (heartbeat, etc.)
 			}
-			subId := event.GetSubscriptionId()
+			subId := ev.GetSubscriptionId()
 			sm.mu.Lock()
 			ch, exists := sm.subs[subId]
 			sm.mu.Unlock()
-			if exists {
-				select {
-				case ch <- event:
-				default:
-					// Drop if channel is full — subscriber should drain.
-				}
+			if !exists {
+				continue
+			}
+			wrapped, err := eventFromProto(ev)
+			if err != nil {
+				continue
+			}
+			select {
+			case ch <- wrapped:
+			default:
+				// Drop if channel is full — subscriber should drain.
 			}
 		}
 	}

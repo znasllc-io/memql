@@ -71,7 +71,9 @@ func (qc *QueryClient) executeRaw(ctx context.Context, query string) (any, error
 }
 
 // ListConcepts fetches the concept registry from the connected node.
-func (qc *QueryClient) ListConcepts(ctx context.Context) ([]*memqlv1.ConceptInfo, error) {
+// Returns SDK-owned Concept values; the wire-level memqlv1.ConceptInfo
+// stays inside the SDK.
+func (qc *QueryClient) ListConcepts(ctx context.Context) ([]Concept, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_ConceptsList{
 			ConceptsList: &memqlv1.ConceptsListMsg{},
@@ -88,7 +90,7 @@ func (qc *QueryClient) ListConcepts(ctx context.Context) ([]*memqlv1.ConceptInfo
 		return nil, nil
 	}
 
-	return result.GetConcepts(), nil
+	return conceptsFromProto(result.GetConcepts()), nil
 }
 
 // GetMyAccess fetches the caller's own access record: cluster-wide role
@@ -98,7 +100,10 @@ func (qc *QueryClient) ListConcepts(ctx context.Context) ([]*memqlv1.ConceptInfo
 // The server derives the result from the AccessContext attached to the
 // stream; the caller never gets another user's access through this RPC.
 // Use membersOfPartition for admin views of "who has access to X".
-func (qc *QueryClient) GetMyAccess(ctx context.Context) (*memqlv1.MyAccessResult, error) {
+//
+// Returns an SDK-owned AccessSummary; the wire-level
+// memqlv1.MyAccessResult stays inside the SDK.
+func (qc *QueryClient) GetMyAccess(ctx context.Context) (*AccessSummary, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_MyAccess{
 			MyAccess: &memqlv1.MyAccessMsg{},
@@ -114,9 +119,5 @@ func (qc *QueryClient) GetMyAccess(ctx context.Context) (*memqlv1.MyAccessResult
 		return nil, fmt.Errorf("my access: %s", qErr.GetError().GetMessage())
 	}
 
-	result := resp.GetMyAccessResult()
-	if result == nil {
-		return nil, nil
-	}
-	return result, nil
+	return accessSummaryFromProto(resp.GetMyAccessResult()), nil
 }
