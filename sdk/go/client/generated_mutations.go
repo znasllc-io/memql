@@ -4977,6 +4977,104 @@ func MutationMarkKnowledgeDomainStaleBuild(args MutationMarkKnowledgeDomainStale
 	return b.String()
 }
 
+// MutationMintSkill -- Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
+//
+// Bound concept: skill.
+type MutationMintSkillArgs struct {
+	SkillId           string
+	Slug              string
+	Name              string
+	Description       string
+	Category          string
+	Tags              []any
+	DomainIds         []any
+	ToolSlugs         []any
+	LiveSourceIds     []any
+	Tier              string
+	OriginatingPlanId string
+	MintedByAgentId   string
+}
+
+// MutationMintSkill calls the engine mutation mutationMintSkill.
+func (qc *QueryClient) MutationMintSkill(ctx context.Context, args MutationMintSkillArgs) (*Result, error) {
+	call := MutationMintSkillBuild(args)
+	return qc.executeNamed(ctx, "mutationMintSkill", call)
+}
+
+func MutationMintSkillBuild(args MutationMintSkillArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMintSkill({")
+	if args.SkillId != "" {
+		b.WriteString("skillId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SkillId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if args.Description != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	if args.Category != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("category: ")
+		b.WriteString(fmt.Sprintf("%q", args.Category))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tags: ")
+	b.WriteString(renderMemQLValue(args.Tags))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domainIds: ")
+	b.WriteString(renderMemQLValue(args.DomainIds))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toolSlugs: ")
+	b.WriteString(renderMemQLValue(args.ToolSlugs))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("liveSourceIds: ")
+	b.WriteString(renderMemQLValue(args.LiveSourceIds))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.OriginatingPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("originatingPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OriginatingPlanId))
+	}
+	if args.MintedByAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mintedByAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.MintedByAgentId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationPersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
 //
 // Bound concept: taskState.
