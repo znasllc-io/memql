@@ -10,9 +10,11 @@ seed agentRole elementary-school-tutor {
   slug:                  "elementary-school-tutor"
   name:                  "Elementary School Tutor (K-5)"
   category:              "education"
-  lockedDomainIds:       ["elementary-pedagogy"]
-  defaultDomainIds:      ["early-literacy", "elementary-math", "child-development", "classroom-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -22,9 +24,11 @@ seed agentRole middle-school-tutor {
   slug:                  "middle-school-tutor"
   name:                  "Middle School Tutor (6-8)"
   category:              "education"
-  lockedDomainIds:       ["middle-school-pedagogy"]
-  defaultDomainIds:      ["prealgebra-algebra", "study-skills", "child-development", "english-grammar-style"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -34,9 +38,11 @@ seed agentRole high-school-tutor {
   slug:                  "high-school-tutor"
   name:                  "High School Tutor (9-12)"
   category:              "education"
-  lockedDomainIds:       ["high-school-pedagogy"]
-  defaultDomainIds:      ["algebra", "geometry-trigonometry", "biology", "chemistry", "physics-high-school", "english-literature", "world-history", "us-history", "study-skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -46,9 +52,11 @@ seed agentRole test-prep-coach {
   slug:                  "test-prep-coach"
   name:                  "Test Prep Coach (SAT / ACT / GRE / GMAT)"
   category:              "education"
-  lockedDomainIds:       ["test-prep-strategy"]
-  defaultDomainIds:      ["sat-act-content", "gre-gmat-content", "study-skills"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -58,9 +66,11 @@ seed agentRole math-tutor-calculus {
   slug:                  "math-tutor-calculus"
   name:                  "Math Tutor (Calculus)"
   category:              "education"
-  lockedDomainIds:       ["calculus"]
-  defaultDomainIds:      ["precalculus", "linear-algebra", "math-problem-solving"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -70,9 +80,11 @@ seed agentRole language-tutor-spanish {
   slug:                  "language-tutor-spanish"
   name:                  "Spanish Language Tutor"
   category:              "education"
-  lockedDomainIds:       ["spanish-language"]
-  defaultDomainIds:      ["spanish-culture", "language-pedagogy", "language-learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -82,9 +94,11 @@ seed agentRole language-tutor-mandarin {
   slug:                  "language-tutor-mandarin"
   name:                  "Mandarin Chinese Tutor"
   category:              "education"
-  lockedDomainIds:       ["mandarin-chinese"]
-  defaultDomainIds:      ["chinese-culture", "language-pedagogy", "language-learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -94,9 +108,11 @@ seed agentRole language-tutor-french {
   slug:                  "language-tutor-french"
   name:                  "French Language Tutor"
   category:              "education"
-  lockedDomainIds:       ["french-language"]
-  defaultDomainIds:      ["french-culture", "language-pedagogy", "language-learning"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -106,9 +122,11 @@ seed agentRole history-educator {
   slug:                  "history-educator"
   name:                  "History Educator"
   category:              "education"
-  lockedDomainIds:       ["world-history"]
-  defaultDomainIds:      ["us-history", "european-history", "ancient-history", "historiography"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -118,9 +136,11 @@ seed agentRole philosophy-educator {
   slug:                  "philosophy-educator"
   name:                  "Philosophy Educator"
   category:              "education"
-  lockedDomainIds:       ["philosophy"]
-  defaultDomainIds:      ["ethics", "logic", "epistemology", "metaphysics", "philosophy-history"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "education-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }

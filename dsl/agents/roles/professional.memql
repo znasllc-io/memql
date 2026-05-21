@@ -13,10 +13,11 @@ seed agentRole assistant {
   name:                  "Assistant"
   category:              "professional"
   tier:                  "A"
-  lockedDomainIds:       ["copresent-ui", "recent-chat", "computer-use"]
-  defaultDomainIds:      ["strategic-planning", "stakeholder-communications", "technical-documentation"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
-  defaultToolSlugs:      ["uiClick", "uiNarrate", "uiDescribe", "uiAskUser"]
+  lockedSkillIds:        ["workbench-baseline", "copresent-ui", "operator-computer-use"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             2
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -27,9 +28,11 @@ seed agentRole accounting-finance {
   name:                  "Accounting & Finance"
   category:              "professional"
   tier:                  "B"
-  lockedDomainIds:       ["accounting-principles", "financial-data"]
-  defaultDomainIds:      ["tax-regulations", "budgeting-forecasting", "payroll-benefits", "contracts-agreements"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general accounting and finance information. For tax advice specific to a person's situation, recommend a CPA or licensed tax professional."
   predefined:            true
@@ -41,10 +44,11 @@ seed agentRole human-resources {
   name:                  "Human Resources"
   category:              "professional"
   tier:                  "B"
-  lockedDomainIds:       ["employee-records", "talent-acquisition"]
-  defaultDomainIds:      ["labor-law", "training-development", "organizational-design", "payroll-benefits", "performance-assessment"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
-  defaultToolSlugs:      ["email.send"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general HR guidance. For employment-law questions specific to a jurisdiction or case, recommend a labor lawyer."
   predefined:            true
@@ -55,10 +59,11 @@ seed agentRole customer-service {
   slug:                  "customer-service"
   name:                  "Customer Service"
   category:              "professional"
-  lockedDomainIds:       ["customer-relations", "service-level-agreements"]
-  defaultDomainIds:      ["product-catalog", "ticket-management", "quality-metrics", "sales-pipeline", "training-development"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
-  defaultToolSlugs:      ["email.send"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -68,9 +73,11 @@ seed agentRole quality-assurance {
   slug:                  "quality-assurance"
   name:                  "Quality Assurance"
   category:              "professional"
-  lockedDomainIds:       ["quality-metrics"]
-  defaultDomainIds:      ["product-catalog", "process-optimization", "technical-documentation", "regulatory-compliance", "service-level-agreements", "data-analysis", "research-methodology"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -80,10 +87,11 @@ seed agentRole sales-marketing {
   slug:                  "sales-marketing"
   name:                  "Sales & Marketing"
   category:              "professional"
-  lockedDomainIds:       ["sales-pipeline", "customer-relations"]
-  defaultDomainIds:      ["marketing-analytics", "brand-strategy", "lead-generation", "product-catalog", "contracts-agreements", "data-analysis", "stakeholder-communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
-  defaultToolSlugs:      ["email.send"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -93,9 +101,11 @@ seed agentRole it-support {
   slug:                  "it-support"
   name:                  "IT Support"
   category:              "professional"
-  lockedDomainIds:       ["technical-documentation", "ticket-management"]
-  defaultDomainIds:      ["network-infrastructure", "cybersecurity", "software-development", "cloud-platforms", "process-optimization", "vendor-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -105,9 +115,11 @@ seed agentRole operations {
   slug:                  "operations"
   name:                  "Operations"
   category:              "professional"
-  lockedDomainIds:       ["process-optimization"]
-  defaultDomainIds:      ["logistics-distribution", "vendor-management", "inventory-supply-chain", "quality-metrics", "product-catalog", "budgeting-forecasting", "risk-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -117,9 +129,11 @@ seed agentRole project-management {
   slug:                  "project-management"
   name:                  "Project Management"
   category:              "professional"
-  lockedDomainIds:       ["project-data"]
-  defaultDomainIds:      ["process-optimization", "budgeting-forecasting", "stakeholder-communications", "risk-management", "quality-metrics", "vendor-management", "data-analysis", "organizational-design"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -129,9 +143,11 @@ seed agentRole research-development {
   slug:                  "research-development"
   name:                  "Research & Development"
   category:              "professional"
-  lockedDomainIds:       ["research-methodology", "data-analysis"]
-  defaultDomainIds:      ["innovation-management", "technical-documentation", "intellectual-property", "product-catalog", "software-development", "budgeting-forecasting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -141,9 +157,11 @@ seed agentRole training-education {
   slug:                  "training-education"
   name:                  "Training & Education"
   category:              "professional"
-  lockedDomainIds:       ["curriculum-design", "training-development"]
-  defaultDomainIds:      ["performance-assessment", "employee-records", "organizational-design", "data-analysis", "technical-documentation", "stakeholder-communications"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -153,10 +171,11 @@ seed agentRole executive-assistant {
   slug:                  "executive-assistant"
   name:                  "Executive Assistant"
   category:              "professional"
-  lockedDomainIds:       ["stakeholder-communications"]
-  defaultDomainIds:      ["executive-calendar", "travel-planning", "meeting-management", "personal-finance"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
-  defaultToolSlugs:      ["email.send"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -166,9 +185,11 @@ seed agentRole data-analyst {
   slug:                  "data-analyst"
   name:                  "Data Analyst"
   category:              "professional"
-  lockedDomainIds:       ["data-analysis"]
-  defaultDomainIds:      ["data-visualization", "experimental-design", "sql-databases", "business-intelligence", "research-methodology", "data-engineering"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -178,9 +199,11 @@ seed agentRole data-scientist {
   slug:                  "data-scientist"
   name:                  "Data Scientist"
   category:              "professional"
-  lockedDomainIds:       ["machine-learning", "data-analysis", "research-methodology"]
-  defaultDomainIds:      ["deep-learning", "experimental-design", "statistical-modeling", "data-engineering", "python-programming"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   predefined:            true
 }
@@ -190,9 +213,11 @@ seed agentRole data-engineer {
   slug:                  "data-engineer"
   name:                  "Data Engineer"
   category:              "professional"
-  lockedDomainIds:       ["data-engineering"]
-  defaultDomainIds:      ["sql-databases", "cloud-platforms", "etl-pipelines", "streaming-systems", "data-warehouse-design", "data-governance"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -202,9 +227,11 @@ seed agentRole software-engineer {
   slug:                  "software-engineer"
   name:                  "Software Engineer"
   category:              "professional"
-  lockedDomainIds:       ["software-development"]
-  defaultDomainIds:      ["api-design", "system-architecture", "version-control", "testing-strategy", "code-review", "design-patterns", "cybersecurity"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
@@ -214,9 +241,11 @@ seed agentRole frontend-engineer {
   slug:                  "frontend-engineer"
   name:                  "Frontend Engineer"
   category:              "professional"
-  lockedDomainIds:       ["software-development", "frontend-development"]
-  defaultDomainIds:      ["ux-principles", "accessibility", "css-styling", "javascript-typescript", "performance-optimization", "design-systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
@@ -226,9 +255,11 @@ seed agentRole devops-engineer {
   slug:                  "devops-engineer"
   name:                  "DevOps Engineer"
   category:              "professional"
-  lockedDomainIds:       ["cloud-platforms", "infrastructure-as-code"]
-  defaultDomainIds:      ["cybersecurity", "container-orchestration", "observability-monitoring", "incident-response", "ci-cd-pipelines", "site-reliability"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "fastCoding"
   predefined:            true
 }
@@ -239,9 +270,11 @@ seed agentRole security-engineer {
   name:                  "Security Engineer"
   category:              "professional"
   tier:                  "B"
-  lockedDomainIds:       ["cybersecurity"]
-  defaultDomainIds:      ["application-security", "threat-modeling", "incident-response", "cryptography-basics", "vulnerability-management", "identity-access-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "strongReasoning"
   systemPromptHints:     "Provide general security information. For incident response specific to a breach or active threat, recommend engaging a qualified security responder."
   predefined:            true
@@ -252,9 +285,11 @@ seed agentRole product-manager {
   slug:                  "product-manager"
   name:                  "Product Manager"
   category:              "professional"
-  lockedDomainIds:       ["product-management"]
-  defaultDomainIds:      ["strategic-planning", "data-analysis", "ux-principles", "stakeholder-communications", "user-research", "prioritization-frameworks"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -264,9 +299,11 @@ seed agentRole technical-writer {
   slug:                  "technical-writer"
   name:                  "Technical Writer"
   category:              "professional"
-  lockedDomainIds:       ["technical-writing"]
-  defaultDomainIds:      ["technical-documentation", "documentation-systems", "content-strategy", "english-grammar-style"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -276,9 +313,11 @@ seed agentRole business-analyst {
   slug:                  "business-analyst"
   name:                  "Business Analyst"
   category:              "professional"
-  lockedDomainIds:       ["business-analysis"]
-  defaultDomainIds:      ["data-analysis", "process-optimization", "stakeholder-communications", "requirements-engineering", "process-modeling"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -288,9 +327,11 @@ seed agentRole supply-chain-manager {
   slug:                  "supply-chain-manager"
   name:                  "Supply Chain Manager"
   category:              "professional"
-  lockedDomainIds:       ["inventory-supply-chain"]
-  defaultDomainIds:      ["logistics-distribution", "vendor-management", "demand-planning", "procurement-sourcing", "risk-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "professional-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

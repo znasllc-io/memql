@@ -9,9 +9,11 @@ seed agentRole chef-professional {
   slug:                  "chef-professional"
   name:                  "Professional Chef"
   category:              "hospitality"
-  lockedDomainIds:       ["culinary-technique"]
-  defaultDomainIds:      ["menu-engineering", "food-safety", "recipes", "kitchen-management", "food-costing"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "hospitality-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -21,9 +23,11 @@ seed agentRole sommelier {
   slug:                  "sommelier"
   name:                  "Sommelier"
   category:              "hospitality"
-  lockedDomainIds:       ["wine-education"]
-  defaultDomainIds:      ["food-pairing", "service-etiquette", "cellar-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "hospitality-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -33,9 +37,11 @@ seed agentRole barista {
   slug:                  "barista"
   name:                  "Barista & Coffee Specialist"
   category:              "hospitality"
-  lockedDomainIds:       ["coffee-specialty"]
-  defaultDomainIds:      ["brewing-methods", "espresso-technique", "milk-steaming"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "hospitality-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -45,9 +51,11 @@ seed agentRole event-planner {
   slug:                  "event-planner"
   name:                  "Event Planner"
   category:              "hospitality"
-  lockedDomainIds:       ["event-planning"]
-  defaultDomainIds:      ["vendor-management", "budgeting-forecasting", "stakeholder-communications", "venue-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "hospitality-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

@@ -11,9 +11,11 @@ seed agentRole general-contractor {
   slug:                  "general-contractor"
   name:                  "General Contractor"
   category:              "trades"
-  lockedDomainIds:       ["construction-fundamentals"]
-  defaultDomainIds:      ["building-codes", "project-data", "trades-safety", "estimating", "subcontractor-management"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -24,9 +26,11 @@ seed agentRole electrician {
   name:                  "Electrical Trades"
   category:              "trades"
   tier:                  "B"
-  lockedDomainIds:       ["electrical-trades"]
-  defaultDomainIds:      ["building-codes", "trades-safety", "circuit-design-basics", "electrical-troubleshooting"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   systemPromptHints:     "Provide general electrical information. Live electrical work is dangerous and frequently licensed by jurisdiction; recommend a licensed electrician for any actual work."
   predefined:            true
@@ -37,9 +41,11 @@ seed agentRole plumber {
   slug:                  "plumber"
   name:                  "Plumbing Trades"
   category:              "trades"
-  lockedDomainIds:       ["plumbing-trades"]
-  defaultDomainIds:      ["building-codes", "trades-safety", "diy-repairs", "water-systems"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -49,9 +55,11 @@ seed agentRole hvac-technician {
   slug:                  "hvac-technician"
   name:                  "HVAC Technician"
   category:              "trades"
-  lockedDomainIds:       ["hvac-systems"]
-  defaultDomainIds:      ["building-codes", "trades-safety", "energy-efficiency", "refrigerant-handling"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -61,9 +69,11 @@ seed agentRole carpenter {
   slug:                  "carpenter"
   name:                  "Carpentry"
   category:              "trades"
-  lockedDomainIds:       ["carpentry"]
-  defaultDomainIds:      ["woodworking", "building-codes", "trades-safety", "joinery-techniques", "diy-repairs"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -73,9 +83,11 @@ seed agentRole automotive-mechanic {
   slug:                  "automotive-mechanic"
   name:                  "Automotive Mechanic"
   category:              "trades"
-  lockedDomainIds:       ["automotive-repair"]
-  defaultDomainIds:      ["vehicle-diagnostics", "trades-safety", "engine-systems", "vehicle-electrical"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -85,9 +97,11 @@ seed agentRole welder {
   slug:                  "welder"
   name:                  "Welding"
   category:              "trades"
-  lockedDomainIds:       ["welding"]
-  defaultDomainIds:      ["metallurgy-basics", "trades-safety", "weld-inspection"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -97,9 +111,11 @@ seed agentRole landscaping-grounds {
   slug:                  "landscaping-grounds"
   name:                  "Landscaping & Grounds"
   category:              "trades"
-  lockedDomainIds:       ["landscaping"]
-  defaultDomainIds:      ["horticulture", "irrigation-systems", "gardening", "lawn-care"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "trades-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }

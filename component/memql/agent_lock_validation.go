@@ -96,21 +96,38 @@ func (e *MemQLEngine) validateAgentLockedItems(ctx context.Context, payload map[
 		return nil
 	}
 
-	proposedDomains := stringSetFromCapabilitiesField(caps, "domains")
-	proposedTools := stringSetFromCapabilitiesField(caps, "tools")
+	proposedSkills := stringSliceFromCapabilitiesField(caps, "skillIds")
+	proposedSkillSet := setFromSlice(proposedSkills)
 
-	if missing := missingFrom(proposedDomains, role.lockedDomainIds); len(missing) > 0 {
+	// Locked skills can't be stripped.
+	if missing := missingFrom(proposedSkillSet, role.lockedSkillIds); len(missing) > 0 {
 		return fmt.Errorf(
-			"v1:agents:agent: role %q requires locked knowledge domains that the update would remove: %s. "+
-				"Locked domains cannot be removed; add them back to capabilities.domains or change roleSlug.",
+			"v1:agents:agent: role %q requires locked skills that the update would remove: %s. "+
+				"Locked skills cannot be removed; add them back to capabilities.skillIds or change roleSlug.",
 			roleSlug, strings.Join(missing, ", "),
 		)
 	}
-	if missing := missingFrom(proposedTools, role.lockedToolSlugs); len(missing) > 0 {
+
+	// Forbidden skills can never be granted -- hard denylist regardless
+	// of source.
+	if forbidden := overlap(proposedSkillSet, role.forbiddenSkillIds); len(forbidden) > 0 {
 		return fmt.Errorf(
-			"v1:agents:agent: role %q requires locked tools that the update would remove: %s. "+
-				"Locked tools cannot be removed; add them back to capabilities.tools or change roleSlug.",
-			roleSlug, strings.Join(missing, ", "),
+			"v1:agents:agent: role %q forbids these skills: %s. "+
+				"Remove them from capabilities.skillIds.",
+			roleSlug, strings.Join(forbidden, ", "),
+		)
+	}
+
+	// Skill count cap: lower of agent.skillBudgetMax and role.maxSkills.
+	effectiveCap := role.maxSkills
+	if cap := intFromCapabilitiesField(caps, "skillBudgetMax"); cap > 0 && cap < effectiveCap {
+		effectiveCap = cap
+	}
+	if effectiveCap > 0 && len(proposedSkills) > effectiveCap {
+		return fmt.Errorf(
+			"v1:agents:agent: role %q caps skillIds at %d (effective cap from "+
+				"min(skillBudgetMax, role.maxSkills)); proposed payload carries %d.",
+			roleSlug, effectiveCap, len(proposedSkills),
 		)
 	}
 	return nil
@@ -118,10 +135,12 @@ func (e *MemQLEngine) validateAgentLockedItems(ctx context.Context, payload map[
 
 // agentRoleLockSet is the minimal projection of a v1:agents:agentRole
 // row needed by the lock validator. Unmarshaled from the row's
-// payload column.
+// payload column. Phase 2 (#158): the skill-id surface replaces the
+// old per-domain / per-tool / per-liveKnowledge locked lists.
 type agentRoleLockSet struct {
-	lockedDomainIds []string
-	lockedToolSlugs []string
+	lockedSkillIds    []string
+	forbiddenSkillIds []string
+	maxSkills         int
 }
 
 // resolveAgentRoleSlug returns the roleSlug the validator should look
@@ -202,27 +221,89 @@ func (e *MemQLEngine) fetchAgentRole(ctx context.Context, slug string) (*agentRo
 		return nil, fmt.Errorf("unmarshal agentRole payload: %w", jerr)
 	}
 	return &agentRoleLockSet{
-		lockedDomainIds: stringSliceFromAny(rolePayload["lockedDomainIds"]),
-		lockedToolSlugs: stringSliceFromAny(rolePayload["lockedToolSlugs"]),
+		lockedSkillIds:    stringSliceFromAny(rolePayload["lockedSkillIds"]),
+		forbiddenSkillIds: stringSliceFromAny(rolePayload["forbiddenSkillIds"]),
+		maxSkills:         intFromAny(rolePayload["maxSkills"]),
 	}, nil
 }
 
-// stringSetFromCapabilitiesField pulls a []string-shaped sub-field
-// out of the capabilities map and returns it as a presence set. Used
-// for membership checks against the role's locked* lists. Tolerant
-// of nil / wrong shape (returns an empty set).
-func stringSetFromCapabilitiesField(caps map[string]any, key string) map[string]struct{} {
-	out := make(map[string]struct{})
+// stringSliceFromCapabilitiesField returns capabilities[key] as a
+// []string, tolerant of nil / wrong shape (returns nil). Used by the
+// skill-id lock validator to read the proposed capabilities.skillIds
+// list with its element order preserved (the cap check counts unique
+// elements; the lock check uses the set form below).
+func stringSliceFromCapabilitiesField(caps map[string]any, key string) []string {
 	raw, ok := caps[key]
 	if !ok {
-		return out
+		return nil
 	}
-	for _, id := range stringSliceFromAny(raw) {
+	return stringSliceFromAny(raw)
+}
+
+// intFromCapabilitiesField returns capabilities[key] as an int,
+// tolerant of float64 (JSON unmarshal default) / int / int64 shapes.
+// Returns 0 when missing or unparseable.
+func intFromCapabilitiesField(caps map[string]any, key string) int {
+	raw, ok := caps[key]
+	if !ok {
+		return 0
+	}
+	return intFromAny(raw)
+}
+
+// intFromAny coerces a JSON-unmarshaled numeric to int. JSON numbers
+// land as float64; typed callers may pass int / int64. Returns 0 for
+// missing / unparseable inputs.
+func intFromAny(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case int32:
+		return int(x)
+	}
+	return 0
+}
+
+// setFromSlice turns a slice into a presence set for O(1) membership
+// checks. Skips empty / whitespace-only ids defensively.
+func setFromSlice(in []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for _, id := range in {
+		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
 		out[id] = struct{}{}
 	}
+	return out
+}
+
+// overlap returns the elements of forbidden that ARE present in have,
+// in stable order, deduped. Inverse of missingFrom.
+func overlap(have map[string]struct{}, forbidden []string) []string {
+	if len(forbidden) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(forbidden))
+	var out []string
+	for _, id := range forbidden {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, present := have[id]; present {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

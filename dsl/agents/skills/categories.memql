@@ -1,0 +1,187 @@
+// skills/categories.memql
+//
+// One baseline skill per agentRole category. Each bundles every
+// knowledge domain the corresponding role catalog locks across its
+// specialists, so a role's `lockedSkillIds = [workbench-baseline,
+// <category>-baseline]` reproduces the pre-Phase-2 domain reach
+// without forcing the role to enumerate the bundle twice. Phase 3
+// (mintSkill) lets the Planner Agent propose finer-grained skills
+// (e.g. medical-cardiology, trades-welding-specialty) when a role's
+// agent needs to specialise beyond the category baseline; until then
+// these baselines plus Phase 1's cross-cutting catalog cover every
+// predefined role.
+//
+// Tier policy: each baseline carries the highest tier across the
+// roles in its category. Tier C medical (every medical role is
+// regulated). Tier B legal + personal-finance corner + electrician
+// (covered under trades). Tier A for the rest.
+
+use agents.concepts.{ skill }
+
+@description("Knowledge baseline for every white-collar professional role -- accounting / HR / IT support / operations / project management / sales+marketing / executive assistant / data + software roles / security. Bundles the union of locked domains across professional.memql so a role's lockedSkillIds = [workbench-baseline, professional-baseline] reproduces the pre-Phase-2 domain reach. Phase 3 mintSkill carves narrower specializations off this when a planner-minted specialist needs them.")
+seed skill professional-baseline {
+  slug:          "professional-baseline"
+  name:          "Professional Baseline"
+  description:   "Cross-cutting baseline for every white-collar role: org workflows, business literacy, the core knowledge domains the professional catalog locks across its specialists."
+  category:      "professional"
+  tags:          ["category-baseline", "professional"]
+  domainIds:     ["business-administration", "accounting-principles", "financial-data", "employee-records", "talent-acquisition", "customer-relations", "service-level-agreements", "quality-metrics", "sales-pipeline", "technical-documentation", "ticket-management", "process-optimization", "project-data", "research-methodology", "data-analysis", "curriculum-design", "training-development", "stakeholder-communications", "data-engineering", "software-development", "frontend-development", "cloud-platforms", "infrastructure-as-code", "cybersecurity", "machine-learning"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "B"
+  predefined:    true
+}
+
+@description("Knowledge baseline for every regulated medical role -- family doctor / pediatrician / dentist / physical therapist / nurse educator / pharmacist educator / veterinarian educator / mental health educator. Bundles the union of locked domains across medical.memql. Tier C: every medical role is high-stakes regulated and the agent factory injects an advisory disclaimer into the system prompt for any role that locks this skill.")
+seed skill medical-baseline {
+  slug:          "medical-baseline"
+  name:          "Medical Baseline"
+  description:   "Cross-cutting baseline for every medical role: patient communication, common chronic conditions, primary-care anchors. Pairs with role-specific specialty Phase 3 skills."
+  category:      "medical"
+  tags:          ["category-baseline", "medical"]
+  domainIds:     ["family-medicine", "patient-communication", "pediatrics", "child-development", "dentistry", "oral-health", "physical-therapy", "musculoskeletal-health", "nursing-fundamentals", "clinical-pharmacology-basics", "veterinary-medicine", "pet-health", "mental-health", "psychology-fundamentals"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "C"
+  predefined:    true
+}
+
+@description("Knowledge baseline for every legal role -- compliance / immigration / family law / estate / personal-legal. Tier B: the agent factory injects a 'general legal info, not personal advice' disclaimer for any role that locks this skill. Practising-attorney boundaries are enforced at the role level (no role grants tools that send communications on behalf of a client without explicit user approval).")
+seed skill legal-baseline {
+  slug:          "legal-baseline"
+  name:          "Legal Baseline"
+  description:   "Cross-cutting baseline for every legal role: contracts, regulatory framing, common personal-legal domains. Pairs with role-specific specialty Phase 3 skills."
+  category:      "legal"
+  tags:          ["category-baseline", "legal"]
+  domainIds:     ["legal-documents", "contracts-agreements", "regulatory-compliance", "immigration-law", "family-law", "estate-planning-personal", "personal-legal"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "B"
+  predefined:    true
+}
+
+@description("Knowledge baseline for skilled trades -- general contracting, electrical, plumbing, HVAC, carpentry, automotive, welding, landscaping. Tier B because electrical / HVAC carry real-world safety stakes; the agent factory injects a 'consult a licensed pro for code and permitting questions' disclaimer for any role that locks this skill.")
+seed skill trades-baseline {
+  slug:          "trades-baseline"
+  name:          "Trades Baseline"
+  description:   "Cross-cutting baseline for every skilled-trades role: code awareness, safety practice, the common cross-trade fundamentals. Pairs with role-specific specialty Phase 3 skills."
+  category:      "trades"
+  tags:          ["category-baseline", "trades"]
+  domainIds:     ["construction-fundamentals", "building-codes", "trades-safety", "electrical-trades", "plumbing-trades", "hvac-systems", "carpentry", "automotive-repair", "welding", "landscaping"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "B"
+  predefined:    true
+}
+
+@description("Knowledge baseline for scientific-educator roles -- physics / chemistry / biology / astronomy / geology. Tier A: research-grounded explanation, not policy advice. Pairs with role-specific specialty Phase 3 skills for deeper sub-discipline coverage.")
+seed skill scientific-baseline {
+  slug:          "scientific-baseline"
+  name:          "Scientific Baseline"
+  description:   "Cross-cutting baseline for every science-educator role: physics, chemistry, biology, astronomy, geology fundamentals."
+  category:      "scientific"
+  tags:          ["category-baseline", "scientific"]
+  domainIds:     ["physics", "chemistry", "biology", "astronomy", "geology"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for education roles -- K-12 tutoring, test prep, language tutoring, history / philosophy education. Tier A; the agent factory layers in age-appropriate communication hints from the role's systemPromptHints.")
+seed skill education-baseline {
+  slug:          "education-baseline"
+  name:          "Education Baseline"
+  description:   "Cross-cutting baseline for every education role: pedagogy across grade levels, language teaching, study skills, common subject areas."
+  category:      "education"
+  tags:          ["category-baseline", "education"]
+  domainIds:     ["elementary-pedagogy", "middle-school-pedagogy", "high-school-pedagogy", "test-prep-strategy", "calculus", "spanish-language", "mandarin-chinese", "french-language", "world-history", "philosophy", "study-skills"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for agriculture roles -- row crops, livestock, horticulture. Tier A. Pairs with the existing weather-climate-ag domain for forecasting context.")
+seed skill agriculture-baseline {
+  slug:          "agriculture-baseline"
+  name:          "Agriculture Baseline"
+  description:   "Cross-cutting baseline for every agriculture role: agronomy, livestock, horticulture, soil + weather grounding."
+  category:      "agriculture"
+  tags:          ["category-baseline", "agriculture"]
+  domainIds:     ["row-crop-agronomy", "livestock-management", "horticulture", "soil-science", "weather-climate-ag", "integrated-pest-management"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for hospitality roles -- chef, sommelier, barista, event planner. Tier A. Pairs with the food-safety domain when the role's specialty involves prepared food.")
+seed skill hospitality-baseline {
+  slug:          "hospitality-baseline"
+  name:          "Hospitality Baseline"
+  description:   "Cross-cutting baseline for every hospitality role: culinary technique, wine + coffee craft, event planning fundamentals."
+  category:      "hospitality"
+  tags:          ["category-baseline", "hospitality"]
+  domainIds:     ["culinary-technique", "wine-education", "coffee-specialty", "event-planning", "food-safety", "menu-engineering"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for civic roles -- civic navigator, nonprofit program manager. Tier A. Bundles the rare domains around government benefits, voting, nonprofit operations.")
+seed skill civic-baseline {
+  slug:          "civic-baseline"
+  name:          "Civic Baseline"
+  description:   "Cross-cutting baseline for every civic role: government services, nonprofit operations, voting + benefits literacy."
+  category:      "civic"
+  tags:          ["category-baseline", "civic"]
+  domainIds:     ["civic-services", "nonprofit-management", "government-benefits", "voting-election-basics", "grant-writing"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for transportation roles -- currently the commercial-pilot educator. Tier C because aviation is a regulated domain; the agent factory injects an FAA-disclaimer-shaped hint when this skill is locked.")
+seed skill transportation-baseline {
+  slug:          "transportation-baseline"
+  name:          "Transportation Baseline"
+  description:   "Cross-cutting baseline for every transportation role: aviation fundamentals + regulations, weather, instrument flying. Phase 3 mintSkill backfills marine / commercial-driving sub-specialties when those roles ship."
+  category:      "transportation"
+  tags:          ["category-baseline", "transportation"]
+  domainIds:     ["aviation-fundamentals", "aviation-weather", "instrument-flying", "aircraft-systems", "aviation-regulations"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "C"
+  predefined:    true
+}
+
+@description("Knowledge baseline for creative roles -- graphic / UX design, fiction / screenwriting, music, photography, video, illustration, game design, the creative companion. Tier A. The deepest catalog -- creative.memql ships 11 specialists so the baseline carries every locked domain across them.")
+seed skill creative-baseline {
+  slug:          "creative-baseline"
+  name:          "Creative Baseline"
+  description:   "Cross-cutting baseline for every creative role: design, writing, music, photography, video, illustration, game design."
+  category:      "creative"
+  tags:          ["category-baseline", "creative"]
+  domainIds:     ["graphic-design", "ux-principles", "creative-writing", "fiction-craft", "screenwriting", "songwriting", "music-theory", "photography", "video-editing", "illustration", "game-design", "creative-arts"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Knowledge baseline for personal-life roles -- household manager, parenting coach, health + wellness, meal-planning, travel, learning companion, social / relationships, pet care, home improvement, mindfulness, entertainment, senior care, real estate, personal finance. Tier B because personal-finance is the only Tier-B subset; every other role downgrades the effective disclaimer at agent-factory time.")
+seed skill personal-baseline {
+  slug:          "personal-baseline"
+  name:          "Personal Baseline"
+  description:   "Cross-cutting baseline for every personal-life role: household, family, wellness, learning, social, pets, home, finance basics."
+  category:      "personal"
+  tags:          ["category-baseline", "personal"]
+  domainIds:     ["personal-finance", "personal-budgeting", "household-maintenance", "diy-repairs", "parenting", "child-development", "elder-care", "fitness", "exercise-science", "nutrition", "meal-planning", "learning-methods", "pet-care", "mindfulness", "entertainment-media"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "B"
+  predefined:    true
+}

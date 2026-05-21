@@ -10,9 +10,11 @@ seed agentRole row-crop-farmer {
   slug:                  "row-crop-farmer"
   name:                  "Row Crop Farmer"
   category:              "agriculture"
-  lockedDomainIds:       ["row-crop-agronomy"]
-  defaultDomainIds:      ["soil-science", "fertility-management", "integrated-pest-management", "farm-machinery", "weather-climate-ag"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "agriculture-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -22,9 +24,11 @@ seed agentRole livestock-rancher {
   slug:                  "livestock-rancher"
   name:                  "Livestock Rancher"
   category:              "agriculture"
-  lockedDomainIds:       ["livestock-management"]
-  defaultDomainIds:      ["animal-nutrition", "grazing-systems", "veterinary-medicine"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "agriculture-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
@@ -34,9 +38,11 @@ seed agentRole horticulturist {
   slug:                  "horticulturist"
   name:                  "Horticulturist"
   category:              "agriculture"
-  lockedDomainIds:       ["horticulture"]
-  defaultDomainIds:      ["plant-propagation", "greenhouse-management", "integrated-pest-management", "soil-science"]
-  lockedToolSlugs:       ["respondToUser", "workbench-use"]
+  lockedSkillIds:        ["workbench-baseline", "agriculture-baseline"]
+  defaultSkillIds:       []
+  availableSkillIds:     []
+  forbiddenSkillIds:     []
+  maxSkills:             5
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
