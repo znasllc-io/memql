@@ -45,6 +45,7 @@ templ AdminJWKS(data AdminJWKSData) {
 			<h2>Manual rotation</h2>
 			<p class="text-muted">Forces an immediate rotation. Use this when you suspect the current private key has leaked. The previous key remains in JWKS for the configured overlap window so existing access tokens continue to validate during the handoff.</p>
 			<form method="POST" action="/admin/jwks/rotate" data-submit-once>
+				@CSRFField(data.Layout.CSRFToken)
 				<button type="submit" class="btn btn-danger" data-pending-label="Rotating...">Rotate now</button>
 			</form>
 		</div>

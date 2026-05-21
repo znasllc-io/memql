@@ -51,7 +51,7 @@ templ AdminTokens(data AdminTokensData) {
 						</thead>
 						<tbody>
 							for _, t := range data.Tokens {
-								@adminTokensRow(t)
+								@adminTokensRow(t, data.Layout.CSRFToken)
 							}
 						</tbody>
 					</table>
@@ -64,7 +64,7 @@ templ AdminTokens(data AdminTokensData) {
 	}
 }
 
-templ adminTokensRow(t AdminPATRow) {
+templ adminTokensRow(t AdminPATRow, csrfToken string) {
 	<tr>
 		<td>
 			if t.OwnerEmail != "" {
@@ -98,6 +98,7 @@ templ adminTokensRow(t AdminPATRow) {
 		<td>
 			if t.Active {
 				<form method="POST" action="/admin/tokens/revoke" style="display:inline;" data-submit-once data-confirm="Revoke this token? The owner will be signed out of any CLI session using it.">
+					@CSRFField(csrfToken)
 					<input type="hidden" name="id" value={ t.ID }/>
 					<button type="submit" class="btn btn-danger btn-small">
 						Revoke

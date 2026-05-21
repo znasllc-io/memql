@@ -75,6 +75,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 				behalf of the user before they hit the app.
 			</p>
 			<form method="POST" action="/admin/users/profile" data-submit-once class="profile-form">
+				@CSRFField(data.Layout.CSRFToken)
 				<input type="hidden" name="user_id" value={ data.User.ID }/>
 				<div class="form-row">
 					<label for="first_name">
@@ -168,6 +169,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 		<div class="card card-full">
 			<h2 class="card-title">Change cluster role</h2>
 			<form method="POST" action="/admin/users/role" data-submit-once>
+				@CSRFField(data.Layout.CSRFToken)
 				<input type="hidden" name="user_id" value={ data.User.ID }/>
 				<div class="form-row">
 					<label for="role">New role</label>
@@ -185,6 +187,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 			if data.User.SuspendedAt != "" {
 				<h2 class="card-title">Lift suspension</h2>
 				<form method="POST" action="/admin/users/unsuspend" data-submit-once>
+					@CSRFField(data.Layout.CSRFToken)
 					<input type="hidden" name="user_id" value={ data.User.ID }/>
 					<button type="submit" class="btn btn-primary" data-pending-label="Lifting...">Restore access</button>
 				</form>
@@ -194,6 +197,7 @@ templ AdminUsersDetail(data AdminUsersDetailData) {
 					Suspended users keep their data but cannot sign in. Lift the suspension at any time.
 				</p>
 				<form method="POST" action="/admin/users/suspend" data-submit-once>
+					@CSRFField(data.Layout.CSRFToken)
 					<input type="hidden" name="user_id" value={ data.User.ID }/>
 					<div class="form-row">
 						<label for="reason">Reason (optional, internal-only)</label>
