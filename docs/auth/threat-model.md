@@ -146,15 +146,24 @@ The Python voice-agent authenticates via `MEMQL_VOICE_AGENT_SHARED_TOKEN`. The i
 
 ### 5.3 Session revocation on long-lived streams (F7)
 
-Session revocation is checked at stream-open time only. A bearer token revoked mid-stream continues to work until the underlying JWT expires (default ~1 hour for browser flows, shorter for API clients).
+Session revocation is now checked at stream-open time AND on a periodic in-stream re-check via the `revocation_epoch` claim (#106). A bulk-revoke bump propagates to active streams within `EpochCheck.Interval` (default 5 min).
 
-**Trust assumption:** JWT short-expiry is the primary defense against compromised credentials; revocation is the secondary defense that closes the gap between "revoke" and "natural expiry."
+**How it works:**
 
-**Trade-off:** per-message revocation would require a DB round-trip per RPC. Acceptable for low-rate calls; unacceptable for the streaming-transcription path where messages are sub-second.
+- `v1:identity:user.revocationEpoch` is a monotonic counter on every user row (default 0).
+- The JWT issuer stamps the user's current epoch into every fresh access token as the `revocation_epoch` claim.
+- The per-node verifier resolves the user's current epoch on stream-open via an `EpochResolver` and rejects when `token.epoch < current`. Same check runs on a per-stream ticker (`StreamInterceptorWithEpoch` + `runEpochRecheck`); when the bump happens mid-stream, the derived context cancels and downstream handlers see `ctx.Err() == context.Canceled`.
+- Bulk-revoke = call `Store.BumpUserRevocationEpoch(userId)`, which reads + increments + writes via `mutationBumpUserRevocationEpoch`. Every pre-bump token is now stale at the verifier; every post-bump token mints with the new epoch.
 
-**Upgrade path:** add a `revocation_epoch` claim to the JWT. The verifier checks the epoch on every stream-open AND on a periodic refresh; bumping the epoch invalidates every token issued before it. Pending; tracked separately.
+**Trust assumption:** JWT short-expiry remains the primary defense against compromised credentials; the epoch closes the gap between "operator hits the bulk-revoke button" and "token reaches its natural expiry."
 
-**Session revocation lookup fails open** when the engine is unavailable, with a WARN log. JWT expiry is the underlying guarantee.
+**Trade-off:** per-message revocation would require a DB round-trip per RPC. The epoch approach is one DB read per stream-open plus one per re-check interval -- cheap even on the streaming-transcription path.
+
+**Fail-open scope.** The OPEN-TIME epoch lookup currently rejects on resolver error (`return status.Error(codes.Unauthenticated, "revocation check failed")` in `StreamInterceptorWithEpoch`); the PER-STREAM re-check cancels the stream on resolver error too. That's a deliberate fail-closed choice on the epoch path -- the assumption is that the resolver is the local engine, which is up if anything else on the node is working. The legacy session revocation lookup (`v1:identity:authSession` hash check) on the OTHER path still **fails open** with a WARN. JWT expiry remains the underlying guarantee on both.
+
+**Out of scope:** per-credential revocation of PATs (PATs have their own row-state on `v1:identity:identity`) and worker tokens (similar). The epoch lives on the user row and only applies to JWTs (`Source == SourceJWT`).
+
+Shipped via #106 (PR #148).
 
 ### 5.4 Plain guest token at rest (F11)
 
@@ -280,7 +289,7 @@ This is by design — every tool defines its own contract — but it leaves a cl
 ## 8. Future hardening (ordered)
 
 1. **Per-node service-account JWT for `NodeService.Stream`** — closes §5.1.
-2. **Revocation epoch claim** — closes §5.3.
+2. ~~**Revocation epoch claim** — closes §5.3.~~ Shipped via #106 / PR #148.
 3. **Centralised tool-call arg validator** — closes §7.6.
 4. **Rotate-on-resend for guest invitations** — closes §5.4.
 5. **Voice-agent service-account path** — closes §5.2.

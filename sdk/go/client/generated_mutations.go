@@ -4963,7 +4963,10 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 //
 // Bound concept: workspace.
 type MutationProvisionWorkspaceArgs struct {
+	// Synthesized id, typically `{planId}` since one workspace per Plan.
 	WorkspaceId string
+	PlanId      string
+	StorageRoot string
 }
 
 // MutationProvisionWorkspace calls the engine mutation mutationProvisionWorkspace.
@@ -4977,6 +4980,16 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	b.WriteString("mutationProvisionWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storageRoot: ")
+	b.WriteString(fmt.Sprintf("%q", args.StorageRoot))
 	b.WriteString("})")
 	return b.String()
 }
