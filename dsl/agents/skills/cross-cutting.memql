@@ -1,0 +1,51 @@
+// skills/cross-cutting.memql
+//
+// Cross-cutting skills the Planner Agent reaches for when a Plan
+// straddles product / engineering lines: ingesting external documents
+// into the knowledge graph, doing web research on the agent's behalf,
+// running customer-support operations end-to-end. Not tied to any one
+// product surface.
+
+use agents.concepts.{ skill }
+
+@description("Ingest external documents (PDFs, spreadsheets, web pages, images) into the v1:knowledge:document + chunk family. Pairs with workbench-baseline for the actual extraction + transformation runs; the skill itself bundles the knowledge of the validation lifecycle (proposed -> validated -> rejected), the supersession model, the per-format item concepts (spreadsheetRow / imageRegion). Phase 2 ships a dedicated knowledge-pipeline domain; the current bundle leans on research-methodology in the interim.")
+seed skill knowledge-ingestion {
+  slug:          "knowledge-ingestion"
+  name:          "Knowledge Ingestion"
+  description:   "Ingest external documents into the memQL knowledge graph: the validation lifecycle, supersession, per-format item concepts."
+  category:      "foundational"
+  tags:          ["knowledge", "documents"]
+  domainIds:     ["research-methodology"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Open-web research delegated to an agent: framing queries, evaluating source quality, distilling citations into knowledge graph rows the user can audit. Phase 2 wires this skill into the workbench-use http_fetch surface explicitly; today the skill carries the methodology + the framing, the agent reaches the network via the workbench tool that workbench-baseline provides.")
+seed skill web-research {
+  slug:          "web-research"
+  name:          "Web Research"
+  description:   "Open-web research: framing, source-quality evaluation, distilling citations into auditable knowledge rows."
+  category:      "foundational"
+  tags:          ["research", "web"]
+  domainIds:     ["research-methodology", "user-research"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
+
+@description("Customer-support operations: ticket triage, response drafting against the customer-relations history, escalation handoffs, audit-trail mindfulness. Pairs naturally with copresent-ui when the user runs support out of CoPresent.")
+seed skill customer-support-ops {
+  slug:          "customer-support-ops"
+  name:          "Customer Support Ops"
+  description:   "End-to-end customer-support operations: ticket triage, history-grounded responses, escalation, audit trail."
+  category:      "foundational"
+  tags:          ["support", "ops"]
+  domainIds:     ["customer-relations"]
+  toolSlugs:     []
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}

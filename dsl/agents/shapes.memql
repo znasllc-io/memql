@@ -5,7 +5,7 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
-use agents.concepts.{ agent, agentAuthorization, agentRole }
+use agents.concepts.{ agent, agentAuthorization, agentRole, skill }
 
 @row
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
@@ -103,4 +103,37 @@ shape agentRole agentRoleFull {
   payload.systemPromptHints
   payload.active
   payload.predefined
+}
+
+@row
+@description("Lightweight skill projection: slug + display + tier + tags. Backs catalog list / picker surfaces where the caller doesn't yet need the domain / tool composition. Faster + smaller than skillFull so the cockpit's Skills admin list and the role-edit picker don't pay for the bundle payload until the user expands a row.")
+shape skill skillSummary {
+  row.id
+  payload.slug
+  payload.name
+  payload.description
+  payload.tier
+  payload.tags
+  payload.category
+  payload.predefined
+  payload.active
+}
+
+@row
+@description("Full skill projection: the catalog row plus its bundle composition. Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, and the agent factory's attach path (Phase 2). Keeps domainIds / toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will do to an agent.")
+shape skill skillFull {
+  row.id
+  payload.slug
+  payload.name
+  payload.description
+  payload.category
+  payload.tags
+  payload.domainIds
+  payload.toolSlugs
+  payload.liveSourceIds
+  payload.tier
+  payload.predefined
+  payload.active
+  row.createdAt
+  row.createdBy
 }

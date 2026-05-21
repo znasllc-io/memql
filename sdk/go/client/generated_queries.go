@@ -187,6 +187,23 @@ func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) st
 	return b.String()
 }
 
+// QueryActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
+//
+// Bound concept: skill.
+type QueryActiveSkillsArgs struct {
+}
+
+// QueryActiveSkills calls the engine query queryActiveSkills.
+func (qc *QueryClient) QueryActiveSkills(ctx context.Context, args QueryActiveSkillsArgs) (*Result, error) {
+	call := QueryActiveSkillsBuild(args)
+	return qc.executeNamed(ctx, "queryActiveSkills", call)
+}
+
+func QueryActiveSkillsBuild(args QueryActiveSkillsArgs) string {
+	_ = args
+	return "queryActiveSkills({})"
+}
+
 // QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.
 //
 // Bound concept: space.
@@ -1954,6 +1971,28 @@ func QuerySiParticipantForSpaceBuild(args QuerySiParticipantForSpaceArgs) string
 	return b.String()
 }
 
+// QuerySkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
+//
+// Bound concept: skill.
+type QuerySkillBySlugArgs struct {
+	Slug string
+}
+
+// QuerySkillBySlug calls the engine query querySkillBySlug.
+func (qc *QueryClient) QuerySkillBySlug(ctx context.Context, args QuerySkillBySlugArgs) (*Result, error) {
+	call := QuerySkillBySlugBuild(args)
+	return qc.executeNamed(ctx, "querySkillBySlug", call)
+}
+
+func QuerySkillBySlugBuild(args QuerySkillBySlugArgs) string {
+	var b strings.Builder
+	b.WriteString("querySkillBySlug({")
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySpaceContext -- Returns runtime context snapshots for spaces. Optional filter: spaceId
 //
 // Bound concept: context.
@@ -2564,6 +2603,28 @@ func QueryWorkspaceForPlanBuild(args QueryWorkspaceForPlanArgs) string {
 	b.WriteString("queryWorkspaceForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
+//
+// Bound concept: skill.
+type SkillNeedsRefreshArgs struct {
+	StaleDomainId string
+}
+
+// SkillNeedsRefresh calls the engine query skillNeedsRefresh.
+func (qc *QueryClient) SkillNeedsRefresh(ctx context.Context, args SkillNeedsRefreshArgs) (*Result, error) {
+	call := SkillNeedsRefreshBuild(args)
+	return qc.executeNamed(ctx, "skillNeedsRefresh", call)
+}
+
+func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
+	var b strings.Builder
+	b.WriteString("skillNeedsRefresh({")
+	b.WriteString("staleDomainId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
 	b.WriteString("})")
 	return b.String()
 }

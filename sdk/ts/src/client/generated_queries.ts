@@ -179,6 +179,26 @@ QueryClient.prototype.queryActiveHumanParticipants = function (this: QueryClient
   return this.executeNamed("queryActiveHumanParticipants", buildQueryActiveHumanParticipants(args), opts);
 };
 
+/** List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable. */
+// Bound concept: skill.
+export interface QueryActiveSkillsArgs {
+}
+
+export function buildQueryActiveSkills(args: QueryActiveSkillsArgs): string {
+  void args;
+  return "queryActiveSkills({})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    queryActiveSkills(args?: QueryActiveSkillsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.queryActiveSkills = function (this: QueryClient, args: QueryActiveSkillsArgs = {} as QueryActiveSkillsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("queryActiveSkills", buildQueryActiveSkills(args), opts);
+};
+
 /** Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list. */
 // Bound concept: space.
 export interface QueryActiveSpacesArgs {
@@ -1925,6 +1945,28 @@ QueryClient.prototype.querySiParticipantForSpace = function (this: QueryClient, 
   return this.executeNamed("querySiParticipantForSpace", buildQuerySiParticipantForSpace(args), opts);
 };
 
+/** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */
+// Bound concept: skill.
+export interface QuerySkillBySlugArgs {
+  slug: string;
+}
+
+export function buildQuerySkillBySlug(args: QuerySkillBySlugArgs): string {
+  const parts: string[] = [];
+  parts.push("slug: " + renderMemQLValue(args.slug));
+  return "querySkillBySlug({" + parts.join(", ") + "})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    querySkillBySlug(args: QuerySkillBySlugArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.querySkillBySlug = function (this: QueryClient, args: QuerySkillBySlugArgs = {} as QuerySkillBySlugArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("querySkillBySlug", buildQuerySkillBySlug(args), opts);
+};
+
 /** Returns runtime context snapshots for spaces. Optional filter: spaceId */
 // Bound concept: context.
 export interface QuerySpaceContextArgs {
@@ -2501,5 +2543,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.queryWorkspaceForPlan = function (this: QueryClient, args: QueryWorkspaceForPlanArgs = {} as QueryWorkspaceForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("queryWorkspaceForPlan", buildQueryWorkspaceForPlan(args), opts);
+};
+
+/** Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient. */
+// Bound concept: skill.
+export interface SkillNeedsRefreshArgs {
+  staleDomainId: string;
+}
+
+export function buildSkillNeedsRefresh(args: SkillNeedsRefreshArgs): string {
+  const parts: string[] = [];
+  parts.push("staleDomainId: " + renderMemQLValue(args.staleDomainId));
+  return "skillNeedsRefresh({" + parts.join(", ") + "})";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillNeedsRefresh(args: SkillNeedsRefreshArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillNeedsRefresh = function (this: QueryClient, args: SkillNeedsRefreshArgs = {} as SkillNeedsRefreshArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillNeedsRefresh", buildSkillNeedsRefresh(args), opts);
 };
 

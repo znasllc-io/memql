@@ -113,6 +113,26 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 			"perUserNames", seedNames(perUser))
 	}
 
+	// Skill tier validation (memql#157): enforce skill.tier >=
+	// max(tier across domainIds[]) before any row lands. A violation
+	// brings boot down -- the catalog is self-validated and a mismatch
+	// here means the cluster would serve a Tier-A skill that bundles
+	// a Tier-C domain, which propagates wrong disclaimer / advisory
+	// posture downstream.
+	skillWarnings, skillErr := validateSkillTiers(m.registry)
+	if skillErr != nil {
+		if logger != nil {
+			logger.Error("seed materializer: skill tier validation refused boot",
+				"error", skillErr)
+		}
+		return skillErr
+	}
+	if len(skillWarnings) > 0 && logger != nil {
+		for _, w := range skillWarnings {
+			logger.Warn("seed materializer: skill catalog warning", "detail", w)
+		}
+	}
+
 	// Global seeds first -- they don't depend on user state.
 	for _, def := range allSeeds {
 		if def.Scope != "global" {
