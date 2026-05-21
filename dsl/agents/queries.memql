@@ -7,7 +7,7 @@
 // "wire it up to call queryAllAgents" -- not "re-implement the agent
 // list query."
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, skill }
+use agents.concepts.{ agent, agentAuthorization, agentRole, skill, skillChangeEvent }
 
 @enabled
 @description("Returns available AI agent templates. Optional filter: groupId")
@@ -169,4 +169,14 @@ query skill skillNeedsRefresh {
   }
   filter  traitIsActiveRecord; ?.payload.domainIds has args.staleDomainId
   shape   skillSummary
+}
+
+@enabled
+@description("Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.")
+query skillChangeEvent skillChangeEventsForAgent {
+  args {
+    targetAgentId  string  @required
+  }
+  filter  payload.targetAgentId==args.targetAgentId
+  shape   skillChangeEventFull
 }
