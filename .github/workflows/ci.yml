@@ -58,6 +58,19 @@ jobs:
       - name: regenerate typed SDK and check for drift
         run: make sdk-gen-check
 
+  sdk-ts-typecheck:
+    name: sdk-ts-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+      - name: install sdk/ts deps
+        run: make sdk-ts-install
+      - name: typecheck sdk/ts
+        run: make sdk-ts-typecheck
+
   # DSL-lint gate. Runs `memql-cockpit lint dsl/` once the cockpit
   # binary is available on the runner (it lives in a separate repo,
   # github.com/znasllc-io/memql-cockpit). The gate is wired here as

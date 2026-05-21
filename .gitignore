@@ -77,9 +77,13 @@ bin/
 temp/
 logs/
 
-# Node.js (not used in this project)
+# Node.js -- the TS SDK under sdk/ts/ is the lone node consumer in
+# this monorepo (memql#116). package.json there is checked in;
+# everything else stays ignored.
 package.json
+!sdk/ts/package.json
 package-lock.json
+!sdk/ts/package-lock.json
 node_modules/
 
 # macOS
