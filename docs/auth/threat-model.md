@@ -190,6 +190,23 @@ Session revocation is checked at stream-open time only. A bearer token revoked m
 
 **Trust assumption:** the unauthenticated entry-point surface does not warrant a full CSRF framework today. If authenticated form POSTs are added (admin console etc.), introduce a `gorilla/csrf`-style middleware first.
 
+### 5.8 gRPC transport posture
+
+The gRPC server defaults to **insecure transport** when no TLS env vars are set. This is the legacy posture suitable for deployments behind a TLS-terminating proxy (Cloud Run, Cloudflare, an mTLS load balancer); the proxy presents the cert to the world and forwards plaintext gRPC inside the trust boundary.
+
+**Trust assumption (default):** the cluster runs behind a TLS-terminating proxy and the gRPC port is not exposed to untrusted networks.
+
+**Opt-in TLS:** issue #126 (closed) wired a configurable TLS toggle. When the operator sets `MEMQL_GRPC_TLS_CERT_FILE` + `MEMQL_GRPC_TLS_KEY_FILE` (with `MEMQL_GRPC_TLS_CLIENT_CA_FILE` optional for mTLS), the gRPC server presents a cert directly, the inter-node dialer (`component/node/connection.go`) enables TLS to match, and `MEMQL_GRPC_REQUIRE_CLIENT_CERT=1` upgrades client-cert verification to required-and-verified.
+
+| Knob | Effect |
+|---|---|
+| `MEMQL_GRPC_TLS_CERT_FILE` + `MEMQL_GRPC_TLS_KEY_FILE` unset | Insecure transport (default) |
+| Cert + key set, no CA | TLS server-auth; inter-node dial enables TLS |
+| Cert + key + `MEMQL_GRPC_TLS_CLIENT_CA_FILE` | Optional mTLS (`VerifyClientCertIfGiven`) |
+| Cert + key + CA + `MEMQL_GRPC_REQUIRE_CLIENT_CERT=1` | Required mTLS (`RequireAndVerifyClientCert`) |
+
+**Discipline:** the key file is rejected at load time if its mode permits group/other access (`verifyPrivateKeyFileMode`, `0o077` mask). Same 0600 floor the `sdk/go/worker` TLS path enforces. The TLS-config builders live in `core/grpctls/` and are unit-tested under `core/grpctls/tls_test.go` (12 cases covering happy path, half-config rejection, key-mode rejection, optional vs required mTLS, ServerName pinning).
+
 ---
 
 ## 6. Test coverage

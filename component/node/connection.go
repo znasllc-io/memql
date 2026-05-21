@@ -2,12 +2,15 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/core/grpctls"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -124,8 +127,23 @@ func (pc *peerConnection) connectOnce(ctx context.Context, onMessage func(*nodev
 	// 32 MiB matches the server side and the workerService /
 	// memqlService limits.
 	const maxNodeMessageSize = 32 * 1024 * 1024
+	// Match the server-side TLS posture: if this node has a server
+	// cert configured (MEMQL_GRPC_TLS_CERT_FILE), the inter-node
+	// dial enables TLS too (ServerName pinned to the peer's
+	// dial-address host) so the mesh authenticates symmetrically.
+	// When unset, fall back to insecure -- the legacy default
+	// suitable for clusters behind a TLS-terminating proxy. See
+	// component/grpc/tls.go.
+	tlsCfg, err := grpctls.LoadClientTLSConfig(pc.address, pc.logger)
+	if err != nil {
+		return fmt.Errorf("node.connect: tls config: %w", err)
+	}
+	transportCreds := insecure.NewCredentials()
+	if tlsCfg != nil {
+		transportCreds = credentials.NewTLS(tlsCfg)
+	}
 	conn, err := grpc.NewClient(pc.address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(transportCreds),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxNodeMessageSize),
 			grpc.MaxCallSendMsgSize(maxNodeMessageSize),
