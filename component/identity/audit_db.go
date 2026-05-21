@@ -2,8 +2,6 @@ package identity
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -11,6 +9,7 @@ import (
 	"time"
 
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // EngineExecutor is the narrow interface this package depends on for
@@ -152,13 +151,12 @@ func writeKVInt(b *strings.Builder, key string, value int, first bool) {
 	b.WriteString(strconv.Itoa(value))
 }
 
-// newAuditEventId returns a 128-bit random hex id. The canonical
-// id format already carries `:auditEvent:` in the middle position,
-// so the shortId stays a plain hash.
+// newAuditEventId returns a fresh opaque shortId for an auditEvent
+// row. Delegates to core/id.NewShortId so the auditEvent format
+// matches every other instance row in the system (UUIDv4). The
+// canonical id format already carries `:auditEvent:` in the middle
+// position; the shortId stays a plain opaque token. Error return
+// preserved for source compatibility -- always nil.
 func newAuditEventId() (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf), nil
+	return id.NewShortId(), nil
 }

@@ -1,6 +1,7 @@
 package automations
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/znasllc-io/memql/core/id"
@@ -192,48 +193,19 @@ func TestChainTrackingEnabled(t *testing.T) {
 	}
 }
 
-func TestRandomSuffix_Uniqueness(t *testing.T) {
-	// Generate multiple suffixes and verify they're not all the same
-	// (the old implementation could produce repeated characters due to nanosecond timing issues)
-	seen := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		suffix := randomSuffix()
-		if len(suffix) != 6 {
-			t.Errorf("randomSuffix should be 6 characters, got %d: %q", len(suffix), suffix)
-		}
-		seen[suffix] = true
-	}
-
-	// With true randomness, 100 6-char strings from a 36-char alphabet
-	// should have very high uniqueness. We expect at least 95 unique values.
-	if len(seen) < 95 {
-		t.Errorf("randomSuffix should produce mostly unique values, got only %d unique out of 100", len(seen))
-	}
-}
-
-func TestRandomSuffix_Charset(t *testing.T) {
-	const validChars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	validSet := make(map[rune]bool)
-	for _, c := range validChars {
-		validSet[c] = true
-	}
-
-	for i := 0; i < 50; i++ {
-		suffix := randomSuffix()
-		for _, c := range suffix {
-			if !validSet[c] {
-				t.Errorf("randomSuffix contains invalid character: %q in %q", c, suffix)
-			}
-		}
-	}
-}
+// uuidv4Re matches the canonical UUIDv4 string format
+// core/id.NewShortId returns. Pinned in the test so the assertion is
+// tight enough to catch a regression that swaps the minter for a
+// different format (per memql#103, the v1:memql:checkpoint row's
+// shortId must match every other instance row in the system).
+var uuidv4Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func TestGenerateExecutionID_Format(t *testing.T) {
-	id := generateExecutionId()
-
-	// Format: YYYYMMDD-HHMMSS-XXXXXX (21 chars)
-	if len(id) < 21 {
-		t.Errorf("execution ID should be at least 21 characters, got %d: %q", len(id), id)
+	for i := 0; i < 50; i++ {
+		idStr := generateExecutionId()
+		if !uuidv4Re.MatchString(idStr) {
+			t.Fatalf("generateExecutionId returned non-UUIDv4 string %q", idStr)
+		}
 	}
 }
 

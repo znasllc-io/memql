@@ -4,7 +4,6 @@
 package automations
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -688,27 +687,15 @@ func (e *AutomationExecution) AddStepResult(result *StepResult) {
 	e.Steps[result.StepId] = result
 }
 
-// generateExecutionId creates a unique execution identifier.
+// generateExecutionId returns a fresh opaque execution identifier.
+// Delegates to core/id.NewShortId so the executionId (which is also
+// the v1:memql:checkpoint row's shortId) shares the same UUIDv4
+// format every other instance row in the system uses. The previous
+// "20060102-150405-XXXXXX" timestamp+suffix shape was the last
+// non-UUID instance-id format in memql core; aligning it with the
+// rest closes the gap memql#103 tracked.
 func generateExecutionId() string {
-	return time.Now().Format("20060102-150405") + "-" + randomSuffix()
-}
-
-// randomSuffix generates a short random string using crypto/rand.
-func randomSuffix() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	result := make([]byte, 6)
-	randomBytes := make([]byte, 6)
-	if _, err := rand.Read(randomBytes); err != nil {
-		// Fallback to less random but still functional approach
-		for i := range result {
-			result[i] = charset[i%len(charset)]
-		}
-		return string(result)
-	}
-	for i, b := range randomBytes {
-		result[i] = charset[int(b)%len(charset)]
-	}
-	return string(result)
+	return id.NewShortId()
 }
 
 // ExecutionCheckpoint captures the state of a failed automation for later resume.
