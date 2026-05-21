@@ -245,7 +245,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "siTranscribeStreamDelta"; value: SITranscribeStreamDeltaPayload }
   | { kind: "siTranscribeStreamComplete"; value: SITranscribeStreamCompletePayload }
   | null {
-  const m = msg as Record<string, unknown>;
+  const m = msg as unknown as Record<string, unknown>;
   if (m.serverHello) return { kind: "serverHello", value: m.serverHello as ServerHelloPayload };
   if (m.queryResult) return { kind: "queryResult", value: m.queryResult as QueryResultPayload };
   if (m.queryError) return { kind: "queryError", value: m.queryError as QueryErrorPayload };
@@ -275,7 +275,7 @@ export function readServerPayload(msg: ServerMessage):
 // in dispatcher.go). Empty when the message does not belong to a
 // known streaming family.
 export function streamRequestId(msg: ServerMessage): string {
-  const m = msg as Record<string, { requestId?: string } | undefined>;
+  const m = msg as unknown as Record<string, { requestId?: string } | undefined>;
   if (m.siTranscribeStreamDelta?.requestId) return m.siTranscribeStreamDelta.requestId;
   if (m.siTranscribeStreamComplete?.requestId) return m.siTranscribeStreamComplete.requestId;
   return "";

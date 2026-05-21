@@ -216,14 +216,18 @@ function numberFromWire(v: string | number | undefined): number {
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
-  // browsers + Node 16+ both support btoa via the global.
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(bytes).toString("base64");
+  // Prefer Node's Buffer when present (no @types/node dependency --
+  // probe via globalThis so a browser bundle doesn't trip on the
+  // bare `Buffer` identifier). Fall back to btoa for browsers.
+  const g = globalThis as unknown as {
+    Buffer?: { from(bytes: Uint8Array): { toString(enc: string): string } };
+    btoa?: (s: string) => string;
+  };
+  if (g.Buffer) return g.Buffer.from(bytes).toString("base64");
+  if (g.btoa) {
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return g.btoa(binary);
   }
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const g = globalThis as any;
-  if (typeof g.btoa === "function") return g.btoa(binary);
   throw new Error("pushToTalk: no base64 encoder available (need Buffer or btoa)");
 }
