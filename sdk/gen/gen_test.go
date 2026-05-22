@@ -101,7 +101,7 @@ func TestEmitTSMethods_QueryWithArgs(t *testing.T) {
 		ShapeName: "spaceCard",
 	}
 
-	out := string(emitTSMethods([]Construct{c}, "query"))
+	out := string(emitTSMethods([]Construct{c}, "query", ""))
 
 	wants := []string{
 		`import { QueryClient, type QueryCallOptions } from "./query.js";`,
@@ -142,7 +142,7 @@ func TestEmitTSMethods_NoArgs(t *testing.T) {
 		Description: "List active agent roles.",
 	}
 
-	out := string(emitTSMethods([]Construct{c}, "query"))
+	out := string(emitTSMethods([]Construct{c}, "query", ""))
 
 	wants := []string{
 		`export interface QueryActiveAgentRolesArgs {`,
@@ -161,9 +161,37 @@ func TestEmitTSMethods_NoArgs(t *testing.T) {
 // gate doesn't flip on an empty file (zero-construct kind would
 // otherwise emit nothing but imports, which is a valid module).
 func TestEmitTSMethods_Empty(t *testing.T) {
-	out := string(emitTSMethods(nil, "query"))
+	out := string(emitTSMethods(nil, "query", ""))
 	if !strings.Contains(out, "export {};") {
 		t.Errorf("expected placeholder `export {};` for empty construct list\n--- output ---\n%s", out)
+	}
+}
+
+// TestEmitTSMethods_ImportFromPackage pins the cross-package form: when
+// importFrom is set (a BFF shipping the generated surface as its own
+// package), the generated TS imports QueryClient/types from that single
+// package specifier and augments via `declare module "<pkg>"` -- never
+// the in-package relative "./query.js" form. This is what lets a
+// separate package (e.g. @visionarys-io/copresent-sdk) merge its
+// generated methods onto the published @znasllc-io/memql-sdk-core
+// QueryClient.
+func TestEmitTSMethods_ImportFromPackage(t *testing.T) {
+	c := Construct{Kind: "query", Name: "queryActiveSpaces", Description: "List active spaces."}
+	out := string(emitTSMethods([]Construct{c}, "query", "@znasllc-io/memql-sdk-core"))
+
+	for _, want := range []string{
+		`import { QueryClient, renderMemQLValue, type QueryCallOptions, type Result } from "@znasllc-io/memql-sdk-core";`,
+		`declare module "@znasllc-io/memql-sdk-core" {`,
+		`QueryClient.prototype.queryActiveSpaces = function`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("emitTSMethods(importFrom) missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{`from "./query.js"`, `from "./types.js"`, `from "./memqlValue.js"`, `declare module "./query.js"`} {
+		if strings.Contains(out, bad) {
+			t.Errorf("emitTSMethods(importFrom) should not emit relative form %q", bad)
+		}
 	}
 }
 
