@@ -52,6 +52,7 @@ func main() {
 	flag.Var(&roots, "dsl", "DSL tree root; repeatable or comma-separated to compose multiple roots (default \"dsl\")")
 	outDir := flag.String("out", "sdk/go/client", "directory for generated Go files; empty to skip Go emission")
 	tsOutDir := flag.String("ts-out", "sdk/ts/src/client", "directory for generated TypeScript files; empty to skip TS emission")
+	tsImportFrom := flag.String("ts-import-from", "", "module specifier the generated TS imports QueryClient/types from and augments via `declare module` (e.g. @znasllc-io/memql-sdk-core); empty uses in-package relative paths")
 	check := flag.Bool("check", false, "exit non-zero if regenerated files would differ")
 	flag.Parse()
 
@@ -60,10 +61,11 @@ func main() {
 	}
 
 	res, err := gen.Generate(gen.Options{
-		Roots: roots,
-		GoOut: *outDir,
-		TSOut: *tsOutDir,
-		Check: *check,
+		Roots:        roots,
+		GoOut:        *outDir,
+		TSOut:        *tsOutDir,
+		TSImportFrom: *tsImportFrom,
+		Check:        *check,
 	})
 	if err != nil {
 		if *check && res != nil && len(res.Drift) > 0 {
