@@ -302,6 +302,15 @@ db:
 ## (see #171 / #172 / #43). Re-run after any DSL change that touches a
 ## construct's args / signature / shape. The drift gate
 ## (sdk-gen-check) catches stale checkouts in CI.
+##
+## Multi-root: the generator (and the importable sdk/gen package it
+## wraps) accepts repeatable / comma-separated --dsl roots and merges
+## constructs from all of them deterministically. memQL itself passes
+## a single root (the core DSL). A product BFF -- a separate Go module
+## that depends on github.com/znasllc-io/memql -- imports sdk/gen and
+## calls gen.Generate over `core DSL ∪ its own DSL`, and wires its own
+## drift gate by calling gen.Generate with Check=true over the same
+## merged roots (a non-nil error means "regenerate and commit").
 sdk-gen:
 	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=
 
