@@ -441,7 +441,17 @@ docker-planner:
 # up the stack, and seeds manifest-listed entries into the running
 # memQL cluster as concept rows.
 
-.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps
+.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps genesis-seal
+
+## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
+## envelope dev-refresh decrypts at cluster start). Headless equivalent
+## of the cockpit's first-launch genesis wizard: parse + manifest-validate
+## + encrypt under MEMQL_MASTER_KEY (reused from your environment when
+## present, generated + printed on first use).
+##   make genesis-seal ENV_FILE=~/Downloads/local.genesis.env
+genesis-seal:
+	@test -n "$(ENV_FILE)" || { echo "usage: make genesis-seal ENV_FILE=/path/to/local.genesis.env"; exit 1; }
+	$(GO) run ./cmd/genesis-seal --env-file=$(ENV_FILE)
 
 ## Install + verify every build-time tool the dev workflow needs:
 ## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
