@@ -1,10 +1,8 @@
-// Side-effect imports: the generated_*.ts modules augment
-// QueryClient via `declare module` + `QueryClient.prototype.<name> =
-// ...`. Importing them here guarantees the prototype assignments run
-// once consumers import anything from `@znasllc-io/memql-sdk/client`.
-import "./generated_queries.js";
-import "./generated_mutations.js";
-import "./generated_logics.js";
+// Client-agnostic runtime core. The typed query/mutation/logic
+// methods are NOT here by design -- each product BFF generates them
+// from its DSL and layers them onto QueryClient (via `declare module`
+// + prototype augmentation) in the product SDK, e.g.
+// @visionarys-io/copresent-sdk, which re-exports this core.
 
 export { Connection, type ConnectOptions, type ConnectionAuth } from "./connection.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";

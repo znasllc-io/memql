@@ -295,25 +295,29 @@ db:
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
-## methods on both the Go SDK (sdk/go/client.QueryClient) and the TS
-## SDK (sdk/ts/src/client/QueryClient). Re-run after any DSL change
-## that touches a construct's args / signature / shape. The drift
-## gate (sdk-gen-check) catches stale checkouts in CI.
+## methods on the Go SDK (sdk/go/client.QueryClient). The TS typed
+## methods are no longer generated here -- the runtime core
+## (@znasllc-io/memql-sdk-core, sdk/ts) is client-agnostic, and each
+## product BFF generates its own typed surface from core + its DSL
+## (see #171 / #172 / #43). Re-run after any DSL change that touches a
+## construct's args / signature / shape. The drift gate
+## (sdk-gen-check) catches stale checkouts in CI.
 sdk-gen:
-	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
+	$(GO) run ./scripts/sdk-gen --dsl=dsl --out=sdk/go/client --ts-out=
 
 ## CI gate: regenerate, then diff against the checked-in tree. Fails
 ## if the DSL evolved without the generator running. Pair with
 ## `make sdk-gen` locally to fix.
 sdk-gen-check:
-	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
+	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
 
-## Install TS SDK dev dependencies (typescript). Idempotent.
+## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
+## (typescript). Idempotent.
 sdk-ts-install:
 	cd sdk/ts && npm install --no-audit --no-fund
 
-## Typecheck the TS SDK. Runs `tsc --noEmit` against sdk/ts. CI gates
-## the generated TS surface through this target. Requires node + npm.
+## Typecheck the runtime core. Runs `tsc --noEmit` against sdk/ts. CI
+## gates the core SDK through this target. Requires node + npm.
 sdk-ts-typecheck:
 	cd sdk/ts && npm run typecheck
 
