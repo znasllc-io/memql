@@ -1,11 +1,13 @@
-// QueryClient is the typed entry point for query / mutation / logic
-// dispatch. Consumers go through the generated typed methods on this
-// class (see generated_*.ts) -- raw DSL strings are forbidden by the
-// named-primitive contract (sdk/go/CLAUDE.md rule #1).
+// QueryClient is the base dispatch surface for query / mutation /
+// logic calls. The product SDK (e.g. @visionarys-io/copresent-sdk)
+// generates typed methods from its DSL and layers them onto this
+// class via `declare module` + prototype augmentation; consumers call
+// those typed methods, never raw DSL strings (the named-primitive
+// contract, sdk/go/CLAUDE.md rule #1). executeNamed is the entry
+// point every generated method dispatches through.
 //
 // listConcepts and getMyAccess are hand-rolled escapes for surfaces
-// that have no DSL counterpart (admin / settings panes). Anything
-// else lives in the DSL and reaches the SDK via sdk-gen.
+// that have no DSL counterpart (admin / settings panes).
 
 import type { Dispatcher } from "./dispatcher.js";
 import {

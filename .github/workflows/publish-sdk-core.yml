@@ -1,0 +1,38 @@
+name: publish-sdk-core
+
+# Publishes @znasllc-io/memql-sdk-core (sdk/ts) to GitHub Packages.
+# Trigger by pushing a tag like `memql-sdk-core-v0.1.0`, or run
+# manually via workflow_dispatch. Bump sdk/ts/package.json "version"
+# before tagging -- npm refuses to republish an existing version.
+on:
+  push:
+    tags:
+      - 'memql-sdk-core-v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/ts
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@znasllc-io'
+      - name: install deps
+        run: npm install --no-audit --no-fund
+      - name: build
+        run: npm run build
+      - name: publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
