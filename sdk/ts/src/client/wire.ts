@@ -69,6 +69,45 @@ export interface SITranscribeStreamEndPayload {
   cancel?: boolean;
 }
 
+// One-shot SI envelopes (chat / speech / transcribe / suggest).
+// Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
+// component/grpc/memql.proto::SIChatMsg .. SISuggestMsg). Replies
+// are correlated to the originating envelope's messageId via
+// correlateTo, not via the per-payload requestId.
+
+export interface SIChatMessageWire {
+  role: string;
+  content: string;
+  name?: string;
+}
+
+export interface SIChatPayload {
+  requestId: string;
+  messages: SIChatMessageWire[];
+  provider?: string;
+  stream?: boolean;
+}
+
+export interface SISpeechPayload {
+  requestId: string;
+  input: string;
+  voice?: string;
+  format?: string; // "wav" | "mp3" | "ogg" | ...
+  provider?: string;
+}
+
+export interface SITranscribePayload {
+  requestId: string;
+  audio: string; // base64-encoded bytes
+  mimeType?: string;
+}
+
+export interface SISuggestPayload {
+  requestId: string;
+  domain: string;
+  payload?: Record<string, unknown>; // google.protobuf.Struct -> plain object
+}
+
 // MemqlClientMessage oneof. Exactly one payload field must be set.
 export type ClientMessage = MessageBase & ClientPayload;
 
@@ -87,6 +126,10 @@ type ClientPayload =
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
   | { myAccess: MyAccessPayload }
+  | { siChat: SIChatPayload }
+  | { siSpeech: SISpeechPayload }
+  | { siTranscribe: SITranscribePayload }
+  | { siSuggest: SISuggestPayload }
   | { siTranscribeStreamStart: SITranscribeStreamStartPayload }
   | { siTranscribeStreamChunk: SITranscribeStreamChunkPayload }
   | { siTranscribeStreamEnd: SITranscribeStreamEndPayload };
@@ -179,6 +222,45 @@ export interface SITranscribeStreamCompletePayload {
   provider?: string;
 }
 
+// One-shot SI reply envelopes. SIChatResult mirrors SIChatMsg (the
+// streaming-chat path interleaves SIStreamChunk frames for in-progress
+// deltas and lands a terminal SIChatResult with the assembled message).
+export interface SIChatResultPayload {
+  requestId: string;
+  message?: SIChatMessageWire;
+}
+
+export interface SISpeechResultPayload {
+  requestId: string;
+  audio?: string; // base64-encoded bytes (protojson encoding of `bytes`)
+  format?: string;
+}
+
+export interface SITranscribeResultPayload {
+  requestId: string;
+  text?: string;
+}
+
+export interface SISuggestResultPayload {
+  requestId: string;
+  domain?: string;
+  result?: Record<string, unknown>;
+}
+
+// SIStreamChunk envelopes interleave during streaming chat. The
+// `chunk` oneof unmarshals to exactly one of `textDelta` (string),
+// `jsonDelta` (object), or `metadata` (object) per frame.
+export interface SIStreamChunkPayload {
+  streamId?: string;
+  provider?: string;
+  requestId: string;
+  index?: string | number;
+  textDelta?: string;
+  jsonDelta?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  done?: boolean;
+}
+
 export interface GraphBundleWire {
   nodes?: MemoryNodeWire[];
   edges?: unknown[];
@@ -235,6 +317,11 @@ type ServerPayload =
   | { conceptsListResult: ConceptsListResultPayload }
   | { myAccessResult: MyAccessResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
+  | { siChatResult: SIChatResultPayload }
+  | { siSpeechResult: SISpeechResultPayload }
+  | { siTranscribeResult: SITranscribeResultPayload }
+  | { siSuggestResult: SISuggestResultPayload }
+  | { siChunk: SIStreamChunkPayload }
   | { siTranscribeStreamDelta: SITranscribeStreamDeltaPayload }
   | { siTranscribeStreamComplete: SITranscribeStreamCompletePayload };
 
@@ -250,6 +337,11 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
+  | { kind: "siChatResult"; value: SIChatResultPayload }
+  | { kind: "siSpeechResult"; value: SISpeechResultPayload }
+  | { kind: "siTranscribeResult"; value: SITranscribeResultPayload }
+  | { kind: "siSuggestResult"; value: SISuggestResultPayload }
+  | { kind: "siChunk"; value: SIStreamChunkPayload }
   | { kind: "siTranscribeStreamDelta"; value: SITranscribeStreamDeltaPayload }
   | { kind: "siTranscribeStreamComplete"; value: SITranscribeStreamCompletePayload }
   | null {
@@ -265,6 +357,16 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
   if (m.rotateAuthResult)
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
+  if (m.siChatResult)
+    return { kind: "siChatResult", value: m.siChatResult as SIChatResultPayload };
+  if (m.siSpeechResult)
+    return { kind: "siSpeechResult", value: m.siSpeechResult as SISpeechResultPayload };
+  if (m.siTranscribeResult)
+    return { kind: "siTranscribeResult", value: m.siTranscribeResult as SITranscribeResultPayload };
+  if (m.siSuggestResult)
+    return { kind: "siSuggestResult", value: m.siSuggestResult as SISuggestResultPayload };
+  if (m.siChunk)
+    return { kind: "siChunk", value: m.siChunk as SIStreamChunkPayload };
   if (m.siTranscribeStreamDelta)
     return {
       kind: "siTranscribeStreamDelta",
@@ -282,9 +384,17 @@ export function readServerPayload(msg: ServerMessage):
 // streaming-protocol server message (mirrors sdk/go's streamRequestId
 // in dispatcher.go). Empty when the message does not belong to a
 // known streaming family.
+//
+// SIChatResult appears here so the terminal frame in a streaming chat
+// session (siChatStream, which uses dispatcher.send without
+// registering in `pending`) routes to the per-requestId stream
+// listener. The non-streaming siChat path uses sendAndWait, which
+// resolves on correlateTo before streamRequestId is consulted.
 export function streamRequestId(msg: ServerMessage): string {
   const m = msg as unknown as Record<string, { requestId?: string } | undefined>;
   if (m.siTranscribeStreamDelta?.requestId) return m.siTranscribeStreamDelta.requestId;
   if (m.siTranscribeStreamComplete?.requestId) return m.siTranscribeStreamComplete.requestId;
+  if (m.siChunk?.requestId) return m.siChunk.requestId;
+  if (m.siChatResult?.requestId) return m.siChatResult.requestId;
   return "";
 }

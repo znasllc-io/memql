@@ -70,6 +70,8 @@ jobs:
         run: make sdk-ts-install
       - name: typecheck sdk/ts
         run: make sdk-ts-typecheck
+      - name: test sdk/ts
+        run: make sdk-ts-test
 
   # DSL-lint gate. Runs `memql-cockpit lint dsl/` once the cockpit
   # binary is available on the runner (it lives in a separate repo,

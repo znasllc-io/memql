@@ -330,6 +330,13 @@ sdk-ts-install:
 sdk-ts-typecheck:
 	cd sdk/ts && npm run typecheck
 
+## Run the runtime-core test suite. Compiles src + test via the
+## tsconfig.test.json overlay and drives node:test against the
+## emitted JS. Zero new runtime deps -- uses Node's built-in
+## test runner. Requires node + npm.
+sdk-ts-test:
+	cd sdk/ts && npm test
+
 ## Run all tests
 test:
 	$(GO) test ./...
