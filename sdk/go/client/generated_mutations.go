@@ -5137,6 +5137,136 @@ func MutationMintSkillBuild(args MutationMintSkillArgs) string {
 	return b.String()
 }
 
+// MutationMoveGroupToPrivate -- Misroute Move action (private half): copy a group-thread v1:cognition:utterance into the caller's Team-tab thread as a new v1:cognition:privateUtterance row. forUserId is server-stamped from actor.userId so the caller cannot move into another user's Team thread. Same shape as mutationMovePrivateToGroup; only the destination concept differs. memql#190 / memql-bff-copresent#44 Phase 8.
+//
+// Bound concept: privateUtterance.
+type MutationMoveGroupToPrivateArgs struct {
+	NewUtteranceId  string
+	SpaceId         string
+	ParticipantId   string
+	ParticipantType string
+	Text            string
+	Source          map[string]any
+	// Timestamp from the source group utterance row. Carried for UI audit only.
+	OriginalTimestamp string
+}
+
+// MutationMoveGroupToPrivate calls the engine mutation mutationMoveGroupToPrivate.
+func (qc *QueryClient) MutationMoveGroupToPrivate(ctx context.Context, args MutationMoveGroupToPrivateArgs) (*Result, error) {
+	call := MutationMoveGroupToPrivateBuild(args)
+	return qc.executeNamed(ctx, "mutationMoveGroupToPrivate", call)
+}
+
+func MutationMoveGroupToPrivateBuild(args MutationMoveGroupToPrivateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMoveGroupToPrivate({")
+	if args.NewUtteranceId != "" {
+		b.WriteString("newUtteranceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.NewUtteranceId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("participantId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	if args.ParticipantType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("participantType: ")
+		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(renderMemQLValue(args.Source))
+	if args.OriginalTimestamp != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("originalTimestamp: ")
+		b.WriteString(fmt.Sprintf("%q", args.OriginalTimestamp))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationMovePrivateToGroup -- Misroute Move action (group half): copy a Team-tab privateUtterance into the group thread as a new v1:cognition:utterance row. The caller passes the original text + speaker; this mutation does NOT read the source row (the BFF/SPA composes the move pair). The companion mutationMoveGroupToPrivate handles the reverse direction. The source private row is left untouched; the calling layer soft-deletes it (or leaves it as audit trail) separately. memql#190 / memql-bff-copresent#44 Phase 8.
+//
+// Bound concept: utterance.
+type MutationMovePrivateToGroupArgs struct {
+	NewUtteranceId  string
+	SpaceId         string
+	ParticipantId   string
+	ParticipantType string
+	Text            string
+	Source          map[string]any
+	// Timestamp from the source privateUtterance row. Carried for UI audit only; the new row's createdAt is the move time, not the original send time.
+	OriginalTimestamp string
+}
+
+// MutationMovePrivateToGroup calls the engine mutation mutationMovePrivateToGroup.
+func (qc *QueryClient) MutationMovePrivateToGroup(ctx context.Context, args MutationMovePrivateToGroupArgs) (*Result, error) {
+	call := MutationMovePrivateToGroupBuild(args)
+	return qc.executeNamed(ctx, "mutationMovePrivateToGroup", call)
+}
+
+func MutationMovePrivateToGroupBuild(args MutationMovePrivateToGroupArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMovePrivateToGroup({")
+	if args.NewUtteranceId != "" {
+		b.WriteString("newUtteranceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.NewUtteranceId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("participantId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	if args.ParticipantType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("participantType: ")
+		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(renderMemQLValue(args.Source))
+	if args.OriginalTimestamp != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("originalTimestamp: ")
+		b.WriteString(fmt.Sprintf("%q", args.OriginalTimestamp))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationPersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
 //
 // Bound concept: taskState.
@@ -5252,6 +5382,90 @@ func MutationRecordLegalAcceptanceBuild(args MutationRecordLegalAcceptanceArgs) 
 	}
 	b.WriteString("legalAcceptance: ")
 	b.WriteString(renderMemQLValue(args.LegalAcceptance))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRecordMisrouteFeedback -- Append a v1:cognition:misrouteFeedback audit row capturing the classifier call + the user's response. Phase 8 tuning corpus -- driven by the wrong-tab classifier whose enable toggle is on User.preferences.misrouteSafetyEnabled. forUserId is server-stamped from actor.userId. memql#190 / memql-bff-copresent#44.
+//
+// Bound concept: misrouteFeedback.
+type MutationRecordMisrouteFeedbackArgs struct {
+	FeedbackId     string
+	SpaceId        string
+	OriginalThread string
+	IntendedThread string
+	Confidence     any
+	Why            string
+	Message        string
+	UtteranceId    string
+	MovedToId      string
+	UserAction     string
+}
+
+// MutationRecordMisrouteFeedback calls the engine mutation mutationRecordMisrouteFeedback.
+func (qc *QueryClient) MutationRecordMisrouteFeedback(ctx context.Context, args MutationRecordMisrouteFeedbackArgs) (*Result, error) {
+	call := MutationRecordMisrouteFeedbackBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordMisrouteFeedback", call)
+}
+
+func MutationRecordMisrouteFeedbackBuild(args MutationRecordMisrouteFeedbackArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordMisrouteFeedback({")
+	if args.FeedbackId != "" {
+		b.WriteString("feedbackId: ")
+		b.WriteString(fmt.Sprintf("%q", args.FeedbackId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("originalThread: ")
+	b.WriteString(fmt.Sprintf("%q", args.OriginalThread))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intendedThread: ")
+	b.WriteString(fmt.Sprintf("%q", args.IntendedThread))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	if args.Why != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("why: ")
+		b.WriteString(fmt.Sprintf("%q", args.Why))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("message: ")
+	b.WriteString(fmt.Sprintf("%q", args.Message))
+	if args.UtteranceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("utteranceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+	}
+	if args.MovedToId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("movedToId: ")
+		b.WriteString(fmt.Sprintf("%q", args.MovedToId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userAction: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserAction))
 	b.WriteString("})")
 	return b.String()
 }
@@ -6106,6 +6320,70 @@ func MutationSendActionUtteranceBuild(args MutationSendActionUtteranceArgs) stri
 	}
 	b.WriteString("action: ")
 	b.WriteString(renderMemQLValue(args.Action))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSendPrivateUtterance -- Insert a v1:cognition:privateUtterance into the caller's Team-tab thread. forUserId is server-stamped from actor.userId -- the caller cannot land a private utterance in another user's thread regardless of what they pass. Mirrors mutationSendTextUtterance but writes to the privateUtterance concept. memql#190 / memql-bff-copresent#44.
+//
+// Bound concept: privateUtterance.
+type MutationSendPrivateUtteranceArgs struct {
+	UtteranceId     string
+	SpaceId         string
+	ParticipantId   string
+	ParticipantType string
+	Text            string
+	ReplyToId       string
+	Source          map[string]any
+}
+
+// MutationSendPrivateUtterance calls the engine mutation mutationSendPrivateUtterance.
+func (qc *QueryClient) MutationSendPrivateUtterance(ctx context.Context, args MutationSendPrivateUtteranceArgs) (*Result, error) {
+	call := MutationSendPrivateUtteranceBuild(args)
+	return qc.executeNamed(ctx, "mutationSendPrivateUtterance", call)
+}
+
+func MutationSendPrivateUtteranceBuild(args MutationSendPrivateUtteranceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSendPrivateUtterance({")
+	if args.UtteranceId != "" {
+		b.WriteString("utteranceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("participantId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
+	if args.ParticipantType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("participantType: ")
+		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if args.ReplyToId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("replyToId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }

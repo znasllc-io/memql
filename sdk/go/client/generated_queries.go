@@ -2122,6 +2122,35 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 	return b.String()
 }
 
+// QuerySpacePrivateUtterancesForViewer -- Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
+type QuerySpacePrivateUtterancesForViewerArgs struct {
+	SpaceId string
+	// Accepted for SDK shape parity with querySpaceUtterances + the SPA's hook signature; the filter binds to actor.userId regardless.
+	ViewerUserId string
+}
+
+// QuerySpacePrivateUtterancesForViewer calls the engine query querySpacePrivateUtterancesForViewer.
+func (qc *QueryClient) QuerySpacePrivateUtterancesForViewer(ctx context.Context, args QuerySpacePrivateUtterancesForViewerArgs) (*Result, error) {
+	call := QuerySpacePrivateUtterancesForViewerBuild(args)
+	return qc.executeNamed(ctx, "querySpacePrivateUtterancesForViewer", call)
+}
+
+func QuerySpacePrivateUtterancesForViewerBuild(args QuerySpacePrivateUtterancesForViewerArgs) string {
+	var b strings.Builder
+	b.WriteString("querySpacePrivateUtterancesForViewer({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.ViewerUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("viewerUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ViewerUserId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
 //
 // Bound concept: utterance.

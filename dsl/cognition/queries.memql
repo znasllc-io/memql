@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, micState, participant, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, context, micState, participant, privateUtterance, session, space, utterance, videoOverride }
 
 @enabled
 @description("Get active human participants in a space")
@@ -526,4 +526,36 @@ query videoOverride queryVideoOverridesForSpace {
   }
   filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); traitIsActiveRecord
   shape   videoOverrideFull
+}
+
+// ---- queries/v1/cognition/spacePrivateUtterances.memql ----
+
+// querySpacePrivateUtterancesForViewer
+// =====================================
+//
+// Returns the caller's Team-tab utterances in a space -- the private
+// thread sister of querySpaceUtterances. Filter MUST gate on
+// forUserId==actor.userId so a caller can NEVER read another user's
+// private thread regardless of what they pass for viewerUserId.
+// viewerUserId is accepted for SDK ergonomics (matches the SPA's
+// useUtteranceSubscription hook shape) but is ignored by the filter
+// -- actor.userId is the only thing that gates the row set.
+//
+// Authz tier: owned. The forUserId predicate is the load-bearing
+// guard; do not relax to a `?.payload.forUserId==args.viewerUserId`
+// arg-conditional, which would let a caller passing viewerUserId=""
+// dodge the gate.
+//
+// memql#190 / memql-bff-copresent#44.
+
+@enabled
+@useConcept(privateUtterance)
+@description("Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.")
+query querySpacePrivateUtterancesForViewer {
+  args {
+    spaceId       string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
+    viewerUserId  string  @description("Accepted for SDK shape parity with querySpaceUtterances + the SPA's hook signature; the filter binds to actor.userId regardless.")
+  }
+  filter  payload.spaceId==args.spaceId; payload.forUserId==actor.userId
+  shape   privateUtteranceFull
 }
