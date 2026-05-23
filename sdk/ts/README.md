@@ -87,21 +87,68 @@ const final = await pushToTalk(conn.dispatcher, audioStream, {
 });
 ```
 
+### SI (chat / speech / transcribe / suggest)
+
+One-shot SI ops on `MemqlService.Stream`. Each helper takes the
+connection's `Dispatcher` directly and returns a typed result.
+
+```ts
+import { siChat, siChatStream, siSpeech, siTranscribe, siSuggest }
+  from "@znasllc-io/memql-sdk-core/si";
+
+// Non-streaming chat
+const reply = await siChat(conn.dispatcher, [
+  { role: "user", content: "Hi there" },
+], { provider: "chat54Mini" });
+
+// Streaming chat
+const handle = siChatStream(conn.dispatcher, [
+  { role: "user", content: "Stream me a story" },
+]);
+for await (const delta of handle.deltas) {
+  if (delta.textDelta) process.stdout.write(delta.textDelta);
+}
+const finalReply = await handle.result;
+
+// Text-to-speech
+const audio = await siSpeech(conn.dispatcher, "Hello there", {
+  voice: "alto",
+  format: "wav",
+});
+
+// One-shot transcription (streaming STT lives in /voice)
+const transcript = await siTranscribe(conn.dispatcher, audioBytes, {
+  mimeType: "audio/wav",
+});
+
+// Suggest (spaces / spaceTitle / agents / groups / *CardSummary / knowledge)
+const suggestion = await siSuggest(conn.dispatcher, "spaceTitle", {
+  description: "a brainstorm session",
+});
+```
+
+All five accept `{ signal }` for cancellation and throw on
+`QueryError` replies or transport failure.
+
 ## Exports
 
 - `.` -- `Connection`, `Dispatcher`, `QueryClient`,
   `SubscriptionManager`, `Result` + row accessors
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
-  `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`).
+  `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
+  re-exports `si` and `voice` as namespace objects.
 - `./client` -- the same client surface.
+- `./si` -- `siChat`, `siChatStream`, `siSpeech`, `siTranscribe`,
+  `siSuggest` and their types.
 - `./voice` -- `pushToTalk` and its types.
 
-## Build
+## Build & test
 
 ```
 npm run build     # tsc -> dist
 npm run typecheck # tsc --noEmit
+npm test          # compile + run node:test against the SI/voice surface
 ```
 
 ESM only, strict TypeScript, browser-targeted (`lib: ES2022 + DOM`).
