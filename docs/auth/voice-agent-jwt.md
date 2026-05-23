@@ -36,18 +36,50 @@ regular auth chain.
 Each running voice-agent process needs one provisioned token,
 delivered into its `VOICE_AGENT_TOKEN` env var before startup.
 
-1. **Reserve an instance id** for the process (e.g.
-   `voice-agent-prod-us-east-1`). Appears in audit logs.
-2. **Mint a `v1:identity:identity` row** with
-   `identityType="voice_agent_token"` and the credential variant
-   fields: `instanceId`, `keyHash` (SHA-256 of the plain token),
-   `mintedBy`, `expiresAt` (default `now + 90d`).
-3. **Sign a `class="voice_agent"` JWT** via
-   `JWTIssuer.IssueVoiceAgentAccessToken(VoiceAgentIssueInput{...})`.
-   The plain compact-form bearer is returned ONCE.
-4. **Copy the bearer** into the voice-agent's `VOICE_AGENT_TOKEN`
-   env var. The voice-agent attaches `Authorization: Bearer
-   ${TOKEN}` on every outbound `MemqlService.Stream` dial.
+### The mint subcommand
+
+The identity binary ships a `voice-agent-token mint` subcommand that
+runs both steps in one call. Because the identity service owns the
+signing key, the subcommand must run as the identity binary itself
+(typically `docker exec` into the live container):
+
+```bash
+# Dev (against the local cluster):
+make voice-agent-token INSTANCE=voice-agent-local
+
+# Equivalent direct invocation:
+docker exec memql-identity /app/memql voice-agent-token mint \
+  --instance-id=voice-agent-local
+
+# Optional flags:
+#   --ttl=720h           Token lifetime (default 90d).
+#   --out=/path/token    Write to file (0600) instead of stdout.
+#   --minted-by=<userId> Audit attribution (default system:voice-agent-token-cli).
+```
+
+The subcommand prints the compact-form bearer to stdout. Diagnostic
+output (identity id, instance id, expiry) goes to stderr so capture
+patterns like `TOKEN=$(make voice-agent-token ...)` work.
+
+### What the subcommand does
+
+1. **Mints a `v1:identity:identity` row** with
+   `identityType="voice_agent_token"` carrying `instanceId`,
+   `keyHash` (SHA-256 of an auxiliary random bearer the subcommand
+   generates and discards), `mintedBy`, and `expiresAt = now + TTL`.
+2. **Signs a `class="voice_agent"` JWT** via
+   `JWTIssuer.IssueVoiceAgentAccessToken(VoiceAgentIssueInput{...})`
+   bound to the freshly minted identity row.
+3. **Returns the JWT** -- this is what becomes
+   `VOICE_AGENT_TOKEN`. The auxiliary bearer hashed into `keyHash`
+   is never printed; the JWT is the only credential the voice-agent
+   ever sees. The hash satisfies the schema's `@required` contract
+   and gives operators a stable fingerprint for audit correlation.
+
+The voice-agent attaches `Authorization: Bearer ${TOKEN}` on every
+outbound `MemqlService.Stream` dial; the
+voice-agent-stream-interceptor on the BFF accepts the JWT and pins
+the call to the `VoiceAgent*` payload types.
 
 ## Rotation
 
@@ -67,7 +99,10 @@ row (`active=false`). The verifier's per-stream revocation watcher
 
 ## Out of scope
 
-- **Automated provisioning CLI.** Two-call sequence for now.
+- **Automated token rotation / refresh.** Voice-agent JWTs have no
+  refresh path; rotation is manual re-mint + restart. Periodic
+  rotation could be wrapped by a cron or deploy-time helper, but
+  the credential itself does not refresh in place.
 - **Multi-tenant voice-agent topology.** The interceptor admits one
   class per call; multi-tenant routing (which tenant owns this
   voice-agent process?) would need extra claims.

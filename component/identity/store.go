@@ -451,6 +451,35 @@ func (s *Store) CreateIdentityMagicLink(ctx context.Context, identityId, userId,
 	return nil
 }
 
+// CreateIdentityVoiceAgentToken creates a v1:identity:identity row with
+// the voice_agent_token variant for a Python voice-agent process.
+// keyHash is the SHA-256 hex digest of an auxiliary random bearer; the
+// actual auth credential handed to the voice-agent is a
+// class="voice_agent" JWT signed via
+// JWTIssuer.IssueVoiceAgentAccessToken (the caller signs after this
+// row is persisted, since the JWT's `sub` claim is the identityId
+// stamped here). expiresAt is RFC3339Nano; empty string is allowed
+// for "no expiry stamped yet."
+func (s *Store) CreateIdentityVoiceAgentToken(
+	ctx context.Context,
+	identityId, userId, instanceId, keyHash, mintedBy, expiresAt, label string,
+) error {
+	var b strings.Builder
+	b.WriteString(`mutationCreateVoiceAgentTokenIdentity({`)
+	writeKVString(&b, "identityId", identityId, true)
+	writeKVString(&b, "userId", userId, false)
+	writeKVString(&b, "instanceId", instanceId, false)
+	writeKVString(&b, "keyHash", keyHash, false)
+	writeKVString(&b, "mintedBy", mintedBy, false)
+	writeKVString(&b, "expiresAt", expiresAt, false)
+	writeKVString(&b, "label", label, false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return fmt.Errorf("identity.store: create voice_agent_token identity: %w", err)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Auth sessions
 // ---------------------------------------------------------------------------

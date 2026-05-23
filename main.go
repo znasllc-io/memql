@@ -34,6 +34,17 @@ var (
 )
 
 func main() {
+	// Subcommand dispatch -- intercept before bootstrapping the full
+	// service stack. Subcommands handle their own lifecycle (build
+	// dependencies, do the work, exit). The dispatch table is
+	// build-tag-gated; binaries that lack the relevant deps surface
+	// "subcommand X is not available on this binary" at runtime.
+	if len(os.Args) > 1 {
+		if handled, code := dispatchSubcommand(os.Args[1:]); handled {
+			os.Exit(code)
+		}
+	}
+
 	serviceLogger := mustCreateServiceLogger()
 
 	// Layer repo-root /.env on top of whatever the host shell + genesis

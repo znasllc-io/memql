@@ -165,3 +165,15 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 func (a *App) fatal(msg string, args ...any) {
 	a.overrides.FatalWithLogger(a.Logger, msg, args...)
 }
+
+// Engine exposes the MemQL engine wired during the engine-and-bus phase.
+// Used by operator subcommands (mint, etc.) that bootstrap the App but
+// don't bring up transport. Nil until engineAndBus() has run.
+func (a *App) Engine() *memql.MemQLEngine { return a.engine }
+
+// IdentityService exposes the identity service wired during the
+// identity integrations phase. Returned as `any` to keep
+// component/identity out of non-identity builds' import graphs; the
+// identity-tagged subcommand handler type-asserts back to
+// *identity.Service. Nil on binaries built without -tags identity.
+func (a *App) IdentityService() any { return a.identityService }
