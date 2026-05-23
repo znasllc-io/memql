@@ -458,3 +458,57 @@ test("AudioClient -- socket close fails in-flight iterators", async () => {
   void activeSocket;
   client.close();
 });
+
+test("AudioClient -- untargeted error frame fails all in-flight handlers", async () => {
+  const { client, socket } = await dialTestAudio();
+
+  // Two transcribe streams + one synthesize stream in flight.
+  const t1 = client.transcribe({
+    spaceId: "spc",
+    participantId: "ptp",
+    format: "pcm16",
+    sampleRate: 16000,
+    channels: 1,
+  });
+  const t2 = client.transcribe({
+    spaceId: "spc",
+    participantId: "ptp",
+    format: "pcm16",
+    sampleRate: 16000,
+    channels: 1,
+  });
+  const s1 = client.synthesize({ text: "hi" });
+
+  const consumeT1 = (async () => {
+    for await (const _ev of t1.events) {
+      /* drain */
+    }
+  })();
+  const consumeT2 = (async () => {
+    for await (const _ev of t2.events) {
+      /* drain */
+    }
+  })();
+  const sawSynthEnd = (async () => {
+    for await (const ev of s1.events) {
+      if (ev.kind === "ended") return ev;
+    }
+    return null;
+  })();
+
+  // Server emits an error frame with NO streamId / requestId --
+  // connection-level fault (auth, server shutdown, malformed
+  // handshake). Every in-flight handler should learn immediately.
+  socket.pushServer({
+    type: "error",
+    error: { code: "unauthorized", message: "bearer token expired" },
+  });
+
+  await assert.rejects(consumeT1, /AudioClient: bearer token expired/);
+  await assert.rejects(consumeT2, /AudioClient: bearer token expired/);
+  const synthEnd = await sawSynthEnd;
+  assert.ok(synthEnd, "synthesize iterator must yield an ended event");
+  assert.match(synthEnd!.error, /AudioClient: bearer token expired/);
+
+  client.close();
+});
