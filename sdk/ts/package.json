@@ -18,6 +18,10 @@
       "types": "./dist/identity/index.d.ts",
       "import": "./dist/identity/index.js"
     },
+    "./realtime": {
+      "types": "./dist/realtime/index.d.ts",
+      "import": "./dist/realtime/index.js"
+    },
     "./si": {
       "types": "./dist/si/index.d.ts",
       "import": "./dist/si/index.js"
