@@ -133,6 +133,16 @@ export interface EvaluatePolicyPayload {
   returnTrace?: boolean;
 }
 
+// Polyphon -- LiveKit room token request. The room name + LiveKit
+// URL come back in the reply so the consumer can hand them to the
+// LiveKit client SDK without a separate config call.
+export interface PolyphonRoomTokenPayload {
+  requestId: string;
+  spaceId: string;
+  participantId: string;
+  displayName: string;
+}
+
 // One-shot SI envelopes (chat / speech / transcribe / suggest).
 // Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
 // component/grpc/memql.proto::SIChatMsg .. SISuggestMsg). Replies
@@ -206,7 +216,8 @@ type ClientPayload =
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
-  | { evaluatePolicy: EvaluatePolicyPayload };
+  | { evaluatePolicy: EvaluatePolicyPayload }
+  | { polyphonRoomToken: PolyphonRoomTokenPayload };
 
 // Server-side payloads. Untyped `any`-shaped fields appear where the
 // engine returns `google.protobuf.Struct` -- those decode to plain
@@ -433,6 +444,16 @@ export interface EvaluatePolicyResultPayload {
   errorMessage?: string;
 }
 
+// expiresAt is int64 unix seconds -- protojson encodes int64 as
+// either string or number depending on the runtime. We accept both.
+export interface PolyphonRoomTokenResultPayload {
+  requestId: string;
+  token?: string;
+  roomName?: string;
+  livekitUrl?: string;
+  expiresAt?: string | number;
+}
+
 export interface GraphBundleWire {
   nodes?: MemoryNodeWire[];
   edges?: unknown[];
@@ -505,7 +526,8 @@ type ServerPayload =
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
-  | { evaluatePolicyResult: EvaluatePolicyResultPayload };
+  | { evaluatePolicyResult: EvaluatePolicyResultPayload }
+  | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload };
 
 // Narrow a ServerMessage to its single payload entry. Returns the
 // first present payload key + its value, or null when the envelope
@@ -536,6 +558,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "evaluatePolicyResult"; value: EvaluatePolicyResultPayload }
+  | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | null {
   const m = msg as unknown as Record<string, unknown>;
   if (m.serverHello) return { kind: "serverHello", value: m.serverHello as ServerHelloPayload };
@@ -595,6 +618,11 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
   if (m.evaluatePolicyResult)
     return { kind: "evaluatePolicyResult", value: m.evaluatePolicyResult as EvaluatePolicyResultPayload };
+  if (m.polyphonRoomTokenResult)
+    return {
+      kind: "polyphonRoomTokenResult",
+      value: m.polyphonRoomTokenResult as PolyphonRoomTokenResultPayload,
+    };
   return null;
 }
 

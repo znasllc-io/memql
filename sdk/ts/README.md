@@ -130,6 +130,55 @@ const suggestion = await siSuggest(conn.dispatcher, "spaceTitle", {
 All five accept `{ signal }` for cancellation and throw on
 `QueryError` replies or transport failure.
 
+### Realtime media
+
+`polyphonRoomToken` rides the main dispatcher (sendAndWait) and
+mints a short-lived LiveKit room token for joining a space's voice
+room. `dialAudio` opens a SEPARATE WebSocket to `/memql/audio` for
+the older streaming-STT + streaming-TTS protocol used by the
+CoPresent SPA. The audio client stamps the same `bearer_token` /
+`guest_token` / `worker_token` query string on the URL the main
+Connection uses.
+
+```ts
+import { polyphonRoomToken, dialAudio } from "@znasllc-io/memql-sdk-core/realtime";
+
+// LiveKit room token (browser hands roomName + livekitUrl to the
+// LiveKit client SDK).
+const t = await polyphonRoomToken(conn.dispatcher, {
+  spaceId: "spc-1",
+  participantId: "ptp-1",
+  displayName: "Alice",
+});
+liveKitRoom.connect(t.livekitUrl, t.token);
+
+// Audio WS -- streaming STT.
+const audio = await dialAudio({
+  endpoint: "wss://app.copresent.ai/memql/audio",
+  auth: { bearer: jwt },
+});
+const stt = audio.transcribe({
+  spaceId: "spc-1",
+  participantId: "ptp-1",
+  format: "opus",
+  sampleRate: 48000,
+  channels: 1,
+});
+mediaRecorder.ondataavailable = (ev) => stt.pushBytes(new Uint8Array(await ev.data.arrayBuffer()));
+for await (const ev of stt.events) {
+  if (ev.isFinal) finalize(ev.text, ev.utteranceId);
+  else renderPartial(ev.text);
+}
+
+// Audio WS -- streaming TTS.
+const tts = audio.synthesize({ text: "Hello", voice: "nova", format: "wav" });
+for await (const ev of tts.events) {
+  if (ev.kind === "chunk") playChunk(ev.audioBase64);
+  if (ev.kind === "ended") finalize();
+}
+audio.close();
+```
+
 ### Identity & access
 
 Guest invites, worker tokens, session revocation, and policy
@@ -193,9 +242,13 @@ else applyResult(decision.result);
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
   `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
-  re-exports `identity`, `si`, and `voice` as namespace objects.
+  re-exports `identity`, `realtime`, `si`, and `voice` as namespace
+  objects.
 - `./client` -- the same client surface.
 - `./identity` -- the 10 identity & access methods listed above.
+- `./realtime` -- `polyphonRoomToken` (LiveKit token mint via the
+  main stream) + `AudioClient` / `dialAudio` (separate WS for
+  streaming STT + TTS on `/memql/audio`).
 - `./si` -- `siChat`, `siChatStream`, `siSpeech`, `siTranscribe`,
   `siSuggest` and their types.
 - `./voice` -- `pushToTalk` and its types.
