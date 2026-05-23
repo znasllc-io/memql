@@ -93,6 +93,37 @@ function check_mkcert() {
     echo "  [ok] mkcert"
 }
 
+function check_ngrok() {
+    # dev-refresh's lib_refresh_ngrok publishes a public
+    # LIVEKIT_PUBLIC_URL so the Anam avatar cloud engine (and any
+    # other external service that has to reach the local LiveKit)
+    # can hit it. Without ngrok the voice-agent still works in
+    # audio-only via the internal "ws://livekit:7880" URL, but the
+    # avatar plugin fails to negotiate -- so the full voice+video
+    # loop on dev needs ngrok present + authed.
+    #
+    # Non-blocking (matches mkcert): the dev stack still comes up.
+    # We surface the hint so a fresh contributor doesn't burn an
+    # hour wondering why the avatar isn't rendering.
+    if ! command -v ngrok >/dev/null 2>&1; then
+        echo "  HINT: ngrok is not installed -- voice-agent runs audio-only without it."
+        case "$(uname -s)" in
+            Darwin) echo "        Install: brew install ngrok" ;;
+            Linux)  echo "        Install: snap install ngrok  (or https://ngrok.com/download)" ;;
+            *)      echo "        Install: see https://ngrok.com/download" ;;
+        esac
+        echo "        Then: ngrok config add-authtoken <your-token>"
+        echo "        (Not blocking; the voice+video loop needs ngrok for the public LIVEKIT_PUBLIC_URL.)"
+        return 0
+    fi
+    if ! ngrok config check >/dev/null 2>&1; then
+        echo "  HINT: ngrok installed but unauthenticated -- run 'ngrok config add-authtoken <your-token>'."
+        echo "        (Not blocking; voice-agent runs audio-only without the public LIVEKIT_PUBLIC_URL.)"
+        return 0
+    fi
+    echo "  [ok] ngrok (authed)"
+}
+
 function install_protoc() {
     if command -v protoc >/dev/null 2>&1; then
         local version
@@ -226,6 +257,7 @@ function main() {
     check_go
     check_docker
     check_mkcert
+    check_ngrok
     install_protoc
     install_protoc_go_plugins
     summary
