@@ -98,7 +98,7 @@ healthcheck:
 # The legacy Go Bridge Agent was retired in Initiative C Phase 11.
 # ---------------------------------------------------------------------------
 
-.PHONY: voice-agent voice-agent-run voice-agent-test voice-agent-docker voice-loop-test-livekit
+.PHONY: voice-agent voice-agent-run voice-agent-test voice-agent-docker voice-loop-test-livekit voice-agent-token
 
 ## Install Python deps + regenerate proto stubs for the voice-agent process.
 ## Idempotent. Re-run after editing pyproject.toml or memql.proto.
@@ -120,6 +120,20 @@ voice-agent-docker:
 		--build-arg AVATAR=$${AVATAR:-anam} \
 		-f voice-agent/Dockerfile \
 		-t memql-voice-agent:dev .
+
+## Mint a class="voice_agent" JWT for the running local cluster's
+## voice-agent process. Execs the identity binary inside the
+## memql-identity container so the mint runs against the same DB +
+## Ed25519 key the live service uses, then prints the bearer to
+## stdout. Used by scripts/dev/refresh.sh to inject
+## VOICE_AGENT_TOKEN at bring-up. Override INSTANCE / TTL / OUT as
+## needed; defaults match the dev compose setup. See
+## docs/auth/voice-agent-jwt.md.
+voice-agent-token:
+	@docker exec memql-identity /app/memql voice-agent-token mint \
+		--instance-id="$${INSTANCE:-voice-agent-local}" \
+		$${TTL:+--ttl=$$TTL} \
+		$${OUT:+--out=$$OUT}
 
 ## End-to-end voice-loop test against the LiveKit Agents path
 ## (replaces voice-loop-test-deepgram once Phase 10 cutover lands).

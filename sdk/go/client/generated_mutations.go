@@ -3798,6 +3798,68 @@ func MutationCreateValidationEventBuild(args MutationCreateValidationEventArgs) 
 	return b.String()
 }
 
+// MutationCreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for a Python voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
+//
+// Bound concept: identity.
+type MutationCreateVoiceAgentTokenIdentityArgs struct {
+	IdentityId string
+	UserId     string
+	InstanceId string
+	KeyHash    string
+	MintedBy   string
+	ExpiresAt  string
+	Label      string
+}
+
+// MutationCreateVoiceAgentTokenIdentity calls the engine mutation mutationCreateVoiceAgentTokenIdentity.
+func (qc *QueryClient) MutationCreateVoiceAgentTokenIdentity(ctx context.Context, args MutationCreateVoiceAgentTokenIdentityArgs) (*Result, error) {
+	call := MutationCreateVoiceAgentTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateVoiceAgentTokenIdentity", call)
+}
+
+func MutationCreateVoiceAgentTokenIdentityBuild(args MutationCreateVoiceAgentTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateVoiceAgentTokenIdentity({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("instanceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.InstanceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.Label != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(fmt.Sprintf("%q", args.Label))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
 //
 // Bound concept: invocation.
