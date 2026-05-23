@@ -2034,6 +2034,34 @@ func QuerySpaceContextBuild(args QuerySpaceContextArgs) string {
 	return b.String()
 }
 
+// QuerySpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
+type QuerySpaceMediaArgs struct {
+	SpaceId   string
+	MediaType string
+}
+
+// QuerySpaceMedia calls the engine query querySpaceMedia.
+func (qc *QueryClient) QuerySpaceMedia(ctx context.Context, args QuerySpaceMediaArgs) (*Result, error) {
+	call := QuerySpaceMediaBuild(args)
+	return qc.executeNamed(ctx, "querySpaceMedia", call)
+}
+
+func QuerySpaceMediaBuild(args QuerySpaceMediaArgs) string {
+	var b strings.Builder
+	b.WriteString("querySpaceMedia({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if args.MediaType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mediaType: ")
+		b.WriteString(fmt.Sprintf("%q", args.MediaType))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySpaceMeta -- Returns the full space record by id.
 //
 // Bound concept: space.

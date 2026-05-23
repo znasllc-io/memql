@@ -2,7 +2,34 @@
 // Per-construct DSL layout: every <kind>s.memql file in a domain
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
+
+use common.concepts.{ media }
+
+// ---- queries/v1/common/spaceMedia.memql ----
+
+// querySpaceMedia -- list v1:common:media rows attached to a space.
 //
-// No queries in common yet. memqlVersion() is the builtin clients
-// call directly for service-version probes; the previous wrapper
-// query had no callers and was removed.
+// Surfaced for the CoPresent SPA's `useMedia(spaceId, filters)` hook
+// (visionarys-io/copresent src/hooks/useCopresent.ts:1359). The hook
+// returns Media[] for the space's audio / video / image / document
+// attachments. SPA callers may pass an optional mediaType filter --
+// the arg-conditional `?.payload.mediaType` predicate fires only
+// when the caller supplies it; an absent filter returns every type.
+//
+// Authz tier: granted. The spaceId arg gates the row set; partition
+// isolation prevents cross-tenant leakage. Matches the pattern of
+// the sibling `querySpaceUtterances` in dsl/cognition/queries.memql.
+//
+// memql-bff-copresent#44 (audit) + memql#191.
+
+@enabled
+@useConcept(media)
+@description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).")
+query querySpaceMedia {
+  args {
+    spaceId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
+    mediaType  string
+  }
+  filter  payload.spaceId==args.spaceId; ?.payload.mediaType==args.mediaType
+  shape   mediaFull
+}
