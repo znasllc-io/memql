@@ -35,6 +35,13 @@ type Dispatcher struct {
 	stopCh       chan struct{}                               // closed on any termination
 	unexpectedCh chan struct{}                               // closed only on stream error
 	sendMu       sync.Mutex                                  // serializes writes to the stream
+
+	// clientTools holds the registered inbound ClientToolCall
+	// handler (memql#174). One handler at a time -- callers route
+	// per-tool inside their handler body. nil-handler envelopes are
+	// dropped + warned; the server-side agent loop times out per
+	// the deadline it ships with each call.
+	clientTools *clientToolHandlerRegistry
 }
 
 // NewDispatcher creates a dispatcher for the given stream.
@@ -47,6 +54,7 @@ func NewDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger
 		eventCh:      make(chan *memqlv1.MemqlServerMessage, 256),
 		stopCh:       make(chan struct{}),
 		unexpectedCh: make(chan struct{}),
+		clientTools:  &clientToolHandlerRegistry{},
 	}
 }
 
@@ -104,6 +112,20 @@ func (d *Dispatcher) Run() {
 				ch <- msg
 				continue
 			}
+		}
+
+		// Inbound client-tool dispatch (memql#174). The server's
+		// agent loop pushes ClientToolCall envelopes when it resolves
+		// a tool marked client_execution=true. Hand off to the
+		// registered handler (if any); the result ships back as a
+		// ClientToolResult correlated by call_id from inside
+		// dispatchClientToolCall's goroutine. Always handled here --
+		// these are not surfaced on the Events() channel because the
+		// dispatch contract is "exactly one handler" rather than the
+		// fan-out semantics Events() carries.
+		if call := msg.GetClientToolCall(); call != nil {
+			d.dispatchClientToolCall(call)
+			continue
 		}
 
 		// Streaming-session routing: messages on multi-reply protocols
