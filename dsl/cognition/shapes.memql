@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, micState, participant, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, context, micState, misrouteFeedback, participant, privateUtterance, session, space, utterance, videoOverride }
 
 @row
 @description("Per-(space, agent) audio override projection")
@@ -124,4 +124,44 @@ shape videoOverride videoOverrideFull {
   payload.mode
   payload.active
   row.createdAt
+}
+
+// ---- shapes/v1/cognition/privateUtteranceFull.memql ----
+
+@row
+@description("Full projection of a v1:cognition:privateUtterance row. Mirrors v1:cognition:utteranceFull's payload coverage so the SPA's Team-tab renderer can reuse the same UI components -- only the source concept differs. forUserId is included so the frontend can sanity-check the row belongs to the active viewer (defense in depth; the query already filters on it).")
+shape privateUtterance privateUtteranceFull {
+  row.id
+  payload.forUserId
+  payload.spaceId
+  payload.participantId
+  payload.participantType
+  payload.text
+  payload.utteranceType
+  payload.replyToId
+  payload.source
+  payload.active
+  payload.deleted
+  row.createdAt
+  row.createdBy
+}
+
+// ---- shapes/v1/cognition/misrouteFeedbackFull.memql ----
+
+@row
+@description("Full projection of a v1:cognition:misrouteFeedback row. Carries every field on the concept since the tuning corpus is the consumer (read by classifier-eval jobs); the SPA itself doesn't render these rows.")
+shape misrouteFeedback misrouteFeedbackFull {
+  row.id
+  payload.forUserId
+  payload.spaceId
+  payload.originalThread
+  payload.intendedThread
+  payload.confidence
+  payload.why
+  payload.message
+  payload.utteranceId
+  payload.movedToId
+  payload.userAction
+  row.createdAt
+  row.createdBy
 }

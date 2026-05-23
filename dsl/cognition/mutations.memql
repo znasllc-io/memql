@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, chunk, micState, participant, presence, response, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, chunk, micState, misrouteFeedback, participant, presence, privateUtterance, response, session, space, utterance, videoOverride }
 use identity.concepts.{ request }
 
 @enabled
@@ -1100,5 +1100,115 @@ mutation session mutationUpdateSessionStreams {
   insert session {
     id: args.sessionId
     args.payload
+  }
+}
+
+// ---- mutations/v1/cognition/sendPrivateUtterance.memql ----
+
+@enabled
+@description("Insert a v1:cognition:privateUtterance into the caller's Team-tab thread. forUserId is server-stamped from actor.userId -- the caller cannot land a private utterance in another user's thread regardless of what they pass. Mirrors mutationSendTextUtterance but writes to the privateUtterance concept. memql#190 / memql-bff-copresent#44.")
+mutation privateUtterance mutationSendPrivateUtterance {
+  args {
+    utteranceId      string
+    spaceId          string  @required
+    participantId    string  @required
+    participantType  string
+    text             string  @required
+    replyToId        string
+    source           object
+  }
+  insert privateUtterance {
+    forUserId:       actor.userId
+    args.spaceId
+    args.participantId
+    participantType: coalesce(args.participantType, "human")
+    utteranceType:   "text"
+    args.text
+    args.replyToId
+    args.source
+    active:          true
+    deleted:         false
+  }
+}
+
+// ---- mutations/v1/cognition/movePrivateToGroup.memql ----
+
+@enabled
+@description("Misroute Move action (group half): copy a Team-tab privateUtterance into the group thread as a new v1:cognition:utterance row. The caller passes the original text + speaker; this mutation does NOT read the source row (the BFF/SPA composes the move pair). The companion mutationMoveGroupToPrivate handles the reverse direction. The source private row is left untouched; the calling layer soft-deletes it (or leaves it as audit trail) separately. memql#190 / memql-bff-copresent#44 Phase 8.")
+mutation utterance mutationMovePrivateToGroup {
+  args {
+    newUtteranceId     string
+    spaceId            string  @required
+    participantId      string  @required
+    participantType    string
+    text               string  @required
+    source             object
+    originalTimestamp  string  @description("Timestamp from the source privateUtterance row. Carried for UI audit only; the new row's createdAt is the move time, not the original send time.")
+  }
+  insert utterance {
+    args.spaceId
+    args.participantId
+    participantType: coalesce(args.participantType, "human")
+    utteranceType:   "text"
+    args.text
+    args.source
+  }
+}
+
+// ---- mutations/v1/cognition/moveGroupToPrivate.memql ----
+
+@enabled
+@description("Misroute Move action (private half): copy a group-thread v1:cognition:utterance into the caller's Team-tab thread as a new v1:cognition:privateUtterance row. forUserId is server-stamped from actor.userId so the caller cannot move into another user's Team thread. Same shape as mutationMovePrivateToGroup; only the destination concept differs. memql#190 / memql-bff-copresent#44 Phase 8.")
+mutation privateUtterance mutationMoveGroupToPrivate {
+  args {
+    newUtteranceId     string
+    spaceId            string  @required
+    participantId      string  @required
+    participantType    string
+    text               string  @required
+    source             object
+    originalTimestamp  string  @description("Timestamp from the source group utterance row. Carried for UI audit only.")
+  }
+  insert privateUtterance {
+    forUserId:       actor.userId
+    args.spaceId
+    args.participantId
+    participantType: coalesce(args.participantType, "human")
+    utteranceType:   "text"
+    args.text
+    args.source
+    active:          true
+    deleted:         false
+  }
+}
+
+// ---- mutations/v1/cognition/recordMisrouteFeedback.memql ----
+
+@enabled
+@description("Append a v1:cognition:misrouteFeedback audit row capturing the classifier call + the user's response. Phase 8 tuning corpus -- driven by the wrong-tab classifier whose enable toggle is on User.preferences.misrouteSafetyEnabled. forUserId is server-stamped from actor.userId. memql#190 / memql-bff-copresent#44.")
+mutation misrouteFeedback mutationRecordMisrouteFeedback {
+  args {
+    feedbackId       string
+    spaceId          string  @required
+    originalThread   string  @required
+    intendedThread   string  @required
+    confidence       float   @required
+    why              string
+    message          string  @required
+    utteranceId      string
+    movedToId        string
+    userAction       string  @required
+  }
+  insert misrouteFeedback {
+    forUserId:       actor.userId
+    args.spaceId
+    args.originalThread
+    args.intendedThread
+    args.confidence
+    args.why
+    args.message
+    args.utteranceId
+    args.movedToId
+    args.userAction
   }
 }

@@ -381,3 +381,44 @@ concept unmetCapability {
 
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
 }
+
+// ---- concepts/v1/cognition/privateUtterance/concept.memql ----
+
+@version("1.0.0")
+@namespace("cognition")
+@description("Per-user 'Team-tab' utterance -- the private thread sister of v1:cognition:utterance. Each row lives in exactly one user's Team thread inside a space (the row's forUserId names the owner); the group thread reads NEVER surface it. forUserId is SERVER-STAMPED from actor.userId on insert -- callers cannot land a privateUtterance in someone else's thread regardless of what they pass. Authz tier: owned. Driven by the SPA's Team-tab + misroute Move flows (visionarys-io/copresent#44, Phase 8). Spec ref: memql#190.")
+concept privateUtterance {
+  forUserId        string  @required @description("The user whose Team-tab thread owns this row. Server-stamped from actor.userId pre-insert by every mutation in this concept.")
+  spaceId          string  @required @description("Owning space.")
+  participantId    string  @required @description("v1:cognition:participant.id of the speaker. May be a human (the owner) OR an SI (an agent reply in the Team thread).")
+  participantType  enum("human", "si", "system") @description("Denormalized from participant for filtering. Mirrors v1:cognition:utterance.participantType.")
+  text             string  @description("Text content -- typed or transcribed.")
+  utteranceType    enum("speech", "text", "action", "system")  @required @description("Same enum as v1:cognition:utterance.utteranceType; carried so the renderer doesn't have to branch on concept.")
+  replyToId        string  @description("Optional reply-to utterance id. Cross-thread allowed for misroute Move (a reply in the private thread to a group-thread utterance).")
+  source           object  @description("Same shape as v1:cognition:utterance.source -- inputMethod / pipeline / sttProvider / etc.")
+  active           bool    @default("true") @description("Soft-deactivate flag.")
+  deleted          bool    @default("false") @description("Soft-delete flag.")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="interactsWith", field="participantId", target="v1:cognition:participant", direction="outgoing")
+}
+
+// ---- concepts/v1/cognition/misrouteFeedback/concept.memql ----
+
+@version("1.0.0")
+@namespace("cognition")
+@description("Append-only audit row capturing the misroute classifier's prediction and the user's response. Phase 8 feedback corpus -- drives tuning of the wrong-tab gating classifier whose toggle is exposed in CoPresent's Conversation Preferences (misrouteSafetyEnabled). forUserId is SERVER-STAMPED from actor.userId pre-insert. One row per classifier-gated send: when the user moves the message, dismisses the warning, the timeout fires, or the classifier blocks outright. Authz tier: owned. Spec ref: memql#190.")
+concept misrouteFeedback {
+  forUserId        string  @required @description("User whose send action triggered the classifier. Server-stamped from actor.userId pre-insert.")
+  spaceId          string  @required @description("Space the send was scoped to.")
+  originalThread   enum("group", "private")  @required @description("Tab the user was typing into when the classifier fired.")
+  intendedThread   enum("group", "private")  @required @description("Tab the classifier predicted as the better fit.")
+  confidence       float   @required @description("Classifier confidence 0.0-1.0.")
+  why              string  @description("Classifier rationale -- free text the model emits alongside its decision.")
+  message          string  @required @description("The original message text the classifier scored.")
+  utteranceId      string  @description("Source utterance id when the row was persisted (the user wasn't blocked at send time).")
+  movedToId        string  @description("Destination utterance id when userAction='moved'. Empty otherwise.")
+  userAction       enum("moved", "dismissed", "timeout", "blocked") @required @description("How the user responded. 'moved' = clicked Move, classifier won; 'dismissed' = clicked Send anyway; 'timeout' = warning auto-collapsed; 'blocked' = hard-block prevented send entirely.")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+}
