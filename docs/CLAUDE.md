@@ -98,6 +98,7 @@ authoritative source.
 
 | File | What |
 |------|------|
+| `bringup-verification.md` | Operator runbook for end-to-end voice-agent verification. Documents the dev env contract (which var sources which path), the `make voice-loop-test-livekit` smoke check, and the manual round-trip. Read after `make dev-refresh` to confirm voice actually works. |
 | `eou-tuning.md` | Voice end-of-utterance (EOU) tuning -- Deepgram `endpointing_ms` / `utterance_end_ms` knobs + a design seed for per-user adaptive endpointing. Read before re-tuning Deepgram or starting on the adaptive layer. |
 
 ---
