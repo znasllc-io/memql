@@ -251,6 +251,41 @@ func (b *Base) ReadWord() string {
 	return sb.String()
 }
 
+// ReadIdentWithHyphens reads an identifier that also accepts the
+// hyphen character (`-`) as a name-internal rune. The first
+// character must still be a Go-identifier start (letter or `_`);
+// hyphens are admitted from the second character onward, never
+// at the start.
+//
+// Used by parsers that accept kebab-case names where the underlying
+// concept naturally uses slug-style ids (seed names like
+// `graphic-designer` for role catalog seeds; memql#180). Most DSL
+// parsers should stay on ReadWord -- queries / mutations / shapes /
+// etc. carry Go-style names that map to generated client methods,
+// where hyphens would be a poor fit.
+func (b *Base) ReadIdentWithHyphens() string {
+	if b.EOF() {
+		return ""
+	}
+	first := b.Peek()
+	if !(unicode.IsLetter(rune(first)) || first == '_') {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteByte(first)
+	b.Advance()
+	for !b.EOF() {
+		ch := b.Peek()
+		if unicode.IsLetter(rune(ch)) || unicode.IsDigit(rune(ch)) || ch == '_' || ch == '-' {
+			sb.WriteByte(ch)
+			b.Advance()
+			continue
+		}
+		break
+	}
+	return sb.String()
+}
+
 // MatchWord matches the literal at Pos with word-boundary semantics
 // (the byte after the literal must not be an identifier char).
 // Advances Pos + Col on match; leaves them untouched otherwise.

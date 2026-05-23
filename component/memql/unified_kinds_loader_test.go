@@ -87,6 +87,18 @@ func TestUnifiedLoadersCoverNewTree(t *testing.T) {
 		}
 	}
 
+	// Hyphenated seed names from the role catalog must materialize
+	// (memql#180). Before the fix the slicer regex + the seed
+	// parser both stopped at `-`, so these silently dropped at
+	// load time and the role catalog was missing every kebab-case
+	// entry. A regression here would re-empty those rows from the
+	// catalog.
+	for _, name := range []string{"graphic-designer", "ux-designer", "music-theory-teacher"} {
+		if _, ok := seedReg.Get(name); !ok {
+			t.Errorf("seed registry missing hyphenated role seed %q -- memql#180 regression?", name)
+		}
+	}
+
 	// Force-reference toolReg so the legacy import that used to
 	// hand it to LoadUnifiedAgents doesn't become unused.
 	_ = toolReg

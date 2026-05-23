@@ -374,3 +374,41 @@ func TestPosPlus(t *testing.T) {
 		t.Fatalf("PosPlus(99) = %d, want 4 (clamped)", got)
 	}
 }
+
+// TestReadIdentWithHyphens covers the kebab-case-name reader added
+// for memql#180 (seed loader silently dropped hyphenated names).
+// Hyphens are admitted from the second rune onward, never at the
+// start; the function stops at the first non-identifier-non-hyphen
+// rune.
+func TestReadIdentWithHyphens(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantRead string
+		// wantRemain is what should still be at the cursor afterwards.
+		wantRemain string
+	}{
+		{"graphic-designer", "graphic-designer", ""},
+		{"music-theory-teacher { ... }", "music-theory-teacher", " { ... }"},
+		{"copresent-voice-agents,", "copresent-voice-agents", ","},
+		// Plain identifier still works.
+		{"assistant", "assistant", ""},
+		// Underscore + digit mid-name accepted (same as ReadWord).
+		{"foo_bar2-baz", "foo_bar2-baz", ""},
+		// Leading hyphen rejected -- must start with letter or _.
+		{"-leading", "", "-leading"},
+		// Leading digit rejected per Go-identifier convention.
+		{"9designer", "", "9designer"},
+		// Trailing hyphen is greedily included; no special trim.
+		{"trailing-", "trailing-", ""},
+	}
+	for _, c := range cases {
+		b := newBase(c.in)
+		got := b.ReadIdentWithHyphens()
+		if got != c.wantRead {
+			t.Errorf("ReadIdentWithHyphens(%q) read %q, want %q", c.in, got, c.wantRead)
+		}
+		if remain := c.in[b.Pos:]; remain != c.wantRemain {
+			t.Errorf("ReadIdentWithHyphens(%q) left %q at cursor, want %q", c.in, remain, c.wantRemain)
+		}
+	}
+}
