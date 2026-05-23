@@ -27,7 +27,7 @@ source "${SCRIPT_DIR}/lib.sh"
 function step1_load_genesis() {
     require_genesis
     local path="${MEMQL_GENESIS_PATH:-$HOME/.memql/genesis.znas}"
-    echo "[1/6] Genesis loaded from $path (decrypted to $GENESIS_ENV_FILE)."
+    echo "[1/7] Genesis loaded from $path (decrypted to $GENESIS_ENV_FILE)."
 }
 
 function step2_export_running_state() {
@@ -36,17 +36,17 @@ function step2_export_running_state() {
     # runs -- LLM-seeded chunks aren't in genesis and would be burned
     # by the upcoming wipe otherwise.
     if ! docker ps --filter "name=^memql-db$" --filter "status=running" --format '{{.Names}}' | grep -q "memql-db"; then
-        echo "[2/6] No running cluster detected -- skipping knowledge backup."
+        echo "[2/7] No running cluster detected -- skipping knowledge backup."
         return 0
     fi
 
-    echo "[2/6] Backing up LLM-seeded knowledge chunks..."
+    echo "[2/7] Backing up LLM-seeded knowledge chunks..."
     bash "${SCRIPT_DIR}/knowledge-export.sh" || \
         echo "  WARNING: knowledge cache export failed; proceeding anyway."
 }
 
 function step3_wipe_and_restart() {
-    echo "[3/6] Wiping cockpit's cached credentials for 'local'..."
+    echo "[3/7] Wiping cockpit's cached credentials for 'local'..."
     # The cluster DB wipe below invalidates any owner identity that
     # was registered against the previous boot. Leaving the cached
     # token in place causes memql-cockpit to silently fail the dial
@@ -59,11 +59,11 @@ function step3_wipe_and_restart() {
     # unaffected.
     rm -f "${HOME}/.memql/credentials/local.json"
 
-    echo "[3/6] Cleaning up containers from sibling compose modes..."
+    echo "[3/7] Cleaning up containers from sibling compose modes..."
     cleanup_sibling_compose_modes
     nuke_stray_memql_containers
 
-    echo "[3/6] Stopping full-mode containers + wiping volumes (incl. orphans)..."
+    echo "[3/7] Stopping full-mode containers + wiping volumes (incl. orphans)..."
     $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON down -v --remove-orphans
 
     # After the docker stack is down, anything still listening on
@@ -83,17 +83,65 @@ function step3_wipe_and_restart() {
     # (handled by `|| true`) when ngrok is missing or .env.local
     # isn't shaped right, in which case Anam stays unreachable
     # this session but voice still works in audio-only.
-    echo "[3/6] Refreshing ngrok tunnel for LiveKit..."
+    echo "[3/7] Refreshing ngrok tunnel for LiveKit..."
     lib_refresh_ngrok || true
 
-    echo "[3/6] Rebuilding + starting full identity stack..."
+    echo "[3/7] Rebuilding + starting full identity stack..."
     $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON up -d --build --remove-orphans
 }
 
-function step4_wait_for_ready() {
+function step4_mint_voice_agent_token() {
+    # The voice-agent crash-loops on bring-up because
+    # VOICE_AGENT_TOKEN is empty -- the compose env-interpolation
+    # has no shell value to pull yet. Mint one against the
+    # freshly-up identity service and recreate the voice-agent
+    # container so the new shell-env value lands. Production
+    # injects this from the deploy pipeline's secret store the same
+    # way (see docs/auth/voice-agent-jwt.md).
+    echo "[4/7] Waiting for identity service to be healthy..."
+    if ! wait_for_identity 90 2; then
+        cat <<'EOF'
+
+  WARNING: identity service did not report healthy within 90s.
+  Skipping voice-agent-token mint; polyphon-voice-agent will
+  crash-loop until you re-run 'make voice-agent-token' + recreate
+  the service yourself.
+
+EOF
+        return 0
+    fi
+
+    echo "[4/7] Minting class=voice_agent JWT for polyphon-voice-agent..."
+    local token
+    token=$(mint_voice_agent_token "voice-agent-local" 2>/dev/null) || token=""
+    if [ -z "$token" ]; then
+        cat <<'EOF'
+
+  WARNING: voice-agent-token mint returned empty. Skipping
+  voice-agent recreate; the service will keep crash-looping.
+  Diagnose with:
+      docker exec memql-identity /app/memql voice-agent-token mint \
+          --instance-id=voice-agent-local
+
+EOF
+        return 0
+    fi
+
+    # Export into THIS shell so the upcoming `up -d` re-evaluates
+    # the ${VOICE_AGENT_TOKEN:-} interpolation in
+    # docker-compose.polyphon.yml with the fresh value. `restart`
+    # would not work -- compose bakes env interpolation at `up` /
+    # `recreate` time, not at restart.
+    export VOICE_AGENT_TOKEN="$token"
+
+    echo "[4/7] Recreating polyphon-voice-agent with the fresh token..."
+    $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON up -d --no-deps --force-recreate voice-agent
+}
+
+function step5_wait_for_ready() {
     local domain
     domain=$(lib_domain)
-    echo "[4/6] Waiting for memQL gRPC handshake on https://bff.${domain}..."
+    echo "[5/7] Waiting for memQL gRPC handshake on https://bff.${domain}..."
     if ! wait_for_memql 120 3; then
         cat <<'EOF'
 
@@ -106,8 +154,8 @@ EOF
     fi
 }
 
-function step5_seed_and_finish() {
-    echo "[5/6] Re-seeding secrets + variables from genesis..."
+function step6_seed_and_finish() {
+    echo "[6/7] Re-seeding secrets + variables from genesis..."
     if ! go run ./scripts/secrets seed --env-file="$GENESIS_ENV_FILE"; then
         cat <<EOF
 
@@ -122,13 +170,13 @@ EOF
     fi
 }
 
-function step6_restore_knowledge() {
+function step7_restore_knowledge() {
     # Restore the LLM-seeded knowledge cache that step2 captured.
     # Idempotent -- chunk ids are deterministic, so a no-op on a
     # fresh run that never seeded anything yet (cache file absent).
     # Best-effort -- if it fails we still print the dev status
     # block; the user can re-run 'make knowledge-restore' manually.
-    echo "[6/6] Restoring LLM-seeded knowledge chunks from cache..."
+    echo "[7/7] Restoring LLM-seeded knowledge chunks from cache..."
     bash "${SCRIPT_DIR}/knowledge-import.sh" || \
         echo "  WARNING: knowledge cache import failed; the dev stack is up but seed knowledge isn't restored."
     print_dev_status_block
@@ -143,7 +191,7 @@ function step0_install_deps() {
     # first run on a new machine actually does work. See
     # scripts/dev/install-deps.sh -- installs protoc + protoc-gen-go
     # plugins, verifies go/docker/mkcert are present.
-    echo "[0/6] Verifying dev dependencies..."
+    echo "[0/7] Verifying dev dependencies..."
     bash "${SCRIPT_DIR}/install-deps.sh" >/dev/null || {
         echo "  ERROR: dependency check failed. Run 'make install-deps' for the full diagnostic."
         exit 1
@@ -156,9 +204,10 @@ function main() {
     step1_load_genesis
     step2_export_running_state
     step3_wipe_and_restart
-    step4_wait_for_ready
-    step5_seed_and_finish
-    step6_restore_knowledge
+    step4_mint_voice_agent_token
+    step5_wait_for_ready
+    step6_seed_and_finish
+    step7_restore_knowledge
 }
 
 main "$@"

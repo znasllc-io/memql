@@ -85,12 +85,10 @@ services:
       # value lives where the rest of the dev env lives.
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
-      # VOICE_AGENT_TOKEN (the class="voice_agent" JWT) is sourced
-      # from .env.local via env_file (defined in
-      # docker-compose.full.yml's bff service). We don't re-declare
-      # it here because the `environment:` block overrides env_file
-      # and `${VAR:-}` would evaluate against an unset host shell
-      # var, shadowing the real value with empty.
+      # VOICE_AGENT_TOKEN is the voice-agent's own credential and
+      # is NOT consumed by the bff. dev-refresh mints it post-
+      # identity-up and injects it into the voice-agent service's
+      # shell-env path; see the voice-agent block below and #184.
     depends_on:
       - livekit
 
@@ -130,13 +128,22 @@ services:
         AVATAR: "${MEMQL_AVATAR_VENDOR:-anam}"
     container_name: polyphon-voice-agent
     hostname: voice-agent
-    # env_file is the source of truth for secrets sourced from
-    # .env.local (Deepgram key, Anam / Simli keys, shared token).
-    # DO NOT re-declare those keys under `environment:` -- compose
-    # treats the `environment:` block as overriding env_file, and
-    # `${VAR:-}` evaluates against the docker-compose-invoking
-    # SHELL (where these are not exported), which shadows the
-    # .env.local value with an empty string.
+    # env_file is the source of truth for vendor secrets sourced
+    # from .env.local (Deepgram key, Anam / Simli keys, vendor API
+    # keys). DO NOT re-declare those keys under `environment:` --
+    # compose treats the `environment:` block as overriding
+    # env_file, and `${VAR:-}` evaluates against the
+    # docker-compose-invoking SHELL (where vendor keys are not
+    # exported), which shadows the .env.local value with empty.
+    #
+    # VOICE_AGENT_TOKEN is the deliberate exception: it's an
+    # injected runtime credential minted by the identity service at
+    # bring-up (see scripts/dev/refresh.sh + #184), NOT a stored
+    # vendor secret. dev-refresh exports it into the calling shell
+    # before recreating this service so the `${VOICE_AGENT_TOKEN:-}`
+    # interpolation below picks it up; baking it into the sealed
+    # genesis envelope is the wrong fit because the token rotates
+    # each refresh.
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
@@ -147,6 +154,12 @@ services:
       LIVEKIT_API_SECRET: "secret"
       MEMQL_GRPC_ADDR: "bff:50051"
       VOICE_AGENT_LOG_LEVEL: "${VOICE_AGENT_LOG_LEVEL:-INFO}"
+      # Service-credential injection. Empty when the shell hasn't
+      # minted yet (the voice-agent will crash-loop until
+      # dev-refresh's mint-and-recreate step completes). Production
+      # injects this from the deploy pipeline's secret store the
+      # same way.
+      VOICE_AGENT_TOKEN: "${VOICE_AGENT_TOKEN:-}"
     depends_on:
       - livekit
       - bff

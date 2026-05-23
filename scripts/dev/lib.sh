@@ -240,6 +240,56 @@ function wait_for_memql() {
     return 1
 }
 
+# wait_for_identity polls the identity service's /healthz until it
+# returns `"status":"ok"` (with memoryNodesDB up) or the timeout
+# expires. The mint-voice-agent-token subcommand needs the identity
+# binary's DB + engine ready; this is the gate.
+#
+# Probes localhost:8081 directly (identity container's host port)
+# rather than https://identity.${domain} so the loop doesn't depend
+# on nginx + TLS being up. Returns 0 on success, 1 on timeout.
+#
+# Args:
+#   $1 = total timeout in seconds (default 60)
+#   $2 = poll interval in seconds (default 2)
+function wait_for_identity() {
+    local timeout=${1:-60}
+    local interval=${2:-2}
+    local waited=0
+    while [ "$waited" -lt "$timeout" ]; do
+        local out
+        out=$(curl -fsS http://localhost:8081/healthz 2>&1) || true
+        if echo "$out" | grep -q '"status":"ok"'; then
+            if echo "$out" | grep -q '"component":"memoryNodesDB","running":true'; then
+                echo "       identity healthy after ${waited}s."
+                return 0
+            fi
+        fi
+        sleep "$interval"
+        waited=$((waited + interval))
+    done
+    return 1
+}
+
+# mint_voice_agent_token execs the identity binary's
+# `voice-agent-token mint` subcommand inside the running
+# memql-identity container, captures the printed JWT, and echoes
+# it on stdout. Diagnostics from the subcommand land on stderr.
+# Empty output / non-zero return means the mint failed -- callers
+# bail.
+#
+# Uses a stable instance-id (voice-agent-local) so repeated
+# dev-refresh runs don't accumulate identity rows beyond ones that
+# expire on their own. The old rows soft-expire via expiresAt.
+#
+# Args:
+#   $1 = instance id (default voice-agent-local)
+function mint_voice_agent_token() {
+    local instance=${1:-voice-agent-local}
+    docker exec memql-identity /app/memql voice-agent-token mint \
+        --instance-id="${instance}"
+}
+
 # print_dev_status_block prints URLs + next-step commands. Called
 # at the end of a successful dev-refresh.
 function print_dev_status_block() {
