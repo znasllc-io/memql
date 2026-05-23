@@ -69,6 +69,70 @@ export interface SITranscribeStreamEndPayload {
   cancel?: boolean;
 }
 
+// Identity + access envelopes. Guest invites, worker tokens, session
+// revoke, and EvaluatePolicy. Mirror MemqlClientMessage oneof slots
+// 46..54 + 70 (proto schema: component/grpc/memql.proto).
+
+export interface SendGuestInvitePayload {
+  requestId: string;
+  spaceId: string;
+  spaceName: string;
+  inviterName: string;
+  email: string;
+  guestName?: string;
+  joinUrlBase: string;
+  expiresInMinutes?: number;
+}
+
+export interface ResolveGuestInvitePayload {
+  requestId: string;
+  token: string;
+}
+
+export interface JoinSpaceAsGuestPayload {
+  requestId: string;
+  participantId: string;
+  displayName: string;
+}
+
+export interface CancelGuestInvitePayload {
+  requestId: string;
+  invitationId: string;
+}
+
+export interface ResendGuestInviteEmailPayload {
+  requestId: string;
+  invitationId: string;
+  joinUrlBase: string;
+}
+
+export interface RevokeCurrentSessionPayload {
+  requestId: string;
+}
+
+export interface RevokeAllSessionsPayload {
+  requestId: string;
+}
+
+export interface CreateWorkerTokenPayload {
+  requestId: string;
+  name: string;
+  expiresAt?: string; // ISO8601, empty = no auto-expiry
+  ownerUserId?: string;
+}
+
+export interface RevokeWorkerTokenPayload {
+  requestId: string;
+  identityId: string;
+}
+
+export interface EvaluatePolicyPayload {
+  requestId: string;
+  policyName: string;
+  argsJson: string; // JSON-encoded args object; empty string = "{}"
+  returnTrace?: boolean;
+}
+
 // One-shot SI envelopes (chat / speech / transcribe / suggest).
 // Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
 // component/grpc/memql.proto::SIChatMsg .. SISuggestMsg). Replies
@@ -132,7 +196,17 @@ type ClientPayload =
   | { siSuggest: SISuggestPayload }
   | { siTranscribeStreamStart: SITranscribeStreamStartPayload }
   | { siTranscribeStreamChunk: SITranscribeStreamChunkPayload }
-  | { siTranscribeStreamEnd: SITranscribeStreamEndPayload };
+  | { siTranscribeStreamEnd: SITranscribeStreamEndPayload }
+  | { sendGuestInvite: SendGuestInvitePayload }
+  | { resolveGuestInvite: ResolveGuestInvitePayload }
+  | { joinSpaceAsGuest: JoinSpaceAsGuestPayload }
+  | { cancelGuestInvite: CancelGuestInvitePayload }
+  | { resendGuestInviteEmail: ResendGuestInviteEmailPayload }
+  | { revokeCurrentSession: RevokeCurrentSessionPayload }
+  | { revokeAllSessions: RevokeAllSessionsPayload }
+  | { createWorkerToken: CreateWorkerTokenPayload }
+  | { revokeWorkerToken: RevokeWorkerTokenPayload }
+  | { evaluatePolicy: EvaluatePolicyPayload };
 
 // Server-side payloads. Untyped `any`-shaped fields appear where the
 // engine returns `google.protobuf.Struct` -- those decode to plain
@@ -261,6 +335,104 @@ export interface SIStreamChunkPayload {
   done?: boolean;
 }
 
+// Identity + access reply envelopes. errorCode carries a short
+// machine-readable tag on partial failures (empty = success); see
+// memql.proto for the per-message tag set.
+
+export interface SendGuestInviteResultPayload {
+  requestId: string;
+  success?: boolean;
+  invitationId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface ResolveGuestInviteResultPayload {
+  requestId: string;
+  // "ok" | "invalid" | "expired" | "already_accepted" | "cancelled"
+  status?: string;
+  invitationId?: string;
+  spaceId?: string;
+  spaceName?: string;
+  inviterName?: string;
+  inviteeEmail?: string;
+  inviteeName?: string;
+  expiresAt?: string; // protojson timestamp -> ISO8601 string
+  errorMessage?: string;
+}
+
+export interface JoinSpaceAsGuestResultPayload {
+  requestId: string;
+  success?: boolean;
+  participantId?: string;
+  spaceId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface CancelGuestInviteResultPayload {
+  requestId: string;
+  success?: boolean;
+  invitationId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface ResendGuestInviteEmailResultPayload {
+  requestId: string;
+  success?: boolean;
+  invitationId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeCurrentSessionResultPayload {
+  requestId: string;
+  success?: boolean;
+  sessionId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeAllSessionsResultPayload {
+  requestId: string;
+  success?: boolean;
+  revokedCount?: number;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface CreateWorkerTokenResultPayload {
+  requestId: string;
+  success?: boolean;
+  plainToken?: string; // shown once; never persisted server-side
+  identityId?: string;
+  ownerUserId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface RevokeWorkerTokenResultPayload {
+  requestId: string;
+  success?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+// EvaluatePolicyResult carries the policy's return value as a
+// JSON-encoded string (the engine's canonical wire form). The SDK
+// helper decodes it to unknown for the caller. traceJson is empty
+// unless the caller passed returnTrace=true OR the policy carries
+// @returns_trace.
+export interface EvaluatePolicyResultPayload {
+  requestId: string;
+  resultJson?: string;
+  traceJson?: string;
+  // POLICY_UNKNOWN | POLICY_NOT_FRONTEND_VISIBLE | POLICY_TIER_MISMATCH | POLICY_RUNTIME_ERROR
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 export interface GraphBundleWire {
   nodes?: MemoryNodeWire[];
   edges?: unknown[];
@@ -323,7 +495,17 @@ type ServerPayload =
   | { siSuggestResult: SISuggestResultPayload }
   | { siChunk: SIStreamChunkPayload }
   | { siTranscribeStreamDelta: SITranscribeStreamDeltaPayload }
-  | { siTranscribeStreamComplete: SITranscribeStreamCompletePayload };
+  | { siTranscribeStreamComplete: SITranscribeStreamCompletePayload }
+  | { sendGuestInviteResult: SendGuestInviteResultPayload }
+  | { resolveGuestInviteResult: ResolveGuestInviteResultPayload }
+  | { joinSpaceAsGuestResult: JoinSpaceAsGuestResultPayload }
+  | { cancelGuestInviteResult: CancelGuestInviteResultPayload }
+  | { resendGuestInviteEmailResult: ResendGuestInviteEmailResultPayload }
+  | { revokeCurrentSessionResult: RevokeCurrentSessionResultPayload }
+  | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
+  | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
+  | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
+  | { evaluatePolicyResult: EvaluatePolicyResultPayload };
 
 // Narrow a ServerMessage to its single payload entry. Returns the
 // first present payload key + its value, or null when the envelope
@@ -344,6 +526,16 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "siChunk"; value: SIStreamChunkPayload }
   | { kind: "siTranscribeStreamDelta"; value: SITranscribeStreamDeltaPayload }
   | { kind: "siTranscribeStreamComplete"; value: SITranscribeStreamCompletePayload }
+  | { kind: "sendGuestInviteResult"; value: SendGuestInviteResultPayload }
+  | { kind: "resolveGuestInviteResult"; value: ResolveGuestInviteResultPayload }
+  | { kind: "joinSpaceAsGuestResult"; value: JoinSpaceAsGuestResultPayload }
+  | { kind: "cancelGuestInviteResult"; value: CancelGuestInviteResultPayload }
+  | { kind: "resendGuestInviteEmailResult"; value: ResendGuestInviteEmailResultPayload }
+  | { kind: "revokeCurrentSessionResult"; value: RevokeCurrentSessionResultPayload }
+  | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
+  | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
+  | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
+  | { kind: "evaluatePolicyResult"; value: EvaluatePolicyResultPayload }
   | null {
   const m = msg as unknown as Record<string, unknown>;
   if (m.serverHello) return { kind: "serverHello", value: m.serverHello as ServerHelloPayload };
@@ -377,6 +569,32 @@ export function readServerPayload(msg: ServerMessage):
       kind: "siTranscribeStreamComplete",
       value: m.siTranscribeStreamComplete as SITranscribeStreamCompletePayload,
     };
+  if (m.sendGuestInviteResult)
+    return { kind: "sendGuestInviteResult", value: m.sendGuestInviteResult as SendGuestInviteResultPayload };
+  if (m.resolveGuestInviteResult)
+    return { kind: "resolveGuestInviteResult", value: m.resolveGuestInviteResult as ResolveGuestInviteResultPayload };
+  if (m.joinSpaceAsGuestResult)
+    return { kind: "joinSpaceAsGuestResult", value: m.joinSpaceAsGuestResult as JoinSpaceAsGuestResultPayload };
+  if (m.cancelGuestInviteResult)
+    return { kind: "cancelGuestInviteResult", value: m.cancelGuestInviteResult as CancelGuestInviteResultPayload };
+  if (m.resendGuestInviteEmailResult)
+    return {
+      kind: "resendGuestInviteEmailResult",
+      value: m.resendGuestInviteEmailResult as ResendGuestInviteEmailResultPayload,
+    };
+  if (m.revokeCurrentSessionResult)
+    return {
+      kind: "revokeCurrentSessionResult",
+      value: m.revokeCurrentSessionResult as RevokeCurrentSessionResultPayload,
+    };
+  if (m.revokeAllSessionsResult)
+    return { kind: "revokeAllSessionsResult", value: m.revokeAllSessionsResult as RevokeAllSessionsResultPayload };
+  if (m.createWorkerTokenResult)
+    return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
+  if (m.revokeWorkerTokenResult)
+    return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
+  if (m.evaluatePolicyResult)
+    return { kind: "evaluatePolicyResult", value: m.evaluatePolicyResult as EvaluatePolicyResultPayload };
   return null;
 }
 
