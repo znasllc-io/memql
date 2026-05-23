@@ -31,13 +31,21 @@ type KeywordSlice struct {
 // the Form B import model; in that case NAME is the trailing
 // identifier (the slice name).
 //
+// The NAME identifier accepts hyphens (`-`) as an internal rune so
+// that kebab-case seed names like `graphic-designer` materialize
+// (memql#180). The slicer is intentionally permissive about the
+// name shape -- per-kind parsers downstream still enforce their
+// own naming rules. The optional binder-concept identifier stays
+// Go-style (no hyphens); concept names are by convention camelCase
+// across the catalog.
+//
 // Slice extent: preamble of @-attribute and comment lines walking
 // up from the header, through the matching close-brace below it.
 // String + line-comment aware brace balancing.
 func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 	headerRe := regexp.MustCompile(
 		`(?m)^[ \t]*` + regexp.QuoteMeta(keyword) +
-			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
 	)
 	matches := headerRe.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {

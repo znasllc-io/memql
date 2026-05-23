@@ -252,3 +252,71 @@ func TestParseSeedMemQL_Rejects(t *testing.T) {
 		})
 	}
 }
+
+// TestParseSeedMemQL_HyphenatedNames pins the kebab-case-name fix
+// from memql#180. Before the fix the seed parser called
+// baseparser.ReadWord(), which stopped at the first `-`; a seed
+// declared as `seed agentRole graphic-designer { ... }` parsed
+// with name="graphic" and then errored on the trailing
+// `-designer`, so the seed silently dropped at load time.
+// Hyphenated names now flow through cleanly via
+// ReadIdentWithHyphens.
+func TestParseSeedMemQL_HyphenatedNames(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string // expected decl.name
+	}{
+		{
+			name: "two-identifier signature with kebab-case name",
+			src: `
+@description("Graphic designer role.")
+seed agentRole graphic-designer {
+  id:       "graphic-designer"
+  roleSlug: "graphic-designer"
+  domains:  ["design"]
+}
+`,
+			want: "graphic-designer",
+		},
+		{
+			name: "multi-hyphen name",
+			src: `
+@description("Music theory teacher.")
+seed agentRole music-theory-teacher {
+  id:       "music-theory-teacher"
+  roleSlug: "music-theory-teacher"
+  domains:  ["music"]
+}
+`,
+			want: "music-theory-teacher",
+		},
+		{
+			name: "legacy single-identifier form with file-top use clause",
+			src: `
+use agents.skill
+
+@description("Copresent canvas skill.")
+seed copresent-canvas {
+  id:    "copresent-canvas"
+  slug:  "copresent-canvas"
+  name:  "Copresent Canvas"
+  tier:  "A"
+}
+`,
+			want: "copresent-canvas",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decl, err := parseSeedMemQL(tc.want+".memql", []byte(tc.src))
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if decl.name != tc.want {
+				t.Errorf("name = %q, want %q (hyphens must be preserved)", decl.name, tc.want)
+			}
+		})
+	}
+}

@@ -167,7 +167,13 @@ func (p *seedMemQLParser) parse(origin string) (*seedDecl, error) {
 
 		if p.MatchWord("seed") {
 			p.SkipWhitespaceAndComments()
-			first := p.ReadWord()
+			// Read the first identifier with ReadIdentWithHyphens so
+			// kebab-case seed names like `graphic-designer` are
+			// accepted (memql#180). When the signature is the canonical
+			// `seed <Concept> <name>` two-identifier shape, the binder
+			// concept (first) is by convention Go-style camelCase --
+			// the hyphen-tolerant reader handles both shapes uniformly.
+			first := p.ReadIdentWithHyphens()
 			if first == "" {
 				return nil, fmt.Errorf("%s:%d:%d: expected seed name after 'seed'", origin, p.Line, p.Col)
 			}
@@ -178,7 +184,7 @@ func (p *seedMemQLParser) parse(origin string) (*seedDecl, error) {
 			// shape that still requires a file-top `use ns.concept`
 			// clause. We disambiguate by peeking past the next word.
 			if !p.EOF() && p.Peek() != '{' {
-				second := p.ReadWord()
+				second := p.ReadIdentWithHyphens()
 				if second != "" {
 					// `seed Concept name { ... }` -- concept binding
 					// lives in the signature. Reject a duplicate
