@@ -81,6 +81,55 @@ outbound `MemqlService.Stream` dial; the
 voice-agent-stream-interceptor on the BFF accepts the JWT and pins
 the call to the `VoiceAgent*` payload types.
 
+## Bring-up injection (dev + prod)
+
+`VOICE_AGENT_TOKEN` is an **injected runtime credential**, not a
+stored secret. It is minted at bring-up and lives only in the
+process environment of the voice-agent container -- the sealed
+genesis envelope (dev) and the deploy pipeline's secret store
+(prod) do NOT carry it.
+
+### Dev (`make dev-refresh`)
+
+`scripts/dev/refresh.sh` mints and injects the token automatically
+after the identity service is healthy:
+
+1. Stack comes up via `docker compose up`. The voice-agent
+   crash-loops because `VOICE_AGENT_TOKEN` is empty.
+2. `wait_for_identity` polls `http://localhost:8081/healthz` until
+   the identity service reports `status=ok` with `memoryNodesDB`
+   running.
+3. `mint_voice_agent_token` execs the identity binary's
+   `voice-agent-token mint --instance-id=voice-agent-local`
+   subcommand and captures the JWT.
+4. The script exports `VOICE_AGENT_TOKEN` into its shell and runs
+   `docker compose up -d --no-deps --force-recreate voice-agent`
+   so compose re-evaluates `${VOICE_AGENT_TOKEN:-}` in
+   `docker-compose.polyphon.yml`'s voice-agent `environment:` block.
+   (Plain `restart` doesn't work -- compose bakes env
+   interpolation at `up`/`recreate` time, not at restart.)
+
+The instance id is stable across refreshes (`voice-agent-local`),
+so each refresh mints a fresh JWT against a freshly inserted
+`v1:identity:identity` row; old rows soft-expire via `expiresAt`.
+
+### Prod
+
+The deploy pipeline does the same dance:
+
+1. Identity service comes up first (or is already up).
+2. The pipeline runs `voice-agent-token mint --instance-id=<env-instance-id>`
+   against the identity binary in the production cluster.
+3. The minted JWT lands in the deploy pipeline's secret store
+   (Cloud Run env vars, Secret Manager, etc.) and is injected as
+   `VOICE_AGENT_TOKEN` into the voice-agent container at startup.
+4. Rotation = re-mint + re-inject + restart on the same cadence
+   (no in-place refresh path).
+
+Operators who want to skip the live mint (air-gapped deploys, etc.)
+can capture the bearer with `--out=/path/to/token` and feed it into
+the secret store manually. The plain bearer is shown ONCE per mint.
+
 ## Rotation
 
 Voice-agent JWTs default to a 90-day TTL
