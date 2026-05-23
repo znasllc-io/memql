@@ -130,6 +130,62 @@ const suggestion = await siSuggest(conn.dispatcher, "spaceTitle", {
 All five accept `{ signal }` for cancellation and throw on
 `QueryError` replies or transport failure.
 
+### Identity & access
+
+Guest invites, worker tokens, session revocation, and policy
+evaluation. The five guest-invite ops, both session-revoke ops, and
+the two worker-token ops mirror their proto shapes 1:1. Typed
+`errorCode` strings (e.g. `invalid_email`, `unauthenticated`,
+`POLICY_NOT_FRONTEND_VISIBLE`) ride the returned object so callers
+can branch without a try/catch; `QueryError` on the dispatcher path
+still throws.
+
+```ts
+import {
+  sendGuestInvite, resolveGuestInvite, joinSpaceAsGuest,
+  cancelGuestInvite, resendGuestInviteEmail,
+  revokeCurrentSession, revokeAllSessions,
+  createWorkerToken, revokeWorkerToken,
+  evaluatePolicy,
+} from "@znasllc-io/memql-sdk-core/identity";
+
+// Guest invites
+const invite = await sendGuestInvite(conn.dispatcher, {
+  spaceId: "spc-1",
+  spaceName: "Brainstorm",
+  inviterName: "Alice",
+  email: "guest@example.com",
+  joinUrlBase: "https://app.copresent.ai",
+  expiresInMinutes: 15,
+});
+
+// Unauthenticated /join/<token> lookup
+const lookup = await resolveGuestInvite(conn.dispatcher, token);
+if (lookup.status === "ok") {
+  await joinSpaceAsGuest(conn.dispatcher, {
+    participantId: newShortId(),
+    displayName: "Guesty",
+  });
+}
+
+// Per-device + cross-device sign-out
+await revokeCurrentSession(conn.dispatcher);
+await revokeAllSessions(conn.dispatcher);
+
+// Worker tokens -- plainToken is shown ONCE; capture it now
+const token = await createWorkerToken(conn.dispatcher, { name: "macbook" });
+await revokeWorkerToken(conn.dispatcher, token.identityId);
+
+// Policy evaluation -- frontend-visible bff-tier policies only
+const decision = await evaluatePolicy(conn.dispatcher, {
+  policyName: "canArchiveSpace",
+  args: { spaceId: "spc-1" },
+  returnTrace: true,
+});
+if (decision.errorCode) handleRejection(decision.errorCode);
+else applyResult(decision.result);
+```
+
 ## Exports
 
 - `.` -- `Connection`, `Dispatcher`, `QueryClient`,
@@ -137,8 +193,9 @@ All five accept `{ signal }` for cancellation and throw on
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
   `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
-  re-exports `si` and `voice` as namespace objects.
+  re-exports `identity`, `si`, and `voice` as namespace objects.
 - `./client` -- the same client surface.
+- `./identity` -- the 10 identity & access methods listed above.
 - `./si` -- `siChat`, `siChatStream`, `siSpeech`, `siTranscribe`,
   `siSuggest` and their types.
 - `./voice` -- `pushToTalk` and its types.
@@ -148,7 +205,7 @@ All five accept `{ signal }` for cancellation and throw on
 ```
 npm run build     # tsc -> dist
 npm run typecheck # tsc --noEmit
-npm test          # compile + run node:test against the SI/voice surface
+npm test          # compile + run node:test against the identity/SI/voice surface
 ```
 
 ESM only, strict TypeScript, browser-targeted (`lib: ES2022 + DOM`).
