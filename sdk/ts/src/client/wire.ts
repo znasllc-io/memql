@@ -143,6 +143,38 @@ export interface PolyphonRoomTokenPayload {
   displayName: string;
 }
 
+// MCP-shaped tool RPC + client-execution dispatch envelopes.
+// memql#174. ListTools / CallTool are outbound (consumer -> server);
+// ClientToolCall is inbound (server -> consumer) for tools marked
+// client_execution=true; ClientToolResult is the consumer's reply
+// correlated by callId.
+
+export interface ListToolsPayload {
+  requestId: string;
+  cursor?: string;
+}
+
+export interface CallToolPayload {
+  requestId: string;
+  name: string;
+  arguments?: Record<string, unknown>; // google.protobuf.Struct -> plain object
+}
+
+export interface ClientToolResultPayload {
+  callId: string;
+  content: ToolResultContentWire[];
+  isError: boolean;
+  errorMessage?: string;
+}
+
+export interface ToolResultContentWire {
+  type: string; // "text" | "image" | "resource"
+  text?: string;
+  mimeType?: string;
+  data?: string; // base64 for "image"
+  uri?: string;
+}
+
 // One-shot SI envelopes (chat / speech / transcribe / suggest).
 // Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
 // component/grpc/memql.proto::SIChatMsg .. SISuggestMsg). Replies
@@ -217,7 +249,10 @@ type ClientPayload =
   | { createWorkerToken: CreateWorkerTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
   | { evaluatePolicy: EvaluatePolicyPayload }
-  | { polyphonRoomToken: PolyphonRoomTokenPayload };
+  | { polyphonRoomToken: PolyphonRoomTokenPayload }
+  | { listTools: ListToolsPayload }
+  | { callTool: CallToolPayload }
+  | { clientToolResult: ClientToolResultPayload };
 
 // Server-side payloads. Untyped `any`-shaped fields appear where the
 // engine returns `google.protobuf.Struct` -- those decode to plain
@@ -454,6 +489,43 @@ export interface PolyphonRoomTokenResultPayload {
   expiresAt?: string | number;
 }
 
+// MCP tool reply envelopes + the inbound ClientToolCall the server
+// pushes for client-execution tools.
+
+export interface ToolDefinitionWire {
+  name?: string;
+  description?: string;
+  inputSchema?: string; // JSON Schema (string)
+  clientExecution?: boolean;
+  scopes?: string[];
+}
+
+export interface ListToolsResultPayload {
+  requestId: string;
+  tools?: ToolDefinitionWire[];
+  nextCursor?: string;
+}
+
+export interface CallToolResultPayload {
+  requestId: string;
+  content?: ToolResultContentWire[];
+  isError?: boolean;
+}
+
+// ClientToolCall is INBOUND on the server message envelope. Carries
+// a per-call callId the consumer must echo back on its
+// ClientToolResult. timeoutMs is the budget the server is willing
+// to wait; the consumer should reply with isError=true rather than
+// timing out silently so the agent reasoning trace stays coherent.
+export interface ClientToolCallPayload {
+  callId: string;
+  turnId?: string;
+  agentId?: string;
+  toolName: string;
+  argumentsJson?: string;
+  timeoutMs?: number;
+}
+
 export interface GraphBundleWire {
   nodes?: MemoryNodeWire[];
   edges?: unknown[];
@@ -527,7 +599,10 @@ type ServerPayload =
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
   | { evaluatePolicyResult: EvaluatePolicyResultPayload }
-  | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload };
+  | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
+  | { listToolsResult: ListToolsResultPayload }
+  | { callToolResult: CallToolResultPayload }
+  | { clientToolCall: ClientToolCallPayload };
 
 // Narrow a ServerMessage to its single payload entry. Returns the
 // first present payload key + its value, or null when the envelope
@@ -559,6 +634,9 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "evaluatePolicyResult"; value: EvaluatePolicyResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
+  | { kind: "listToolsResult"; value: ListToolsResultPayload }
+  | { kind: "callToolResult"; value: CallToolResultPayload }
+  | { kind: "clientToolCall"; value: ClientToolCallPayload }
   | null {
   const m = msg as unknown as Record<string, unknown>;
   if (m.serverHello) return { kind: "serverHello", value: m.serverHello as ServerHelloPayload };
@@ -623,6 +701,12 @@ export function readServerPayload(msg: ServerMessage):
       kind: "polyphonRoomTokenResult",
       value: m.polyphonRoomTokenResult as PolyphonRoomTokenResultPayload,
     };
+  if (m.listToolsResult)
+    return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
+  if (m.callToolResult)
+    return { kind: "callToolResult", value: m.callToolResult as CallToolResultPayload };
+  if (m.clientToolCall)
+    return { kind: "clientToolCall", value: m.clientToolCall as ClientToolCallPayload };
   return null;
 }
 

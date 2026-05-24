@@ -235,6 +235,40 @@ if (decision.errorCode) handleRejection(decision.errorCode);
 else applyResult(decision.result);
 ```
 
+### Tools (MCP) + inbound client-tool dispatch
+
+`listTools` / `callTool` enumerate and invoke server-side tools (the
+MCP request/reply pair). `registerClientToolHandler` is the inbound
+side: when the server's agent loop resolves a tool marked
+`client_execution=true` it pushes a `ClientToolCall`; the SDK runs
+the registered handler locally and ships the result back as a
+`ClientToolResult` correlated by `callId`.
+
+```ts
+import { listTools, callTool, registerClientToolHandler }
+  from "@znasllc-io/memql-sdk-core/tools";
+
+// Enumerate
+const { tools, nextCursor } = await listTools(conn.dispatcher);
+
+// Invoke
+const r = await callTool(conn.dispatcher, {
+  name: "createSpace",
+  arguments: { title: "Brainstorm", architecture: "polyphon" },
+});
+if (r.isError) handleFailure(r.content);
+else applyResult(r.content);
+
+// Inbound dispatch (one handler per dispatcher).
+const unregister = registerClientToolHandler(conn.dispatcher, async (call, signal) => {
+  // call.toolName, call.argumentsJson (raw JSON), call.timeoutMs
+  // signal aborts after timeoutMs so cooperative handlers can bail.
+  const args = JSON.parse(call.argumentsJson || "{}");
+  return runLocally(call.toolName, args, signal);
+});
+// later: unregister() to detach.
+```
+
 ## Exports
 
 - `.` -- `Connection`, `Dispatcher`, `QueryClient`,
@@ -242,8 +276,8 @@ else applyResult(decision.result);
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
   `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
-  re-exports `identity`, `realtime`, `si`, and `voice` as namespace
-  objects.
+  re-exports `identity`, `realtime`, `si`, `tools`, and `voice` as
+  namespace objects.
 - `./client` -- the same client surface.
 - `./identity` -- the 10 identity & access methods listed above.
 - `./realtime` -- `polyphonRoomToken` (LiveKit token mint via the
@@ -251,6 +285,9 @@ else applyResult(decision.result);
   streaming STT + TTS on `/memql/audio`).
 - `./si` -- `siChat`, `siChatStream`, `siSpeech`, `siTranscribe`,
   `siSuggest` and their types.
+- `./tools` -- `listTools` / `callTool` (MCP outbound) and
+  `registerClientToolHandler` (inbound `ClientToolCall` ->
+  `ClientToolResult` dispatch).
 - `./voice` -- `pushToTalk` and its types.
 
 ## Build & test
