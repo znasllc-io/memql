@@ -26,6 +26,10 @@
       "types": "./dist/si/index.d.ts",
       "import": "./dist/si/index.js"
     },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js"
+    },
     "./voice": {
       "types": "./dist/voice/index.d.ts",
       "import": "./dist/voice/index.js"
