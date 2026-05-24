@@ -67,7 +67,7 @@ class MockDispatcher {
   }
 
   push(payload: Record<string, unknown>): void {
-    const msg = payload as ServerMessage;
+    const msg = payload as unknown as ServerMessage;
     for (const fn of this.eventListeners) fn(msg);
   }
 
@@ -187,9 +187,11 @@ test("callTool -- rejects missing name", async () => {
 
 test("registerClientToolHandler -- inbound call dispatches to handler + ships result back", async () => {
   const mock = new MockDispatcher();
-  let captured: ClientToolCall | null = null;
+  // Hold via an object so closure-mutation widens the type (TS's
+  // flow analysis doesn't see the inner `let` assignment).
+  const ref: { call: ClientToolCall | null } = { call: null };
   registerClientToolHandler(mock.asDispatcher(), async (call) => {
-    captured = call;
+    ref.call = call;
     return {
       content: [{ type: "text", text: "ok", mimeType: "", data: "", uri: "" }],
       isError: false,
@@ -210,10 +212,11 @@ test("registerClientToolHandler -- inbound call dispatches to handler + ships re
   // Handler runs in a microtask; give it a turn.
   await new Promise<void>((r) => setTimeout(r, 10));
 
+  const captured = ref.call;
   assert.ok(captured, "handler invoked");
-  assert.equal(captured!.callId, "call-1");
-  assert.equal(captured!.toolName, "uiClick");
-  assert.equal(captured!.argumentsJson, '{"opId":"chat.send"}');
+  assert.equal(captured.callId, "call-1");
+  assert.equal(captured.toolName, "uiClick");
+  assert.equal(captured.argumentsJson, '{"opId":"chat.send"}');
 
   // Result envelope shipped back as a send.
   const sent = mock.sent.find((s) => {
