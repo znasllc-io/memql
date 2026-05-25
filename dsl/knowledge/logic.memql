@@ -18,5 +18,6 @@ logic logicRefreshDueKnowledgeDomains {
     // (build a Plan with kind='trainSpecialist', mode='refresh',
     // input.domainId, then insert via mutationCreatePlan).
     candidates := queryDueRefreshDomains({})
+    return candidates.Len()
   }
 }
