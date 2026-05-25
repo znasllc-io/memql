@@ -252,6 +252,54 @@ query board queryCopresentBoard {
 	}
 }
 
+// TestCollectConstructs_BuiltinSDKGating confirms that only builtins
+// marked @sdk are collected (most builtins are internal and must not
+// widen the client surface), that their body IS the arg schema (no
+// `args { }` block), and that they classify as kind "builtin".
+func TestCollectConstructs_BuiltinSDKGating(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "builtins.memql", `@enabled
+@executor("integration.training.trainAgent")
+@sdk
+@description("Train an agent.")
+builtin trainAgent {
+  agentId  string  @required
+  domains  array
+  tools    array
+}
+
+@enabled
+@executor("integration.auth.checkPermission")
+@description("Internal permission check -- not client-facing.")
+builtin authCheckPermission {
+  userId  string  @required
+}
+`)
+	got, err := CollectConstructs(root)
+	if err != nil {
+		t.Fatalf("CollectConstructs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 construct (only the @sdk builtin), got %d: %+v", len(got), got)
+	}
+	c := got[0]
+	if c.Kind != "builtin" {
+		t.Errorf("Kind = %q, want \"builtin\"", c.Kind)
+	}
+	if c.Name != "trainAgent" {
+		t.Errorf("Name = %q, want \"trainAgent\"", c.Name)
+	}
+	if len(c.Args) != 3 {
+		t.Fatalf("expected 3 args parsed from the builtin body, got %d: %+v", len(c.Args), c.Args)
+	}
+	if c.Args[0].Name != "agentId" || !c.Args[0].Required {
+		t.Errorf("Args[0] = %+v, want agentId @required", c.Args[0])
+	}
+	if c.Args[1].Name != "domains" || c.Args[1].Type != "array" {
+		t.Errorf("Args[1] = %+v, want domains array", c.Args[1])
+	}
+}
+
 // --- Multi-root merge tests -------------------------------------------------
 
 // writeFixture writes a .memql file under dir/rel, creating parent dirs.

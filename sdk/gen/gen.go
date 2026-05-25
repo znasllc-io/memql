@@ -52,14 +52,20 @@ var (
 	// The optional middle identifier is the signature-bound concept on
 	// queries / mutations / shapes (PR #48 / #49). logic + automation
 	// never bind a concept in the signature; for those the middle
-	// segment is always absent in authored sources.
+	// segment is always absent in authored sources. builtin likewise
+	// never binds a concept (it's Go-backed via @executor) -- its body
+	// IS the arg schema (no `args { }` block), and only builtins marked
+	// @sdk are emitted (most builtins are internal).
 	//
 	// Anchored at column 0 to avoid matching `logic X { ... }` nested
 	// inside automation step bodies -- those are call-site references,
 	// not top-level declarations.
 	constructHeader = regexp.MustCompile(
-		`(?m)^(query|mutation|logic)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+		`(?m)^(query|mutation|logic|builtin)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
+	// @sdk opt-in marker above a builtin: emits a typed wrapper for an
+	// otherwise-internal builtin.
+	sdkMarkerRe = regexp.MustCompile(`(?m)^@sdk\b`)
 	// Args block inside a construct body: `args { ... }`. Single match
 	// per construct (the parser rejects multiple args blocks).
 	argsBlockRe = regexp.MustCompile(`(?s)\bargs[ \t]*\{(.*?)\}`)
@@ -77,7 +83,7 @@ var (
 
 // Construct captures the generator's view of a single DSL declaration.
 type Construct struct {
-	Kind        string // "query" | "mutation" | "logic"
+	Kind        string // "query" | "mutation" | "logic" | "builtin"
 	Name        string // function name as it appears in DSL + wire
 	Concept     string // signature-bound concept (queries / mutations only); empty for logic
 	Description string // from @description annotation
@@ -211,6 +217,7 @@ func Emit(constructs []Construct, goOut, tsOut, tsImportFrom string) []OutputFil
 			OutputFile{goOut, "generated_queries.go", emitMethods(byKind["query"], "Query")},
 			OutputFile{goOut, "generated_mutations.go", emitMethods(byKind["mutation"], "Mutation")},
 			OutputFile{goOut, "generated_logics.go", emitMethods(byKind["logic"], "Logic")},
+			OutputFile{goOut, "generated_builtins.go", emitMethods(byKind["builtin"], "Builtin")},
 		)
 	}
 	if strings.TrimSpace(tsOut) != "" {
@@ -218,6 +225,7 @@ func Emit(constructs []Construct, goOut, tsOut, tsImportFrom string) []OutputFil
 			OutputFile{tsOut, "generated_queries.ts", emitTSMethods(byKind["query"], "query", tsImportFrom)},
 			OutputFile{tsOut, "generated_mutations.ts", emitTSMethods(byKind["mutation"], "mutation", tsImportFrom)},
 			OutputFile{tsOut, "generated_logics.ts", emitTSMethods(byKind["logic"], "logic", tsImportFrom)},
+			OutputFile{tsOut, "generated_builtins.ts", emitTSMethods(byKind["builtin"], "builtin", tsImportFrom)},
 		)
 	}
 	return out
@@ -308,12 +316,27 @@ func CollectConstructs(root string) ([]Construct, error) {
 				continue
 			}
 
+			// Builtins: most are internal (auth checks, cognition
+			// scoring, daily-space provisioning, ...) and must not widen
+			// the client surface. Only those explicitly marked @sdk are
+			// emitted. Their body IS the arg schema -- there's no
+			// `args { }` block, so parse fields straight off the body.
+			var args []ArgField
+			if kind == "builtin" {
+				if !sdkMarkerRe.MatchString(attrPreamble(src, m[0])) {
+					continue
+				}
+				args = parseFields(body)
+			} else {
+				args = parseArgsBlock(body)
+			}
+
 			c := Construct{
 				Kind:        kind,
 				Name:        name,
 				Concept:     concept,
 				Description: descriptionFor(src, m[0]),
-				Args:        parseArgsBlock(body),
+				Args:        args,
 				ShapeName:   shapeRefFor(body),
 				Origin:      path,
 			}
@@ -346,13 +369,11 @@ func bodyFor(src string, openIdx int) (string, bool) {
 	return "", false
 }
 
-// descriptionFor walks BACKWARDS from the construct header looking for
-// a @description("...") annotation in the immediately-preceding
-// attribute block. Returns empty string when no description annotation
-// is present.
-func descriptionFor(src string, headerStart int) string {
-	// Walk back to find the start of the attribute preamble: stop at
-	// the first non-attribute, non-blank line.
+// attrPreamble returns the contiguous block of @annotation lines
+// immediately preceding the construct header (skipping blank lines).
+// Walks BACKWARDS from the header, stopping at the first
+// non-attribute, non-blank line.
+func attrPreamble(src string, headerStart int) string {
 	prev := strings.LastIndex(src[:headerStart], "\n")
 	for prev > 0 {
 		lineStart := strings.LastIndex(src[:prev], "\n") + 1
@@ -372,8 +393,13 @@ func descriptionFor(src string, headerStart int) string {
 	if prev < 0 {
 		prev = 0
 	}
-	preamble := src[prev:headerStart]
-	if m := descRe.FindStringSubmatch(preamble); len(m) > 1 {
+	return src[prev:headerStart]
+}
+
+// descriptionFor pulls the @description("...") annotation from the
+// construct's attribute preamble. Returns empty string when absent.
+func descriptionFor(src string, headerStart int) string {
+	if m := descRe.FindStringSubmatch(attrPreamble(src, headerStart)); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -390,6 +416,14 @@ func parseArgsBlock(body string) []ArgField {
 	if !ok {
 		return nil
 	}
+	return parseFields(inner)
+}
+
+// parseFields parses `<name> <type> [@annotations]` declarations out of
+// a block of text in source order. Used for both the inner text of an
+// `args { }` block (queries / mutations) and a builtin's body, where
+// the field list IS the body (no args block).
+func parseFields(inner string) []ArgField {
 	var out []ArgField
 	for _, fm := range argsFieldRe.FindAllStringSubmatch(inner, -1) {
 		name := fm[1]

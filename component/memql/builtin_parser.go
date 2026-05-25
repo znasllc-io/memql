@@ -133,6 +133,11 @@ func (p *builtinMemQLParser) parseBuiltinDecorator(decl *builtinDecl) error {
 	case "enabled", "disabled":
 		return nil
 
+	case "sdk":
+		// Generator marker: opts this builtin into the generated typed
+		// SDK surface (sdk/gen reads it from source). No engine effect.
+		return nil
+
 	case "description":
 		val, err := p.ParseParenString()
 		if err != nil {
