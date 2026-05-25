@@ -63,11 +63,11 @@ upstream agent_grpc     { server agent:50051; }
 upstream agent_http     { server agent:8089; }
 upstream identity_http  { server identity:8081; }
 
-# The CoPresent SPA runs as a Vite dev server on the developer's
-# host machine, NOT in docker. host.docker.internal maps to the
-# host on Docker Desktop (macOS, Windows) and via the
-# extra_hosts directive on Linux.
-upstream app_vite { server host.docker.internal:8080; }
+# The CoPresent SPA runs as a Vite dev server in the `app` container
+# (see docker-compose.full.yml). Documentation-only, like the blocks
+# above -- the location below uses the runtime-resolver variable form
+# so nginx starts even if `app` is still installing deps / booting.
+upstream app_vite { server app:8080; }
 
 # -----------------------------------------------------------------
 # Plaintext :80 -> 301 to TLS :443
@@ -178,7 +178,12 @@ server {
     }
 
     location / {
-        proxy_pass http://app_vite;
+        # Variable-based upstream so the resolver picks fresh DNS each
+        # request (see the resolver block at the top) -- lets nginx
+        # start before the `app` container is up and survive its
+        # recreation. Mirrors the bff/agent/identity locations.
+        set $app_target app:8080;
+        proxy_pass http://$app_target;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

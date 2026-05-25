@@ -124,15 +124,62 @@ services:
       - "80:80"
       - "443:443"
     extra_hosts:
-      # nginx proxies app.${DOMAIN} -> the developer's host machine
-      # (Vite dev server on :8080). host.docker.internal is provided
-      # automatically on Docker Desktop (macOS, Windows); the
-      # host-gateway alias makes it work on Linux too.
+      # The SPA now runs in the `app` container (app_vite -> app:8080),
+      # so the LB no longer needs the host. Kept as a fallback for
+      # anyone who reverts app_vite to host.docker.internal:8080 to run
+      # Vite natively on the host; host-gateway makes it work on Linux.
       - "host.docker.internal:host-gateway"
     depends_on:
       - bff
       - identity
       - agent
+    networks:
+      - memql
+    restart: unless-stopped
+
+  # CoPresent frontend dev server (Vite :8080 + Express :3000), run
+  # IN-CONTAINER so local dev needs zero host Node. nginx proxies
+  # https://app.${DOMAIN} here via the app_vite upstream. The SPA
+  # source is bind-mounted for HMR; node_modules lives in a named
+  # volume so the host's (absent / wrong-platform) modules don't
+  # shadow the container's. The browser reaches the backend directly
+  # through the absolute VITE_* URLs below (TLS-fronted by nginx), so
+  # this container only serves SPA assets + the HMR socket -- it does
+  # not dial the backend itself. The app definition lives in the
+  # sibling copresent repo (bind-mounted at ../../copresent).
+  app:
+    image: node:22-alpine
+    container_name: memql-app
+    hostname: app
+    working_dir: /app
+    # Install deps into the named volume on first boot, then run the
+    # full dev stack (Vite + Express). --legacy-peer-deps mirrors the
+    # production Dockerfile.
+    command: sh -c "npm install --legacy-peer-deps && npm run dev:full"
+    environment:
+      # Bind both dev servers to 0.0.0.0 so nginx (other container)
+      # can reach them; run-app.mjs reads these.
+      FRONTEND_HOST: 0.0.0.0
+      FRONTEND_PORT: "8080"
+      API_HOST: 0.0.0.0
+      API_PORT: "3000"
+      # Reliable HMR file-watching across the bind mount on Linux.
+      CHOKIDAR_USEPOLLING: "true"
+      # The SPA's two SDK deps come from GitHub Packages (see
+      # copresent/.npmrc). npm reads this token at install time; export
+      # MEMQL_PACKAGES_TOKEN (a GitHub token with read:packages for both
+      # the @visionarys-io and @znasllc-io scopes) before dev-refresh.
+      NODE_AUTH_TOKEN: ${MEMQL_PACKAGES_TOKEN:-}
+      # Browser-facing URLs (absolute, TLS-fronted by nginx). Client id
+      # "app" matches the OAuth client registered on the identity
+      # service below (IDENTITY_REGISTERED_CLIENTS).
+      VITE_MEMQL_WS_URL: wss://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}/memql/ws
+      VITE_MEMQL_API_URL: https://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
+      VITE_IDENTITY_BASE_URL: https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
+      VITE_IDENTITY_CLIENT_ID: app
+    volumes:
+      - ../../copresent:/app
+      - app_node_modules:/app/node_modules
     networks:
       - memql
     restart: unless-stopped
@@ -561,6 +608,11 @@ volumes:
   postgres_data:
     driver: local
   identity_keys:
+    driver: local
+  # node_modules for the in-container CoPresent frontend dev server.
+  # Keeps the host's bind-mounted copresent/ free of a node_modules
+  # tree (and avoids a host/musl platform mismatch).
+  app_node_modules:
     driver: local
 
 networks:
