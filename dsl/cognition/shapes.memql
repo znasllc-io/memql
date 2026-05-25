@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, micState, misrouteFeedback, participant, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, context, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
 
 @row
 @description("Per-(space, agent) audio override projection")
@@ -164,4 +164,21 @@ shape misrouteFeedback misrouteFeedbackFull {
   payload.userAction
   row.createdAt
   row.createdBy
+}
+
+@row
+@description("UI-friendly presence snapshot for a participant. Carries the high-level state (thinking / responding / waiting / ...) plus the short UI label + timing fields. The SPA keys these latest-wins by participantId to drive the presence panel + chat activity indicator.")
+shape presence presenceFull {
+  row.id
+  payload.spaceId
+  payload.participantId
+  payload.state
+  payload.label
+  payload.reason
+  payload.intent
+  payload.sinceAt
+  payload.lastUpdatedAt
+  payload.lastUtteranceId
+  payload.lastError
+  row.createdAt
 }

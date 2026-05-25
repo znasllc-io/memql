@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, context, micState, participant, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, context, micState, participant, presence, privateUtterance, session, space, utterance, videoOverride }
 
 @enabled
 @description("Get active human participants in a space")
@@ -558,4 +558,26 @@ query querySpacePrivateUtterancesForViewer {
   }
   filter  payload.spaceId==args.spaceId; payload.forUserId==actor.userId
   shape   privateUtteranceFull
+}
+
+// ---- queries/v1/cognition/spaceParticipantPresence.memql ----
+
+// spaceParticipantPresence - Presence snapshots for a space
+// =========================================================
+//
+// Returns every v1:cognition:participant:presence row for a space.
+// The SPA keys these latest-wins by participantId (useParticipantPresence
+// + SpaceSubscriptionContext) to drive the presence panel's per-agent
+// status pill + the chat activity indicator. Space-scoped, same gating
+// shape as querySpaceParticipants (the calling path verifies the caller
+// is a space participant).
+
+@enabled
+@description("Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.")
+query presence querySpaceParticipantPresence {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId
+  shape   presenceFull
 }
