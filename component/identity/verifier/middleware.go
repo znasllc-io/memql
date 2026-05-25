@@ -91,6 +91,12 @@ func extractTokenHTTP(r *http.Request) (string, string, error) {
 		return strings.TrimSpace(c.Value), "cookie", nil
 	}
 	if r.URL != nil {
+		// Browsers can't set headers on the WebSocket upgrade, so the
+		// SDK piggybacks the bearer JWT as ?bearer_token=. ?token= is
+		// kept as a legacy alias.
+		if v := strings.TrimSpace(r.URL.Query().Get("bearer_token")); v != "" {
+			return v, "query", nil
+		}
 		if v := strings.TrimSpace(r.URL.Query().Get("token")); v != "" {
 			return v, "query", nil
 		}
