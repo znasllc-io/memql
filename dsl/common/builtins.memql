@@ -245,6 +245,7 @@ builtin help {
 
 @enabled
 @executor("integration.knowledge.augmentDomainAnalyze")
+@sdk
 @args(profile="object", additionalProperties="true")
 @description("Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight.")
 builtin knowledgeAugmentDomainAnalyze {
@@ -272,6 +273,7 @@ builtin knowledgeAugmentDomainAnalyze {
 
 @enabled
 @executor("integration.knowledge.augmentDomainGenerate")
+@sdk
 @args(profile="object", additionalProperties="true")
 @description("Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}.")
 builtin knowledgeAugmentDomainGenerate {
@@ -650,6 +652,7 @@ builtin tools {
 
 @enabled
 @executor("integration.training.trainAgent")
+@sdk
 @args(profile="object", additionalProperties="true")
 @description("Train an agent: replace capabilities.domains + .tools, eager-embed chunks, refresh identity vector, distill system prompt. Bracketed by a Plan + 3 Tasks for canvas + Tasks-page visibility.")
 builtin trainAgent {
@@ -688,6 +691,7 @@ builtin trainAgent {
 
 @enabled
 @executor("integration.training.trainAgentRetryStep")
+@sdk
 @args(profile="object", additionalProperties="true")
 @description("Re-run a single failed training step (Step B identity vector OR Step C distilled prompt) for an agent. Used by the background retry poll loop and the frontend Retry button.")
 builtin trainAgentRetryStep {
