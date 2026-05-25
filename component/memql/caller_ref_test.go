@@ -52,6 +52,48 @@ func TestCallerReferenceParsesAsRHS(t *testing.T) {
 	}
 }
 
+// TestActorReferenceParsesAsRHS guards memql#216: the restructured DSL
+// uses `actor.userId` (not `caller.userId`) in self-scoped filters, e.g.
+// queryCurrentUser's `id==actor.userId`. The parser must treat `actor.`
+// like `caller.` -- otherwise the reference never becomes a
+// *CallerReference, resolveCallerReferences leaves it unresolved, and
+// the query silently returns zero rows.
+func TestActorReferenceParsesAsRHS(t *testing.T) {
+	query := `concept==v1:identity:user; id==actor.userId`
+	tokens, err := tokenize(query)
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+	p := newParser(tokens, nil)
+	expr, err := p.parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var findIdValue func(e ExpressionNode) any
+	findIdValue = func(e ExpressionNode) any {
+		switch n := e.(type) {
+		case *LogicalExpression:
+			if v := findIdValue(n.Left); v != nil {
+				return v
+			}
+			return findIdValue(n.Right)
+		case *ComparisonExpression:
+			if len(n.Field.Parts) == 1 && n.Field.Parts[0] == "id" {
+				return n.Value
+			}
+		}
+		return nil
+	}
+	value := findIdValue(expr)
+	ref, ok := value.(*CallerReference)
+	if !ok {
+		t.Fatalf("id value is %T, want *CallerReference (actor.userId not recognized)", value)
+	}
+	if ref.Path != "userId" {
+		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+	}
+}
+
 func TestResolveCallerReferences_ResolvesUserId(t *testing.T) {
 	ac := &auth.AccessContext{UserId: "user-xyz", Role: auth.RoleWriter}
 	ctx := auth.ContextWithAccess(context.Background(), ac)
