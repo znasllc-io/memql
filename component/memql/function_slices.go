@@ -31,48 +31,57 @@ type FunctionSlice struct {
 // functionDeclHeader matches every top-level function-style header
 // at column 0 we care about:
 //
-//   - struct-form: `query NAME {`, `mutation NAME {`, `spec NAME {`,
-//     `logic NAME {`, `automation NAME {`
+//   - struct-form: `query NAME {`, `mutation NAME {`, `logic NAME {`
 //   - procedural: `func (Query) NAME`, `func (Mutation) NAME`, ...
 //
 // Captures the (keyword, name) for the slice. We don't match
 // `concept` -- those go through ExtractConceptDecls.
+//
 // Excludes `spec` and `trait` -- those have their own dedicated
 // parser (component/memql/spec_parser.go) and don't flow through
 // the function-slicer pipeline. Including them here would just
 // produce debug-level parse failures on every load.
+//
+// Excludes `automation` -- automations are NOT function-registry
+// constructs. They are event-triggered side-effects loaded by the
+// dedicated runtime loader (component/automations/unified_loader.go),
+// nothing imports them via `use`, and the function type switch has no
+// automation case (an `*ast.AutomationDef` body would be rejected).
+// Slicing them here only produced "body is not an expression node"
+// skips on every load (issue #212). The inner `logic NAME { ... }`
+// invocations that live inside an automation's `step` blocks are
+// likewise NOT top-level declarations -- the brace-depth guard in
+// ExtractFunctionSlices skips them so they aren't mis-extracted as
+// standalone logic slices.
 var functionDeclHeader = regexp.MustCompile(
 	`(?m)^[ \t]*(?:` +
 		// struct-form: `<kind> [<concept>] <name> {`. The optional
 		// `<concept>` identifier is the post-migration signature-bound
 		// concept on queries / mutations / shapes / seeds (PR #48 / #49);
-		// logic + automation never bind a concept in the signature, so
-		// for those two the optional segment will always be absent in
-		// authored sources.
-		`(query|mutation|logic|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
+		// logic never binds a concept in the signature, so for it the
+		// optional segment will always be absent in authored sources.
+		`(query|mutation|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{` +
 		`|` +
 		// procedural: `func (Kind) NAME(`
-		`func[ \t]*\([ \t]*(Query|Mutation|Logic|Automation|Shape|Tool|Builtin|Prompt|Provider|Policy)[ \t]*\)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(` +
+		`func[ \t]*\([ \t]*(Query|Mutation|Logic|Shape|Tool|Builtin|Prompt|Provider|Policy)[ \t]*\)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(` +
 		`)`,
 )
 
 // kindFromString maps a parser keyword to the FunctionType enum.
-// Spec / Trait omitted -- dedicated path.
+// Spec / Trait / Automation omitted -- dedicated paths.
 var kindFromString = map[string]languageParser.FunctionType{
-	"query":      languageParser.FunctionTypeQuery,
-	"mutation":   languageParser.FunctionTypeMutation,
-	"logic":      languageParser.FunctionTypeLogic,
-	"automation": languageParser.FunctionTypeAutomation,
-	"Query":      languageParser.FunctionTypeQuery,
-	"Mutation":   languageParser.FunctionTypeMutation,
-	"Logic":      languageParser.FunctionTypeLogic,
-	"Automation": languageParser.FunctionTypeAutomation,
-	"Shape":      languageParser.FunctionTypeShape,
-	"Tool":       languageParser.FunctionTypeTool,
-	"Builtin":    languageParser.FunctionTypeBuiltin,
-	"Prompt":     languageParser.FunctionTypePrompt,
-	"Provider":   languageParser.FunctionTypeProvider,
-	"Policy":     languageParser.FunctionTypePolicy,
+	"query":    languageParser.FunctionTypeQuery,
+	"mutation": languageParser.FunctionTypeMutation,
+	"logic":    languageParser.FunctionTypeLogic,
+	"Query":    languageParser.FunctionTypeQuery,
+	"Mutation": languageParser.FunctionTypeMutation,
+	"Logic":    languageParser.FunctionTypeLogic,
+	"Shape":    languageParser.FunctionTypeShape,
+	"Tool":     languageParser.FunctionTypeTool,
+	"Builtin":  languageParser.FunctionTypeBuiltin,
+	"Prompt":   languageParser.FunctionTypePrompt,
+	"Provider": languageParser.FunctionTypeProvider,
+	"Policy":   languageParser.FunctionTypePolicy,
 }
 
 // ExtractFunctionSlices scans `source` for top-level function
@@ -110,6 +119,17 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 		headerStart := m[0]
 		headerEnd := m[1]
 
+		// Only extract top-level (brace-depth-0) declarations. A header
+		// that sits inside another construct's braces is not a standalone
+		// declaration -- e.g. a `logic NAME { ... }` invocation inside an
+		// automation `step` block, or a nested construct in a logic body.
+		// Without this guard those get mis-extracted as bogus slices that
+		// then fail to parse (issue #212). `use ...{ ... }` preambles have
+		// balanced braces so they net to depth 0 and don't shift it.
+		if braceDepthBefore(source, headerStart) != 0 {
+			continue
+		}
+
 		// Pull the keyword + name from the capture groups. Group
 		// indices are (in order):
 		//   m[2..3] = struct-form keyword
@@ -137,8 +157,7 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 		// opens after the (...) signature -- find the first `{` at
 		// or after headerEnd.
 		openIdx := -1
-		if kindStr == "query" || kindStr == "mutation" || kindStr == "spec" ||
-			kindStr == "logic" || kindStr == "automation" {
+		if kindStr == "query" || kindStr == "mutation" || kindStr == "logic" {
 			openIdx = headerEnd - 1
 		} else {
 			// Procedural: scan from headerEnd for the first `{`.
@@ -213,6 +232,50 @@ func extractUseDeclarations(source string) string {
 // multi-line bodies. The path may contain dots; the body may span
 // multiple lines.
 var useBlockRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+[A-Za-z_][A-Za-z0-9_.]*\.\{[^}]*\}`)
+
+// braceDepthBefore returns the net number of unclosed `{` in
+// source[0:pos]. Used to decide whether a construct header is
+// top-level (depth 0) or nested inside another construct (depth > 0).
+// Mirrors the string + line-comment handling of
+// findMatchingCloseBraceRune so braces inside string literals and
+// `// ...` comments don't perturb the count.
+func braceDepthBefore(source string, pos int) int {
+	if pos > len(source) {
+		pos = len(source)
+	}
+	depth := 0
+	inString := false
+	for i := 0; i < pos; i++ {
+		c := source[i]
+		if inString {
+			if c == '\\' && i+1 < pos {
+				i++
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '/':
+			if i+1 < len(source) && source[i+1] == '/' {
+				nl := strings.IndexByte(source[i:], '\n')
+				if nl < 0 {
+					return depth
+				}
+				i += nl
+			}
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+	}
+	return depth
+}
 
 // findMatchingCloseBraceRune walks source from openIdx (position of
 // `{`) and returns the index of the matching `}`. Strings + chars
