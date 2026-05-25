@@ -756,9 +756,12 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 	// Check Authorization header first
 	if auth := strings.TrimSpace(r.Header.Get("Authorization")); auth != "" {
 		md.Append("authorization", auth)
+	} else if bearer := strings.TrimSpace(r.URL.Query().Get("bearer_token")); bearer != "" {
+		// Browsers can't set custom headers during the WebSocket upgrade,
+		// so the SDK piggybacks the bearer JWT as ?bearer_token=.
+		md.Append("authorization", "Bearer "+bearer)
 	} else if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
-		// Fallback: construct Bearer token from query parameter (useful for WebSocket
-		// connections where browsers cannot set custom headers during upgrade)
+		// Legacy alias for ?bearer_token=.
 		md.Append("authorization", "Bearer "+token)
 	} else if guest := strings.TrimSpace(r.URL.Query().Get("guest_token")); guest != "" {
 		// Guest invite flow: browsers opening /join/<token> send the

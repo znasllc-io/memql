@@ -163,6 +163,11 @@ func extractBearerTokenHTTP(r *http.Request) string {
 		}
 	}
 	if r.URL != nil {
+		// SDK sends the bearer JWT as ?bearer_token= on the WS upgrade
+		// (browsers can't set headers); ?token= kept as a legacy alias.
+		if v := strings.TrimSpace(r.URL.Query().Get("bearer_token")); v != "" {
+			return v
+		}
 		if v := strings.TrimSpace(r.URL.Query().Get("token")); v != "" {
 			return v
 		}
