@@ -774,6 +774,23 @@ func QueryClusterSpawnEventsBuild(args QueryClusterSpawnEventsArgs) string {
 	return "queryClusterSpawnEvents({})"
 }
 
+// QueryCurrentUser -- Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.
+//
+// Bound concept: user.
+type QueryCurrentUserArgs struct {
+}
+
+// QueryCurrentUser calls the engine query queryCurrentUser.
+func (qc *QueryClient) QueryCurrentUser(ctx context.Context, args QueryCurrentUserArgs) (*Result, error) {
+	call := QueryCurrentUserBuild(args)
+	return qc.executeNamed(ctx, "queryCurrentUser", call)
+}
+
+func QueryCurrentUserBuild(args QueryCurrentUserArgs) string {
+	_ = args
+	return "queryCurrentUser({})"
+}
+
 // QueryDelegationsByIdentity -- Get all delegations (active and revoked) for a given identity ID
 //
 // Bound concept: delegation.
@@ -2078,6 +2095,28 @@ func (qc *QueryClient) QuerySpaceMeta(ctx context.Context, args QuerySpaceMetaAr
 func QuerySpaceMetaBuild(args QuerySpaceMetaArgs) string {
 	var b strings.Builder
 	b.WriteString("querySpaceMeta({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QuerySpaceParticipantPresence -- Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.
+//
+// Bound concept: presence.
+type QuerySpaceParticipantPresenceArgs struct {
+	SpaceId string
+}
+
+// QuerySpaceParticipantPresence calls the engine query querySpaceParticipantPresence.
+func (qc *QueryClient) QuerySpaceParticipantPresence(ctx context.Context, args QuerySpaceParticipantPresenceArgs) (*Result, error) {
+	call := QuerySpaceParticipantPresenceBuild(args)
+	return qc.executeNamed(ctx, "querySpaceParticipantPresence", call)
+}
+
+func QuerySpaceParticipantPresenceBuild(args QuerySpaceParticipantPresenceArgs) string {
+	var b strings.Builder
+	b.WriteString("querySpaceParticipantPresence({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")

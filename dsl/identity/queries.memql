@@ -934,6 +934,30 @@ query user queryUserById {
   shape   userFull
 }
 
+// ---- queries/v1/identity/currentUser.memql ----
+
+// currentUser - the caller's own user record
+// ==========================================
+//
+// Returns the authenticated caller's v1:identity:user row. The
+// authorizerId -> userId resolution happens at auth time, so the
+// caller never passes an id -- the filter binds to actor.userId
+// server-side. Backs the SPA boot path (useCurrentUser): the
+// browser holds the OIDC subject but the user payload doesn't carry
+// authorizerId (it lives on the associated v1:identity:identity row),
+// so a self-scoped query is the correct lookup rather than an
+// authorizerId filter.
+//
+// Returns:
+//   Array with 0 or 1 user record in userFull shape.
+
+@enabled
+@description("Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.")
+query user queryCurrentUser {
+  filter  id==actor.userId; traitIsActiveRecord
+  shape   userFull
+}
+
 // ---- queries/v1/identity/userCount.memql ----
 
 // userCount - Count of active users
