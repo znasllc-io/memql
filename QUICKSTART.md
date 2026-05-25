@@ -7,6 +7,23 @@
 
 - **Docker** installed and running
 - **Go 1.26.1+** (for development outside Docker)
+- **GitHub Packages access** for the in-container CoPresent frontend.
+  The `app` container `npm install`s two private SDK packages
+  (`@visionarys-io/copresent-sdk`, `@znasllc-io/memql-sdk-core`) from
+  GitHub Packages, so it needs a token at startup:
+
+  ```bash
+  # a GitHub token with read:packages, SSO-authorized for BOTH the
+  # znasllc-io and visionarys-io orgs. A classic PAT works, or reuse
+  # your gh login if it has the scope:
+  export MEMQL_PACKAGES_TOKEN=$(gh auth token)
+  ```
+
+  Export it before `docker compose up` / `make dev-refresh`. Without it
+  the `app` container's install fails (the backend still comes up). Full
+  details + how to mint the token: copresent
+  [`docs/sdk-dependency.md`](../copresent/docs/sdk-dependency.md).
+  No Node install on the host is needed -- the frontend runs in-container.
 
 ---
 
@@ -95,7 +112,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
 
 | Service | Public URL | Notes |
 |---------|------------|-------|
-| **App SPA** | https://app.local.znas.io | Proxied by nginx to your local Vite dev server (host:8080) |
+| **App SPA** | https://app.local.znas.io | Proxied by nginx to the `app` container's Vite dev server (in-container; needs `MEMQL_PACKAGES_TOKEN`) |
 | **Identity service** | https://identity.local.znas.io | Magic-link auth, OAuth, JWKS, /admin, /pair/* |
 | **BFF (gRPC + WS)** | https://bff.local.znas.io | gRPC for cockpit / SDKs; HTTP/WS for browser bridge |
 | **Agent (gRPC)** | https://agent.local.znas.io | WorkerService.Stream lives here; cockpit-workers attach |
