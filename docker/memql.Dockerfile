@@ -39,8 +39,11 @@ RUN go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/
 # Cached under bin/tools/ in the build layer.
 RUN bash scripts/identity/build-css.sh
 
-# Build the application with optional build tags
-RUN CGO_ENABLED=0 GOOS=linux go build -tags "${BUILD_TAGS}" -a -installsuffix cgo -ldflags="-s -w" -o memql main.go
+# Build the application with optional build tags. Build the whole main
+# package ('.'), not 'main.go' alone -- the single-file form excludes
+# sibling files in package main (e.g. subcommand_stub.go, which defines
+# dispatchSubcommand called from main.go), breaking every node build.
+RUN CGO_ENABLED=0 GOOS=linux go build -tags "${BUILD_TAGS}" -a -installsuffix cgo -ldflags="-s -w" -o memql .
 
 # Build the health check binary (for distroless containers)
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o healthcheck ./cmd/healthcheck
