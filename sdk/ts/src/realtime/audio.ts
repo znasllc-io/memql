@@ -196,6 +196,11 @@ export class AudioClient {
   private constructor(socket: WebSocket, opts: DialAudioOptions) {
     this.socket = socket;
     this.logger = opts.logger ?? null;
+    // Force ArrayBuffer for binary frames so the Blob.text() path
+    // in handleMessage stays a defensive net rather than the
+    // normal hot path -- async .text() resolution can otherwise
+    // reorder frames vs intervening string frames on mixed streams.
+    socket.binaryType = "arraybuffer";
     socket.addEventListener("message", this.handleMessage);
     socket.addEventListener("close", this.handleClose);
   }
@@ -503,7 +508,22 @@ export class AudioClient {
       }
     }
     if (msg.type === "error") {
-      this.logger?.warn?.("memql audio: untargeted error frame", msg.error);
+      // Untargeted error -- no streamId / requestId means the server
+      // is signalling a connection-level fault (auth, malformed
+      // handshake, server shutdown). Treat as terminal: fail every
+      // in-flight handler so consumer iterators learn immediately
+      // instead of waiting for the eventual socket close.
+      const m = typeof msg.error === "object" ? msg.error?.message ?? "(no message)" : String(msg.error);
+      this.logger?.warn?.("memql audio: untargeted error frame, terminating in-flight streams", m);
+      const errMsg = `AudioClient: ${m}`;
+      for (const h of this.transcribeHandlers.values()) {
+        h({ type: "error", error: { message: errMsg } });
+      }
+      for (const h of this.synthesizeHandlers.values()) {
+        h({ type: "tts_ended", error: errMsg });
+      }
+      this.transcribeHandlers.clear();
+      this.synthesizeHandlers.clear();
     }
   }
 
@@ -538,7 +558,7 @@ function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
   if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      cleanup();
+      cleanupAndClose();
       reject(new Error(`AudioClient: open handshake timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     const onOpen = () => {
@@ -546,10 +566,11 @@ function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
       resolve();
     };
     const onError = (ev: Event) => {
-      cleanup();
+      cleanupAndClose();
       reject(new Error(`AudioClient: open failed: ${(ev as ErrorEvent).message ?? "error"}`));
     };
     const onClose = (ev: CloseEvent) => {
+      // Socket is already closed; just remove listeners + clear timer.
       cleanup();
       reject(new Error(`AudioClient: closed before open: code=${ev.code} reason=${ev.reason}`));
     };
@@ -558,6 +579,18 @@ function waitForOpen(socket: WebSocket, timeoutMs: number): Promise<void> {
       socket.removeEventListener("open", onOpen);
       socket.removeEventListener("error", onError);
       socket.removeEventListener("close", onClose);
+    };
+    // Rejection paths additionally close the socket so a still-
+    // CONNECTING socket doesn't leak in Node-style runtimes that
+    // don't GC unreferenced sockets aggressively. Idempotent under
+    // a socket already in CLOSING / CLOSED state.
+    const cleanupAndClose = () => {
+      cleanup();
+      try {
+        socket.close();
+      } catch {
+        /* ignore */
+      }
     };
     socket.addEventListener("open", onOpen);
     socket.addEventListener("error", onError);
