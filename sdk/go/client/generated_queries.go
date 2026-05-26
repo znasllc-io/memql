@@ -221,6 +221,23 @@ func QueryActiveSkillsFullBuild(args QueryActiveSkillsFullArgs) string {
 	return "queryActiveSkillsFull({})"
 }
 
+// QueryActiveSpaceIds -- Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).
+//
+// Bound concept: space.
+type QueryActiveSpaceIdsArgs struct {
+}
+
+// QueryActiveSpaceIds calls the engine query queryActiveSpaceIds.
+func (qc *QueryClient) QueryActiveSpaceIds(ctx context.Context, args QueryActiveSpaceIdsArgs) (*Result, error) {
+	call := QueryActiveSpaceIdsBuild(args)
+	return qc.executeNamed(ctx, "queryActiveSpaceIds", call)
+}
+
+func QueryActiveSpaceIdsBuild(args QueryActiveSpaceIdsArgs) string {
+	_ = args
+	return "queryActiveSpaceIds({})"
+}
+
 // QueryActiveSpaces -- Returns spaces with status='active' (the default), scoped to the caller's per-row authz reach. Optional userId arg narrows to a specific creator. Used by the cockpit Chat tab to populate the space list.
 //
 // Bound concept: space.

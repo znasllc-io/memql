@@ -94,6 +94,12 @@ shape space spaceFull {
 }
 
 @row
+@description("Id-only projection of v1:cognition:space rows. Backs the heartbeat path (memql#287) that just needs to iterate active spaces -- avoids paying the spaceFull projection cost when only the id is consumed.")
+shape space spaceIdOnly {
+  row.id
+}
+
+@row
 @description("Comprehensive utterance projection with all fields")
 shape utterance utteranceFull {
   row.id
