@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
+
+	"github.com/znasllc-io/memql/component/safety"
 )
 
 // remainingPlaceholderRegex matches a `$args.<identifier>` placeholder
@@ -358,6 +360,42 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	}
 
 	handler := tool.Handler
+
+	// Safety classifier (memql#229). Runs AFTER args are schema-valid
+	// (so the classifier sees the same args the handler will) and
+	// BEFORE any dispatch -- query / function / webhook / delegate
+	// all flow past this gate.
+	//
+	// Surface picks the right blast-radius class: webhook handlers
+	// fire outbound HTTP; everything else is engine-internal. The
+	// rule layer's URL rules only fire on http_fetch/webhook
+	// actions, but every tool gets recorded in shadow mode so the
+	// telemetry stays uniform across handler types.
+	//
+	// Fail-OPEN on classifier error here. Per-handler validation +
+	// the dispatch path's own checks are the primary surface; the
+	// worker pre-dispatch gate is the fail-closed one (highest
+	// blast radius). #231's decision policy supplies the real
+	// allow/ask/deny matrix; until then decide() returns Allow and
+	// this path is observation-only.
+	toolSurface := safety.SurfaceToolIntegration
+	if strings.EqualFold(strings.TrimSpace(handler.Type), "webhook") {
+		toolSurface = safety.SurfaceToolWebhook
+	}
+	toolDesc := safety.NewToolAction(toolSurface, tool.Name, args, safety.CallerContext{
+		Capability: callerRole,
+	})
+	toolGate := safety.DefaultGate()
+	decision, cls, classErr := toolGate.Evaluate(ctx, toolDesc)
+	if proceed, reason := toolGate.EnforceDecision(decision, cls, classErr, false); !proceed {
+		return &ToolCallResult{
+			IsError: true,
+			Content: []ToolResultContent{
+				{Type: "text", Text: fmt.Sprintf("tool %q: %s", tool.Name, reason)},
+			},
+		}, nil
+	}
+
 	switch strings.ToLower(strings.TrimSpace(handler.Type)) {
 	case "query":
 		query := strings.TrimSpace(handler.Query)

@@ -28,6 +28,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/safety"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -190,6 +191,11 @@ type gateResult struct {
 	errorCode          string
 	errorMessage       string
 	outcome            string
+	// classification carries the safety-classifier verdict on the
+	// `denied_by_classifier` path so emitDenied can surface
+	// {tier, ruleId, reason, categories} in the audit row. nil for
+	// every other denial path.
+	classification *safety.Classification
 }
 
 // preDispatchCheck enforces Q9 (scope) + Q13 (kill switch) BEFORE
@@ -306,6 +312,29 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 				errorCode:          "denied_by_scope",
 				errorMessage:       fmt.Sprintf("action requires scope %q, agent has %q", required.Scope, effectiveScope),
 				outcome:            "denied_by_scope",
+			}
+		}
+
+		// Safety classifier (memql#229). Runs LAST in preDispatchCheck
+		// so the structural gates above (per-task approval, kill
+		// switch, scope) have already done their work and we know the
+		// agent is otherwise allowed to dispatch. Computer-use is the
+		// highest blast radius -- fail-closed on classifier error in
+		// enforce mode. Gate.EnforceDecision honours shadow mode end
+		// to end: a classifier error in shadow is logged + swallowed,
+		// never blocks live traffic. #235's rollout flips enforce.
+		desc := buildSafetyDescriptor(req, effectiveScope, required.Capability)
+		gate := safety.DefaultGate()
+		decision, cls, classErr := gate.Evaluate(ctx, desc)
+		if proceed, reason := gate.EnforceDecision(decision, cls, classErr, true); !proceed {
+			return gateResult{
+				deny:               true,
+				requiredCapability: required.Capability,
+				requiredScope:      required.Scope,
+				errorCode:          "denied_by_classifier",
+				errorMessage:       reason,
+				outcome:            "denied_by_classifier",
+				classification:     &cls,
 			}
 		}
 	}
@@ -477,6 +506,36 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 				"errorMessage": gate.errorMessage,
 			},
 			Timestamp: d.clock(),
+		})
+	case "denied_by_classifier":
+		// memql#229. The gate's per-decision SlogRecorder line is
+		// the lightweight observability sink; this auditEvent is the
+		// persistent "this command was blocked" record.
+		detail := map[string]any{
+			"errorMessage": gate.errorMessage,
+			"tool":         req.Tool,
+			"action":       req.Action,
+		}
+		if cls := gate.classification; cls != nil {
+			detail["tier"] = cls.Tier.String()
+			detail["ruleId"] = cls.RuleID
+			detail["reason"] = cls.Reason
+			detail["confidence"] = cls.Confidence
+			cats := make([]string, 0, len(cls.Categories))
+			for _, c := range cls.Categories {
+				cats = append(cats, string(c))
+			}
+			detail["categories"] = cats
+		}
+		d.auditor.Emit(ctx, workerservice.AuditEvent{
+			Action:        "command_blocked",
+			Actor:         "agent:" + req.AgentId,
+			Target:        req.AgentId,
+			TargetType:    "agent",
+			OwnerUserId:   req.OwnerUserId,
+			CorrelationId: req.CorrelationId,
+			Detail:        detail,
+			Timestamp:     d.clock(),
 		})
 	}
 }
