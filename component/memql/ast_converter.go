@@ -230,10 +230,24 @@ func (c *ASTConverter) convertComparisonExpr(expr *languageParser.ComparisonExpr
 		return nil, nil
 	}
 
-	// Convert value - might be an ArgReference from parser
+	// Convert value - might be an ArgReference from parser.
 	value := expr.Value
 	if argRef, ok := expr.Value.(*languageParser.ArgRefExpr); ok {
-		value = &ArgReference{Path: argRef.Path}
+		// The language parser routes bare `actor.X` / `caller.X`
+		// auth-context accessors through ArgRefExpr (carrying the
+		// prefix). Those are NOT caller-passed args -- map them to the
+		// engine CallerReference so they resolve from the caller's
+		// AccessContext at filter time (resolveCallerReferences ->
+		// resolveCallerPath), e.g. queryCurrentUser's `id==actor.userId`.
+		// Without this they become an ArgReference, miss the args bag,
+		// and the comparison silently matches zero rows. See memql#216.
+		if path, ok := strings.CutPrefix(argRef.Path, "actor."); ok {
+			value = &CallerReference{Path: path}
+		} else if path, ok := strings.CutPrefix(argRef.Path, "caller."); ok {
+			value = &CallerReference{Path: path}
+		} else {
+			value = &ArgReference{Path: argRef.Path}
+		}
 	}
 
 	result := &ComparisonExpression{

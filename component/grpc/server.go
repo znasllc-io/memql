@@ -1119,6 +1119,16 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// so engine.Execute uses it instead of stamping a fresh default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 
+	// Resolve + attach the caller's AccessContext so the engine can bind
+	// actor.* references in DSL filters/bodies (e.g. queryCurrentUser's
+	// `id==actor.userId`, or `createdBy: actor.userId` on mutations). The
+	// verifier interceptor only stamps claims onto the stream context;
+	// ensureAccess converts them to a full AccessContext (cached per
+	// stream). Without this the engine's resolveCallerPath sees no
+	// AccessContext, actor.userId resolves to "", and every self-scoped
+	// query/mutation silently no-ops (zero rows). See memql#216.
+	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
+
 	s.activeRequests.Store(requestId, cancel)
 
 	// Extract clientId for optimistic update reconciliation

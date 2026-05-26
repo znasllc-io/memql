@@ -6,7 +6,58 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
+
+// TestStructFormActorFilterConvertsToCallerReference guards memql#216 at
+// the layer that actually broke: struct-form .memql queries are parsed by
+// the language parser, then ast-converted. queryCurrentUser's
+// `id==actor.userId` was converting to an ArgReference (args-bag lookup ->
+// always empty) instead of a CallerReference (AccessContext). This drives
+// the real ParseExpression -> ConvertExpression path.
+func TestStructFormActorFilterConvertsToCallerReference(t *testing.T) {
+	for _, src := range []string{"id==actor.userId", "id==caller.userId"} {
+		t.Run(src, func(t *testing.T) {
+			parsed, err := languageParser.ParseExpression(src)
+			if err != nil {
+				t.Fatalf("ParseExpression(%q): %v", src, err)
+			}
+			converted, err := NewASTConverter().ConvertExpression(parsed)
+			if err != nil {
+				t.Fatalf("ConvertExpression: %v", err)
+			}
+			cmp, ok := converted.(*ComparisonExpression)
+			if !ok {
+				t.Fatalf("converted is %T, want *ComparisonExpression", converted)
+			}
+			ref, ok := cmp.Value.(*CallerReference)
+			if !ok {
+				t.Fatalf("comparison Value is %T, want *CallerReference (actor/caller not routed to AccessContext)", cmp.Value)
+			}
+			if ref.Path != "userId" {
+				t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+			}
+		})
+	}
+}
+
+// TestStructFormArgsFilterStaysArgReference confirms the fix didn't
+// regress real caller-passed args: `id==args.userId` must remain an
+// ArgReference (resolved from the args bag), not a CallerReference.
+func TestStructFormArgsFilterStaysArgReference(t *testing.T) {
+	parsed, err := languageParser.ParseExpression("id==args.userId")
+	if err != nil {
+		t.Fatalf("ParseExpression: %v", err)
+	}
+	converted, err := NewASTConverter().ConvertExpression(parsed)
+	if err != nil {
+		t.Fatalf("ConvertExpression: %v", err)
+	}
+	cmp := converted.(*ComparisonExpression)
+	if _, ok := cmp.Value.(*ArgReference); !ok {
+		t.Fatalf("args.userId comparison Value is %T, want *ArgReference", cmp.Value)
+	}
+}
 
 // findCallerValue walks the expression tree and returns the Value of
 // the first ComparisonExpression whose Field is payload.userId.
@@ -46,6 +97,48 @@ func TestCallerReferenceParsesAsRHS(t *testing.T) {
 	ref, ok := value.(*CallerReference)
 	if !ok {
 		t.Fatalf("payload.userId value is %T, want *CallerReference", value)
+	}
+	if ref.Path != "userId" {
+		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+	}
+}
+
+// TestActorReferenceParsesAsRHS guards memql#216: the restructured DSL
+// uses `actor.userId` (not `caller.userId`) in self-scoped filters, e.g.
+// queryCurrentUser's `id==actor.userId`. The parser must treat `actor.`
+// like `caller.` -- otherwise the reference never becomes a
+// *CallerReference, resolveCallerReferences leaves it unresolved, and
+// the query silently returns zero rows.
+func TestActorReferenceParsesAsRHS(t *testing.T) {
+	query := `concept==v1:identity:user; id==actor.userId`
+	tokens, err := tokenize(query)
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+	p := newParser(tokens, nil)
+	expr, err := p.parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var findIdValue func(e ExpressionNode) any
+	findIdValue = func(e ExpressionNode) any {
+		switch n := e.(type) {
+		case *LogicalExpression:
+			if v := findIdValue(n.Left); v != nil {
+				return v
+			}
+			return findIdValue(n.Right)
+		case *ComparisonExpression:
+			if len(n.Field.Parts) == 1 && n.Field.Parts[0] == "id" {
+				return n.Value
+			}
+		}
+		return nil
+	}
+	value := findIdValue(expr)
+	ref, ok := value.(*CallerReference)
+	if !ok {
+		t.Fatalf("id value is %T, want *CallerReference (actor.userId not recognized)", value)
 	}
 	if ref.Path != "userId" {
 		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")

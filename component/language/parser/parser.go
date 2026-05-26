@@ -4356,6 +4356,17 @@ func (p *Parser) parseValue() (any, error) {
 				}
 				return &ArgRefExpr{Path: argPath}, nil
 			}
+			// actor.X / caller.X are auth-context accessors (the caller's
+			// AccessContext), NOT caller-passed args. Emit an ArgRefExpr
+			// carrying the prefix; the AST converter routes it to the
+			// engine CallerReference so it resolves from the AccessContext
+			// at filter time (resolveCallerReferences). Without this a bare
+			// `actor.userId` in a comparison falls through as the literal
+			// string and the predicate (= 'actor.userId') never matches a
+			// real row. See memql#216.
+			if strings.HasPrefix(val, "actor.") || strings.HasPrefix(val, "caller.") {
+				return &ArgRefExpr{Path: val}, nil
+			}
 			return val, nil
 		}
 	case p.check(TokenOperator) && p.current.Literal == "$":
