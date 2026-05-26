@@ -41,6 +41,22 @@ var representativeRuntimeQueries = []struct {
 	{"single-arg mutation invocation", `mutationCreateRecord({recordId: "v1:data:record:abc"})`},
 	{"mixed-arg builtin invocation",
 		`trainAgent({agentId: "v1:agents:agent:abc", domains: ["x", "y"], tools: []})`},
+	// Bare-parens no-arg invocation -- some integrations write
+	// `queryFoo()` instead of `queryFoo({})`. Found at
+	// integrations/agents/factory.go:238 (queryActiveAgentRoles()).
+	{"bare-parens no-arg invocation", `queryActiveAgentRoles()`},
+	// Directive function calls (`paginate(...)` / `sort(...)` /
+	// `select(...)` / `asOf(...)` / `withDepth(...)` / `shape(...)`)
+	// are NOT in this corpus because the langparser produces a
+	// generic *FunctionCallExpr for the modern single-paren form
+	// while the memql parser specialises them into
+	// *PaginateExpression / *SortExpression / etc. The two parsers
+	// diverge at the AST level there; e.Parse's applyDirectiveWrappers
+	// only walks the specialised types. Until the langparser learns
+	// to wrap modern directive calls (filed as a follow-up under
+	// epic #218), `langparserPathUnsupported` returns true for
+	// queries containing a directive function name so they fall
+	// back to the memql parser. See TestParseViaLangparser_FallsBackOnDirectives.
 }
 
 // TestParseViaLangparser_CoversCorpus asserts the opt-in langparser
@@ -126,6 +142,62 @@ func TestParseViaLangparser_RejectsInlineSpec(t *testing.T) {
 	}
 }
 
+// TestParseViaLangparser_FallsBackOnDirectives covers the directive
+// fallback added in #249's flip-default work: the langparser
+// produces a generic *FunctionCallExpr for the modern single-paren
+// directive form (paginate / sort / select / asOf / withDepth /
+// shape), while the memql parser specialises them into
+// *PaginateExpression / *SortExpression / etc. The two paths
+// diverge at the AST level there, so langparserPathUnsupported
+// flags any query whose top-level call (or any nested call) names
+// a directive function, and parseViaLangparser returns the sentinel
+// so e.Parse cleanly falls back to the memql parser.
+//
+// When the langparser grows native wrapping for modern directive
+// calls (filed as a follow-up under epic #218), drop this test
+// (or convert it into an equivalence check) and remove the
+// directiveFunctionNames map.
+func TestParseViaLangparser_FallsBackOnDirectives(t *testing.T) {
+	for _, src := range []string{
+		`paginate(concept==v1:cluster:node, 10)`,
+		`sort(concept==v1:cluster:node, "createdAt", "desc")`,
+		`select(concept==v1:cluster:node, ["a", "b"])`,
+		`asOf(concept==v1:cluster:node, "latest")`,
+		`shape(concept==v1:cluster:node, "spaceCard")`,
+		// Composite (the integrations/cognition/space_context_engine.go shape).
+		`shape(paginate(sort(concept==v1:cognition:space:context; payload.spaceId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := parseViaLangparser(src)
+			if !errors.Is(err, errLangparserUnsupported) {
+				t.Errorf("got %v, want errLangparserUnsupported", err)
+			}
+		})
+	}
+}
+
+// TestLangparserPathUnsupported_DirectiveBoundary covers the
+// false-positive guards on the directive-name detector. Identifiers
+// that CONTAIN a directive name as a substring (e.g.
+// `mutationPaginateFoo({...})`) or appear in a field reference
+// (`payload.shape=="cylinder"`) must NOT trigger the fallback --
+// the detector only matches a directive name when it's the head of
+// a function call.
+func TestLangparserPathUnsupported_DirectiveBoundary(t *testing.T) {
+	for _, src := range []string{
+		`mutationPaginateFoo({id: "x"})`,
+		`payload.shape=="cylinder"`,
+		`queryListSortedThings({})`,
+		`foo.select=="x"`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if langparserPathUnsupported(src) {
+				t.Errorf("detector falsely flagged %q as a directive call", src)
+			}
+		})
+	}
+}
+
 // TestLangparserPathUnsupported_QuoteAware confirms the upfront
 // detector skips `@` and `:=` inside string literals so a query
 // like `... payload.title=="@latest"` doesn't trigger a spurious
@@ -149,6 +221,13 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 // pair -- the bootstrap-side opt-in handle for #248. Default OFF;
 // flipping ON is reflected in LangparserRuntimeEnabled. The flag's
 // effect on Parse is exercised by the equivalence test above.
+//
+// The planned default-flip (#249) discovered that the langparser
+// path is not yet a drop-in replacement: 13 existing memql/parser
+// tests diverge on relationship functions, introspection builtins,
+// number literal representation, and parser-error message text.
+// The flip is blocked on the architectural prerequisites filed
+// under epic #218.
 func TestEngineUseLangparserRuntimeToggle(t *testing.T) {
 	e := &MemQLEngine{}
 	if e.LangparserRuntimeEnabled() {

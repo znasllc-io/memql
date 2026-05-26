@@ -79,19 +79,23 @@ type MemQLEngine struct {
 	// useLangparserRuntime, when true, routes engine.Execute(ctx,
 	// string)'s parsing through the language parser + ASTConverter
 	// instead of the in-package memql parser. Opt-in (#248 / 3a of
-	// the #243 retirement). Default OFF; flips to ON in #249 after a
-	// soak period; component/memql/parser.go retires entirely in #250.
-	// Set via UseLangparserRuntime(...). The langparser path falls
-	// back to the memql parser for shapes it doesn't handle yet
-	// (timestamp suffix, inline specs); see parser_langpath.go.
+	// the #243 retirement). Default OFF; #249 (flip default) is
+	// blocked on the architectural prerequisites filed under epic
+	// #218 (langparser grammar parity, literal representation
+	// standardisation, introspection-dispatch refactor, test
+	// hygiene). Set via UseLangparserRuntime(...). The langparser
+	// path falls back to the memql parser per-query for shapes it
+	// doesn't handle (timestamp suffix, inline specs, directive +
+	// relationship function calls); see parser_langpath.go.
 	useLangparserRuntime bool
 }
 
-// UseLangparserRuntime toggles the opt-in langparser-backed runtime
-// query path (#248). Default is OFF; callers (typically app bootstrap)
-// flip it ON to opt into the soak period. The flag may also be set
-// by the MEMQL_PARSER=langparser environment variable at bootstrap;
-// see component/config.
+// UseLangparserRuntime toggles the opt-in langparser-backed
+// runtime query path (#248). Default is OFF; #249's planned
+// default-flip is blocked on architectural prerequisites (langparser
+// grammar parity for directive + relationship functions, literal
+// representation, introspection-dispatch refactor, test hygiene).
+// Callers can opt in for experimentation.
 func (e *MemQLEngine) UseLangparserRuntime(enabled bool) {
 	e.useLangparserRuntime = enabled
 }
