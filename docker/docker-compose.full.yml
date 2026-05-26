@@ -58,6 +58,22 @@ services:
       MEMQL_NODE_ADDRESS: bff:50058
       MEMQL_NODE_SERVICE_ADDRESS: ":50058"
       MEMQL_NODE_FLAVOR: ""
+      # Inter-node peer auth (memql#338). MEMQL_BFF_NODE_TOKEN is
+      # minted by scripts/dev/mint-node-tokens.sh and exported into
+      # the calling shell by scripts/dev/refresh.sh's step4b before
+      # the cluster nodes get force-recreated. First-time
+      # `docker compose up` before that step runs leaves
+      # MEMQL_NODE_TOKEN empty -- the inter-node interceptor then
+      # rejects every peer call with `authorization header missing`
+      # until the bootstrap completes. Operators using
+      # `docker compose up` directly should run:
+      #   make dev-node-tokens-bootstrap
+      #   source .env.local.node-tokens
+      #   docker compose -f docker/docker-compose.full.yml \
+      #       up -d --force-recreate bff voice cognition agent planner
+      # Matches the same shell-interpolation pattern as
+      # VOICE_AGENT_TOKEN (see docker-compose.polyphon.yml).
+      MEMQL_NODE_TOKEN: ${MEMQL_BFF_NODE_TOKEN:-}
       # Static seed addresses for WorkerDialer. DB-based discovery
       # (via v1:cluster:node events) takes over once workers register
       # themselves; this is a first-boot safety net so BFF can route
@@ -201,6 +217,9 @@ services:
       MEMQL_NODE_ID: cognition-local
       MEMQL_NODE_ADDRESS: cognition:50054
       MEMQL_NODE_SERVICE_ADDRESS: ":50054"
+      # Inter-node peer auth (memql#338) -- see the bff service for the
+      # full annotation.
+      MEMQL_NODE_TOKEN: ${MEMQL_COGNITION_NODE_TOKEN:-}
       # Dial BFF so events originated here (SI responses, presence
       # updates) flow back to BFF's event bus and reach frontend
       # subscribers. Without this the worker has no outbound stream
@@ -260,6 +279,9 @@ services:
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
+      # Inter-node peer auth (memql#338) -- see the bff service for the
+      # full annotation.
+      MEMQL_NODE_TOKEN: ${MEMQL_PLANNER_NODE_TOKEN:-}
       # Node identity
       MEMQL_NODE_TYPE: planner
       MEMQL_NODE_ID: planner-local
@@ -326,6 +348,9 @@ services:
       MEMQL_NODE_ADDRESS: voice:50059
       MEMQL_NODE_SERVICE_ADDRESS: ":50059"
       MEMQL_PARENT_ADDRESS: bff:50058
+      # Inter-node peer auth (memql#338) -- see the bff service for the
+      # full annotation.
+      MEMQL_NODE_TOKEN: ${MEMQL_VOICE_NODE_TOKEN:-}
 
       # Database (migrations are external)
       MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
@@ -407,6 +432,9 @@ services:
       MEMQL_NODE_ADDRESS: agent:50055
       MEMQL_NODE_SERVICE_ADDRESS: ":50055"
       MEMQL_PARENT_ADDRESS: bff:50058
+      # Inter-node peer auth (memql#338) -- see the bff service for the
+      # full annotation.
+      MEMQL_NODE_TOKEN: ${MEMQL_AGENT_NODE_TOKEN:-}
 
       # Database (migrations are external)
       MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable

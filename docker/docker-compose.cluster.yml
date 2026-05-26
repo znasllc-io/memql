@@ -56,6 +56,9 @@ services:
       MEMQL_NODE_ADDRESS: bff:50058
       MEMQL_NODE_SERVICE_ADDRESS: ":50058"
       MEMQL_NODE_FLAVOR: ""
+      # Inter-node peer auth (memql#338) -- see the bff service in
+      # docker-compose.full.yml for the full annotation.
+      MEMQL_NODE_TOKEN: ${MEMQL_BFF_NODE_TOKEN:-}
       # Static seed addresses for WorkerDialer. DB-based discovery
       # (via v1:cluster:node events) takes over once workers register
       # themselves, so this is a first-boot safety net -- not the
@@ -106,6 +109,8 @@ services:
       MEMQL_NODE_ID: cognition-local
       MEMQL_NODE_ADDRESS: cognition:50054
       MEMQL_NODE_SERVICE_ADDRESS: ":50054"
+      # Inter-node peer auth (memql#338).
+      MEMQL_NODE_TOKEN: ${MEMQL_COGNITION_NODE_TOKEN:-}
       # Dial BFF so events originated here (SI responses, presence updates)
       # flow back to BFF's event bus and reach the frontend subscribers.
       # Without this the worker has no outbound stream to BFF; EventBridge
@@ -146,6 +151,8 @@ services:
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
+      # Inter-node peer auth (memql#338).
+      MEMQL_NODE_TOKEN: ${MEMQL_VOICE_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: voice
       MEMQL_NODE_ID: voice-local
       MEMQL_NODE_ADDRESS: voice:50059
@@ -214,6 +221,8 @@ services:
       MEMQL_NODE_ADDRESS: agent:50055
       MEMQL_NODE_SERVICE_ADDRESS: ":50055"
       MEMQL_PARENT_ADDRESS: bff:50058
+      # Inter-node peer auth (memql#338).
+      MEMQL_NODE_TOKEN: ${MEMQL_AGENT_NODE_TOKEN:-}
       # Cluster-mode workbench: route workbenchHost calls to the
       # dedicated workbench node-type binary instead of dispatching
       # locally. The dialer needs a seed address; v1:cluster:node
@@ -258,6 +267,8 @@ services:
       MEMQL_NODE_SERVICE_ADDRESS: ":50060"
       MEMQL_PARENT_ADDRESS: bff:50058
       MEMQL_WORKBENCH_ROOT: /var/lib/memql/workbenches
+      # Inter-node peer auth (memql#338).
+      MEMQL_NODE_TOKEN: ${MEMQL_WORKBENCH_NODE_TOKEN:-}
 
       MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
       MEMQL_GRPC_ADDRESS: ":50051"
@@ -286,6 +297,8 @@ services:
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
+      # Inter-node peer auth (memql#338).
+      MEMQL_NODE_TOKEN: ${MEMQL_PLANNER_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: planner
       MEMQL_NODE_ID: planner-local
       MEMQL_NODE_ADDRESS: planner:50056
