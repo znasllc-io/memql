@@ -234,3 +234,92 @@ func TestHandleNodeBootstrap_AdmitsPlaintextWithXForwardedProto(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 }
+
+// TestHandleNodeBootstrap_VoiceAgentGoldenPath asserts the
+// memql#342 extension: tokenClass="voice_agent" + instanceId mints
+// a class="voice_agent" JWT through the same /node/bootstrap
+// endpoint + bootstrap secret.
+func TestHandleNodeBootstrap_VoiceAgentGoldenPath(t *testing.T) {
+	const secret = "dev-bootstrap-secret-for-tests"
+	s := newBootstrapTestServer(t, secret)
+
+	body, err := json.Marshal(NodeBootstrapRequest{
+		TokenClass: "voice_agent",
+		InstanceId: "voice-agent-local",
+	})
+	require.NoError(t, err)
+
+	rec := driveBootstrapRequest(t, s, secret, string(body))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	resp := decodeBootstrapResponse(t, rec)
+	assert.True(t, resp.Success)
+	assert.NotEmpty(t, resp.PlainToken)
+	assert.Equal(t, "v1:identity:identity:voice_agent:voice-agent-local", resp.IdentityId)
+	assert.Equal(t, "voice-agent-local", resp.NodeId, "voice-agent path echoes instance id via NodeId")
+	assert.Empty(t, resp.NodeType, "voice-agent path doesn't carry NodeType")
+	assert.NotEmpty(t, resp.ExpiresAt)
+
+	// Round-trip the returned JWT to confirm it's actually valid +
+	// stamped with class="voice_agent" (not class="node").
+	claims, err := s.Issuer.VerifyAccessToken(resp.PlainToken, time.Now().UTC().Add(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, identity.ClassVoiceAgent, claims.Class)
+	assert.Equal(t, "voice-agent-local", claims.NodeId, "voice-agent reuses NodeId claim slot for instance id")
+}
+
+// TestHandleNodeBootstrap_VoiceAgentRequiresInstanceId asserts that
+// the voice-agent path rejects requests missing instanceId. The
+// nodeId/nodeType fields are accepted (and ignored) on this path
+// because the same bootstrap-token client struct serves both
+// classes -- the parse can't always strip them upstream.
+func TestHandleNodeBootstrap_VoiceAgentRequiresInstanceId(t *testing.T) {
+	const secret = "secret"
+	s := newBootstrapTestServer(t, secret)
+
+	body := `{"tokenClass":"voice_agent"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	resp := decodeBootstrapResponse(t, rec)
+	assert.Equal(t, "bad_request", resp.ErrorCode)
+	assert.Contains(t, resp.Error, "instanceId")
+}
+
+// TestHandleNodeBootstrap_RejectsUnknownTokenClass asserts that
+// any tokenClass outside {"", "node", "voice_agent"} fails fast
+// with a 400 -- a future class addition has to land server-side
+// before clients can request it. The grammar stays exhaustive.
+func TestHandleNodeBootstrap_RejectsUnknownTokenClass(t *testing.T) {
+	const secret = "secret"
+	s := newBootstrapTestServer(t, secret)
+
+	body := `{"tokenClass":"admin","nodeId":"x","nodeType":"bff"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	resp := decodeBootstrapResponse(t, rec)
+	assert.Equal(t, "bad_request", resp.ErrorCode)
+	assert.Contains(t, resp.Error, "tokenClass")
+}
+
+// TestHandleNodeBootstrap_EmptyTokenClassDefaultsToNode asserts
+// backward compatibility: pre-#342 callers that omit tokenClass
+// continue to get the class="node" mint path. This pins the
+// "tokenClass is optional, defaults to node" contract so a future
+// refactor can't accidentally make it required.
+func TestHandleNodeBootstrap_EmptyTokenClassDefaultsToNode(t *testing.T) {
+	const secret = "secret"
+	s := newBootstrapTestServer(t, secret)
+
+	// No tokenClass on the body -- existing #338 clients look like this.
+	body := `{"nodeId":"v1:cluster:node:bff-local","nodeType":"bff"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	resp := decodeBootstrapResponse(t, rec)
+	require.NotEmpty(t, resp.PlainToken)
+	claims, err := s.Issuer.VerifyAccessToken(resp.PlainToken, time.Now().UTC().Add(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, identity.ClassNode, claims.Class)
+}

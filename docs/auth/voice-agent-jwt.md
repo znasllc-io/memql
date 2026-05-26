@@ -91,11 +91,41 @@ genesis envelope (dev) and the deploy pipeline's secret store
 
 ### Dev (`make dev-refresh`)
 
-`scripts/dev/refresh.sh` mints and injects the token automatically
-after the identity service is healthy:
+### Dev: self-bootstrap (default, memql#342)
+
+`docker-compose.polyphon.yml` ships with the self-bootstrap path
+wired by default so a stock `docker compose up` brings the
+voice-agent up cleanly without `make dev-refresh` running first.
+On startup, when `VOICE_AGENT_TOKEN` is empty, the Python
+voice-agent's `load_config` posts to the identity service's
+`POST /node/bootstrap` endpoint with `tokenClass="voice_agent"` +
+`instanceId="<MEMQL_VOICE_AGENT_INSTANCE_ID>"`, presenting the
+`MEMQL_NODE_BOOTSTRAP_TOKEN` bootstrap secret. Identity returns a
+minted `class="voice_agent"` JWT and `load_config` uses it for the
+rest of the process's lifetime.
+
+The compose file defaults all three knobs to dev sentinels:
+
+| Env var | Dev default | Production posture |
+| --- | --- | --- |
+| `MEMQL_NODE_BOOTSTRAP_TOKEN` | `dev-bootstrap-do-not-use-in-production-memql338` | Leave unset on identity side -- endpoint stays dark |
+| `IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` | Set to the deployed identity URL (HTTPS) |
+| `MEMQL_VOICE_AGENT_INSTANCE_ID` | `voice-agent-local` | Set to the deployed instance label (e.g. `voice-agent-prod-us-east-1`) |
+
+The endpoint reuses the same secret + same bootstrap surface as
+node-class JWTs (memql#338); operators have one secret to rotate
+and one endpoint to audit. The Go-side companion lives in
+`component/node/bootstrap_token.go`; the Python-side companion
+lives in `voice-agent/voice_agent/config.py::_maybe_bootstrap_voice_agent_token`.
+
+### Dev: out-of-band mint (`make dev-refresh`)
+
+The pre-#342 out-of-band path still works and stays the
+production-grade flow. `scripts/dev/refresh.sh` mints and injects
+the token explicitly after the identity service is healthy:
 
 1. Stack comes up via `docker compose up`. The voice-agent
-   crash-loops because `VOICE_AGENT_TOKEN` is empty.
+   self-bootstraps via the path above and starts cleanly.
 2. `wait_for_identity` polls `http://localhost:8081/healthz` until
    the identity service reports `status=ok` with `memoryNodesDB`
    running.
@@ -106,12 +136,22 @@ after the identity service is healthy:
    `docker compose up -d --no-deps --force-recreate voice-agent`
    so compose re-evaluates `${VOICE_AGENT_TOKEN:-}` in
    `docker-compose.polyphon.yml`'s voice-agent `environment:` block.
-   (Plain `restart` doesn't work -- compose bakes env
-   interpolation at `up`/`recreate` time, not at restart.)
+   Once VOICE_AGENT_TOKEN is set, the explicit token wins over the
+   self-bootstrap path (operator-provisioned tokens always win).
 
 The instance id is stable across refreshes (`voice-agent-local`),
 so each refresh mints a fresh JWT against a freshly inserted
 `v1:identity:identity` row; old rows soft-expire via `expiresAt`.
+
+### Which path runs?
+
+`load_config` checks env vars in this order:
+
+1. `VOICE_AGENT_TOKEN` non-empty -> use it directly (operator path).
+2. `MEMQL_NODE_BOOTSTRAP_TOKEN` non-empty + `IDENTITY_VERIFIER_BASE_URL`
+   + `MEMQL_VOICE_AGENT_INSTANCE_ID` -> self-bootstrap (dev path).
+3. Otherwise -> raise `RuntimeError` with the canonical
+   "VOICE_AGENT_TOKEN unset" message + provisioning pointers.
 
 ### Prod
 
