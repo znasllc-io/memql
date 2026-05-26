@@ -3231,6 +3231,106 @@ func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParti
 	return b.String()
 }
 
+// MutationCreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mutationMintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function \"mutationCreateSkill\" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
+//
+// Bound concept: skill.
+type MutationCreateSkillArgs struct {
+	SkillId       string
+	Slug          string
+	Name          string
+	Description   string
+	Category      string
+	Tags          []any
+	DomainIds     []any
+	ToolSlugs     []any
+	LiveSourceIds []any
+	Tier          string
+	Predefined    bool
+	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
+	Active        bool
+	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+}
+
+// MutationCreateSkill calls the engine mutation mutationCreateSkill.
+func (qc *QueryClient) MutationCreateSkill(ctx context.Context, args MutationCreateSkillArgs) (*Result, error) {
+	call := MutationCreateSkillBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateSkill", call)
+}
+
+func MutationCreateSkillBuild(args MutationCreateSkillArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateSkill({")
+	if args.SkillId != "" {
+		b.WriteString("skillId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SkillId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if args.Description != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	if args.Category != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("category: ")
+		b.WriteString(fmt.Sprintf("%q", args.Category))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tags: ")
+	b.WriteString(renderMemQLValue(args.Tags))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domainIds: ")
+	b.WriteString(renderMemQLValue(args.DomainIds))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toolSlugs: ")
+	b.WriteString(renderMemQLValue(args.ToolSlugs))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("liveSourceIds: ")
+	b.WriteString(renderMemQLValue(args.LiveSourceIds))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.PredefinedSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("predefined: ")
+		b.WriteString(fmt.Sprintf("%v", args.Predefined))
+	}
+	if args.ActiveSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("active: ")
+		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateSkillChangeEvent -- Append a v1:agents:skillChangeEvent row recording a skill attach / reconfigure on an agent. Phase 2 (#158) cut: every Planner Agent extendSpecialist / createSpecialist flow that lands a skill on an agent issues one of these per skill. Phase 3 also writes them from the cockpit Skills admin view when a human attaches a skill manually. Empty actorAgentId + actorUserId is allowed for system-driven attaches (the migration tool writes events with actorUserId='system:migration:phase2'). The caller is responsible for providing skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
 //
 // Bound concept: skillChangeEvent.
