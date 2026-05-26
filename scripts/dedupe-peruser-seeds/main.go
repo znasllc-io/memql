@@ -119,6 +119,15 @@ func run(ctx context.Context, dsn string, execute bool) error {
 	plan := ComputePlan(agents, participants)
 	printPlan(plan)
 
+	// Read-only audit: scan other concepts that carry an agentId
+	// reference (authorizations, delegations, audio/video overrides,
+	// utterances, etc.) and surface counts so operators know what
+	// else points at the cleaned-up agents. The main delete pass
+	// below does not touch these rows; the audit is informational.
+	if err := auditAgentReferences(ctx, db, plan); err != nil {
+		return fmt.Errorf("agentId reference audit: %w", err)
+	}
+
 	if !execute {
 		fmt.Println()
 		fmt.Println("dry-run only; pass --execute to apply.")
