@@ -325,7 +325,7 @@ func emitQuery(name, conceptId, body string) (string, error) {
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
 	sb.WriteString("  return ")
-	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape))
+	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf))
 	sb.WriteString(", nil\n}")
 	return sb.String(), nil
 }
@@ -373,13 +373,38 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	return out, nil
 }
 
-// buildStructQueryExpr stitches the concept / filter / shape pieces
-// into the runtime expression the engine already knows how to
-// compile.
-func buildStructQueryExpr(conceptId, filter, shape string) string {
+// buildStructQueryExpr stitches the concept / filter / shape +
+// sort / paginate / asOf pieces into the runtime expression the
+// engine already knows how to compile.
+//
+// Directive wrapping order (innermost to outermost): asOf -> sort ->
+// paginate -> shape. Matches the order the runtime memql parser
+// applies them when these are written as nested function calls in
+// a handwritten query string. Each directive's argument is passed
+// through VERBATIM -- the author writes the same arg list they
+// would use in the runtime form (`sort "createdAt", "desc"` ->
+// `sort(base, "createdAt", "desc")`), so the rewriter needs zero
+// new arg parsing logic.
+//
+// memql#294: pre-#294 the sort / paginate / asOf fields on
+// structQueryBody were parsed but silently dropped here. That left
+// every "give me the latest N rows" query forced into the
+// handwritten `shape(paginate(sort(...)))` runtime form, which
+// blocked memql#286's migration of cognition's space-context
+// callsites away from runtime shape() (memql#288, memql#290).
+func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string) string {
 	base := "concept==" + conceptId
 	if filter != "" {
 		base += ";" + filter
+	}
+	if asOf != "" {
+		base = fmt.Sprintf("asOf(%s, %s)", base, asOf)
+	}
+	if sort != "" {
+		base = fmt.Sprintf("sort(%s, %s)", base, sort)
+	}
+	if paginate != "" {
+		base = fmt.Sprintf("paginate(%s, %s)", base, paginate)
 	}
 	if shape != "" {
 		return fmt.Sprintf("shape(%s, %q)", base, shape)
