@@ -32,6 +32,18 @@ query space queryActiveSpaceIds {
   shape   spaceIdOnly
 }
 
+@enabled
+@description("Returns the latest v1:cognition:space:context row for a given spaceId, shaped via spaceContextFull. memql#294 in-tree exerciser for the wired sort + paginate struct-query directives; also directly unblocks memql#288's Go-side migration of getSpaceContextForPrompt away from a handwritten paginate(sort(filter, ...)) runtime query. Returns at most 1 row.")
+query context queryLatestSpaceContextForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId
+  sort    "createdAt", "desc"
+  paginate 1
+  shape   spaceContextFull
+}
+
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
 
 // queryAgentInteractionCount - Cross-space agent interaction signal

@@ -1574,6 +1574,28 @@ func QueryKnowledgeDomainByIdBuild(args QueryKnowledgeDomainByIdArgs) string {
 	return b.String()
 }
 
+// QueryLatestSpaceContextForSpace -- Returns the latest v1:cognition:space:context row for a given spaceId, shaped via spaceContextFull. memql#294 in-tree exerciser for the wired sort + paginate struct-query directives; also directly unblocks memql#288's Go-side migration of getSpaceContextForPrompt away from a handwritten paginate(sort(filter, ...)) runtime query. Returns at most 1 row.
+//
+// Bound concept: context.
+type QueryLatestSpaceContextForSpaceArgs struct {
+	SpaceId string
+}
+
+// QueryLatestSpaceContextForSpace calls the engine query queryLatestSpaceContextForSpace.
+func (qc *QueryClient) QueryLatestSpaceContextForSpace(ctx context.Context, args QueryLatestSpaceContextForSpaceArgs) (*Result, error) {
+	call := QueryLatestSpaceContextForSpaceBuild(args)
+	return qc.executeNamed(ctx, "queryLatestSpaceContextForSpace", call)
+}
+
+func QueryLatestSpaceContextForSpaceBuild(args QueryLatestSpaceContextForSpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLatestSpaceContextForSpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.
 //
 // Bound concept: knowledgeDomain.
