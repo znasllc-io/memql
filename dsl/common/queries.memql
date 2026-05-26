@@ -23,9 +23,8 @@ use common.concepts.{ media }
 // memql-bff-copresent#44 (audit) + memql#191.
 
 @enabled
-@useConcept(media)
 @description("Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).")
-query querySpaceMedia {
+query media querySpaceMedia {
   args {
     spaceId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string

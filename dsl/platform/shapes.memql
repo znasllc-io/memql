@@ -6,7 +6,7 @@
 use platform.concepts.{ missingCapability, partitionVariable }
 
 @row
-@description("Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the policyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.")
+@description("Comprehensive policy-trace projection for v1:platform:policyTrace rows. Backs the queryPolicyTracesForPolicy debug query and any operator surface that lists recent policy evaluations.")
 shape policyTrace policyTraceFull {
   row.id
   payload.policyName

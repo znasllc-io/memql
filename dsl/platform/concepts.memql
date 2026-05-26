@@ -73,7 +73,7 @@ concept partitionVariable {
 @version("1.0.0")
 @namespace("platform")
 @description("Persisted trace tree for a single policy evaluation. The engine writes one row per evaluation when the resolved policy carries @traces_persisted or when the caller requests PersistTrace=true on the EvaluatePolicy options. The row carries the policy name, the tier, the caller (actor / partition), the args hash (for cache lookup and audit correlation), the JSON-serialized PolicyTrace tree, the computed result, the wall-clock duration in milliseconds, and any error message that arose during evaluation. Retention is governed by the MEMQL_POLICYTRACE_RETENTION_DAYS env var (default 90); the daily purge automation hard-deletes rows whose `createdAt + retentionDays < now`. Distinct from v1:identity:auditEvent, which is the lightweight @audited per-eval row -- policyTrace is the heavyweight 'I'm debugging WHY this returned X' artifact.")
-concept policytrace {
+concept policyTrace {
   policyName   string    @required @description("Name of the policy that produced this trace.")
   tier         string    @required @description("Tier of the policy at evaluation time -- 'core' or 'bff'.")
   actorUserId  string    @description("Caller's v1:identity:user id. May be empty for server-internal calls.")

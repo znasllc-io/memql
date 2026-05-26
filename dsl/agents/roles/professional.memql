@@ -7,8 +7,13 @@
 
 use agents.concepts.{ agentRole }
 
+// Construct name is `assistantRole` (not `assistant`) to avoid a
+// seed-registry name collision with the per-user `seed agent assistant`
+// (agents/assistant.memql) -- the registry keys by name across concepts.
+// The role's identity is its `slug` ("assistant"), which is unchanged,
+// so all roleSlug references are preserved.
 @description("The designated fallback when no specialist fits. Owns operator-facing UI-driving tools and routes work to other agents when appropriate.")
-seed agentRole assistant {
+seed agentRole assistantRole {
   slug:                  "assistant"
   name:                  "Assistant"
   category:              "professional"
