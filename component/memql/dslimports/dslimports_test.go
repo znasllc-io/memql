@@ -198,6 +198,69 @@ func (Query) noop(_ any) (any, error) { return nil, nil }
 	}
 }
 
+// TestLoad_OrphanLogicFragmentSurfaces locks the #293 fix: a file
+// with a malformed `logic NAME { event: event }` token at file
+// level (the leftover-from-restructure-by-construct shape that
+// triggered memql-bff-copresent#55) must produce a diagnostic
+// rather than load silently. Pre-#293 the dslimports.Load
+// fallback unconditionally swallowed any parse error from
+// ParseFileSource so this class of structural noise escaped to
+// runtime; the narrowed fallback only swallows ErrEmptyInput
+// now, so real parser errors surface.
+func TestLoad_OrphanLogicFragmentSurfaces(t *testing.T) {
+	root := fstest.MapFS{
+		"orphan.memql": {Data: []byte(`logic foo { event: event }
+
+logic logicValid {
+  args {
+    event object @required
+  }
+  body {
+    return 1
+  }
+}
+`)},
+	}
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load should surface the orphan-logic parse error; got nil")
+	}
+	if !strings.Contains(err.Error(), "orphan.memql") {
+		t.Errorf("error should name the offending file; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "logic") {
+		t.Errorf("error should mention the failing construct kind; got %v", err)
+	}
+}
+
+// TestLoad_NonProceduralOnlyFileLoadsCleanly locks the fallback
+// path that #293's narrowing deliberately preserves: a file whose
+// only top-level content is a non-procedural construct (shape,
+// provider, builtin, prompt, tool, policy, seed, spec, trait)
+// strips down to comments + imports, ParseFileSource returns
+// ErrEmptyInput, and Load accepts the imports-only projection
+// without a diagnostic. The dedicated runtime loaders
+// (shape_loader.go, spec_loader.go, ...) parse the bodies
+// separately.
+func TestLoad_NonProceduralOnlyFileLoadsCleanly(t *testing.T) {
+	cases := map[string]string{
+		"shapes.memql":   `shape foo {` + "\n  payload.bar\n}\n",
+		"shapesCB.memql": `shape workspace workspaceFull {` + "\n  row.id\n}\n",
+		"specs.memql":    `spec specIsActive {` + "\n  payload.active==true\n}\n",
+		"traits.memql":   `trait traitIsActiveRecord {` + "\n  payload.active==true\n}\n",
+		"seeds.memql":    `seed agent assistant {` + "\n  name: \"Assistant\"\n}\n",
+	}
+	for filename, body := range cases {
+		t.Run(filename, func(t *testing.T) {
+			root := fstest.MapFS{filename: {Data: []byte(body)}}
+			_, err := Load(root)
+			if err != nil {
+				t.Errorf("Load(%s) returned diagnostic for a stripped-clean file: %v", filename, err)
+			}
+		})
+	}
+}
+
 // TestLoad_EmptyTree locks the no-files case.
 func TestLoad_EmptyTree(t *testing.T) {
 	tree, err := Load(fstest.MapFS{})
