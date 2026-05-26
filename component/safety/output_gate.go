@@ -193,9 +193,16 @@ func (g *OutputGate) Screen(ctx context.Context, in ScreeningInput) (ScreeningVe
 		// Record the error so it shows up in audit; return Clean
 		// (fail-open) to the surface in shadow + enforce. Surfaces
 		// that want fail-closed wrap Screen and check err.
+		//
+		// Source = ScreenSourceError (not res.Source) because the
+		// failing screener may have returned a zero-value
+		// ScreeningResult (Source == ""). The persisted row's
+		// `screener` field is @required; an empty value would fail
+		// validation, swallowing exactly the events ops need to
+		// surface ("classifier outage" rows).
 		errRes := ScreeningResult{
 			Verdict:   ScreeningVerdictClean,
-			Source:    res.Source,
+			Source:    ScreenSourceError,
 			LatencyMs: res.LatencyMs,
 			Reason:    "screener error: " + err.Error(),
 		}

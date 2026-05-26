@@ -142,6 +142,15 @@ func TestOutputGateScreenerErrorFailsOpenInBothModes(t *testing.T) {
 		if rec.Count() != 1 {
 			t.Errorf("%s: error path must still record, got %d", mode, rec.Count())
 		}
+		// PR #267 review fix: the recorded result's Source must be
+		// non-empty so the persisted row's @required `screener`
+		// field doesn't fail validation -- that's exactly the
+		// "classifier outage" rows ops most need to see.
+		_, recRes, _ := rec.Last()
+		if recRes.Source != ScreenSourceError {
+			t.Errorf("%s: error-path Source must be ScreenSourceError (so persisted screener field is non-empty), got %q",
+				mode, recRes.Source)
+		}
 	}
 }
 

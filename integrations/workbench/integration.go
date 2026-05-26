@@ -182,7 +182,16 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	// happened but can't follow embedded instructions. Per-surface
 	// wiring lands incrementally -- this is the demonstration
 	// integration; tool_output / file_read / knowledge_seed follow.
-	if res.OK && res.Action == "http_fetch" {
+	//
+	// CRITICAL: gated on res.Action only, NOT res.OK. handleHTTPFetch
+	// flips res.OK on the HTTP status code (< 400), but a 4xx/5xx
+	// response body still flows to the model when the agent
+	// processes the error. An attacker who controls a URL can serve
+	// a 403 with a poisoned body and bypass the screener entirely
+	// if we gated on res.OK. Screening runs for ALL http_fetch
+	// outcomes; only the body-replacement on Blocked depends on
+	// having a body to replace.
+	if res.Action == "http_fetch" {
 		if pl, ok := res.Payload.(map[string]any); ok {
 			if body, ok := pl["body"].(string); ok && body != "" {
 				outGate := safety.DefaultOutputGate()

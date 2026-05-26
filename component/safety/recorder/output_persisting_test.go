@@ -118,6 +118,40 @@ func TestOutputRecordNilRunnerIsNoop(t *testing.T) {
 	// No assertion beyond "doesn't panic" -- the call returns void.
 }
 
+// TestOutputRecordUTF8SafeTruncation pins the PR #267 review fix
+// for a multi-byte UTF-8 sequence that straddles MaxRedactedSampleBytes.
+// A naive byte-truncation splits the rune; json.Marshal replaces the
+// trailing byte with U+FFFD, which the memql parser may reject. The
+// fix snaps the truncation to a rune boundary.
+func TestOutputRecordUTF8SafeTruncation(t *testing.T) {
+	runner := &stubRunner{}
+	p := NewOutputPersistingRecorder(runner, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Build content so a 3-byte CJK character straddles the
+	// MaxRedactedSampleBytes boundary: 4094 a's + 1 CJK (3 bytes)
+	// totals 4097 bytes; naive cut at 4096 splits the middle of
+	// the CJK rune.
+	content := strings.Repeat("a", 4094) + "中" + strings.Repeat("b", 100)
+	p.Record(context.Background(),
+		safety.ScreeningInput{ContentType: safety.ContentTypeFileRead, Content: content},
+		safety.ScreeningResult{Verdict: safety.ScreeningVerdictClean, Source: safety.ScreenSourceRule},
+		safety.OutputModeShadow)
+	q := runner.Queries()[0]
+	// The redactedSample JSON-marshalled into the query must NOT
+	// contain U+FFFD (which appears as � in JSON) -- that
+	// would be evidence of a mid-rune cut.
+	if strings.Contains(q, `�`) {
+		t.Errorf("UTF-8-safe truncation broken: query contains replacement char \\ufffd: %q",
+			q[:min(len(q), 4200)])
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func TestOutputRecordDeterministicQueryOrder(t *testing.T) {
 	runner := &stubRunner{}
 	p := NewOutputPersistingRecorder(runner, slog.New(slog.NewTextHandler(io.Discard, nil)))

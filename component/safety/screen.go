@@ -78,6 +78,12 @@ const (
 	ScreenSourceCache    ScreenSource = "cache"
 	ScreenSourceNoop     ScreenSource = "noop"
 	ScreenSourceDisabled ScreenSource = "disabled"
+	// ScreenSourceError: the screener errored before producing a
+	// verdict. Used by OutputGate.Screen's error path so the
+	// persisted row carries a non-empty source (mutation arg is
+	// @required) and ops can grep for `screener=error` to find
+	// classifier outages.
+	ScreenSourceError ScreenSource = "error"
 )
 
 // ScreeningResult is what each Screener returns. Verdict is the

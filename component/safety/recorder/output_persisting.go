@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/safety"
 )
@@ -79,10 +80,7 @@ func (p *OutputPersistingRecorder) Record(ctx context.Context, in safety.Screeni
 // mutationInsertOutputScreening args map. The redactedSample is
 // truncated here (single source of truth for the cap policy).
 func buildOutputArgs(in safety.ScreeningInput, res safety.ScreeningResult, mode safety.OutputMode) map[string]any {
-	sample := in.Content
-	if len(sample) > MaxRedactedSampleBytes {
-		sample = sample[:MaxRedactedSampleBytes]
-	}
+	sample := truncateUTF8(in.Content, MaxRedactedSampleBytes)
 	cats := make([]string, 0, len(res.Categories))
 	for _, c := range res.Categories {
 		cats = append(cats, string(c))
@@ -105,6 +103,29 @@ func buildOutputArgs(in safety.ScreeningInput, res safety.ScreeningResult, mode 
 		"correlationId":  in.Caller.CorrelationID,
 		"mode":           string(mode),
 	}
+}
+
+// truncateUTF8 truncates s to at most maxBytes, snapping the cut
+// to a valid UTF-8 boundary so a multi-byte sequence isn't split
+// across the limit. Important because the persisted redactedSample
+// gets JSON-marshalled into a memql string literal; json.Marshal
+// turns an invalid UTF-8 byte at the boundary into U+FFFD, and the
+// memql parser's string-literal lexer may reject that. UTF-8-safe
+// truncation removes the dependency on parser tolerance.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk backward from maxBytes until we find a valid rune start.
+	// Bounded by 4 (max UTF-8 rune length) so the loop terminates
+	// even on a stream of continuation bytes.
+	for i := maxBytes; i > maxBytes-4 && i > 0; i-- {
+		if utf8.RuneStart(s[i]) {
+			return s[:i]
+		}
+	}
+	// Pathological input -- fall back to byte truncation.
+	return s[:maxBytes]
 }
 
 // buildOutputMutationQuery composes the memql call string. Same

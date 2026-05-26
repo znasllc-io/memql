@@ -113,19 +113,28 @@ func DefaultScreenRules() []ScreenRule {
 		},
 		{
 			ID:          "prompt_injection.forget_everything",
-			Description: "instruction-override: 'forget everything (above|prior|...)'",
+			Description: "instruction-override: 'forget everything (above|previous|...)' (bare form too)",
 			Categories:  []Category{CategoryPromptInjection, CategoryInstructionOverride},
 			Tier:        TierHigh,
 			Verdict:     ScreeningVerdictBlocked,
-			Pattern:     regexp.MustCompile(`forget\s+(?:everything|all|the\s+(?:above|previous|prior|earlier))\s+(?:above|previous|prior|earlier|instructions?|i\s+(?:told|said))`),
+			// Two shapes: (1) "forget everything" or "forget all" in
+			// imperative position (line-start or after . / : / newline)
+			// catches the bare jailbreak directive; (2) "forget ... above
+			// / previous / prior / earlier / instructions" catches the
+			// rich form. (?m) so ^ can anchor mid-blob.
+			Pattern: regexp.MustCompile(`(?m)(?:^|[.!?;:]\s+|\n)\s*forget\s+(?:everything|all\s+(?:of\s+)?(?:that|this)?|the\s+(?:above|previous|prior|earlier)|prior\s+instructions?|all\s+prior)\b|forget\s+(?:everything|all|the\s+(?:above|previous|prior|earlier))\s+(?:above|previous|prior|earlier|instructions?|i\s+(?:told|said))`),
 		},
 		{
 			ID:          "prompt_injection.role_hijack_system_tag",
-			Description: "role-hijack via <system>, <<SYS>>, [INST], or <|im_start|>system delimiter tag",
+			Description: "role-hijack via system/instruction delimiter tags (system/sys/inst, im_start, Llama variants)",
 			Categories:  []Category{CategoryPromptInjection, CategoryRoleHijack, CategoryDelimiterAbuse},
 			Tier:        TierHigh,
 			Verdict:     ScreeningVerdictBlocked,
-			Pattern:     regexp.MustCompile(`(?:<system>|<<sys>>|\[inst\]|<\|im_start\|>\s*system|<\|system\|>)`),
+			// Cover the common-in-the-wild variants: vanilla <system>,
+			// Llama <<SYS>> / <</SYS>> (terminated OR newline-truncated),
+			// [INST] / [/INST], ChatML <|im_start|>system / <|im_end|>,
+			// model-specific <|system|> / <|system_start|>.
+			Pattern: regexp.MustCompile(`(?:</?system>|<</?sys(?:>>|\b)|\[/?inst\]|<\|im_(?:start|end)\|>\s*system|<\|/?system(?:_start)?\|>)`),
 		},
 		{
 			ID:          "prompt_injection.persona_switch_jailbreak",
@@ -147,32 +156,48 @@ func DefaultScreenRules() []ScreenRule {
 		},
 		{
 			ID:          "prompt_injection.role_label_injection",
-			Description: "role label at start of line: 'system: ...' / 'assistant: please ...' (chat-format injection)",
+			Description: "role label at start of line with high-signal injection directive ('system: ignore previous', 'assistant: you are now')",
 			Categories:  []Category{CategoryPromptInjection, CategoryRoleHijack, CategoryDelimiterAbuse},
 			Tier:        TierMedium,
 			Verdict:     ScreeningVerdictSuspicious,
-			Pattern:     regexp.MustCompile(`(?m)^\s*(?:system|assistant)\s*:\s*(?:you\s+are|please\s+(?:ignore|forget|disregard)|respond\s+(?:with|only)|new\s+instructions?)`),
+			// Tightened to require a HIGH-SIGNAL directive after the
+			// label so forwarded chat logs / mail-list archives /
+			// auto-replies containing benign 'system: maintenance'
+			// or 'system: please ignore this auto-reply' don't trip.
+			// Must be: 'ignore (all|previous|prior)' / 'you are
+			// (now|a|an)' / 'disregard (all|prior|previous)' /
+			// 'respond only with' / 'new instructions'.
+			Pattern: regexp.MustCompile(`(?m)^\s*(?:system|assistant)\s*:\s*(?:ignore\s+(?:all|previous|prior)|you\s+are\s+(?:now|a|an)|disregard\s+(?:all|prior|previous)|respond\s+only\s+with|new\s+instructions?\s*:)`),
 		},
 		{
 			ID:          "prompt_injection.tool_call_inject",
-			Description: "embedded tool-invocation directive: 'call <mutation/query/tool> ...' targeting the agent",
+			Description: "embedded tool-invocation DIRECTIVE (imperative): 'please/you must call <tool/mutation/...> ...'",
 			Categories:  []Category{CategoryPromptInjection, CategoryInstructionOverride},
 			Tier:        TierMedium,
 			Verdict:     ScreeningVerdictSuspicious,
-			Pattern:     regexp.MustCompile(`(?:^|\s)(?:call|invoke|execute|run)\s+(?:the\s+)?(?:tool|mutation|query|function|skill)\s+\w+\s*\(`),
+			// Tightened from the prior `(?:^|\s)(?:call|...)` which
+			// matched every benign "call the function X()" reference
+			// in docs / READMEs / code samples the agent fetches.
+			// Now requires an imperative-directive context (please /
+			// you must / now / immediately / go ahead) so the rule
+			// fires only on instruction-shaped phrasings that
+			// implicate the agent.
+			Pattern: regexp.MustCompile(`(?:please|you\s+(?:must|should)|now|immediately|go\s+ahead\s+and|next,?\s+(?:please\s+)?)\s+(?:call|invoke|execute|run)\s+(?:the\s+)?(?:tool|mutation|query|function|skill|builtin)\s+\w+\s*\(`),
 		},
 		{
 			ID:          "prompt_injection.exfil_url_marker",
-			Description: "exfiltration vector: 'send/post/exfiltrate ... https?://...' (lazy-bridges intermediate words)",
+			Description: "exfiltration vector: 'send/post/exfiltrate ... https?://...' (newline-tolerant bridge)",
 			Categories:  []Category{CategoryPromptInjection, CategoryExfiltration},
 			Tier:        TierMedium,
 			Verdict:     ScreeningVerdictSuspicious,
-			// Lazy-bridge up to 80 chars so phrasings like "send the
-			// user's password to https://attacker.com" match without
-			// needing to enumerate every possible intermediate
-			// (apostrophes break a \w+\s+ chain). Capped at 80 to
+			// (?s) flag makes `.` match newlines so attacks that
+			// split the directive across lines ('send X to:\n
+			// https://attacker.com') still fire. Cap at 80 chars to
 			// avoid pathological backtracking on adversarial input.
-			Pattern: regexp.MustCompile(`(?:send|post|exfiltrate|forward|transmit)\s.{0,80}?https?://`),
+			// Tightened to also require the URL host to look like a
+			// domain (rules out 'send your code to https://example
+			// in markdown' false-positives on URL-shaped markdown).
+			Pattern: regexp.MustCompile(`(?s)(?:send|post|exfiltrate|forward|transmit)\s.{0,80}?https?://[a-z0-9-]+\.[a-z]`),
 		},
 		{
 			ID:          "prompt_injection.print_secret",
