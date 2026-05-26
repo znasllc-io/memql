@@ -1257,6 +1257,37 @@ type ConceptDecl struct {
 
 func (*ConceptDecl) node() {}
 
+// ShapeDecl is the shared-frontend AST node for a struct-form shape
+// declaration (`shape NAME { id; payload.X; ... }`). Introduced by
+// memql#315 (sub-epic #309 / #306 child C) so the unified-kinds loader
+// can parse shapes through the langparser instead of the hand-rolled
+// shape_parser.go mini-parser.
+//
+// The body is a sequence of dotted-path field references; each path
+// is preserved verbatim and the memql-side converter handles the
+// kind/namespace prefix translation (`row.X` -> `X`, `<concept>.X`
+// -> `payload.X`, etc.).
+//
+// Annotation surface (validated by the converter, not the parser):
+//
+//	@description("text")
+//	@row                              // shape projects row payload + intrinsics
+//	@actor                            // shape projects engine envelope
+//	@useConcept(name1, name2, ...)    // bound concept names (bare)
+//
+// The two-identifier signature `shape <Concept> <name> { ... }` is
+// recorded on SignatureConcept; the bound concept is also appended to
+// UseConcepts so downstream consumers see one canonical list.
+type ShapeDecl struct {
+	Name             string       // shape name
+	Attributes       []*Attribute // shape-level annotations
+	Paths            []string     // body field paths in source order
+	SignatureConcept string       // bound concept from the two-identifier signature, if any
+	Path             string       // source path, for errors/diagnostics
+}
+
+func (*ShapeDecl) node() {}
+
 // PropertyDecl is a single field declaration inside a ConceptDecl.
 // Supports both primitive types (string, bool, int, float, datetime,
 // enum, array, object) and nested object blocks via the Nested slice.

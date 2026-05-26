@@ -122,6 +122,7 @@ type (
 	ImportDecl              = ast.ImportDecl
 	File                    = ast.File
 	ConceptDecl             = ast.ConceptDecl
+	ShapeDecl               = ast.ShapeDecl
 	PropertyDecl            = ast.PropertyDecl
 	PropertyVariant         = ast.PropertyVariant
 	TypeRef                 = ast.TypeRef

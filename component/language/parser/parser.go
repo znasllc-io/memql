@@ -110,6 +110,32 @@ func ParseFile(source string) (*File, error) {
 	return parser.parseFile()
 }
 
+// ParseShapeDecl tokenises the given source and parses it as a
+// single struct-form shape declaration. Convenience wrapper around
+// ParseFile for callers that handle one shape per slice (the
+// unified-kinds loader's LoadUnifiedShapes flow). Returns an error
+// when the source contains zero or more than one definition, or
+// when the single definition isn't a shape.
+//
+// memql#315 (sub-epic #309 / #306 child C).
+func ParseShapeDecl(source string) (*ShapeDecl, error) {
+	file, err := ParseFile(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Definitions) == 0 {
+		return nil, fmt.Errorf("no shape declaration found")
+	}
+	if len(file.Definitions) > 1 {
+		return nil, fmt.Errorf("expected one shape declaration, got %d definitions", len(file.Definitions))
+	}
+	shape, ok := file.Definitions[0].(*ShapeDecl)
+	if !ok {
+		return nil, fmt.Errorf("expected shape declaration, got %T", file.Definitions[0])
+	}
+	return shape, nil
+}
+
 // ParseFile parses a file containing multiple definitions.
 func (p *Parser) parseFile() (*File, error) {
 	file := &File{
@@ -375,8 +401,17 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "shape":
+		// Contextual keyword: `shape` at top-of-file introduces a
+		// struct-form shape declaration. Stays a plain identifier
+		// elsewhere (e.g. ShapeExpr's `<expr> with shape(...)`).
+		// memql#315 (sub-epic #309 / #306 child C).
+		def, err = p.parseShapeDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func' or 'concept'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', or 'shape'", p.current.Literal)
 	}
 
 	if err != nil {
@@ -1383,6 +1418,81 @@ func (p *Parser) parseConceptDecl(attrs []*Attribute) (*ConceptDecl, error) {
 			return nil, err
 		}
 		decl.Properties = append(decl.Properties, prop)
+	}
+
+	if err := p.expect(TokenBraceClose); err != nil {
+		return nil, err
+	}
+	return decl, nil
+}
+
+// parseShapeDecl parses a struct-form shape declaration. Two
+// signature shapes are accepted, mirroring the hand-rolled
+// shape_parser.go this is migrating off of:
+//
+//   shape <name> { <path>; <path>; ... }              -- bare form
+//   shape <Concept> <name> { <path>; <path>; ... }    -- concept-bound
+//
+// Body grammar: each entry is a dotted-path identifier (the lexer
+// consumes `payload.X.Y` as one TokenIdentifier). Entries may be
+// separated by `;` or `,` or just whitespace; the closing `}`
+// terminates the body. No attributes inside the body (annotations all
+// live in the leading attribute cluster captured by parseDefinition).
+//
+// memql#315 (sub-epic #309 / #306 child C). The kind/namespace
+// translation (`row.X` -> `X`, `<concept>.X` -> `payload.X`,
+// `actor.X` -> unchanged) is intentionally NOT done here -- the
+// memql-side converter (shapeDeclToShapeDefinition) handles it. This
+// AST node carries the author-facing paths verbatim so future
+// language tooling (Sense, diagnostics) can echo back the user's
+// source intact.
+func (p *Parser) parseShapeDecl(attrs []*Attribute) (*ShapeDecl, error) {
+	if !p.check(TokenIdentifier) || p.current.Literal != "shape" {
+		return nil, newParseErrorf(&p.current, "expected 'shape' keyword, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected shape name after 'shape', got %q", p.current.Literal)
+	}
+	first := p.current.Literal
+	p.advance()
+
+	decl := &ShapeDecl{Attributes: attrs}
+
+	// Two-identifier form: `shape <Concept> <name> { ... }`. If the
+	// next token is another identifier (not `{`), promote the first
+	// identifier to SignatureConcept and use the second as the name.
+	if p.check(TokenIdentifier) {
+		decl.SignatureConcept = first
+		decl.Name = p.current.Literal
+		p.advance()
+	} else {
+		decl.Name = first
+	}
+
+	if err := p.expect(TokenBraceOpen); err != nil {
+		return nil, err
+	}
+
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		// Skip explicit separators (the author surface tolerates `;`
+		// `,` or just whitespace between paths).
+		for p.check(TokenSemicolon) || p.check(TokenComma) {
+			p.advance()
+		}
+		if p.check(TokenBraceClose) || p.check(TokenEOF) {
+			break
+		}
+		if !p.check(TokenIdentifier) {
+			return nil, newParseErrorf(&p.current,
+				"expected field path identifier in shape body, got %q", p.current.Literal)
+		}
+		// The lexer's scanIdentifier consumes dotted paths
+		// (`payload.X.Y`) as a single token, so the path is just the
+		// literal of the current TokenIdentifier.
+		decl.Paths = append(decl.Paths, p.current.Literal)
+		p.advance()
 	}
 
 	if err := p.expect(TokenBraceClose); err != nil {

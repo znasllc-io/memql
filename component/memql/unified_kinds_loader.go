@@ -20,6 +20,7 @@ import (
 	"text/template"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -36,8 +37,15 @@ func extractAdapter(content, keyword string) []baseloader.Slice {
 }
 
 // LoadUnifiedShapes walks the new tree, parses every `shape NAME
-// { ... }` block, and upserts the resulting ShapeDefinition into the
-// supplied registry.
+// { ... }` block through the langparser's load-time path, and upserts
+// the resulting ShapeDefinition into the supplied registry.
+//
+// memql#315 (sub-epic #309 / #306 child C) migrated the parsing
+// half off the hand-rolled parseShapeMemQL onto langparser.ParseShapeDecl
+// + the in-package shapeDeclToShapeDefinition converter. The
+// hand-rolled parser is unreferenced from production code after this
+// child; tests in shape_parser_test.go still exercise it pending the
+// final deletion in #306 child D (#310).
 func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("shape registry is nil")
@@ -49,7 +57,11 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 		baseloader.ReadAll(logger),
 		extractAdapter,
 		func(origin string, raw []byte) (*ShapeDefinition, error) {
-			shape, err := parseShapeMemQL(origin, raw)
+			decl, err := languageParser.ParseShapeDecl(string(raw))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", origin, err)
+			}
+			shape, err := shapeDeclToShapeDefinition(decl, origin)
 			if err != nil {
 				return nil, err
 			}
