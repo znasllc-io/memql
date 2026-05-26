@@ -91,7 +91,7 @@ var representativeRuntimeQueries = []struct {
 //
 //  1. Trigger the upfront unsupported detector
 //     (`langparserPathUnsupported == true` -> parseViaLangparser
-//     returns errLangparserUnsupported).
+//     returns ErrUnsupportedQueryShape).
 //  2. Round-trip cleanly through the memql parser so the fallback
 //     produces a usable AST.
 //
@@ -156,14 +156,14 @@ var inOperatorFallsBackQueries = []struct {
 func TestLangparserPathFallsBackOnShape(t *testing.T) {
 	for _, tc := range shapeFallsBackToMemqlQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if !langparserPathUnsupported(tc.query) {
+			if unsupportedQueryShape(tc.query) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; shape() should short-circuit until parity ships", tc.query)
 			}
 			// And the public entry must return the sentinel
 			// (not a stray parser error that would propagate).
 			_, err := parseViaLangparser(tc.query)
-			if !errors.Is(err, errLangparserUnsupported) {
-				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			if !errors.Is(err, ErrUnsupportedQueryShape) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
 		})
 	}
@@ -175,12 +175,12 @@ func TestLangparserPathFallsBackOnShape(t *testing.T) {
 func TestLangparserPathFallsBackOnSelect(t *testing.T) {
 	for _, tc := range selectFallsBackToMemqlQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if !langparserPathUnsupported(tc.query) {
+			if unsupportedQueryShape(tc.query) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; select() should short-circuit until Plan.Fields parity ships", tc.query)
 			}
 			_, err := parseViaLangparser(tc.query)
-			if !errors.Is(err, errLangparserUnsupported) {
-				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			if !errors.Is(err, ErrUnsupportedQueryShape) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
 		})
 	}
@@ -191,12 +191,12 @@ func TestLangparserPathFallsBackOnSelect(t *testing.T) {
 func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
 	for _, tc := range memqlVersionCompatFallsBackQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if !langparserPathUnsupported(tc.query) {
+			if unsupportedQueryShape(tc.query) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; concept==memql:version compat should short-circuit", tc.query)
 			}
 			_, err := parseViaLangparser(tc.query)
-			if !errors.Is(err, errLangparserUnsupported) {
-				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			if !errors.Is(err, ErrUnsupportedQueryShape) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
 		})
 	}
@@ -207,12 +207,12 @@ func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
 func TestLangparserPathFallsBackOnInOperator(t *testing.T) {
 	for _, tc := range inOperatorFallsBackQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if !langparserPathUnsupported(tc.query) {
+			if unsupportedQueryShape(tc.query) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; in (...) collection operator should short-circuit", tc.query)
 			}
 			_, err := parseViaLangparser(tc.query)
-			if !errors.Is(err, errLangparserUnsupported) {
-				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			if !errors.Is(err, ErrUnsupportedQueryShape) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
 		})
 	}
@@ -343,8 +343,8 @@ func TestParseViaLangparser_RejectsTimestampSuffix(t *testing.T) {
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, err := parseViaLangparser(src)
-			if !errors.Is(err, errLangparserUnsupported) {
-				t.Errorf("got %v, want errLangparserUnsupported", err)
+			if !errors.Is(err, ErrUnsupportedQueryShape) {
+				t.Errorf("got %v, want ErrUnsupportedQueryShape", err)
 			}
 		})
 	}
@@ -355,8 +355,8 @@ func TestParseViaLangparser_RejectsTimestampSuffix(t *testing.T) {
 func TestParseViaLangparser_RejectsInlineSpec(t *testing.T) {
 	src := `myFilter := concept==v1:cluster:node`
 	_, err := parseViaLangparser(src)
-	if !errors.Is(err, errLangparserUnsupported) {
-		t.Errorf("got %v, want errLangparserUnsupported", err)
+	if !errors.Is(err, ErrUnsupportedQueryShape) {
+		t.Errorf("got %v, want ErrUnsupportedQueryShape", err)
 	}
 }
 
@@ -385,7 +385,7 @@ func TestLangparserPathDirectivesNotFlagged(t *testing.T) {
 		`integerField == 5`,
 	} {
 		t.Run(src, func(t *testing.T) {
-			if langparserPathUnsupported(src) {
+			if unsupportedQueryShape(src) != nil {
 				t.Errorf("detector flagged %q after #254 removed directive-name guard", src)
 			}
 		})
@@ -403,7 +403,7 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 		`payload.title=="x := y"`,
 	} {
 		t.Run(src, func(t *testing.T) {
-			if langparserPathUnsupported(src) {
+			if unsupportedQueryShape(src) != nil {
 				t.Errorf("detector flagged %q (quoted content) as unsupported", src)
 			}
 		})
@@ -440,7 +440,7 @@ func TestEngineUseLangparserRuntimeToggle(t *testing.T) {
 }
 
 // TestParseViaLangparser_FallsBackOnParseError pins the #249 soak
-// contract: ANY langparser parse error returns errLangparserUnsupported
+// contract: ANY langparser parse error returns ErrUnsupportedQueryShape
 // so engine.Parse falls back to the memql parser for the canonical
 // error message + sentinel chain. Without this conversion,
 // langparser's bare error text doesn't wrap ErrInvalidArgument /
@@ -452,17 +452,19 @@ func TestEngineUseLangparserRuntimeToggle(t *testing.T) {
 // memql-sentinel-wrapped errors but got bare langparser errors --
 // inverted for the soak; restore when langparser error-wrapping
 // reaches parity (separate follow-up under epic #218).
-func TestParseViaLangparser_FallsBackOnParseError(t *testing.T) {
-	// Genuinely malformed input -- nothing about it triggers the
-	// upfront-unsupported detector, so it reaches
-	// langparser.ParseExpression which produces a parse error.
-	// The wrapper converts it to errLangparserUnsupported so the
-	// memql fallback path produces the canonical error.
+// TestParseViaLangparser_PropagatesParseErrors pins the post-#250
+// contract: genuine langparser parse errors propagate RAW.
+// Pre-#250 (under #249's soak posture) such errors were wrapped to
+// errLangparserUnsupported so the legacy memql parser could
+// produce the canonical sentinel chain; #250 deleted that
+// fallback so langparser is canonical and its errors reach the
+// caller verbatim.
+func TestParseViaLangparser_PropagatesParseErrors(t *testing.T) {
 	_, err := parseViaLangparser(`concept==`)
 	if err == nil {
-		t.Fatal("expected fallback signal, got nil")
+		t.Fatal("expected raw parse error, got nil")
 	}
-	if !errors.Is(err, errLangparserUnsupported) {
-		t.Errorf("parse error should be converted to errLangparserUnsupported, got %v", err)
+	if errors.Is(err, ErrUnsupportedQueryShape) {
+		t.Errorf("parse error must NOT wrap ErrUnsupportedQueryShape post-#250, got %v", err)
 	}
 }
