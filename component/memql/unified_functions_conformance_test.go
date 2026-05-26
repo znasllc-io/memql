@@ -63,8 +63,10 @@ func (h skipCountingHandler) Handle(_ context.Context, r slog.Record) error {
 // invocation from inside an automation `step` block, or a malformed /
 // returnless logic body.
 //
-// Mutation + query skips are tracked separately (#213 / #214); when
-// those land, tighten this assertion to zero skips of ANY kind.
+// Query skips are also asserted zero as of #214 (query-prefix naming,
+// retired @useConcept, the misnamed policyTrace concept). Mutation
+// skips remain tracked separately (#213 args-usage + #215 workbench);
+// tighten this to zero skips of ANY kind once those land.
 func TestUnifiedLoaderZeroAutomationLogicSkips(t *testing.T) {
 	var mu sync.Mutex
 	counts := map[string]int{}
@@ -85,8 +87,9 @@ func TestUnifiedLoaderZeroAutomationLogicSkips(t *testing.T) {
 
 	autoSkips := counts[string(languageParser.FunctionTypeAutomation)]
 	logicSkips := counts[string(languageParser.FunctionTypeLogic)]
-	if autoSkips != 0 || logicSkips != 0 {
-		t.Errorf("issue #212: expected 0 automation + 0 logic skipped slices, got automation=%d logic=%d. Skipped:\n%s",
-			autoSkips, logicSkips, strings.Join(detail, "\n"))
+	querySkips := counts[string(languageParser.FunctionTypeQuery)]
+	if autoSkips != 0 || logicSkips != 0 || querySkips != 0 {
+		t.Errorf("issues #212/#214: expected 0 automation + 0 logic + 0 query skipped slices, got automation=%d logic=%d query=%d. Skipped:\n%s",
+			autoSkips, logicSkips, querySkips, strings.Join(detail, "\n"))
 	}
 }

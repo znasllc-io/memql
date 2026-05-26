@@ -536,25 +536,25 @@ query videoOverride queryVideoOverridesForSpace {
 // Returns the caller's Team-tab utterances in a space -- the private
 // thread sister of querySpaceUtterances. Filter MUST gate on
 // forUserId==actor.userId so a caller can NEVER read another user's
-// private thread regardless of what they pass for viewerUserId.
-// viewerUserId is accepted for SDK ergonomics (matches the SPA's
-// useUtteranceSubscription hook shape) but is ignored by the filter
-// -- actor.userId is the only thing that gates the row set.
+// private thread.
 //
-// Authz tier: owned. The forUserId predicate is the load-bearing
-// guard; do not relax to a `?.payload.forUserId==args.viewerUserId`
-// arg-conditional, which would let a caller passing viewerUserId=""
-// dodge the gate.
+// No viewerUserId arg: the row set is gated solely by actor.userId
+// server-side. A viewerUserId param was previously accepted for SPA
+// hook-shape parity but ignored by the filter; it was removed under
+// the no-unused-args conformance rule (memql#214). Do NOT re-add it
+// as a `?.payload.forUserId==args.viewerUserId` arg-conditional --
+// that would let a caller dodge the actor.userId gate.
+//
+// Authz tier: owned. The forUserId==actor.userId predicate is the
+// load-bearing guard.
 //
 // memql#190 / memql-bff-copresent#44.
 
 @enabled
-@useConcept(privateUtterance)
 @description("Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.")
-query querySpacePrivateUtterancesForViewer {
+query privateUtterance querySpacePrivateUtterancesForViewer {
   args {
-    spaceId       string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
-    viewerUserId  string  @description("Accepted for SDK shape parity with querySpaceUtterances + the SPA's hook signature; the filter binds to actor.userId regardless.")
+    spaceId  string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
   }
   filter  payload.spaceId==args.spaceId; payload.forUserId==actor.userId
   shape   privateUtteranceFull

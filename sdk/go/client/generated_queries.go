@@ -14,28 +14,6 @@ var (
 	_ = strings.Builder{}
 )
 
-// PolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
-//
-// Bound concept: policyTrace.
-type PolicyTracesForPolicyArgs struct {
-	PolicyName string
-}
-
-// PolicyTracesForPolicy calls the engine query policyTracesForPolicy.
-func (qc *QueryClient) PolicyTracesForPolicy(ctx context.Context, args PolicyTracesForPolicyArgs) (*Result, error) {
-	call := PolicyTracesForPolicyBuild(args)
-	return qc.executeNamed(ctx, "policyTracesForPolicy", call)
-}
-
-func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
-	var b strings.Builder
-	b.WriteString("policyTracesForPolicy({")
-	b.WriteString("policyName: ")
-	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
-	b.WriteString("})")
-	return b.String()
-}
-
 // QueryAccessRequestById -- Returns the access request with the given id. Zero or one result.
 //
 // Bound concept: accessRequest.
@@ -1807,6 +1785,28 @@ func QueryPolicyBuild(args QueryPolicyArgs) string {
 	return b.String()
 }
 
+// QueryPolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
+//
+// Bound concept: policyTrace.
+type QueryPolicyTracesForPolicyArgs struct {
+	PolicyName string
+}
+
+// QueryPolicyTracesForPolicy calls the engine query queryPolicyTracesForPolicy.
+func (qc *QueryClient) QueryPolicyTracesForPolicy(ctx context.Context, args QueryPolicyTracesForPolicyArgs) (*Result, error) {
+	call := QueryPolicyTracesForPolicyBuild(args)
+	return qc.executeNamed(ctx, "queryPolicyTracesForPolicy", call)
+}
+
+func QueryPolicyTracesForPolicyBuild(args QueryPolicyTracesForPolicyArgs) string {
+	var b strings.Builder
+	b.WriteString("queryPolicyTracesForPolicy({")
+	b.WriteString("policyName: ")
+	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryProvisionedWorkspaces -- List provisioned workspaces for inventory / debugging. Filtered to status=provisioned so released rows don't clutter the view.
 //
 // Bound concept: workspace.
@@ -2027,6 +2027,50 @@ func QuerySkillBySlugBuild(args QuerySkillBySlugArgs) string {
 	return b.String()
 }
 
+// QuerySkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
+//
+// Bound concept: skillChangeEvent.
+type QuerySkillChangeEventsForAgentArgs struct {
+	TargetAgentId string
+}
+
+// QuerySkillChangeEventsForAgent calls the engine query querySkillChangeEventsForAgent.
+func (qc *QueryClient) QuerySkillChangeEventsForAgent(ctx context.Context, args QuerySkillChangeEventsForAgentArgs) (*Result, error) {
+	call := QuerySkillChangeEventsForAgentBuild(args)
+	return qc.executeNamed(ctx, "querySkillChangeEventsForAgent", call)
+}
+
+func QuerySkillChangeEventsForAgentBuild(args QuerySkillChangeEventsForAgentArgs) string {
+	var b strings.Builder
+	b.WriteString("querySkillChangeEventsForAgent({")
+	b.WriteString("targetAgentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QuerySkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
+//
+// Bound concept: skill.
+type QuerySkillNeedsRefreshArgs struct {
+	StaleDomainId string
+}
+
+// QuerySkillNeedsRefresh calls the engine query querySkillNeedsRefresh.
+func (qc *QueryClient) QuerySkillNeedsRefresh(ctx context.Context, args QuerySkillNeedsRefreshArgs) (*Result, error) {
+	call := QuerySkillNeedsRefreshBuild(args)
+	return qc.executeNamed(ctx, "querySkillNeedsRefresh", call)
+}
+
+func QuerySkillNeedsRefreshBuild(args QuerySkillNeedsRefreshArgs) string {
+	var b strings.Builder
+	b.WriteString("querySkillNeedsRefresh({")
+	b.WriteString("staleDomainId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QuerySpaceContext -- Returns runtime context snapshots for spaces. Optional filter: spaceId
 //
 // Bound concept: context.
@@ -2052,6 +2096,8 @@ func QuerySpaceContextBuild(args QuerySpaceContextArgs) string {
 }
 
 // QuerySpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view (visionarys-io/copresent src/hooks/useCopresent.ts).
+//
+// Bound concept: media.
 type QuerySpaceMediaArgs struct {
 	SpaceId   string
 	MediaType string
@@ -2162,10 +2208,10 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 }
 
 // QuerySpacePrivateUtterancesForViewer -- Returns the caller's Team-tab privateUtterance rows in a space. The forUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
+//
+// Bound concept: privateUtterance.
 type QuerySpacePrivateUtterancesForViewerArgs struct {
 	SpaceId string
-	// Accepted for SDK shape parity with querySpaceUtterances + the SPA's hook signature; the filter binds to actor.userId regardless.
-	ViewerUserId string
 }
 
 // QuerySpacePrivateUtterancesForViewer calls the engine query querySpacePrivateUtterancesForViewer.
@@ -2179,13 +2225,6 @@ func QuerySpacePrivateUtterancesForViewerBuild(args QuerySpacePrivateUtterancesF
 	b.WriteString("querySpacePrivateUtterancesForViewer({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if args.ViewerUserId != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("viewerUserId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ViewerUserId))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -2716,50 +2755,6 @@ func QueryWorkspaceForPlanBuild(args QueryWorkspaceForPlanArgs) string {
 	b.WriteString("queryWorkspaceForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// SkillChangeEventsForAgent -- Phase 3 (memql#159 / cockpit#125): list v1:agents:skillChangeEvent rows for a target agent. Backs the cockpit planner trace viewer's per-agent skill-history surface -- the operator selects a Plan, sees its ownerAgentId, and this query feeds the timeline of every attach / reconfigure recorded against that agent (newest first). The skillChangeEvent rows are append-only, so this is just a filter + sort against the time-series.
-//
-// Bound concept: skillChangeEvent.
-type SkillChangeEventsForAgentArgs struct {
-	TargetAgentId string
-}
-
-// SkillChangeEventsForAgent calls the engine query skillChangeEventsForAgent.
-func (qc *QueryClient) SkillChangeEventsForAgent(ctx context.Context, args SkillChangeEventsForAgentArgs) (*Result, error) {
-	call := SkillChangeEventsForAgentBuild(args)
-	return qc.executeNamed(ctx, "skillChangeEventsForAgent", call)
-}
-
-func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
-	var b strings.Builder
-	b.WriteString("skillChangeEventsForAgent({")
-	b.WriteString("targetAgentId: ")
-	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
-	b.WriteString("})")
-	return b.String()
-}
-
-// SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors queryActiveAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
-//
-// Bound concept: skill.
-type SkillNeedsRefreshArgs struct {
-	StaleDomainId string
-}
-
-// SkillNeedsRefresh calls the engine query skillNeedsRefresh.
-func (qc *QueryClient) SkillNeedsRefresh(ctx context.Context, args SkillNeedsRefreshArgs) (*Result, error) {
-	call := SkillNeedsRefreshBuild(args)
-	return qc.executeNamed(ctx, "skillNeedsRefresh", call)
-}
-
-func SkillNeedsRefreshBuild(args SkillNeedsRefreshArgs) string {
-	var b strings.Builder
-	b.WriteString("skillNeedsRefresh({")
-	b.WriteString("staleDomainId: ")
-	b.WriteString(fmt.Sprintf("%q", args.StaleDomainId))
 	b.WriteString("})")
 	return b.String()
 }

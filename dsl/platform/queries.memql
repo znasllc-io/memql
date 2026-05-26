@@ -7,7 +7,7 @@ use platform.concepts.{ globalVariable, missingCapability }
 
 @enabled
 @description("Recent persisted policy traces for the named policy, most-recent first.")
-query policyTrace policyTracesForPolicy {
+query policyTrace queryPolicyTracesForPolicy {
   args {
     policyName  string  @required
   }
