@@ -569,6 +569,28 @@ func QueryArchivedSpacesBuild(args QueryArchivedSpacesArgs) string {
 	return b.String()
 }
 
+// QueryAssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinSI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
+//
+// Bound concept: agent.
+type QueryAssistantAgentForUserArgs struct {
+	OwnerUserId string
+}
+
+// QueryAssistantAgentForUser calls the engine query queryAssistantAgentForUser.
+func (qc *QueryClient) QueryAssistantAgentForUser(ctx context.Context, args QueryAssistantAgentForUserArgs) (*Result, error) {
+	call := QueryAssistantAgentForUserBuild(args)
+	return qc.executeNamed(ctx, "queryAssistantAgentForUser", call)
+}
+
+func QueryAssistantAgentForUserBuild(args QueryAssistantAgentForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAssistantAgentForUser({")
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
 // Bound concept: audioOverride.
