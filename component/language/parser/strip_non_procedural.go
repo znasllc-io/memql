@@ -29,19 +29,61 @@ import (
 // dedicated loaders walking the same FS in parallel.
 
 // nonProceduralHeaders lists every top-level construct keyword the
-// generic parser doesn't understand. Adding more is a one-line
+// generic parser doesn't understand. Each kind has its own dedicated
+// runtime loader (shape_loader.go, spec_loader.go, seed_loader.go,
+// ...) that reads these blocks directly off the same source files,
+// so the generic parser doesn't need to understand them -- it just
+// needs to step over them cleanly. Adding more is a one-line
 // extension; the stripping logic is keyword-agnostic.
+//
+// memql#293 added seed / spec / trait to this list. Pre-#293 the
+// dslimports.Load fallback silently swallowed any parse error,
+// including the "unexpected token 'seed'" / "'spec'" / "'trait'"
+// failures these omissions produced. With the fallback narrowed to
+// only swallow ErrEmptyInput, these declarations have to actually
+// strip cleanly.
 var nonProceduralHeaders = []string{
 	"shape", "provider", "builtin", "prompt", "tool", "policy",
+	"seed", "spec", "trait",
 }
 
-// nonProceduralRe matches `<keyword> NAME {` at column 0, including
-// leading whitespace. The trailing `{` marks the start of the body
-// that brace-matching closes out.
+// nonProceduralRe matches `<keyword> [<Concept>] NAME {` at column 0
+// (including leading whitespace). Two header shapes are supported:
+//
+//   - bare form, used by provider / builtin / prompt / tool / policy
+//     / spec / trait and by concept-agnostic shape declarations:
+//
+//	      shape spaceCard {
+//	      provider chat54Mini {
+//	      spec specIsHumanParticipant {
+//	      trait traitIsActiveRecord {
+//
+//   - concept-bound form, used by shape + seed declarations that
+//     bind to a concept in their signature (mirrors the
+//     `query <Concept> <name>` / `mutation <Concept> <name>` patterns):
+//
+//	      shape workspace workspaceFull {
+//	      shape invocation workerInvocationFull {
+//	      seed agent assistant {
+//	      seed skill workbench-baseline {
+//
+// The optional `(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]+)?` group consumes
+// the concept binding when present; the trailing identifier captures
+// the construct's own name in either form. Names accept hyphens (the
+// seed skill catalog uses kebab-case slugs like `workbench-baseline`),
+// concept-binding identifiers don't need them in practice but share
+// the same class for simplicity.
+//
+// Without the optional group AND the seed/spec/trait keywords,
+// concept-bound shapes / seed-with-concept-binding / spec / trait
+// declarations survive the strip and the generic parser chokes on
+// the keyword as an unrecognized top-level token -- a class of
+// failure dslimports.Load was silently swallowing pre-#293. See the
+// fallback in dslimports.go for the matching swallow-narrowing.
 var nonProceduralRe = regexp.MustCompile(
 	`(?m)^[ \t]*(` +
 		strings.Join(nonProceduralHeaders, "|") +
-		`)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+		`)[ \t]+(?:[A-Za-z_][A-Za-z0-9_-]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
 )
 
 // StripNonProceduralBlocks finds every struct-form construct

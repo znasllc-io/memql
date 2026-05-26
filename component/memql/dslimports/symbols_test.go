@@ -52,11 +52,20 @@ func TestResolveSymbol_CrossFileQuery(t *testing.T) {
 	root := fstest.MapFS{
 		"queries/users.memql": {Data: []byte(`@description("users query")
 func (Query) listUsers(_ any) (any, error) { return nil, nil }`)},
+		// The tool file only needs the import + a parseable body so
+		// ResolveSymbol has somewhere to anchor the `q` alias. Prior
+		// to #293 this file carried `func (Tool) userTool() (any,
+		// error)` with a missing `_ any` parameter -- the parser
+		// rejected it but dslimports.Load's pre-#293 fallback
+		// silently swallowed the parse error, so the test still
+		// worked end-to-end. With the fallback now narrowed to
+		// ErrEmptyInput only, the fixture has to be syntactically
+		// clean (or stripped to comments + imports).
 		"tools/userTool.memql": {Data: []byte(`import (
 	"../queries/users" as q
 )
-@description("a tool")
-func (Tool) userTool() (any, error) { return nil, nil }`)},
+// userTool body intentionally omitted; the test only exercises
+// the import-alias resolution path, not the tool declaration.`)},
 	}
 
 	tree, err := Load(root)

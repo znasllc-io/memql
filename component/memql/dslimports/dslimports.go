@@ -9,6 +9,7 @@
 package dslimports
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -103,17 +104,42 @@ func Load(root fs.FS) (*Tree, error) {
 		// loader so files the engine accepts also lint clean.
 		fileAst, parseErr := languageCompiler.ParseFileSource(string(content))
 		if parseErr != nil {
-			// Fallback: shape / provider / builtin / prompt / tool
-			// files use dedicated runtime parsers and don't go
-			// through the generic parser. Their imports still need
-			// to participate in the cross-file integrity check, so
-			// fall back to the imports-only scan. The dedicated
-			// runtime parsers cover semantic validation of the
-			// body separately.
+			// Two-tier fallback. shape / provider / builtin / prompt
+			// / tool / policy files use dedicated runtime parsers
+			// and don't go through the generic parser; after
+			// StripNonProceduralBlocks removes their bodies the
+			// remaining source is just comments + imports and
+			// ParseFileSource returns the sentinel ErrEmptyInput.
+			// That sentinel-shaped failure IS the legitimate fall-
+			// back case: the file has no procedural content to
+			// parse, so we accept the imports-only projection
+			// without a diagnostic.
+			//
+			// EVERY OTHER parseErr is a real problem -- malformed
+			// procedural content, file-level orphan tokens that
+			// the rewriter chokes on (memql#293), broken syntax in
+			// queries / mutations / logic / automations. Those MUST
+			// surface as diagnostics so the lint gate catches them;
+			// the prior unconditional swallow let three hours of
+			// real bugs through this session (orphan logic-line
+			// fragments in memql-bff-copresent#55, broken
+			// autoJoinSI hash lookup that became memql#276 / #273
+			// Layer 1).
+			//
+			// We still produce the imports-only projection in both
+			// branches so the cross-file integrity check downstream
+			// can name a bad file's importers; without that, a single
+			// malformed file would mask import errors in unrelated
+			// files.
+			treatAsDedicatedParserFile := errors.Is(parseErr, languageParser.ErrEmptyInput)
+
 			importsOnly, importsErr := languageParser.ExtractImports(string(content))
 			if importsErr != nil {
 				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
 				continue
+			}
+			if !treatAsDedicatedParserFile {
+				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
 			}
 			importsOnly.Path = p
 			tree.Files[p] = importsOnly
