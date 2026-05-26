@@ -38,16 +38,20 @@ import (
 //     test reads the langparser AST directly so it doesn't depend
 //     on the runtime flag state.
 //
-//   - Bare identifier `pending` (no quotes) is handled differently
-//     by the two parsers: the memql parser's parseLiteralValue
-//     returns the string "pending"; the langparser's parsePrimary
-//     emits an ArgRefExpr / function reference for bare
-//     identifiers, which the converter resolves to an ArgReference
-//     -- NOT a literal. That divergence is a pre-existing
-//     identifier-classification issue, tracked separately under
-//     epic #218; this test focuses on the literal categories the
-//     #255 issue body enumerated (integer / float / string / bool /
-//     null / array / map) and skips the bare-identifier case here.
+//   - Bare identifiers in comparison-RHS position (`status==pending`,
+//     no quotes) ARE covered. #255's first revision of this test
+//     skipped them on the hypothesis -- since disproved by #264's
+//     empirical sweep -- that the langparser produced an ArgRefExpr
+//     for bare RHS identifiers. In fact the langparser's parseValue
+//     falls through to return the raw identifier string (parser.go
+//     ~line 4748 in component/language/parser/parser.go), matching
+//     the memql parser's parseLiteralValue default branch (parser.go
+//     ~line 2710 in component/memql/parser.go). Both produce a
+//     string Value on the resulting ComparisonExpression. The
+//     bare-identifier cases below lock that behavior in so it can't
+//     silently drift -- a real concern for the eventual #249 flip
+//     since the equivalence corpus from #248 didn't probe bare
+//     identifiers in RHS position.
 func TestParseLiteralTypes_BothPathsEquivalent(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -65,6 +69,25 @@ func TestParseLiteralTypes_BothPathsEquivalent(t *testing.T) {
 		{"int list", `payload.tags in [1, 2, 3]`, []any{int64(1), int64(2), int64(3)}},
 		{"float list", `payload.tags in [1.5, 2.5]`, []any{1.5, 2.5}},
 		{"string list", `payload.tags in ["a", "b"]`, []any{"a", "b"}},
+		// Bare-identifier (unquoted) string literal RHS -- the #264
+		// exclusion this revision removes. Both parsers produce
+		// Go-string Values for these; the test below would have
+		// caught any future drift if either side decides to treat
+		// unquoted identifiers as references instead of strings.
+		{"bare ident ==", `payload.status==pending`, "pending"},
+		{"bare ident !=", `payload.status!=pending`, "pending"},
+		{"bare ident has", `payload.tags has pending`, "pending"},
+		{"uppercase bare ident", `payload.status==Pending`, "Pending"},
+		// `concept==v1:cluster:node` is canonical hand-written shape
+		// in BrowseConcept admin queries; the lexer accepts colons
+		// inside the identifier so it arrives as a single token.
+		{"colon-id concept literal", `concept==v1:cluster:node`, "v1:cluster:node"},
+		{"bare ident list", `payload.tags in [pending, active]`, []any{"pending", "active"}},
+		{"bare ident not in list", `payload.tags not in [pending, active]`, []any{"pending", "active"}},
+		// Mixed-type collection (int + bare ident + quoted string)
+		// exercises parseArray's per-element parseValue dispatch
+		// across all three literal categories at once.
+		{"mixed-type list", `payload.tags in [1, pending, "abc"]`, []any{int64(1), "pending", "abc"}},
 	}
 
 	for _, tc := range cases {
