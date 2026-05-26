@@ -3909,11 +3909,11 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseActorAccessor()
 	case "caller":
 		// Retired in #221 in favour of actor. for one vocabulary
-		// across the DSL. Surfaced as a parse error with the
-		// migration hint; sweeping the in-tree DSL was done in
-		// the same PR.
-		return nil, newParseErrorf(&p.current,
-			"caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
+		// across the DSL. baseparser.ErrCallerRetired is the single
+		// source of the migration-hint string; both parsers emit it
+		// identically so a cross-parser equivalence test can assert
+		// equality (#244 / epic #218).
+		return nil, newParseErrorf(&p.current, "%s", baseparser.ErrCallerRetired.Error())
 	case "error":
 		return p.parseErrorAccessor()
 	case "timestamp", "now":
@@ -4376,12 +4376,16 @@ func (p *Parser) parseValue() (any, error) {
 			// Without this a bare `actor.userId` in a comparison falls
 			// through as the literal string and the predicate
 			// (= 'actor.userId') never matches a real row. See
-			// memql#216. caller.X retired by #221.
-			if strings.HasPrefix(val, "actor.") {
-				return &ArgRefExpr{Path: val}, nil
+			// memql#216. caller.X retired by #221; baseparser.ClassifyAccessor
+			// is the single source for both the actor/args/ctx dispatch
+			// AND the caller-rejection migration hint that BOTH parsers
+			// emit identically (#244 / epic #218).
+			kind, _, accErr := baseparser.ClassifyAccessor(val)
+			if accErr != nil {
+				return nil, accErr
 			}
-			if strings.HasPrefix(val, "caller.") {
-				return nil, fmt.Errorf("caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
+			if kind == baseparser.KindActor {
+				return &ArgRefExpr{Path: val}, nil
 			}
 			return val, nil
 		}

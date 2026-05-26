@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // QueryPlan represents the parsed structure of a MemQL expression.
@@ -2403,11 +2404,13 @@ func (p *parser) parseComparisonValue(op ComparisonOperator) (any, error) {
 				return p.parseLiteralValue() // handles ctx.name as a reference
 			}
 			// The shared lexer emits `actor.X` as a single identifier
-			// token (`.` is part of isIdentifierCharNoColon). Recognise
-			// both the bare `actor` and an `actor.X` suffix. caller.X
-			// retired by #221 -- the rejection fires from
-			// parseLiteralValue (parseActorReference's dispatcher).
-			if ident == "actor" || strings.HasPrefix(ident, "actor.") {
+			// token (`.` is part of isIdentifierCharNoColon). Route
+			// any engine-managed accessor (actor/args/ctx) through
+			// the shared dispatcher in parseLiteralValue, which uses
+			// baseparser.ClassifyAccessor. caller. retired by #221:
+			// the rejection fires there with the canonical migration
+			// hint.
+			if kind, _, _ := baseparser.ClassifyAccessor(ident); kind == baseparser.KindActor {
 				return p.parseLiteralValue() // handles actor.X as a reference
 			}
 		}
@@ -2640,34 +2643,25 @@ func (p *parser) parseLiteralValue() (any, error) {
 			p.next() // consume 'arg'
 			return nil, p.errorf(tok, "arg(...) is retired — use ctx.<path> instead")
 		}
-		// actor.X -- reference to the authenticated user's AccessContext.
-		// The shared lexer emits `actor.X` as a single identifier token
-		// (`.` is part of isIdentifierCharNoColon), so we match on the
-		// prefix and split off the path. Resolved at execution time via
-		// auth.AccessFromContext(ctx); see resolveActorReferences in
-		// executor.go. (The internal Go type is still ActorReference
-		// and the function is still parseActorReference -- both are
-		// implementation detail; the DSL author surface is actor.)
-		if tok.literal == "actor" || strings.HasPrefix(tok.literal, "actor.") {
+		// actor./args./ctx. -- engine-managed accessors. The shared
+		// lexer emits the dotted form as a single identifier token
+		// (`.` is part of isIdentifierCharNoColon), so the FULL
+		// `tok.literal` is what baseparser.ClassifyAccessor expects.
+		// caller. retired by #221: the helper returns the canonical
+		// migration-hint error and BOTH parsers route their rejection
+		// through it, so the user-facing message is identical
+		// regardless of which parser the author's expression reached
+		// (#244 / epic #218).
+		kind, _, accErr := baseparser.ClassifyAccessor(tok.literal)
+		if accErr != nil {
+			return nil, p.errorf(tok, "%s", accErr.Error())
+		}
+		switch kind {
+		case baseparser.KindActor:
 			return p.parseActorReference()
-		}
-		// caller.X retired by #221 -- surface the migration hint
-		// rather than fall through to "unknown identifier".
-		if tok.literal == "caller" || strings.HasPrefix(tok.literal, "caller.") {
-			return nil, p.errorf(tok, "caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
-		}
-		// args.X / ctx.X -- caller-passed argument reference. `args.X`
-		// is the author-facing form; `ctx.X` is the legacy runtime
-		// form still emitted by the struct-form rewriter for non-Logic
-		// receivers. Both produce the same ArgReference AST so the
-		// executor / renderer / spec validator paths keep working
-		// unchanged. The lexer emits `args.foo` / `ctx.foo` as a single
-		// identifier token (`.` is part of isIdentifierCharNoColon), so
-		// we match on the prefix and split off the path.
-		if tok.literal == "args" || strings.HasPrefix(tok.literal, "args.") {
+		case baseparser.KindArgs:
 			return p.parseArgsReference()
-		}
-		if tok.literal == "ctx" || strings.HasPrefix(tok.literal, "ctx.") {
+		case baseparser.KindCtx:
 			return p.parseCtxReference()
 		}
 		p.next()
@@ -3485,8 +3479,11 @@ func validateFieldReference(ref *FieldReference) error {
 		}
 		return nil
 	case "caller":
-		// caller.X retired by #221.
-		return fmt.Errorf("caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
+		// caller.X retired by #221. The migration-hint string is
+		// sourced from baseparser.ErrCallerRetired so every
+		// rejection site across both parsers emits identical text
+		// (#244 / epic #218).
+		return baseparser.ErrCallerRetired
 	default:
 		return fmt.Errorf("field %q must start with payload., meta., actor., or an intrinsic like id/concept/type/createdAt/createdBy/provenance", ref.Raw)
 	}

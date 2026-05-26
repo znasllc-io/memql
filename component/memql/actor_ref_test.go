@@ -2,11 +2,13 @@ package memql
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
 // TestStructFormActorFilterConvertsToActorReference guards memql#216 at
@@ -234,5 +236,112 @@ func TestParseRejectsActorPartitions(t *testing.T) {
 		if !strings.Contains(err.Error(), "retired") {
 			t.Fatalf("%s: error %q missing 'retired' migration hint", path, err.Error())
 		}
+	}
+}
+
+// TestCrossParserActorEquivalence is the #244 acceptance test.
+// memQL has TWO parsers for the same DSL fragments -- the load-time
+// language parser and the exec-time memql parser. Before #244 they
+// each owned a separate dispatch site for `actor.X` accessors, and
+// the two could (did) drift -- that drift is what made #216 land in
+// the wrong parser first.
+//
+// After #244 both parsers route accessor classification through
+// baseparser.ClassifyAccessor. This test asserts that for every
+// actor-context path the SAME literal produces the SAME engine AST
+// regardless of which parser the author's expression flowed through.
+// Add a new accessor (or a new actor field) and update the table.
+func TestCrossParserActorEquivalence(t *testing.T) {
+	paths := []string{"userId", "role", "identityId", "isClusterOwner", "primaryEmail"}
+	for _, path := range paths {
+		expr := fmt.Sprintf("id==actor.%s", path)
+		t.Run(expr, func(t *testing.T) {
+			// (a) Language parser: ParseExpression -> ConvertExpression
+			//     (the load-time path: how a `.memql` filter clause
+			//     reaches the engine.)
+			parsed, err := languageParser.ParseExpression(expr)
+			if err != nil {
+				t.Fatalf("language ParseExpression(%q): %v", expr, err)
+			}
+			convA, err := NewASTConverter().ConvertExpression(parsed)
+			if err != nil {
+				t.Fatalf("ConvertExpression: %v", err)
+			}
+			refA, ok := convA.(*ComparisonExpression).Value.(*ActorReference)
+			if !ok {
+				t.Fatalf("language parser: comparison Value is %T, want *ActorReference",
+					convA.(*ComparisonExpression).Value)
+			}
+
+			// (b) Memql parser: tokenize + newParser
+			//     (the exec-time path: how an `engine.Execute(ctx, str)`
+			//     call site reaches the engine.)
+			tokens, err := tokenize(expr)
+			if err != nil {
+				t.Fatalf("memql tokenize(%q): %v", expr, err)
+			}
+			convB, err := newParser(tokens, nil).parse()
+			if err != nil {
+				t.Fatalf("memql parse: %v", err)
+			}
+			cmpB, ok := convB.(*ComparisonExpression)
+			if !ok {
+				t.Fatalf("memql parser: parsed is %T, want *ComparisonExpression", convB)
+			}
+			refB, ok := cmpB.Value.(*ActorReference)
+			if !ok {
+				t.Fatalf("memql parser: comparison Value is %T, want *ActorReference", cmpB.Value)
+			}
+
+			// (c) Both must produce the SAME path. Drift here would
+			//     mean a fix in one parser silently doesn't apply
+			//     to the other -- which is the bug class #244 is
+			//     guarding against.
+			if refA.Path != path {
+				t.Errorf("language parser: refA.Path = %q, want %q", refA.Path, path)
+			}
+			if refB.Path != path {
+				t.Errorf("memql parser: refB.Path = %q, want %q", refB.Path, path)
+			}
+			if refA.Path != refB.Path {
+				t.Errorf("cross-parser drift on %q: language=%q vs memql=%q",
+					expr, refA.Path, refB.Path)
+			}
+		})
+	}
+}
+
+// TestCrossParserCallerRejectionMessageIdentical asserts both
+// parsers surface the canonical #221 migration-hint string from
+// baseparser.ErrCallerRetired. Before #244 the message was
+// duplicated as a string literal in each parser; this test guards
+// the consolidation so a future caller-vocabulary regression in
+// one parser fails this test rather than only being noticed when
+// an operator's error log doesn't match what they got from another
+// surface.
+func TestCrossParserCallerRejectionMessageIdentical(t *testing.T) {
+	expr := "id==caller.userId"
+	canonical := baseparser.ErrCallerRetired.Error()
+
+	_, errA := languageParser.ParseExpression(expr)
+	if errA == nil {
+		t.Fatal("language parser: expected rejection, got nil")
+	}
+	if !strings.Contains(errA.Error(), canonical) {
+		t.Errorf("language parser error %q does not contain canonical hint %q",
+			errA.Error(), canonical)
+	}
+
+	tokens, err := tokenize(expr)
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+	_, errB := newParser(tokens, nil).parse()
+	if errB == nil {
+		t.Fatal("memql parser: expected rejection, got nil")
+	}
+	if !strings.Contains(errB.Error(), canonical) {
+		t.Errorf("memql parser error %q does not contain canonical hint %q",
+			errB.Error(), canonical)
 	}
 }
