@@ -1540,3 +1540,42 @@ type ToolFieldDecl struct {
 	EnumValues   []string // @enum("a", "b", "c") values; empty = no enum constraint
 	Default      string   // @default("x") value, stored as a string regardless of the field's declared type
 }
+
+// PolicyDecl is the shared-frontend AST node for an SI Router
+// routing policy declaration. Mirrors ConceptDecl / ShapeDecl /
+// ProviderDecl / ToolDecl in role: the langparser produces this
+// typed node so the per-construct loader
+// (component/memql.LoadUnifiedPolicies) can consume it without
+// running its own hand-rolled parser.
+//
+// Authoring shape:
+//
+//	@description("Balanced LLM for most agent replies.")
+//	@primary("chat54Mini")
+//	@fallback("chat53")
+//	@fallback("anthropicSonnet")
+//	@maxLatencyMs(8000)
+//	@maxTimeToFirstTokenMs(500)
+//	@preferredRole("assistant")
+//	policy balancedChat { }
+//
+// The `policy NAME { }` body is empty today; the grammar reserves
+// brace space for future per-vendor tuning knobs. Multiple
+// `@fallback` / `@preferredRole` annotations on the same policy
+// accumulate (order preserved).
+//
+// Distinct from cross-cutting decision policies (`func (Policy)
+// name { ... }`) which are parsed via the general function-parser
+// path. This node represents only the SI-Router provider-chain
+// shape.
+type PolicyDecl struct {
+	Name                  string
+	Description           string
+	Primary               string
+	Fallbacks             []string
+	MaxLatencyMs          int
+	MaxTimeToFirstTokenMs int
+	PreferredRoles        []string
+}
+
+func (*PolicyDecl) node() {}

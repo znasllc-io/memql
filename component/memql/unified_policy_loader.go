@@ -27,11 +27,18 @@ import (
 )
 
 // LoadUnifiedPolicies walks the unified tree, extracts every
-// `policy NAME { }` block, parses each via parsePolicyMemQL, and
-// registers the resulting PolicyConfig in the supplied registry.
+// `policy NAME { }` block through the langparser's load-time path,
+// and registers the resulting PolicyConfig in the supplied
+// registry. Also rebuilds the role -> policy map so DefaultForRole
+// resolves correctly. First @preferredRole wins (matches legacy
+// behaviour).
 //
-// Also rebuilds the role -> policy map so DefaultForRole resolves
-// correctly. First @preferredRole wins (matches legacy behavior).
+// memql#333 (sub-epic #329 / Stage 1C of #310) migrated the parsing
+// half off the hand-rolled parsePolicyMemQL onto
+// languageParser.ParsePolicyDecl + the in-package
+// policyDeclToPolicyConfig converter. The hand-rolled parser is
+// unreferenced from production after this child; tests in
+// policy_parser_test.go still exercise it pending #329's cleanup PR.
 func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("policy registry is nil")
@@ -39,10 +46,18 @@ func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry) (int, er
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
 		for _, slice := range ExtractKeywordSlices(raw.Content, "policy") {
-			cfg, err := parsePolicyMemQL("unified:"+raw.Path+":"+slice.Name, []byte(slice.Source))
+			decl, err := languageParser.ParsePolicyDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
 					logger.Debug("unified policy loader: parse failed",
+						"file", raw.Path, "policy", slice.Name, "error", err)
+				}
+				continue
+			}
+			cfg, err := policyDeclToPolicyConfig(decl)
+			if err != nil {
+				if logger != nil {
+					logger.Debug("unified policy loader: convert failed",
 						"file", raw.Path, "policy", slice.Name, "error", err)
 				}
 				continue

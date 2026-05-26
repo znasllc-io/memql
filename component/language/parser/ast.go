@@ -130,6 +130,7 @@ type (
 	ToolFieldDecl           = ast.ToolFieldDecl
 	PromptDecl              = ast.PromptDecl
 	PromptField             = ast.PromptField
+	PolicyDecl              = ast.PolicyDecl
 	PropertyDecl            = ast.PropertyDecl
 	PropertyVariant         = ast.PropertyVariant
 	TypeRef                 = ast.TypeRef
