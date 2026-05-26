@@ -55,8 +55,14 @@ func (c *CognitionIntegration) recomputeAllSpacesContext(ctx context.Context) er
 		return nil
 	}
 	// Load all active spaces (best-effort).
-	query := `shape(concept==v1:cognition:space;payload.active==true, {"id": node("id")})`
-	result, err := c.engine.Execute(ctx, query)
+	// memql#287 (sub-epic #286): migrated from a handwritten
+	// `shape(concept==v1:cognition:space;payload.active==true,
+	// {"id": node("id")})` runtime query to a DSL-defined query
+	// that produces the equivalent shape via spaceIdOnly. The
+	// downstream extractDataFromResult call returns the same
+	// `[]any` of `{"id": "<id>"}` maps so the iteration below is
+	// unchanged. Unblocks #250 (legacy parser deletion).
+	result, err := c.engine.Execute(ctx, `queryActiveSpaceIds({})`)
 	if err != nil {
 		return err
 	}

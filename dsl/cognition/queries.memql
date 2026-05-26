@@ -25,6 +25,13 @@ query space queryActiveSpaces {
   shape   spaceFull
 }
 
+@enabled
+@description("Returns id-only projections of every active v1:cognition:space row (no status / archived filtering -- mirrors the pre-existing recomputeAllSpacesContext semantics that just need non-deleted rows). Backs the cognition heartbeat path that iterates spaces to recompute per-space context (memql#287; replaces a handwritten shape() runtime query under sub-epic #286).")
+query space queryActiveSpaceIds {
+  filter  traitIsActiveRecord
+  shape   spaceIdOnly
+}
+
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
 
 // queryAgentInteractionCount - Cross-space agent interaction signal
