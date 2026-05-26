@@ -1,6 +1,6 @@
 // mutations.memql -- safety namespace.
 
-use safety.concepts.{ classification }
+use safety.concepts.{ classification, approvalRequest }
 
 @enabled
 @description("Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.")
@@ -40,5 +40,55 @@ mutation classification mutationInsertSafetyClassification {
     args.planId
     args.correlationId
     args.mode
+  }
+}
+
+@enabled
+@description("Create one v1:safety:approvalRequest row in `pending` status. Called from component/safety/approval/sink.go when an Ask verdict fires in enforce mode AND no active row already exists for the descriptor's correlationKey. argsRedacted arrives pre-scrubbed (same semantics as classification.argsRedacted). expiresAt is the advisory TTL -- the sink computes it from MEMQL_SAFETY_APPROVAL_TTL_HOURS (default 24h) at create time.")
+mutation approvalRequest mutationCreateApprovalRequest {
+  args {
+    correlationKey string   @required
+    surface        string   @required
+    action         string   @required
+    argsRedacted   string
+    tier           string   @required
+    categories     string
+    reason         string
+    expiresAt      datetime
+    agentId        string
+    ownerUserId    string
+    planId         string
+  }
+  insert approvalRequest {
+    args.correlationKey
+    args.surface
+    args.action
+    args.argsRedacted
+    args.tier
+    args.categories
+    args.reason
+    args.expiresAt
+    status: "pending"
+    args.agentId
+    args.ownerUserId
+    args.planId
+  }
+}
+
+@enabled
+@description("Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls queryApprovalRequestById first); v1 ships the simple shape.")
+mutation approvalRequest mutationResolveApprovalRequest {
+  args {
+    id             string   @required
+    status         string   @required
+    decidedBy      string   @required
+    decisionReason string
+  }
+  update approvalRequest {
+    id: args.id
+    args.status
+    args.decidedBy
+    decidedAt: now
+    args.decisionReason
   }
 }

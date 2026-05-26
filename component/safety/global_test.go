@@ -54,18 +54,25 @@ func TestEnforceDecisionDenyCarriesReason(t *testing.T) {
 	}
 }
 
-func TestEnforceDecisionAskTreatedAsDeny(t *testing.T) {
-	// Until #232's approval flow lands, Ask surfaces as a refusal
-	// (with a pending-#232 marker so audit can grep how often it
-	// would fire).
+func TestEnforceDecisionAskTreatedAsRefusal(t *testing.T) {
+	// #232 wired the approval sink into Gate.Evaluate, but
+	// EnforceDecision is still called directly by surfaces with a
+	// pre-computed Decision. When that Decision is Ask (sink returned
+	// Pending or Unconfigured), EnforceDecision must refuse with the
+	// cls.Reason surfaced -- the reason already carries the
+	// approvalRequest id when the sink created one, so the human
+	// approver knows what to resolve.
 	g := enforceGate(ModeEnforce)
 	cls := Classification{Tier: TierHigh, Reason: "sudo invocation"}
 	proceed, reason := g.EnforceDecision(DecisionAsk, cls, nil, false)
 	if proceed {
 		t.Error("Ask: expected proceed=false")
 	}
-	if !contains(reason, "#232") {
-		t.Errorf("Ask: refusal should mark the pending #232 dependency, got %q", reason)
+	if !contains(reason, "requires user approval") {
+		t.Errorf("Ask: refusal text should mention user approval, got %q", reason)
+	}
+	if !contains(reason, "sudo invocation") {
+		t.Errorf("Ask: refusal should surface the cls.Reason (incl. any approvalRequest id the sink stamped), got %q", reason)
 	}
 }
 
