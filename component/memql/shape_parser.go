@@ -45,7 +45,7 @@ type shapeDecl struct {
 	signatureConcept string         // concept from the two-identifier signature, if any
 	template         map[string]any // body paths translated to `node("...")` entries
 	kindRow          bool
-	kindCaller       bool
+	kindActor       bool
 }
 
 func (p *shapeMemQLParser) parse(origin string) (*ShapeDefinition, error) {
@@ -154,10 +154,10 @@ func (p *shapeMemQLParser) parseDecorator(decl *shapeDecl) error {
 	case "actor":
 		// Flag annotation: no parens, no value. The shape kind
 		// keyword for the auth-envelope projection. The internal
-		// flag is still named kindCaller (the Go-side type stays
-		// CallerReference) -- that is implementation detail; the
+		// flag is still named kindActor (the Go-side type stays
+		// ActorReference) -- that is implementation detail; the
 		// DSL author surface is @actor.
-		decl.kindCaller = true
+		decl.kindActor = true
 		return nil
 
 	case "caller":
@@ -409,7 +409,7 @@ func (d *shapeDecl) toShapeDefinition(origin string) (*ShapeDefinition, error) {
 		Template:    d.template,
 		Origin:      origin,
 		KindRow:     d.kindRow,
-		KindCaller:  d.kindCaller,
+		KindActor:  d.kindActor,
 		UseConcepts: d.useConcepts,
 	}, nil
 }

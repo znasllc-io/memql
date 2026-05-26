@@ -3903,10 +3903,10 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 	case "actor":
 		// Auth-context accessor; canonical name (#221). The
 		// underlying parser function keeps the historical name
-		// (parseCallerAccessor) -- the produced AST node is a
-		// CallerReference -- both are internal-only and unrelated
+		// (parseActorAccessor) -- the produced AST node is a
+		// ActorReference -- both are internal-only and unrelated
 		// to the DSL author surface.
-		return p.parseCallerAccessor()
+		return p.parseActorAccessor()
 	case "caller":
 		// Retired in #221 in favour of actor. for one vocabulary
 		// across the DSL. Surfaced as a parse error with the
@@ -4371,8 +4371,8 @@ func (p *Parser) parseValue() (any, error) {
 			// actor.X is the auth-context accessor (the actor's
 			// AccessContext), NOT a caller-passed arg. Emit an
 			// ArgRefExpr carrying the prefix; the AST converter routes
-			// it to the engine CallerReference so it resolves from the
-			// AccessContext at filter time (resolveCallerReferences).
+			// it to the engine ActorReference so it resolves from the
+			// AccessContext at filter time (resolveActorReferences).
 			// Without this a bare `actor.userId` in a comparison falls
 			// through as the literal string and the predicate
 			// (= 'actor.userId') never matches a real row. See
@@ -4639,10 +4639,10 @@ func (p *Parser) parseEventAccessor() (ExpressionNode, error) {
 	return &EventRefExpr{}, nil
 }
 
-// parseCallerAccessor parses caller() -- the authenticated user's
+// parseActorAccessor parses caller() -- the authenticated user's
 // AccessContext. Typed as CallerRefExpr; runtime resolves dotted
 // paths like caller.userId, caller.role.
-func (p *Parser) parseCallerAccessor() (ExpressionNode, error) {
+func (p *Parser) parseActorAccessor() (ExpressionNode, error) {
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
 	}

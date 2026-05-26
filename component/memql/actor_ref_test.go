@@ -9,13 +9,13 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// TestStructFormActorFilterConvertsToCallerReference guards memql#216 at
+// TestStructFormActorFilterConvertsToActorReference guards memql#216 at
 // the layer that actually broke: struct-form .memql queries are parsed by
 // the language parser, then ast-converted. queryCurrentUser's
 // `id==actor.userId` was converting to an ArgReference (args-bag lookup ->
-// always empty) instead of a CallerReference (AccessContext). This drives
+// always empty) instead of a ActorReference (AccessContext). This drives
 // the real ParseExpression -> ConvertExpression path.
-func TestStructFormActorFilterConvertsToCallerReference(t *testing.T) {
+func TestStructFormActorFilterConvertsToActorReference(t *testing.T) {
 	parsed, err := languageParser.ParseExpression("id==actor.userId")
 	if err != nil {
 		t.Fatalf("ParseExpression: %v", err)
@@ -28,12 +28,12 @@ func TestStructFormActorFilterConvertsToCallerReference(t *testing.T) {
 	if !ok {
 		t.Fatalf("converted is %T, want *ComparisonExpression", converted)
 	}
-	ref, ok := cmp.Value.(*CallerReference)
+	ref, ok := cmp.Value.(*ActorReference)
 	if !ok {
-		t.Fatalf("comparison Value is %T, want *CallerReference (actor.userId not routed to AccessContext)", cmp.Value)
+		t.Fatalf("comparison Value is %T, want *ActorReference (actor.userId not routed to AccessContext)", cmp.Value)
 	}
 	if ref.Path != "userId" {
-		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+		t.Errorf("ActorReference.Path = %q, want %q", ref.Path, "userId")
 	}
 }
 
@@ -54,7 +54,7 @@ func TestLanguageParserRejectsCallerAccessor(t *testing.T) {
 
 // TestStructFormArgsFilterStaysArgReference confirms the fix didn't
 // regress real caller-passed args: `id==args.userId` must remain an
-// ArgReference (resolved from the args bag), not a CallerReference.
+// ArgReference (resolved from the args bag), not a ActorReference.
 func TestStructFormArgsFilterStaysArgReference(t *testing.T) {
 	parsed, err := languageParser.ParseExpression("id==args.userId")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestRawParserRejectsCallerAccessor(t *testing.T) {
 // uses `actor.userId` (not `caller.userId`) in self-scoped filters, e.g.
 // queryCurrentUser's `id==actor.userId`. The parser must treat `actor.`
 // like `caller.` -- otherwise the reference never becomes a
-// *CallerReference, resolveCallerReferences leaves it unresolved, and
+// *ActorReference, resolveActorReferences leaves it unresolved, and
 // the query silently returns zero rows.
 func TestActorReferenceParsesAsRHS(t *testing.T) {
 	query := `concept==v1:identity:user; id==actor.userId`
@@ -155,19 +155,19 @@ func TestActorReferenceParsesAsRHS(t *testing.T) {
 		return nil
 	}
 	value := findIdValue(expr)
-	ref, ok := value.(*CallerReference)
+	ref, ok := value.(*ActorReference)
 	if !ok {
-		t.Fatalf("id value is %T, want *CallerReference (actor.userId not recognized)", value)
+		t.Fatalf("id value is %T, want *ActorReference (actor.userId not recognized)", value)
 	}
 	if ref.Path != "userId" {
-		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+		t.Errorf("ActorReference.Path = %q, want %q", ref.Path, "userId")
 	}
 }
 
-func TestResolveCallerReferences_ResolvesUserId(t *testing.T) {
+func TestResolveActorReferences_ResolvesUserId(t *testing.T) {
 	ac := &auth.AccessContext{UserId: "user-xyz", Role: auth.RoleWriter}
 	ctx := auth.ContextWithAccess(context.Background(), ac)
-	resolved, err := resolveCallerReferences(ctx, parseUserIdFilter(t))
+	resolved, err := resolveActorReferences(ctx, parseUserIdFilter(t))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestResolveCallerReferences_ResolvesUserId(t *testing.T) {
 	}
 }
 
-func TestResolveCallerReferences_ScalarPaths(t *testing.T) {
+func TestResolveActorReferences_ScalarPaths(t *testing.T) {
 	ac := &auth.AccessContext{
 		UserId:       "user-xyz",
 		PrimaryEmail: "alice@example.com",
@@ -197,7 +197,7 @@ func TestResolveCallerReferences_ScalarPaths(t *testing.T) {
 	ctx := auth.ContextWithAccess(context.Background(), ac)
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			got, err := resolveCallerPath(ctx, tc.path, OpEq)
+			got, err := resolveActorPath(ctx, tc.path, OpEq)
 			if err != nil {
 				t.Fatalf("resolve %q: %v", tc.path, err)
 			}
@@ -208,10 +208,10 @@ func TestResolveCallerReferences_ScalarPaths(t *testing.T) {
 	}
 }
 
-func TestResolveCallerReferences_UnknownPathErrors(t *testing.T) {
-	_, err := resolveCallerPath(context.Background(), "bogus", OpEq)
+func TestResolveActorReferences_UnknownPathErrors(t *testing.T) {
+	_, err := resolveActorPath(context.Background(), "bogus", OpEq)
 	if err == nil {
-		t.Fatal("expected error for unknown caller path")
+		t.Fatal("expected error for unknown actor path")
 	}
 }
 

@@ -172,11 +172,11 @@ func (e *MemQLEngine) evaluateExpression(ctx context.Context, expr ExpressionNod
 
 func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort) (map[string]memorynodes.MemoryNode, error) {
 	// Resolve any caller.X references using the AccessContext on ctx
-	// before we start compiling SQL. This substitutes *CallerReference
+	// before we start compiling SQL. This substitutes *ActorReference
 	// comparison values with concrete values (or the owner-wildcard
 	// sentinel for owners); subsequent compile stages never see the
 	// reference type.
-	resolved, err := resolveCallerReferences(ctx, expr)
+	resolved, err := resolveActorReferences(ctx, expr)
 	if err != nil {
 		return nil, err
 	}
@@ -279,17 +279,17 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 	}
 }
 
-// ownerWildcardSentinel is a marker value used by the caller-reference
+// ownerWildcardSentinel is a marker value used by the actor-reference
 // resolver to signal that the comparison should match every row. It is
 // recognised by compilePayloadComparison and friends, which emit `TRUE`
 // as their SQL fragment when the value is of this type. Currently
-// unused on the live caller surface (the partition-aware paths that
+// unused on the live actor surface (the partition-aware paths that
 // produced it were retired in #56); kept around for callers that may
 // reintroduce wildcard semantics for a future scalar path.
 type ownerWildcardSentinel struct{}
 
-// resolveCallerReferences walks an expression tree and substitutes every
-// *CallerReference comparison value with a concrete value pulled from
+// resolveActorReferences walks an expression tree and substitutes every
+// *ActorReference comparison value with a concrete value pulled from
 // the AccessContext on ctx.
 //
 // Supported paths:
@@ -299,17 +299,17 @@ type ownerWildcardSentinel struct{}
 //	caller.role         -> string (owner/admin/writer/reader)
 //	caller.primaryEmail -> string
 //	caller.isOwner      -> bool
-func resolveCallerReferences(ctx context.Context, expr ExpressionNode) (ExpressionNode, error) {
+func resolveActorReferences(ctx context.Context, expr ExpressionNode) (ExpressionNode, error) {
 	if expr == nil {
 		return nil, nil
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
-		ref, ok := node.Value.(*CallerReference)
+		ref, ok := node.Value.(*ActorReference)
 		if !ok {
 			return expr, nil
 		}
-		value, err := resolveCallerPath(ctx, ref.Path, node.Operator)
+		value, err := resolveActorPath(ctx, ref.Path, node.Operator)
 		if err != nil {
 			return nil, err
 		}
@@ -317,17 +317,17 @@ func resolveCallerReferences(ctx context.Context, expr ExpressionNode) (Expressi
 		resolved.Value = value
 		return &resolved, nil
 	case *LogicalExpression:
-		left, err := resolveCallerReferences(ctx, node.Left)
+		left, err := resolveActorReferences(ctx, node.Left)
 		if err != nil {
 			return nil, err
 		}
-		right, err := resolveCallerReferences(ctx, node.Right)
+		right, err := resolveActorReferences(ctx, node.Right)
 		if err != nil {
 			return nil, err
 		}
 		return &LogicalExpression{Op: node.Op, Left: left, Right: right}, nil
 	case *RelationshipExpression:
-		target, err := resolveCallerReferences(ctx, node.Target)
+		target, err := resolveActorReferences(ctx, node.Target)
 		if err != nil {
 			return nil, err
 		}
@@ -337,9 +337,9 @@ func resolveCallerReferences(ctx context.Context, expr ExpressionNode) (Expressi
 	}
 }
 
-// resolveCallerPath translates a dotted caller.X path into the scalar
+// resolveActorPath translates a dotted caller.X path into the scalar
 // value that the comparison evaluator expects.
-func resolveCallerPath(ctx context.Context, path string, op ComparisonOperator) (any, error) {
+func resolveActorPath(ctx context.Context, path string, op ComparisonOperator) (any, error) {
 	_ = op
 	ac, _ := auth.AccessFromContext(ctx)
 	switch path {
@@ -370,7 +370,7 @@ func resolveCallerPath(ctx context.Context, path string, op ComparisonOperator) 
 		}
 		return ac.IsClusterOwner(), nil
 	default:
-		return nil, fmt.Errorf("unsupported caller reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
+		return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
 	}
 }
 
