@@ -305,7 +305,7 @@ db:
 # Test targets
 # ---------------------------------------------------------------------------
 
-.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck
+.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -333,6 +333,15 @@ sdk-gen:
 ## `make sdk-gen` locally to fix.
 sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=
+
+## DSL lint: load the embedded DSL tree through the same
+## dslimports.Load pipeline the engine runs at boot and fail on any
+## parse / import / build diagnostics. Mirrors the CI gate so authors
+## can catch the issue locally before pushing. Pass a single .memql
+## file path to scope the report to that file + its imported
+## neighbors.
+dsl-lint:
+	$(GO) run ./cmd/memqllint dsl/
 
 ## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
 ## (typescript). Idempotent.
