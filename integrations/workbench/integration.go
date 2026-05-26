@@ -116,10 +116,17 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	// legacy EnforceExecAllowlist in handleExec stays the active
 	// block on exec until #235 flips enforce. Runs BEFORE the
 	// remote-forward branch so cluster + local paths agree on the
-	// audit shape.
+	// audit shape. agentId / taskId arrive in the outer args (the
+	// cluster-forward path uses them too), so we surface them in
+	// the CallerContext for audit fidelity.
+	agentId, _ := args["agentId"].(string)
+	taskId, _ := args["taskId"].(string)
 	safetyDesc := buildSafetyDescriptor(action, planId, innerArgs)
-	decision, cls, classErr := safety.DefaultGate().Evaluate(ctx, safetyDesc)
-	if proceed, reason := safety.EnforceDecision(decision, cls, classErr, false); !proceed {
+	safetyDesc.Caller.AgentID = agentId
+	safetyDesc.Caller.TaskID = taskId
+	workbenchGate := safety.DefaultGate()
+	decision, cls, classErr := workbenchGate.Evaluate(ctx, safetyDesc)
+	if proceed, reason := workbenchGate.EnforceDecision(decision, cls, classErr, false); !proceed {
 		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 

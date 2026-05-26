@@ -320,11 +320,13 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 		// switch, scope) have already done their work and we know the
 		// agent is otherwise allowed to dispatch. Computer-use is the
 		// highest blast radius -- fail-closed on classifier error in
-		// enforce mode (the gate's shadow default means a failure
-		// here is observation-only until #235's rollout flips it).
+		// enforce mode. Gate.EnforceDecision honours shadow mode end
+		// to end: a classifier error in shadow is logged + swallowed,
+		// never blocks live traffic. #235's rollout flips enforce.
 		desc := buildSafetyDescriptor(req, effectiveScope, required.Capability)
-		decision, cls, classErr := safety.DefaultGate().Evaluate(ctx, desc)
-		if proceed, reason := safety.EnforceDecision(decision, cls, classErr, true); !proceed {
+		gate := safety.DefaultGate()
+		decision, cls, classErr := gate.Evaluate(ctx, desc)
+		if proceed, reason := gate.EnforceDecision(decision, cls, classErr, true); !proceed {
 			return gateResult{
 				deny:               true,
 				requiredCapability: required.Capability,

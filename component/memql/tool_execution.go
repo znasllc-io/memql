@@ -385,8 +385,9 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	toolDesc := safety.NewToolAction(toolSurface, tool.Name, args, safety.CallerContext{
 		Capability: callerRole,
 	})
-	decision, cls, classErr := safety.DefaultGate().Evaluate(ctx, toolDesc)
-	if proceed, reason := safety.EnforceDecision(decision, cls, classErr, false); !proceed {
+	toolGate := safety.DefaultGate()
+	decision, cls, classErr := toolGate.Evaluate(ctx, toolDesc)
+	if proceed, reason := toolGate.EnforceDecision(decision, cls, classErr, false); !proceed {
 		return &ToolCallResult{
 			IsError: true,
 			Content: []ToolResultContent{
@@ -394,7 +395,6 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 			},
 		}, nil
 	}
-	_ = cls // RuleID + Tier already captured by the gate's recorder
 
 	switch strings.ToLower(strings.TrimSpace(handler.Type)) {
 	case "query":

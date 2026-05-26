@@ -63,7 +63,7 @@ func SetDefaultGate(g *Gate) {
 	defaultGate.Store(g)
 }
 
-// EnforceDecision maps a Gate.Evaluate result -- (Decision,
+// EnforceDecision maps the Gate's Evaluate result -- (Decision,
 // Classification, error) -- into a (proceed, refusalReason) outcome
 // each surface acts on:
 //
@@ -71,20 +71,29 @@ func SetDefaultGate(g *Gate) {
 //   - proceed=false: surface emits its audit event for the block
 //     and returns a structured refusal to the caller.
 //
-// The Gate itself stays neutral on classifier error so per-surface
-// fail-open vs fail-closed is the caller's call -- pass
+// Per-surface fail-open vs fail-closed is the caller's call -- pass
 // failClosedOnError=true for high-blast-radius surfaces
 // (computer-use) and false for bounded ones (workbench / tool exec).
+// **In ModeShadow the fail-closed-on-error path is suppressed** so
+// the rollout-safety invariant holds: shadow mode is observation-
+// only end-to-end (decisions AND classifier failures get logged
+// but never block live traffic). The recorder still captures the
+// error so ops see it.
 //
 // In Phase 1 the gate's decide() always returns Allow, so the only
 // way this currently returns blocked is the fail-closed-on-error
-// path. #231 replaces decide() with the real commandRiskDecision
-// policy and the Deny/Ask returns start firing. The DecisionAsk
-// path here treats Ask as a deny with a "pending #232" reason --
-// approval is wired by #232 and replaces this branch then.
-func EnforceDecision(decision Decision, cls Classification, err error, failClosedOnError bool) (proceed bool, refusalReason string) {
+// path in enforce mode. #231 replaces decide() with the real
+// commandRiskDecision policy and the Deny/Ask returns start firing.
+// The DecisionAsk path here treats Ask as a deny with a
+// "pending #232" reason -- approval is wired by #232 and replaces
+// this branch then.
+func (g *Gate) EnforceDecision(decision Decision, cls Classification, err error, failClosedOnError bool) (proceed bool, refusalReason string) {
 	if err != nil {
-		if failClosedOnError {
+		// Fail-closed only applies in enforce mode -- shadow and off
+		// are observation-only by design (the rollout-safety
+		// invariant) so a classifier error gets logged + swallowed
+		// rather than blocking live traffic.
+		if failClosedOnError && g.mode == ModeEnforce {
 			return false, "command classifier error (failing closed): " + err.Error()
 		}
 		return true, ""

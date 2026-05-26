@@ -28,16 +28,24 @@ func TestSetDefaultGateOverride(t *testing.T) {
 	}
 }
 
+// enforceGate is a tiny test helper: builds a Gate with the given
+// mode so we can exercise the method form of EnforceDecision.
+func enforceGate(mode Mode) *Gate {
+	return NewGate(GateOptions{Classifier: NoopClassifier{}, Mode: mode})
+}
+
 func TestEnforceDecisionAllow(t *testing.T) {
-	proceed, reason := EnforceDecision(DecisionAllow, Classification{}, nil, true)
+	g := enforceGate(ModeEnforce)
+	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, nil, true)
 	if !proceed || reason != "" {
 		t.Errorf("Allow: expected proceed=true reason='', got %v %q", proceed, reason)
 	}
 }
 
 func TestEnforceDecisionDenyCarriesReason(t *testing.T) {
+	g := enforceGate(ModeEnforce)
 	cls := Classification{Tier: TierCritical, Reason: "rm -rf /", RuleID: "shell.destructive"}
-	proceed, reason := EnforceDecision(DecisionDeny, cls, nil, false)
+	proceed, reason := g.EnforceDecision(DecisionDeny, cls, nil, false)
 	if proceed {
 		t.Error("Deny: expected proceed=false")
 	}
@@ -50,8 +58,9 @@ func TestEnforceDecisionAskTreatedAsDeny(t *testing.T) {
 	// Until #232's approval flow lands, Ask surfaces as a refusal
 	// (with a pending-#232 marker so audit can grep how often it
 	// would fire).
+	g := enforceGate(ModeEnforce)
 	cls := Classification{Tier: TierHigh, Reason: "sudo invocation"}
-	proceed, reason := EnforceDecision(DecisionAsk, cls, nil, false)
+	proceed, reason := g.EnforceDecision(DecisionAsk, cls, nil, false)
 	if proceed {
 		t.Error("Ask: expected proceed=false")
 	}
@@ -60,11 +69,12 @@ func TestEnforceDecisionAskTreatedAsDeny(t *testing.T) {
 	}
 }
 
-func TestEnforceDecisionErrorFailClosed(t *testing.T) {
+func TestEnforceDecisionErrorFailClosedEnforce(t *testing.T) {
+	g := enforceGate(ModeEnforce)
 	boom := errors.New("provider unreachable")
-	proceed, reason := EnforceDecision(DecisionAllow, Classification{}, boom, true)
+	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, true)
 	if proceed {
-		t.Error("fail-closed: expected proceed=false on classifier error")
+		t.Error("fail-closed in enforce: expected proceed=false on classifier error")
 	}
 	if !contains(reason, "provider unreachable") {
 		t.Errorf("fail-closed: refusal should include the error, got %q", reason)
@@ -72,10 +82,44 @@ func TestEnforceDecisionErrorFailClosed(t *testing.T) {
 }
 
 func TestEnforceDecisionErrorFailOpen(t *testing.T) {
+	g := enforceGate(ModeEnforce)
 	boom := errors.New("provider unreachable")
-	proceed, reason := EnforceDecision(DecisionAllow, Classification{}, boom, false)
+	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, false)
 	if !proceed || reason != "" {
 		t.Errorf("fail-open: expected proceed=true reason='' on classifier error, got %v %q", proceed, reason)
+	}
+}
+
+// TestEnforceDecisionShadowSuppressesFailClosed pins the rollout-
+// safety invariant: ModeShadow is observation-only end-to-end, so
+// a classifier error MUST NOT block live traffic even on a
+// fail-closed surface. The recorder still captures the error (the
+// gate's Evaluate logs it before returning); this just asserts the
+// SURFACE doesn't block.
+func TestEnforceDecisionShadowSuppressesFailClosed(t *testing.T) {
+	g := enforceGate(ModeShadow)
+	boom := errors.New("provider unreachable")
+	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, true)
+	if !proceed {
+		t.Errorf("shadow + fail-closed-on-error: expected proceed=true (shadow never blocks), got proceed=false reason=%q", reason)
+	}
+	if reason != "" {
+		t.Errorf("shadow + fail-closed-on-error: expected empty reason, got %q", reason)
+	}
+}
+
+// TestEnforceDecisionOffSuppressesFailClosed -- same invariant for
+// ModeOff (classifier disabled): no path should block.
+func TestEnforceDecisionOffSuppressesFailClosed(t *testing.T) {
+	// ModeOff in NewGate.Mode short-circuits Evaluate without
+	// calling the classifier, so an error wouldn't arise via the
+	// normal path. But if a surface ever passes an artificial err
+	// to EnforceDecision in off mode, behaviour should still be
+	// "don't block." Asserting the same shape as shadow keeps the
+	// semantics tidy.
+	g := NewGate(GateOptions{Classifier: NoopClassifier{}, Mode: ModeOff})
+	if proceed, _ := g.EnforceDecision(DecisionAllow, Classification{}, errors.New("ignored"), true); !proceed {
+		t.Error("ModeOff: should never block on EnforceDecision")
 	}
 }
 
