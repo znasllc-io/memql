@@ -81,6 +81,31 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 		}, nil
 	}
 
+	// Introspection meta-command short-circuit (#256). Runs BEFORE
+	// either runtime parser so dispatch for help / docs / concepts /
+	// validate / functions / tools / serviceVersion / memqlVersion /
+	// shapeTemplates / shapeHelp / contentId / previewInsert is owned
+	// by the meta_commands.go shim. The two parsers no longer carry
+	// per-name special cases for these (parser.go's lookupBuiltin
+	// branch never fires for them now; the langparser never had
+	// equivalent code). On a matched name with bad args this returns
+	// a real parse error -- we do NOT fall through to the parsers,
+	// matching the insert(...) short-circuit's all-or-nothing
+	// commitment above.
+	if metaExpr, matched, err := e.tryParseMetaCommand(trimmed); matched {
+		if err != nil {
+			return nil, err
+		}
+		return &QueryPlan{
+			Root:          metaExpr,
+			Mutations:     nil,
+			Filters:       nil,
+			Relationships: nil,
+			Timestamp:     nil,
+			UseLatest:     false,
+		}, nil
+	}
+
 	// Opt-in langparser-backed runtime path (#248 / 3a of the
 	// component/memql/parser.go retirement). When enabled AND the
 	// query shape is one the new path covers, parse via the same
@@ -780,312 +805,16 @@ func (p *parser) parseSIExpression() (ExpressionNode, error) {
 	return &SIExpression{Invocation: invocation}, nil
 }
 
-func (p *parser) parseDocsFunction() (ExpressionNode, error) {
-	fnTok := p.next()
-	if _, err := p.expect(tokParenOpen, "expected '(' after memqlDocs"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tokParenClose, "memqlDocs() does not accept arguments"); err != nil {
-		return nil, p.errorf(fnTok, "memqlDocs() does not accept arguments")
-	}
-	return &BuiltinFunctionExpression{
-		Name:     "memqlDocs",
-		Executor: BuiltinExecutorMemqlDocs,
-	}, nil
-}
-
-func (p *parser) parseConceptsFunction() (ExpressionNode, error) {
-	fnTok := p.next()
-	if _, err := p.expect(tokParenOpen, "expected '(' after concepts"); err != nil {
-		return nil, err
-	}
-
-	var args map[string]any
-
-	// Check for optional pattern argument
-	if p.peek().typ == tokString {
-		patternTok := p.next()
-		pattern := patternTok.literal
-		if pattern == "" {
-			return nil, p.argErrorf(patternTok, "concepts() pattern cannot be empty")
-		}
-		args = map[string]any{"pattern": pattern}
-	}
-
-	if _, err := p.expect(tokParenClose, "expected ')' after concepts arguments"); err != nil {
-		return nil, p.argErrorf(fnTok, "concepts() accepts an optional string pattern argument")
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "concepts",
-		Executor: BuiltinExecutorConcepts,
-		Args:     args,
-	}, nil
-}
-
-// parseValidateFunction parses validate({concept: "...", payload: {...}})
-// Returns a BuiltinFunctionExpression with the parsed arguments.
-func (p *parser) parseValidateFunction() (ExpressionNode, error) {
-	fnTok := p.next() // consume "validate"
-	if _, err := p.expect(tokParenOpen, "expected '(' after validate"); err != nil {
-		return nil, err
-	}
-
-	// Expect a JSON object as the argument
-	if p.peek().typ != tokBraceOpen {
-		return nil, p.argErrorf(fnTok, "validate() requires a JSON object argument with 'concept' and 'payload' fields")
-	}
-
-	args, err := p.parseFunctionArgs()
-	if err != nil {
-		return nil, p.argErrorf(fnTok, "validate() argument: %v", err)
-	}
-
-	// Validate required fields
-	concept, ok := args["concept"]
-	if !ok {
-		return nil, p.argErrorf(fnTok, "validate() requires 'concept' field in argument")
-	}
-	if _, ok := concept.(string); !ok {
-		return nil, p.argErrorf(fnTok, "validate() 'concept' field must be a string")
-	}
-
-	_, hasPayload := args["payload"]
-	if !hasPayload {
-		return nil, p.argErrorf(fnTok, "validate() requires 'payload' field in argument")
-	}
-
-	if _, err := p.expect(tokParenClose, "expected ')' after validate arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "validate",
-		Executor: BuiltinExecutorValidate,
-		Args:     args,
-	}, nil
-}
-
-// parseFunctionsBuiltin parses functions() - no arguments
-func (p *parser) parseFunctionsBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "functions"
-	if _, err := p.expect(tokParenOpen, "expected '(' after functions"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tokParenClose, "functions() does not accept arguments"); err != nil {
-		return nil, p.errorf(fnTok, "functions() does not accept arguments")
-	}
-	return &BuiltinFunctionExpression{
-		Name:     "functions",
-		Executor: BuiltinExecutorFunctions,
-	}, nil
-}
-
-// parseToolsBuiltin parses tools() - no arguments
-func (p *parser) parseToolsBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "tools"
-	if _, err := p.expect(tokParenOpen, "expected '(' after tools"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tokParenClose, "tools() does not accept arguments"); err != nil {
-		return nil, p.errorf(fnTok, "tools() does not accept arguments")
-	}
-	return &BuiltinFunctionExpression{
-		Name:     "tools",
-		Executor: BuiltinExecutorTools,
-	}, nil
-}
-
-// parseHelpBuiltin parses help({"name": "..."}) - requires name argument
-func (p *parser) parseHelpBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "help"
-	if _, err := p.expect(tokParenOpen, "expected '(' after help"); err != nil {
-		return nil, err
-	}
-
-	// Expect a JSON object or string as the argument
-	var args map[string]any
-	switch p.peek().typ {
-	case tokBraceOpen:
-		var err error
-		args, err = p.parseFunctionArgs()
-		if err != nil {
-			return nil, p.argErrorf(fnTok, "help() argument: %v", err)
-		}
-	case tokString:
-		// Allow shorthand: help("functionName")
-		nameTok := p.next()
-		args = map[string]any{"name": nameTok.literal}
-	default:
-		return nil, p.argErrorf(fnTok, "help() requires a name argument: help(\"name\") or help({\"name\": \"...\"})")
-	}
-
-	// Validate required name field
-	name, ok := args["name"]
-	if !ok {
-		return nil, p.argErrorf(fnTok, "help() requires 'name' field in argument")
-	}
-	if _, ok := name.(string); !ok {
-		return nil, p.argErrorf(fnTok, "help() 'name' field must be a string")
-	}
-
-	if _, err := p.expect(tokParenClose, "expected ')' after help arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "help",
-		Executor: BuiltinExecutorHelp,
-		Args:     args,
-	}, nil
-}
-
-// parseShapeTemplatesBuiltin parses shapeTemplates() or shapeTemplates("conceptName")
-func (p *parser) parseShapeTemplatesBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "shapeTemplates"
-	if _, err := p.expect(tokParenOpen, "expected '(' after shapeTemplates"); err != nil {
-		return nil, err
-	}
-
-	var args map[string]any
-	// Optional string argument for concept filter
-	if p.peek().typ == tokString {
-		conceptTok := p.next()
-		args = map[string]any{"concept": conceptTok.literal}
-	} else if p.peek().typ == tokBraceOpen {
-		var err error
-		args, err = p.parseFunctionArgs()
-		if err != nil {
-			return nil, p.errorf(fnTok, "shapeTemplates() argument: %v", err)
-		}
-	}
-
-	if _, err := p.expect(tokParenClose, "expected ')' after shapeTemplates arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "shapeTemplates",
-		Executor: BuiltinExecutorShapeTemplates,
-		Args:     args,
-	}, nil
-}
-
-// parseShapeHelpBuiltin parses shapeHelp("shapeName") or shapeHelp({"name": "..."})
-func (p *parser) parseShapeHelpBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "shapeHelp"
-	if _, err := p.expect(tokParenOpen, "expected '(' after shapeHelp"); err != nil {
-		return nil, err
-	}
-
-	var args map[string]any
-	switch p.peek().typ {
-	case tokBraceOpen:
-		var err error
-		args, err = p.parseFunctionArgs()
-		if err != nil {
-			return nil, p.errorf(fnTok, "shapeHelp() argument: %v", err)
-		}
-	case tokString:
-		// Allow shorthand: shapeHelp("shapeName")
-		nameTok := p.next()
-		args = map[string]any{"name": nameTok.literal}
-	default:
-		return nil, p.errorf(fnTok, "shapeHelp() requires a name argument: shapeHelp(\"name\") or shapeHelp({\"name\": \"...\"})")
-	}
-
-	// Validate required name field
-	name, ok := args["name"]
-	if !ok {
-		return nil, p.errorf(fnTok, "shapeHelp() requires 'name' field in argument")
-	}
-	if _, ok := name.(string); !ok {
-		return nil, p.errorf(fnTok, "shapeHelp() 'name' field must be a string")
-	}
-
-	if _, err := p.expect(tokParenClose, "expected ')' after shapeHelp arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "shapeHelp",
-		Executor: BuiltinExecutorShapeHelp,
-		Args:     args,
-	}, nil
-}
-
-// parseContentIdBuiltin parses contentId({"concept": "...", "payload": {...}})
-func (p *parser) parseContentIdBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "contentId"
-	if _, err := p.expect(tokParenOpen, "expected '(' after contentId"); err != nil {
-		return nil, err
-	}
-
-	// Expect a JSON object as the argument
-	if p.peek().typ != tokBraceOpen {
-		return nil, p.argErrorf(fnTok, "contentId() requires a JSON object argument")
-	}
-
-	args, err := p.parseFunctionArgs()
-	if err != nil {
-		return nil, p.errorf(fnTok, "contentId() argument: %v", err)
-	}
-
-	// No validation at parse time - let executor return structured errors
-	if _, err := p.expect(tokParenClose, "expected ')' after contentId arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "contentId",
-		Executor: BuiltinExecutorContentId,
-		Args:     args,
-	}, nil
-}
-
-// parsePreviewInsertBuiltin parses previewInsert({"concept": "...", "payload": {...}})
-func (p *parser) parsePreviewInsertBuiltin() (ExpressionNode, error) {
-	fnTok := p.next() // consume "previewInsert"
-	if _, err := p.expect(tokParenOpen, "expected '(' after previewInsert"); err != nil {
-		return nil, err
-	}
-
-	// Expect a JSON object as the argument
-	if p.peek().typ != tokBraceOpen {
-		return nil, p.argErrorf(fnTok, "previewInsert() requires a JSON object argument")
-	}
-
-	args, err := p.parseFunctionArgs()
-	if err != nil {
-		return nil, p.errorf(fnTok, "previewInsert() argument: %v", err)
-	}
-
-	// No validation at parse time - let executor return structured errors
-	if _, err := p.expect(tokParenClose, "expected ')' after previewInsert arguments"); err != nil {
-		return nil, err
-	}
-
-	return &BuiltinFunctionExpression{
-		Name:     "previewInsert",
-		Executor: BuiltinExecutorPreviewInsert,
-		Args:     args,
-	}, nil
-}
-
-// parseServiceVersionBuiltin parses memqlVersion() / serviceVersion() - no arguments.
-func (p *parser) parseServiceVersionBuiltin() (ExpressionNode, error) {
-	fnTok := p.next()
-	if _, err := p.expect(tokParenOpen, "expected '(' after version function"); err != nil {
-		return nil, err
-	}
-	if _, err := p.expect(tokParenClose, "version function does not accept arguments"); err != nil {
-		return nil, p.errorf(fnTok, "version function does not accept arguments")
-	}
-	return &BuiltinFunctionExpression{
-		Name:     "memqlVersion",
-		Executor: BuiltinExecutorServiceVersion,
-	}, nil
-}
+// Dead-code zone retired in #256: parseDocsFunction / parseConceptsFunction
+// / parseValidateFunction / parseFunctionsBuiltin / parseToolsBuiltin /
+// parseHelpBuiltin / parseShapeTemplatesBuiltin / parseShapeHelpBuiltin
+// / parseContentIdBuiltin / parsePreviewInsertBuiltin /
+// parseServiceVersionBuiltin all lived here. None were ever called
+// (introspection-builtin dispatch flowed exclusively through the
+// lookupBuiltin -> parseBuiltinFunctionCall path even before #256);
+// the top-level shim in e.Parse (tryParseMetaCommand) is now the
+// authoritative dispatch surface and the nested path keeps using
+// parseBuiltinFunctionCall.
 
 func (p *parser) parseSort() (ExpressionNode, error) {
 	fnTok := p.next()
