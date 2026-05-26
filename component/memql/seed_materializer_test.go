@@ -124,6 +124,85 @@ func TestBuildArgsFromBody_PerUserStampsConceptIdAndOwner(t *testing.T) {
 	}
 }
 
+// TestDeterministicPerUserSeedId_MatchesDocumentedContract is the
+// #273 acceptance test: the materializer's docstring (and the seed
+// file at memql/dsl/agents/assistant.memql) promises that perUser
+// seeds materialize at `<seedName>-<userId>`. The implementation
+// previously broke that promise by minting a fresh UUID in
+// `lookupOrMintPerUserId` when no prior row existed, which made
+// cluster boot produce N distinct rows per user (one per node
+// racing the startup sweep). This test pins the contract.
+func TestDeterministicPerUserSeedId_MatchesDocumentedContract(t *testing.T) {
+	def := &SeedDefinition{
+		Name:         "assistant",
+		UseNamespace: "agents",
+		UseConcept:   "agent",
+	}
+
+	cases := []struct {
+		name   string
+		userId string
+		want   string
+	}{
+		{
+			name:   "canonical-prefixed userId (the form Execute returns)",
+			userId: "v1:identity:user:395e4e72-3097-4371-b9be-18da56eb8d5a",
+			want:   "assistant-395e4e72-3097-4371-b9be-18da56eb8d5a",
+		},
+		{
+			name:   "bare userId (some event payloads carry the shortId only)",
+			userId: "395e4e72-3097-4371-b9be-18da56eb8d5a",
+			want:   "assistant-395e4e72-3097-4371-b9be-18da56eb8d5a",
+		},
+		{
+			name:   "short alias used in adjacent existing tests",
+			userId: "user-jose",
+			want:   "assistant-user-jose",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deterministicPerUserSeedId(def, tc.userId)
+			if got != tc.want {
+				t.Errorf("deterministicPerUserSeedId = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeterministicPerUserSeedId_ConvergesUnderConcurrentRacers
+// asserts the load-bearing cluster-boot invariant: N callers
+// running the deterministic-id path concurrently for the same
+// (seed, user) pair all land on the SAME id. Without this, every
+// node's startup sweep wrote a separate row and the user saw N
+// duplicate assistants. The deterministic-id function itself is
+// pure string manipulation so this is over-specified -- the test
+// exists to prevent a future refactor from re-introducing random-
+// id generation in this path.
+func TestDeterministicPerUserSeedId_ConvergesUnderConcurrentRacers(t *testing.T) {
+	def := &SeedDefinition{
+		Name:         "assistant",
+		UseNamespace: "agents",
+		UseConcept:   "agent",
+	}
+	userId := "v1:identity:user:racer-test-user"
+
+	const racers = 16
+	out := make(chan string, racers)
+	for i := 0; i < racers; i++ {
+		go func() { out <- deterministicPerUserSeedId(def, userId) }()
+	}
+
+	want := "assistant-racer-test-user"
+	for i := 0; i < racers; i++ {
+		got := <-out
+		if got != want {
+			t.Fatalf("racer %d: got %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestBuildArgsFromBody_GlobalUsesBodyIdNotOwner(t *testing.T) {
 	body := seedBlock{
 		fields: map[string]seedValue{

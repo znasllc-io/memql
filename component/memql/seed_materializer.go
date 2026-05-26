@@ -12,7 +12,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
-	"github.com/znasllc-io/memql/core/id"
 )
 
 // seedMaterializerActor is the synthetic actor every materializer
@@ -287,13 +286,26 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 }
 
 // lookupOrMintPerUserId returns the existing perUser-seed row id for
-// (def, userId) if one is already present, or a freshly minted UUID
-// otherwise. The lookup is a raw concept query filtered by the
-// (ownerUserId, provenance.name) pair the materializer guarantees on
-// every perUser write. A lookup error falls through to UUID minting
-// (logged at warn level); the cost of an occasional duplicate row is
-// bounded -- AgentRegistry keys by roleSlug, so duplicate seed rows
-// collapse to one in-memory entry even if the DB has both.
+// (def, userId) if one is already present, or a deterministic
+// `<seedName>-<userShortId>` id otherwise. The deterministic-id path
+// matches what the type-level docstring promises (see "For
+// @scope("perUser") the materializer computes the id as
+// `<seedName>-<userId>`" above) and is the load-bearing invariant
+// for cluster boot: every node's startup sweep computes the SAME id
+// for the same (seed, user) pair, so the racing inserts collapse to
+// versions of one logical row via memql's (id, createdAt) primary
+// key. The prior implementation here minted a fresh UUID via
+// id.NewShortId() instead, which broke cluster boot -- 5 nodes
+// racing produced 5 distinct rows for the same logical assistant.
+// Tracked at #273.
+//
+// The lookup-first path is preserved so re-runs after the first
+// successful materialization (subsequent startup sweeps, user-create
+// re-fires) keep returning the row's original id even if that id
+// pre-dates the deterministic-id contract (single-node deployments
+// that wrote opaque UUIDs before this fix). Lookup failure falls
+// through to the deterministic id rather than yet another UUID --
+// any subsequent retry will then converge on that same value.
 func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedDefinition, userId string) (string, error) {
 	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
 	query := fmt.Sprintf(
@@ -303,10 +315,10 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 	result, err := m.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		if m.engine.Logger != nil {
-			m.engine.Logger.Warn("seed materializer: dedup lookup failed; minting new id",
+			m.engine.Logger.Warn("seed materializer: dedup lookup failed; falling back to deterministic id",
 				"seed", def.Name, "userId", userId, "error", err)
 		}
-		return id.NewShortId(), nil
+		return deterministicPerUserSeedId(def, userId), nil
 	}
 	if result != nil && result.Bundle != nil {
 		for _, node := range result.Bundle.Nodes {
@@ -315,7 +327,21 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 			}
 		}
 	}
-	return id.NewShortId(), nil
+	return deterministicPerUserSeedId(def, userId), nil
+}
+
+// deterministicPerUserSeedId computes `<seedName>-<userShortId>` --
+// the id every concurrent materializer run lands on for the same
+// (seed, user) pair. The user's canonical prefix
+// (`v1:identity:user:`) is stripped so the resulting shortId stays
+// readable; the bare userId tail already carries enough entropy to
+// uniquely identify the user inside the seed's namespace.
+//
+// Pure (no engine / no IO) so it's safe to call from the racing-
+// inserts test that this issue's fix adds.
+func deterministicPerUserSeedId(def *SeedDefinition, userId string) string {
+	bare := strings.TrimPrefix(userId, "v1:identity:user:")
+	return def.Name + "-" + bare
 }
 
 // invokeCreateMutation builds the canonical `mutationCreate<Concept>`
