@@ -330,6 +330,20 @@ trait traitIdentityIsWorkerToken {
   payload.identityType=="worker_token"
 }
 
+// ---- traitIdentityIsNodeToken ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "node_token". Node tokens authenticate
+// inter-node NodeService.Stream peer calls (memql#105 / #338); this
+// trait scopes per-node credential lookups used by the bootstrap-
+// minted identity-row persistence path (memql#343).
+
+@enabled
+@description("Matches v1:identity:identity rows with identityType=='node_token'.")
+trait traitIdentityIsNodeToken {
+  payload.identityType=="node_token"
+}
+
 // ---- traitIsDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

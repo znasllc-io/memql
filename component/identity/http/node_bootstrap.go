@@ -1,7 +1,12 @@
 package http
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -185,19 +190,124 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Synthetic IdentityId. The verifier doesn't look up identity rows
-	// during JWT validation -- it trusts the signed `node_id` /
-	// `node_type` claims directly -- so a synthetic subject works
-	// fine for getting peer auth functional. A follow-up can persist
-	// real identity rows so /admin/tokens can display + revoke per-
-	// node tokens (see memql#338's notes).
-	syntheticIdentityId := "v1:identity:identity:node:" + nodeType + ":" + nodeId
+	// Lookup-or-create the v1:identity:identity row for this
+	// (nodeType, nodeId) binding (memql#343). Persisting the row
+	// gives operators audit + listing surface on bootstrap-minted
+	// credentials -- the synthetic-subject shape that #338 originally
+	// shipped left bootstrap-minted tokens invisible to
+	// /admin/tokens, which precluded both revocation and audit.
+	//
+	// The verifier still doesn't dereference IdentityId during JWT
+	// validation -- it trusts the signed `node_id` / `node_type`
+	// claims directly. The row exists for operational visibility,
+	// not for runtime auth. Hot-path revocation enforcement is the
+	// follow-up to this issue (see #343's step 5).
+	//
+	// When Store is nil (unit tests + ad-hoc handler drivers), the
+	// handler falls back to the synthetic-subject behaviour from
+	// before #343. Production deploys always wire Store -- the
+	// fallback exists purely to keep the handler's tests independent
+	// of the full bootstrap stack.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var (
+		existing *identity.NodeTokenLookup
+		keyHash  string
+	)
+	now := time.Now().UTC()
+
+	if s.Store != nil {
+		binding := identity.NodeTokenBinding{NodeType: nodeType, NodeId: nodeId}
+		lookup, lookupErr := s.Store.LookupNodeTokenIdentityByBinding(ctx, binding)
+		if lookupErr != nil {
+			errorId := generateErrorId()
+			if s.Logger != nil {
+				s.Logger.Error("node_bootstrap_lookup_failed",
+					"error_id", errorId,
+					"error", lookupErr.Error(),
+					"node_type", nodeType,
+					"node_id", nodeId,
+				)
+			}
+			writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node-token lookup failed; see identity logs (errorId=" + errorId + ")",
+				ErrorCode: "mint_failed",
+			})
+			return
+		}
+		existing = lookup
+		if existing != nil && !existing.Active {
+			// The operator revoked this row out-of-band (e.g. via
+			// /admin/tokens). Refuse to silently re-mint a fresh
+			// token for the same (nodeType, nodeId) -- restoring the
+			// row to active status is the explicit, audit-emitting
+			// path.
+			writeJSON(w, http.StatusForbidden, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node_token identity for this (nodeType, nodeId) is revoked; re-activate via /admin/tokens before bootstrapping again",
+				ErrorCode: "credential_revoked",
+			})
+			return
+		}
+
+		// Mint a fresh auxiliary bearer + hash on every bootstrap
+		// call so the keyHash audit fingerprint stays correlated
+		// with the freshly-signed JWT (rotating the JWT but keeping
+		// the keyHash would split the audit trail). The plaintext
+		// bearer is never returned -- only the JWT is the
+		// operational credential.
+		_, hash, hashErr := newNodeTokenAuxBearer()
+		if hashErr != nil {
+			errorId := generateErrorId()
+			if s.Logger != nil {
+				s.Logger.Error("node_bootstrap_aux_bearer_failed",
+					"error_id", errorId,
+					"error", hashErr.Error(),
+				)
+			}
+			writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node-token mint failed; see identity logs (errorId=" + errorId + ")",
+				ErrorCode: "mint_failed",
+			})
+			return
+		}
+		keyHash = hash
+	}
+
+	var identityId string
+	if existing != nil {
+		identityId = existing.IdentityId
+	} else if s.Store != nil {
+		newId, idErr := newNodeTokenIdentityId(nodeType)
+		if idErr != nil {
+			errorId := generateErrorId()
+			if s.Logger != nil {
+				s.Logger.Error("node_bootstrap_id_gen_failed",
+					"error_id", errorId,
+					"error", idErr.Error(),
+				)
+			}
+			writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node-token mint failed; see identity logs (errorId=" + errorId + ")",
+				ErrorCode: "mint_failed",
+			})
+			return
+		}
+		identityId = newId
+	} else {
+		// Test-mode fallback: synthetic subject, no persistence.
+		identityId = "v1:identity:identity:node:" + nodeType + ":" + nodeId
+	}
 
 	token, expiresAt, err := s.Issuer.IssueNodeAccessToken(identity.NodeIssueInput{
-		IdentityId: syntheticIdentityId,
+		IdentityId: identityId,
 		NodeId:     nodeId,
 		NodeType:   nodeType,
-	}, time.Now().UTC())
+	}, now)
 	if err != nil {
 		errorId := generateErrorId()
 		if s.Logger != nil {
@@ -217,21 +327,67 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Persist the audit fields. First-time bindings get insert();
+	// repeat callers get update(). Either way we own the row before
+	// returning -- a row that fails to write would leak a JWT no
+	// admin can later see in /admin/tokens, which is exactly the gap
+	// #343 exists to close. Skipped entirely when Store is nil (the
+	// test-mode fallback above).
+	bootstrappedFrom := clientIP(r)
+	if s.Store != nil {
+		expiresAtStr := expiresAt.Format(time.RFC3339Nano)
+		bootstrappedAt := now.Format(time.RFC3339Nano)
+		const bootstrapMintedBy = "system:node-bootstrap"
+		const bootstrapUserId = "system:node-bootstrap"
+
+		var persistErr error
+		if existing == nil {
+			persistErr = s.Store.CreateNodeTokenIdentity(ctx,
+				identityId, bootstrapUserId, nodeId, nodeType, keyHash,
+				bootstrapMintedBy, expiresAtStr, bootstrappedAt, bootstrappedFrom)
+		} else {
+			persistErr = s.Store.StampNodeTokenBootstrap(ctx,
+				identityId, bootstrapUserId, nodeId, nodeType, keyHash,
+				bootstrapMintedBy, expiresAtStr, bootstrappedAt, bootstrappedFrom)
+		}
+		if persistErr != nil {
+			errorId := generateErrorId()
+			if s.Logger != nil {
+				s.Logger.Error("node_bootstrap_persist_failed",
+					"error_id", errorId,
+					"error", persistErr.Error(),
+					"node_type", nodeType,
+					"node_id", nodeId,
+					"identity_id", identityId,
+				)
+			}
+			writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node-token audit persist failed; see identity logs (errorId=" + errorId + ")",
+				ErrorCode: "mint_failed",
+			})
+			return
+		}
+	}
+
 	if s.Logger != nil {
+		reuse := existing != nil
 		s.Logger.Info("node_bootstrap_issued",
 			"token_class", "node",
 			"node_type", nodeType,
 			"node_id", nodeId,
-			"identity_id", syntheticIdentityId,
+			"identity_id", identityId,
 			"expires_at", expiresAt.Format(time.RFC3339),
-			"remote", clientIP(r),
+			"remote", bootstrappedFrom,
+			"reused_row", reuse,
+			"persisted", s.Store != nil,
 		)
 	}
 
 	writeJSON(w, http.StatusOK, NodeBootstrapResponse{
 		Success:    true,
 		PlainToken: token,
-		IdentityId: syntheticIdentityId,
+		IdentityId: identityId,
 		NodeType:   nodeType,
 		NodeId:     nodeId,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
@@ -304,6 +460,37 @@ func (s *Server) mintVoiceAgentBootstrapToken(w http.ResponseWriter, r *http.Req
 		NodeId:     instanceId,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
 	})
+}
+
+// newNodeTokenIdentityId mints the v1:identity:identity row id for a
+// bootstrap-created node_token credential. The id encodes the
+// node-type so operators reading admin / audit output can recognise
+// at a glance which binary class a row belongs to; the random
+// suffix is the actual uniqueness driver. Mirrors the voice-agent
+// mint subcommand's pattern (subcommand_voice_agent_token.go).
+// memql#343.
+func newNodeTokenIdentityId(nodeType string) (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "v1:identity:identity:node_" + nodeType + "_" + hex.EncodeToString(b), nil
+}
+
+// newNodeTokenAuxBearer generates the auxiliary `mql_node_<base64>`
+// bearer + its SHA-256 hex hash. The plaintext is NEVER returned to
+// the caller (the JWT is the operational credential); the hash
+// satisfies the schema's @required contract on `credentials.keyHash`
+// and gives operators a stable fingerprint to correlate the
+// identity row with audit lines. memql#343.
+func newNodeTokenAuxBearer() (bearer, keyHash string, err error) {
+	raw := make([]byte, 32)
+	if _, err = rand.Read(raw); err != nil {
+		return "", "", err
+	}
+	bearer = "mql_node_" + base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(bearer))
+	return bearer, hex.EncodeToString(sum[:]), nil
 }
 
 // requireSecureBootstrapRequest mirrors requireSecureRequest's logic

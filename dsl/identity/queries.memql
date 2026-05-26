@@ -1159,3 +1159,59 @@ query identity queryWorkerTokensForUser {
   filter  traitIdentityIsWorkerToken; payload.userId==args.userId
   shape   identityFull
 }
+
+// ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
+
+// queryNodeTokenIdentityByBinding
+// ===============================
+//
+// Lookup helper for the bootstrap-minted identity-row persistence
+// path (memql#343). Finds the v1:identity:identity row keyed on the
+// (nodeType, nodeId) pair the bootstrap handler is processing, so
+// the handler can stamp audit fields onto an existing row rather
+// than insert a fresh one on every node restart.
+//
+// Returns rows even when active=false so the handler can detect
+// "the operator revoked this token" and refuse to re-mint (rather
+// than silently revive a revoked row by inserting a new one with
+// the same (nodeType, nodeId)).
+//
+// Arguments:
+//   nodeType (string, required) - bff / voice / cognition / agent / planner / workbench
+//   nodeId   (string, required) - v1:cluster:node.id the credential authenticates
+//
+// Returns:
+//   Zero or one identity row in identityFull shape.
+
+@enabled
+@public
+@description("Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.")
+query identity queryNodeTokenIdentityByBinding {
+  args {
+    nodeType  string  @required
+    nodeId    string  @required
+  }
+  filter  traitIdentityIsNodeToken; payload.credentials.nodeType==args.nodeType; payload.credentials.nodeId==args.nodeId
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/nodeTokenIdentities.memql ----
+
+// queryNodeTokenIdentities
+// ========================
+//
+// Lists every v1:identity:identity row of identityType="node_token"
+// across the cluster. Backs the future /admin/tokens extension that
+// surfaces bootstrap-minted credentials alongside PATs + worker
+// tokens (see #343's follow-up admin UI work).
+//
+// Returns rows even when active=false so the admin UI can show
+// revoked tokens explicitly (rather than ghosting them).
+
+@enabled
+@public
+@description("List every node_token identity across the cluster (active + inactive). memql#343.")
+query identity queryNodeTokenIdentities {
+  filter  traitIdentityIsNodeToken
+  shape   identityFull
+}

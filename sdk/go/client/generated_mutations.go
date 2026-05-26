@@ -2701,6 +2701,82 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 	return b.String()
 }
 
+// MutationCreateNodeTokenIdentity -- Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.
+//
+// Bound concept: identity.
+type MutationCreateNodeTokenIdentityArgs struct {
+	IdentityId       string
+	UserId           string
+	NodeId           string
+	NodeType         string
+	KeyHash          string
+	MintedBy         string
+	ExpiresAt        string
+	BootstrappedAt   string
+	BootstrappedFrom string
+}
+
+// MutationCreateNodeTokenIdentity calls the engine mutation mutationCreateNodeTokenIdentity.
+func (qc *QueryClient) MutationCreateNodeTokenIdentity(ctx context.Context, args MutationCreateNodeTokenIdentityArgs) (*Result, error) {
+	call := MutationCreateNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateNodeTokenIdentity", call)
+}
+
+func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateNodeTokenIdentity({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.BootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	}
+	if args.BootstrappedFrom != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedFrom: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.
@@ -7665,6 +7741,76 @@ func MutationSoftDeleteWorkerInvocationBuild(args MutationSoftDeleteWorkerInvoca
 	b.WriteString("mutationSoftDeleteWorkerInvocation({")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationStampNodeTokenBootstrap -- Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343.
+//
+// Bound concept: identity.
+type MutationStampNodeTokenBootstrapArgs struct {
+	IdentityId       string
+	UserId           string
+	NodeId           string
+	NodeType         string
+	KeyHash          string
+	MintedBy         string
+	ExpiresAt        string
+	BootstrappedAt   string
+	BootstrappedFrom string
+}
+
+// MutationStampNodeTokenBootstrap calls the engine mutation mutationStampNodeTokenBootstrap.
+func (qc *QueryClient) MutationStampNodeTokenBootstrap(ctx context.Context, args MutationStampNodeTokenBootstrapArgs) (*Result, error) {
+	call := MutationStampNodeTokenBootstrapBuild(args)
+	return qc.executeNamed(ctx, "mutationStampNodeTokenBootstrap", call)
+}
+
+func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationStampNodeTokenBootstrap({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bootstrappedAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bootstrappedFrom: ")
+	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
 	b.WriteString("})")
 	return b.String()
 }
