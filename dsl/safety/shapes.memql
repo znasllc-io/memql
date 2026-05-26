@@ -1,6 +1,6 @@
 // shapes.memql -- safety namespace.
 
-use safety.concepts.{ classification }
+use safety.concepts.{ classification, approvalRequest }
 
 @row
 @concepts("v1:safety:classification")
@@ -24,4 +24,27 @@ shape classification classificationFull {
   payload.planId
   payload.correlationId
   payload.mode
+}
+
+@row
+@concepts("v1:safety:approvalRequest")
+@description("Comprehensive projection of every v1:safety:approvalRequest field. Backs the cockpit approval inbox (memql-cockpit follow-up) + the Gate's bypass-check query.")
+shape approvalRequest approvalRequestFull {
+  row.id
+  row.createdAt
+  payload.correlationKey
+  payload.surface
+  payload.action
+  payload.argsRedacted
+  payload.tier
+  payload.categories
+  payload.reason
+  payload.expiresAt
+  payload.status
+  payload.decidedBy
+  payload.decidedAt
+  payload.decisionReason
+  payload.agentId
+  payload.ownerUserId
+  payload.planId
 }

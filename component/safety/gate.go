@@ -106,13 +106,16 @@ func (r SlogRecorder) Record(ctx context.Context, desc ActionDescriptor, cls Cla
 // tool / workbench) routes through before dispatch. Phase 0 shipped
 // the gate; #229 wired the call sites; #231 plugs in the real
 // decision policy (the `decide` stub now delegates to a
-// DecisionPolicy). Fail-closed semantics for computer-use are
-// handled by per-surface `EnforceDecision` calls (see global.go).
+// DecisionPolicy); #232 plugs in the approval sink (the Ask branch
+// in enforce mode now consults it before returning). Fail-closed
+// semantics for computer-use are handled by per-surface
+// `EnforceDecision` calls (see global.go).
 type Gate struct {
 	classifier     Classifier
 	recorder       DecisionRecorder
 	mode           Mode
 	decisionPolicy DecisionPolicy
+	approvalSink   ApprovalSink
 }
 
 // GateOptions configures NewGate. All fields are optional; sensible
@@ -128,6 +131,12 @@ type GateOptions struct {
 	// or to swap in a DSL-backed impl once procedural Policy DSL
 	// is exercised.
 	DecisionPolicy DecisionPolicy
+	// ApprovalSink consulted on Ask verdicts in enforce mode (#232).
+	// nil -> NoopApprovalSink, which keeps the pre-approval "requires
+	// user approval" refusal behavior intact. App boot supplies the
+	// DSL-backed sink (component/safety/approval); tests can pin a
+	// deterministic verdict by passing a stub.
+	ApprovalSink ApprovalSink
 	// Logger is used only when Recorder is nil -- the default
 	// SlogRecorder is built around it.
 	Logger *slog.Logger
@@ -157,11 +166,16 @@ func NewGate(opts GateOptions) *Gate {
 	if decisionPolicy == nil {
 		decisionPolicy = DefaultDecisionPolicy{}
 	}
+	approvalSink := opts.ApprovalSink
+	if approvalSink == nil {
+		approvalSink = NoopApprovalSink{}
+	}
 	return &Gate{
 		classifier:     classifier,
 		recorder:       recorder,
 		mode:           mode,
 		decisionPolicy: decisionPolicy,
+		approvalSink:   approvalSink,
 	}
 }
 
@@ -214,12 +228,50 @@ func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, C
 	}
 	decision := g.decide(cls, desc)
 	if g.mode == ModeShadow {
-		// Record what we WOULD have decided, but always allow.
+		// Record what we WOULD have decided, but always allow. The
+		// approval sink is NOT consulted in shadow -- the rollout-
+		// safety invariant (shadow never blocks AND never creates
+		// side-effecting rows the operator didn't authorise) holds.
 		g.recorder.Record(ctx, desc, cls, decision, g.mode)
 		return DecisionAllow, cls, nil
 	}
+	// Enforce mode: consult the approval sink on Ask. The sink may
+	// flip Decision to Allow (approved bypass) or Deny (human said
+	// no); Pending leaves Decision=Ask, but the cls.Reason now carries
+	// the approvalRequest id so EnforceDecision's refusal text points
+	// the user at the row they need to resolve.
+	if decision == DecisionAsk {
+		decision, cls = g.applyApprovalVerdict(ctx, desc, decision, cls)
+	}
 	g.recorder.Record(ctx, desc, cls, decision, g.mode)
 	return decision, cls, nil
+}
+
+// applyApprovalVerdict consults the gate's ApprovalSink and folds
+// the verdict into (decision, cls). Only called from enforce-mode
+// Evaluate, only when the policy returned DecisionAsk. The Reason
+// field is rewritten with an approvalRequest-id-bearing prefix so
+// downstream consumers (recorder, EnforceDecision refusal text,
+// cockpit audit drill-down) all see the same self-describing string.
+func (g *Gate) applyApprovalVerdict(ctx context.Context, desc ActionDescriptor, decision Decision, cls Classification) (Decision, Classification) {
+	verdict := g.approvalSink.Check(ctx, desc, cls)
+	originalReason := cls.Reason
+	switch verdict.State {
+	case ApprovalStateApproved:
+		cls.Reason = "approved bypass (approvalRequest=" + verdict.ApprovalRequestID + "): " + originalReason
+		return DecisionAllow, cls
+	case ApprovalStatePending:
+		cls.Reason = "awaiting approval (approvalRequest=" + verdict.ApprovalRequestID + "): " + originalReason
+		return DecisionAsk, cls
+	case ApprovalStateDenied:
+		cls.Reason = "denied by approver (approvalRequest=" + verdict.ApprovalRequestID + "): " + originalReason
+		return DecisionDeny, cls
+	default:
+		// Unconfigured -- gate behavior unchanged. Don't touch
+		// cls.Reason since it may be empty + we want the original
+		// EnforceDecision branch to keep working.
+		return decision, cls
+	}
 }
 
 // decide consults the configured DecisionPolicy. The DefaultDecisionPolicy

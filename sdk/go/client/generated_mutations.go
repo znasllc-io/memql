@@ -997,6 +997,102 @@ func MutationCreateAgentRoleBuild(args MutationCreateAgentRoleArgs) string {
 	return b.String()
 }
 
+// MutationCreateApprovalRequest -- Create one v1:safety:approvalRequest row in `pending` status. Called from component/safety/approval/sink.go when an Ask verdict fires in enforce mode AND no active row already exists for the descriptor's correlationKey. argsRedacted arrives pre-scrubbed (same semantics as classification.argsRedacted). expiresAt is the advisory TTL -- the sink computes it from MEMQL_SAFETY_APPROVAL_TTL_HOURS (default 24h) at create time.
+//
+// Bound concept: approvalRequest.
+type MutationCreateApprovalRequestArgs struct {
+	CorrelationKey string
+	Surface        string
+	Action         string
+	ArgsRedacted   string
+	Tier           string
+	Categories     string
+	Reason         string
+	ExpiresAt      string
+	AgentId        string
+	OwnerUserId    string
+	PlanId         string
+}
+
+// MutationCreateApprovalRequest calls the engine mutation mutationCreateApprovalRequest.
+func (qc *QueryClient) MutationCreateApprovalRequest(ctx context.Context, args MutationCreateApprovalRequestArgs) (*Result, error) {
+	call := MutationCreateApprovalRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateApprovalRequest", call)
+}
+
+func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateApprovalRequest({")
+	b.WriteString("correlationKey: ")
+	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("surface: ")
+	b.WriteString(fmt.Sprintf("%q", args.Surface))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(fmt.Sprintf("%q", args.Action))
+	if args.ArgsRedacted != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("argsRedacted: ")
+		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.Categories != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("categories: ")
+		b.WriteString(fmt.Sprintf("%q", args.Categories))
+	}
+	if args.Reason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.AgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	}
+	if args.PlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateAuditEvent -- Append a row to the append-only security audit log.
 //
 // Bound concept: auditEvent.
@@ -5943,6 +6039,48 @@ func MutationResetStaleAfterRefreshBuild(args MutationResetStaleAfterRefreshArgs
 	}
 	b.WriteString("lastSeededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeededAt))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationResolveApprovalRequest -- Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls queryApprovalRequestById first); v1 ships the simple shape.
+//
+// Bound concept: approvalRequest.
+type MutationResolveApprovalRequestArgs struct {
+	Id             string
+	Status         string
+	DecidedBy      string
+	DecisionReason string
+}
+
+// MutationResolveApprovalRequest calls the engine mutation mutationResolveApprovalRequest.
+func (qc *QueryClient) MutationResolveApprovalRequest(ctx context.Context, args MutationResolveApprovalRequestArgs) (*Result, error) {
+	call := MutationResolveApprovalRequestBuild(args)
+	return qc.executeNamed(ctx, "mutationResolveApprovalRequest", call)
+}
+
+func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationResolveApprovalRequest({")
+	b.WriteString("id: ")
+	b.WriteString(fmt.Sprintf("%q", args.Id))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("decidedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.DecidedBy))
+	if args.DecisionReason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("decisionReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.DecisionReason))
+	}
 	b.WriteString("})")
 	return b.String()
 }

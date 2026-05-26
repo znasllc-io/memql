@@ -80,13 +80,12 @@ func SetDefaultGate(g *Gate) {
 // but never block live traffic). The recorder still captures the
 // error so ops see it.
 //
-// In Phase 1 the gate's decide() always returns Allow, so the only
-// way this currently returns blocked is the fail-closed-on-error
-// path in enforce mode. #231 replaces decide() with the real
-// commandRiskDecision policy and the Deny/Ask returns start firing.
-// The DecisionAsk path here treats Ask as a deny with a
-// "pending #232" reason -- approval is wired by #232 and replaces
-// this branch then.
+// In Phase 1 the gate's decide() always returns Allow; #231 swapped
+// in the real commandRiskDecision matrix so Deny/Ask returns fire;
+// #232 plugged the ApprovalSink into the Gate's Evaluate path so the
+// Ask branch here only fires when the sink couldn't approve. The
+// cls.Reason already carries the approvalRequest id when the sink
+// returned Pending or Denied, so the refusal text is self-describing.
 func (g *Gate) EnforceDecision(decision Decision, cls Classification, err error, failClosedOnError bool) (proceed bool, refusalReason string) {
 	if err != nil {
 		// Fail-closed only applies in enforce mode -- shadow and off
@@ -105,15 +104,15 @@ func (g *Gate) EnforceDecision(decision Decision, cls Classification, err error,
 		}
 		return false, "blocked by safety classifier"
 	case DecisionAsk:
-		// #232 wires the approval surface; until then surface Ask
-		// as a refusal so the agent loop returns a structured "I
-		// need approval first" rather than parking the call. The
-		// reason text + RuleID still land in audit via the gate's
-		// recorder so we can measure how often Ask would fire.
+		// Gate's Evaluate already consulted the ApprovalSink in
+		// enforce mode (#232); we only land here when the sink
+		// returned Pending or Unconfigured. cls.Reason carries the
+		// approvalRequest id when one was created -- callers /
+		// approvers can resolve via mutationResolveApprovalRequest.
 		if cls.Reason != "" {
-			return false, "requires user approval (not yet implemented; pending #232): " + cls.Reason
+			return false, "requires user approval: " + cls.Reason
 		}
-		return false, "requires user approval (not yet implemented; pending #232)"
+		return false, "requires user approval"
 	default:
 		return true, ""
 	}

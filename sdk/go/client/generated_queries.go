@@ -99,6 +99,28 @@ func QueryActiveAgentsForUserBuild(args QueryActiveAgentsForUserArgs) string {
 	return b.String()
 }
 
+// QueryActiveApprovalsByCorrelationKey -- Returns active (pending OR approved) v1:safety:approvalRequest rows for a given correlationKey. The DSL-backed ApprovalSink calls this BEFORE creating a new pending row -- if an `approved` non-expired row exists, the Gate bypasses with proceed=true; if a `pending` row exists, the sink reuses its id rather than creating a duplicate (idempotency). `expired` and `denied` rows are excluded -- the bypass check should treat them as nonexistent so a subsequent retry creates a fresh pending row.
+//
+// Bound concept: approvalRequest.
+type QueryActiveApprovalsByCorrelationKeyArgs struct {
+	CorrelationKey string
+}
+
+// QueryActiveApprovalsByCorrelationKey calls the engine query queryActiveApprovalsByCorrelationKey.
+func (qc *QueryClient) QueryActiveApprovalsByCorrelationKey(ctx context.Context, args QueryActiveApprovalsByCorrelationKeyArgs) (*Result, error) {
+	call := QueryActiveApprovalsByCorrelationKeyBuild(args)
+	return qc.executeNamed(ctx, "queryActiveApprovalsByCorrelationKey", call)
+}
+
+func QueryActiveApprovalsByCorrelationKeyBuild(args QueryActiveApprovalsByCorrelationKeyArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActiveApprovalsByCorrelationKey({")
+	b.WriteString("correlationKey: ")
+	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
@@ -482,6 +504,28 @@ func (qc *QueryClient) QueryAllSafetyClassifications(ctx context.Context, args Q
 func QueryAllSafetyClassificationsBuild(args QueryAllSafetyClassificationsArgs) string {
 	_ = args
 	return "queryAllSafetyClassifications({})"
+}
+
+// QueryApprovalRequestById -- Returns a single v1:safety:approvalRequest by id. Backs the cockpit drill-down view (follow-up in memql-cockpit) and the `mutationResolveApprovalRequest` read-modify-write path.
+//
+// Bound concept: approvalRequest.
+type QueryApprovalRequestByIdArgs struct {
+	Id string
+}
+
+// QueryApprovalRequestById calls the engine query queryApprovalRequestById.
+func (qc *QueryClient) QueryApprovalRequestById(ctx context.Context, args QueryApprovalRequestByIdArgs) (*Result, error) {
+	call := QueryApprovalRequestByIdBuild(args)
+	return qc.executeNamed(ctx, "queryApprovalRequestById", call)
+}
+
+func QueryApprovalRequestByIdBuild(args QueryApprovalRequestByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryApprovalRequestById({")
+	b.WriteString("id: ")
+	b.WriteString(fmt.Sprintf("%q", args.Id))
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryArchivedSpaces -- Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).

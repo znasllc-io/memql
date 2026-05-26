@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/safety"
+	"github.com/znasllc-io/memql/component/safety/approval"
 	"github.com/znasllc-io/memql/component/safety/llm"
 	"github.com/znasllc-io/memql/component/safety/recorder"
 )
@@ -24,6 +25,15 @@ const EnvSafetyLLMProvider = "MEMQL_SAFETY_LLM_PROVIDER"
 // Recognised off values: "off" / "false" / "0" (case-insensitive,
 // trimmed).
 const EnvPersistClassifications = "MEMQL_SAFETY_PERSIST_CLASSIFICATIONS"
+
+// EnvApprovalSink opts a node OUT of the DSL-backed approval sink
+// (memql#232). Default is on (consult v1:safety:approvalRequest rows
+// whenever the engine is ready). Recognised off values: "off" /
+// "false" / "0" (case-insensitive, trimmed). When opted out, Ask
+// verdicts in enforce mode fall back to the pre-approval "requires
+// user approval" refusal -- shadow mode never reaches the Ask branch
+// regardless.
+const EnvApprovalSink = "MEMQL_SAFETY_APPROVAL_SINK"
 
 // engineMutationRunner adapts memql.MemQLEngine.Execute into the
 // safety/recorder.MutationRunner interface. Lives here (in app/)
@@ -43,24 +53,28 @@ func (e engineMutationRunner) RunMutation(ctx context.Context, query string) err
 //
 //   - Classifier chain (rules-only OR rules + LLM)
 //   - Recorder (slog-only OR slog + persisting v1:safety:classification)
+//   - ApprovalSink (Noop OR DSL-backed v1:safety:approvalRequest)
 //
-// Single SetDefaultGate call -- both halves arrive together so a
-// half-wired gate never goes live.
+// Single SetDefaultGate call -- all three halves arrive together so
+// a half-wired gate never goes live.
 //
 // Idempotent + non-fatal on every "can't wire" condition; surface
-// gates keep working with the rules-only / slog-only default if
-// any half declines. Logs the outcome of each half -- ops can grep
-// `safety classifier:` to see which nodes have which layers.
+// gates keep working with the safest default (rules-only / slog-only
+// / noop-approval) if any half declines. Logs the outcome of each
+// half -- ops can grep `safety classifier:` to see which nodes have
+// which layers.
 //
 // Called from transportBase so the gate is set before any handler
 // can dispatch.
 func (a *App) wireSafetyGate() {
 	classifier := a.buildSafetyClassifier()
 	rec := a.buildSafetyRecorder()
+	sink := a.buildSafetyApprovalSink()
 	safety.SetDefaultGate(safety.NewGate(safety.GateOptions{
-		Classifier: classifier,
-		Recorder:   rec,
-		Logger:     a.Logger,
+		Classifier:   classifier,
+		Recorder:     rec,
+		ApprovalSink: sink,
+		Logger:       a.Logger,
 	}))
 }
 
@@ -100,6 +114,55 @@ func (a *App) buildSafetyClassifier() safety.Classifier {
 		"provider", providerName,
 		"mode", safety.ModeFromEnv())
 	return safety.NewChainClassifier(rules, llmClassifier)
+}
+
+// buildSafetyApprovalSink returns the approval sink for this node.
+// DSL-backed by default (consults v1:safety:approvalRequest rows);
+// falls back to NoopApprovalSink if the engine isn't ready or the
+// env var opts out. Mirrors the recorder's safe-default posture.
+func (a *App) buildSafetyApprovalSink() safety.ApprovalSink {
+	off := strings.ToLower(strings.TrimSpace(os.Getenv(EnvApprovalSink)))
+	if off == "off" || off == "false" || off == "0" {
+		a.Logger.Info("safety classifier: approval sink disabled (MEMQL_SAFETY_APPROVAL_SINK)",
+			"component", "safety")
+		return safety.NoopApprovalSink{}
+	}
+	if a.engine == nil {
+		a.Logger.Warn("safety classifier: engine not ready; approval sink disabled",
+			"component", "safety")
+		return safety.NoopApprovalSink{}
+	}
+	a.Logger.Info("safety classifier: approval sink enabled (v1:safety:approvalRequest rows)",
+		"component", "safety")
+	return approval.New(approval.Options{
+		Engine: engineApprovalAdapter{engine: a.engine},
+		Logger: a.Logger,
+	})
+}
+
+// engineApprovalAdapter wraps memql.MemQLEngine to satisfy
+// approval.Engine -- one method, returns (any, error). Keeps the
+// approval package engine-independent (mirrors engineMutationRunner).
+//
+// The conversion via ConvertExecuteResultToMap is load-bearing:
+// memql.MemQLEngine.Execute returns *ExecuteResult (a typed struct
+// holding a GraphBundle + shaped output), NOT a raw map. Without the
+// conversion the approval.Sink's rowsFromResult / idFromResult see
+// an opaque pointer they can't decode, every query looks empty +
+// every mutation looks empty-id'd -- idempotency breaks + the
+// approved-bypass flow never fires. Same pattern as CognitionEngineAdapter
+// in adapters.go.
+type engineApprovalAdapter struct{ engine *memql.MemQLEngine }
+
+func (e engineApprovalAdapter) Execute(ctx context.Context, query string) (any, error) {
+	result, err := e.engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return ConvertExecuteResultToMap(result), nil
 }
 
 // buildSafetyRecorder returns the recorder fanout for this node.
