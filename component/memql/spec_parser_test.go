@@ -6,14 +6,14 @@ import (
 )
 
 // TestParseSpecMemQL_GoldenPath_RowSpec locks the canonical
-// struct-form spec syntax for a row-spec bound to a concept. The
-// body references payload via the bareName (`participant.X`) which
-// the parser rewrites to `payload.X` before expression parsing.
+// struct-form spec syntax for a row-spec. Body authors write
+// payload references directly as `payload.X`; the legacy
+// `@useConcept(<bareName>)` + bareName-rewrite path was retired
+// (see issue #301).
 func TestParseSpecMemQL_GoldenPath_RowSpec(t *testing.T) {
-	src := []byte(`@useConcept(participant)
-@description("Matches participants with human participantType.")
+	src := []byte(`@description("Matches participants with human participantType.")
 spec specIsHumanParticipant {
-  participant.participantType == "human"
+  payload.participantType == "human"
 }`)
 
 	got, err := parseSpecMemQL("test.memql", src)
@@ -26,74 +26,39 @@ spec specIsHumanParticipant {
 	if got.Name != "specIsHumanParticipant" {
 		t.Errorf("Name = %q, want specIsHumanParticipant", got.Name)
 	}
-	if got.UseConceptName != "participant" {
-		t.Errorf("UseConceptName = %q, want participant", got.UseConceptName)
-	}
 	if got.IsTrait {
 		t.Error("IsTrait = true, want false (this is a spec, not a trait)")
 	}
+	if got.Kind != SpecKindRow {
+		t.Errorf("Kind = %q, want %q (payload.X body classifies as row-spec)", got.Kind, SpecKindRow)
+	}
 }
 
-// TestParseSpecMemQL_TraitForbidsBinding locks the rule: traits are
-// concept-agnostic. @useConcept on a trait is an error.
-func TestParseSpecMemQL_TraitForbidsBinding(t *testing.T) {
-	src := []byte(`@useConcept(participant)
-trait traitBoom {
-  payload.active == true
+// TestParseSpecMemQL_GoldenPath_ContextSpec locks the canonical
+// caller-only predicate (no row references; evaluated in-process
+// from the auth-context envelope).
+func TestParseSpecMemQL_GoldenPath_ContextSpec(t *testing.T) {
+	src := []byte(`@description("Actor holds the admin role.")
+spec requiresAdmin {
+  actor.role == "admin"
 }`)
 
-	_, err := parseSpecMemQL("test.memql", src)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	got, err := parseSpecMemQL("test.memql", src)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "@useConcept") {
-		t.Errorf("error should mention @useConcept rejection on trait, got %v", err)
-	}
-}
-
-// TestParseSpecMemQL_SpecRequiresBinding locks the rule: specs MUST
-// declare exactly one of @useConcept / @useShape.
-func TestParseSpecMemQL_SpecRequiresBinding(t *testing.T) {
-	src := []byte(`@description("missing binding")
-spec specBoom {
-  payload.active == true
-}`)
-
-	_, err := parseSpecMemQL("test.memql", src)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "binding") {
-		t.Errorf("error should mention missing binding, got %v", err)
+	if got.Kind != SpecKindContext {
+		t.Errorf("Kind = %q, want %q (actor.X body classifies as context-spec)", got.Kind, SpecKindContext)
 	}
 }
 
-// TestParseSpecMemQL_SpecRejectsDualBinding catches the case where
-// an author declares both @useConcept and @useShape on the same spec.
-func TestParseSpecMemQL_SpecRejectsDualBinding(t *testing.T) {
-	src := []byte(`@useConcept(foo)
-@useShape(fooFull)
-spec specDualBound {
-  payload.active == true
-}`)
-
-	_, err := parseSpecMemQL("test.memql", src)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "both") && !strings.Contains(err.Error(), "exactly one") {
-		t.Errorf("error should reject dual binding, got %v", err)
-	}
-}
-
-// TestParseSpecMemQL_RejectsLifecycleOnSpec locks Decision: the
-// engine controls spec lifecycle. @enabled / @disabled on a spec
-// is an error; the same annotations are no-op on traits.
+// TestParseSpecMemQL_RejectsLifecycleOnSpec locks: the engine
+// controls spec lifecycle. @enabled / @disabled on a spec is an
+// error; the same annotations are no-op on traits.
 func TestParseSpecMemQL_RejectsLifecycleOnSpec(t *testing.T) {
 	src := []byte(`@enabled
-@useConcept(participant)
 spec specBoom {
-  participant.active == true
+  payload.active == true
 }`)
 
 	_, err := parseSpecMemQL("test.memql", src)
@@ -105,21 +70,38 @@ spec specBoom {
 	}
 }
 
-// TestParseSpecMemQL_RejectsUnknownAnnotation locks the
-// annotation allow-list.
+// TestParseSpecMemQL_RejectsUnknownAnnotation locks the annotation
+// allow-list. Includes the retired legacy bindings @useConcept /
+// @useShape (#301) -- both should now error as unknown.
 func TestParseSpecMemQL_RejectsUnknownAnnotation(t *testing.T) {
-	src := []byte(`@bogusKnob
-@useConcept(participant)
+	cases := []struct {
+		name        string
+		src         string
+		mustMention string
+	}{
+		{"bogus", `@bogusKnob
 spec specFoo {
-  participant.active == true
-}`)
-
-	_, err := parseSpecMemQL("test.memql", src)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+  payload.active == true
+}`, "bogusKnob"},
+		{"retired useConcept", `@useConcept(participant)
+spec specFoo {
+  payload.active == true
+}`, "useConcept"},
+		{"retired useShape", `@useShape(participantFull)
+spec specFoo {
+  payload.active == true
+}`, "useShape"},
 	}
-	if !strings.Contains(err.Error(), "bogusKnob") {
-		t.Errorf("error should mention bogusKnob, got %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSpecMemQL("test.memql", []byte(tc.src))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.mustMention) {
+				t.Errorf("error should mention %q, got %v", tc.mustMention, err)
+			}
+		})
 	}
 }
 

@@ -164,7 +164,6 @@ func (Policy) vendorPolicy(ctx any) bool {
 func TestEvaluateSpec_ContextSpec_AdminRole(t *testing.T) {
 	registry := newSpecRegistry()
 	src := `@description("admin check")
-@useShape(actorEnvelope)
 spec requiresAdmin {
   actor.role == "admin"
 }`
@@ -196,7 +195,6 @@ spec requiresAdmin {
 func TestEvaluateSpec_RejectsRowSpec(t *testing.T) {
 	registry := newSpecRegistry()
 	src := `@description("row spec")
-@useShape(statusRowTrait)
 spec rowOnly {
   payload.status == "active"
 }`
@@ -218,7 +216,6 @@ spec rowOnly {
 func TestPolicyBody_SpecBuiltin(t *testing.T) {
 	specRegistry := newSpecRegistry()
 	specSrc := `@description("admin check")
-@useShape(actorEnvelope)
 spec requiresAdmin {
   actor.role == "admin"
 }`

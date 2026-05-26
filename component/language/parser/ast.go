@@ -154,8 +154,6 @@ var (
 	AttrRole                 = ast.AttrRole
 	AttrSchedule             = ast.AttrSchedule
 	AttrUse                  = ast.AttrUse
-	AttrUseConcept           = ast.AttrUseConcept
-	AttrUseShape             = ast.AttrUseShape
 	AttrUseSpec              = ast.AttrUseSpec
 	AttrUseTrait             = ast.AttrUseTrait
 	AttrUseQuery             = ast.AttrUseQuery
