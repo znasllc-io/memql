@@ -68,6 +68,13 @@ services:
       # Identity verifier defaults to http://identity:8081 (local
       # identity service). Override via env to point elsewhere; no noauth shortcut.
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # The issuer claim baked into JWTs is the public IDENTITY_BASE_URL
       # (what the browser sees), not the in-cluster service hostname. Bff/
       # voice/cognition/agent/planner verify against that exact value.
@@ -226,6 +233,13 @@ services:
       SERVER_ALLOWED_ORIGINS: "*"
       MEMQL_GRPC_ADDRESS: ":50051"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # The issuer claim baked into JWTs is the public IDENTITY_BASE_URL
       # (what the browser sees), not the in-cluster service hostname. Bff/
       # voice/cognition/agent/planner verify against that exact value.
@@ -280,6 +294,13 @@ services:
       SERVER_ALLOWED_ORIGINS: "*"
       MEMQL_GRPC_ADDRESS: ":50051"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # The issuer claim baked into JWTs is the public IDENTITY_BASE_URL
       # (what the browser sees), not the in-cluster service hostname. Bff/
       # voice/cognition/agent/planner verify against that exact value.
@@ -342,6 +363,13 @@ services:
       # Identity verifier defaults to http://identity:8081 (local
       # identity service). Override via env to point elsewhere; no noauth shortcut.
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # The issuer claim baked into JWTs is the public IDENTITY_BASE_URL
       # (what the browser sees), not the in-cluster service hostname. Bff/
       # voice/cognition/agent/planner verify against that exact value.
@@ -421,6 +449,13 @@ services:
       SERVER_ALLOWED_ORIGINS: "*"
       MEMQL_GRPC_ADDRESS: ":50051"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Node-bootstrap secret (memql#338). When set on both this node
+      # AND the identity service, a node that boots without an
+      # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
+      # JWT via identity's POST /node/bootstrap. Default is a known dev
+      # value so `docker compose up` works out of the box; production
+      # overrides via .env.local or shell export.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # The issuer claim baked into JWTs is the public IDENTITY_BASE_URL
       # (what the browser sees), not the in-cluster service hostname. Bff/
       # voice/cognition/agent/planner verify against that exact value.
@@ -496,6 +531,25 @@ services:
       # docker/nginx/templates/default.conf.template.
       IDENTITY_BASE_URL: https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
       IDENTITY_KEY_DIR: /var/identity/keys
+
+      # Node-bootstrap secret (memql#338). When set on the identity
+      # service, the POST /node/bootstrap endpoint is enabled; nodes
+      # that boot without an operator-provisioned MEMQL_NODE_TOKEN
+      # present this shared secret to self-mint a class="node" JWT.
+      # Must match the value set on each cluster binary that should be
+      # allowed to self-bootstrap.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
+      # Dev escape hatch: admit plaintext HTTP requests to /node/bootstrap.
+      # The docker network is in-cluster plain HTTP between containers; the
+      # bootstrap endpoint defaults to requiring HTTPS (the secret is a
+      # long-lived bearer credential). Production deploys must leave this
+      # unset and terminate TLS at the ingress (or set X-Forwarded-Proto:
+      # https on the proxy).
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
+      # Same dev escape hatch for the pair endpoints. Already part of the
+      # pre-existing #338 surface but compose never set it; included here
+      # so the pair-redeem path also works under the in-cluster plain HTTP.
+      MEMQL_IDENTITY_ALLOW_INSECURE_PAIR: ${MEMQL_IDENTITY_ALLOW_INSECURE_PAIR:-1}
       # Plaintext-on-disk in dev. In staging/prod set
       # IDENTITY_KEY_ENCRYPTION_KEY (>=16 chars) to wrap with AES-256-GCM.
       IDENTITY_KEY_ENCRYPTION_KEY: ""

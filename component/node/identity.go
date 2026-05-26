@@ -3,6 +3,8 @@
 package node
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -135,6 +137,46 @@ func NewIdentity(version string) *Identity {
 		Labels:        labels,
 		BearerToken:   strings.TrimSpace(os.Getenv("MEMQL_NODE_TOKEN")),
 	}
+}
+
+// EnsureBearerToken fills in BearerToken when the operator left
+// MEMQL_NODE_TOKEN empty but opted into self-bootstrap (set
+// MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL on this
+// binary and the identity service). Calls the identity service's
+// `/node/bootstrap` endpoint with the shared secret to mint a fresh
+// class="node" JWT, then assigns it to id.BearerToken so the
+// peerConnection's outbound dials present it.
+//
+// No-op when MEMQL_NODE_TOKEN was already set (operator-provisioned
+// tokens win) or when the bootstrap preconditions aren't met
+// (legacy "empty bearer token" behaviour preserved -- some single-
+// node dev paths intentionally run without auth).
+//
+// Returns a non-nil error only when the operator opted into
+// bootstrap (secret + identity URL both set) AND the mint call
+// failed. The caller can choose whether to block startup
+// (production-grade) or log + proceed; app/cluster.go logs + proceeds
+// so an identity outage during boot doesn't deadlock the whole
+// cluster startup, matching the lenient posture the empty-token
+// branch has carried forward from #105's original design.
+//
+// memql#338.
+func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) error {
+	if id == nil {
+		return nil
+	}
+	if strings.TrimSpace(id.BearerToken) != "" {
+		return nil
+	}
+	token, ok, err := maybeBootstrapNodeToken(ctx, logger, id.ID, string(id.Type))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	id.BearerToken = token
+	return nil
 }
 
 // NodeId returns the node's unique identifier.

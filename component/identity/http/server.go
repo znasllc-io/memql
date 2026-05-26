@@ -154,6 +154,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /pair/redeem", wrap(s.cors(s.handlePairRedeem)))
 	mux.HandleFunc("OPTIONS /pair/redeem", wrap(s.cors(s.handleOptions)))
 
+	// Node bootstrap -- self-mint a class="node" JWT for cluster
+	// binaries (bff / agent / cognition / planner / voice) that
+	// boot with MEMQL_NODE_TOKEN empty. Authenticates via
+	// Authorization: Bootstrap <secret>. Disabled by default;
+	// enabled when MEMQL_NODE_BOOTSTRAP_TOKEN is set on the
+	// identity service. memql#338.
+	mux.HandleFunc("POST /node/bootstrap", wrap(s.cors(s.handleNodeBootstrap)))
+	mux.HandleFunc("OPTIONS /node/bootstrap", wrap(s.cors(s.handleOptions)))
+
 	if s.Logger != nil {
 		s.Logger.Info("identity HTTP routes mounted",
 			slog.String("base_url", s.Cfg.BaseURL),

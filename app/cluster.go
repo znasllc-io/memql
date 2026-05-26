@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"strings"
@@ -16,6 +17,24 @@ import (
 // the system.startup event with infrastructure metadata for automations.
 func (a *App) cluster() {
 	nodeIdentity := node.NewIdentity(a.Version)
+
+	// Self-bootstrap a node-class JWT when MEMQL_NODE_TOKEN is empty
+	// but the operator opted into self-bootstrap via
+	// MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL (see
+	// memql#338 and component/node/bootstrap_token.go). No-op when
+	// MEMQL_NODE_TOKEN was provisioned out-of-band; logs + proceeds
+	// on bootstrap failure rather than blocking cluster startup
+	// (the empty-token path is the legacy fallback every dev / unit-
+	// test setup has been running under for months).
+	if err := nodeIdentity.EnsureBearerToken(context.Background(), a.Logger); err != nil {
+		if a.Logger != nil {
+			a.Logger.Warn("node bootstrap failed; proceeding with empty BearerToken (every NodeService.Stream call will fail with 'authorization header missing' until MEMQL_NODE_TOKEN is set out-of-band or the bootstrap path is fixed)",
+				"error", err.Error(),
+				"node_type", nodeIdentity.Type,
+				"node_id", nodeIdentity.ID,
+			)
+		}
+	}
 
 	// DB-based peer discovery: query v1:cluster:node for an existing
 	// healthy peer to connect to. If found, set identity.ParentAddress

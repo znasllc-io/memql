@@ -491,6 +491,33 @@ type Config struct {
 	// URL differs from the internal-mesh URL.
 	// Env: IDENTITY_JWKS_URL
 	JWKSURL string
+
+	// NodeBootstrapToken is the shared secret that gates the
+	// `/node/bootstrap` HTTP endpoint. When set, every cluster
+	// node (bff / agent / cognition / planner / voice) that starts
+	// without `MEMQL_NODE_TOKEN` set can present this secret to mint
+	// itself a fresh class="node" JWT instead of failing every
+	// peer-to-peer call with "authorization header missing"
+	// (memql#338). Distinct from the cluster-bootstrap wizard's
+	// `Bootstrap` field above -- that's for first-run owner
+	// onboarding, this is per-binary-restart node auth.
+	//
+	// When empty, the `/node/bootstrap` endpoint is disabled (returns
+	// 503 -- "bootstrap not configured"). This is the safe default
+	// for production deploys that mint per-node tokens out-of-band
+	// via the operator CLI; the bootstrap endpoint is only enabled
+	// when the operator opts in by setting the secret on both the
+	// identity service and every node that should be allowed to
+	// self-mint.
+	//
+	// Operational guidance: rotate this secret if exposed; every
+	// node that needs to self-bootstrap will need the new value
+	// pushed before its next restart. Token TTL is independent
+	// (defaults to DefaultNodeTokenTTLSeconds = 30 days), so a
+	// rotated bootstrap secret doesn't invalidate live node tokens.
+	//
+	// Env: MEMQL_NODE_BOOTSTRAP_TOKEN
+	NodeBootstrapToken string
 }
 
 // LiveTokenSettings is the runtime-tunable knob set the http handlers
@@ -556,6 +583,7 @@ func LoadConfigFromEnv() (Config, error) {
 		JWKSURL:                         os.Getenv("IDENTITY_JWKS_URL"),
 		DisposableEmailBlocklistEnabled: envBool("IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED", true),
 		MXValidationEnabled:             envBool("IDENTITY_MX_VALIDATION_ENABLED", true),
+		NodeBootstrapToken:              strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")),
 	}
 
 	cfg.AccessTokenTTL = envDurationSeconds("IDENTITY_ACCESS_TOKEN_TTL_SECONDS", DefaultAccessTokenTTLSeconds)
