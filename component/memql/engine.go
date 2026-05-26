@@ -76,49 +76,13 @@ type MemQLEngine struct {
 	// stripped-down binaries that don't load automations still get an
 	// actionable failure mode.
 	logicRunner LogicRunner
-	// useLegacyMemqlParser, when true, routes engine.Execute(ctx,
-	// string)'s parsing through the in-package memql parser
-	// (`parser.go` + the 9 sub-parsers) instead of the language
-	// parser + ASTConverter.
-	//
-	// #249 FLIPPED THE DEFAULT (was useLangparserRuntime; opt-in to
-	// the new path). The zero value now means "use langparser" --
-	// the new path is the default; this field is the rollback
-	// switch for the soak period before #250 deletes the legacy
-	// parser entirely.
-	//
-	// The langparser path falls back to the memql parser per-query
-	// for shapes it doesn't handle (timestamp suffix, inline specs,
-	// directive + relationship function calls); see parser_langpath.go.
-	// All four architectural prereqs to the flip (#254 grammar
-	// parity, #255 literal repr, #256 introspection dispatch,
-	// #257 error-test refactor) landed on main before this flip.
-	//
-	// Set via UseLangparserRuntime(false) to engage the legacy
-	// rollback. Once #250 lands, this field + the legacy path are
-	// gone.
-	useLegacyMemqlParser bool
 }
 
-// UseLangparserRuntime toggles between the langparser-backed
-// runtime path (#248 / #249) and the legacy memql parser. true
-// (default) routes through the langparser; false engages the
-// legacy memql parser as a soak-period rollback.
-//
-// API shape preserved across the #249 default flip -- callers
-// keep writing `engine.UseLangparserRuntime(true|false)` and the
-// semantics are unchanged from their perspective; only the
-// zero-value default flipped.
-func (e *MemQLEngine) UseLangparserRuntime(enabled bool) {
-	e.useLegacyMemqlParser = !enabled
-}
-
-// LangparserRuntimeEnabled reports whether the engine is currently
-// routing runtime queries through the langparser path. Returns true
-// for a fresh-constructed engine (post-#249 default).
-func (e *MemQLEngine) LangparserRuntimeEnabled() bool {
-	return !e.useLegacyMemqlParser
-}
+// #250: the useLegacyMemqlParser field + UseLangparserRuntime
+// setter + LangparserRuntimeEnabled getter are gone. Langparser is
+// the sole runtime parser; there's nothing to toggle. The
+// pre-#250 API was a soak-period rollback handle that the legacy
+// parser deletion makes meaningless.
 
 // LogicRunner is the cross-package bridge that lets the memql engine
 // dispatch a multi-step Logic call into the automation step runner.

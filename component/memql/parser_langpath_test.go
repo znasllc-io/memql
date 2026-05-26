@@ -410,34 +410,6 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 	}
 }
 
-// TestEngineUseLangparserRuntimeToggle is a smoke test for the
-// (*MemQLEngine).UseLangparserRuntime / LangparserRuntimeEnabled
-// pair -- the bootstrap-side opt-out handle for #249's flipped
-// default.
-//
-// **#249 flipped the default:** a fresh-constructed engine now
-// routes through the langparser. UseLangparserRuntime(false) is
-// the rollback to the legacy memql parser, kept for the soak
-// period before #250 deletes the legacy code entirely. The
-// previously-planned prereqs #254 / #255 / #256 / #257 all landed
-// before this flip.
-func TestEngineUseLangparserRuntimeToggle(t *testing.T) {
-	e := &MemQLEngine{}
-	// #249 flip: zero-value engine should now report langparser
-	// enabled (was OFF pre-flip). The toggle still works in both
-	// directions for the soak rollback.
-	if !e.LangparserRuntimeEnabled() {
-		t.Fatal("post-#249 default should be ON (langparser)")
-	}
-	e.UseLangparserRuntime(false)
-	if e.LangparserRuntimeEnabled() {
-		t.Fatal("UseLangparserRuntime(false) did not engage the legacy rollback")
-	}
-	e.UseLangparserRuntime(true)
-	if !e.LangparserRuntimeEnabled() {
-		t.Fatal("UseLangparserRuntime(true) did not re-enable")
-	}
-}
 
 // TestParseViaLangparser_FallsBackOnParseError pins the #249 soak
 // contract: ANY langparser parse error returns ErrUnsupportedQueryShape
