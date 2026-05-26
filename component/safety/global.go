@@ -83,16 +83,20 @@ func SetDefaultGate(g *Gate) {
 // In Phase 1 the gate's decide() always returns Allow; #231 swapped
 // in the real commandRiskDecision matrix so Deny/Ask returns fire;
 // #232 plugged the ApprovalSink into the Gate's Evaluate path so the
-// Ask branch here only fires when the sink couldn't approve. The
-// cls.Reason already carries the approvalRequest id when the sink
-// returned Pending or Denied, so the refusal text is self-describing.
-func (g *Gate) EnforceDecision(decision Decision, cls Classification, err error, failClosedOnError bool) (proceed bool, refusalReason string) {
+// Ask branch here only fires when the sink couldn't approve; #235
+// added the surface param so the mode lookup honours per-surface
+// env overrides (MEMQL_SAFETY_<SURFACE>_MODE) -- without it,
+// EnforceDecision would consult the construction-time g.mode while
+// Evaluate was already running in per-surface enforce, breaking
+// the fail-closed posture.
+func (g *Gate) EnforceDecision(surface Surface, decision Decision, cls Classification, err error, failClosedOnError bool) (proceed bool, refusalReason string) {
+	mode := resolveModeForSurface(surface, g.mode)
 	if err != nil {
 		// Fail-closed only applies in enforce mode -- shadow and off
 		// are observation-only by design (the rollout-safety
 		// invariant) so a classifier error gets logged + swallowed
 		// rather than blocking live traffic.
-		if failClosedOnError && g.mode == ModeEnforce {
+		if failClosedOnError && mode == ModeEnforce {
 			return false, "command classifier error (failing closed): " + err.Error()
 		}
 		return true, ""

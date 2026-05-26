@@ -106,7 +106,7 @@ func TestEvaluatePendingKeepsAskWithId(t *testing.T) {
 	}
 	// EnforceDecision should refuse Ask + surface the reason that now
 	// carries the request id.
-	proceed, refusal := g.EnforceDecision(decision, cls, nil, false)
+	proceed, refusal := g.EnforceDecision(SurfaceWorkbench, decision, cls, nil, false)
 	if proceed {
 		t.Errorf("pending Ask should refuse, proceed=%v", proceed)
 	}

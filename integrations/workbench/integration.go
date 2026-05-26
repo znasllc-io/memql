@@ -126,7 +126,11 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	safetyDesc.Caller.TaskID = taskId
 	workbenchGate := safety.DefaultGate()
 	decision, cls, classErr := workbenchGate.Evaluate(ctx, safetyDesc)
-	if proceed, reason := workbenchGate.EnforceDecision(decision, cls, classErr, false); !proceed {
+	// #235: per-surface fail-closed posture via env override.
+	// Workbench is a per-Plan sandbox so default is fail-OPEN; env
+	// flip lets ops escalate to fail-closed for a hardening pass.
+	failClosed := safety.FailClosedForSurface(safetyDesc.Surface)
+	if proceed, reason := workbenchGate.EnforceDecision(safetyDesc.Surface, decision, cls, classErr, failClosed); !proceed {
 		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 
@@ -204,8 +208,33 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 						TaskID:  taskId,
 					},
 				}
-				verdict, sr, _ := outGate.Screen(ctx, in)
-				if verdict == safety.ScreeningVerdictBlocked {
+				verdict, sr, screenErr := outGate.Screen(ctx, in)
+				// #235: apply SuspiciousAsBlocked policy per
+				// content type. When the operator sets
+				// MEMQL_SAFETY_OUTPUT_HTTP_FETCH_SUSPICIOUS_AS_BLOCKED=true,
+				// Suspicious-tier verdicts are escalated to Blocked
+				// here so the body gets sanitised. Default is
+				// pass-through (opt-in).
+				//
+				// Fail-open posture on screener error: the gate
+				// already returns Clean on error (audit trail
+				// captures it via the recorder). For surfaces opted
+				// into SuspiciousAsBlocked, we ALSO sanitise on
+				// screener-error so a classifier outage can't
+				// silently let a poisoned body through on
+				// hardened surfaces. Default-surfaces (no opt-in)
+				// keep the body intact -- losing the screener
+				// shouldn't break workflows that weren't asking
+				// for the strict posture.
+				if screenErr != nil && safety.SuspiciousAsBlockedForContentType(in.ContentType) {
+					pl["body"] = safety.SanitisedReplacement(in,
+						safety.ScreeningResult{
+							RuleID: "screener.error",
+							Reason: "screener errored; sanitising on hardened surface",
+						})
+					pl["screenedBy"] = "screener.error"
+					pl["screenReason"] = screenErr.Error()
+				} else if safety.EffectiveVerdict(in.ContentType, verdict) == safety.ScreeningVerdictBlocked {
 					pl["body"] = safety.SanitisedReplacement(in, sr)
 					pl["screenedBy"] = sr.RuleID
 					pl["screenReason"] = sr.Reason
