@@ -17,11 +17,15 @@ func (c *CognitionIntegration) getSpaceContextForPrompt(ctx context.Context, spa
 		return nil
 	}
 
-	query := fmt.Sprintf(`shape(
-  paginate(sort(concept==v1:cognition:space:context;payload.spaceId==%s, "createdAt", "desc"), 1),
-  "spaceContextFull"
-)`, escapeJSONString(spaceId))
-
+	// memql#288 (sub-epic #286): migrated from a handwritten
+	// `shape(paginate(sort(filter, "createdAt", "desc"), 1),
+	// "spaceContextFull")` runtime query to the DSL-defined
+	// queryLatestSpaceContextForSpace -- added in memql#294 as the
+	// in-tree exerciser for the wired sort/paginate struct-query
+	// directives. Downstream extractDataFromResult sees the same
+	// spaceContextFull-shaped result so the type-switch below is
+	// unchanged. Unblocks #250.
+	query := fmt.Sprintf(`queryLatestSpaceContextForSpace({spaceId: %s})`, escapeJSONString(spaceId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil
