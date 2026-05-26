@@ -92,6 +92,13 @@ func NewClassifier(opts Options) (*Classifier, error) {
 	if maxEntries == 0 {
 		maxEntries = envIntDefault(EnvCacheMaxEntries, defaultCacheMaxEntries)
 	}
+	if maxEntries < 0 {
+		// Defensive: negative would otherwise bypass the bound
+		// entirely (the verdictCache `> 0` check treats negative
+		// as unbounded). Clamp to the documented default rather
+		// than silently disabling the cap.
+		maxEntries = defaultCacheMaxEntries
+	}
 	cache := newVerdictCache(ttl, maxEntries)
 	if opts.Now != nil {
 		cache.now = opts.Now

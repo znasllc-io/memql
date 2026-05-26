@@ -212,6 +212,20 @@ func (slowProvider) CallChatStructured(ctx context.Context, _ []common.ChatMessa
 	return "", ctx.Err()
 }
 
+func TestNewClassifierClampsNegativeMaxEntries(t *testing.T) {
+	// A negative CacheMaxEntries would otherwise pass through to
+	// verdictCache's "<=0 means unbounded" branch and silently
+	// disable the soft cap. Confirm it clamps to the default.
+	p := &fakeProvider{respond: `{"tier":"none","categories":[],"reason":"x","confidence":0.5}`}
+	c, err := NewClassifier(Options{Provider: p, CacheMaxEntries: -1, CacheTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.cache.maxEntries != defaultCacheMaxEntries {
+		t.Errorf("negative max should clamp to %d, got %d", defaultCacheMaxEntries, c.cache.maxEntries)
+	}
+}
+
 func TestEnvIntDefault(t *testing.T) {
 	// Missing -> default.
 	t.Setenv("UNSET_VAR_FOR_TEST", "")
