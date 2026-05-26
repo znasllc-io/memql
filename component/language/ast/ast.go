@@ -1343,3 +1343,55 @@ type RelationshipDecl struct {
 	Target      string // concept name, e.g. "v1:cognition:space"
 	Direction   string // "outgoing", "incoming", "bidirectional"
 }
+
+// ProviderDecl is the shared-frontend AST node for an SI provider
+// declaration. Mirrors ConceptDecl in role: the langparser produces
+// this typed node so the per-construct loader
+// (component/memql.LoadUnifiedProviders) can consume it without
+// running its own hand-rolled parser.
+//
+// Authoring shape:
+//
+//	@description("OpenAI GPT-5 Mini")
+//	@type("OpenAI")
+//	@model("gpt-5-mini")
+//	@modality("text")
+//	provider chat5Mini {
+//	  auth {
+//	    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+//	  }
+//	  params {
+//	    maxTokens  4096
+//	    temperature  0.7
+//	  }
+//	}
+//
+// Base providers (vendor-level metadata, no @model) carry @base:
+//
+//	@base
+//	@type("OpenAI")
+//	provider openai {
+//	  auth { apiKey env("MEMQL_SI_OPENAI_API_KEY") }
+//	}
+//
+// Child providers inherit Type + Auth from a @extends("...") parent
+// at load time. The parser captures Extends but doesn't resolve it;
+// that's the loader's job.
+//
+// Auth values written as `env("VAR")` are surfaced as the literal
+// string `${VAR}` so the loader's resolveAuthPlaceholders pass can
+// substitute the OS env at startup.
+type ProviderDecl struct {
+	Name        string
+	Description string
+	Type        string // "OpenAI" / "Anthropic" / "OpenAIStream" / etc.
+	Model       string // empty for @base providers
+	Modality    string // "text" (default) / "tts" / "stt"
+	IsDefault   bool   // @default flag
+	IsBase      bool   // @base flag
+	Extends     string // @extends("parentName") -- parent provider name
+	Params      map[string]any
+	Auth        map[string]string
+}
+
+func (*ProviderDecl) node() {}

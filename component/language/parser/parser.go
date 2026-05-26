@@ -410,8 +410,19 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "provider":
+		// Contextual keyword: `provider` at top-of-file introduces an
+		// SI provider declaration. Same rationale as `concept` /
+		// `shape` -- kept as a plain identifier so the lexer doesn't
+		// disturb other uses, and the symmetry matches every other
+		// struct-form construct. memql#316 (sub-epic #309 sibling of
+		// #315).
+		def, err = p.parseProviderDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', or 'shape'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', or 'provider'", p.current.Literal)
 	}
 
 	if err != nil {
