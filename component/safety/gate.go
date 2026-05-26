@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 )
 
 // Mode controls whether the Gate enforces the decision policy or
@@ -215,8 +214,3 @@ func (g *Gate) decide(_ Classification) Decision {
 	// TODO(#231): replace with engine.EvaluatePolicy("commandRiskDecision", ...).
 	return DecisionAllow
 }
-
-// nowMonotonic returns a monotonic time anchor for latency math.
-// Wrapped here so tests can stub if they need to (unused in Phase 0
-// but kept to avoid spreading time.Now across the package).
-func nowMonotonic() time.Time { return time.Now() }
