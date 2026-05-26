@@ -31,6 +31,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 	switch args[0] {
 	case "voice-agent-token":
 		return true, runVoiceAgentTokenSubcommand(args[1:])
+	case "node-token":
+		return true, runNodeTokenSubcommand(args[1:])
 	}
 	return false, 0
 }

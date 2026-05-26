@@ -135,6 +135,35 @@ voice-agent-token:
 		$${TTL:+--ttl=$$TTL} \
 		$${OUT:+--out=$$OUT}
 
+## Mint a class="node" JWT for the given cluster node. Used by
+## scripts/dev/refresh.sh + the bootstrap-tokens target below to
+## seed MEMQL_NODE_TOKEN for every cluster-node binary in the dev
+## docker stack (without it the receiving NodeService interceptor
+## rejects with `authorization header missing` and inter-node
+## peer calls fail silently). memql#338.
+##
+## Override NODE / TYPE / TTL / OUT as needed; bff-local defaults
+## match the dev compose setup.
+node-token:
+	@docker exec memql-identity /app/memql node-token mint \
+		--node-id="$${NODE:-bff-local}" \
+		--node-type="$${TYPE:-bff}" \
+		$${TTL:+--ttl=$$TTL} \
+		$${OUT:+--out=$$OUT}
+
+## Mint a class="node" JWT for every node-type the dev docker-compose
+## stack runs (bff, voice, cognition, agent, planner) and write a
+## `.env.local.node-tokens` snippet the compose env_file consumes via
+## `${MEMQL_<TYPE>_NODE_TOKEN}` indirection. Idempotent -- each call
+## mints fresh tokens (existing rows are not revoked; just supersede).
+##
+## Run this after `docker compose up` brings the identity service
+## healthy, then `docker compose up -d --force-recreate` the cluster
+## nodes so they pick up the new env. `make dev-refresh` runs the
+## same flow automatically via scripts/dev/refresh.sh. memql#338.
+dev-node-tokens-bootstrap:
+	@bash scripts/dev/mint-node-tokens.sh
+
 ## End-to-end voice-loop test against the LiveKit Agents path
 ## (replaces voice-loop-test-deepgram once Phase 10 cutover lands).
 ## Requires MEMQL_DEEPGRAM_API_KEY in the calling shell.

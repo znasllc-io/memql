@@ -17,6 +17,7 @@
 set -euo pipefail
 
 readonly SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+readonly REPO_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
 
@@ -138,6 +139,52 @@ EOF
     $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON up -d --no-deps --force-recreate voice-agent
 }
 
+function step4b_mint_node_tokens() {
+    # Same chicken-and-egg as voice-agent-token: the cluster-node
+    # binaries (bff / voice / cognition / agent / planner) come up
+    # with MEMQL_NODE_TOKEN empty because the per-service
+    # ${MEMQL_<TYPE>_NODE_TOKEN:-} interpolation has no shell value
+    # yet. Without it the receiving NodeService.Stream interceptor
+    # rejects every peer call with `authorization header missing`
+    # and chat / greet / dispatch all silently fail. memql#338.
+    #
+    # Mint per-node tokens via the identity service, source the
+    # written snippet into THIS shell, and recreate the cluster
+    # nodes so the upcoming `up -d` re-evaluates the
+    # `${MEMQL_<TYPE>_NODE_TOKEN:-}` interpolation with the fresh
+    # values. The identity service is already healthy from step4's
+    # wait_for_identity check.
+    echo "[4b/7] Minting class=node JWTs for cluster-node services..."
+    if ! bash "${SCRIPT_DIR}/mint-node-tokens.sh"; then
+        cat <<'EOF'
+
+  WARNING: node-token mint failed. The cluster nodes will keep
+  rejecting peer calls (`authorization header missing`); chat and
+  greet-on-join won't work until you re-run the mint manually:
+      make dev-node-tokens-bootstrap
+      source .env.local.node-tokens
+      docker compose -f docker/docker-compose.full.yml \
+          up -d --force-recreate bff voice cognition agent planner
+
+EOF
+        return 0
+    fi
+
+    # Export the freshly-minted tokens into THIS shell so the
+    # upcoming `up -d` re-evaluates the
+    # `${MEMQL_<TYPE>_NODE_TOKEN:-}` interpolation with the new
+    # values. `restart` would not work -- compose bakes env
+    # interpolation at `up` / `recreate` time, not at restart.
+    # shellcheck disable=SC1091
+    set -a
+    source "${REPO_ROOT}/.env.local.node-tokens"
+    set +a
+
+    echo "[4b/7] Recreating cluster nodes with the fresh tokens..."
+    $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON up -d --force-recreate \
+        bff voice cognition agent planner
+}
+
 function step5_wait_for_ready() {
     local domain
     domain=$(lib_domain)
@@ -205,6 +252,7 @@ function main() {
     step2_export_running_state
     step3_wipe_and_restart
     step4_mint_voice_agent_token
+    step4b_mint_node_tokens
     step5_wait_for_ready
     step6_seed_and_finish
     step7_restore_knowledge
