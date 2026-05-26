@@ -132,6 +132,10 @@ type (
 	PromptDecl              = ast.PromptDecl
 	PromptField             = ast.PromptField
 	PolicyDecl              = ast.PolicyDecl
+	SeedDecl                = ast.SeedDecl
+	SeedBlock               = ast.SeedBlock
+	SeedValue               = ast.SeedValue
+	SeedValueKind           = ast.SeedValueKind
 	PropertyDecl            = ast.PropertyDecl
 	PropertyVariant         = ast.PropertyVariant
 	TypeRef                 = ast.TypeRef

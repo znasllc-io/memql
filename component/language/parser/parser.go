@@ -518,8 +518,15 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "seed":
+		// Contextual keyword: `seed` at top-of-file introduces a seed
+		// declaration. memql#335 (sub-epic #329 / Stage 1C of #310).
+		def, err = p.parseSeedDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', 'policy', 'spec', or 'trait'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', 'policy', 'spec', 'trait', or 'seed'", p.current.Literal)
 	}
 
 	if err != nil {
