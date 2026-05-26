@@ -1061,11 +1061,13 @@ func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) 
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
-	b.WriteString("expiresAt: ")
-	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.AgentId != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")

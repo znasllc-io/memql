@@ -143,10 +143,26 @@ func (a *App) buildSafetyApprovalSink() safety.ApprovalSink {
 // engineApprovalAdapter wraps memql.MemQLEngine to satisfy
 // approval.Engine -- one method, returns (any, error). Keeps the
 // approval package engine-independent (mirrors engineMutationRunner).
+//
+// The conversion via ConvertExecuteResultToMap is load-bearing:
+// memql.MemQLEngine.Execute returns *ExecuteResult (a typed struct
+// holding a GraphBundle + shaped output), NOT a raw map. Without the
+// conversion the approval.Sink's rowsFromResult / idFromResult see
+// an opaque pointer they can't decode, every query looks empty +
+// every mutation looks empty-id'd -- idempotency breaks + the
+// approved-bypass flow never fires. Same pattern as CognitionEngineAdapter
+// in adapters.go.
 type engineApprovalAdapter struct{ engine *memql.MemQLEngine }
 
 func (e engineApprovalAdapter) Execute(ctx context.Context, query string) (any, error) {
-	return e.engine.Execute(ctx, query)
+	result, err := e.engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return ConvertExecuteResultToMap(result), nil
 }
 
 // buildSafetyRecorder returns the recorder fanout for this node.

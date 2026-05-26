@@ -145,9 +145,14 @@ func (s *Sink) Check(ctx context.Context, desc safety.ActionDescriptor, cls safe
 // and returns (approvedId, pendingId, deniedId). Walks all rows so
 // the cockpit-side history that someone approved earlier wins over a
 // later pending row -- the bypass posture is "any approval suffices."
-// An approved row that's past its TTL is treated as no approval (the
-// Gate creates a fresh pending row -- so the human gets the chance
-// to extend or re-deny).
+//
+// An approved row is treated as live ONLY if it has a parseable
+// expiresAt in the future. Empty / unparseable expiresAt -> treated
+// as expired (the safest posture: a forever-live bypass token is
+// the failure mode worth avoiding, since the retention sweep that
+// would flip stale rows to status=expired is a follow-up). The Gate
+// then creates a fresh pending row so the human gets the chance to
+// extend or re-deny.
 func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, deniedId string) {
 	now := s.now()
 	for _, r := range rows {
@@ -156,12 +161,21 @@ func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, den
 		switch status {
 		case "approved":
 			expires := str(r, "expiresAt")
-			if expires != "" {
-				if t, err := time.Parse(time.RFC3339, expires); err == nil && t.Before(now) {
-					// Approved but past TTL -- skip; the Gate will
-					// create a fresh pending row.
-					continue
-				}
+			if expires == "" {
+				// No TTL stamped -- defensive policy: treat as
+				// expired. Until the resolve mutation gains an
+				// expiresAt arg (follow-up), CLI-created approvals
+				// without a TTL fall through to a fresh pending row.
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, expires)
+			if err != nil {
+				// Unparseable expiresAt -- treat as expired.
+				continue
+			}
+			if t.Before(now) {
+				// Past TTL -- treat as expired.
+				continue
 			}
 			if approvedId == "" {
 				approvedId = id
@@ -243,16 +257,19 @@ func hasCategory(cats []safety.Category, target safety.Category) bool {
 }
 
 // ttlFromEnv reads MEMQL_SAFETY_APPROVAL_TTL_HOURS; falls back to
-// DefaultTTLHours on missing / unparseable. Negative / zero values
-// are clamped to the default -- "approve forever" or "approve
-// retroactively" aren't sensible postures.
+// DefaultTTLHours on missing / unparseable / negative. Zero is a
+// valid operator-intent ("approvals expire immediately on creation")
+// -- a degenerate-but-legitimate posture for nodes that don't want
+// any approval to confer a bypass; the classifyActive check treats
+// an in-the-past expiresAt as expired, so zero-TTL approvals can
+// never satisfy the bypass check.
 func ttlFromEnv() time.Duration {
 	raw := strings.TrimSpace(envLookup(EnvTTLHours))
 	if raw == "" {
 		return time.Duration(DefaultTTLHours) * time.Hour
 	}
 	var hours int
-	if _, err := fmt.Sscanf(raw, "%d", &hours); err != nil || hours <= 0 {
+	if _, err := fmt.Sscanf(raw, "%d", &hours); err != nil || hours < 0 {
 		return time.Duration(DefaultTTLHours) * time.Hour
 	}
 	return time.Duration(hours) * time.Hour
@@ -294,10 +311,21 @@ func buildMutationCall(name string, args map[string]any) string {
 
 // rowsFromResult coerces an engine.Execute return into a list of
 // rows, each represented as a map carrying the payload fields + the
-// top-level "id" field. Two shapes are tolerated:
+// top-level "id" field.
 //
-//   - []any of map[string]any  (the typical Execute return for a query)
-//   - map[string]any with a "rows" key  (some shapes wrap that way)
+// The expected shape is what ConvertExecuteResultToMap (in app/adapters.go)
+// produces -- a map with two axes:
+//
+//   - response["data"]: shaped rows from a query that used `shape()`.
+//     The shape can be []any of maps, []map[string]any, or a single map.
+//     For our queryActiveApprovalsByCorrelationKey (which uses
+//     `shape approvalRequestFull`), this is where the rows land.
+//   - response["bundle"]["nodes"]: []any of {id, concept, type, payload}
+//     for the raw graph nodes. Used as a fallback when "data" is empty --
+//     covers queries that don't use shape().
+//
+// Bare []any / "rows" maps are also tolerated for test stubs that
+// don't go through the engine.
 //
 // Unrecognised shapes return an empty list; the caller treats that as
 // "no active rows" and creates a fresh pending row -- safe fallback.
@@ -306,8 +334,34 @@ func rowsFromResult(res any) []map[string]any {
 	switch r := res.(type) {
 	case []any:
 		raws = r
+	case []map[string]any:
+		raws = make([]any, len(r))
+		for i, m := range r {
+			raws[i] = m
+		}
 	case map[string]any:
-		if r["rows"] != nil {
+		// Try the "data" axis first (shape() queries).
+		switch d := r["data"].(type) {
+		case []any:
+			raws = d
+		case []map[string]any:
+			raws = make([]any, len(d))
+			for i, m := range d {
+				raws[i] = m
+			}
+		case map[string]any:
+			raws = []any{d}
+		}
+		// Fall back to bundle.nodes for non-shape queries.
+		if len(raws) == 0 {
+			if bundle, ok := r["bundle"].(map[string]any); ok {
+				if nodes, ok := bundle["nodes"].([]any); ok {
+					raws = nodes
+				}
+			}
+		}
+		// Test-stub convenience: top-level "rows" key.
+		if len(raws) == 0 && r["rows"] != nil {
 			if list, ok := r["rows"].([]any); ok {
 				raws = list
 			}
@@ -335,19 +389,50 @@ func rowsFromResult(res any) []map[string]any {
 				flat[k] = v
 			}
 		}
+		// If the shape projection already flattened payload into the
+		// top-level map (some shape implementations do this), copy
+		// the leftover fields too. Skip well-known nesting keys.
+		for k, v := range m {
+			if k == "id" || k == "createdAt" || k == "payload" ||
+				k == "concept" || k == "type" {
+				continue
+			}
+			if _, dup := flat[k]; dup {
+				continue
+			}
+			flat[k] = v
+		}
 		out = append(out, flat)
 	}
 	return out
 }
 
 // idFromResult coerces an engine.Execute return for a mutation into
-// the inserted row's id. The engine returns the inserted row's
-// payload map with "id" populated; falls back to the empty string
-// (which the Sink turns into ApprovalStateUnconfigured) if the shape
-// is unfamiliar.
+// the inserted row's id. memql.MemQLEngine.Execute returns
+// *ExecuteResult; ConvertExecuteResultToMap (in app/adapters.go)
+// flattens it into a map with the inserted node at
+// response["bundle"]["nodes"][0]["id"]. Mutations don't go through
+// shape(), so they don't populate the "data" axis.
+//
+// Test-stub shorthand (map with top-level "id") + raw-string return
+// are also tolerated for unit tests that don't go through the engine.
+// Falls back to the empty string (which the Sink turns into
+// ApprovalStateUnconfigured) if the shape is unfamiliar -- a safe
+// fail-open posture matching the rest of the sink.
 func idFromResult(res any) string {
 	switch r := res.(type) {
 	case map[string]any:
+		// Production path: bundle.nodes[0].id from ConvertExecuteResultToMap.
+		if bundle, ok := r["bundle"].(map[string]any); ok {
+			if nodes, ok := bundle["nodes"].([]any); ok && len(nodes) > 0 {
+				if first, ok := nodes[0].(map[string]any); ok {
+					if id, ok := first["id"].(string); ok {
+						return id
+					}
+				}
+			}
+		}
+		// Test-stub shorthand: top-level "id".
 		if id, ok := r["id"].(string); ok {
 			return id
 		}

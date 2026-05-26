@@ -275,6 +275,150 @@ func TestSinkTTLNegativeFallsBack(t *testing.T) {
 	}
 }
 
+// TestSinkApprovedRowFromConvertedExecuteResultShape pins the
+// production decode path: the actual shape app.ConvertExecuteResultToMap
+// produces (response["data"] for shape() queries; response["bundle"]
+// ["nodes"][0]["id"] for mutations). The earlier tests use a
+// stub-friendly []any-of-maps shape that hid a critical bug --
+// engine.Execute returns *ExecuteResult, not a raw map. This test
+// would have caught it.
+func TestSinkApprovedRowFromConvertedExecuteResultShape(t *testing.T) {
+	// "data" axis -- the shape app/adapters.go::ConvertExecuteResultToMap
+	// produces for a shape() query result. The shape projection puts
+	// id + createdAt at the top + payload fields nested under "payload".
+	engine := &stubEngine{
+		queryRes: map[string]any{
+			"data": []any{
+				map[string]any{
+					"id":        "v1:safety:approvalRequest:from-real-engine",
+					"createdAt": "2026-05-25T10:00:00Z",
+					"payload": map[string]any{
+						"status":    "approved",
+						"expiresAt": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+					},
+				},
+			},
+			"bundle": map[string]any{
+				"nodes":   []any{},
+				"rootIds": []string{},
+			},
+		},
+	}
+	s := New(Options{Engine: engine, Logger: discardLogger()})
+	v := s.Check(context.Background(), newDesc(), newCls())
+	if v.State != safety.ApprovalStateApproved {
+		t.Errorf("converted-result-shape approved row should yield Approved, got %s", v.State)
+	}
+	if v.ApprovalRequestID != "v1:safety:approvalRequest:from-real-engine" {
+		t.Errorf("expected the converted-shape id, got %q", v.ApprovalRequestID)
+	}
+}
+
+// TestSinkCreatePendingFromConvertedExecuteResultShape pins the
+// production decode path for the mutation result: engine returns
+// bundle.nodes[0].id, NOT a top-level "id" key.
+func TestSinkCreatePendingFromConvertedExecuteResultShape(t *testing.T) {
+	engine := &stubEngine{
+		// Active query returns empty -- forces the create path.
+		queryRes: map[string]any{
+			"data":   []any{},
+			"bundle": map[string]any{"nodes": []any{}, "rootIds": []string{}},
+		},
+		// Mutation returns the converted shape: id is at
+		// bundle.nodes[0].id (no top-level "id" key).
+		mutRes: map[string]any{
+			"bundle": map[string]any{
+				"nodes": []any{
+					map[string]any{
+						"id":      "v1:safety:approvalRequest:created-from-real-engine",
+						"concept": "v1:safety:approvalRequest",
+						"type":    "approvalRequest",
+						"payload": map[string]any{"status": "pending"},
+					},
+				},
+				"rootIds": []string{"v1:safety:approvalRequest:created-from-real-engine"},
+			},
+		},
+	}
+	s := New(Options{Engine: engine, Logger: discardLogger()})
+	v := s.Check(context.Background(), newDesc(), newCls())
+	if v.State != safety.ApprovalStatePending {
+		t.Errorf("expected Pending after create, got %s", v.State)
+	}
+	if v.ApprovalRequestID != "v1:safety:approvalRequest:created-from-real-engine" {
+		t.Errorf("idFromResult must read bundle.nodes[0].id; got %q", v.ApprovalRequestID)
+	}
+}
+
+func TestSinkEmptyExpiresAtTreatedAsExpired(t *testing.T) {
+	// Defensive: a CLI-created approval without an expiresAt must
+	// NOT confer a forever-live bypass. classifyActive treats empty
+	// expiresAt as expired so a fresh pending row gets created.
+	engine := &stubEngine{
+		queryRes: []any{
+			map[string]any{
+				"id": "v1:safety:approvalRequest:no-ttl-approval",
+				"payload": map[string]any{
+					"status":    "approved",
+					"expiresAt": "", // CLI forgot to set one
+				},
+			},
+		},
+		mutRes: map[string]any{"id": "v1:safety:approvalRequest:fresh"},
+	}
+	s := New(Options{Engine: engine, Logger: discardLogger()})
+	v := s.Check(context.Background(), newDesc(), newCls())
+	if v.State != safety.ApprovalStatePending {
+		t.Errorf("empty expiresAt should NOT confer Approved; got %s", v.State)
+	}
+	if v.ApprovalRequestID != "v1:safety:approvalRequest:fresh" {
+		t.Errorf("expected a fresh pending row id, got %q", v.ApprovalRequestID)
+	}
+}
+
+func TestSinkUnparseableExpiresAtTreatedAsExpired(t *testing.T) {
+	// Same defensive policy for garbage expiresAt: if time.Parse
+	// fails, treat as expired rather than "live forever."
+	engine := &stubEngine{
+		queryRes: []any{
+			map[string]any{
+				"id": "v1:safety:approvalRequest:bad-ttl",
+				"payload": map[string]any{
+					"status":    "approved",
+					"expiresAt": "not-a-timestamp",
+				},
+			},
+		},
+		mutRes: map[string]any{"id": "v1:safety:approvalRequest:fresh"},
+	}
+	s := New(Options{Engine: engine, Logger: discardLogger()})
+	v := s.Check(context.Background(), newDesc(), newCls())
+	if v.State != safety.ApprovalStatePending {
+		t.Errorf("unparseable expiresAt should NOT confer Approved; got %s", v.State)
+	}
+}
+
+func TestSinkZeroTTLAllowedButImmediatelyExpires(t *testing.T) {
+	// MEMQL_SAFETY_APPROVAL_TTL_HOURS=0 is a legitimate operator
+	// posture (no bypass tokens). ttlFromEnv accepts 0; the resulting
+	// approval would have expiresAt==now, which classifyActive's
+	// t.Before(now) check would treat as expired immediately. So a
+	// 0-TTL node creates pending rows on every dispatch + never
+	// confers a bypass.
+	old := envLookup
+	envLookup = func(k string) string {
+		if k == EnvTTLHours {
+			return "0"
+		}
+		return ""
+	}
+	defer func() { envLookup = old }()
+	got := ttlFromEnv()
+	if got != 0 {
+		t.Errorf("TTL=0 should pass through as zero duration, got %v", got)
+	}
+}
+
 func TestSinkCorrelationKeyEmbedded(t *testing.T) {
 	// The created mutation must carry the descriptor's correlation
 	// key so the next dispatch finds the row via the lookup query.

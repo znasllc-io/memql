@@ -54,7 +54,7 @@ mutation approvalRequest mutationCreateApprovalRequest {
     tier           string   @required
     categories     string
     reason         string
-    expiresAt      datetime
+    expiresAt      string
     agentId        string
     ownerUserId    string
     planId         string
