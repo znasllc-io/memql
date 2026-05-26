@@ -754,22 +754,16 @@ func functionBodyStartsWithReturn(content string) bool {
 	}
 	body := strings.TrimSpace(content[start+1 : end])
 
-	// Skip leading comments and blank lines to find the first statement.
-	// Accept either:
-	//   - legacy form: body starts with `return ...`
-	//   - new ctx-envelope form: body starts with `ctx.output = ...`
-	// Both shapes produce the same AST through the body parsers; the
-	// per-receiver structural check here just needs to recognise both
-	// as valid entry points.
+	// Skip leading comments and blank lines to find the first
+	// statement. The canonical procedural body starts with `return
+	// <expr>`. memql#302 retired the legacy `ctx.output = <expr>;
+	// return ctx, nil` envelope shape; that branch is gone.
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "return ") {
-			return true
-		}
-		if strings.HasPrefix(trimmed, "ctx.output") {
 			return true
 		}
 		return false
@@ -809,9 +803,8 @@ func nonReturnStepCount(steps []languageParser.StepDef) int {
 
 // extractLogicReturnExpression returns the expression the logic body
 // produces. We look for the synthetic `_return` step that
-// parseGoStyleAutomationBody appends for trailing `return <expr>` /
-// `ctx.output = <expr>` terminators, and pull the wrapped
-// QueryStepConfig.Query out of it.
+// parseGoStyleAutomationBody appends for the trailing `return <expr>`
+// terminator, and pull the wrapped QueryStepConfig.Query out of it.
 func extractLogicReturnExpression(auto *languageParser.AutomationDef) (languageParser.ExpressionNode, error) {
 	for _, s := range auto.Steps {
 		if s.ID != "_return" {

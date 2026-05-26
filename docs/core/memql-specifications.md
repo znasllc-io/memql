@@ -91,9 +91,9 @@ policy canViewAdminSettings {
 ```
 
 (The legacy `func (Policy) ... { ctx.output = ...; return ctx, nil }`
-shape is still emitted by the rewriter today; that residual is being
-removed -- see [handoff-ctx-purge.md](../handoff-ctx-purge.md). Don't
-author it.)
+shape was retired in memql#302 / #303 -- the rewriter emits the
+canonical `return <expr>, nil` form and the loader rejects author-
+written procedural shapes at parse time. Don't author it.)
 
 ## CQS interaction
 

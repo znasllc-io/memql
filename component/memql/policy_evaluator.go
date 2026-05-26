@@ -202,18 +202,6 @@ func (e *MemQLEngine) EvaluatePolicy(ctx context.Context, name string, args map[
 		trace.Error = evalErr.Error()
 	}
 
-	// Stamp the ctx envelope post-eval: the body's return value is
-	// ctx.output, the error message lands on ctx.error. The shorthand
-	// `ctx.X` / canonical `ctx.input.X` reads remain unchanged from
-	// pre-body state. Sub-policy callers continue to see the raw
-	// value at value position (no DSLCtx wrapper); explicit
-	// `.output` / `.input` / `.error` chained access on a sub-call
-	// is deferred to Phase C when the parser learns that path.
-	effective["output"] = result
-	if evalErr != nil {
-		effective["error"] = evalErr.Error()
-	}
-
 	// Phase 7 persistence path: when the policy carries
 	// @traces_persisted, or the caller passed PersistTrace=true on
 	// the options, write the trace tree to v1:platform:policyTrace
@@ -291,47 +279,29 @@ func persistPolicyTrace(
 
 // buildPolicyCtx assembles the ctx envelope a policy body sees.
 //
-// Shape (the canonical ctx envelope used across every procedural DSL
-// receiver under the ctx-envelope rule):
+// Shape (post-#302 ctx-envelope purge):
 //
-//	ctx.input       caller-passed args (map[string]any)
-//	ctx.output      filled by the body; starts nil
-//	ctx.error       error string when set; "" otherwise
 //	ctx.actor       resolved AccessContext fields (userId / role / ...)
 //	ctx.partition   active partition string
 //	ctx.now         engine-monotonic timestamp
 //	ctx.config      allow-listed config surface (see PolicyExposableConfig)
-//	ctx.trace       reserved for future breadcrumb access
 //
-// In addition, every caller-passed arg key is mirrored at the top
-// level so existing files written under the prior convention
-// (`ctx.spaceId`, `ctx.vendor`) keep working — `ctx.X` for unknown X
-// resolves to `ctx.input.X` via the path-resolution fallback in
-// lookupPath. New code should prefer the explicit `ctx.input.X`
-// form.
+// Caller-passed args are mirrored at the top level so the canonical
+// `args.X` form (and the equivalent `ctx.X` shorthand both parsers
+// emit) resolves directly via top-level map lookup. The legacy
+// `ctx.input.X` longhand, the `ctx.output = ...` writeback, and the
+// `ctx.error` envelope key are retired in memql#302.
 func buildPolicyCtx(ctx context.Context, engine *MemQLEngine, args map[string]any) map[string]any {
 	if args == nil {
 		args = map[string]any{}
 	}
 	out := make(map[string]any, len(args)+8)
 
-	// ctx.input — canonical caller args.
-	out["input"] = args
-	// ctx.output / ctx.error — body fills via assignment under the
-	// new convention; the engine reads them post-eval and exposes to
-	// callers. Default to nil / empty.
-	out["output"] = nil
-	out["error"] = ""
-
-	// Mirror caller args at the top level for back-compat with the
-	// shorthand `ctx.X` form. The path resolver also auto-falls-back
-	// to ctx.input.X when X isn't a known engine field, so both reads
-	// land on the same value.
+	// Mirror caller args at the top level so `args.X` / `ctx.X`
+	// references resolve via direct map lookup. Arg keys that
+	// collide with engine envelope fields (`actor` / `partition` /
+	// `now` / `config`) are skipped — the engine field wins.
 	for k, v := range args {
-		// Don't shadow engine fields if a caller happens to pass an
-		// arg keyed "input" / "output" / "actor" / etc. — that would
-		// confuse the resolver. Skip reserved names from the mirror;
-		// the explicit ctx.input.<name> path still resolves them.
 		if isReservedCtxKey(k) {
 			continue
 		}
@@ -366,17 +336,17 @@ func buildPolicyCtx(ctx context.Context, engine *MemQLEngine, args map[string]an
 
 // reservedCtxKeys is the set of top-level ctx field names the engine
 // owns. Caller-passed args sharing one of these names are NOT
-// mirrored to the top level; readers reach them via the explicit
-// ctx.input.<name> path.
+// mirrored to the top level; the engine field wins.
+//
+// memql#302 dropped `input` / `output` / `error` / `trace` from this
+// list when the ctx-envelope longhand was retired. The canonical
+// reads are `actor.X` / `now` / `partition` / `config.X` as bare
+// references, plus `args.X` for caller args.
 var reservedCtxKeys = map[string]struct{}{
-	"input":     {},
-	"output":    {},
-	"error":     {},
 	"actor":     {},
 	"partition": {},
 	"now":       {},
 	"config":    {},
-	"trace":     {},
 }
 
 func isReservedCtxKey(key string) bool {
@@ -640,33 +610,19 @@ func evaluatePolicyValue(value any, ctx map[string]any) (any, error) {
 	return value, nil
 }
 
-// lookupPath walks a dotted path against the ctx envelope. The
-// resolver supports both the canonical `ctx.input.X` form and the
-// shorthand `ctx.X` form: when the first path segment isn't a
-// reserved engine field (input / output / error / actor / partition
-// / now / config / trace), the resolver implicitly walks into
-// ctx.input.X. This preserves every existing .memql file written
-// under the prior convention while making `ctx.input.X` explicit
-// for new code.
+// lookupPath walks a dotted path against the ctx envelope. After
+// memql#302 the resolver supports only the canonical form:
+//   - `args.X` (lowered to ArgReference{Path: "X"}) walks the
+//     top-level args mirror via walkValuePath.
+//   - `actor.X` / `now` / `partition` / `config.X` walk through the
+//     engine-owned reserved fields at the top level.
+//
+// The legacy `ctx.input.X` longhand is retired -- there is no
+// `input` key on the envelope. parseCtxReference rejects `ctx.input`
+// at parse time with a migration hint.
 func lookupPath(root map[string]any, parts []string) any {
 	if root == nil || len(parts) == 0 {
 		return nil
-	}
-	first := strings.ToLower(strings.TrimSpace(parts[0]))
-	// Shorthand: `ctx.X` for X that isn't a known engine field
-	// reads from ctx.input.X. The canonical form `ctx.input.X` also
-	// works because parts[0]=="input" walks into ctx["input"]
-	// directly via the regular path-walk below.
-	if _, reserved := reservedCtxKeys[first]; !reserved {
-		if _, hasInput := root["input"].(map[string]any); hasInput {
-			if v, ok := root["input"].(map[string]any)[parts[0]]; ok {
-				if len(parts) == 1 {
-					return v
-				}
-				// Continue walking from the input-rooted value.
-				return walkValuePath(v, parts[1:])
-			}
-		}
 	}
 	return walkValuePath(any(root), parts)
 }

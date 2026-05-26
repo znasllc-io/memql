@@ -808,8 +808,6 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		body, err = p.parseGoStyleSpecBody()
 	case FunctionTypePolicy:
 		// Policies are pure decision functions. Body shape: `return <expr>`.
-		// (The legacy `ctx.output = <expr>; return ctx, nil` envelope form
-		// was retired in F.2 of the ctx-envelope purge.)
 		body, err = p.parseGoStyleSpecBody()
 	case FunctionTypeTool, FunctionTypeBuiltin:
 		// Tool and Builtin definitions have declarative bodies parsed externally.
@@ -1064,9 +1062,11 @@ func (p *Parser) parseGoStyleQueryBody() (Node, error) {
 }
 
 func (p *Parser) parseGoStyleQueryBodyOrLegacy() (Node, error) {
-	// Canonical form: `return <expr>, nil`. (The transitional
-	// `ctx.output = <expr>; return ctx, nil` envelope shape was
-	// retired in F.2 of the ctx-envelope purge.)
+	// Canonical form: `return <expr>, nil`. Non-return bodies fall
+	// through to a bare-expression parse for the internal IR path the
+	// rewriter feeds (struct-form query rewrite emits `return <expr>`
+	// but the legacy compiler fixtures still hand the parser raw
+	// expressions in places).
 	if p.check(TokenKeywordReturn) {
 		return p.parseGoStyleQueryBody()
 	}
@@ -1116,8 +1116,8 @@ func (p *Parser) parseGoStyleMutationBody() (Node, error) {
 
 func (p *Parser) parseGoStyleMutationBodyOrLegacy() (Node, error) {
 	// Canonical form: `return insert(...)` / `return update(...)`.
-	// (The transitional `ctx.output = insert(...); return ctx, nil`
-	// envelope shape was retired in F.2 of the ctx-envelope purge.)
+	// Non-return bodies fall through to the bare insert/update parse
+	// for the internal IR path the rewriter feeds.
 	if p.check(TokenKeywordReturn) {
 		return p.parseGoStyleMutationBody()
 	}
@@ -5140,32 +5140,32 @@ func (p *Parser) parseValue() (any, error) {
 				return call, nil
 			}
 
-			// Dotted identifier path (event.payload.id) parsed as single identifier when '.' in ident chars
-			// Check for args.fieldName / ctx.fieldName syntax - convert to ArgRefExpr.
-			// The struct-form rewriter (rewriter.go:translateArgsRefsToCtx)
-			// rewrites `args.X` to `ctx.X` in filter / insert / update
-			// bodies before the parser sees them, so both shapes need to
-			// land at the same AST node here -- otherwise `ctx.X` in a
-			// value position falls through as the literal string
-			// "ctx.X" and the comparison compiles to a no-op SQL
-			// predicate (= 'ctx.X') that never matches a real row.
+			// Dotted identifier path (event.payload.id) parsed as a
+			// single identifier when '.' is in the ident chars. Both
+			// `args.X` (canonical) and `ctx.X` (shorthand kept for
+			// backward compatibility per F.3 of the ctx-envelope purge)
+			// lower to ArgRefExpr -- otherwise `ctx.X` in value
+			// position would fall through as the literal string and
+			// compile to a no-op SQL predicate that never matches.
+			//
+			// memql#302 retired the legacy envelope longhand
+			// (`ctx.input.X` / `ctx.output = ...`). The `ctx.actor` /
+			// `ctx.now` / `ctx.partition` / `ctx.config` reserved
+			// fields likewise never appear in comparison-value position
+			// (the canonical struct form is bare `actor.X` / `now` /
+			// etc.); the guard below stays minimal -- only `ctx.input`
+			// is explicitly rejected, since stripping the longhand
+			// without a migration message would silently produce a
+			// no-match predicate.
 			if strings.HasPrefix(val, "args.") {
 				argPath := strings.TrimPrefix(val, "args.")
 				return &ArgRefExpr{Path: argPath}, nil
 			}
 			if strings.HasPrefix(val, "ctx.") {
 				argPath := strings.TrimPrefix(val, "ctx.")
-				// Reserved envelope fields (ctx.input / ctx.output /
-				// ctx.actor / ctx.partition / ctx.now / ctx.config /
-				// ctx.error / ctx.trace) are addressed via dedicated
-				// resolution paths in the engine, not the args bag, so
-				// don't shadow them here. In practice these don't appear
-				// in comparison-value position (the canonical struct form
-				// is `actor.X` / `now` / etc. as bare references) but the
-				// guard keeps the parse surface honest.
-				switch argPath {
-				case "input", "output", "actor", "partition", "now", "config", "error", "trace":
-					return val, nil
+				if argPath == "input" || strings.HasPrefix(argPath, "input.") {
+					return nil, newParseErrorf(&p.current,
+						"`ctx.input.X` is retired -- use `args.X` for caller-passed arguments")
 				}
 				return &ArgRefExpr{Path: argPath}, nil
 			}

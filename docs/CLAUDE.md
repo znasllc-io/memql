@@ -192,10 +192,6 @@ work fully lands.
 - [handoff-prompt.md](handoff-prompt.md) -- meta-template: the briefing
   prompt for onboarding a new implementer (agent or developer). Points
   at CLAUDE.md, the memory directory, and the active handoff list below.
-- [handoff-ctx-purge.md](handoff-ctx-purge.md) -- ctx-envelope purge
-  (F.1-F.7). Shipped end-to-end; kept as the historical record of the
-  migration. Deletable once the repo has cut a release with the
-  purged form.
 
 ---
 

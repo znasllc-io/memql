@@ -974,9 +974,7 @@ body references `args.X` directly (the parser recognises both
 node). Authors should never write the procedural shape directly --
 use the struct form (`query NAME { args { ... } filter ... shape
 ... }`, `logic NAME { args { ... } body { ... return <expr> } }`,
-etc.). The remaining purge work (multi-step Logic via the
-automation step runner) is tracked in
-[docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md).
+etc.).
 
 **Receivers exempt entirely:**
 - **Specs** keep their `bool` return — they compile into SQL filter
@@ -1265,11 +1263,11 @@ logic logicProvisionDailySpaceOnUserCreate {
 ```
 
 Multi-statement bodies (intermediate `name := <call>` steps with
-side effects, followed by a trailing `return <expr>`) parse today
-but the function executor doesn't yet walk them end-to-end -- the
-loader rejects with a clear error pointing the author at the
-single-statement form. The step-runner-backed Logic invocation
-path is tracked in [docs/handoff-ctx-purge.md](docs/handoff-ctx-purge.md#f5----multi-step-logic-execution).
+side effects, followed by a trailing `return <expr>`) execute via
+the `LogicRunner` wired into the engine at startup: the runner
+walks intermediate steps in dependency order through the same step
+registry the automation scheduler uses, then evaluates the
+trailing `return <expr>` as the function's return value.
 
 Logic functions don't write `ctx.output = ...`; the body's
 trailing `return <expr>` is the function's return value.
