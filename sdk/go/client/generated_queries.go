@@ -1596,6 +1596,28 @@ func QueryLatestSpaceContextForSpaceBuild(args QueryLatestSpaceContextForSpaceAr
 	return b.String()
 }
 
+// QueryLatestSpaceContextSnapshot -- Returns just payload.snapshot from the most-recent v1:cognition:space:context row for a given spaceId. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- shape projects only payload.snapshot to minimise wire payload vs. the full spaceContextFull projection (which carries computedAt / lastUpdatedAt / spaceId / id / createdAt the comparison doesn't need). Returns at most 1 row.
+//
+// Bound concept: context.
+type QueryLatestSpaceContextSnapshotArgs struct {
+	SpaceId string
+}
+
+// QueryLatestSpaceContextSnapshot calls the engine query queryLatestSpaceContextSnapshot.
+func (qc *QueryClient) QueryLatestSpaceContextSnapshot(ctx context.Context, args QueryLatestSpaceContextSnapshotArgs) (*Result, error) {
+	call := QueryLatestSpaceContextSnapshotBuild(args)
+	return qc.executeNamed(ctx, "queryLatestSpaceContextSnapshot", call)
+}
+
+func QueryLatestSpaceContextSnapshotBuild(args QueryLatestSpaceContextSnapshotArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLatestSpaceContextSnapshot({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.
 //
 // Bound concept: knowledgeDomain.

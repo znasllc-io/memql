@@ -68,6 +68,12 @@ shape context spaceContextFull {
 }
 
 @row
+@description("Snapshot-only projection of v1:cognition:space:context rows. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- minimises payload size when the consumer only needs payload.snapshot. The previous handwritten runtime query used an inline `{\"snapshot\": node(\"payload.snapshot\")}` template; this shape is its DSL-defined equivalent.")
+shape context spaceContextSnapshotOnly {
+  payload.snapshot
+}
+
+@row
 @description("Comprehensive space projection with all fields")
 shape space spaceFull {
   row.id

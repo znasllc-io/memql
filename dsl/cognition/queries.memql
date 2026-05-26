@@ -44,6 +44,18 @@ query context queryLatestSpaceContextForSpace {
   shape   spaceContextFull
 }
 
+@enabled
+@description("Returns just payload.snapshot from the most-recent v1:cognition:space:context row for a given spaceId. Backs the deterministic-comparison path in getLatestSpaceContextSnapshot (memql#290) -- shape projects only payload.snapshot to minimise wire payload vs. the full spaceContextFull projection (which carries computedAt / lastUpdatedAt / spaceId / id / createdAt the comparison doesn't need). Returns at most 1 row.")
+query context queryLatestSpaceContextSnapshot {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId
+  sort    "createdAt", "desc"
+  paginate 1
+  shape   spaceContextSnapshotOnly
+}
+
 // ---- queries/v1/cognition/agentInteractionCount.memql ----
 
 // queryAgentInteractionCount - Cross-space agent interaction signal
