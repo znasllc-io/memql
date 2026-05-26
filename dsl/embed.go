@@ -20,7 +20,7 @@ import (
 // walker can apply the soft-disable rule consistently (whereas the
 // default behavior would skip them at the embed step entirely).
 //
-//go:embed all:agents all:cluster all:cognition all:common all:curriculum all:data all:identity all:knowledge all:memql all:observability all:planner all:platform all:policies all:providers all:router all:workbench all:worker
+//go:embed all:agents all:cluster all:cognition all:common all:curriculum all:data all:identity all:knowledge all:memql all:observability all:planner all:platform all:policies all:providers all:router all:safety all:workbench all:worker
 var embedFS embed.FS
 
 // Tree returns an fs.FS rooted at the unified DSL tree. Each top-

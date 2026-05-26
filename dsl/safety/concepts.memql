@@ -1,0 +1,32 @@
+// concepts.memql -- safety namespace
+//
+// The safety command-classifier (memql#226 epic) writes one
+// `v1:safety:classification` row per Gate.Evaluate decision. The
+// rows are the substrate for the cockpit Command Safety view + the
+// FP/FN measurement that gates the shadow->enforce rollout (#235).
+//
+// All persisted values are already passed through
+// safety.RedactedPayload before they land here, so credential-shaped
+// args never reach this concept.
+
+@version("1.0.0")
+@namespace("safety")
+@description("One row per safety-classifier decision. Captures what the Gate decided, the verdict source (rule / model / cache), the surface + action it was deciding about, and the (redacted) payload. Retention is governed by the MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS env var (default 90); the daily purge automation hard-deletes rows whose `createdAt + retentionDays < now`. Distinct from v1:platform:policyTrace -- policyTrace covers the decision-policy evaluation tree; this concept covers the safety-classifier verdict + final gate decision per command.")
+concept classification {
+  surface       string @required @description("Execution surface: `computer_use_headless`/`_embodied`, `workbench`, `tool_webhook`, `tool_integration`.")
+  action        string @required @description("Abstract action: exec / fs_read / fs_write / fs_list / fs_stat / http_fetch / gui_input / screenshot / webhook / tool_call.")
+  argsRedacted  string @description("JSON-encoded redacted payload. Body + Args go through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/API_KEY/Authorization fragments -> [REDACTED]). Command / URL / Paths / Method / ToolName are passed through verbatim UNLESS the classifier flagged `credential_access` (URL with userinfo, env-var assignment in a shell command, etc.), in which case the recorder drops those surface fields entirely so credentials never reach the persisted row -- the rule's reason field still carries enough context for triage. Empty when the descriptor's payload was already empty.")
+  tier          string @required @description("Risk tier: `none`|`low`|`medium`|`high`|`critical`.")
+  categories    string @description("Comma-separated category list (e.g. `destructive,credential_access`). Empty for tier=none.")
+  decision      string @required @description("What the Gate decided: `allow`|`ask`|`deny`. In shadow mode the surface always proceeds regardless; in enforce mode this is honoured.")
+  source        string @required @description("Classifier source: `rule`|`model`|`cache`|`noop`|`disabled`. Lets ops tell rule-engine hits from LLM verdicts in queries.")
+  ruleId        string @description("Stable rule identifier (`shell.destructive`, `model.classify_v1`, ...). Empty for noop/disabled sources.")
+  confidence    float  @description("Classifier self-reported confidence [0, 1]. Rule verdicts are 1.0 by convention; model verdicts carry the model's own estimate.")
+  reason        string @description("Short human-readable explanation -- which specific pattern fired. <= 200 chars.")
+  latencyMs     float  @description("Total classification latency in ms (chain time including rules + model + cache lookup). float (matches policyTrace.durationMs) since `number` isn't a DSL primitive.")
+  agentId       string @description("Calling agent id.")
+  ownerUserId   string @description("Owning user id.")
+  planId        string @description("Plan id, when the action is plan-scoped.")
+  correlationId string @description("Correlation id linking back to the dispatch + any auditEvent.")
+  mode          string @required @description("Gate mode at decision time: `off`|`shadow`|`enforce`. `shadow` rows are observation-only -- the surface proceeded regardless of `decision`.")
+}

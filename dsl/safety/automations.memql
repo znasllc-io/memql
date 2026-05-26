@@ -1,0 +1,26 @@
+// automations.memql -- safety namespace.
+
+use safety.logic.{ logicPurgeExpiredSafetyClassifications }
+
+// purgeExpiredSafetyClassifications
+// =================================
+//
+// Daily 02:35 UTC sweep over v1:safety:classification rows older
+// than MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90).
+// Mirrors purgeExpiredPolicyTraces in platform/: MemQL has no
+// row-removal mutation today, so this cron emits a
+// `safety.classification.retention.observed` event each tick with
+// the candidate count. Flip to per-row delete once the engine
+// grows a delete() mutation.
+//
+// Schedule chosen as 02:35 UTC (5 minutes after policyTrace's
+// 02:30 sweep) so the two retention crons don't contend on the
+// same DB window.
+@enabled
+@trigger(schedule="0 35 2 * * *")
+@description("Daily 02:35 UTC sweep: identifies safety-classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
+automation purgeExpiredSafetyClassifications {
+  step run {
+    logic purgeExpiredSafetyClassifications { event: event }
+  }
+}

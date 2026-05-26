@@ -1,0 +1,11 @@
+// queries.memql -- safety namespace.
+
+use safety.concepts.{ classification }
+use safety.shapes.{ classificationFull }
+
+@enabled
+@description("Returns every v1:safety:classification row. Used by the retention sweep (mirrors queryAllPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.")
+query classification queryAllSafetyClassifications {
+  filter  payload.surface!=""
+  shape   classificationFull
+}

@@ -1,0 +1,44 @@
+// mutations.memql -- safety namespace.
+
+use safety.concepts.{ classification }
+
+@enabled
+@description("Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.")
+mutation classification mutationInsertSafetyClassification {
+  args {
+    surface       string @required
+    action        string @required
+    argsRedacted  string
+    tier          string @required
+    categories    string
+    decision      string @required
+    source        string @required
+    ruleId        string
+    confidence    float
+    reason        string
+    latencyMs     float
+    agentId       string
+    ownerUserId   string
+    planId        string
+    correlationId string
+    mode          string @required
+  }
+  insert classification {
+    args.surface
+    args.action
+    args.argsRedacted
+    args.tier
+    args.categories
+    args.decision
+    args.source
+    args.ruleId
+    args.confidence
+    args.reason
+    args.latencyMs
+    args.agentId
+    args.ownerUserId
+    args.planId
+    args.correlationId
+    args.mode
+  }
+}
