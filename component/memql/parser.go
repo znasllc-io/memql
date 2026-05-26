@@ -2402,12 +2402,13 @@ func (p *parser) parseComparisonValue(op ComparisonOperator) (any, error) {
 			if ident == "arg" {
 				return p.parseLiteralValue() // handles ctx.name as a reference
 			}
-			// The shared lexer emits `caller.X` as a single identifier
+			// The shared lexer emits `actor.X` as a single identifier
 			// token (`.` is part of isIdentifierCharNoColon). Recognise
-			// both the bare `caller` and a `caller.X` suffix.
-			if ident == "caller" || strings.HasPrefix(ident, "caller.") ||
-				ident == "actor" || strings.HasPrefix(ident, "actor.") {
-				return p.parseLiteralValue() // handles caller.X / actor.X as a reference
+			// both the bare `actor` and an `actor.X` suffix. caller.X
+			// retired by #221 -- the rejection fires from
+			// parseLiteralValue (parseCallerReference's dispatcher).
+			if ident == "actor" || strings.HasPrefix(ident, "actor.") {
+				return p.parseLiteralValue() // handles actor.X as a reference
 			}
 		}
 		if p.peek().typ == tokBracketOpen {
@@ -2639,15 +2640,21 @@ func (p *parser) parseLiteralValue() (any, error) {
 			p.next() // consume 'arg'
 			return nil, p.errorf(tok, "arg(...) is retired — use ctx.<path> instead")
 		}
-		// caller.X -- reference to the authenticated user's AccessContext.
-		// The shared lexer emits `caller.X` as a single identifier token
+		// actor.X -- reference to the authenticated user's AccessContext.
+		// The shared lexer emits `actor.X` as a single identifier token
 		// (`.` is part of isIdentifierCharNoColon), so we match on the
 		// prefix and split off the path. Resolved at execution time via
 		// auth.AccessFromContext(ctx); see resolveCallerReferences in
-		// executor.go.
-		if tok.literal == "caller" || strings.HasPrefix(tok.literal, "caller.") ||
-			tok.literal == "actor" || strings.HasPrefix(tok.literal, "actor.") {
+		// executor.go. (The internal Go type is still CallerReference
+		// and the function is still parseCallerReference -- both are
+		// implementation detail; the DSL author surface is actor.)
+		if tok.literal == "actor" || strings.HasPrefix(tok.literal, "actor.") {
 			return p.parseCallerReference()
+		}
+		// caller.X retired by #221 -- surface the migration hint
+		// rather than fall through to "unknown identifier".
+		if tok.literal == "caller" || strings.HasPrefix(tok.literal, "caller.") {
+			return nil, p.errorf(tok, "caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
 		}
 		// args.X / ctx.X -- caller-passed argument reference. `args.X`
 		// is the author-facing form; `ctx.X` is the legacy runtime
@@ -2712,28 +2719,23 @@ type CallerReference struct {
 func (p *parser) parseCallerReference() (*CallerReference, error) {
 	tok := p.next()
 	literal := strings.TrimSpace(tok.literal)
-	// Accept both `caller.X` (the @caller shape/spec envelope accessor)
-	// and `actor.X` (the canonical auth-context accessor used in query/
-	// mutation filters per the args-resolution model). Both resolve to
-	// the same AccessContext fields at execution time (resolveCallerPath).
-	var prefix string
-	switch {
-	case literal == "caller" || strings.HasPrefix(literal, "caller."):
-		prefix = "caller."
-	case literal == "actor" || strings.HasPrefix(literal, "actor."):
-		prefix = "actor."
-	default:
-		return nil, p.errorf(tok, "expected caller.X or actor.X, got %q", literal)
+	// Accept `actor.X` -- the canonical auth-context accessor (the
+	// internal AST node is still *CallerReference, but the DSL author
+	// surface is actor.). caller.X retired by #221; the dispatcher at
+	// site-2 above already rejects it with a migration hint, so a
+	// caller.X token shouldn't reach this function.
+	if !(literal == "actor" || strings.HasPrefix(literal, "actor.")) {
+		return nil, p.errorf(tok, "expected actor.X, got %q", literal)
 	}
-	if literal == "caller" || literal == "actor" {
-		return nil, p.errorf(tok, "%s reference requires a field path, e.g. %suserId", strings.TrimSuffix(prefix, "."), prefix)
+	if literal == "actor" {
+		return nil, p.errorf(tok, "actor reference requires a field path, e.g. actor.userId")
 	}
-	path := strings.TrimSpace(strings.TrimPrefix(literal, prefix))
+	path := strings.TrimSpace(strings.TrimPrefix(literal, "actor."))
 	if path == "" {
-		return nil, p.errorf(tok, "caller/actor reference requires a field path, e.g. actor.userId")
+		return nil, p.errorf(tok, "actor reference requires a field path, e.g. actor.userId")
 	}
 	if path == "partition" || path == "partitions" {
-		return nil, p.errorf(tok, "%s%s is retired post-#56 phase 5; reference userId/role instead", prefix, path)
+		return nil, p.errorf(tok, "actor.%s is retired post-#56 phase 5; reference userId/role instead", path)
 	}
 	return &CallerReference{Path: path}, nil
 }
@@ -3465,25 +3467,28 @@ func validateFieldReference(ref *FieldReference) error {
 			}
 		}
 		return nil
-	case "caller":
-		// caller.X (auth-context reference) on the LHS of a comparison
-		// is valid inside context-spec bodies — `caller.role == "admin"`,
-		// `caller.userId == "..."`, etc. The engine evaluates these
-		// in-process at call time via the same caller-resolver used by
+	case "actor":
+		// actor.X (auth-context reference) on the LHS of a comparison
+		// is valid inside context-spec bodies — `actor.role == "admin"`,
+		// `actor.userId == "..."`, etc. The engine evaluates these
+		// in-process at call time via the same actor-resolver used by
 		// the policy evaluator; nothing is pushed into SQL.
 		//
 		// The spec registration path inspects whether a spec body
 		// touches `payload.*` / intrinsics (row-spec, SQL pushdown) OR
-		// only `caller.*` (context-spec, in-process eval) — mixed bodies
+		// only `actor.*` (context-spec, in-process eval) — mixed bodies
 		// are flagged separately. Here we just admit the field-ref
 		// shape; the row-vs-context classification happens in the spec
 		// validator.
 		if len(ref.Parts) < 2 {
-			return fmt.Errorf("caller field references must include a sub-field (e.g. caller.role, caller.userId)")
+			return fmt.Errorf("actor field references must include a sub-field (e.g. actor.role, actor.userId)")
 		}
 		return nil
+	case "caller":
+		// caller.X retired by #221.
+		return fmt.Errorf("caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
 	default:
-		return fmt.Errorf("field %q must start with payload., meta., caller., or an intrinsic like id/concept/type/createdAt/createdBy/provenance", ref.Raw)
+		return fmt.Errorf("field %q must start with payload., meta., actor., or an intrinsic like id/concept/type/createdAt/createdBy/provenance", ref.Raw)
 	}
 
 	if len(ref.Parts) == 1 {

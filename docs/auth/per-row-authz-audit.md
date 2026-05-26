@@ -28,7 +28,7 @@ Every query and mutation in the DSL falls into exactly one of these:
 | Bucket | Definition | Required gating |
 |---|---|---|
 | **owned** | Row carries `payload.ownerUserId` (or `payload.userId` for identity-domain concepts) | `filter` must include `payload.ownerUserId == actor.userId` (the caller can only read rows they own) |
-| **granted** | Row visible via a relationship (e.g. space participant, group member) | Filter must reference a relationship spec that gates on `caller.userId` |
+| **granted** | Row visible via a relationship (e.g. space participant, group member) | Filter must reference a relationship spec that gates on `actor.userId` |
 | **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | Compose `spec("requiresClusterOwner")` or equivalent |
 | **public** | Globally readable by intent (concept catalogs, role registry, public lookup tables) | `@public` annotation on the construct |
 
@@ -42,8 +42,8 @@ unauthenticated callers / cross-user reads / etc."
 `dsl.TestPerRowAuthzClassification` walks every query and mutation
 in the tree and classifies each one. The test logs counts per
 bucket and emits a flagged list of constructs that look user-scoped
-but lack a caller-check (the `caller.userId == ...` reference or a
-known caller-scope spec).
+but lack an actor-check (the `actor.userId == ...` reference or a
+known actor-scope spec).
 
 The test is **informational** today (logs findings; does not fail
 the build). Once each domain's gaps are closed (follow-up PRs per

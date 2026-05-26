@@ -3900,8 +3900,20 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseItemAccessor()
 	case "event":
 		return p.parseEventAccessor()
-	case "caller":
+	case "actor":
+		// Auth-context accessor; canonical name (#221). The
+		// underlying parser function keeps the historical name
+		// (parseCallerAccessor) -- the produced AST node is a
+		// CallerReference -- both are internal-only and unrelated
+		// to the DSL author surface.
 		return p.parseCallerAccessor()
+	case "caller":
+		// Retired in #221 in favour of actor. for one vocabulary
+		// across the DSL. Surfaced as a parse error with the
+		// migration hint; sweeping the in-tree DSL was done in
+		// the same PR.
+		return nil, newParseErrorf(&p.current,
+			"caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
 	case "error":
 		return p.parseErrorAccessor()
 	case "timestamp", "now":
@@ -4356,16 +4368,20 @@ func (p *Parser) parseValue() (any, error) {
 				}
 				return &ArgRefExpr{Path: argPath}, nil
 			}
-			// actor.X / caller.X are auth-context accessors (the caller's
-			// AccessContext), NOT caller-passed args. Emit an ArgRefExpr
-			// carrying the prefix; the AST converter routes it to the
-			// engine CallerReference so it resolves from the AccessContext
-			// at filter time (resolveCallerReferences). Without this a bare
-			// `actor.userId` in a comparison falls through as the literal
-			// string and the predicate (= 'actor.userId') never matches a
-			// real row. See memql#216.
-			if strings.HasPrefix(val, "actor.") || strings.HasPrefix(val, "caller.") {
+			// actor.X is the auth-context accessor (the actor's
+			// AccessContext), NOT a caller-passed arg. Emit an
+			// ArgRefExpr carrying the prefix; the AST converter routes
+			// it to the engine CallerReference so it resolves from the
+			// AccessContext at filter time (resolveCallerReferences).
+			// Without this a bare `actor.userId` in a comparison falls
+			// through as the literal string and the predicate
+			// (= 'actor.userId') never matches a real row. See
+			// memql#216. caller.X retired by #221.
+			if strings.HasPrefix(val, "actor.") {
 				return &ArgRefExpr{Path: val}, nil
+			}
+			if strings.HasPrefix(val, "caller.") {
+				return nil, fmt.Errorf("caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
 			}
 			return val, nil
 		}

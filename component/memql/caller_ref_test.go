@@ -16,28 +16,39 @@ import (
 // always empty) instead of a CallerReference (AccessContext). This drives
 // the real ParseExpression -> ConvertExpression path.
 func TestStructFormActorFilterConvertsToCallerReference(t *testing.T) {
-	for _, src := range []string{"id==actor.userId", "id==caller.userId"} {
-		t.Run(src, func(t *testing.T) {
-			parsed, err := languageParser.ParseExpression(src)
-			if err != nil {
-				t.Fatalf("ParseExpression(%q): %v", src, err)
-			}
-			converted, err := NewASTConverter().ConvertExpression(parsed)
-			if err != nil {
-				t.Fatalf("ConvertExpression: %v", err)
-			}
-			cmp, ok := converted.(*ComparisonExpression)
-			if !ok {
-				t.Fatalf("converted is %T, want *ComparisonExpression", converted)
-			}
-			ref, ok := cmp.Value.(*CallerReference)
-			if !ok {
-				t.Fatalf("comparison Value is %T, want *CallerReference (actor/caller not routed to AccessContext)", cmp.Value)
-			}
-			if ref.Path != "userId" {
-				t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
-			}
-		})
+	parsed, err := languageParser.ParseExpression("id==actor.userId")
+	if err != nil {
+		t.Fatalf("ParseExpression: %v", err)
+	}
+	converted, err := NewASTConverter().ConvertExpression(parsed)
+	if err != nil {
+		t.Fatalf("ConvertExpression: %v", err)
+	}
+	cmp, ok := converted.(*ComparisonExpression)
+	if !ok {
+		t.Fatalf("converted is %T, want *ComparisonExpression", converted)
+	}
+	ref, ok := cmp.Value.(*CallerReference)
+	if !ok {
+		t.Fatalf("comparison Value is %T, want *CallerReference (actor.userId not routed to AccessContext)", cmp.Value)
+	}
+	if ref.Path != "userId" {
+		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+	}
+}
+
+// TestLanguageParserRejectsCallerAccessor is the #221 guardrail at the
+// LANGUAGE parser (struct-form queries / specs / shapes). caller.X is
+// retired in favour of actor.X for one vocabulary across the DSL; the
+// parser must reject it with a migration-hint error rather than silently
+// accept and surprise the author downstream.
+func TestLanguageParserRejectsCallerAccessor(t *testing.T) {
+	_, err := languageParser.ParseExpression("id==caller.userId")
+	if err == nil {
+		t.Fatal("expected parser error for caller.userId, got nil")
+	}
+	if !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("error %q missing 'retired' migration hint", err.Error())
 	}
 }
 
@@ -78,7 +89,7 @@ func findPayloadUserIdValue(e ExpressionNode) any {
 
 func parseUserIdFilter(t *testing.T) ExpressionNode {
 	t.Helper()
-	query := `concept==v1:identity:user; payload.userId==caller.userId`
+	query := `concept==v1:identity:user; payload.userId==actor.userId`
 	tokens, err := tokenize(query)
 	if err != nil {
 		t.Fatalf("tokenize: %v", err)
@@ -91,15 +102,23 @@ func parseUserIdFilter(t *testing.T) ExpressionNode {
 	return expr
 }
 
-func TestCallerReferenceParsesAsRHS(t *testing.T) {
-	expr := parseUserIdFilter(t)
-	value := findPayloadUserIdValue(expr)
-	ref, ok := value.(*CallerReference)
-	if !ok {
-		t.Fatalf("payload.userId value is %T, want *CallerReference", value)
+// TestRawParserRejectsCallerAccessor is the #221 guardrail at the RAW
+// parser (the exec-time string parser for invocations like
+// `concept==X; payload.Y==caller.Z`). Mirrors
+// TestLanguageParserRejectsCallerAccessor on the load-time parser.
+func TestRawParserRejectsCallerAccessor(t *testing.T) {
+	query := `concept==v1:identity:user; payload.userId==caller.userId`
+	tokens, err := tokenize(query)
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
 	}
-	if ref.Path != "userId" {
-		t.Errorf("CallerReference.Path = %q, want %q", ref.Path, "userId")
+	p := newParser(tokens, nil)
+	_, err = p.parse()
+	if err == nil {
+		t.Fatal("expected parser error for caller.userId, got nil")
+	}
+	if !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("error %q missing 'retired' migration hint", err.Error())
 	}
 }
 
@@ -196,11 +215,12 @@ func TestResolveCallerReferences_UnknownPathErrors(t *testing.T) {
 	}
 }
 
-func TestParseRejectsCallerPartitions(t *testing.T) {
-	// caller.partitions was retired in #56 phase 5. The parser rejects
+func TestParseRejectsActorPartitions(t *testing.T) {
+	// actor.partition[s] was retired in #56 phase 5. The parser rejects
 	// it with a migration hint so any stragglers in the tree fail
-	// loudly at load time.
-	for _, path := range []string{"caller.partitions", "caller.partition"} {
+	// loudly at load time. (caller.X is rejected even earlier by the
+	// #221 sweep -- see TestRawParserRejectsCallerAccessor.)
+	for _, path := range []string{"actor.partitions", "actor.partition"} {
 		query := `concept==v1:platform:partition; payload.name == ` + path
 		tokens, err := tokenize(query)
 		if err != nil {

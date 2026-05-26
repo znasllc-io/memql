@@ -61,18 +61,18 @@ spec specIsSIParticipant {
 //   3. Caller / context spec
 // =============================================================================
 //
-// A context-spec references `caller.X` fields only. It evaluates
+// A context-spec references `actor.X` fields only. It evaluates
 // in-process against the auth envelope; it is not pushed down to SQL.
 // Context-specs are called from policy bodies via `spec("name")`.
 
 @description("Caller must hold an admin or owner role.")
 spec requiresAdmin {
-  caller.role == "admin" || caller.role == "owner"
+  actor.role == "admin" || actor.role == "owner"
 }
 
 @description("Caller is the cluster owner.")
 spec specIsClusterOwner {
-  caller.isClusterOwner == true
+  actor.isClusterOwner == true
 }
 
 // =============================================================================
@@ -111,14 +111,14 @@ trait traitStatusIsActive {
 //
 //            filter <expr>; specName
 //
-//   caller.*
+//   actor.*
 //     -> CONTEXT-SPEC. Evaluates in-process against the auth envelope.
 //        Callable from policy bodies via `spec("name")`.
 //
 // Mixed bodies (both row + caller refs) are REJECTED at load time:
 //
 //   `spec body mixes row references (payload / intrinsics) with context
-//    references (caller.*) -- split into a row-spec + a context-spec and
+//    references (actor.*) -- split into a row-spec + a context-spec and
 //    compose via a policy`
 //
 // Split mixed predicates into two specs + compose via a policy that
@@ -131,21 +131,21 @@ spec rowSpecExample {
 
 @description("Context-spec: caller-only body. Evaluates in-process.")
 spec contextSpecExample {
-  caller.userId != null
+  actor.userId != null
 }
 
 // =============================================================================
 //   6. Caller envelope vocabulary
 // =============================================================================
 //
-// Context-spec bodies can reference these caller.* fields:
+// Context-spec bodies can reference these actor.* fields:
 //
-//   caller.userId          authenticated user's id (string)
-//   caller.role            cluster-wide role (owner / admin / writer / reader)
-//   caller.identityId      credential's identity id
-//   caller.isClusterOwner  bool, true for the cluster owner
-//   caller.now             RFC3339 timestamp captured at request start
-//   caller.config.<key>    allow-listed config values (see policy_exposable.go)
+//   actor.userId          authenticated user's id (string)
+//   actor.role            cluster-wide role (owner / admin / writer / reader)
+//   actor.identityId      credential's identity id
+//   actor.isClusterOwner  bool, true for the cluster owner
+//   actor.now             RFC3339 timestamp captured at request start
+//   actor.config.<key>    allow-listed config values (see policy_exposable.go)
 
 // =============================================================================
 //   7. Row intrinsics

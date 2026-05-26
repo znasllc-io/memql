@@ -1,6 +1,6 @@
 # memQL auth threat model
 
-**Status:** v1, written 2026-05-20 as part of the Wave 3 security audit (see #86). Companion to [access-model.md](access-model.md), [caller-envelope.md](caller-envelope.md), [identity-service.md](identity-service.md), and [per-row-authz-audit.md](per-row-authz-audit.md).
+**Status:** v1, written 2026-05-20 as part of the Wave 3 security audit (see #86). Companion to [access-model.md](access-model.md), [actor-envelope.md](actor-envelope.md), [identity-service.md](identity-service.md), and [per-row-authz-audit.md](per-row-authz-audit.md).
 
 This document inventories the auth surfaces, the threats considered, the defenses in place, the trust assumptions, and the known limitations. It is intended to be the single place a reviewer can read to understand what memQL's auth model *is* — both its enforcement and its boundaries.
 

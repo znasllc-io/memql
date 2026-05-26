@@ -94,7 +94,7 @@ load-time errors.
 flowchart TB
   concepts["<b>Concepts</b><br/>schemas + reserved intrinsics<br/>(the base of everything)"]
 
-  shapes["<b>Shapes</b><br/>@row / @caller projections<br/>(reusable field templates)"]
+  shapes["<b>Shapes</b><br/>@row / @actor projections<br/>(reusable field templates)"]
   mutations["<b>Mutations</b><br/>insert / update on rows"]
   builtins["<b>Builtins</b><br/>Go-backed executors"]
   providers["<b>Providers</b><br/>SI vendor + model + auth"]
@@ -161,7 +161,7 @@ types.
 | # | Construct | Purpose | Author shape | State |
 |---|---|---|---|---|
 | 1 | `concept` | Persistent row schema | `@version @namespace concept N { fields }` | Mature |
-| 2 | `shape` | Reusable field projection | `@row / @caller shape N { row.X; payload.Y }` | Mature |
+| 2 | `shape` | Reusable field projection | `@row / @actor shape N { row.X; payload.Y }` | Mature |
 | 3 | `spec` | Atomic boolean predicate | `@shape("S") spec N { <bool-expr> }` | Mature |
 | 4 | `trait` | Concept-agnostic spec | `@enabled trait N { <bool-expr> }` | Mature |
 | 5 | `query` | Typed read | `query N { args; filter; shape }` | Mature |
@@ -286,7 +286,7 @@ flowchart LR
 
 3. **Execution is dual-mode.** Specs that reference `payload.X` /
    intrinsics compile to SQL `WHERE` fragments (push-down to
-   Postgres). Specs that reference `caller.X` only evaluate in-process.
+   Postgres). Specs that reference `actor.X` only evaluate in-process.
    The classifier walks AST field references at load time. Mixed
    bodies are rejected.
 

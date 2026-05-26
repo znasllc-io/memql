@@ -614,12 +614,14 @@ func evaluatePolicyFieldRef(ref FieldReference, ctx map[string]any) (any, error)
 		// position; `args` is the author-facing form. All three
 		// resolve to the policy ctx.
 		return lookupPath(ctx, ref.Parts[1:]), nil
-	case "caller":
+	case "actor":
 		actor, _ := ctx["actor"].(map[string]any)
 		if actor == nil {
 			return nil, nil
 		}
 		return lookupPath(actor, ref.Parts[1:]), nil
+	case "caller":
+		return nil, fmt.Errorf("caller.X is retired (#221) -- use actor.X (the same auth-context envelope, one canonical spelling)")
 	}
 	return nil, fmt.Errorf("field reference %q not supported in policy body", ref.Raw)
 }

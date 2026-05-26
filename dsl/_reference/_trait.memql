@@ -17,7 +17,7 @@
 //
 //   - References to payload.* / id / createdAt / createdBy  ->  row-spec
 //     (compiles to a SQL WHERE fragment, pushed down to the database)
-//   - References to caller.userId / caller.role / etc.       ->  context-spec
+//   - References to actor.userId / actor.role / etc.       ->  context-spec
 //     (evaluates in-process against the auth-context envelope)
 //
 // Mixed bodies (both row and caller refs) are rejected -- the author must
@@ -107,28 +107,28 @@ trait traitIsSeedRow {
 //   4. Context-spec traits -- caller-based predicates
 // =============================================================================
 //
-// A context-spec trait references caller.* fields. The body evaluates
+// A context-spec trait references actor.* fields. The body evaluates
 // in-process against the auth-context envelope -- no SQL pushdown.
 //
 // Context-spec field reference vocabulary:
 //
-//     caller.userId          -- authenticated user's id (string)
-//     caller.role            -- cluster-wide role (owner / admin / writer / reader)
-//     caller.identityId      -- credential's identity id (magic-link, oauth, pat, ...)
-//     caller.isClusterOwner  -- bool, true for the cluster owner
-//     caller.now             -- RFC3339 timestamp captured at request start
-//     caller.config.<key>    -- allow-listed config values (see policy_exposable.go)
+//     actor.userId          -- authenticated user's id (string)
+//     actor.role            -- cluster-wide role (owner / admin / writer / reader)
+//     actor.identityId      -- credential's identity id (magic-link, oauth, pat, ...)
+//     actor.isClusterOwner  -- bool, true for the cluster owner
+//     actor.now             -- RFC3339 timestamp captured at request start
+//     actor.config.<key>    -- allow-listed config values (see policy_exposable.go)
 
 @enabled
 @description("Caller must hold an identity-issued JWT with admin or owner role.")
 trait traitRequiresAdmin {
-  caller.role == "admin" || caller.role == "owner"
+  actor.role == "admin" || actor.role == "owner"
 }
 
 @enabled
 @description("Caller is the cluster owner (top-most privilege tier).")
 trait traitIsClusterOwner {
-  caller.isClusterOwner == true
+  actor.isClusterOwner == true
 }
 
 // =============================================================================
@@ -160,7 +160,7 @@ trait traitIsClusterOwner {
 // =============================================================================
 //
 // The AST converter classifies the body as row-spec OR context-spec, never
-// both. A body that touches both `payload.*` AND `caller.*` is rejected at
+// both. A body that touches both `payload.*` AND `actor.*` is rejected at
 // load time. Split such logic into a row-spec trait + a context-spec trait
 // and compose via a policy.
 //
@@ -170,7 +170,7 @@ trait traitIsClusterOwner {
 //     @enabled
 //     @description("Caller owns this row.")
 //     trait traitOwnedByCaller {
-//       payload.ownerId == caller.userId
+//       payload.ownerId == actor.userId
 //     }
 //
 // The correct pattern: declare two traits and compose at the call site.
@@ -181,7 +181,7 @@ trait traitIsClusterOwner {
 //       payload.ownerId != null
 //     }
 //
-//     // Plus a policy that compares payload.ownerId against caller.userId
+//     // Plus a policy that compares payload.ownerId against actor.userId
 //     // via two spec() lookups + an explicit boolean composition.
 //
 // =============================================================================

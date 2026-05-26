@@ -278,7 +278,7 @@ func policyFunctionFromDef(origin, dirTier string, fd *languageParser.FunctionDe
 	// docs/planning/dsl-engine-mvp-foundation.md): a policy whose
 	// body has none of @audited / @cacheable / @traces_persisted /
 	// @frontend_visible / @returns_trace, calls no policy()/spec()
-	// sub-routine, returns bool, and reads only caller.* is
+	// sub-routine, returns bool, and reads only actor.* is
 	// structurally a context-spec wearing a policy hat. The loader
 	// rejects with a precise migration message naming the target
 	// spec file path.
@@ -317,15 +317,15 @@ func isPolicySpecShaped(p *PolicyFunction) string {
 		return ""
 	}
 	// Walk the body. Track: does it have function calls? Does it
-	// reference ctx.* / args? Does it have any caller.* refs?
+	// reference ctx.* / args? Does it have any actor.* refs?
 	body := p.FunctionDef.Body
 	if body == nil {
 		return ""
 	}
 	hasFnCall := false
 	hasCtxOrArgs := false
-	hasCallerRef := false
-	walkPolicyBodyRefs(body, &hasFnCall, &hasCtxOrArgs, &hasCallerRef)
+	hasActorRef := false
+	walkPolicyBodyRefs(body, &hasFnCall, &hasCtxOrArgs, &hasActorRef)
 	if hasFnCall {
 		// Composes another policy / spec / DSL function — genuinely
 		// policy work.
@@ -336,16 +336,16 @@ func isPolicySpecShaped(p *PolicyFunction) string {
 		// has to be a policy.
 		return ""
 	}
-	if hasCallerRef {
-		return "body reads only caller.* and contains no policy()/spec() calls"
+	if hasActorRef {
+		return "body reads only actor.* and contains no policy()/spec() calls"
 	}
 	return ""
 }
 
 // walkPolicyBodyRefs scans a policy body for function calls,
-// ctx-arg references, and caller references. Sets the flags as it
+// ctx-arg references, and actor references. Sets the flags as it
 // finds each. Mirrors the shape of the language-parser AST.
-func walkPolicyBodyRefs(node any, hasFnCall, hasCtxOrArgs, hasCallerRef *bool) {
+func walkPolicyBodyRefs(node any, hasFnCall, hasCtxOrArgs, hasActorRef *bool) {
 	if node == nil {
 		return
 	}
@@ -353,20 +353,20 @@ func walkPolicyBodyRefs(node any, hasFnCall, hasCtxOrArgs, hasCallerRef *bool) {
 	case *languageParser.FunctionCallExpr:
 		*hasFnCall = true
 		for _, arg := range n.Args {
-			walkPolicyBodyRefs(arg, hasFnCall, hasCtxOrArgs, hasCallerRef)
+			walkPolicyBodyRefs(arg, hasFnCall, hasCtxOrArgs, hasActorRef)
 		}
 	case *languageParser.LogicalExpr:
-		walkPolicyBodyRefs(n.Left, hasFnCall, hasCtxOrArgs, hasCallerRef)
-		walkPolicyBodyRefs(n.Right, hasFnCall, hasCtxOrArgs, hasCallerRef)
+		walkPolicyBodyRefs(n.Left, hasFnCall, hasCtxOrArgs, hasActorRef)
+		walkPolicyBodyRefs(n.Right, hasFnCall, hasCtxOrArgs, hasActorRef)
 	case *languageParser.ComparisonExpr:
-		walkPolicyBodyFieldRef(n.Field, hasCtxOrArgs, hasCallerRef)
-		walkPolicyBodyRefs(n.Value, hasFnCall, hasCtxOrArgs, hasCallerRef)
+		walkPolicyBodyFieldRef(n.Field, hasCtxOrArgs, hasActorRef)
+		walkPolicyBodyRefs(n.Value, hasFnCall, hasCtxOrArgs, hasActorRef)
 	case *languageParser.ArgRefExpr:
 		*hasCtxOrArgs = true
 	}
 }
 
-func walkPolicyBodyFieldRef(ref languageParser.FieldReference, hasCtxOrArgs, hasCallerRef *bool) {
+func walkPolicyBodyFieldRef(ref languageParser.FieldReference, hasCtxOrArgs, hasActorRef *bool) {
 	if len(ref.Parts) == 0 {
 		return
 	}
@@ -374,8 +374,8 @@ func walkPolicyBodyFieldRef(ref languageParser.FieldReference, hasCtxOrArgs, has
 	switch first {
 	case "ctx", "args", "payload":
 		*hasCtxOrArgs = true
-	case "caller":
-		*hasCallerRef = true
+	case "actor":
+		*hasActorRef = true
 	}
 }
 

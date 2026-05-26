@@ -849,7 +849,7 @@ How the DSL constructs lean on each other. Each layer can only depend
    ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌────────────┐
    │ Shapes  │ │Mutations│ │ Builtins │ │ Providers  │
    │ @row /  │ │ inserts │ │ Go-backed│ │ SI vendor  │
-   │ @caller │ │ on rows │ │ executors│ │ + model    │
+   │ @actor  │ │ on rows │ │ executors│ │ + model    │
    │ + traits│ │         │ │          │ │            │
    └────┬────┘ └─────────┘ └──────────┘ └────────────┘
         │                                       │
@@ -889,7 +889,7 @@ How the DSL constructs lean on each other. Each layer can only depend
   or more concept ids.
 - **Shapes** are reusable field-projection templates. Every shape
   declares its kind via `@row` (concept payload + row intrinsics —
-  requires `@concepts(...)`) and/or `@caller` (engine envelope —
+  requires `@concepts(...)`) and/or `@actor` (engine envelope —
   forbids `@concepts(...)`). Trait shapes are `@row` shapes WITHOUT
   `@concepts(...)` — concept-agnostic scaffolds for cross-concept
   predicates (`activeRowTrait`, `statusRowTrait`, etc.). Shapes can
@@ -898,10 +898,10 @@ How the DSL constructs lean on each other. Each layer can only depend
   `@shape("name")` binding; the spec's eval strategy is derived
   from the bound shape's kind:
   - Shape is `@row` → spec compiles to a SQL `WHERE` fragment.
-  - Shape is `@caller` → spec evaluates in-process against the
+  - Shape is `@actor` → spec evaluates in-process against the
     auth-context envelope.
-  - Shape is mixed (`@row` + `@caller`) → spec compiles to SQL
-    with caller fields bound as query parameters.
+  - Shape is mixed (`@row` + `@actor`) → spec compiles to SQL
+    with actor fields bound as query parameters.
 - **Mutations** write to concepts. One `insert(...)` per body
   (parser limitation).
 - **Builtins** wrap Go integrations behind a declarative schema, so
@@ -1094,8 +1094,8 @@ policy-only annotations and points the author at the spec form.
 Per-row authorization is the only gate (see
 [docs/auth/per-row-authz-audit.md](docs/auth/per-row-authz-audit.md)).
 Every query and mutation in the DSL classifies as **owned** (filter
-on `payload.ownerUserId == caller.userId`), **granted** (relationship
-predicate gates on caller.userId), **admin** (cluster-owner spec), or
+on `payload.ownerUserId == actor.userId`), **granted** (relationship
+predicate gates on actor.userId), **admin** (cluster-owner spec), or
 **public** (`@public` annotation). The classification test in
 `dsl/conformance_test.go` hard-fails on any new unclassified
 construct.
@@ -1327,7 +1327,7 @@ parser rejects it with a migration hint.
 ### Shapes
 Reusable data projections — declared in struct form. Each shape
 declares its **kind** (where its fields come from) via `@row` and/or
-`@caller`. At least one is required; both is allowed (mixed shape).
+`@actor`. At least one is required; both is allowed (mixed shape).
 Each path becomes a template entry keyed by the path's terminal
 segment.
 
@@ -1345,36 +1345,34 @@ shape spaceCard {
 }
 ```
 
-**Caller shapes** project the engine envelope (the authenticated
-actor + active partition + engine timestamp + allow-listed config).
-Forbid `@concepts(...)`. Closed field set:
-`caller.userId` / `caller.role` / `caller.identityId` /
-`caller.isClusterOwner` / `caller.partitions` / `caller.partition` /
-`caller.now` / `caller.config.<allow-listed-key>`.
+**Actor shapes** project the engine envelope (the authenticated
+actor + engine timestamp + allow-listed config). Forbid
+`@concepts(...)`. Closed field set:
+`actor.userId` / `actor.role` / `actor.identityId` /
+`actor.isClusterOwner` / `actor.now` /
+`actor.config.<allow-listed-key>`.
 ```memql
-@description("Caller identity envelope")
-@caller
-shape callerActor {
-  caller.userId
-  caller.role
-  caller.identityId
-  caller.isClusterOwner
-  caller.partitions
-  caller.partition
+@description("Actor identity envelope")
+@actor
+shape actorEnvelope {
+  actor.userId
+  actor.role
+  actor.identityId
+  actor.isClusterOwner
 }
 ```
 
 **Mixed shapes** carry both annotations — useful for predicates that
-compare row fields against caller context (e.g. "rows I created" =
-`row.payload.createdBy == caller.userId`):
+compare row fields against actor context (e.g. "rows I created" =
+`row.payload.createdBy == actor.userId`):
 ```memql
 @row
-@caller
+@actor
 @concepts("v1:cognition:space")
 shape ownedSpace {
   row.id
   row.payload.ownerId
-  caller.userId
+  actor.userId
 }
 ```
 
@@ -1403,16 +1401,16 @@ evaluation strategy:
   (`id`, `concept`, `type`, `createdAt`, `createdBy`, `schema`).
   They compile into a SQL `WHERE` fragment and push down to the
   database for filtering.
-- **Context-specs** reference `caller.X` only (e.g. `caller.role`,
-  `caller.isClusterOwner`). They evaluate in-process; called from
-  policies via `spec("name")` for caller-based checks like "is
+- **Context-specs** reference `actor.X` only (e.g. `actor.role`,
+  `actor.isClusterOwner`). They evaluate in-process; called from
+  policies via `spec("name")` for actor-based checks like "is
   admin," "owns partition," etc.
 
 Bodies that mix both flavors are rejected at load time.
 
 **Every spec MUST carry `@shape("name")`** binding it to a shape.
 Concept-specific specs bind to a concept-bound `@row` shape;
-caller-side specs bind to a `@caller` shape; cross-concept specs
+actor-side specs bind to an `@actor` shape; cross-concept specs
 bind to a **trait shape** (a `@row` shape without `@concepts(...)` —
 the predicate scaffolds under `dsl/v1/shapes/v1/trait/`:
 `activeRowTrait`, `statusRowTrait`, `deletedRowTrait`,
@@ -1427,10 +1425,10 @@ spec specIsHumanParticipant {
 }
 
 @enabled
-@description("Caller holds an admin or owner role")
-@shape("callerActor")
+@description("Actor holds an admin or owner role")
+@shape("actorEnvelope")
 spec requiresAdmin {
-  caller.role == "admin"                        // context-spec
+  actor.role == "admin"                         // context-spec
 }
 
 @enabled
