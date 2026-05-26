@@ -498,12 +498,13 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 		// specific validators can type-check without re-parsing the
 		// string. Non-bare numeric forms (@cache(ttl=0)) fall through
 		// to the named-args path because they start with an identifier.
-		// Uses the shared parseNumericLiteral helper so bare attribute
-		// values, runtime expression literals (parsePrimary), and
-		// named-arg / array / object element values (parseValue) all
-		// produce the same Go type for the same source -- see #255.
+		// Uses the shared baseparser.ParseNumericLiteral helper so bare
+		// attribute values, runtime expression literals (parsePrimary),
+		// and named-arg / array / object element values (parseValue) all
+		// produce the same Go type for the same source -- see #255 /
+		// #265 (consolidated into baseparser).
 		if p.check(TokenNumber) {
-			val, numErr := parseNumericLiteral(p.current.Literal)
+			val, numErr := baseparser.ParseNumericLiteral(p.current.Literal)
 			if numErr == nil {
 				p.advance()
 				if p.check(TokenParenClose) {
@@ -3583,11 +3584,11 @@ func (p *Parser) parsePrimary() (ExpressionNode, error) {
 		// float64. Matches the memql parser (parseNumberLiteral) and
 		// parseAttribute's bare-numeric path so reflect.DeepEqual
 		// equivalence holds across the two parser paths for literal
-		// types in runtime expressions (issue #255). Downstream
+		// types in runtime expressions (issue #255 / #265). Downstream
 		// normalisation in executor_filter.normalizeScalarValue is
 		// type-agnostic across the int/float family, so this choice
 		// is invisible to filter evaluation.
-		val, err := parseNumericLiteral(p.current.Literal)
+		val, err := baseparser.ParseNumericLiteral(p.current.Literal)
 		if err != nil {
 			return nil, newParseErrorf(&p.current, "invalid number %q", p.current.Literal)
 		}
@@ -4636,12 +4637,12 @@ func (p *Parser) parseValue() (any, error) {
 	case p.check(TokenNumber):
 		// Bare integers store as int64; decimals / scientific store as
 		// float64. Same int-first dance as parsePrimary above and
-		// parseAttribute's bare-numeric path; see issue #255 for the
-		// equivalence rationale. The four directive-arg call sites
-		// (paginate limit/offset, withDepth, concurrent.concurrency)
-		// that read these values use numericAsInt to accept both
-		// int64 and float64.
-		val, err := parseNumericLiteral(p.current.Literal)
+		// parseAttribute's bare-numeric path; see issues #255 / #265
+		// for the equivalence rationale. The four directive-arg call
+		// sites (paginate limit/offset, withDepth,
+		// concurrent.concurrency) that read these values use
+		// numericAsInt to accept both int64 and float64.
+		val, err := baseparser.ParseNumericLiteral(p.current.Literal)
 		if err != nil {
 			return nil, newParseErrorf(&p.current, "invalid number %q", p.current.Literal)
 		}
@@ -5829,67 +5830,38 @@ func (p *Parser) reconstructTokens(start, end int) string {
 	return strings.Join(parts, "")
 }
 
-// parseNumericLiteral converts a TokenNumber literal string to its
-// canonical Go representation:
-//
-//   - bare integer (`42`, `-7`, `0`) -> int64
-//   - decimal / scientific (`3.14`, `1e9`, `2.5e-3`) -> float64
-//
-// Single source of truth for every TokenNumber emitted by the
-// langparser -- parsePrimary (runtime expression literals),
-// parseValue (attribute named-arg / array / object element values),
-// and parseAttribute's bare-numeric branch all funnel through here.
-// Mirrors the memql parser's parseNumberLiteral (component/memql/
-// parser.go) so the two parsers produce reflect.DeepEqual-equal
-// engine ASTs for the same source -- see #255.
-//
-// Downstream directive-arg call sites (paginate limit/offset,
-// withDepth, concurrent.concurrency) that previously asserted
-// `.(float64)` on the value should use numericAsInt to accept both
-// int64 and float64; raw `.(float64)` assertions on Args entries
-// fed by this helper will fail for integer literals.
-func parseNumericLiteral(lit string) (any, error) {
-	if !strings.ContainsAny(lit, ".eE") {
-		if i, err := strconv.ParseInt(lit, 10, 64); err == nil {
-			return i, nil
-		}
-	}
-	if f, err := strconv.ParseFloat(lit, 64); err == nil {
-		return f, nil
-	}
-	return nil, fmt.Errorf("invalid numeric literal %q", lit)
-}
-
 // numericAsInt coerces a parser-emitted numeric value to an int.
-// Accepts both int64 (the new canonical type for integer literals)
-// and float64 (decimals and pre-#255 emissions) so directive-arg
-// consumers that need an int (paginate, withDepth, etc.) don't have
-// to re-implement the type dispatch at every call site.
+// Accepts both int64 (the canonical type for integer literals emitted
+// by baseparser.ParseNumericLiteral) and float64 (decimals and
+// pre-#255 emissions) so directive-arg consumers that need an int
+// (paginate, withDepth, forEach concurrency) don't have to re-
+// implement the type dispatch at every call site.
 //
 // Out-of-range values reject (ok=false) rather than wrap. The bound
 // is math.MaxInt32 / math.MinInt32 rather than math.MaxInt /
 // math.MinInt: (1) `int` is platform-sized (32 bits on 32-bit
 // builds, 64 on 64-bit), so silently truncating int64 to int on
-// 32-bit is a latent bug; (2) the four directive consumers
-// (paginate limit/offset, withDepth, forEach concurrency) all
+// 32-bit is a latent bug; (2) the four directive consumers all
 // expect small positive integers and never approach 2B, so an
-// int32 sub-range is operationally fine; (3) CodeQL's
-// go/incorrect-integer-conversion rule recognises int32-clamped
-// constants as a real bounds check, where math.MaxInt's
-// platform-dependent value isn't tracked as a stable upper bound
-// across the int64/float64 union flow.
+// int32 sub-range is operationally fine; (3) chaining the
+// narrowed `int32(n)` through `int(...)` gives CodeQL's
+// go/incorrect-integer-conversion rule an explicit narrow-then-
+// widen pattern it recognises, where the previous direct
+// `int(n)` after a range check tripped a false positive against
+// the int64-source taint flow even with the bound predicate in
+// place.
 func numericAsInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int64:
-		if n > math.MaxInt32 || n < math.MinInt32 {
+		if n < math.MinInt32 || n > math.MaxInt32 {
 			return 0, false
 		}
-		return int(n), true
+		return int(int32(n)), true
 	case float64:
-		if n > math.MaxInt32 || n < math.MinInt32 {
+		if n < math.MinInt32 || n > math.MaxInt32 {
 			return 0, false
 		}
-		return int(n), true
+		return int(int32(n)), true
 	}
 	return 0, false
 }

@@ -688,16 +688,9 @@ func (p *parser) parseFunctionArgValue() (any, error) {
 		return tok.literal, nil
 	case tokNumber:
 		p.next()
-		if strings.ContainsAny(tok.literal, ".eE") {
-			val, err := strconv.ParseFloat(tok.literal, 64)
-			if err != nil {
-				return nil, p.errorf(tok, "invalid number literal %q", tok.literal)
-			}
-			return val, nil
-		}
-		val, err := strconv.ParseInt(tok.literal, 10, 64)
+		val, err := baseparser.ParseNumericLiteral(tok.literal)
 		if err != nil {
-			return nil, p.errorf(tok, "invalid integer literal %q", tok.literal)
+			return nil, p.errorf(tok, "%s", err.Error())
 		}
 		return val, nil
 	case tokIdentifier:
@@ -1159,16 +1152,9 @@ func (p *parser) parseShapeTemplateValue() (shapeTemplate, error) {
 		return &shapeLiteral{Value: tok.literal}, nil
 	case tokNumber:
 		p.next()
-		if strings.ContainsAny(tok.literal, ".eE") {
-			val, err := strconv.ParseFloat(tok.literal, 64)
-			if err != nil {
-				return nil, p.errorf(tok, "invalid number literal %q", tok.literal)
-			}
-			return &shapeLiteral{Value: val}, nil
-		}
-		val, err := strconv.ParseInt(tok.literal, 10, 64)
+		val, err := baseparser.ParseNumericLiteral(tok.literal)
 		if err != nil {
-			return nil, p.errorf(tok, "invalid integer literal %q", tok.literal)
+			return nil, p.errorf(tok, "%s", err.Error())
 		}
 		return &shapeLiteral{Value: val}, nil
 	case tokIdentifier:
@@ -1634,16 +1620,9 @@ func (p *parser) parseShapeComparisonValue(op ComparisonOperator) (any, error) {
 		return tok.literal, nil
 	case tokNumber:
 		p.next()
-		if strings.ContainsAny(tok.literal, ".eE") {
-			val, err := strconv.ParseFloat(tok.literal, 64)
-			if err != nil {
-				return nil, p.errorf(tok, "invalid number literal %q", tok.literal)
-			}
-			return val, nil
-		}
-		val, err := strconv.ParseInt(tok.literal, 10, 64)
+		val, err := baseparser.ParseNumericLiteral(tok.literal)
 		if err != nil {
-			return nil, p.errorf(tok, "invalid integer literal %q", tok.literal)
+			return nil, p.errorf(tok, "%s", err.Error())
 		}
 		return val, nil
 	case tokIdentifier:
@@ -1684,19 +1663,11 @@ func (p *parser) parseShapeValueList() ([]any, error) {
 			values = append(values, tok.literal)
 		case tokNumber:
 			p.next()
-			if strings.ContainsAny(tok.literal, ".eE") {
-				val, err := strconv.ParseFloat(tok.literal, 64)
-				if err != nil {
-					return nil, p.errorf(tok, "invalid number literal %q", tok.literal)
-				}
-				values = append(values, val)
-			} else {
-				val, err := strconv.ParseInt(tok.literal, 10, 64)
-				if err != nil {
-					return nil, p.errorf(tok, "invalid integer literal %q", tok.literal)
-				}
-				values = append(values, val)
+			val, err := baseparser.ParseNumericLiteral(tok.literal)
+			if err != nil {
+				return nil, p.errorf(tok, "%s", err.Error())
 			}
+			values = append(values, val)
 		case tokIdentifier:
 			switch strings.ToLower(tok.literal) {
 			case "true":
@@ -2388,7 +2359,7 @@ func (p *parser) parseLiteralValue() (any, error) {
 		return tok.literal, nil
 	case tokNumber:
 		p.next()
-		num, err := parseNumberLiteral(tok.literal)
+		num, err := baseparser.ParseNumericLiteral(tok.literal)
 		if err != nil {
 			return nil, p.errorf(tok, "%s", err.Error())
 		}
@@ -3273,18 +3244,6 @@ func isSpecReferenceCandidate(name string) bool {
 		return false
 	}
 	return specNamePattern.MatchString(trimmed)
-}
-
-func parseNumberLiteral(lit string) (any, error) {
-	if !strings.ContainsAny(lit, ".eE") {
-		if i, err := strconv.ParseInt(lit, 10, 64); err == nil {
-			return i, nil
-		}
-	}
-	if f, err := strconv.ParseFloat(lit, 64); err == nil {
-		return f, nil
-	}
-	return nil, fmt.Errorf("invalid numeric literal %q", lit)
 }
 
 func toComparisonOperator(value string) (ComparisonOperator, error) {
