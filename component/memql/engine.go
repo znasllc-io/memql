@@ -76,6 +76,30 @@ type MemQLEngine struct {
 	// stripped-down binaries that don't load automations still get an
 	// actionable failure mode.
 	logicRunner LogicRunner
+	// useLangparserRuntime, when true, routes engine.Execute(ctx,
+	// string)'s parsing through the language parser + ASTConverter
+	// instead of the in-package memql parser. Opt-in (#248 / 3a of
+	// the #243 retirement). Default OFF; flips to ON in #249 after a
+	// soak period; component/memql/parser.go retires entirely in #250.
+	// Set via UseLangparserRuntime(...). The langparser path falls
+	// back to the memql parser for shapes it doesn't handle yet
+	// (timestamp suffix, inline specs); see parser_langpath.go.
+	useLangparserRuntime bool
+}
+
+// UseLangparserRuntime toggles the opt-in langparser-backed runtime
+// query path (#248). Default is OFF; callers (typically app bootstrap)
+// flip it ON to opt into the soak period. The flag may also be set
+// by the MEMQL_PARSER=langparser environment variable at bootstrap;
+// see component/config.
+func (e *MemQLEngine) UseLangparserRuntime(enabled bool) {
+	e.useLangparserRuntime = enabled
+}
+
+// LangparserRuntimeEnabled reports whether the engine is currently
+// routing runtime queries through the langparser path.
+func (e *MemQLEngine) LangparserRuntimeEnabled() bool {
+	return e.useLangparserRuntime
 }
 
 // LogicRunner is the cross-package bridge that lets the memql engine
