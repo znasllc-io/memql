@@ -258,8 +258,31 @@ server {
         grpc_send_timeout 3600s;
     }
 
-    # HTTP -- /memql/ws, /memql/audio (browser WS bridge),
-    # /spaces/{id}/attachments, /polyphon/*, /healthz.
+    # Audio WebSocket -- terminates on the VOICE node, not the bff.
+    # The audio handler + STT provider live on voice (and agent) per
+    # docs/core/build-tags.md; the bff has neither, so /memql/audio must
+    # be proxied to voice (voice:8085). Browser still connects to
+    # bff.${DOMAIN}; nginx forwards. Variable-based upstream uses the
+    # runtime resolver (see the resolver block at the top) so a rebuilt
+    # voice container isn't stranded on a stale IP.
+    location /memql/audio {
+        set $voice_http_target voice:8085;
+        proxy_pass http://$voice_http_target;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # HTTP -- /memql/ws (browser WS bridge), /spaces/{id}/attachments,
+    # /polyphon/*, /healthz. (/memql/audio is handled above -> voice.)
     location / {
         set $bff_http_target bff:8088;
         proxy_pass http://$bff_http_target;

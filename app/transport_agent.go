@@ -4,11 +4,9 @@ package app
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
 	"github.com/znasllc-io/memql/component/server"
-	"github.com/znasllc-io/memql/component/server/audiows"
 	"github.com/znasllc-io/memql/integrations/gcs"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
@@ -37,28 +35,8 @@ func (a *App) transportAgent() {
 		a.grpcServer.SetSTTProvider(a.sttProvider.(stt.StreamingProvider))
 	}
 
-	// Audio WebSocket
-	if a.sttProvider != nil {
-		sttProv := a.sttProvider.(stt.StreamingProvider)
-		ttsProvider := a.engine.TTSProvider()
-
-		audioHandler, err := audiows.New(audiows.Options{
-			Logger:      a.Logger,
-			STTProvider: sttProv,
-			TTSProvider: ttsProvider,
-			Engine:      &AudioEngineAdapter{Engine: a.engine},
-		})
-		if err != nil {
-			a.fatal("failed to initialize audio websocket handler", "error", err)
-		}
-		for _, path := range server.AudioWebsocketPaths() {
-			a.mux.Handle("GET "+path, http.HandlerFunc(audioHandler.ServeHTTP))
-		}
-		a.Logger.Info("audio websocket enabled",
-			"paths", server.AudioWebsocketPaths(),
-			"sttProvider", sttProv.Name(),
-		)
-	}
+	// Audio WebSocket (shared with the voice node; see transport_audio.go).
+	a.setupAudioWebsocket()
 
 	// Attachment upload endpoints
 	var uploader server.FileUploader
