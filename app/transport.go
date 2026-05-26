@@ -16,6 +16,13 @@ import (
 // transportBase creates the gRPC server, WebSocket bridge, and gateway middleware.
 // Called by all tag-specific transport methods before wiring their endpoints.
 func (a *App) transportBase() {
+	// Safety classifier (memql#230). Configures the process-wide
+	// safety.DefaultGate BEFORE any handler is registered, so every
+	// downstream dispatch sees the configured chain. Idempotent +
+	// non-fatal on any "can't wire" condition (rules-only default
+	// stays). Opt-in per node via MEMQL_SAFETY_LLM_PROVIDER.
+	a.wireSafetyClassifier()
+
 	// === gRPC Server ===
 	memqlGRPCAddr := strings.TrimSpace(os.Getenv("MEMQL_GRPC_ADDRESS"))
 	a.grpcServer = memqlgrpc.NewServer(memqlGRPCAddr, a.Logger)
