@@ -184,17 +184,14 @@ func TestParseMetaCommand_LangparserFlagDoesNotMatter(t *testing.T) {
 	// default-flip relies on.
 	for _, q := range queries {
 		t.Run(q, func(t *testing.T) {
-			engine.UseLangparserRuntime(false)
 			planOff, errOff := engine.Parse(q)
 			if errOff != nil {
 				t.Fatalf("Parse(off) error: %v", errOff)
 			}
-			engine.UseLangparserRuntime(true)
 			planOn, errOn := engine.Parse(q)
 			if errOn != nil {
 				t.Fatalf("Parse(on) error: %v", errOn)
 			}
-			engine.UseLangparserRuntime(false)
 
 			gotOff, ok := planOff.Root.(*BuiltinFunctionExpression)
 			if !ok {

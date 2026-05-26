@@ -26,6 +26,11 @@ var (
 	// assert via errors.Is so the parser-side wording can change without
 	// breaking the assertion (#257 / for #249).
 	ErrInvalidArgument = errors.New("invalid argument")
+	// ErrUnsupportedQueryShape indicates the runtime query uses a shape the
+	// langparser runtime path doesn't handle. Post-#250 there is no legacy
+	// memql parser to fall back to, so each rejected shape carries a
+	// shape-specific wrapper string that names the workaround.
+	ErrUnsupportedQueryShape = errors.New("query shape not supported by current runtime parser")
 	// ErrExecutionNotImplemented indicates execution is not yet available.
 	ErrExecutionNotImplemented = errors.New("execution not implemented")
 )

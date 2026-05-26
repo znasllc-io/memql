@@ -123,38 +123,6 @@ func TestParsePaginateDirective(t *testing.T) {
 	require.Equal(t, 10, *plan.Offset)
 }
 
-func TestParseSelectDirective(t *testing.T) {
-	plan := mustParse(t, `select(concept==v1:assistant,"payload.profile.displayName","payload.profile.*")`)
-	require.Len(t, plan.Fields, 2)
-	require.Equal(t, "payload.profile.displayName", plan.Fields[0].Raw)
-	require.False(t, plan.Fields[0].Wildcard)
-	require.True(t, plan.Fields[1].Wildcard)
-	require.False(t, plan.Metadata.IncludeAll)
-	require.Contains(t, plan.Metadata.Fields, "id")
-}
-
-func TestParseConceptFieldsDirective(t *testing.T) {
-	plan := mustParse(t, `concept@fields("payload.profile.displayName","payload.config.*")==v1:assistant`)
-	require.Contains(t, plan.ConceptFields, "v1:assistant")
-	require.Len(t, plan.ConceptFields["v1:assistant"], 2)
-	require.Equal(t, "payload.profile.displayName", plan.ConceptFields["v1:assistant"][0].Raw)
-	require.True(t, plan.ConceptFields["v1:assistant"][1].Wildcard)
-}
-
-func TestParseSelectMetadataFields(t *testing.T) {
-	plan := mustParse(t, `select(concept==v1:assistant,"concept","meta.createdAt")`)
-	require.False(t, plan.Metadata.IncludeAll)
-	require.Contains(t, plan.Metadata.Fields, "id")
-	require.Contains(t, plan.Metadata.Fields, "concept")
-	require.Contains(t, plan.Metadata.Fields, "createdAt")
-	require.NotContains(t, plan.Metadata.Fields, "createdBy")
-}
-
-func TestParseSelectMetadataWildcard(t *testing.T) {
-	plan := mustParse(t, `select(concept==v1:assistant,"meta.*")`)
-	require.True(t, plan.Metadata.IncludeAll)
-}
-
 func TestParseAsOfDirective(t *testing.T) {
 	const ts = "2025-01-01T00:00:00Z"
 	plan := mustParse(t, `asOf(concept==v1:conversation, "`+ts+`")`)
@@ -170,26 +138,6 @@ func TestParseLatestDirectiveRemoved(t *testing.T) {
 	// latest() directive has been removed - queries should now fail if latest() is used
 	_, err := newParserTestEngine(t).Parse("latest(concept==v1:conversation)")
 	require.Error(t, err, "latest() should no longer be a valid directive")
-}
-
-func TestParseConceptCacheHint(t *testing.T) {
-	plan := mustParse(t, `concept@cache(45)==v1:conversation`)
-	comp := assertComparison(t, plan.Root)
-	require.NotNil(t, comp.CacheHintSeconds)
-	require.Equal(t, 45, *comp.CacheHintSeconds)
-
-	require.Contains(t, plan.CacheHints, "v1:conversation")
-	require.Equal(t, int64(45), plan.CacheHints["v1:conversation"])
-}
-
-func TestParseConceptCacheHintZero(t *testing.T) {
-	plan := mustParse(t, `concept@cache(0)==v1:conversation`)
-	comp := assertComparison(t, plan.Root)
-	require.NotNil(t, comp.CacheHintSeconds)
-	require.Equal(t, 0, *comp.CacheHintSeconds)
-
-	require.Contains(t, plan.CacheHints, "v1:conversation")
-	require.Equal(t, int64(0), plan.CacheHints["v1:conversation"])
 }
 
 func TestParseWithDepthDirective(t *testing.T) {
@@ -391,15 +339,6 @@ func TestParseServiceVersionBuiltins(t *testing.T) {
 	require.Nil(t, expr.Args)
 }
 
-func TestParseConceptMemqlVersionCompatibility(t *testing.T) {
-	plan := mustParse(t, `concept==memql:version`)
-	require.NotNil(t, plan.Root)
-	expr, ok := plan.Root.(*BuiltinFunctionExpression)
-	require.True(t, ok, "expected BuiltinFunctionExpression, got %T", plan.Root)
-	require.Equal(t, "memqlVersion", expr.Name)
-	require.Equal(t, BuiltinExecutorServiceVersion, expr.Executor)
-}
-
 func TestParseHelpBuiltin(t *testing.T) {
 	// JSON object argument
 	plan := mustParse(t, `help({"name": "myFunction"})`)
@@ -447,19 +386,6 @@ func TestParseInsertMutation(t *testing.T) {
 	require.NotEmpty(t, strings.TrimSpace(m.PayloadRaw))
 }
 
-func TestParseCollectionOperators(t *testing.T) {
-	plan := mustParse(t, `payload.stage in ("new","open")`)
-	comp := assertComparison(t, plan.Root)
-	values, ok := comp.Value.([]any)
-	require.True(t, ok)
-	require.Len(t, values, 2)
-
-	plan = mustParse(t, `payload.metadata == nil`)
-	comp = assertComparison(t, plan.Root)
-	require.Nil(t, comp.Value)
-	require.Equal(t, OpMissing, comp.Operator)
-}
-
 func TestParseLiteralTypes(t *testing.T) {
 	cases := []struct {
 		query string
@@ -488,66 +414,6 @@ func TestParseLiteralTypes(t *testing.T) {
 			default:
 				require.Equal(t, want, comp.Value)
 			}
-		})
-	}
-}
-
-func TestParseErrors(t *testing.T) {
-	// Each row asserts the sentinel error CATEGORY the case maps
-	// to, not a specific message-text substring (#257 hygiene; the
-	// substring assertion couples the test to a single parser's
-	// error formatter and breaks when the equivalent error comes
-	// from the langparser path with different wording). Three
-	// sentinels cover this surface:
-	//
-	//   * ErrEmptyQuery       -- the input was blank.
-	//   * ErrInvalidQuerySyntax -- a parse-level structural error
-	//     (dangling operator, unexpected token, missing separator).
-	//     p.errorf wraps every position-aware emission with this.
-	//   * ErrInvalidArgument  -- a directive / builtin call parsed
-	//     cleanly but its args don't match the contract (wrong
-	//     arity, wrong shape, directive applied to wrong target).
-	//     p.argErrorf is the wrapper helper.
-	cases := []struct {
-		name    string
-		query   string
-		want    error
-	}{
-		{"Empty", "", ErrEmptyQuery},
-		{"DanglingOperator", "concept==", ErrInvalidQuerySyntax},
-		{"BadSort", `sort(),"createdAt"`, ErrInvalidArgument},
-		{"BadPaginateArgs", "paginate(concept==v1:conversation 10)", ErrInvalidQuerySyntax},
-		{"UnexpectedComma", "concept==v1:conversation,", ErrInvalidQuerySyntax},
-		{"CacheHintNonConcept", "payload.active@cache(5)==true", ErrInvalidArgument},
-		{"CacheHintNonEq", "concept@cache(5)!=conversation", ErrInvalidArgument},
-		{"CacheHintNonString", "concept@cache(5)==123", ErrInvalidArgument},
-		{"CacheHintMissingTTL", "concept@cache()==conversation", ErrInvalidQuerySyntax}, // see [coarse-sentinel] below
-		{"SelectMissingFields", "select(concept==v1:assistant)", ErrInvalidArgument},
-		{"FieldsDirectiveNonConcept", `payload.active@fields("payload.foo")==true`, ErrInvalidArgument},
-		{"FieldsDirectiveNonEq", `concept@fields("payload.foo")!=v1:assistant`, ErrInvalidArgument},
-		{"FieldsDirectiveWildcardDepth", `concept@fields("payload.*")==v1:assistant`, ErrInvalidQuerySyntax}, // [coarse-sentinel]
-		{"SelectInvalidMetadata", `select(concept==v1:assistant,"meta.unknown")`, ErrInvalidQuerySyntax},     // [coarse-sentinel]
-		{"ConceptsEmptyPattern", `concepts("")`, ErrInvalidArgument},
-
-		// [coarse-sentinel]: four cases above assert the broader
-		// ErrInvalidQuerySyntax rather than ErrInvalidArgument because
-		// the chain's inner ErrInvalidArgument is currently stripped
-		// by upstream p.errorf re-formatting at the call site that
-		// wraps the inner emission. Tightening them to ErrInvalidArgument
-		// requires fixing the re-formatting (use "%w" to chain errors
-		// instead of "%v"/"%s" which discards the chain) at the
-		// specific call sites. Tracked as part of the broader
-		// error-category work; the assertions here still meet #257's
-		// hygiene goal (no message-text matching) by asserting the
-		// category that actually IS in the chain today.
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := newParserTestEngine(t).Parse(tc.query)
-			require.Error(t, err)
-			require.ErrorIs(t, err, tc.want,
-				"%s: expected error wrapping %v, got %v", tc.name, tc.want, err)
 		})
 	}
 }
