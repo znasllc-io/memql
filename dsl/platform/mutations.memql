@@ -236,13 +236,12 @@ mutation missingCapability mutationLogMissingCapability {
 }
 
 @enabled
-@description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount, refreshes lastSeenAt, optionally appends to exampleGoals. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
+@description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
 mutation missingCapability mutationBumpMissingCapabilitySighting {
   args {
     missingId       string  @required
     sightingCount   int     @required
     lastSeenAt      string  @required
-    appendGoal      string
   }
   update missingCapability {
     id: args.missingId

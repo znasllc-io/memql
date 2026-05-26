@@ -152,14 +152,13 @@ func MutationAttachDocumentToDomainBuild(args MutationAttachDocumentToDomainArgs
 	return b.String()
 }
 
-// MutationBumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount, refreshes lastSeenAt, optionally appends to exampleGoals. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
+// MutationBumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
 //
 // Bound concept: missingCapability.
 type MutationBumpMissingCapabilitySightingArgs struct {
 	MissingId     string
 	SightingCount int
 	LastSeenAt    string
-	AppendGoal    string
 }
 
 // MutationBumpMissingCapabilitySighting calls the engine mutation mutationBumpMissingCapabilitySighting.
@@ -183,13 +182,6 @@ func MutationBumpMissingCapabilitySightingBuild(args MutationBumpMissingCapabili
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
-	if args.AppendGoal != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("appendGoal: ")
-		b.WriteString(fmt.Sprintf("%q", args.AppendGoal))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -4337,7 +4329,6 @@ func MutationDeleteKnowledgeDomainBuild(args MutationDeleteKnowledgeDomainArgs) 
 // Bound concept: record.
 type MutationDeleteRecordArgs struct {
 	RecordId string
-	SpaceId  string
 }
 
 // MutationDeleteRecord calls the engine mutation mutationDeleteRecord.
@@ -4351,11 +4342,6 @@ func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
 	b.WriteString("mutationDeleteRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("spaceId: ")
-	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4716,7 +4702,6 @@ type MutationJoinSpaceAsHumanArgs struct {
 	SpaceId             string
 	UserId              string
 	DisplayName         string
-	ParticipantId       string
 	Status              string
 	JoinedAt            string
 	CapabilityOverrides map[string]any
@@ -4743,13 +4728,6 @@ func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if args.ParticipantId != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	}
 	if args.Status != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
@@ -4780,7 +4758,6 @@ type MutationJoinSpaceAsSIArgs struct {
 	SpaceId             string
 	AgentId             string
 	DisplayName         string
-	ParticipantId       string
 	Status              string
 	JoinedAt            string
 	CapabilityOverrides map[string]any
@@ -4812,13 +4789,6 @@ func MutationJoinSpaceAsSIBuild(args MutationJoinSpaceAsSIArgs) string {
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if args.ParticipantId != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantId: ")
-		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	}
 	if args.Status != "" {
 		if b.Len() > 17 {
 			b.WriteString(", ")
@@ -5147,8 +5117,6 @@ type MutationMoveGroupToPrivateArgs struct {
 	ParticipantType string
 	Text            string
 	Source          map[string]any
-	// Timestamp from the source group utterance row. Carried for UI audit only.
-	OriginalTimestamp string
 }
 
 // MutationMoveGroupToPrivate calls the engine mutation mutationMoveGroupToPrivate.
@@ -5191,13 +5159,6 @@ func MutationMoveGroupToPrivateBuild(args MutationMoveGroupToPrivateArgs) string
 	}
 	b.WriteString("source: ")
 	b.WriteString(renderMemQLValue(args.Source))
-	if args.OriginalTimestamp != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("originalTimestamp: ")
-		b.WriteString(fmt.Sprintf("%q", args.OriginalTimestamp))
-	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -5212,8 +5173,6 @@ type MutationMovePrivateToGroupArgs struct {
 	ParticipantType string
 	Text            string
 	Source          map[string]any
-	// Timestamp from the source privateUtterance row. Carried for UI audit only; the new row's createdAt is the move time, not the original send time.
-	OriginalTimestamp string
 }
 
 // MutationMovePrivateToGroup calls the engine mutation mutationMovePrivateToGroup.
@@ -5256,13 +5215,6 @@ func MutationMovePrivateToGroupBuild(args MutationMovePrivateToGroupArgs) string
 	}
 	b.WriteString("source: ")
 	b.WriteString(renderMemQLValue(args.Source))
-	if args.OriginalTimestamp != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("originalTimestamp: ")
-		b.WriteString(fmt.Sprintf("%q", args.OriginalTimestamp))
-	}
 	b.WriteString("})")
 	return b.String()
 }

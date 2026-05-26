@@ -120,6 +120,7 @@ mutation record mutationCreateRecord {
   }
   insert record {
     id: args.recordId
+    createdAt: coalesce(args.createdAt, timestamp())
     args.spaceId
     args.recordType
     args.label
@@ -231,7 +232,6 @@ mutation record mutationCreateRecordBatch {
 mutation record mutationDeleteRecord {
   args {
     recordId  string  @required
-    spaceId   string  @required
   }
   insert record {
     id: args.recordId
