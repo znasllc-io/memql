@@ -2,15 +2,23 @@ package memql
 
 // unified_spec_loader.go walks the unified DSL tree, extracts every
 // `spec NAME { ... }` and `trait NAME { ... }` declaration, parses
-// each via parseSpecMemQL, and registers the resulting Spec. Specs +
-// traits share the SpecRegistry (the IsTrait flag distinguishes them
-// at runtime); two passes -- one per keyword -- run through the same
-// shared baseloader pipeline.
+// each through the langparser's load-time path, and registers the
+// resulting Spec. Specs + traits share the SpecRegistry (the IsTrait
+// flag distinguishes them at runtime); two passes -- one per keyword
+// -- run through the same shared baseloader pipeline.
+//
+// memql#334 (sub-epic #329 / #310 Stage 1C) migrated the parsing
+// half off the hand-rolled parseSpecMemQL onto
+// languageParser.ParseSpecDecl + the in-package specDeclToSpec
+// converter. The hand-rolled parser is unreferenced from production
+// after this child; spec_parser_test.go still exercises it pending
+// the final deletion in sub-epic #329's cleanup PR.
 
 import (
 	"fmt"
 	"log/slog"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
@@ -26,13 +34,21 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) 
 	}
 	files := baseloader.ReadAll(logger)
 
+	parse := func(origin string, raw []byte) (*Spec, error) {
+		decl, err := languageParser.ParseSpecDecl(string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", origin, err)
+		}
+		return specDeclToSpec(decl, origin)
+	}
+
 	specs, err := baseloader.LoadOne[Spec](
 		logger,
 		"memql.unifiedSpecLoader",
 		"spec",
 		files,
 		extractAdapter,
-		parseSpecMemQL,
+		parse,
 		registry.add,
 	)
 	if err != nil {
@@ -44,7 +60,7 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry) (int, error) 
 		"trait",
 		files,
 		extractAdapter,
-		parseSpecMemQL,
+		parse,
 		registry.add,
 	)
 	return specs + traits, err

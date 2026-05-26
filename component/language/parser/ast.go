@@ -125,6 +125,7 @@ type (
 	ShapeDecl               = ast.ShapeDecl
 	BuiltinDecl             = ast.BuiltinDecl
 	BuiltinField            = ast.BuiltinField
+	SpecDecl                = ast.SpecDecl
 	ProviderDecl            = ast.ProviderDecl
 	ToolDecl                = ast.ToolDecl
 	ToolFieldDecl           = ast.ToolFieldDecl

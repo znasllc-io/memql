@@ -501,8 +501,25 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "spec":
+		// Contextual keyword: `spec` at top-of-file introduces a
+		// struct-form spec declaration. memql#334 (sub-epic #329 /
+		// #310 Stage 1C). Stays a plain identifier inside query
+		// bodies (the SpecRefExpression path uses bare names).
+		def, err = p.parseSpecDecl(attributes, false)
+		if err == nil {
+			attributes = nil
+		}
+	case p.check(TokenIdentifier) && p.current.Literal == "trait":
+		// Contextual keyword: `trait` at top-of-file introduces a
+		// struct-form trait declaration (same runtime contract as
+		// spec; concept-agnostic predicate). memql#334.
+		def, err = p.parseSpecDecl(attributes, true)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', or 'policy'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', 'policy', 'spec', or 'trait'", p.current.Literal)
 	}
 
 	if err != nil {

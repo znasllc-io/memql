@@ -1343,6 +1343,39 @@ type PromptField struct {
 	Attributes []*Attribute // any other field-level annotations (@description / @enum / @default)
 }
 
+// SpecDecl is the shared-frontend AST node for a struct-form spec
+// or trait declaration (`spec NAME { <bool-expr> }` /
+// `trait NAME { <bool-expr> }`). Introduced by memql#334
+// (sub-epic #329 / #310 Stage 1C) so the unified spec loader can
+// parse specs + traits through the langparser instead of the
+// hand-rolled spec_parser.go mini-parser.
+//
+// Body grammar: a single boolean expression. The langparser parses
+// the body via the shared expression-parsing path and stores the
+// resulting typed ExpressionNode here; the memql-side converter
+// (specDeclToSpec) runs NewASTConverter().ConvertExpression on it
+// + the existing classifier + boolean-shape validator.
+//
+// Annotation surface (validated by the converter, not the parser):
+//
+//	@description("text")              documentation (both specs + traits)
+//	@enabled / @disabled              lifecycle (traits only; no-op flags)
+//
+// IsTrait discriminates the two header keywords (`spec NAME { ... }`
+// vs `trait NAME { ... }`). Specs and traits share the SpecRegistry
+// runtime contract; the trait flag drives the converter's
+// classification of whether the entry binds a concept (specs do via
+// file-top use + signature; traits are concept-agnostic).
+type SpecDecl struct {
+	Name       string         // spec / trait name
+	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
+	Attributes []*Attribute   // declaration-level annotations
+	Body       ExpressionNode // parsed boolean expression body
+	Path       string         // source path, for errors/diagnostics
+}
+
+func (*SpecDecl) node() {}
+
 // ShapeDecl is the shared-frontend AST node for a struct-form shape
 // declaration (`shape NAME { id; payload.X; ... }`). Introduced by
 // memql#315 (sub-epic #309 / #306 child C) so the unified-kinds loader
