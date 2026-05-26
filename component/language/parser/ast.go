@@ -128,6 +128,8 @@ type (
 	ProviderDecl            = ast.ProviderDecl
 	ToolDecl                = ast.ToolDecl
 	ToolFieldDecl           = ast.ToolFieldDecl
+	PromptDecl              = ast.PromptDecl
+	PromptField             = ast.PromptField
 	PropertyDecl            = ast.PropertyDecl
 	PropertyVariant         = ast.PropertyVariant
 	TypeRef                 = ast.TypeRef

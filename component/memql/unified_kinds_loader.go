@@ -262,14 +262,22 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, 
 }
 
 // LoadUnifiedPrompts walks the new tree, extracts every `prompt NAME
-// { ... }` block, resolves its template (.tmpl sidecar or inline
-// source) against the unified FS, compiles the input schema, and
-// registers via PromptRegistry.set.
+// { ... }` block through the langparser's load-time path, resolves
+// its template (.tmpl sidecar) against the unified FS, compiles the
+// input schema, and registers via PromptRegistry.set.
 //
-// Prompts can't use the generic helper directly because the per-
-// slice work (template resolution + schema compilation) needs the
-// raw file's directory path to resolve sidecar templates. Kept
-// inline for that reason.
+// memql#319 (sub-epic #309 / #306 child C) migrated the parsing half
+// off the hand-rolled parsePromptMemQL onto
+// languageParser.ParsePromptDecl + the in-package
+// promptDeclToPromptDecl converter. The hand-rolled parser is
+// unreferenced from production after this child; tests under
+// prompt_parser_test.go still exercise it pending the final deletion
+// in #306 child D (#310).
+//
+// Prompts can't use the generic helper because the per-slice work
+// (template resolution + schema compilation) needs the raw file's
+// directory path to resolve sidecar templates. Kept inline for that
+// reason.
 func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials *template.Template) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("prompt registry is nil")
@@ -279,10 +287,18 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	for _, raw := range baseloader.ReadAll(logger) {
 		for _, slice := range ExtractKeywordSlices(raw.Content, "prompt") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
-			decl, err := parsePromptMemQL(origin, []byte(slice.Source))
+			astDecl, err := languageParser.ParsePromptDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
 					logger.Debug("memql.unifiedPromptLoader: parse failed",
+						"file", raw.Path, "prompt", slice.Name, "error", err)
+				}
+				continue
+			}
+			decl, err := promptDeclToPromptDecl(astDecl, origin)
+			if err != nil {
+				if logger != nil {
+					logger.Debug("memql.unifiedPromptLoader: convert failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
 				continue

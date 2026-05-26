@@ -160,6 +160,30 @@ func ParseBuiltinDecl(source string) (*BuiltinDecl, error) {
 	return builtin, nil
 }
 
+// ParsePromptDecl tokenises the given source and parses it as a
+// single struct-form prompt declaration. Convenience wrapper around
+// ParseFile for the unified-kinds loader's LoadUnifiedPrompts flow.
+// Mirrors ParseBuiltinDecl on the error surface.
+//
+// memql#319 (sub-epic #309 / #306 child C).
+func ParsePromptDecl(source string) (*PromptDecl, error) {
+	file, err := ParseFile(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Definitions) == 0 {
+		return nil, fmt.Errorf("no prompt declaration found")
+	}
+	if len(file.Definitions) > 1 {
+		return nil, fmt.Errorf("expected one prompt declaration, got %d definitions", len(file.Definitions))
+	}
+	prompt, ok := file.Definitions[0].(*PromptDecl)
+	if !ok {
+		return nil, fmt.Errorf("expected prompt declaration, got %T", file.Definitions[0])
+	}
+	return prompt, nil
+}
+
 // ParseFile parses a file containing multiple definitions.
 func (p *Parser) parseFile() (*File, error) {
 	file := &File{
@@ -461,8 +485,16 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "prompt":
+		// Contextual keyword: `prompt` at top-of-file introduces a
+		// struct-form prompt declaration. memql#319
+		// (sub-epic #309 / #306 child C).
+		def, err = p.parsePromptDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', or 'tool'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', or 'prompt'", p.current.Literal)
 	}
 
 	if err != nil {
@@ -1650,6 +1682,147 @@ func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
 	}
 
 	return field, nil
+}
+
+// parsePromptDecl parses a struct-form prompt declaration:
+//
+//   prompt <name> {
+//     <field> <type> [@required] [@description("...")]
+//     ...
+//   }
+//
+// Body grammar mirrors parseBuiltinDecl: each field is `name type`
+// followed by zero or more `@annotation` attributes; the next ident
+// (no leading `@`) starts a new field, `}` ends the body.
+//
+// Prompt-level annotations (the cluster captured by parseDefinition)
+// carry the operational semantics (`@description`,
+// `@defaultProvider`, `@templateFile`, `@enabled` / `@disabled`).
+// The converter (promptDeclToPromptDecl in the memql package)
+// interprets them.
+//
+// Two retired forms are rejected at parse time with a migration
+// hint:
+//   - `func (Prompt) name { ... }` -- the receiver-function wrapper
+//     (caught upstream in parseDefinition via the `func` branch +
+//     parseReceiver's known-receiver list).
+//   - `@input { ... }` -- the body-level wrapper around the field
+//     list. The langparser doesn't expose a corresponding body
+//     grammar; an attempt to parse it fails on the `{` after the
+//     `input` attribute name.
+//
+// Inline `@template("""...""")` (a rarely-used alternative to
+// `@templateFile`) is NOT supported on this path: the langparser's
+// lexer doesn't tokenise triple-quoted strings, and zero shipped
+// prompts use the inline form. parsePromptDecl rejects body-level
+// `@template` with a migration-pointing error.
+//
+// memql#319 (sub-epic #309 / #306 child C).
+func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
+	if !p.check(TokenIdentifier) || p.current.Literal != "prompt" {
+		return nil, newParseErrorf(&p.current, "expected 'prompt' keyword, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected prompt name after 'prompt', got %q", p.current.Literal)
+	}
+	decl := &PromptDecl{
+		Name:       p.current.Literal,
+		Attributes: attrs,
+	}
+	p.advance()
+
+	if err := p.expect(TokenBraceOpen); err != nil {
+		return nil, err
+	}
+
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		// Body-level `@template` / `@input` are retired authoring forms.
+		// Reject them with a clear migration hint before falling through
+		// to field parsing (which would otherwise mis-classify them as
+		// "expected field name, got '@'").
+		if p.check(TokenAt) {
+			if next := p.peekNextIdent(); next == "input" {
+				return nil, newParseErrorf(&p.current,
+					"`@input { ... }` wrapper is retired -- declare prompt fields directly inside `prompt name { ... }`")
+			} else if next == "template" {
+				return nil, newParseErrorf(&p.current,
+					"inline `@template(...)` body annotation is not supported on the langparser path -- use `@templateFile(\"...\")` with a sidecar .tmpl file")
+			}
+			return nil, newParseErrorf(&p.current,
+				"unexpected '@' in prompt body -- annotations attach to field declarations, not the body itself")
+		}
+		field, err := p.parsePromptField()
+		if err != nil {
+			return nil, err
+		}
+		decl.Fields = append(decl.Fields, field)
+	}
+
+	if err := p.expect(TokenBraceClose); err != nil {
+		return nil, err
+	}
+	return decl, nil
+}
+
+// parsePromptField parses one `<name> <type> [@annotation ...]` row
+// inside a prompt body. Mirrors parseBuiltinField -- prompts and
+// builtins share the same per-field grammar; the converter handles
+// the (small) semantic differences in how the field surface lowers
+// to each construct's internal type.
+func (p *Parser) parsePromptField() (*PromptField, error) {
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected prompt field name, got %q", p.current.Literal)
+	}
+	field := &PromptField{Name: p.current.Literal}
+	p.advance()
+
+	// Type: optional `[]` prefix + ident.
+	if p.check(TokenBracketOpen) {
+		p.advance()
+		if err := p.expect(TokenBracketClose); err != nil {
+			return nil, err
+		}
+		field.Type = "[]"
+	}
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current,
+			"expected type for prompt field %q, got %q", field.Name, p.current.Literal)
+	}
+	field.Type += p.current.Literal
+	p.advance()
+
+	// Field-level annotations: consume `@attribute(args)` while next
+	// token is `@`. Mirrors parseBuiltinField.
+	for p.check(TokenAt) {
+		attr, err := p.parseAttribute()
+		if err != nil {
+			return nil, err
+		}
+		if attr == nil {
+			continue
+		}
+		if attr.Name == "required" {
+			field.Required = true
+		}
+		field.Attributes = append(field.Attributes, attr)
+	}
+
+	return field, nil
+}
+
+// peekNextIdent returns the literal of the token immediately
+// following p.current, or "" if it's not an identifier. Used by
+// parsePromptDecl to look one step ahead at the name following an
+// `@` token (`input`, `template`) so we can emit a migration-
+// pointing error before falling through to field parsing.
+func (p *Parser) peekNextIdent() string {
+	t := p.peekAhead(1)
+	if t.Type != TokenIdentifier {
+		return ""
+	}
+	return t.Literal
 }
 
 // parsePropertyDecl parses a single property declaration inside a
