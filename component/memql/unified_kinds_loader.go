@@ -20,6 +20,7 @@ import (
 	"text/template"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -74,24 +75,24 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry) (int, error
 
 // LoadUnifiedProviders walks the new tree, parses every `provider
 // NAME { ... }` block, and upserts into the registry. Provider files
-// bundle a vendor base + all its models in one file, so the parser
-// returns a slice (handled by baseloader.LoadMany).
+// bundle a vendor base + all its models in one file.
 //
-// Providers ride the MemQL-DSL parser (parseProviderMemQL), not the
-// legacy JSON path (parseProviderConfigs). Until 2026-05-17 this
-// loader called parseProviderConfigs by mistake, which tried to
-// json.Unmarshal the MemQL provider syntax and silently failed every
-// slice. Result: every node booted with providers=0 and every SI
-// call returned `provider "<name>" not available` -- including the
-// planner agent loop's plannerAgent invocation.
+// As of sub-epic #309 child #316, the langparser handles the
+// `provider NAME { ... }` struct form natively
+// (langparser.ParseProviderDecl). This loader slices each provider
+// out of the per-file source, parses it through the langparser, and
+// converts the resulting *ast.ProviderDecl to a *ProviderConfig via
+// providerDeclToProviderConfig. The legacy hand-rolled
+// parseProviderMemQL is unreferenced from this loader path and will
+// be deleted in sub-epic #306 child #310.
 //
-// Each parsed config also gets a CLIENT instantiated via newSIProvider
+// Each parsed config gets a CLIENT instantiated via newSIProvider
 // before the registry entry is written. Without that step the
 // registry holds the Config but Available stays false and the SI
 // runtime rejects every lookup with "provider <name> not available"
 // (see si_runtime.go's entry.Available check). The legacy
-// loadSIProviders walked the providers and called newSIProvider; that
-// step was lost when Pass 3 of the DSL restructure retired the
+// loadSIProviders walked the providers and called newSIProvider;
+// that step was lost when Pass 3 of the DSL restructure retired the
 // legacy walk. Re-attaching it here keeps the unified-loader path
 // self-contained.
 //
@@ -113,10 +114,6 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	// `openai` is at line 379 but children like audio15 / chat54
 	// land at lines 27..) because the resolver runs before the base
 	// is in the registry.
-	//
-	// baseloader.LoadMany doesn't support multi-pass, so we walk the
-	// files ourselves and call extractAdapter / parseProviderMemQL
-	// inline.
 	files := baseloader.ReadAll(logger)
 	type parsedProvider struct {
 		cfg    *ProviderConfig
@@ -125,7 +122,8 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	all := make([]parsedProvider, 0, 64)
 	for _, raw := range files {
 		for _, slice := range extractAdapter(raw.Content, "provider") {
-			cfg, err := parseProviderMemQL(raw.Path+":"+slice.Name, []byte(slice.Source))
+			origin := raw.Path + ":" + slice.Name
+			decl, err := languageParser.ParseProviderDecl(slice.Source)
 			if err != nil {
 				if logger != nil {
 					logger.Debug("memql.unifiedProviderLoader: parse failed",
@@ -133,10 +131,18 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 				}
 				continue
 			}
+			cfg, err := providerDeclToProviderConfig(decl)
+			if err != nil {
+				if logger != nil {
+					logger.Debug("memql.unifiedProviderLoader: convert failed",
+						"file", raw.Path, "provider", slice.Name, "error", err)
+				}
+				continue
+			}
 			if cfg == nil {
 				continue
 			}
-			all = append(all, parsedProvider{cfg: cfg, origin: raw.Path + ":" + slice.Name})
+			all = append(all, parsedProvider{cfg: cfg, origin: origin})
 		}
 	}
 
@@ -522,6 +528,39 @@ func resolveUnifiedPromptTemplate(decl *promptDecl, memqlPath string, tree fs.FS
 		return decl.templateSource, nil
 	}
 	return "", fmt.Errorf("prompt %q: template or templateFile is required", decl.name)
+}
+
+// providerDeclToProviderConfig translates the langparser-produced
+// AST node into the *ProviderConfig the loader registers. The
+// validation rules mirror what the legacy parseProviderMemQL applied
+// at the end of its parse: @type is required unless the provider is
+// @base (vendor-level metadata) or @extends another provider (in
+// which case the parent supplies the type); @model is required
+// unless the provider is @base. Auth and Params maps are aliased
+// straight through -- the env() resolution + base-extends merge
+// happens later in this loader's pass 2.
+func providerDeclToProviderConfig(decl *ast.ProviderDecl) (*ProviderConfig, error) {
+	if decl == nil {
+		return nil, fmt.Errorf("provider declaration is nil")
+	}
+	if decl.Type == "" && decl.Extends == "" && !decl.IsBase {
+		return nil, fmt.Errorf("provider %q: @type is required", decl.Name)
+	}
+	if decl.Model == "" && !decl.IsBase {
+		return nil, fmt.Errorf("provider %q: @model is required", decl.Name)
+	}
+	return &ProviderConfig{
+		Name:        decl.Name,
+		Type:        decl.Type,
+		Model:       decl.Model,
+		Auth:        decl.Auth,
+		Params:      decl.Params,
+		Default:     decl.IsDefault,
+		Modality:    decl.Modality,
+		Description: decl.Description,
+		Base:        decl.IsBase,
+		Extends:     decl.Extends,
+	}, nil
 }
 
 // resolveProviderExtends fills in fields a child provider didn't

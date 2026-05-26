@@ -43,7 +43,9 @@ import (
 // only swallow ErrEmptyInput, these declarations have to actually
 // strip cleanly.
 var nonProceduralHeaders = []string{
-	"shape", "provider", "builtin", "prompt", "tool", "policy",
+	// `provider` left out: parseProviderDecl handles it natively
+	// (sub-epic #309 child #316).
+	"shape", "builtin", "prompt", "tool", "policy",
 	"seed", "spec", "trait",
 }
 
