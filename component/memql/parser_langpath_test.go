@@ -3,7 +3,6 @@ package memql
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -54,16 +53,24 @@ var representativeRuntimeQueries = []struct {
 	{"sort field + explicit desc", `sort(concept==v1:cluster:node, "createdAt", "desc")`},
 	{"sort field + explicit asc", `sort(concept==v1:cluster:node, "createdAt", "asc")`},
 	{"sort two fields with directions", `sort(concept==v1:cluster:node, "createdAt", "desc", "payload.name", "asc")`},
-	{"select single field", `select(concept==v1:cluster:node, "payload.name")`},
-	{"select multiple fields", `select(concept==v1:cluster:node, "payload.name", "payload.role")`},
+	// select entries removed from the equivalence corpus in #249:
+	// langparser parses select() correctly (the AST is equivalent
+	// to memql's), but doesn't populate Plan.Fields/Plan.Metadata
+	// the way the memql parser's select handler does. Until that
+	// post-parse plumbing reaches parity, select() falls back.
+	// The fallback contract for select() lives in
+	// selectFallsBackToMemqlQueries below.
 	{"asOf latest", `asOf(concept==v1:cluster:node, latest)`},
 	{"asOf rfc3339", `asOf(concept==v1:cluster:node, "2026-01-01T00:00:00Z")`},
 	{"withDepth", `withDepth(concept==v1:cluster:node, 2)`},
-	// shape() runtime usages always carry an inline template object;
-	// the bare-string "named shape" form exists in DSL contexts only
-	// and isn't part of the runtime equivalence contract.
-	{"shape inline template", `shape(concept==v1:cognition:space;payload.active==true, {"id": node("id")})`},
-	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.spaceId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
+	// shape() entries removed from the equivalence corpus in #249:
+	// the langparser's shape grammar has two gaps the executor tests
+	// surface (array templates `[...]` parse-error; nested-object
+	// templates parse but execute differently). Until parity is
+	// reached, `langparserPathUnsupported` short-circuits shape()
+	// to the memql parser; the previously-equivalent shape entries
+	// now live in `shapeFallsBackToMemqlQueries` below where the
+	// fallback contract is asserted explicitly.
 	// Single-paren relationship wrappers -- these used to ride the
 	// generic wrapperFunctions branch in the langparser; they now
 	// also have equivalence coverage so the contract is locked in.
@@ -76,6 +83,198 @@ var representativeRuntimeQueries = []struct {
 	{"relationship owns", `owns(concept==v1:cluster:node)`},
 	{"relationship createdBy", `createdBy(concept==v1:cluster:node)`},
 	{"relationship ids", `ids(concept==v1:cluster:node)`},
+}
+
+// shapeFallsBackToMemqlQueries covers the runtime shape() usages
+// that #249 forces back to the memql parser via the targeted
+// shape() detector in langparserPathUnsupported. Each entry MUST:
+//
+//  1. Trigger the upfront unsupported detector
+//     (`langparserPathUnsupported == true` -> parseViaLangparser
+//     returns errLangparserUnsupported).
+//  2. Round-trip cleanly through the memql parser so the fallback
+//     produces a usable AST.
+//
+// Move entries back into representativeRuntimeQueries (and delete
+// here) once langparser shape parity ships -- the corpus then asserts
+// the langparser path handles them equivalently. The follow-up issue
+// for that parity work is tracked under epic #218.
+var shapeFallsBackToMemqlQueries = []struct {
+	name  string
+	query string
+}{
+	{"shape inline template", `shape(concept==v1:cognition:space;payload.active==true, {"id": node("id")})`},
+	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.spaceId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
+	// Array-form template (the parse-error failure mode):
+	{"shape array template", `shape(concept==v1:conversation;id=="conv-1",[node("id"),children(node("id")),"done"])`},
+	// Nested-object template with relationships (the
+	// execute-differently failure mode):
+	{"shape nested relations template", `shape(concept==v1:conversation;id=="conv-1",{"conversation":node("payload.title","id"),"messages":children({"id":node("id"),"author":createdBy(node("payload.name"))})})`},
+}
+
+// selectFallsBackToMemqlQueries covers select() runtime usages.
+// See note on shapeFallsBackToMemqlQueries for the contract.
+var selectFallsBackToMemqlQueries = []struct {
+	name  string
+	query string
+}{
+	{"select single field", `select(concept==v1:cluster:node, "payload.name")`},
+	{"select multiple fields", `select(concept==v1:cluster:node, "payload.name", "payload.role")`},
+	{"select with metadata wildcard", `select(concept==v1:assistant,"meta.*")`},
+}
+
+// memqlVersionCompatFallsBackQueries covers the
+// `concept==memql:version` compat shape that the memql parser
+// rewrites to memqlVersion BuiltinFunctionExpression. Langparser
+// produces a generic ComparisonExpression -- different downstream
+// dispatch. Falls back until the rewrite migrates to the
+// meta-command dispatch (filed under epic #218).
+var memqlVersionCompatFallsBackQueries = []struct {
+	name  string
+	query string
+}{
+	{"concept==memql:version", `concept==memql:version`},
+	{"concept == memql:version with space", `concept == memql:version`},
+}
+
+// inOperatorFallsBackQueries covers the parenthesised collection-
+// form of the `in` operator that langparser doesn't recognise.
+var inOperatorFallsBackQueries = []struct {
+	name  string
+	query string
+}{
+	{"in with quoted list", `payload.stage in ("new","open")`},
+	{"in with space variations", `payload.status  in  ( "active" , "live" )`},
+}
+
+// TestLangparserPathFallsBackOnShape pins the #249 shape() fallback:
+// every shape() form in shapeFallsBackToMemqlQueries must short-
+// circuit to the memql parser via the upfront detector. Catches
+// regressions in BOTH directions: if a future fix lets shape()
+// flow through the langparser cleanly, this test fails + the entry
+// moves back into the equivalence corpus.
+func TestLangparserPathFallsBackOnShape(t *testing.T) {
+	for _, tc := range shapeFallsBackToMemqlQueries {
+		t.Run(tc.name, func(t *testing.T) {
+			if !langparserPathUnsupported(tc.query) {
+				t.Errorf("langparserPathUnsupported(%q) returned false; shape() should short-circuit until parity ships", tc.query)
+			}
+			// And the public entry must return the sentinel
+			// (not a stray parser error that would propagate).
+			_, err := parseViaLangparser(tc.query)
+			if !errors.Is(err, errLangparserUnsupported) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			}
+		})
+	}
+}
+
+// TestLangparserPathFallsBackOnSelect mirrors the shape test for
+// select() -- pins the detector + sentinel for every select()
+// entry in selectFallsBackToMemqlQueries.
+func TestLangparserPathFallsBackOnSelect(t *testing.T) {
+	for _, tc := range selectFallsBackToMemqlQueries {
+		t.Run(tc.name, func(t *testing.T) {
+			if !langparserPathUnsupported(tc.query) {
+				t.Errorf("langparserPathUnsupported(%q) returned false; select() should short-circuit until Plan.Fields parity ships", tc.query)
+			}
+			_, err := parseViaLangparser(tc.query)
+			if !errors.Is(err, errLangparserUnsupported) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			}
+		})
+	}
+}
+
+// TestLangparserPathFallsBackOnMemqlVersionCompat pins the
+// `concept==memql:version` compat shape fallback.
+func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
+	for _, tc := range memqlVersionCompatFallsBackQueries {
+		t.Run(tc.name, func(t *testing.T) {
+			if !langparserPathUnsupported(tc.query) {
+				t.Errorf("langparserPathUnsupported(%q) returned false; concept==memql:version compat should short-circuit", tc.query)
+			}
+			_, err := parseViaLangparser(tc.query)
+			if !errors.Is(err, errLangparserUnsupported) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			}
+		})
+	}
+}
+
+// TestLangparserPathFallsBackOnInOperator pins the `<expr> in (...)`
+// collection-operator fallback.
+func TestLangparserPathFallsBackOnInOperator(t *testing.T) {
+	for _, tc := range inOperatorFallsBackQueries {
+		t.Run(tc.name, func(t *testing.T) {
+			if !langparserPathUnsupported(tc.query) {
+				t.Errorf("langparserPathUnsupported(%q) returned false; in (...) collection operator should short-circuit", tc.query)
+			}
+			_, err := parseViaLangparser(tc.query)
+			if !errors.Is(err, errLangparserUnsupported) {
+				t.Errorf("parseViaLangparser(%q) -> %v; want errLangparserUnsupported", tc.query, err)
+			}
+		})
+	}
+}
+
+// TestContainsConceptMemqlVersionRightBoundary pins the PR #279
+// review fix: a literal `memql:version` must end at a true word
+// boundary, so `concept==memql:versionfoo` does NOT trigger the
+// targeted fallback (would have forced unnecessary fallback for
+// queries both parsers handle equivalently as a generic
+// ComparisonExpression).
+func TestContainsConceptMemqlVersionRightBoundary(t *testing.T) {
+	cases := []struct {
+		name   string
+		query  string
+		expect bool
+	}{
+		{"exact match", `concept==memql:version`, true},
+		{"trailing whitespace", `concept==memql:version `, true},
+		{"followed by close paren", `paginate(concept==memql:version, 1)`, true},
+		{"followed by semicolon (compound)", `concept==memql:version;payload.x==1`, true},
+		{"trailing ident chars must NOT match", `concept==memql:versionfoo`, false},
+		{"trailing digit must NOT match", `concept==memql:version2`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := containsConceptMemqlVersionShape(c.query)
+			if got != c.expect {
+				t.Errorf("containsConceptMemqlVersionShape(%q) = %v; want %v", c.query, got, c.expect)
+			}
+		})
+	}
+}
+
+// TestContainsRuntimeCallBoundary pins the word-boundary semantics
+// of the containsRuntimeCall helper -- a substring match would
+// false-positive on `payload.shapeId` / `myShape(` / a quoted
+// "shape(" string and silently force fallback for queries the
+// langparser handles fine.
+func TestContainsRuntimeCallBoundary(t *testing.T) {
+	cases := []struct {
+		name   string
+		query  string
+		fn     string
+		expect bool
+	}{
+		{"bare call matches", `shape(x, y)`, "shape", true},
+		{"prefix-bounded matches", `; shape(x, y)`, "shape", true},
+		{"identifier suffix does not match", `payload.shapeId == "abc"`, "shape", false},
+		{"identifier prefix does not match", `myShape(x)`, "shape", false},
+		{"inside quoted string does not match", `payload.title=="shape(foo)"`, "shape", false},
+		{"no occurrence", `concept==v1:cluster:node`, "shape", false},
+		{"end-of-string without paren does not match", `payload.shape`, "shape", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := containsRuntimeCall(c.query, c.fn)
+			if got != c.expect {
+				t.Errorf("containsRuntimeCall(%q, %q) = %v; want %v", c.query, c.fn, got, c.expect)
+			}
+		})
+	}
 }
 
 // TestParseViaLangparser_CoversCorpus asserts the opt-in langparser
@@ -170,12 +369,20 @@ func TestLangparserPathDirectivesNotFlagged(t *testing.T) {
 	for _, src := range []string{
 		`paginate(concept==v1:cluster:node, 10)`,
 		`sort(concept==v1:cluster:node, "createdAt", "desc")`,
-		`select(concept==v1:cluster:node, "payload.name")`,
+		// select( and shape( are intentionally NOT in this list
+		// post-#249 -- they're in the fallback bucket
+		// (shapeFallsBackToMemqlQueries / selectFallsBackToMemqlQueries)
+		// until langparser parity reaches the Plan.Fields population
+		// + shape grammar gaps.
 		`asOf(concept==v1:cluster:node, latest)`,
 		`withDepth(concept==v1:cluster:node, 2)`,
-		`shape(concept==v1:cognition:space, "spaceCard")`,
 		`mutationPaginateFoo({id: "x"})`,
 		`payload.shape=="cylinder"`,
+		// Identifiers and function-call args that contain the
+		// substring `in` must NOT trip the in-operator detector
+		// (would force unnecessary fallback). Pin the boundary.
+		`payload.inside == true`,
+		`integerField == 5`,
 	} {
 		t.Run(src, func(t *testing.T) {
 			if langparserPathUnsupported(src) {
@@ -205,47 +412,57 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 
 // TestEngineUseLangparserRuntimeToggle is a smoke test for the
 // (*MemQLEngine).UseLangparserRuntime / LangparserRuntimeEnabled
-// pair -- the bootstrap-side opt-in handle for #248. Default OFF;
-// flipping ON is reflected in LangparserRuntimeEnabled. The flag's
-// effect on Parse is exercised by the equivalence test above.
+// pair -- the bootstrap-side opt-out handle for #249's flipped
+// default.
 //
-// The planned default-flip (#249) is now down to its remaining
-// architectural prerequisites: #255 (number literal int/float
-// standardisation), #256 (introspection builtin dispatch), and #257
-// (parser_test error-text assertions). #254 closed the directive +
-// relationship AST gap that used to dominate the divergence list.
+// **#249 flipped the default:** a fresh-constructed engine now
+// routes through the langparser. UseLangparserRuntime(false) is
+// the rollback to the legacy memql parser, kept for the soak
+// period before #250 deletes the legacy code entirely. The
+// previously-planned prereqs #254 / #255 / #256 / #257 all landed
+// before this flip.
 func TestEngineUseLangparserRuntimeToggle(t *testing.T) {
 	e := &MemQLEngine{}
-	if e.LangparserRuntimeEnabled() {
-		t.Fatal("default should be OFF")
-	}
-	e.UseLangparserRuntime(true)
+	// #249 flip: zero-value engine should now report langparser
+	// enabled (was OFF pre-flip). The toggle still works in both
+	// directions for the soak rollback.
 	if !e.LangparserRuntimeEnabled() {
-		t.Fatal("UseLangparserRuntime(true) did not enable")
+		t.Fatal("post-#249 default should be ON (langparser)")
 	}
 	e.UseLangparserRuntime(false)
 	if e.LangparserRuntimeEnabled() {
-		t.Fatal("UseLangparserRuntime(false) did not disable")
+		t.Fatal("UseLangparserRuntime(false) did not engage the legacy rollback")
+	}
+	e.UseLangparserRuntime(true)
+	if !e.LangparserRuntimeEnabled() {
+		t.Fatal("UseLangparserRuntime(true) did not re-enable")
 	}
 }
 
-// TestParseViaLangparser_DoesNotMaskRealErrors confirms the
-// fall-back contract: errLangparserUnsupported is the ONLY sentinel
-// e.Parse should swallow; every other parse error must propagate
-// unchanged so the caller doesn't get a misleading message from
-// the wrong parser.
-func TestParseViaLangparser_DoesNotMaskRealErrors(t *testing.T) {
+// TestParseViaLangparser_FallsBackOnParseError pins the #249 soak
+// contract: ANY langparser parse error returns errLangparserUnsupported
+// so engine.Parse falls back to the memql parser for the canonical
+// error message + sentinel chain. Without this conversion,
+// langparser's bare error text doesn't wrap ErrInvalidArgument /
+// ErrInvalidSyntax that callers grep for via errors.Is().
+//
+// The previous-contract test (`TestParseViaLangparser_DoesNotMaskRealErrors`)
+// asserted langparser errors propagated unchanged. That contract
+// shipped a divergence where TestParseErrors expected
+// memql-sentinel-wrapped errors but got bare langparser errors --
+// inverted for the soak; restore when langparser error-wrapping
+// reaches parity (separate follow-up under epic #218).
+func TestParseViaLangparser_FallsBackOnParseError(t *testing.T) {
 	// Genuinely malformed input -- nothing about it triggers the
 	// upfront-unsupported detector, so it reaches
-	// langparser.ParseExpression which returns its own real error.
+	// langparser.ParseExpression which produces a parse error.
+	// The wrapper converts it to errLangparserUnsupported so the
+	// memql fallback path produces the canonical error.
 	_, err := parseViaLangparser(`concept==`)
 	if err == nil {
-		t.Fatal("expected real parse error, got nil")
+		t.Fatal("expected fallback signal, got nil")
 	}
-	if errors.Is(err, errLangparserUnsupported) {
-		t.Errorf("real parse error masquerading as errLangparserUnsupported: %v", err)
-	}
-	if strings.Contains(err.Error(), "not yet supported") {
-		t.Errorf("real parse error formatted like the sentinel: %v", err)
+	if !errors.Is(err, errLangparserUnsupported) {
+		t.Errorf("parse error should be converted to errLangparserUnsupported, got %v", err)
 	}
 }

@@ -119,7 +119,12 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 		timestamp   *time.Time
 		useLatest   bool
 	)
-	if e.useLangparserRuntime {
+	// #249 flipped the default: langparser path runs by default, the
+	// legacy memql parser is the rollback. Negated read of the
+	// renamed field so the zero value (legacy=false) routes through
+	// the langparser. errLangparserUnsupported falls through to the
+	// legacy path below; on a real parse error, propagate.
+	if !e.useLegacyMemqlParser {
 		converted, err := parseViaLangparser(trimmed)
 		if err == nil {
 			root = converted
