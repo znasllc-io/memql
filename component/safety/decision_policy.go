@@ -128,7 +128,16 @@ func effectiveTier(t RiskTier, cats []Category) RiskTier {
 // scopeAtLeastInteract returns true when the caller's effective
 // scope is `interact` or `full`. Case-insensitive + whitespace-
 // tolerant since the scope comes from request payloads + DB rows.
-// The known scope ladder today: observe < interact < full.
+//
+// Canonical ladder per `integrations/agent/worker/scope.go`:
+// `observe < full`, with `interact` as a legacy alias upgraded to
+// `full` on read. We accept BOTH here so a legacy `agentAuthorization`
+// row (or `planScope`) that still says `interact` lands as "scope
+// granted." If a future scope value (e.g. `administer`) is added to
+// the worker-side `scopeRank`, update this list to match -- the two
+// systems are independently consistent today, but a new scope value
+// added to one and not the other would silently mean a wider /
+// narrower interpretation than intended.
 func scopeAtLeastInteract(scope string) bool {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "interact", "full":
