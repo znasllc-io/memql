@@ -4695,6 +4695,134 @@ func MutationInsertPolicyTraceBuild(args MutationInsertPolicyTraceArgs) string {
 	return b.String()
 }
 
+// MutationInsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. All arg values arrive already redacted by safety.RedactedPayload, so this mutation does not need its own scrub pass.
+//
+// Bound concept: classification.
+type MutationInsertSafetyClassificationArgs struct {
+	Surface       string
+	Action        string
+	ArgsRedacted  string
+	Tier          string
+	Categories    string
+	Decision      string
+	Source        string
+	RuleId        string
+	Confidence    any
+	Reason        string
+	LatencyMs     any
+	AgentId       string
+	OwnerUserId   string
+	PlanId        string
+	CorrelationId string
+	Mode          string
+}
+
+// MutationInsertSafetyClassification calls the engine mutation mutationInsertSafetyClassification.
+func (qc *QueryClient) MutationInsertSafetyClassification(ctx context.Context, args MutationInsertSafetyClassificationArgs) (*Result, error) {
+	call := MutationInsertSafetyClassificationBuild(args)
+	return qc.executeNamed(ctx, "mutationInsertSafetyClassification", call)
+}
+
+func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassificationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationInsertSafetyClassification({")
+	b.WriteString("surface: ")
+	b.WriteString(fmt.Sprintf("%q", args.Surface))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(fmt.Sprintf("%q", args.Action))
+	if args.ArgsRedacted != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("argsRedacted: ")
+		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.Categories != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("categories: ")
+		b.WriteString(fmt.Sprintf("%q", args.Categories))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("decision: ")
+	b.WriteString(fmt.Sprintf("%q", args.Decision))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if args.RuleId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ruleId: ")
+		b.WriteString(fmt.Sprintf("%q", args.RuleId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	if args.Reason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("latencyMs: ")
+	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
+	if args.AgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	}
+	if args.PlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
+	if args.CorrelationId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("correlationId: ")
+		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mode: ")
+	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationJoinSpaceAsHuman -- Join a space as a human participant.
 //
 // Bound concept: participant.

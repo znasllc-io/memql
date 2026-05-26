@@ -467,6 +467,23 @@ func QueryAllPolicyTracesBuild(args QueryAllPolicyTracesArgs) string {
 	return "queryAllPolicyTraces({})"
 }
 
+// QueryAllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors queryAllPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
+//
+// Bound concept: classification.
+type QueryAllSafetyClassificationsArgs struct {
+}
+
+// QueryAllSafetyClassifications calls the engine query queryAllSafetyClassifications.
+func (qc *QueryClient) QueryAllSafetyClassifications(ctx context.Context, args QueryAllSafetyClassificationsArgs) (*Result, error) {
+	call := QueryAllSafetyClassificationsBuild(args)
+	return qc.executeNamed(ctx, "queryAllSafetyClassifications", call)
+}
+
+func QueryAllSafetyClassificationsBuild(args QueryAllSafetyClassificationsArgs) string {
+	_ = args
+	return "queryAllSafetyClassifications({})"
+}
+
 // QueryArchivedSpaces -- Returns spaces with space.status == 'archived'. Optional filter: userId (createdBy).
 //
 // Bound concept: space.

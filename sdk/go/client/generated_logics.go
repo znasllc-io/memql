@@ -389,6 +389,26 @@ func LogicPurgeExpiredPolicyTracesBuild(args LogicPurgeExpiredPolicyTracesArgs) 
 	return b.String()
 }
 
+// LogicPurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.
+type LogicPurgeExpiredSafetyClassificationsArgs struct {
+	Event map[string]any
+}
+
+// LogicPurgeExpiredSafetyClassifications calls the engine logic logicPurgeExpiredSafetyClassifications.
+func (qc *QueryClient) LogicPurgeExpiredSafetyClassifications(ctx context.Context, args LogicPurgeExpiredSafetyClassificationsArgs) (*Result, error) {
+	call := LogicPurgeExpiredSafetyClassificationsBuild(args)
+	return qc.executeNamed(ctx, "logicPurgeExpiredSafetyClassifications", call)
+}
+
+func LogicPurgeExpiredSafetyClassificationsBuild(args LogicPurgeExpiredSafetyClassificationsArgs) string {
+	var b strings.Builder
+	b.WriteString("logicPurgeExpiredSafetyClassifications({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicRefreshDueKnowledgeDomains -- Reads candidate knowledge-domain rows via queryDueRefreshDomains; for each, the Go-side cron handler (registered by the planner-service init path) evaluates the elapsed-since-lastSeededAt check and spawns a trainSpecialist Plan per matching row. Per Q9 the schema-side cadence + runtime-side spawn are deliberately split -- the DSL filter is broad (active + non-null refreshCadenceDays), the precise elapsed-time math runs in Go where arithmetic on datetime fields is cheap.
 type LogicRefreshDueKnowledgeDomainsArgs struct {
 	Event map[string]any
