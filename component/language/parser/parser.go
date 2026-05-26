@@ -491,26 +491,21 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 		}
 
 		// Numeric value: @version(1). When the entire parenthesised
-		// body is a single integer literal, store it as int64 so
-		// attribute-specific validators can type-check without
-		// re-parsing the string. Float literals store as float64.
-		// Non-bare numeric forms (@cache(ttl=0)) fall through to
-		// the named-args path because they start with an identifier.
+		// body is a single numeric literal, store it as int64 (bare
+		// integer) or float64 (decimal / scientific) so attribute-
+		// specific validators can type-check without re-parsing the
+		// string. Non-bare numeric forms (@cache(ttl=0)) fall through
+		// to the named-args path because they start with an identifier.
+		// Uses the shared parseNumericLiteral helper so bare attribute
+		// values, runtime expression literals (parsePrimary), and
+		// named-arg / array / object element values (parseValue) all
+		// produce the same Go type for the same source -- see #255.
 		if p.check(TokenNumber) {
-			lit := p.current.Literal
-			if n, intErr := strconv.ParseInt(lit, 10, 64); intErr == nil {
+			val, numErr := parseNumericLiteral(p.current.Literal)
+			if numErr == nil {
 				p.advance()
 				if p.check(TokenParenClose) {
-					attr.Value = n
-					p.advance()
-					return attr, nil
-				}
-				return nil, newParseErrorf(&p.current, "expected ')' after numeric attribute value in @%s, got %q", name, p.current.Literal)
-			}
-			if f, floatErr := strconv.ParseFloat(lit, 64); floatErr == nil {
-				p.advance()
-				if p.check(TokenParenClose) {
-					attr.Value = f
+					attr.Value = val
 					p.advance()
 					return attr, nil
 				}
@@ -3139,8 +3134,8 @@ func (p *Parser) parseForEachStepConfig() (*ForEachStepConfig, error) {
 				if err != nil {
 					return nil, err
 				}
-				if n, ok := val.(float64); ok {
-					config.Concurrency = int(n)
+				if n, ok := numericAsInt(val); ok {
+					config.Concurrency = n
 				}
 			case "do":
 				// Parse array of steps
@@ -3582,7 +3577,18 @@ func (p *Parser) parsePrimary() (ExpressionNode, error) {
 		p.advance()
 		return &LiteralExpr{Value: val}, nil
 	case p.check(TokenNumber):
-		val, _ := strconv.ParseFloat(p.current.Literal, 64)
+		// Bare integers store as int64; decimals / scientific store as
+		// float64. Matches the memql parser (parseNumberLiteral) and
+		// parseAttribute's bare-numeric path so reflect.DeepEqual
+		// equivalence holds across the two parser paths for literal
+		// types in runtime expressions (issue #255). Downstream
+		// normalisation in executor_filter.normalizeScalarValue is
+		// type-agnostic across the int/float family, so this choice
+		// is invisible to filter evaluation.
+		val, err := parseNumericLiteral(p.current.Literal)
+		if err != nil {
+			return nil, newParseErrorf(&p.current, "invalid number %q", p.current.Literal)
+		}
 		p.advance()
 		return &LiteralExpr{Value: val}, nil
 	case p.check(TokenBracketOpen):
@@ -4223,20 +4229,18 @@ func (p *Parser) wrapDirective(name string, args map[string]any, target Expressi
 
 	case "paginate":
 		expr := &PaginateExpr{Target: target}
-		if limit, ok := args["limit"].(float64); ok {
-			l := int(limit)
-			expr.Limit = &l
+		if limit, ok := numericAsInt(args["limit"]); ok {
+			expr.Limit = &limit
 		}
-		if offset, ok := args["offset"].(float64); ok {
-			o := int(offset)
-			expr.Offset = &o
+		if offset, ok := numericAsInt(args["offset"]); ok {
+			expr.Offset = &offset
 		}
 		return expr, nil
 
 	case "depth":
 		expr := &DepthExpr{Target: target}
-		if d, ok := args["0"].(float64); ok {
-			expr.Depth = int(d)
+		if d, ok := numericAsInt(args["0"]); ok {
+			expr.Depth = d
 		}
 		return expr, nil
 
@@ -4283,7 +4287,14 @@ func (p *Parser) parseValue() (any, error) {
 		p.advance()
 		return val, nil
 	case p.check(TokenNumber):
-		val, err := strconv.ParseFloat(p.current.Literal, 64)
+		// Bare integers store as int64; decimals / scientific store as
+		// float64. Same int-first dance as parsePrimary above and
+		// parseAttribute's bare-numeric path; see issue #255 for the
+		// equivalence rationale. The four directive-arg call sites
+		// (paginate limit/offset, withDepth, concurrent.concurrency)
+		// that read these values use numericAsInt to accept both
+		// int64 and float64.
+		val, err := parseNumericLiteral(p.current.Literal)
 		if err != nil {
 			return nil, newParseErrorf(&p.current, "invalid number %q", p.current.Literal)
 		}
@@ -5450,4 +5461,50 @@ func (p *Parser) reconstructTokens(start, end int) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// parseNumericLiteral converts a TokenNumber literal string to its
+// canonical Go representation:
+//
+//   - bare integer (`42`, `-7`, `0`) -> int64
+//   - decimal / scientific (`3.14`, `1e9`, `2.5e-3`) -> float64
+//
+// Single source of truth for every TokenNumber emitted by the
+// langparser -- parsePrimary (runtime expression literals),
+// parseValue (attribute named-arg / array / object element values),
+// and parseAttribute's bare-numeric branch all funnel through here.
+// Mirrors the memql parser's parseNumberLiteral (component/memql/
+// parser.go) so the two parsers produce reflect.DeepEqual-equal
+// engine ASTs for the same source -- see #255.
+//
+// Downstream directive-arg call sites (paginate limit/offset,
+// withDepth, concurrent.concurrency) that previously asserted
+// `.(float64)` on the value should use numericAsInt to accept both
+// int64 and float64; raw `.(float64)` assertions on Args entries
+// fed by this helper will fail for integer literals.
+func parseNumericLiteral(lit string) (any, error) {
+	if !strings.ContainsAny(lit, ".eE") {
+		if i, err := strconv.ParseInt(lit, 10, 64); err == nil {
+			return i, nil
+		}
+	}
+	if f, err := strconv.ParseFloat(lit, 64); err == nil {
+		return f, nil
+	}
+	return nil, fmt.Errorf("invalid numeric literal %q", lit)
+}
+
+// numericAsInt coerces a parser-emitted numeric value to an int.
+// Accepts both int64 (the new canonical type for integer literals)
+// and float64 (decimals and pre-#255 emissions) so directive-arg
+// consumers that need an int (paginate, withDepth, etc.) don't have
+// to re-implement the type dispatch at every call site.
+func numericAsInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
