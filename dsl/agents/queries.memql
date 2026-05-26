@@ -54,6 +54,53 @@ query agent queryAgentById {
   shape   agentFull
 }
 
+// queryAssistantForOwner -- look up a user's General Assistant.
+// ==============================================================
+//
+// Resolves the user's GA (the perUser-seeded agent with role
+// "assistant") by ownerUserId. The seed materializer guarantees
+// each user has at most one active assistant row at the canonical
+// id `<seedName>-<bareUserId>` (per #274's deterministic-id fix),
+// so this query returns 0 or 1 rows. Callers use `.Empty()` to
+// distinguish "user has no GA yet" (first sweep hasn't run yet)
+// from "user has a GA, here it is."
+//
+// Used by:
+//   - logicAutoJoinSI (dsl/cognition/logic.memql) -- to join the
+//     space owner's GA on space creation. Replaces the broken
+//     pre-#276 lookup that hashed the actor email and never found
+//     anything; see #276 for the diagnostic narrative.
+//
+// Args:
+//   ownerUserId (required) -- the user's canonical v1:identity:user
+//                             id, e.g. `v1:identity:user:395e4e72-...`.
+//
+// Shape: agentFull (id, name, role, capabilities, providerConfig,
+//        triggerBehavior, ...). Callers can read `.First().id` and
+//        `.First().name` once the path-resolution work in the
+//        automation step runner is settled.
+//
+// `@public` marks this query as intentionally not caller-scoped.
+// The sole callsite is `logicAutoJoinSI` running under the
+// `system:automation:autoJoinSI` system actor; the automation
+// needs to resolve the SPACE OWNER's GA, not the caller's GA,
+// so an `args.ownerUserId == actor.userId` gate would defeat
+// the use case. Matches the convention of `queryActiveAgentsForUser`
+// (also @public, also system-actor-only) -- a user-facing entry
+// point would instead want a `queryMyAssistant` variant scoped
+// by `actor.userId`; splitting tracked as a follow-up under #54.
+
+@enabled
+@public
+@description("Resolve a user's General Assistant agent (role='assistant') by ownerUserId. Returns 0 or 1 rows.")
+query agent queryAssistantForOwner {
+  args {
+    ownerUserId  string  @required
+  }
+  filter  payload.ownerUserId==args.ownerUserId; payload.role=="assistant"; traitIsActiveRecord; traitIsNotDeleted
+  shape   agentFull
+}
+
 // queryAgentOwner -- agent's owning-user lookup
 // ==============================================
 //

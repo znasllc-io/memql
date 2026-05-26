@@ -569,6 +569,28 @@ func QueryArchivedSpacesBuild(args QueryArchivedSpacesArgs) string {
 	return b.String()
 }
 
+// QueryAssistantForOwner -- Resolve a user's General Assistant agent (role='assistant') by ownerUserId. Returns 0 or 1 rows.
+//
+// Bound concept: agent.
+type QueryAssistantForOwnerArgs struct {
+	OwnerUserId string
+}
+
+// QueryAssistantForOwner calls the engine query queryAssistantForOwner.
+func (qc *QueryClient) QueryAssistantForOwner(ctx context.Context, args QueryAssistantForOwnerArgs) (*Result, error) {
+	call := QueryAssistantForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryAssistantForOwner", call)
+}
+
+func QueryAssistantForOwnerBuild(args QueryAssistantForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAssistantForOwner({")
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
 // Bound concept: audioOverride.

@@ -40,7 +40,7 @@
 // - bootstrapSession automation creates sessions for new SI
 //   participants.
 // - Emits "si.auto-joined" event for observability.
-use agents.queries.{ queryAgentById }
+use agents.queries.{ queryAssistantForOwner }
 use cognition.builtins.{ ensureDailySpaceForCaller, ensureDailySpaceForUser, rolloverDailySpacesAllUsers }
 use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsSI, mutationSendTextUtterance }
 use cognition.queries.{ queryExpiredArchivedSpaces, queryHasSIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
@@ -52,52 +52,53 @@ logic logicAutoJoinSI {
     event object @required
   }
   body {
-  // hash(args.event.payload.actor) = the Actor the MemoryNode was
-  // stamped with at insert time (the user's email for user-originated
-  // writes). The actual per-user GA agentId composed by the
-  // SeedMaterializer is `assistant-<userId-short>` (see assistant.memql
-  // + seed_materializer.materializePerUser), NOT this hash. This
-  // lookup is a pre-existing mismatch from the legacy `ga-<hash>`
-  // convention and a known no-op in autoJoinSI today; the fix lands
-  // with the per-row authz audit (issue #54) which rewrites GA
-  // resolution to query by (ownerUserId, role="assistant") rather
-  // than constructing the canonical id client-side. Leaving the
-  // shortId free of concept-name prefixes per issue #53.
-  getGA := queryAgentById({ agentId: hash(args.event.payload.actor) })
-
-  // Join the GA if it exists and isn't already a participant. The
-  // function-step arg resolver (automations/steps/function.go) only
-  // resolves bare cross-step references when the expression is a
-  // nested builtin -- i.e. starts with one of concat/coalesce/cond/
-  // first/... and ends with `)`. A naked `getGA.First().id` falls
-  // through that check and is rendered as a LITERAL STRING into
-  // the outgoing query ("getGA.First().name" in displayName was
-  // exactly how I hit this trap). Wrapping in coalesce(..., "...")
-  // flips it onto the sharedArgEvaluator path which normalises
-  // `.First()` -> `.first` and resolves through ResolveStrictBarePath.
+  // Resolve the space creator's GA by (ownerUserId, role="assistant").
+  // The space concept stamps payload.ownerUserId from the request
+  // actor at create time (dsl/cognition/concepts.memql:211), so the
+  // event payload carries it directly -- no need to canonicalize or
+  // hash the actor stamp to reconstruct an agent id.
   //
-  // Why the canonical id matters: cognition's agent lookup + the
-  // relation-field resolver both do a raw id-in-set match, so a
-  // short-form id on the participant record breaks those paths.
-  // getGA.First().id exposes the partition-prefixed canonical id
-  // from the shape's `node("id")` projection.
-  // We build the GA's agent id deterministically from the same
-  // hash(email) formula provisionAssistant uses, so we don't
-  // have to dig it out of the getGA step result. The function-step
-  // arg evaluator's path resolver does not reliably navigate
-  // `stepName.First().id` / `.First().payload.name` when the step's
-  // result is a shape bundle -- the coalesce fallback fires and the
-  // raw expression text ends up in the outgoing mutation. Building
-  // the id via concat() here avoids that trap entirely. The only
-  // purpose of the getGA query now is the existence check (Empty()).
+  // History: pre-#276, this step queried by `hash(args.event.payload.actor)`
+  // on the assumption that the GA's id was `ga-<hash(email)>` --
+  // the pre-seed-materializer convention. The seed materializer
+  // writes the GA at `assistant-<bareUserId>` instead (per the
+  // documented contract enforced by #274), so the old lookup was
+  // a known no-op for an unknown length of time. The frontend
+  // useEnsureGeneralAssistant hook (in copresent) was carrying the
+  // join end-to-end as a belt-and-suspenders backstop. With the
+  // lookup now resolving via (ownerUserId, role), every client --
+  // including memql-cockpit and future thick / thin clients --
+  // inherits the GA-join behavior without needing a parallel hook.
+  // Retiring the frontend hook is a separate follow-up; the
+  // backstop is harmless until then.
+  getGA := queryAssistantForOwner({ ownerUserId: args.event.payload.ownerUserId })
+
+  // Existence-and-not-already-a-participant check before insert.
+  // The agent id passed to queryParticipantByAgentSpace and
+  // mutationJoinSpaceAsSI is the canonical-form id from the GA
+  // row, navigated via coalesce(getGA.First().id, "") -- the
+  // wrapper flips the function-step arg evaluator onto the
+  // sharedArgEvaluator path that resolves `.First().id` correctly
+  // (a naked `getGA.First().id` falls through and is rendered as
+  // literal text into the outgoing query; see the legacy comments
+  // in this file's git history for the diagnostic narrative). The
+  // empty-string fallback never fires because we only reach this
+  // code path inside `if !getGA.Empty()`.
+  //
+  // mutationJoinSpaceAsSI canonicalizes its inputs internally
+  // (dsl/cognition/mutations.memql:483-513) and content-addresses
+  // the resulting participant id off (agent, space), so a re-fire
+  // of this automation lands a new VERSION of the same participant
+  // row rather than a duplicate.
   checkExistingGA := if !getGA.Empty() {
     queryParticipantByAgentSpace({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(hash(args.event.payload.actor), "v1:agents:agent")
+      agentId: coalesce(getGA.First().id, "")
     })
   }
+
   // Owner GA join carries two chat-architecture flags (Phase 1.5):
-  //   - forUserId = the space creator. This anchors the GA to the
+  //   - forUserId = the space owner. This anchors the GA to the
   //     creator's Team-tab roster so per-user-roster queries find it
   //     and the per-(user, space) 3-cap counts it against the owner.
   //   - isGroupGA = true. The engine pre-insert participant guard
@@ -108,12 +109,19 @@ logic logicAutoJoinSI {
   // Both fields ride through unchanged because autoJoinSI runs as a
   // system actor (system:automation:autoJoinSI), which the participant
   // guard treats as elevated and trusts the explicit forUserId on.
+  //
+  // displayName follows the GA's actual name from the row -- if
+  // the user renamed their assistant (the seed materializer's
+  // create-only semantics preserve user edits across restarts),
+  // the participant displayName follows the rename. The default
+  // is "Assistant" per the seed file; "Sofia" was a hardcoded
+  // pre-#276 fallback that didn't match the seed and is gone.
   insertGA := if !getGA.Empty() && checkExistingGA.Empty() {
     mutationJoinSpaceAsSI({
       spaceId: args.event.payload.id,
-      agentId: canonicalId(hash(args.event.payload.actor), "v1:agents:agent"),
-      displayName: "Sofia",
-      forUserId: args.event.payload.actor,
+      agentId: coalesce(getGA.First().id, ""),
+      displayName: coalesce(getGA.First().name, "Assistant"),
+      forUserId: args.event.payload.ownerUserId,
       isGroupGA: true
     })
   }
