@@ -19,8 +19,7 @@ func TestDeclaredUsage_AcceptsFullyUsedDecls(t *testing.T) {
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
 	// Every declaration is exercised.
-	src := `@useConcept(space)
-mutation mutationCreateSpace {
+	src := `mutation space mutationCreateSpace {
   args {
     name string @required
     description string
@@ -42,8 +41,7 @@ func TestDeclaredUsage_RejectsStaleArgsField(t *testing.T) {
 	})
 
 	// Mutation declares args.other but never uses it.
-	src := `@useConcept(space)
-mutation mutationStaleArgs {
+	src := `mutation space mutationStaleArgs {
   args {
     name  string @required
     other string @required
@@ -65,9 +63,8 @@ func TestDeclaredUsage_RejectsStaleUseSpec(t *testing.T) {
 	})
 
 	// Query declares @useSpec(specGhost) but never references it.
-	src := `@useConcept(space)
-@useSpec(specGhost)
-query queryStaleSpec {
+	src := `@useSpec(specGhost)
+query space queryStaleSpec {
   args {
     userId string
   }

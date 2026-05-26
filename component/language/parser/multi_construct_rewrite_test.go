@@ -10,36 +10,29 @@ import (
 //
 // The consolidated DSL layout (Phase 2 of the import-model refactor)
 // puts many constructs of different kinds into one .memql file. The
-// rewriter has to bind each construct to its OWN concept (via the
-// nearest @useConcept(...) annotation walking backward from the
-// block header) rather than to a single file-level binding.
-//
-// extractConceptBindingForBlock implements that walk-back. These
-// tests prove the rule holds for representative multi-construct
-// shapes.
+// rewriter has to bind each construct to its OWN concept; memql#314
+// retired the annotation-walkback fallback so every struct-form
+// construct now declares its concept binding in the signature
+// (`<kind> <Concept> <name> { ... }`). These tests prove the
+// per-construct binding rule holds.
 //
 // Note: the rewriter emits each construct's procedural form WITHOUT
 // translating bareName.X -> payload.X. That translation happens
 // downstream in component/memql/function_loader.go via
-// extractAllUseConceptNames + translateConceptPathsToPayload (the
-// multi-name iteration is the Phase 1 fix that lets multi-construct
-// files load cleanly). These tests stay focused on the rewriter's
-// own job: emitting the right per-construct concept binding.
+// translateConceptPathsToPayload.
 
 // TestRewriter_MultipleQueriesDifferentConcepts locks the case the
 // import-model refactor most depends on: two queries in one file,
-// each bound to a different concept via per-construct @useConcept.
+// each bound to a different concept via the signature.
 func TestRewriter_MultipleQueriesDifferentConcepts(t *testing.T) {
-	source := `@useConcept(participant)
-@description("Active participants in a space.")
-query queryActiveParticipants {
+	source := `@description("Active participants in a space.")
+query participant queryActiveParticipants {
   filter participant.spaceId == args.spaceId
   shape  participantFull
 }
 
-@useConcept(space)
 @description("Active spaces for a user.")
-query queryActiveSpaces {
+query space queryActiveSpaces {
   filter space.ownerId == args.userId
   shape  spaceFull
 }`
@@ -71,9 +64,8 @@ query queryActiveSpaces {
 // TestRewriter_MultipleMutationsDifferentConcepts is the mutation
 // twin of the query test above.
 func TestRewriter_MultipleMutationsDifferentConcepts(t *testing.T) {
-	source := `@useConcept(space)
-@description("Create a cognition space.")
-mutation mutationCreateSpace {
+	source := `@description("Create a cognition space.")
+mutation space mutationCreateSpace {
   args { name string @required }
   insert space {
     id:   args.id
@@ -81,9 +73,8 @@ mutation mutationCreateSpace {
   }
 }
 
-@useConcept(participant)
 @description("Add a participant to a space.")
-mutation mutationAddParticipant {
+mutation participant mutationAddParticipant {
   args { spaceId string @required; userId string @required }
   insert participant {
     spaceId: args.spaceId
@@ -110,29 +101,23 @@ mutation mutationAddParticipant {
 	}
 }
 
-// TestRewriter_LeftoverFileTopUseStillWorks locks the legacy
-// single-construct path: a file with a file-top `use <ns>.<concept>`
-// directive and no per-construct annotation still rewrites cleanly.
-// (Backward compatibility during the import-model migration window.)
-func TestRewriter_LeftoverFileTopUseStillWorks(t *testing.T) {
-	source := `use cognition.participant
-
-@description("Single-construct legacy file.")
-query queryParticipantById {
-  args { id string @required }
-  filter id == args.id
-  shape  participantFull
+// TestRewriter_MissingConceptBindingErrors locks the migration-error
+// path: a struct-form query/mutation without a signature-bound concept
+// must fail with a clear "missing concept binding" message. Previously
+// the rewriter would fall back to an annotation or file-top directive;
+// memql#314 retired those fallbacks.
+func TestRewriter_MissingConceptBindingErrors(t *testing.T) {
+	source := `@description("Bare-signature query, no concept binding.")
+query queryActiveSpaces {
+  filter space.ownerId == args.userId
+  shape  spaceFull
 }`
 
-	out, err := NormaliseQuerySource(source)
-	if err != nil {
-		t.Fatalf("NormaliseQuerySource: %v", err)
+	_, err := NormaliseQuerySource(source)
+	if err == nil {
+		t.Fatal("expected error: query missing signature-bound concept")
 	}
-	if !strings.Contains(out, "func (Query) queryParticipantById(") {
-		t.Errorf("expected procedural form, got:\n%s", out)
-	}
-	// The file-top `use` produces a fully-qualified concept id.
-	if !strings.Contains(out, "concept==v1:cognition:participant") {
-		t.Errorf("expected fully-qualified concept binding from file-top `use`, got:\n%s", out)
+	if !strings.Contains(err.Error(), "missing concept binding") {
+		t.Fatalf("error should name the missing binding; got %q", err.Error())
 	}
 }

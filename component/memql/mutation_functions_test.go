@@ -113,8 +113,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
-	src := `@useConcept(space)
-mutation mutationCreateSpaceShorthand {
+	src := `mutation space mutationCreateSpaceShorthand {
   args {
     spaceId  string  @required
     name     string  @required
