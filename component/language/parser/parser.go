@@ -136,6 +136,30 @@ func ParseShapeDecl(source string) (*ShapeDecl, error) {
 	return shape, nil
 }
 
+// ParseBuiltinDecl tokenises the given source and parses it as a
+// single struct-form builtin declaration. Convenience wrapper around
+// ParseFile for the unified-kinds loader's LoadUnifiedBuiltins flow.
+// Mirrors ParseShapeDecl on the error surface.
+//
+// memql#318 (sub-epic #309 / #306 child C).
+func ParseBuiltinDecl(source string) (*BuiltinDecl, error) {
+	file, err := ParseFile(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Definitions) == 0 {
+		return nil, fmt.Errorf("no builtin declaration found")
+	}
+	if len(file.Definitions) > 1 {
+		return nil, fmt.Errorf("expected one builtin declaration, got %d definitions", len(file.Definitions))
+	}
+	builtin, ok := file.Definitions[0].(*BuiltinDecl)
+	if !ok {
+		return nil, fmt.Errorf("expected builtin declaration, got %T", file.Definitions[0])
+	}
+	return builtin, nil
+}
+
 // ParseFile parses a file containing multiple definitions.
 func (p *Parser) parseFile() (*File, error) {
 	file := &File{
@@ -421,8 +445,16 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "builtin":
+		// Contextual keyword: `builtin` at top-of-file introduces a
+		// struct-form builtin declaration. memql#318
+		// (sub-epic #309 / #306 child C).
+		def, err = p.parseBuiltinDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', or 'provider'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', or 'builtin'", p.current.Literal)
 	}
 
 	if err != nil {
@@ -1510,6 +1542,106 @@ func (p *Parser) parseShapeDecl(attrs []*Attribute) (*ShapeDecl, error) {
 		return nil, err
 	}
 	return decl, nil
+}
+
+// parseBuiltinDecl parses a struct-form builtin declaration:
+//
+//   builtin <name> {
+//     <field> <type> [@required]
+//     ...
+//   }
+//
+// Body grammar: each field is `name type` followed by zero or more
+// `@annotation` attributes. The langparser's lexer already strips
+// newlines, so the field boundary is detected structurally -- a
+// TokenIdentifier that ISN'T preceded by `@` starts a new field;
+// `}` ends the body.
+//
+// Builtin-level annotations (the cluster captured by parseDefinition)
+// carry the operational semantics (`@executor`, `@args`, `@alias`,
+// `@description`, `@enabled`, `@sdk`). The converter
+// (builtinDeclToFunction in the memql package) interprets them.
+//
+// memql#318 (sub-epic #309 / #306 child C).
+func (p *Parser) parseBuiltinDecl(attrs []*Attribute) (*BuiltinDecl, error) {
+	if !p.check(TokenIdentifier) || p.current.Literal != "builtin" {
+		return nil, newParseErrorf(&p.current, "expected 'builtin' keyword, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected builtin name after 'builtin', got %q", p.current.Literal)
+	}
+	decl := &BuiltinDecl{
+		Name:       p.current.Literal,
+		Attributes: attrs,
+	}
+	p.advance()
+
+	if err := p.expect(TokenBraceOpen); err != nil {
+		return nil, err
+	}
+
+	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+		field, err := p.parseBuiltinField()
+		if err != nil {
+			return nil, err
+		}
+		decl.Fields = append(decl.Fields, field)
+	}
+
+	if err := p.expect(TokenBraceClose); err != nil {
+		return nil, err
+	}
+	return decl, nil
+}
+
+// parseBuiltinField parses one `<name> <type> [@annotation ...]` row
+// inside a builtin body. Type accepts primitives and the array-of-
+// primitive shorthand `[]primitive`. Field-level annotations are
+// captured as Attribute list; only `@required` is acted on today
+// (parses semantics-bearing flag), but the slice carries any future
+// annotations forward verbatim.
+func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "expected builtin field name, got %q", p.current.Literal)
+	}
+	field := &BuiltinField{Name: p.current.Literal}
+	p.advance()
+
+	// Type: optional `[]` prefix + ident.
+	if p.check(TokenBracketOpen) {
+		p.advance()
+		if err := p.expect(TokenBracketClose); err != nil {
+			return nil, err
+		}
+		field.Type = "[]"
+	}
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current,
+			"expected type for builtin field %q, got %q", field.Name, p.current.Literal)
+	}
+	field.Type += p.current.Literal
+	p.advance()
+
+	// Field-level annotations: consume `@attribute(args)` while next
+	// token is `@`. The annotation cluster ends as soon as we see an
+	// ident (= next field's name) or `}` (= end of body).
+	for p.check(TokenAt) {
+		attr, err := p.parseAttribute()
+		if err != nil {
+			return nil, err
+		}
+		if attr == nil {
+			continue
+		}
+		if attr.Name == "required" {
+			field.Required = true
+		}
+		field.Attributes = append(field.Attributes, attr)
+	}
+
+	return field, nil
 }
 
 // parsePropertyDecl parses a single property declaration inside a

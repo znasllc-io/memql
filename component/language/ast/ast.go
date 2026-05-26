@@ -1257,6 +1257,46 @@ type ConceptDecl struct {
 
 func (*ConceptDecl) node() {}
 
+// BuiltinDecl is the shared-frontend AST node for a struct-form
+// builtin declaration (`builtin NAME { field type @required; ... }`).
+// Introduced by memql#318 (sub-epic #309 / #306 child C) so the
+// unified-kinds loader can parse builtins through the langparser
+// instead of the hand-rolled builtin_parser.go mini-parser.
+//
+// Annotation surface (validated by the converter, not the parser):
+//
+//	@enabled / @disabled              lifecycle (engine-side flags)
+//	@description("text")              documentation
+//	@executor("integration.X.Y")      Go executor name -- required
+//	@alias("name")                    parser-side alias (multi-valued)
+//	@args(profile="...", stringKey="...", additionalProperties=...)
+//	                                   parse-time argument contract
+//	@sdk                              SDK-generator marker (no engine effect)
+//
+// Field grammar: `<name> <type> [@required]`. Type accepts primitives
+// (string, bool, int, number, object) and `[]primitive` array forms.
+// The converter (builtinDeclToFunction in the memql package) walks
+// Fields + Attributes to produce a Function with Type=builtin.
+type BuiltinDecl struct {
+	Name       string         // builtin name
+	Attributes []*Attribute   // builtin-level annotations
+	Fields     []*BuiltinField // body field declarations
+	Path       string         // source path, for errors/diagnostics
+}
+
+func (*BuiltinDecl) node() {}
+
+// BuiltinField is a single field declaration inside a BuiltinDecl
+// body. The Type string preserves the author-surface form
+// (`string`, `bool`, `[]string`, etc.); the converter passes it
+// through to BuiltinArgContract.Properties verbatim.
+type BuiltinField struct {
+	Name       string
+	Type       string       // e.g. "string", "bool", "[]string"
+	Required   bool         // from @required
+	Attributes []*Attribute // any other field-level annotations (tolerated, not yet acted on)
+}
+
 // ShapeDecl is the shared-frontend AST node for a struct-form shape
 // declaration (`shape NAME { id; payload.X; ... }`). Introduced by
 // memql#315 (sub-epic #309 / #306 child C) so the unified-kinds loader
