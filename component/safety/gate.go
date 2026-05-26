@@ -94,6 +94,7 @@ func (r SlogRecorder) Record(ctx context.Context, desc ActionDescriptor, cls Cla
 		slog.String("tier", cls.Tier.String()),
 		slog.Any("categories", cats),
 		slog.String("source", string(cls.Source)),
+		slog.String("rule_id", cls.RuleID),
 		slog.Float64("confidence", cls.Confidence),
 		slog.Int64("classifier_ms", cls.LatencyMs),
 		slog.String("decision", string(decision)),
