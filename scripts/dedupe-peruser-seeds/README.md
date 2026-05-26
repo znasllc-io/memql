@@ -47,7 +47,16 @@ to the env var.
    `deterministicPerUserSeedId` in `component/memql/seed_materializer.go`).
 4. Dooms every row whose id doesn't match the canonical form.
 5. Dooms every participant pointing at a doomed agent id.
-6. In `--execute` mode, runs both deletes inside one transaction.
+6. Runs a **read-only audit** of every other concept that carries a
+   single-valued `payload.agentId` field (authorizations, delegations,
+   audio/video overrides, client-tool requests, utterance source ids)
+   and prints per-concept row counts pointing at the doomed agent
+   ids. The audit is informational only — those rows are NOT touched
+   by either the dry-run or execute pass. See the runbook at
+   [`docs/migrations/dedupe-peruser-seeds.md`](../../docs/migrations/dedupe-peruser-seeds.md)
+   for follow-up guidance on each audited concept.
+7. In `--execute` mode, runs both deletes (agent + participant rows)
+   inside one transaction.
 
 Hard delete is intentional. memql's `(id, "createdAt")` PK means soft
 delete (a new version with `deleted=true`) would still leave the
