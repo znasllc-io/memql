@@ -49,8 +49,6 @@ type specDecl struct {
 	name                     string
 	isTrait                  bool
 	description              string
-	useConceptName           string
-	useShapeName             string
 	bodySource               string
 	seenLifecycleAnnotations map[string]bool
 }
@@ -68,8 +66,6 @@ type specMemQLParser struct {
 // full author surfaces. The parser rejects anything else by name.
 var allowedSpecAnnotations = map[string]bool{
 	"description": true,
-	"useConcept":  true,
-	"useShape":    true,
 }
 
 var allowedTraitAnnotations = map[string]bool{
@@ -137,22 +133,6 @@ func (p *specMemQLParser) parseAnnotation(decl *specDecl, name string) error {
 			return fmt.Errorf("@description: %w", err)
 		}
 		decl.description = val
-		return nil
-
-	case "useConcept":
-		val, err := p.ParseParenIdent()
-		if err != nil {
-			return fmt.Errorf("@useConcept: %w", err)
-		}
-		decl.useConceptName = val
-		return nil
-
-	case "useShape":
-		val, err := p.ParseParenIdent()
-		if err != nil {
-			return fmt.Errorf("@useShape: %w", err)
-		}
-		decl.useShapeName = val
 		return nil
 
 	case "enabled":
@@ -238,36 +218,13 @@ func (p *specMemQLParser) buildSpec(decl *specDecl, origin string) (*Spec, error
 		}
 	}
 
-	// Bindings rejected on traits.
-	if decl.isTrait {
-		if decl.useConceptName != "" {
-			return nil, fmt.Errorf("trait %q must not carry @useConcept(...) (traits are concept-agnostic; bind only on specs)", decl.name)
-		}
-		if decl.useShapeName != "" {
-			return nil, fmt.Errorf("trait %q must not carry @useShape(...) (traits are concept-agnostic; bind only on specs)", decl.name)
-		}
-	} else {
-		// Specs require exactly one binding.
-		hasUseConcept := decl.useConceptName != ""
-		hasUseShape := decl.useShapeName != ""
-		if !hasUseConcept && !hasUseShape {
-			return nil, fmt.Errorf("spec %q is missing a binding -- declare exactly one of @useConcept(<bareName>) or @useShape(<bareName>)", decl.name)
-		}
-		if hasUseConcept && hasUseShape {
-			return nil, fmt.Errorf("spec %q carries both @useConcept and @useShape -- declare exactly one", decl.name)
-		}
-	}
-
-	// Bare-name body translation. `@useConcept(N)` / `@useShape(N)`
-	// authors write payload references as `N.X`; rewrite to
-	// `payload.X` before the expression parser tokenises.
+	// The legacy `@useConcept(N)` / `@useShape(N)` annotations were
+	// retired alongside the consolidated DSL layout: specs and traits
+	// now bind their concept context via the file-top `use ...`
+	// import + the construct's signature. Body authors write
+	// `payload.X` directly; no per-spec bare-name translation runs
+	// here.
 	bodySource := decl.bodySource
-	if decl.useConceptName != "" {
-		bodySource = translateConceptPathsToPayload(bodySource, decl.useConceptName)
-	}
-	if decl.useShapeName != "" {
-		bodySource = translateConceptPathsToPayload(bodySource, decl.useShapeName)
-	}
 
 	// Parse the body as a single boolean expression via the shared
 	// expression parser.
@@ -300,15 +257,13 @@ func (p *specMemQLParser) buildSpec(decl *specDecl, origin string) (*Spec, error
 	}
 
 	return &Spec{
-		Name:           decl.name,
-		Description:    decl.description,
-		ExprSource:     bodySource,
-		Expr:           expr,
-		Kind:           kind,
-		UsesSI:         detectSIUsage(expr),
-		Origin:         origin,
-		UseConceptName: decl.useConceptName,
-		UseShapeName:   decl.useShapeName,
-		IsTrait:        decl.isTrait,
+		Name:        decl.name,
+		Description: decl.description,
+		ExprSource:  bodySource,
+		Expr:        expr,
+		Kind:        kind,
+		UsesSI:      detectSIUsage(expr),
+		Origin:      origin,
+		IsTrait:     decl.isTrait,
 	}, nil
 }

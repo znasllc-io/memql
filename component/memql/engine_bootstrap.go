@@ -189,13 +189,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		e.Logger.Warn("unified spec loader returned an error",
 			"component", "memql.engine", "error", ulErr)
 	}
-
-	// Now that both spec and shape registries are populated, validate
-	// every spec's @useShape(N) binding resolves to a registered
-	// shape. Catches typos + dangling references at startup.
-	if err := ValidateSpecBindings(specRegistry, shapeRegistry); err != nil {
-		return err
-	}
+	_ = shapeRegistry // shape-binding validation moved to the spec/shape modern path; the legacy @useShape(N) post-load check is retired.
 
 	// Pass 2: overlay builtins from the new tree (struct-form
 	// `builtin NAME { ... }` blocks). Builtins are functions

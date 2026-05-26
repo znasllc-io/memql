@@ -31,11 +31,11 @@ func (r *ConceptResolver) ResolveFile(file *languageParser.File, versionContext 
 }
 
 // ResolveFileWithSignatureConcepts is the canonical entry point post-
-// PR-48: in addition to the legacy `use` directive + `@useConcept`
-// resolution, it also seeds the symbol table with concept names
-// captured from the construct SIGNATURE (`mutation <Concept> <name>
-// { ... }`). The caller passes the bare-name list it pulled from
-// the pre-NormaliseAll source via extractAllSignatureConceptNames.
+// PR-48: it builds the symbol table from the file-top `use ...`
+// declarations and the concept names captured from the construct
+// SIGNATURE (`mutation <Concept> <name> { ... }`). The caller passes
+// the bare-name list it pulled from the pre-NormaliseAll source via
+// extractAllSignatureConceptNames.
 func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.File, versionContext string, signatureConcepts []string) error {
 	if file == nil {
 		return nil
@@ -47,18 +47,8 @@ func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.
 		return fmt.Errorf("resolving use declarations: %w", err)
 	}
 
-	// Augment the symbol table with `@useConcept(<bareName>)` annotations
-	// on function definitions. The bare name is resolved by trailing-
-	// segment match against the registered concept list. This is the
-	// canonical concept-binding form going forward; the `use` directive
-	// is on its way out (G.3.g).
-	if err := r.collectUseConceptAnnotations(file, symbols); err != nil {
-		return fmt.Errorf("resolving @useConcept annotations: %w", err)
-	}
-
 	// Augment the symbol table with concepts named in construct
-	// signatures (`<kind> <Concept> <name> { ... }`). Same trailing-
-	// segment resolution rule as @useConcept.
+	// signatures (`<kind> <Concept> <name> { ... }`).
 	for _, bareName := range signatureConcepts {
 		if _, dup := symbols[bareName]; dup {
 			continue
@@ -85,53 +75,6 @@ func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.
 		}
 	}
 
-	return nil
-}
-
-// collectUseConceptAnnotations walks every function definition in the
-// file, picks up `@useConcept(name1, name2, ...)` attribute targets,
-// resolves each bare name against the concept registry by trailing-
-// segment match, and adds the resulting symbol entries to `symbols`.
-//
-// Resolution rule: a bare name resolves to a concept whose canonical id
-// ends with `:<name>` (case-insensitive comparison). Zero matches or
-// more than one match is a load-time error — the caller should fix the
-// annotation to disambiguate or add the concept first.
-//
-// Collisions with the file's `use` declarations are an error so authors
-// don't accidentally bind the same short name twice.
-func (r *ConceptResolver) collectUseConceptAnnotations(file *languageParser.File, symbols map[string]*symbolEntry) error {
-	if file == nil || len(file.Definitions) == 0 {
-		return nil
-	}
-	for _, def := range file.Definitions {
-		fn, ok := def.(*languageParser.FunctionDef)
-		if !ok {
-			continue
-		}
-		for _, attr := range fn.Attributes {
-			if attr == nil || attr.Name != languageParser.AttrUseConcept {
-				continue
-			}
-			for _, bareName := range attr.UseTargets() {
-				resolvedId, err := r.resolveBareConceptName(bareName)
-				if err != nil {
-					return fmt.Errorf("function %q: @useConcept(%s): %w", fn.Name, bareName, err)
-				}
-				if existing, dup := symbols[bareName]; dup {
-					if existing.resolvedId != resolvedId {
-						return fmt.Errorf("function %q: @useConcept(%s) conflicts with `use %s` (resolves to %q vs %q)", fn.Name, bareName, existing.fullPath, resolvedId, existing.resolvedId)
-					}
-					continue
-				}
-				symbols[bareName] = &symbolEntry{
-					leafName:   bareName,
-					resolvedId: resolvedId,
-					fullPath:   "@useConcept(" + bareName + ")",
-				}
-			}
-		}
-	}
 	return nil
 }
 

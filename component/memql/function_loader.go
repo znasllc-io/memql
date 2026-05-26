@@ -127,59 +127,26 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	}
 
 	// Keep the pre-translation source for the declared-usage validator
-	// (Phase G.3.g pt 4). The validator checks `@useConcept(<name>)`
-	// against `\b<name>\.` references in the body, which would already
-	// be translated to `payload.` if we ran it on the post-translation
-	// source.
+	// (Phase G.3.g pt 4). The validator scans `@use*(...)` annotation
+	// targets + args fields against `\b<name>\.` references in the
+	// body, which would already be translated to `payload.` if we ran
+	// it on the post-translation source.
 	rawSourceForUsage := content
 
-	// Reject the legacy filter form (`<conceptName>.X==args.X`) at
-	// load time. The 2026-05 DSL cleanup picked `payload.X` as the
-	// only legal way to reference payload fields when an @useConcept
-	// binding is in scope; this validator enforces the rule so a
-	// regression fails the engine startup with a clear message rather
-	// than silently translating via translateConceptPathsToPayload.
-	if err := validateNoLegacyConceptPathRefs(content, origin); err != nil {
-		return nil, err
-	}
-
-	// Concept-namespace path translation. A function bound via
-	// `@useConcept(name)` writes payload references in the canonical
-	// `<name>.X` form (e.g. `space.name`). Translate every occurrence
-	// of `\b<name>\.` to `payload.` BEFORE the parser sees the source,
-	// so downstream evaluator code keeps reading rows under its
-	// existing `payload.X` accessor without any AST-level changes.
-	//
-	// Operates on the post-rewrite source so both struct-form and
-	// procedural-form bodies are covered uniformly. The translation
-	// is naive `\b<name>\.` replacement -- it intentionally rewrites
-	// `<name>.` occurrences in comments / docstrings too (comments
-	// don't affect parsing, and the rewrite reads as a clarifying
-	// "this is payload data" annotation rather than a mis-edit).
-	// Multi-construct files (Phase 2 consolidated layout) can declare
-	// many @useConcept / @useShape annotations -- one per construct.
-	// Translate each distinct bare name independently so a query
-	// bound to `participant` and a query bound to `space` in the
-	// same file each see their own payload references rewritten
-	// without stomping on the other. extractAllUseConceptNames
-	// returns names in declaration order; translation is order-
-	// insensitive (each `\b<name>\.` pattern is disjoint by
-	// construction).
-	for _, name := range extractAllUseConceptNames(content) {
-		content = translateConceptPathsToPayload(content, name)
-	}
-	for _, name := range extractAllUseShapeNames(content) {
-		content = translateConceptPathsToPayload(content, name)
-	}
-	// Same translation for signature-bound concepts (post-migration
-	// canonical shape, PR #48). Files without legacy @useConcept
-	// annotations still need `<Concept>.X` -> `payload.X` so the
-	// engine reads through its existing payload.X accessor. The
-	// signature concepts were captured from the PRE-rewrite source
-	// above; we just apply the translation against the post-rewrite
+	// Concept-namespace path translation. A function bound via the
+	// canonical signature form (`mutation <Concept> <name>`) writes
+	// payload references in the `<Concept>.X` form (e.g. `space.name`).
+	// Translate every occurrence of `\b<name>\.` to `payload.` BEFORE
+	// the parser sees the source, so downstream evaluator code keeps
+	// reading rows under its existing `payload.X` accessor without
+	// any AST-level changes. Translation is naive `\b<name>\.`
+	// replacement -- it intentionally rewrites `<name>.` occurrences
+	// in comments / docstrings too (comments don't affect parsing).
+	// The signature concepts were captured from the PRE-rewrite
+	// source above; we apply the translation against the post-rewrite
 	// content here.
 	for _, name := range signatureConcepts {
-		content = translateConceptPathsToPayload(content, name)
+		content = translateSignatureConceptPathsToPayload(content, name)
 	}
 
 	// Try parsing with the full parser
@@ -206,10 +173,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	}
 
 	// Resolve symbolic concept references. Trigger when EITHER a
-	// file-top `use` directive OR a function-def `@useConcept(...)`
-	// annotation OR a signature-bound concept is present -- the
-	// resolver handles all three.
-	if registry != nil && (len(file.Uses) > 0 || hasUseConceptAnnotation(file) || len(signatureConcepts) > 0) {
+	// file-top `use` directive OR a signature-bound concept is
+	// present -- the resolver handles both.
+	if registry != nil && (len(file.Uses) > 0 || len(signatureConcepts) > 0) {
 		version := VersionFromFilePath(origin)
 		if version == "" {
 			version = "v1" // default
@@ -220,12 +186,12 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		}
 	}
 
-	// Set BoundConcept from the resolved use declaration OR a
-	// `@useConcept(<name>)` annotation on the function definition. The
-	// resulting fully-qualified concept ID is the implicit binding
-	// for bare `concept` in query expressions and argument-less
-	// `insert()` calls. Exactly one binding source is permitted; the
-	// concept-resolver guards against collisions.
+	// Set BoundConcept from the resolved use declaration OR the
+	// canonical construct-signature concept (`mutation <Concept>
+	// <name> { ... }`). The resulting fully-qualified concept ID is
+	// the implicit binding for bare `concept` in query expressions
+	// and argument-less `insert()` calls. Exactly one binding source
+	// is permitted; the concept-resolver guards against collisions.
 	var boundConcept string
 	// Legacy Form A (`use cognition.space`) is rejected at parse
 	// time, but the resolver still stamps ResolvedId on any
@@ -245,19 +211,10 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			boundConcept = id
 		}
 	}
-	if boundConcept == "" {
-		if id, err := boundConceptFromUseAnnotation(file, registry); err != nil {
-			return nil, fmt.Errorf("function %q: %w", expectedName, err)
-		} else if id != "" {
-			boundConcept = id
-		}
-	}
 	// Post-PR-48 canonical shape: the concept binding lives in the
 	// signature (`mutation <Concept> <name> { ... }`). When no Form A
-	// `use` directive and no legacy `@useConcept` annotation are
-	// present, resolve the signature concept via the registry's
-	// trailing-segment match (same rule the legacy concept-resolver
-	// applied to bare `@useConcept` names).
+	// `use` directive is present, resolve the signature concept via
+	// the registry's trailing-segment match.
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
 		if id, err := resolver.resolveBareConceptName(signatureConcepts[0]); err == nil {
@@ -273,14 +230,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// binding in the construct signature (`mutation <Concept> <name>`),
 	// and the multi-construct file layout (per `function_slices.go`
 	// header) prepends every file-top use declaration to every emitted
-	// slice so the slice parser has the imports it needs. Counting
-	// file-top uses against a signature-bound construct is a category
-	// error -- the uses are file-level imports, not a one-concept-per-
-	// function constraint -- and rejecting on `len(file.Uses) > 1` is
-	// what broke `cognition/mutations.memql`, `worker/mutations.memql`,
-	// `worker/queries.memql` after the multi-construct consolidation
-	// (surfaced via memql-cockpit#49: daily-space never created because
-	// `mutationCreateDailySpace` failed to load).
+	// slice so the slice parser has the imports it needs.
 	//
 	// Skip the check when the construct has a signature-bound concept;
 	// fall through to it only for legacy procedural-form queries /
@@ -559,36 +509,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	return fn, nil
 }
 
-// useConceptAnnotSourceRe matches a `@useConcept(<bareName>)` annotation
-// in raw .memql source. Single bare name only -- the canonical
-// query/mutation form. The submatch captures the bare name.
-var useConceptAnnotSourceRe = regexp.MustCompile(`@useConcept\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
-
-// useShapeAnnotSourceRe matches a `@useShape(<bareName>)` annotation in
-// raw .memql source. Same pattern as useConcept; the binding form on
-// specs that prefer to bind to a shape (the shape's concept becomes
-// the spec's effective concept).
-var useShapeAnnotSourceRe = regexp.MustCompile(`@useShape\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
-
-// extractUseConceptName scans raw .memql source for the first
-// `@useConcept(<bareName>)` annotation and returns the bare name.
-// Returns ("", false) when no annotation is present.
-//
-// For multi-construct files (the import-model refactor's
-// consolidated layout), prefer extractAllUseConceptNames -- this
-// helper only sees the first match.
-func extractUseConceptName(source string) (string, bool) {
-	m := useConceptAnnotSourceRe.FindStringSubmatch(source)
-	if m == nil {
-		return "", false
-	}
-	return m[1], true
-}
-
 // signatureConceptRe matches the canonical post-PR-48 struct-form
 // signature `<kind> <Concept> <name> {` and captures the concept
-// bare name. Used post-migration to feed the same body-rewrite
-// pipeline that `@useConcept` previously drove.
+// bare name. Used to feed the per-name payload-translation pipeline
+// that rewrites `<Concept>.X` references in the construct body to
+// `payload.X` before the expression parser tokenises.
 var signatureConceptRe = regexp.MustCompile(
 	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
@@ -596,9 +521,7 @@ var signatureConceptRe = regexp.MustCompile(
 // extractAllSignatureConceptNames scans raw .memql source for every
 // signature-bound concept binding (`mutation <Concept> <name> {`,
 // `query <Concept> <name> {`, etc.) and returns the distinct concept
-// names in declaration order. Mirrors extractAllUseConceptNames so
-// post-migration files (signature-bound) and any straggler files
-// (legacy `@useConcept`) feed the same per-name translation pass.
+// names in declaration order.
 func extractAllSignatureConceptNames(source string) []string {
 	matches := signatureConceptRe.FindAllStringSubmatch(source, -1)
 	if len(matches) == 0 {
@@ -620,142 +543,14 @@ func extractAllSignatureConceptNames(source string) []string {
 	return out
 }
 
-// extractAllUseConceptNames scans raw .memql source for every
-// `@useConcept(<bareName>)` annotation and returns the distinct
-// bare names in declaration order. The list is the input to the
-// per-construct bareName-to-payload translation for files holding
-// multiple constructs bound to different concepts.
-func extractAllUseConceptNames(source string) []string {
-	matches := useConceptAnnotSourceRe.FindAllStringSubmatch(source, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(matches))
-	out := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
-		name := m[1]
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
-// extractUseShapeName scans raw .memql source for the first
-// `@useShape(<bareName>)` annotation and returns the bare name.
-// Returns ("", false) when no annotation is present.
-func extractUseShapeName(source string) (string, bool) {
-	m := useShapeAnnotSourceRe.FindStringSubmatch(source)
-	if m == nil {
-		return "", false
-	}
-	return m[1], true
-}
-
-// extractAllUseShapeNames -- shape-side twin of
-// extractAllUseConceptNames. Used by the multi-construct
-// translation pass.
-func extractAllUseShapeNames(source string) []string {
-	matches := useShapeAnnotSourceRe.FindAllStringSubmatch(source, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(matches))
-	out := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
-		name := m[1]
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
-// translateConceptPathsToPayload rewrites every `\b<bareName>\.`
-// occurrence in `source` to `payload.`. The annotation itself
-// (`@useConcept(<bareName>)` / `@useShape(<bareName>)`) is preserved
-// because there's no trailing `.` after the bare name inside the
-// `(...)` argument context, so the regex doesn't match it.
-func translateConceptPathsToPayload(source, bareName string) string {
+// translateSignatureConceptPathsToPayload rewrites every
+// `\b<bareName>\.` occurrence in `source` to `payload.`. The
+// signature itself (`mutation <Concept> <name>`) is preserved
+// because the bare name is followed by a space and the construct
+// name, not a `.`, so the regex doesn't match it.
+func translateSignatureConceptPathsToPayload(source, bareName string) string {
 	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(bareName) + `\.`)
 	return re.ReplaceAllString(source, "payload.")
-}
-
-// hasUseConceptAnnotation reports whether any function definition in
-// the parsed file carries a `@useConcept(...)` attribute. Used to gate
-// the concept-resolver pass for files that bind their concept via the
-// annotation instead of the legacy `use <ns>.<concept>` directive.
-func hasUseConceptAnnotation(file *languageParser.File) bool {
-	if file == nil {
-		return false
-	}
-	for _, def := range file.Definitions {
-		fn, ok := def.(*languageParser.FunctionDef)
-		if !ok {
-			continue
-		}
-		for _, attr := range fn.Attributes {
-			if attr != nil && attr.Name == languageParser.AttrUseConcept {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// boundConceptFromUseAnnotation resolves the file's `@useConcept(<name>)`
-// annotation to a fully-qualified concept id via the registry's
-// trailing-segment match. Used to derive `BoundConcept` for files
-// that bind their concept via the annotation instead of the legacy
-// `use <ns>.<concept>` directive.
-//
-// Returns an empty string with no error when no annotation is present
-// (so the caller can fall through to other binding paths). Returns
-// an error when the annotation is present but unresolvable.
-func boundConceptFromUseAnnotation(file *languageParser.File, registry memoryNodes.Registry) (string, error) {
-	if file == nil || registry == nil {
-		return "", nil
-	}
-	var picked string
-	for _, def := range file.Definitions {
-		fn, ok := def.(*languageParser.FunctionDef)
-		if !ok {
-			continue
-		}
-		for _, attr := range fn.Attributes {
-			if attr == nil || attr.Name != languageParser.AttrUseConcept {
-				continue
-			}
-			targets := attr.UseTargets()
-			if len(targets) == 0 {
-				continue
-			}
-			if len(targets) > 1 {
-				return "", fmt.Errorf("@useConcept on a query/mutation must name exactly one concept (got %d: %s)", len(targets), strings.Join(targets, ", "))
-			}
-			name := targets[0]
-			resolver := NewConceptResolver(registry)
-			id, err := resolver.resolveBareConceptName(name)
-			if err != nil {
-				return "", fmt.Errorf("@useConcept(%s): %w", name, err)
-			}
-			if picked != "" && picked != id {
-				return "", fmt.Errorf("multiple @useConcept annotations on the same function resolve to different concepts (%q and %q)", picked, id)
-			}
-			picked = id
-		}
-	}
-	return picked, nil
 }
 
 // ensureBoundConceptFilter returns expr AND'd with a

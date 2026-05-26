@@ -766,9 +766,13 @@ const (
 	// Dependency-declaration attributes. Every named construct
 	// referenced inside a body MUST be declared via the matching
 	// @use* annotation. Unused declarations error at load.
+	//
+	// The legacy concept/shape binding annotations `@useConcept` and
+	// `@useShape` were retired in issue #301 -- concepts now bind
+	// through the construct's signature (`mutation <Concept> <name>`)
+	// and the file-top `use` import; shapes bind through `@shape("name")`
+	// (string form, parsed elsewhere).
 	AttrUse           = "use"
-	AttrUseConcept    = "useConcept"
-	AttrUseShape      = "useShape"
 	AttrUseSpec       = "useSpec"
 	AttrUseTrait      = "useTrait"
 	AttrUseQuery      = "useQuery"

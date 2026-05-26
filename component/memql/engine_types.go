@@ -100,22 +100,9 @@ type Spec struct {
 	UsesSI      bool
 	Origin      string
 
-	// UseConceptName carries the bare name from @useConcept(N) when
-	// the spec uses that binding form. Empty when the spec binds via
-	// @useShape or when the entry is a trait.
-	UseConceptName string
-
-	// UseShapeName carries the bare name from @useShape(N) when the
-	// spec uses that binding form. Empty when the spec binds via
-	// @useConcept or when the entry is a trait. Validated at post-load
-	// time against the shape registry.
-	UseShapeName string
-
 	// IsTrait flags this entry as a trait rather than a spec.
 	// Traits share the runtime contract (atomic boolean predicate)
-	// but are concept-agnostic: at load time, trait sources are
-	// validated to FORBID @useConcept / @useShape, allowing only
-	// @row / @caller kind annotations.
+	// but are concept-agnostic.
 	IsTrait bool
 }
 
@@ -124,16 +111,14 @@ func (s *Spec) clone() *Spec {
 		return nil
 	}
 	return &Spec{
-		Name:           s.Name,
-		Description:    s.Description,
-		ExprSource:     s.ExprSource,
-		Expr:           cloneExpressionNode(s.Expr),
-		Kind:           s.Kind,
-		UsesSI:         s.UsesSI,
-		Origin:         s.Origin,
-		UseConceptName: s.UseConceptName,
-		UseShapeName:   s.UseShapeName,
-		IsTrait:        s.IsTrait,
+		Name:        s.Name,
+		Description: s.Description,
+		ExprSource:  s.ExprSource,
+		Expr:        cloneExpressionNode(s.Expr),
+		Kind:        s.Kind,
+		UsesSI:      s.UsesSI,
+		Origin:      s.Origin,
+		IsTrait:     s.IsTrait,
 	}
 }
 

@@ -14,10 +14,8 @@ import (
 // stale declaration found. Mirrors Go's "imported and not used" /
 // "declared but not used" discipline. (Phase G.3.g pt 4.)
 //
-// The validator runs on the RAW source (pre-path-translation) so the
-// `@useConcept(<bareName>)` check sees the canonical `<bareName>.X`
-// references intact. Other `@use*` targets and args fields pass
-// through both forms unchanged.
+// The validator runs on the RAW source (pre-path-translation) so
+// `@use*` targets and args fields pass through unchanged.
 //
 // Inert cases:
 //
@@ -53,15 +51,6 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 			continue
 		}
 		switch attr.Name {
-		case languageParser.AttrUseConcept:
-			// `@useConcept(name)` -> body must reference `name.X` or
-			// the bare `name` somewhere outside the annotation. Bare
-			// references (`concept==name`) are also OK.
-			for _, name := range attr.UseTargets() {
-				if !referencedAsNameOrDottedHead(bodyNoAnnotations, name) {
-					return fmt.Errorf("function %q: @useConcept(%s) declared but %s is never referenced in the body", funcDef.Name, name, name)
-				}
-			}
 		case languageParser.AttrUseQuery,
 			languageParser.AttrUseMutation,
 			languageParser.AttrUseAutomation,
@@ -74,7 +63,6 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 			}
 		case languageParser.AttrUseSpec,
 			languageParser.AttrUseTrait,
-			languageParser.AttrUseShape,
 			languageParser.AttrUseTool,
 			languageParser.AttrUsePrompt,
 			languageParser.AttrUseProvider,
@@ -231,15 +219,6 @@ func referencedAsCall(body, name string) bool {
 func referencedAsBareName(body, name string) bool {
 	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 	return re.MatchString(body)
-}
-
-func referencedAsNameOrDottedHead(body, name string) bool {
-	// Match `<name>.X` (concept-namespace path) OR bare `<name>`.
-	dottedRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\.`)
-	if dottedRe.MatchString(body) {
-		return true
-	}
-	return referencedAsBareName(body, name)
 }
 
 func referencedAsArgsField(body, fieldName string) bool {
