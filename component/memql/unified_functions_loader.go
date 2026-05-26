@@ -22,7 +22,23 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
+
+// constructAnnotationAllowLists keys each migrated construct's
+// annotation allow-list by its FunctionType so dispatchPerConstructParser
+// can validate annotations inline before delegating structural parsing
+// to the langparser-backed tryParseNewFunctionSyntax. The four
+// per-construct entry points (parseQueryMemQL / parseMutationMemQL /
+// parseLogicMemQL / parseAutomationMemQL) were thin shells around the
+// same validation + delegation; #308 inlined them. The four shells
+// + their tests are deleted in sub-epic #306 child D.
+var constructAnnotationAllowLists = map[languageParser.FunctionType]map[string]bool{
+	languageParser.FunctionTypeQuery:      allowedQueryAnnotations,      // query_parser.go
+	languageParser.FunctionTypeMutation:   allowedMutationAnnotations,   // mutation_parser.go
+	languageParser.FunctionTypeLogic:      allowedLogicAnnotations,      // logic_parser.go
+	languageParser.FunctionTypeAutomation: allowedAutomationAnnotations, // automation_parser.go
+}
 
 // LoadUnifiedFunctions walks the unified DSL tree, extracts every
 // function-shaped declaration (query / mutation / spec / logic /
@@ -91,31 +107,23 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 	return total, counts, nil
 }
 
-// dispatchPerConstructParser routes each function slice to the
-// dedicated parser for its construct kind. Each dedicated parser
-// validates its construct's annotation surface (hard-rejecting
-// unknown annotations / typos) before delegating structural parsing
-// to the shared tryParseNewFunctionSyntax helper.
+// dispatchPerConstructParser routes each function slice through the
+// langparser-backed shared parser (tryParseNewFunctionSyntax), with
+// a per-construct annotation allow-list applied inline beforehand.
+// Unknown / typo annotations on a query / mutation / logic /
+// automation slice are hard-rejected here; structural parsing is the
+// langparser's responsibility downstream.
 //
 // Procedural-form receivers (`func (Kind) NAME(...)` -- legacy
-// surface) flow through the shared helper directly, since no DSL
-// author writes them anymore and the per-construct annotation
-// surface only applies to the canonical struct form.
+// surface) and the other construct kinds (shape / tool / builtin /
+// prompt / provider / policy, parsed by their own dedicated loaders)
+// reach this dispatcher only through the safety-net fall-through and
+// skip the allow-list step.
 func dispatchPerConstructParser(slice FunctionSlice, origin string, conceptRegistry memoryNodes.Registry) (*Function, error) {
-	switch slice.Kind {
-	case languageParser.FunctionTypeQuery:
-		return parseQueryMemQL(slice.Name, origin, slice.Source, conceptRegistry)
-	case languageParser.FunctionTypeMutation:
-		return parseMutationMemQL(slice.Name, origin, slice.Source, conceptRegistry)
-	case languageParser.FunctionTypeLogic:
-		return parseLogicMemQL(slice.Name, origin, slice.Source, conceptRegistry)
-	case languageParser.FunctionTypeAutomation:
-		return parseAutomationMemQL(slice.Name, origin, slice.Source, conceptRegistry)
-	default:
-		// Other kinds (shape / tool / builtin / prompt / provider /
-		// policy) have their own dedicated parsers + loaders. Their
-		// slices shouldn't reach this dispatcher today, but route
-		// them through the shared helper as a safety net.
-		return tryParseNewFunctionSyntax(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry)
+	if allowed, ok := constructAnnotationAllowLists[slice.Kind]; ok {
+		if err := baseparser.ValidateConstructAnnotations(slice.Source, string(slice.Kind), allowed); err != nil {
+			return nil, fmt.Errorf("%s: %w", origin, err)
+		}
 	}
+	return tryParseNewFunctionSyntax(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry)
 }
