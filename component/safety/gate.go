@@ -207,7 +207,14 @@ func (g *Gate) Mode() Mode { return g.mode }
 // fail-closed vs fail-open per #229 -- the Gate itself stays
 // neutral, since the policy hasn't been consulted.
 func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, Classification, error) {
-	if g.mode == ModeOff {
+	// Per-surface mode lookup (memql#235). The gate's
+	// construction-time g.mode is the fallback; per-surface env
+	// vars (MEMQL_SAFETY_<SURFACE>_MODE) override so ops can flip
+	// one surface without touching the others. Read per-call so
+	// the override responds to env changes between calls (cheap
+	// os.Getenv lookup; no measurable overhead).
+	mode := resolveModeForSurface(desc.Surface, g.mode)
+	if mode == ModeOff {
 		return DecisionAllow, Classification{
 			Source: SourceDisabled,
 			Reason: "classifier off (MEMQL_COMMAND_CLASSIFIER_MODE=off)",
@@ -223,16 +230,16 @@ func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, C
 			LatencyMs: cls.LatencyMs,
 			Reason:    "classifier error: " + err.Error(),
 		}
-		g.recorder.Record(ctx, desc, errCls, DecisionAllow, g.mode)
+		g.recorder.Record(ctx, desc, errCls, DecisionAllow, mode)
 		return DecisionAllow, errCls, err
 	}
 	decision := g.decide(cls, desc)
-	if g.mode == ModeShadow {
+	if mode == ModeShadow {
 		// Record what we WOULD have decided, but always allow. The
 		// approval sink is NOT consulted in shadow -- the rollout-
 		// safety invariant (shadow never blocks AND never creates
 		// side-effecting rows the operator didn't authorise) holds.
-		g.recorder.Record(ctx, desc, cls, decision, g.mode)
+		g.recorder.Record(ctx, desc, cls, decision, mode)
 		return DecisionAllow, cls, nil
 	}
 	// Enforce mode: consult the approval sink on Ask. The sink may
@@ -243,7 +250,7 @@ func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, C
 	if decision == DecisionAsk {
 		decision, cls = g.applyApprovalVerdict(ctx, desc, decision, cls)
 	}
-	g.recorder.Record(ctx, desc, cls, decision, g.mode)
+	g.recorder.Record(ctx, desc, cls, decision, mode)
 	return decision, cls, nil
 }
 

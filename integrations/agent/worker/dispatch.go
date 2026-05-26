@@ -326,7 +326,12 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 		desc := buildSafetyDescriptor(req, effectiveScope, required.Capability)
 		gate := safety.DefaultGate()
 		decision, cls, classErr := gate.Evaluate(ctx, desc)
-		if proceed, reason := gate.EnforceDecision(decision, cls, classErr, true); !proceed {
+		// #235: per-surface fail-closed posture via env override.
+		// Computer-use surfaces default fail-CLOSED (highest blast
+		// radius -- the user's real machine); env can flip to
+		// fail-open if a regression makes that unsafe.
+		failClosed := safety.FailClosedForSurface(desc.Surface)
+		if proceed, reason := gate.EnforceDecision(desc.Surface, decision, cls, classErr, failClosed); !proceed {
 			return gateResult{
 				deny:               true,
 				requiredCapability: required.Capability,

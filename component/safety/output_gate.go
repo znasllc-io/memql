@@ -178,7 +178,14 @@ func (g *OutputGate) Mode() OutputMode { return g.mode }
 //   - err: the screener's error if any. Surfaces decide fail-open
 //     vs fail-closed per their threat model.
 func (g *OutputGate) Screen(ctx context.Context, in ScreeningInput) (ScreeningVerdict, ScreeningResult, error) {
-	if g.mode == OutputModeOff {
+	// Per-content-type mode lookup (memql#235). Mirrors the
+	// Gate-side per-surface override: an operator can flip
+	// http_fetch to enforce while leaving tool_output in shadow.
+	// Construction-time g.mode is the fallback when no env override
+	// is set, so existing tests (which pass Mode: in options) keep
+	// working.
+	mode := resolveOutputModeForContentType(in.ContentType, g.mode)
+	if mode == OutputModeOff {
 		clean := ScreeningResult{
 			Verdict:    ScreeningVerdictClean,
 			Tier:       TierNone,
@@ -206,16 +213,16 @@ func (g *OutputGate) Screen(ctx context.Context, in ScreeningInput) (ScreeningVe
 			LatencyMs: res.LatencyMs,
 			Reason:    "screener error: " + err.Error(),
 		}
-		g.recorder.Record(ctx, in, errRes, g.mode)
+		g.recorder.Record(ctx, in, errRes, mode)
 		return ScreeningVerdictClean, errRes, err
 	}
-	if g.mode == OutputModeShadow {
+	if mode == OutputModeShadow {
 		// Record what we WOULD have done, but always return Clean.
 		// Mirrors the command-side shadow invariant.
-		g.recorder.Record(ctx, in, res, g.mode)
+		g.recorder.Record(ctx, in, res, mode)
 		return ScreeningVerdictClean, res, nil
 	}
-	g.recorder.Record(ctx, in, res, g.mode)
+	g.recorder.Record(ctx, in, res, mode)
 	return res.Verdict, res, nil
 }
 

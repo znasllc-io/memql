@@ -36,7 +36,7 @@ func enforceGate(mode Mode) *Gate {
 
 func TestEnforceDecisionAllow(t *testing.T) {
 	g := enforceGate(ModeEnforce)
-	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, nil, true)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionAllow, Classification{}, nil, true)
 	if !proceed || reason != "" {
 		t.Errorf("Allow: expected proceed=true reason='', got %v %q", proceed, reason)
 	}
@@ -45,7 +45,7 @@ func TestEnforceDecisionAllow(t *testing.T) {
 func TestEnforceDecisionDenyCarriesReason(t *testing.T) {
 	g := enforceGate(ModeEnforce)
 	cls := Classification{Tier: TierCritical, Reason: "rm -rf /", RuleID: "shell.destructive"}
-	proceed, reason := g.EnforceDecision(DecisionDeny, cls, nil, false)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionDeny, cls, nil, false)
 	if proceed {
 		t.Error("Deny: expected proceed=false")
 	}
@@ -64,7 +64,7 @@ func TestEnforceDecisionAskTreatedAsRefusal(t *testing.T) {
 	// approver knows what to resolve.
 	g := enforceGate(ModeEnforce)
 	cls := Classification{Tier: TierHigh, Reason: "sudo invocation"}
-	proceed, reason := g.EnforceDecision(DecisionAsk, cls, nil, false)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionAsk, cls, nil, false)
 	if proceed {
 		t.Error("Ask: expected proceed=false")
 	}
@@ -79,7 +79,7 @@ func TestEnforceDecisionAskTreatedAsRefusal(t *testing.T) {
 func TestEnforceDecisionErrorFailClosedEnforce(t *testing.T) {
 	g := enforceGate(ModeEnforce)
 	boom := errors.New("provider unreachable")
-	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, true)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionAllow, Classification{}, boom, true)
 	if proceed {
 		t.Error("fail-closed in enforce: expected proceed=false on classifier error")
 	}
@@ -91,7 +91,7 @@ func TestEnforceDecisionErrorFailClosedEnforce(t *testing.T) {
 func TestEnforceDecisionErrorFailOpen(t *testing.T) {
 	g := enforceGate(ModeEnforce)
 	boom := errors.New("provider unreachable")
-	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, false)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionAllow, Classification{}, boom, false)
 	if !proceed || reason != "" {
 		t.Errorf("fail-open: expected proceed=true reason='' on classifier error, got %v %q", proceed, reason)
 	}
@@ -106,7 +106,7 @@ func TestEnforceDecisionErrorFailOpen(t *testing.T) {
 func TestEnforceDecisionShadowSuppressesFailClosed(t *testing.T) {
 	g := enforceGate(ModeShadow)
 	boom := errors.New("provider unreachable")
-	proceed, reason := g.EnforceDecision(DecisionAllow, Classification{}, boom, true)
+	proceed, reason := g.EnforceDecision(SurfaceWorkbench, DecisionAllow, Classification{}, boom, true)
 	if !proceed {
 		t.Errorf("shadow + fail-closed-on-error: expected proceed=true (shadow never blocks), got proceed=false reason=%q", reason)
 	}
@@ -125,7 +125,7 @@ func TestEnforceDecisionOffSuppressesFailClosed(t *testing.T) {
 	// "don't block." Asserting the same shape as shadow keeps the
 	// semantics tidy.
 	g := NewGate(GateOptions{Classifier: NoopClassifier{}, Mode: ModeOff})
-	if proceed, _ := g.EnforceDecision(DecisionAllow, Classification{}, errors.New("ignored"), true); !proceed {
+	if proceed, _ := g.EnforceDecision(SurfaceWorkbench, DecisionAllow, Classification{}, errors.New("ignored"), true); !proceed {
 		t.Error("ModeOff: should never block on EnforceDecision")
 	}
 }

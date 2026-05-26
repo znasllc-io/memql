@@ -126,7 +126,11 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	safetyDesc.Caller.TaskID = taskId
 	workbenchGate := safety.DefaultGate()
 	decision, cls, classErr := workbenchGate.Evaluate(ctx, safetyDesc)
-	if proceed, reason := workbenchGate.EnforceDecision(decision, cls, classErr, false); !proceed {
+	// #235: per-surface fail-closed posture via env override.
+	// Workbench is a per-Plan sandbox so default is fail-OPEN; env
+	// flip lets ops escalate to fail-closed for a hardening pass.
+	failClosed := safety.FailClosedForSurface(safetyDesc.Surface)
+	if proceed, reason := workbenchGate.EnforceDecision(safetyDesc.Surface, decision, cls, classErr, failClosed); !proceed {
 		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 
@@ -205,7 +209,13 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 					},
 				}
 				verdict, sr, _ := outGate.Screen(ctx, in)
-				if verdict == safety.ScreeningVerdictBlocked {
+				// #235: apply SuspiciousAsBlocked policy per
+				// content type. When the operator sets
+				// MEMQL_SAFETY_OUTPUT_HTTP_FETCH_SUSPICIOUS_AS_BLOCKED=true,
+				// Suspicious-tier verdicts are escalated to Blocked
+				// here so the body gets sanitised. Default is
+				// pass-through (opt-in).
+				if safety.EffectiveVerdict(in.ContentType, verdict) == safety.ScreeningVerdictBlocked {
 					pl["body"] = safety.SanitisedReplacement(in, sr)
 					pl["screenedBy"] = sr.RuleID
 					pl["screenReason"] = sr.Reason

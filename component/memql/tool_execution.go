@@ -387,7 +387,11 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	})
 	toolGate := safety.DefaultGate()
 	decision, cls, classErr := toolGate.Evaluate(ctx, toolDesc)
-	if proceed, reason := toolGate.EnforceDecision(decision, cls, classErr, false); !proceed {
+	// #235: per-surface fail-closed posture via env override.
+	// Default for tool surfaces stays fail-OPEN (sandboxed handlers
+	// + own validation).
+	failClosed := safety.FailClosedForSurface(toolSurface)
+	if proceed, reason := toolGate.EnforceDecision(toolSurface, decision, cls, classErr, failClosed); !proceed {
 		return &ToolCallResult{
 			IsError: true,
 			Content: []ToolResultContent{

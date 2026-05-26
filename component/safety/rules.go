@@ -91,9 +91,12 @@ func DefaultRules() []Rule {
 		{ID: "shell.destructive", Fn: ruleShellDestructive},
 		{ID: "shell.remote_code", Fn: ruleShellRemoteCode},
 		{ID: "shell.privesc", Fn: ruleShellSudo},
+		{ID: "shell.chmod_system", Fn: ruleShellChmodSystem},
 		{ID: "shell.persistence", Fn: ruleShellShellRCWrite},
 		{ID: "shell.system_write", Fn: ruleShellSystemWrite},
 		{ID: "shell.credential_access", Fn: ruleShellCredentialRead},
+		{ID: "shell.history_clear", Fn: ruleShellHistoryClear},
+		{ID: "shell.subshell_inject", Fn: ruleShellSubshellInject},
 		// URL rules (http_fetch + webhook).
 		{ID: "http.userinfo", Fn: ruleHTTPUserinfo},
 		{ID: "http.local_network", Fn: ruleHTTPLocalNetwork},
