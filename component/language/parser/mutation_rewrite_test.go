@@ -7,15 +7,16 @@ import (
 
 // The struct-form mutation rewriter requires the write block opener
 // to name its target concept: `insert <bareName> { ... }` or
-// `update <bareName> { ... }`. The bare name must match the file's
-// `@useConcept(<bareName>)` binding (or the trailing segment of a
-// legacy `use <ns>.<concept>` directive). The bare `insert { ... }`
-// shape that earlier phases of the DSL accepted is now an error
-// with a migration hint.
+// `update <bareName> { ... }`. The bare name must match the
+// mutation's signature-bound concept (`mutation <Concept> <name>`).
+// The bare `insert { ... }` shape that earlier phases of the DSL
+// accepted is now an error with a migration hint.
+//
+// memql#314 retired the legacy concept-binding-via-annotation form;
+// every fixture below declares the binding through the signature.
 
 func TestNormaliseMutationSource_RequiresInsertTargetName(t *testing.T) {
-	src := `@useConcept(space)
-mutation createSpace {
+	src := `mutation space createSpace {
   insert {
     id: "x"
     name: "untitled"
@@ -31,8 +32,7 @@ mutation createSpace {
 }
 
 func TestNormaliseMutationSource_RejectsMismatchedInsertTarget(t *testing.T) {
-	src := `@useConcept(space)
-mutation createSpace {
+	src := `mutation space createSpace {
   insert participant {
     id: "x"
     name: "untitled"
@@ -48,8 +48,7 @@ mutation createSpace {
 }
 
 func TestNormaliseMutationSource_AcceptsMatchingInsertTarget(t *testing.T) {
-	src := `@useConcept(space)
-mutation createSpace {
+	src := `mutation space createSpace {
   insert space {
     id: "x"
     name: "untitled"
@@ -65,8 +64,7 @@ mutation createSpace {
 }
 
 func TestNormaliseMutationSource_RejectsMismatchedUpdateTarget(t *testing.T) {
-	src := `@useConcept(space)
-mutation renameSpace {
+	src := `mutation space renameSpace {
   update participant {
     id: "x"
     name: "new"

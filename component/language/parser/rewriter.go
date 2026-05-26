@@ -70,77 +70,14 @@ func findMatchingCloseBrace(s string, openIdx int) int {
 	return -1
 }
 
-// fileTopUseDecl matches a file-top `use <ns>.<concept>` declaration.
-var fileTopUseDecl = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*(?://.*)?$`)
-
-// useConceptBinding matches a single-name `@useConcept(<name>)`
-// annotation used as the concept binding for a struct-form
-// query/mutation.
-var useConceptBinding = regexp.MustCompile(`@useConcept\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
-
-// extractStructConceptBinding inspects the source for the concept
-// binding driving a struct-form query/mutation. Two forms are
-// accepted (exactly one must be present):
-//
-//   - File-top `use <ns>.<concept>` directive -- emits the fully-
-//     qualified canonical id (`v1:<ns>:<concept>`).
-//   - `@useConcept(<name>)` annotation -- emits the BARE name. The
-//     post-parse concept resolver fully-qualifies it.
-//
-// A leading `v1` version segment in the `use` path is accepted and
-// elided.
-func extractStructConceptBinding(source string) (string, error) {
-	useMatches := fileTopUseDecl.FindStringSubmatch(source)
-	annotMatches := useConceptBinding.FindStringSubmatch(source)
-	switch {
-	case useMatches != nil && annotMatches != nil:
-		return "", fmt.Errorf("conflicting concept binding: both file-top `use <ns>.<concept>` directive and `@useConcept(...)` annotation present; pick one")
-	case useMatches != nil:
-		path := useMatches[1]
-		parts := strings.Split(path, ".")
-		if len(parts) < 2 {
-			return "", fmt.Errorf("invalid `use` path %q: expected `<ns>.<concept>` or `v1.<ns>.<concept>`", path)
-		}
-		if parts[0] == "v1" {
-			parts = parts[1:]
-		}
-		if len(parts) < 2 {
-			return "", fmt.Errorf("invalid `use` path %q: expected at least two segments after the version", path)
-		}
-		return "v1:" + strings.Join(parts, ":"), nil
-	case annotMatches != nil:
-		return annotMatches[1], nil
-	default:
-		return "", fmt.Errorf("missing concept binding; declare via `@useConcept(<name>)` annotation")
-	}
-}
-
-// useConceptInBlockRe finds @useConcept annotations in a construct's
-// preamble (the annotations declared above the block header).
-var useConceptInBlockRe = regexp.MustCompile(`(?m)^[ \t]*@useConcept\(([^)]+)\)`)
-
-// extractConceptBindingForBlock returns the concept binding (bare
-// name or fully-qualified id) for the construct whose header starts
-// at `blockStart`. Looks for the nearest `@useConcept(<name>)` in
-// the preamble; falls back to the file-level resolver for
-// single-construct legacy files.
-func extractConceptBindingForBlock(source string, blockStart int) (string, error) {
-	pre := source[:blockStart]
-	matches := useConceptInBlockRe.FindAllStringSubmatch(pre, -1)
-	if len(matches) > 0 {
-		last := matches[len(matches)-1]
-		first := strings.TrimSpace(strings.Split(last[1], ",")[0])
-		return first, nil
-	}
-	return extractStructConceptBinding(source)
-}
-
 // rewriteEachBlock walks every struct-form construct in `source`
 // matching `header`, calls `emit` on each, and splices the result
 // back in place. Processes matches in reverse so byte offsets stay
 // stable across splices. When `needsConcept` is true, the concept
-// binding is resolved (per-block via extractConceptBindingForBlock)
-// and passed to emit; otherwise emit receives an empty conceptId.
+// binding MUST come from the construct's signature
+// (`<kind> <Concept> <name> { ... }`); the annotation + file-top
+// directive fallbacks the rewriter used to honour were retired in
+// memql#314.
 //
 // `kindLabel` is used in error messages ("struct-form query", etc).
 // `emit` returns the procedural source that replaces the matched
@@ -186,15 +123,10 @@ func rewriteEachBlock(
 
 		var conceptId string
 		if needsConcept {
-			if signatureConcept != "" {
-				conceptId = signatureConcept
-			} else {
-				cid, err := extractConceptBindingForBlock(out, h[0])
-				if err != nil {
-					return "", fmt.Errorf("%s: %w", kindLabel, err)
-				}
-				conceptId = cid
+			if signatureConcept == "" {
+				return "", fmt.Errorf("%s %q: missing concept binding -- declare via the signature form `<kind> <Concept> <name> { ... }`", kindLabel, name)
 			}
+			conceptId = signatureConcept
 		}
 
 		body := out[openIdx+1 : closeIdx]
@@ -285,13 +217,15 @@ func NormaliseAll(source string) (string, error) {
 // Query
 // =============================================================================
 
-// queryStructHeader matches both the legacy and the canonical
-// post-migration shapes:
+// queryStructHeader matches the canonical concept-in-signature shape:
 //
-//	query queryFoo { ... }                  -- legacy (concept via @useConcept)
-//	query participant queryFoo { ... }      -- canonical (concept-in-signature)
+//	query participant queryFoo { ... }      -- concept binding from signature
 //
-// Group 1 is the optional concept name; group 2 is the construct name.
+// Group 1 is the concept name; group 2 is the construct name. The
+// legacy single-identifier shape `query queryFoo { ... }` was retired
+// in memql#314 -- the regex's optional concept group is preserved so
+// a legacy header still gets matched + handed to rewriteEachBlock for
+// a clean "missing concept binding" error rather than a silent no-op.
 var queryStructHeader = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // LooksLikeStructQuery reports whether the source declares a
@@ -476,12 +410,11 @@ func emitMutation(name, conceptId, body string) (string, error) {
 			return "", fmt.Errorf("update block requires an `id: <expr>` line identifying the target row")
 		}
 		// Emit the bare concept name as the first positional arg
-		// (mirroring insert) so the declared-usage validator finds
-		// the implicit `@useConcept(X)` reference in the body. The
-		// runtime doesn't strictly need it -- update looks up by id
-		// -- but emitting it keeps the post-rewrite shape symmetric
-		// with insert and prevents `function not found` at call
-		// time from a silently-dropped load.
+		// (mirroring insert). The runtime doesn't strictly need it --
+		// update looks up by id -- but emitting it keeps the
+		// post-rewrite shape symmetric with insert and prevents
+		// `function not found` at call time from a silently-dropped
+		// load.
 		sb.WriteString(fmt.Sprintf("  return update(%s, id=%s, payload=%s)\n", conceptId, idExpr, payload))
 	}
 	sb.WriteString("}")
@@ -506,7 +439,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 			// error message names the missing concept binding.
 			bareRe := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]*\{`)
 			if bareRe.FindStringIndex(body) != nil {
-				return "", "", false, fmt.Errorf("`%s { ... }` is retired -- use `%s <conceptName> { ... }` so the write target is visible at the block header (the concept name must match the file's `@useConcept(...)` binding)", keyword, keyword)
+				return "", "", false, fmt.Errorf("`%s { ... }` is retired -- use `%s <conceptName> { ... }` so the write target is visible at the block header (the concept name must match the mutation's signature-bound concept)", keyword, keyword)
 			}
 			return "", "", false, nil
 		}

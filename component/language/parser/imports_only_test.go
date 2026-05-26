@@ -14,9 +14,8 @@ func TestExtractImports_ShapeFile(t *testing.T) {
 	)
 
 @row
-@useConcept(participant)
 @description("Participant projection")
-shape participantFull {
+shape participant participantFull {
   row.id
   participant.spaceId
   participant.status

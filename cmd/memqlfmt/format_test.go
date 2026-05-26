@@ -20,9 +20,8 @@ import (
 // twice (idempotency under formatting after the rewriter has run).
 
 func TestFmtRewriterParity_QueryStructForm(t *testing.T) {
-	source := `@useConcept(participant)
-@description("Active participants in a space.")
-query queryActiveParticipantsForSpace {
+	source := `@description("Active participants in a space.")
+query participant queryActiveParticipantsForSpace {
   args {
     spaceId  string  @required
   }
@@ -34,9 +33,8 @@ query queryActiveParticipantsForSpace {
 }
 
 func TestFmtRewriterParity_MutationStructForm(t *testing.T) {
-	source := `@useConcept(space)
-@description("Create a cognition space.")
-mutation mutationCreateSpace {
+	source := `@description("Create a cognition space.")
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
