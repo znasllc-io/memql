@@ -453,8 +453,16 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "tool":
+		// Contextual keyword: `tool` at top-of-file introduces a
+		// struct-form SI tool declaration. memql#317 (sub-epic #309
+		// sibling of #315 / #316 / #318).
+		def, err = p.parseToolDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', or 'builtin'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', or 'tool'", p.current.Literal)
 	}
 
 	if err != nil {

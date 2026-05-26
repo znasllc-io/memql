@@ -199,7 +199,15 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 }
 
 // LoadUnifiedTools walks the new tree, parses every `tool NAME
-// { ... }` block, and upserts each into the registry.
+// { ... }` block through the langparser's load-time path, and
+// upserts each into the registry.
+//
+// memql#317 (sub-epic #309 sibling of #315 / #316) migrated the
+// parsing half off the hand-rolled parseToolMemQL onto
+// langparser.ParseToolDecl + the in-package toolDeclToTool
+// converter. The hand-rolled parser is unreferenced from production
+// code after this child; tests in tool_parser_test.go still
+// exercise it pending the final deletion in #306 child D (#310).
 func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("tool registry is nil")
@@ -210,7 +218,13 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) 
 		"tool",
 		baseloader.ReadAll(logger),
 		extractAdapter,
-		parseToolMemQL,
+		func(origin string, raw []byte) ([]*Tool, error) {
+			decl, err := languageParser.ParseToolDecl(string(raw))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", origin, err)
+			}
+			return toolDeclToTool(decl, origin)
+		},
 		registry.Upsert,
 	)
 }
