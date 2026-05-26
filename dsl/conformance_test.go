@@ -690,6 +690,67 @@ func TestNoCallerVocabulary(t *testing.T) {
 	}
 }
 
+// TestAutoJoinSILocksInOwnerUserIdResolution is the structural
+// regression guard for memql#273: the autoJoinSI automation MUST
+// resolve the General Assistant via ownerUserId (consistent across
+// every caller of mutationCreateDailySpace -- signup automation,
+// login automation, frontend hook) rather than via
+// hash(args.event.payload.actor) (the createdBy stamp, which varies
+// per caller and produced one extra participant row per fire).
+//
+// The full acceptance test (1 participant after N
+// ensureDailySpaceForUser calls) requires a running engine + DB and
+// is exercised manually per the issue's acceptance criteria; this
+// test locks in the source-level structure that makes the runtime
+// behaviour correct so a future edit that re-introduces the broken
+// pattern fails CI immediately.
+func TestAutoJoinSILocksInOwnerUserIdResolution(t *testing.T) {
+	tree := Tree()
+	file, err := tree.Open("cognition/logic.memql")
+	if err != nil {
+		t.Fatalf("open cognition/logic.memql: %v", err)
+	}
+	raw, err := io.ReadAll(file)
+	file.Close()
+	if err != nil {
+		t.Fatalf("read cognition/logic.memql: %v", err)
+	}
+	src := string(raw)
+
+	// Anchor on the logicAutoJoinSI body. The structural rules are
+	// about THIS automation only -- other automations are free to
+	// hash actors / build canonical ids however they need.
+	startIdx := strings.Index(src, "logic logicAutoJoinSI")
+	if startIdx < 0 {
+		t.Fatal("logicAutoJoinSI not found in cognition/logic.memql")
+	}
+	endIdx := strings.Index(src[startIdx:], "\n}\n")
+	if endIdx < 0 {
+		t.Fatal("logicAutoJoinSI body terminator not found")
+	}
+	body := src[startIdx : startIdx+endIdx]
+
+	// Strip `// ...` line comments so commentary that mentions the
+	// pre-#273 broken pattern (e.g. an explanatory note about why
+	// hash(actor) was wrong) doesn't trip the negative checks below.
+	bodyLines := strings.Split(body, "\n")
+	var stripped []string
+	for _, line := range bodyLines {
+		stripped = append(stripped, stripLineComment(line))
+	}
+	executable := strings.Join(stripped, "\n")
+
+	if !strings.Contains(executable, "queryAssistantAgentForUser") {
+		t.Error("logicAutoJoinSI must call queryAssistantAgentForUser(...) to resolve the GA by ownerUserId -- the pre-#273 hash(actor) pattern produced one extra participant per caller")
+	}
+	if !strings.Contains(executable, "args.event.payload.ownerUserId") {
+		t.Error("logicAutoJoinSI must read args.event.payload.ownerUserId (the space row's owner, set by mutationCreateDailySpace) -- args.event.payload.actor varies per caller and was the #273 root cause")
+	}
+	if strings.Contains(executable, "hash(args.event.payload.actor)") {
+		t.Error("logicAutoJoinSI must NOT derive the agent id from hash(args.event.payload.actor) -- the actor stamp varies per caller of mutationCreateDailySpace (signup automation, login automation, frontend hook), so the participant content-address key was different each fire and idempotency collapsed nothing (memql#273)")
+	}
+}
+
 // stripLineComment trims `// ...` from the end of a line, preserving
 // any `//` that appears inside a string literal. The DSL's string
 // literals use double quotes only, so a simple quote-aware walk is

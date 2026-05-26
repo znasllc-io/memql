@@ -120,6 +120,25 @@ query agent queryActiveAgentsForUser {
   shape   agentMinimalForDedupe
 }
 
+// `@public` marks this query as intentionally not caller-scoped.
+// Single callsite: the autoJoinSI automation runs as a system actor
+// (system:automation:autoJoinSI) and needs to resolve the space
+// owner's General Assistant from the ownerUserId stamped on the
+// space row -- NOT from the createdBy actor field, which varies by
+// caller (signup automation, login automation, frontend hook).
+// Inconsistent agentId resolution across the three callers was the
+// root cause of the duplicate-participants regression in memql#273.
+@enabled
+@public
+@description("Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinSI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.")
+query agent queryAssistantAgentForUser {
+  args {
+    ownerUserId  string  @required
+  }
+  filter  payload.ownerUserId==args.ownerUserId; payload.roleSlug=="assistant"; traitIsActiveRecord; traitIsNotDeleted
+  shape   agentMinimalForDedupe
+}
+
 @enabled
 @description("Resolve a single agentRole row by its slug. Used by the role catalog seeder (idempotency check) and by the agent-creation path (look up the locked + default sets when materializing a new agent for the slug).")
 query agentRole queryAgentRoleBySlug {
