@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
@@ -3985,6 +3986,16 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseCaseFunction()
 	case "default":
 		return p.parseDefaultFunction()
+	case "paginate":
+		return p.parsePaginateFunction()
+	case "sort":
+		return p.parseSortFunction()
+	case "select":
+		return p.parseSelectFunction()
+	case "asof":
+		return p.parseAsOfFunction()
+	case "withdepth":
+		return p.parseWithDepthFunction()
 	}
 
 	// Handle shape() specially - two forms: shape(expr, template) or shape({ source, template })
@@ -3993,12 +4004,17 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		return p.parseShapeFunction()
 	}
 
-	// For wrapper functions like sort(), depth(), etc.
-	// The content is an expression, not named arguments
+	// Relationship wrapper functions take a single inner expression and
+	// produce a *RelationshipExpr (createWrapper dispatches by name).
+	// The dedicated directive parse functions (paginate / sort / select /
+	// asOf / withDepth / shape) live in the switch above and produce
+	// their specialised AST types directly; they are NOT in this map.
+	// Modern single-paren `contains(filter)` is handled inside
+	// parseContainsFunction (arg-count discriminates relationship vs
+	// 2-arg string search).
 	wrapperFunctions := map[string]bool{
-		"sort": true, "paginate": true, "select": true,
-		"asof": true, "depth": true, "parentof": true,
-		"childof": true, "aliasof": true, "equals": true, "interactswith": true,
+		"parentof": true, "childof": true, "aliasof": true,
+		"equals": true, "interactswith": true,
 		"owns": true, "createdby": true, "ids": true,
 	}
 
@@ -4168,6 +4184,336 @@ func (p *Parser) parseShapeLogicalOr() (ExpressionNode, error) {
 	}
 
 	return left, nil
+}
+
+// parseDirectiveTarget parses the leading expression argument of a
+// modern single-paren directive call (paginate / sort / select / asOf
+// / withDepth). It accepts `;` and `&&` AND-joined comparisons via
+// parseLogicalAnd but STOPS at the bare comma that separates the
+// target from the directive's tail args. The OR-via-comma precedence
+// level (parseLogicalOr) is intentionally NOT used here -- the memql
+// runtime parser likewise treats the directive boundary as a hard
+// stop.
+func (p *Parser) parseDirectiveTarget() (ExpressionNode, error) {
+	return p.parseLogicalAnd()
+}
+
+// parsePaginateFunction parses the modern single-paren form
+// `paginate(target, LIMIT [, OFFSET])` and produces a *PaginateExpr
+// matching what the memql runtime parser (parsePaginate, parser.go
+// ~line 1223) emits. Limit must be a positive integer; offset, when
+// present, must be a non-negative integer. The opening `(` is already
+// consumed by the caller (parseFunctionCall).
+func (p *Parser) parsePaginateFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "paginate() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+	if !p.check(TokenComma) {
+		return nil, newParseErrorf(&p.current, "expected ',' before paginate limit, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	limit, err := p.expectPositiveIntegerLiteral("paginate limit")
+	if err != nil {
+		return nil, err
+	}
+
+	var offsetPtr *int
+	if p.check(TokenComma) {
+		p.advance()
+		offset, err := p.expectNonNegativeIntegerLiteral("paginate offset")
+		if err != nil {
+			return nil, err
+		}
+		offsetPtr = &offset
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &PaginateExpr{
+		Target: target,
+		Limit:  &limit,
+		Offset: offsetPtr,
+	}, nil
+}
+
+// parseSortFunction parses the modern single-paren form
+// `sort(target, "field" [, "asc"|"desc"] ...)` and produces a
+// *SortExpr matching parseSort + parseSortFields in the memql runtime
+// parser (parser.go ~line 1086). Default direction is SortDesc (the
+// memql parser's behaviour; a bare `sort(target, "createdAt")` sorts
+// descending). A trailing "asc"/"desc" literal binds to the
+// preceding field; otherwise the next string starts a new field with
+// the default direction.
+func (p *Parser) parseSortFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "sort() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+
+	fields := []SortField{}
+	for {
+		if !p.check(TokenComma) {
+			return nil, newParseErrorf(&p.current, "expected ',' before sort field, got %q", p.current.Literal)
+		}
+		p.advance()
+
+		if !p.check(TokenString) {
+			return nil, newParseErrorf(&p.current, "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")")
+		}
+		field := strings.TrimSpace(p.current.Literal)
+		if field == "" {
+			return nil, newParseErrorf(&p.current, "sort field must not be empty")
+		}
+		p.advance()
+
+		direction := SortDesc
+		if p.check(TokenComma) && p.peekAhead(1).Type == TokenString && isSortDirectionLiteral(p.peekAhead(1).Literal) {
+			p.advance() // consume comma
+			direction = parseSortDirection(p.current.Literal)
+			p.advance() // consume direction literal
+		}
+
+		fields = append(fields, SortField{Field: field, Direction: direction})
+
+		if p.check(TokenParenClose) {
+			break
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil, newParseErrorf(&p.current, "sort() requires at least one field")
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &SortExpr{Target: target, Fields: fields}, nil
+}
+
+// parseSelectFunction parses the modern single-paren form
+// `select(target, "field1", "field2", ...)` and produces a
+// *SelectExpr matching parseSelect (memql parser.go ~line 1168). At
+// least one field is required; field references are string literals
+// validated by parseFieldReferenceLiteralLang.
+func (p *Parser) parseSelectFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "select() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+
+	if !p.check(TokenComma) {
+		return nil, newParseErrorf(&p.current, "select() requires at least one field")
+	}
+
+	fields := []FieldReference{}
+	for {
+		if !p.check(TokenComma) {
+			return nil, newParseErrorf(&p.current, "expected ',' between select fields, got %q", p.current.Literal)
+		}
+		p.advance()
+
+		if !p.check(TokenString) {
+			return nil, newParseErrorf(&p.current, "select field must be a string literal (e.g. \"payload.title\")")
+		}
+		ref, err := parseFieldReferenceLiteralLang(p.current.Literal)
+		if err != nil {
+			return nil, newParseErrorf(&p.current, "%s", err.Error())
+		}
+		p.advance()
+		fields = append(fields, ref)
+
+		if p.check(TokenParenClose) {
+			break
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil, newParseErrorf(&p.current, "select() requires at least one field")
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &SelectExpr{Target: target, Fields: fields}, nil
+}
+
+// parseAsOfFunction parses the modern single-paren form
+// `asOf(target, "RFC3339" | latest)` and produces a *TimestampExpr
+// matching parseAsOf (memql parser.go ~line 1278). The second arg is
+// either a string literal (parsed as RFC3339Nano) or the bare
+// identifier `latest`.
+func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "asOf() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+	if !p.check(TokenComma) {
+		return nil, newParseErrorf(&p.current, "expected ',' before asOf timestamp, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	var (
+		timestamp *time.Time
+		useLatest bool
+	)
+	switch {
+	case p.check(TokenString):
+		value := strings.TrimSpace(p.current.Literal)
+		if value == "" {
+			return nil, newParseErrorf(&p.current, "asOf timestamp must not be empty")
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return nil, newParseErrorf(&p.current, "invalid RFC3339 timestamp %q", value)
+		}
+		timestamp = &parsed
+		p.advance()
+	case p.check(TokenIdentifier):
+		if !strings.EqualFold(strings.TrimSpace(p.current.Literal), "latest") {
+			return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string or latest")
+		}
+		useLatest = true
+		p.advance()
+	default:
+		return nil, newParseErrorf(&p.current, "asOf second argument must be an RFC3339 string or latest")
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &TimestampExpr{
+		Target:    target,
+		Timestamp: timestamp,
+		UseLatest: useLatest,
+	}, nil
+}
+
+// parseWithDepthFunction parses the modern single-paren form
+// `withDepth(target, INT)` and produces a *DepthExpr matching
+// parseWithDepth (memql parser.go ~line 1337). Depth must be a
+// positive integer literal.
+func (p *Parser) parseWithDepthFunction() (ExpressionNode, error) {
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "withDepth() requires an expression argument")
+	}
+	target, err := p.parseDirectiveTarget()
+	if err != nil {
+		return nil, err
+	}
+	if !p.check(TokenComma) {
+		return nil, newParseErrorf(&p.current, "expected ',' before withDepth value, got %q", p.current.Literal)
+	}
+	p.advance()
+
+	depth, err := p.expectPositiveIntegerLiteral("withDepth value")
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+
+	return &DepthExpr{Target: target, Depth: depth}, nil
+}
+
+// expectPositiveIntegerLiteral consumes the current TokenNumber and
+// asserts it parses as a strictly positive integer. Mirrors the
+// memql parser's parsePositiveInt validation surface so error text
+// stays close enough for the cross-parser equivalence work to focus
+// on AST structure rather than message wording.
+func (p *Parser) expectPositiveIntegerLiteral(field string) (int, error) {
+	if !p.check(TokenNumber) {
+		return 0, newParseErrorf(&p.current, "%s must be an integer literal", field)
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(p.current.Literal))
+	if err != nil {
+		return 0, newParseErrorf(&p.current, "%s must be an integer", field)
+	}
+	if value <= 0 {
+		return 0, newParseErrorf(&p.current, "%s must be greater than zero", field)
+	}
+	p.advance()
+	return value, nil
+}
+
+// expectNonNegativeIntegerLiteral is the offset-style counterpart to
+// expectPositiveIntegerLiteral (zero is allowed).
+func (p *Parser) expectNonNegativeIntegerLiteral(field string) (int, error) {
+	if !p.check(TokenNumber) {
+		return 0, newParseErrorf(&p.current, "%s must be an integer literal", field)
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(p.current.Literal))
+	if err != nil {
+		return 0, newParseErrorf(&p.current, "%s must be an integer", field)
+	}
+	if value < 0 {
+		return 0, newParseErrorf(&p.current, "%s must be zero or greater", field)
+	}
+	p.advance()
+	return value, nil
+}
+
+// isSortDirectionLiteral returns true if value (case-insensitive)
+// names a sort direction (asc / desc). Mirrors the memql parser
+// helper of the same name -- the langparser cannot import that one
+// directly because of the package boundary.
+func isSortDirectionLiteral(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(SortAsc), string(SortDesc):
+		return true
+	}
+	return false
+}
+
+// parseSortDirection coerces an "asc" / "desc" literal to the
+// langparser SortDirection enum. Unknown inputs default to
+// SortDesc to match the memql parser's defaulting behaviour.
+func parseSortDirection(value string) SortDirection {
+	if strings.EqualFold(strings.TrimSpace(value), string(SortAsc)) {
+		return SortAsc
+	}
+	return SortDesc
+}
+
+// parseFieldReferenceLiteralLang mirrors the memql parser's
+// parseFieldReferenceLiteral / splitFieldParts so a select() field
+// reference produced by either parser carries the same Raw + Parts.
+// Lives in this package (with the `Lang` suffix) because the memql
+// parser's helper is unexported and can't be imported across the
+// package boundary.
+func parseFieldReferenceLiteralLang(value string) (FieldReference, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return FieldReference{}, fmt.Errorf("field reference must not be empty")
+	}
+	parts := strings.Split(trimmed, ".")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	if len(parts) == 0 {
+		return FieldReference{}, fmt.Errorf("field reference must not be empty")
+	}
+	return FieldReference{Raw: trimmed, Parts: parts}, nil
 }
 
 // createWrapper creates the appropriate expression wrapper for wrapper functions.
@@ -5251,13 +5597,32 @@ func (p *Parser) parseIsFirstDayOfQuarterFunction() (ExpressionNode, error) {
 
 // parseContainsFunction parses contains(str, substr).
 func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
+	if p.check(TokenParenClose) {
+		return nil, newParseErrorf(&p.current, "contains() requires at least one argument")
+	}
+	// First argument: parse with the AND-level helper so a runtime
+	// `contains(concept==X; payload.y=="z")` relationship invocation
+	// picks up the full `;`-joined filter expression. parseLogicalAnd
+	// reduces to parsePrimary when the input is a single value
+	// reference (the existing string-search 2-arg form), so the
+	// legacy DSL surface continues to work unchanged.
+	target, err := p.parseLogicalAnd()
 	if err != nil {
 		return nil, err
 	}
 
+	// Single-arg form: modern runtime relationship wrapper. Mirrors
+	// what the memql runtime parser (parseRelationship, parser.go
+	// ~line 535) emits for `contains(filter)`. The two-arg string-
+	// search form (DSL load-time `contains(text, substr)`) keeps its
+	// existing *ContainsExpr shape and falls through below.
+	if p.check(TokenParenClose) {
+		p.advance()
+		return &RelationshipExpr{Function: RelContains, Target: target}, nil
+	}
+
 	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "contains() requires two arguments")
+		return nil, newParseErrorf(&p.current, "contains() expects ')' after relationship target or ',' before substring argument, got %q", p.current.Literal)
 	}
 	p.advance()
 

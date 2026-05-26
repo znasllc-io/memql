@@ -98,35 +98,6 @@ func flattenRuntimeFunctionArgs(node ExpressionNode) ExpressionNode {
 	return node
 }
 
-// directiveFunctionNames is the set of function names the runtime
-// grammar treats as DIRECTIVES -- query-shape wrappers that the
-// memql parser specialises into dedicated *PaginateExpression /
-// *SortExpression / *SelectExpression / *TimestampExpression /
-// *DepthExpression / *ShapeExpression AST nodes (see
-// component/memql/parser.go around lines 1119/1201/1271/1330/1371/1415
-// for the build-sites). The langparser's modern single-paren form
-// produces a generic *FunctionCallExpr for the same syntax (its
-// wrapDirective fires only for the legacy double-paren form), so
-// the two paths diverge at the AST level for any composite query
-// containing one of these names. e.Parse's applyDirectiveWrappers
-// only walks the specialised types; without the divergence guard
-// here, a langparser-routed `paginate(...)` would silently skip
-// extracting Limit/Offset into the plan.
-//
-// Until the langparser learns to wrap modern directive calls
-// natively (filed as a follow-up; tracked under epic #218 with the
-// remaining #250 deletion), these shapes fall back to the memql
-// parser through langparserPathUnsupported. Membership lookup is
-// O(1) string compare against the known set.
-var directiveFunctionNames = map[string]struct{}{
-	"paginate":  {},
-	"sort":      {},
-	"select":    {},
-	"asof":      {},
-	"withdepth": {},
-	"shape":     {},
-}
-
 // langparserPathUnsupported is a cheap upfront detector for the
 // trailing-feature shapes the opt-in path doesn't handle yet. We
 // run it BEFORE invoking langparser.ParseExpression so the
@@ -143,16 +114,16 @@ var directiveFunctionNames = map[string]struct{}{
 // a real parse error from langparser, which is fine -- the user
 // gets a clear error either way.
 //
-// It ALSO falls back on any source where a directive function name
-// (`paginate`, `sort`, `select`, `asOf`, `withDepth`, `shape`)
-// appears as the head of a call -- the langparser produces a
-// generic *FunctionCallExpr for those, but the engine expects the
-// specialised directive expression. See directiveFunctionNames
-// above for the rationale.
+// Directive function names (paginate / sort / select / asOf /
+// withDepth / shape) used to fall back here too because the
+// langparser produced a generic *FunctionCallExpr for the modern
+// single-paren form. That gap was closed in #254 (the langparser
+// now emits *PaginateExpr / *SortExpr / *SelectExpr / *TimestampExpr
+// / *DepthExpr / *ShapeExpr directly), so the directive-name guard
+// is gone and these queries flow through the opt-in path.
 func langparserPathUnsupported(query string) bool {
 	inStr := false
 	var quote byte
-	identStart := -1 // index of the first byte of an in-progress identifier, -1 if none
 	for i := 0; i < len(query); i++ {
 		c := query[i]
 		if inStr {
@@ -168,7 +139,6 @@ func langparserPathUnsupported(query string) bool {
 		if c == '"' || c == '\'' || c == '`' {
 			inStr = true
 			quote = c
-			identStart = -1
 			continue
 		}
 		// `@` outside a string: timestamp suffix (`@latest` /
@@ -181,46 +151,6 @@ func langparserPathUnsupported(query string) bool {
 		if c == ':' && i+1 < len(query) && query[i+1] == '=' {
 			return true
 		}
-		// Track identifier boundaries so the directive check fires
-		// on `paginate(` but not on `mutationPaginateFoo({...})` or
-		// `payload.paginate=="x"`. An identifier extends while the
-		// byte is an ASCII letter / digit / underscore; the first
-		// non-identifier byte ends it.
-		if isAccessorIdentByte(c) {
-			if identStart < 0 {
-				identStart = i
-			}
-			continue
-		}
-		if identStart >= 0 {
-			// Identifier just ended at i-1. If the next non-space
-			// byte is `(`, this is a function call -- check if the
-			// name is a directive.
-			ident := strings.ToLower(query[identStart:i])
-			identStart = -1
-			j := i
-			for j < len(query) && (query[j] == ' ' || query[j] == '\t' || query[j] == '\n' || query[j] == '\r') {
-				j++
-			}
-			if j < len(query) && query[j] == '(' {
-				if _, ok := directiveFunctionNames[ident]; ok {
-					return true
-				}
-			}
-		}
 	}
-	// EOF while inside an identifier -- can't be a call (no `(`
-	// follows), so no directive match.
 	return false
-}
-
-// isAccessorIdentByte returns true if c can be part of a memql
-// identifier. Matches the language parser's lexer convention --
-// ASCII letter / digit / underscore. (The dotted `actor.X` form
-// is one identifier token at the lexer level; the dot is treated
-// as part of the identifier elsewhere, but for the directive-call
-// boundary check we want the bare-name boundary so `foo.shape("x")`
-// is NOT treated as a `shape(` call.)
-func isAccessorIdentByte(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }
