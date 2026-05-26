@@ -62,10 +62,12 @@ shape knowledgeDomain knowledgeDomainFull {
 // Trait shapes -- concept-agnostic row scaffolds
 // =============================================================================
 //
-// These shapes carry @row but no @useConcept(...), making them
-// concept-agnostic. Specs bind to a trait shape via @useShape(N) when
-// they want to filter rows by a predicate that applies across many
-// different concepts (e.g. "active row", "cancelled row").
+// These shapes carry @row WITHOUT a concept binding in the signature
+// (i.e. `shape <name>`, not `shape <Concept> <name>`), which is what
+// makes them concept-agnostic. Specs bind to a trait shape via
+// `@shape("<name>")` when they want to filter rows by a predicate
+// that applies across many different concepts (e.g. "active row",
+// "cancelled row").
 //
 // Trait shapes project ONLY the payload fields their predicates check,
 // so the engine knows the predicate's field-reference universe without
@@ -115,7 +117,7 @@ shape validationRowTrait {
 //
 // @actor shapes project the engine's auth envelope rather than row
 // fields. Context-specs (predicates that check actor.* fields only)
-// bind here via @useShape(actorEnvelope).
+// bind here via `@shape("actorEnvelope")`.
 
 @actor
 @description("Actor envelope projection: authenticated actor, role, and now.")
