@@ -11,49 +11,6 @@ import (
 	"github.com/znasllc-io/memql/component/memql/baseparser"
 )
 
-// QueryPlan represents the parsed structure of a MemQL expression.
-type QueryPlan struct {
-	Root      ExpressionNode
-	Mutations []MutationNode
-	// MutationCall is a top-level call to a mutation function (func (Mutation) ...).
-	// When set, Root will be nil and Mutations will be empty; Execute will evaluate the
-	// function template and run exactly one insert.
-	MutationCall *FunctionCallExpression
-	// LogicCall is a top-level call to a multi-step Logic function
-	// (func (Logic) ... whose body has intermediate `name := <call>`
-	// steps before `_return`). When set, Root is nil and Execute
-	// dispatches through the wired LogicRunner so step results bind
-	// for later steps + the `_return` expression. Single-statement
-	// Logic bodies don't set this -- their fn.Expr is evaluated
-	// directly via the normal query expression path.
-	LogicCall         *FunctionCallExpression
-	Filters           []FilterNode
-	Relationships     []RelationshipNode
-	Timestamp         *time.Time
-	UseLatest         bool
-	Limit             *int
-	Offset            *int
-	Depth             *int
-	Sort              []SortField
-	CacheHints        map[string]int64
-	Fields            []FieldReference
-	ConceptFields     map[string][]FieldReference
-	Metadata          metadataSelection
-	PayloadSelect     bool
-	ShapeTemplate     shapeTemplate
-	ShapeTemplateName string // Named shape reference; resolved at execution time
-	IncludeBundle     bool   // when true, include bundle in shape response
-	InlineSpecs       map[string]*Spec
-}
-
-// RelationshipNode identifies relationship traversals declared within a query.
-type RelationshipNode struct {
-	Alias      string
-	Definition RelationshipDefinition
-	Filters    []FilterNode
-	Depth      int
-}
-
 // Parse converts a MemQL query string into a QueryPlan.
 func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 	if !e.canResolve() {
@@ -269,11 +226,6 @@ type parser struct {
 	pos             int
 	inlineSpecs     []inlineSpecDefinition
 	builtinByLookup map[string]*Function
-}
-
-type inlineSpecDefinition struct {
-	Name string
-	Expr ExpressionNode
 }
 
 func newParser(tokens []token, functions *FunctionRegistry) *parser {
@@ -2350,24 +2302,6 @@ func (p *parser) parseLiteralValue() (any, error) {
 	}
 }
 
-// ArgReference represents a reference to a named function argument.
-// It's stored as the Value in a ComparisonExpression and resolved at
-// execution time. Produced by parsing the canonical `ctx.<path>`
-// syntax (see parseCtxReference); the legacy `ctx.fieldName` form
-// that originally produced this node is retired.
-type ArgReference struct {
-	Path string // e.g., "spaceId" or "options.limit"
-}
-
-// ActorReference represents a reference to a field on the authenticated
-// user's AccessContext. Created by parsing `caller.X` syntax in
-// comparison-value position; resolved at execution time by reading
-// auth.AccessFromContext(ctx). Dotted paths are supported
-// (`caller.userId`, `caller.role`, etc.).
-type ActorReference struct {
-	Path string
-}
-
 // parseActorReference consumes an `actor` or `actor.X[.Y...]`
 // identifier token and returns a *ActorReference whose Path is the
 // dotted suffix (empty for bare `actor`, though only dotted paths
@@ -3165,21 +3099,6 @@ func validateFieldReference(ref *FieldReference) error {
 	}
 
 	return nil
-}
-
-func isSpecReferenceCandidate(name string) bool {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return false
-	}
-	if strings.Contains(trimmed, ".") {
-		return false
-	}
-	switch strings.ToLower(trimmed) {
-	case "payload", "meta", "concept", "id", "type", "createdat", "createdby", "schema", "provenance":
-		return false
-	}
-	return specNamePattern.MatchString(trimmed)
 }
 
 func toComparisonOperator(value string) (ComparisonOperator, error) {

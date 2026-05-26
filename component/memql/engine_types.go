@@ -1,10 +1,159 @@
 package memql
 
 import (
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/language/ast"
 )
+
+// QueryPlan represents the parsed structure of a MemQL expression.
+type QueryPlan struct {
+	Root      ExpressionNode
+	Mutations []MutationNode
+	// MutationCall is a top-level call to a mutation function (func (Mutation) ...).
+	// When set, Root will be nil and Mutations will be empty; Execute will evaluate the
+	// function template and run exactly one insert.
+	MutationCall *FunctionCallExpression
+	// LogicCall is a top-level call to a multi-step Logic function
+	// (func (Logic) ... whose body has intermediate `name := <call>`
+	// steps before `_return`). When set, Root is nil and Execute
+	// dispatches through the wired LogicRunner so step results bind
+	// for later steps + the `_return` expression. Single-statement
+	// Logic bodies don't set this -- their fn.Expr is evaluated
+	// directly via the normal query expression path.
+	LogicCall         *FunctionCallExpression
+	Filters           []FilterNode
+	Relationships     []RelationshipNode
+	Timestamp         *time.Time
+	UseLatest         bool
+	Limit             *int
+	Offset            *int
+	Depth             *int
+	Sort              []SortField
+	CacheHints        map[string]int64
+	Fields            []FieldReference
+	ConceptFields     map[string][]FieldReference
+	Metadata          metadataSelection
+	PayloadSelect     bool
+	ShapeTemplate     shapeTemplate
+	ShapeTemplateName string // Named shape reference; resolved at execution time
+	IncludeBundle     bool   // when true, include bundle in shape response
+	InlineSpecs       map[string]*Spec
+}
+
+// RelationshipNode identifies relationship traversals declared within a query.
+type RelationshipNode struct {
+	Alias      string
+	Definition RelationshipDefinition
+	Filters    []FilterNode
+	Depth      int
+}
+
+// inlineSpecDefinition captures a `spec name = expr` declaration
+// parsed from a query string into a deferred definition the engine
+// materialises into a *Spec at compile time.
+type inlineSpecDefinition struct {
+	Name string
+	Expr ExpressionNode
+}
+
+// ArgReference represents a reference to a named function argument.
+// It's stored as the Value in a ComparisonExpression and resolved at
+// execution time. Produced by parsing the canonical `ctx.<path>`
+// syntax (see parseCtxReference); the legacy `ctx.fieldName` form
+// that originally produced this node is retired.
+type ArgReference struct {
+	Path string // e.g., "spaceId" or "options.limit"
+}
+
+// ActorReference represents a reference to a field on the authenticated
+// user's AccessContext. Created by parsing `caller.X` syntax in
+// comparison-value position; resolved at execution time by reading
+// auth.AccessFromContext(ctx). Dotted paths are supported
+// (`caller.userId`, `caller.role`, etc.).
+type ActorReference struct {
+	Path string
+}
+
+// FunctionCallExpression references a named function invocation with arguments.
+type FunctionCallExpression struct {
+	Name string
+	// Args is the JSON object passed to the function (as map[string]any).
+	// All functions require an argument object (can be empty {}).
+	Args map[string]any
+}
+
+func (*FunctionCallExpression) isExpressionNode() {}
+
+// Spec represents a named boolean predicate.
+//
+// Row-specs compile to SQL WHERE filters (Kind == SpecKindRow).
+// Context-specs evaluate in-process against the caller's auth
+// context at call time (Kind == SpecKindContext).
+type Spec struct {
+	Name        string
+	Description string
+	ExprSource  string
+	Expr        ExpressionNode
+	Kind        SpecKind
+	UsesSI      bool
+	Origin      string
+
+	// UseConceptName carries the bare name from @useConcept(N) when
+	// the spec uses that binding form. Empty when the spec binds via
+	// @useShape or when the entry is a trait.
+	UseConceptName string
+
+	// UseShapeName carries the bare name from @useShape(N) when the
+	// spec uses that binding form. Empty when the spec binds via
+	// @useConcept or when the entry is a trait. Validated at post-load
+	// time against the shape registry.
+	UseShapeName string
+
+	// IsTrait flags this entry as a trait rather than a spec.
+	// Traits share the runtime contract (atomic boolean predicate)
+	// but are concept-agnostic: at load time, trait sources are
+	// validated to FORBID @useConcept / @useShape, allowing only
+	// @row / @caller kind annotations.
+	IsTrait bool
+}
+
+func (s *Spec) clone() *Spec {
+	if s == nil {
+		return nil
+	}
+	return &Spec{
+		Name:           s.Name,
+		Description:    s.Description,
+		ExprSource:     s.ExprSource,
+		Expr:           cloneExpressionNode(s.Expr),
+		Kind:           s.Kind,
+		UsesSI:         s.UsesSI,
+		Origin:         s.Origin,
+		UseConceptName: s.UseConceptName,
+		UseShapeName:   s.UseShapeName,
+		IsTrait:        s.IsTrait,
+	}
+}
+
+// isSpecReferenceCandidate reports whether the given identifier could
+// be a reference to a registered spec. Spec names are camelCase and
+// must not collide with row intrinsics or the payload alias.
+func isSpecReferenceCandidate(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	if strings.Contains(trimmed, ".") {
+		return false
+	}
+	switch strings.ToLower(trimmed) {
+	case "payload", "meta", "concept", "id", "type", "createdat", "createdby", "schema", "provenance":
+		return false
+	}
+	return specNamePattern.MatchString(trimmed)
+}
 
 // AttributeMap stores arbitrary key/value arguments discovered in query stages.
 type AttributeMap map[string]any
