@@ -21,9 +21,9 @@ type ShapeDefinition struct {
 	Template    map[string]any `json:"template"`
 	Origin      string         `json:"-"` // file path for debugging
 
-	// KindRow / KindCaller declare the shape's source universe.
+	// KindRow / KindActor declare the shape's source universe.
 	KindRow    bool `json:"kindRow,omitempty"`
-	KindCaller bool `json:"kindCaller,omitempty"`
+	KindActor bool `json:"kindActor,omitempty"`
 
 	// UseConcepts holds the bare concept names declared via
 	// `@useConcept(name, ...)`.

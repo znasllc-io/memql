@@ -1124,7 +1124,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// `id==actor.userId`, or `createdBy: actor.userId` on mutations). The
 	// verifier interceptor only stamps claims onto the stream context;
 	// ensureAccess converts them to a full AccessContext (cached per
-	// stream). Without this the engine's resolveCallerPath sees no
+	// stream). Without this the engine's resolveActorPath sees no
 	// AccessContext, actor.userId resolves to "", and every self-scoped
 	// query/mutation silently no-ops (zero rows). See memql#216.
 	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))

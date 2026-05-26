@@ -236,15 +236,15 @@ func (c *ASTConverter) convertComparisonExpr(expr *languageParser.ComparisonExpr
 		// The language parser routes bare `actor.X` auth-context
 		// accessors through ArgRefExpr (carrying the prefix). Those
 		// are NOT caller-passed args -- map them to the engine
-		// CallerReference so they resolve from the actor's
-		// AccessContext at filter time (resolveCallerReferences ->
-		// resolveCallerPath), e.g. queryCurrentUser's `id==actor.userId`.
+		// ActorReference so they resolve from the actor's
+		// AccessContext at filter time (resolveActorReferences ->
+		// resolveActorPath), e.g. queryCurrentUser's `id==actor.userId`.
 		// Without this they become an ArgReference, miss the args bag,
 		// and the comparison silently matches zero rows. See memql#216.
 		// caller.X retired by #221; the language parser rejects it,
 		// so this CutPrefix only sees actor.X.
 		if path, ok := strings.CutPrefix(argRef.Path, "actor."); ok {
-			value = &CallerReference{Path: path}
+			value = &ActorReference{Path: path}
 		} else {
 			value = &ArgReference{Path: argRef.Path}
 		}

@@ -409,7 +409,7 @@ func msSince(start time.Time) float64 {
 }
 
 // evaluatePolicyExpression walks the engine ExpressionNode AST and
-// produces a plain Go value, resolving ArgReference / CallerReference
+// produces a plain Go value, resolving ArgReference / ActorReference
 // against the effective ctx. The supported surface is intentionally
 // small — enough for the Phase 9 consumers (avatar vendor, role
 // check, UI gating). Richer constructs come as needed.
@@ -630,7 +630,7 @@ func evaluatePolicyValue(value any, ctx map[string]any) (any, error) {
 	switch v := value.(type) {
 	case *ArgReference:
 		return lookupPath(ctx, strings.Split(v.Path, ".")), nil
-	case *CallerReference:
+	case *ActorReference:
 		actor, _ := ctx["actor"].(map[string]any)
 		if actor == nil {
 			return nil, nil

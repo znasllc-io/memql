@@ -2406,7 +2406,7 @@ func (p *parser) parseComparisonValue(op ComparisonOperator) (any, error) {
 			// token (`.` is part of isIdentifierCharNoColon). Recognise
 			// both the bare `actor` and an `actor.X` suffix. caller.X
 			// retired by #221 -- the rejection fires from
-			// parseLiteralValue (parseCallerReference's dispatcher).
+			// parseLiteralValue (parseActorReference's dispatcher).
 			if ident == "actor" || strings.HasPrefix(ident, "actor.") {
 				return p.parseLiteralValue() // handles actor.X as a reference
 			}
@@ -2644,12 +2644,12 @@ func (p *parser) parseLiteralValue() (any, error) {
 		// The shared lexer emits `actor.X` as a single identifier token
 		// (`.` is part of isIdentifierCharNoColon), so we match on the
 		// prefix and split off the path. Resolved at execution time via
-		// auth.AccessFromContext(ctx); see resolveCallerReferences in
-		// executor.go. (The internal Go type is still CallerReference
-		// and the function is still parseCallerReference -- both are
+		// auth.AccessFromContext(ctx); see resolveActorReferences in
+		// executor.go. (The internal Go type is still ActorReference
+		// and the function is still parseActorReference -- both are
 		// implementation detail; the DSL author surface is actor.)
 		if tok.literal == "actor" || strings.HasPrefix(tok.literal, "actor.") {
-			return p.parseCallerReference()
+			return p.parseActorReference()
 		}
 		// caller.X retired by #221 -- surface the migration hint
 		// rather than fall through to "unknown identifier".
@@ -2699,29 +2699,29 @@ type ArgReference struct {
 	Path string // e.g., "spaceId" or "options.limit"
 }
 
-// CallerReference represents a reference to a field on the authenticated
+// ActorReference represents a reference to a field on the authenticated
 // user's AccessContext. Created by parsing `caller.X` syntax in
 // comparison-value position; resolved at execution time by reading
 // auth.AccessFromContext(ctx). Dotted paths are supported
 // (`caller.userId`, `caller.role`, etc.).
-type CallerReference struct {
+type ActorReference struct {
 	Path string
 }
 
-// parseCallerReference consumes a `caller` or `caller.X[.Y...]`
-// identifier token and returns a *CallerReference whose Path is the
-// dotted suffix (empty for bare `caller`, though only dotted paths are
-// currently supported by the resolver).
+// parseActorReference consumes an `actor` or `actor.X[.Y...]`
+// identifier token and returns a *ActorReference whose Path is the
+// dotted suffix (empty for bare `actor`, though only dotted paths
+// are currently supported by the resolver).
 //
-// The shared lexer treats `.` as part of an identifier, so `caller.X`
-// arrives as ONE tokIdentifier whose literal is `caller.X`. We just
+// The shared lexer treats `.` as part of an identifier, so `actor.X`
+// arrives as ONE tokIdentifier whose literal is `actor.X`. We just
 // strip the prefix.
-func (p *parser) parseCallerReference() (*CallerReference, error) {
+func (p *parser) parseActorReference() (*ActorReference, error) {
 	tok := p.next()
 	literal := strings.TrimSpace(tok.literal)
-	// Accept `actor.X` -- the canonical auth-context accessor (the
-	// internal AST node is still *CallerReference, but the DSL author
-	// surface is actor.). caller.X retired by #221; the dispatcher at
+	// Accept `actor.X` -- the canonical auth-context accessor. The
+	// AST node and the parser function carry the canonical name too
+	// (#221 + #239). caller.X retired by #221; the dispatcher at
 	// site-2 above already rejects it with a migration hint, so a
 	// caller.X token shouldn't reach this function.
 	if !(literal == "actor" || strings.HasPrefix(literal, "actor.")) {
@@ -2737,7 +2737,7 @@ func (p *parser) parseCallerReference() (*CallerReference, error) {
 	if path == "partition" || path == "partitions" {
 		return nil, p.errorf(tok, "actor.%s is retired post-#56 phase 5; reference userId/role instead", path)
 	}
-	return &CallerReference{Path: path}, nil
+	return &ActorReference{Path: path}, nil
 }
 
 // parseCtxReference consumes a `ctx` or `ctx.X[.Y...]` identifier
