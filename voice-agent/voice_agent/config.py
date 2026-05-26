@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# voice_agent_bootstrap_http_timeout caps how long the Python
+# self-bootstrap waits for the identity service to mint a token
+# before giving up. Generous so slow-start identity in compose
+# doesn't trigger a false negative, but bounded so a misconfigured
+# identity endpoint doesn't block voice-agent startup forever.
+# Mirrors `node.nodeBootstrapHTTPTimeout` (30s) on the Go side.
+_VOICE_AGENT_BOOTSTRAP_HTTP_TIMEOUT_SEC = 30
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,131 @@ def _get_int(env: str, default: int) -> int:
         return default
 
 
+def _maybe_bootstrap_voice_agent_token() -> str:
+    """Self-bootstrap a class="voice_agent" JWT against the identity service.
+
+    Returns the minted token when all preconditions are present + the call
+    succeeds; returns "" when self-bootstrap isn't opted into (the operator
+    is provisioning the token out-of-band via the documented flow).
+
+    Preconditions (mirroring `component/node.maybeBootstrapNodeToken`):
+      1. VOICE_AGENT_TOKEN env var is empty (operator-provisioned token wins).
+      2. MEMQL_NODE_BOOTSTRAP_TOKEN env var is set (the shared bootstrap
+         secret the identity service validates against; reused from #338
+         so operators have one secret to rotate).
+      3. IDENTITY_VERIFIER_BASE_URL env var is set (we need somewhere to POST).
+      4. MEMQL_VOICE_AGENT_INSTANCE_ID env var is set (the operator-chosen
+         instance label stamped onto the JWT claims for audit).
+
+    Raises RuntimeError when the bootstrap call is configured but fails;
+    the caller surfaces the error so the operator sees a clear diagnostic
+    instead of a downstream auth failure. memql#342.
+    """
+    if os.environ.get("VOICE_AGENT_TOKEN", "").strip():
+        # Operator-provisioned token wins.
+        return ""
+    secret = os.environ.get("MEMQL_NODE_BOOTSTRAP_TOKEN", "").strip()
+    if not secret:
+        # Self-bootstrap not opted into.
+        return ""
+    identity_base = os.environ.get("IDENTITY_VERIFIER_BASE_URL", "").strip().rstrip("/")
+    if not identity_base:
+        raise RuntimeError(
+            "voice-agent bootstrap requested (MEMQL_NODE_BOOTSTRAP_TOKEN set) "
+            "but IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service"
+        )
+    instance_id = os.environ.get("MEMQL_VOICE_AGENT_INSTANCE_ID", "").strip()
+    if not instance_id:
+        raise RuntimeError(
+            "voice-agent bootstrap requested but MEMQL_VOICE_AGENT_INSTANCE_ID is empty "
+            "(stamp an instance label so audit can correlate this process)"
+        )
+
+    endpoint = f"{identity_base}/node/bootstrap"
+    payload = json.dumps(
+        {"tokenClass": "voice_agent", "instanceId": instance_id}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bootstrap {secret}",
+        },
+    )
+    logger.info(
+        "voice-agent bootstrap: requesting voice_agent JWT from identity endpoint=%s instance=%s",
+        endpoint,
+        instance_id,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_VOICE_AGENT_BOOTSTRAP_HTTP_TIMEOUT_SEC) as resp:
+            body = resp.read()
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        body = e.read() if hasattr(e, "read") else b""
+        status = e.code
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"voice-agent bootstrap: POST {endpoint}: {e.reason}"
+        ) from e
+
+    try:
+        decoded = json.loads(body) if body else {}
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"voice-agent bootstrap: identity returned {status} with non-JSON body: "
+            f"{body[:512]!r}"
+        ) from e
+
+    if status != 200 or not decoded.get("success"):
+        err_code = decoded.get("errorCode") or f"http_{status}"
+        raise RuntimeError(
+            "voice-agent bootstrap: identity rejected request "
+            f"(status={status} errorCode={err_code}): {decoded.get('error', '').strip()}"
+        )
+
+    token = (decoded.get("plainToken") or "").strip()
+    if not token:
+        raise RuntimeError(
+            "voice-agent bootstrap: identity returned 200 success but empty plainToken"
+        )
+    logger.info(
+        "voice-agent bootstrap: minted voice_agent JWT identity_id=%s expires_at=%s",
+        decoded.get("identityId"),
+        decoded.get("expiresAt"),
+    )
+    return token
+
+
+def _resolve_voice_agent_token() -> str:
+    """Return the JWT to authenticate this voice-agent on MemqlService.Stream.
+
+    Resolution order:
+      1. VOICE_AGENT_TOKEN env var (operator-provisioned, the production path).
+      2. Self-bootstrap via _maybe_bootstrap_voice_agent_token (the dev path
+         introduced by memql#342 to keep `docker compose up` working out of
+         the box).
+
+    Raises RuntimeError when neither path yields a token -- matches the
+    pre-#342 contract that `load_config` errors loudly when authentication
+    can't be set up.
+    """
+    direct = os.environ.get("VOICE_AGENT_TOKEN", "").strip()
+    if direct:
+        return direct
+    bootstrapped = _maybe_bootstrap_voice_agent_token()
+    if bootstrapped:
+        return bootstrapped
+    raise RuntimeError(
+        "required env var VOICE_AGENT_TOKEN is unset; either provision a "
+        "voice-agent JWT out-of-band (see docs/auth/voice-agent-jwt.md) or "
+        "set MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL + "
+        "MEMQL_VOICE_AGENT_INSTANCE_ID for the self-bootstrap path (memql#342)"
+    )
+
+
 def load_config() -> Config:
     """Load + validate config. Raises if required vars are missing."""
     cfg = Config(
@@ -91,7 +227,7 @@ def load_config() -> Config:
         livekit_api_secret=_get_required("LIVEKIT_API_SECRET"),
         deepgram_api_key=_get_required("MEMQL_DEEPGRAM_API_KEY"),
         memql_grpc_addr=_get_required("MEMQL_GRPC_ADDR"),
-        voice_agent_token=_get_required("VOICE_AGENT_TOKEN"),
+        voice_agent_token=_resolve_voice_agent_token(),
         avatar_vendor=_get("MEMQL_AVATAR_VENDOR", "anam").lower(),
         anam_api_key=_get("ANAM_API_KEY") or None,
         simli_api_key=_get("SIMLI_API_KEY") or None,

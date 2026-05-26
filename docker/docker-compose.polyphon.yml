@@ -136,14 +136,25 @@ services:
     # docker-compose-invoking SHELL (where vendor keys are not
     # exported), which shadows the .env.local value with empty.
     #
-    # VOICE_AGENT_TOKEN is the deliberate exception: it's an
-    # injected runtime credential minted by the identity service at
-    # bring-up (see scripts/dev/refresh.sh + #184), NOT a stored
-    # vendor secret. dev-refresh exports it into the calling shell
-    # before recreating this service so the `${VOICE_AGENT_TOKEN:-}`
-    # interpolation below picks it up; baking it into the sealed
-    # genesis envelope is the wrong fit because the token rotates
-    # each refresh.
+    # VOICE_AGENT_TOKEN is the runtime credential authenticating
+    # the voice-agent on MemqlService.Stream. Two provisioning paths
+    # are supported:
+    #
+    #   1. Out-of-band mint (production): the deploy pipeline mints
+    #      a class="voice_agent" JWT via the identity admin CLI and
+    #      injects it as VOICE_AGENT_TOKEN. dev-refresh follows the
+    #      same shape (see scripts/dev/refresh.sh + #184).
+    #
+    #   2. Self-bootstrap (dev, memql#342): when VOICE_AGENT_TOKEN
+    #      is empty AND MEMQL_NODE_BOOTSTRAP_TOKEN is set, the
+    #      Python voice-agent's load_config calls identity's
+    #      /node/bootstrap with tokenClass="voice_agent" and mints
+    #      its own token. This is the path that makes a stock
+    #      `docker compose up` work without dev-refresh's
+    #      mint-and-recreate dance. Production deploys that
+    #      provision tokens out-of-band leave
+    #      MEMQL_NODE_BOOTSTRAP_TOKEN unset on the identity side and
+    #      the endpoint stays dark.
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
@@ -154,12 +165,14 @@ services:
       LIVEKIT_API_SECRET: "secret"
       MEMQL_GRPC_ADDR: "bff:50051"
       VOICE_AGENT_LOG_LEVEL: "${VOICE_AGENT_LOG_LEVEL:-INFO}"
-      # Service-credential injection. Empty when the shell hasn't
-      # minted yet (the voice-agent will crash-loop until
-      # dev-refresh's mint-and-recreate step completes). Production
-      # injects this from the deploy pipeline's secret store the
-      # same way.
+      # Path 1 (out-of-band): operator-provisioned JWT wins when set.
       VOICE_AGENT_TOKEN: "${VOICE_AGENT_TOKEN:-}"
+      # Path 2 (self-bootstrap, dev default). Mirrors the cluster /
+      # full compose dev sentinel for MEMQL_NODE_BOOTSTRAP_TOKEN
+      # from #340 so `docker compose up` works out of the box.
+      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
+      IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      MEMQL_VOICE_AGENT_INSTANCE_ID: ${MEMQL_VOICE_AGENT_INSTANCE_ID:-voice-agent-local}
     depends_on:
       - livekit
       - bff
