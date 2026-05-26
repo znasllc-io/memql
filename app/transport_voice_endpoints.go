@@ -20,6 +20,11 @@ func (a *App) transportVoiceEndpoints() {
 		a.grpcServer.SetSTTProvider(a.sttProvider.(stt.StreamingProvider))
 	}
 
+	// Audio WebSocket (browser STT + Read-Aloud TTS). The voice node is
+	// the canonical /memql/audio terminus -- nginx proxies it here. Shared
+	// with the agent node; see transport_audio.go.
+	a.setupAudioWebsocket()
+
 	// Polyphon multi-agent voice
 	a.wirePolyphonEndpoints()
 
