@@ -3,20 +3,21 @@ package memql
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// skipCountingHandler is a slog.Handler that tallies the unified
-// function loader's "skipping slice" warnings, grouped by the `kind`
-// attribute, so a conformance test can assert zero skips per construct
-// kind without scraping formatted log text.
+// skipCountingHandler is a slog.Handler that tallies the loaders'
+// skip warnings, grouped by construct kind, so a conformance test can
+// assert zero skips per kind without scraping formatted log text. It
+// catches both the function loader's "skipping slice" warnings (kind
+// from the `kind` attr) and the concept loader's "skipping concept"
+// warning (recorded under kind="concept").
 type skipCountingHandler struct {
 	mu     *sync.Mutex
 	counts map[string]int
@@ -28,10 +29,12 @@ func (h skipCountingHandler) WithAttrs([]slog.Attr) slog.Handler       { return 
 func (h skipCountingHandler) WithGroup(string) slog.Handler            { return h }
 
 func (h skipCountingHandler) Handle(_ context.Context, r slog.Record) error {
-	if !strings.Contains(r.Message, "skipping slice") {
+	isSlice := strings.Contains(r.Message, "skipping slice")
+	isConcept := strings.Contains(r.Message, "skipping concept")
+	if !isSlice && !isConcept {
 		return nil
 	}
-	var kind, fn, file, errStr string
+	var kind, fn, file, concept, errStr string
 	r.Attrs(func(a slog.Attr) bool {
 		switch a.Key {
 		case "kind":
@@ -40,11 +43,19 @@ func (h skipCountingHandler) Handle(_ context.Context, r slog.Record) error {
 			fn = a.Value.String()
 		case "file":
 			file = a.Value.String()
+		case "concept":
+			concept = a.Value.String()
 		case "error":
 			errStr = a.Value.String()
 		}
 		return true
 	})
+	if isConcept {
+		kind = "concept"
+		if fn == "" {
+			fn = concept
+		}
+	}
 	h.mu.Lock()
 	h.counts[kind]++
 	*h.detail = append(*h.detail, fmt.Sprintf("  %s :: %s (kind=%s) -> %s", file, fn, kind, errStr))
@@ -52,31 +63,34 @@ func (h skipCountingHandler) Handle(_ context.Context, r slog.Record) error {
 	return nil
 }
 
-// TestUnifiedLoaderZeroAutomationLogicSkips is the issue #212 acceptance
-// conformance test: the embedded DSL must load through the unified
-// function loader with ZERO skipped `automation` and `logic` slices.
+// TestUnifiedLoaderZeroSkips is the epic #218 acceptance conformance
+// test: the embedded DSL must load through the concept loader and the
+// unified function loader with ZERO skipped slices or concepts of ANY
+// kind.
 //
-// Background: automations are NOT function-registry constructs (they
-// load via component/automations) so they must not be sliced here at
-// all; logic slices must all parse + register. Regressions to watch
-// for: the slicer mis-extracting a nested `logic NAME { ... }`
-// invocation from inside an automation `step` block, or a malformed /
-// returnless logic body.
+// History: this started life asserting only automation + logic skips
+// (#212), then added query skips (#214), then mutation + concept skips
+// once #213 (mutation args-usage) and #215 (workbench concept/mutation)
+// landed. It now asserts the strong invariant -- any construct the
+// migration left unloadable, of any kind, fails this test with the
+// loader's own error message.
 //
-// Query skips are also asserted zero as of #214 (query-prefix naming,
-// retired @useConcept, the misnamed policyTrace concept). Mutation
-// skips remain tracked separately (#213 args-usage + #215 workbench);
-// tighten this to zero skips of ANY kind once those land.
-func TestUnifiedLoaderZeroAutomationLogicSkips(t *testing.T) {
+// Regressions to watch for: a concept declaring a reserved intrinsic
+// (id/createdAt/createdBy/...), a mutation write block written bare
+// (`update {` instead of `update <concept> {`), a query missing the
+// `query` prefix, a logic body using the unsupported
+// `name := if cond { multi-stmt }` form, or a `@useConcept(...)`
+// annotation that should be a file-top `use` import.
+func TestUnifiedLoaderZeroSkips(t *testing.T) {
 	var mu sync.Mutex
 	counts := map[string]int{}
 	var detail []string
 	logger := slog.New(skipCountingHandler{mu: &mu, counts: counts, detail: &detail})
 
 	// Concepts must load first so concept-binding resolution works
-	// during function parsing.
-	quiet := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if _, err := LoadUnifiedConcepts(quiet); err != nil {
+	// during function parsing. Concept-build skips are captured by the
+	// same handler (kind="concept").
+	if _, err := LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
 
@@ -85,11 +99,15 @@ func TestUnifiedLoaderZeroAutomationLogicSkips(t *testing.T) {
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
 	}
 
-	autoSkips := counts[string(languageParser.FunctionTypeAutomation)]
-	logicSkips := counts[string(languageParser.FunctionTypeLogic)]
-	querySkips := counts[string(languageParser.FunctionTypeQuery)]
-	if autoSkips != 0 || logicSkips != 0 || querySkips != 0 {
-		t.Errorf("issues #212/#214: expected 0 automation + 0 logic + 0 query skipped slices, got automation=%d logic=%d query=%d. Skipped:\n%s",
-			autoSkips, logicSkips, querySkips, strings.Join(detail, "\n"))
+	total := 0
+	kinds := make([]string, 0, len(counts))
+	for k, n := range counts {
+		total += n
+		kinds = append(kinds, fmt.Sprintf("%s=%d", k, n))
+	}
+	if total != 0 {
+		sort.Strings(kinds)
+		t.Errorf("epic #218: expected 0 skipped slices/concepts of any kind, got %d (%s). Skipped:\n%s",
+			total, strings.Join(kinds, " "), strings.Join(detail, "\n"))
 	}
 }
