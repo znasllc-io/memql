@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -80,59 +81,88 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 		}, nil
 	}
 
-	tokens, err := tokenize(trimmed)
-	if err != nil {
-		return nil, err
+	// Opt-in langparser-backed runtime path (#248 / 3a of the
+	// component/memql/parser.go retirement). When enabled AND the
+	// query shape is one the new path covers, parse via the same
+	// language parser the .memql loader uses; first step of
+	// retiring the in-package parser entirely (#250). On any
+	// unsupported-shape sentinel, fall through to the established
+	// path below; on a real parse error, propagate.
+	var (
+		root        ExpressionNode
+		inlineSpecs map[string]*Spec
+		timestamp   *time.Time
+		useLatest   bool
+	)
+	if e.useLangparserRuntime {
+		converted, err := parseViaLangparser(trimmed)
+		if err == nil {
+			root = converted
+			// langparser path produces no inline specs (those shapes
+			// are short-circuited upstream by
+			// langparserPathUnsupported) and no @timestamp suffix
+			// (same), so the inlineSpecs map stays nil and the
+			// timestamp/useLatest locals stay zero -- matching what
+			// the memql path would emit for a query with neither.
+		} else if !errors.Is(err, errLangparserUnsupported) {
+			return nil, err
+		}
 	}
+	if root == nil {
+		tokens, err := tokenize(trimmed)
+		if err != nil {
+			return nil, err
+		}
 
-	p := newParser(tokens, e.functions)
-	root, err := p.parse()
-	if err != nil {
-		return nil, err
-	}
+		p := newParser(tokens, e.functions)
+		root, err = p.parse()
+		if err != nil {
+			return nil, err
+		}
 
-	inlineSpecs, err := inlineDefinitionsToSpecs(p.inlineSpecDefinitions())
-	if err != nil {
-		return nil, err
+		inlineSpecs, err = inlineDefinitionsToSpecs(p.inlineSpecDefinitions())
+		if err != nil {
+			return nil, err
+		}
+
+		// Timestamp suffix + the EOF check below ONLY apply to the
+		// memql parser path. The langparser path rejects shapes
+		// containing `@` upfront via langparserPathUnsupported, and
+		// langparser.ParseExpression has its own end-of-input check,
+		// so neither belongs in the branch above.
+		if p.match(tokAt) {
+			if p.peek().typ == tokEOF {
+				return nil, p.errorf(p.previous(), "timestamp suffix requires a value")
+			}
+
+			switch next := p.peek(); next.typ {
+			case tokString:
+				p.next()
+				parsed, err := time.Parse(time.RFC3339, next.literal)
+				if err != nil {
+					return nil, p.errorf(next, "invalid timestamp %q: %v", next.literal, err)
+				}
+				timestamp = &parsed
+			case tokIdentifier:
+				p.next()
+				if strings.EqualFold(next.literal, "latest") {
+					useLatest = true
+					timestamp = nil
+				} else {
+					return nil, p.errorf(next, "unexpected timestamp keyword %q", next.literal)
+				}
+			default:
+				return nil, p.errorf(next, "unexpected token %q after '@'", next.literal)
+			}
+		}
+
+		if p.peek().typ != tokEOF {
+			return nil, p.errorf(p.peek(), "unexpected token %q after expression", p.peek().literal)
+		}
 	}
 
 	if root == nil {
 		return nil, ErrEmptyQuery
-	}
-
-	var (
-		timestamp *time.Time
-		useLatest bool
-	)
-
-	if p.match(tokAt) {
-		if p.peek().typ == tokEOF {
-			return nil, p.errorf(p.previous(), "timestamp suffix requires a value")
-		}
-
-		switch next := p.peek(); next.typ {
-		case tokString:
-			p.next()
-			parsed, err := time.Parse(time.RFC3339, next.literal)
-			if err != nil {
-				return nil, p.errorf(next, "invalid timestamp %q: %v", next.literal, err)
-			}
-			timestamp = &parsed
-		case tokIdentifier:
-			p.next()
-			if strings.EqualFold(next.literal, "latest") {
-				useLatest = true
-				timestamp = nil
-			} else {
-				return nil, p.errorf(next, "unexpected timestamp keyword %q", next.literal)
-			}
-		default:
-			return nil, p.errorf(next, "unexpected token %q after '@'", next.literal)
-		}
-	}
-
-	if p.peek().typ != tokEOF {
-		return nil, p.errorf(p.peek(), "unexpected token %q after expression", p.peek().literal)
 	}
 
 	plan := &QueryPlan{

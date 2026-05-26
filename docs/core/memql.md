@@ -3601,3 +3601,44 @@ Any change to MemQL parsing, execution options, relationships, or mutations **mu
 
 1. Update the relevant sections (syntax, operators, options, examples, roadmap).
 2. Reference this document in pull requests so reviewers verify documentation parity.
+
+## Runtime parser opt-in (#248 / epic #218)
+
+The runtime grammar consumed by `engine.Execute(ctx, query string)` --
+function invocations (`funcName({k: v, ...})`), filter expressions
+(`concept==X; payload.Y==Z`), accessor references (`actor.X`,
+`args.X`) -- is historically parsed by `component/memql/parser.go`,
+which lives alongside the load-time parser in
+`component/language/parser`. These two parsers were the duplication
+behind memql#216 / #221 / #239, and the broader retirement is
+tracked under epic #218 across three sequenced slices: #248 (add
+opt-in path), #249 (flip default after soak), #250 (delete the old
+parser).
+
+For the soak window, the langparser-backed runtime path is
+**opt-in** via:
+
+```go
+engine.UseLangparserRuntime(true)  // flag default is OFF
+```
+
+When ON, `engine.Execute(ctx, string)` routes the query through
+`langparser.ParseExpression` + `ASTConverter` for the shapes it
+covers (every shape SDK-generated builders produce + the
+`concept==X` hand-written form). Two shapes still fall back to the
+old parser:
+
+- **Timestamp suffix** -- `concept==X @latest` /
+  `concept==X @"2026-01-01T00:00:00Z"`. Handled post-parse on the
+  memql path; the langparser path rejects it upfront via a
+  sentinel so the fall-back is transparent.
+- **Inline spec definitions** -- `name := expr`. Same.
+
+Behavior is byte-identical for every supported shape -- guarded
+by the cross-parser equivalence test
+`TestParseViaLangparser_Equivalence` in
+`component/memql/parser_langpath_test.go`. Add a row there if a
+new caller adopts a shape the corpus doesn't cover.
+
+The flag flips to ON-by-default in #249 after one to two release
+cycles of dev/staging use with no parser-related regressions.
