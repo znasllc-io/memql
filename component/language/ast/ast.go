@@ -1297,6 +1297,52 @@ type BuiltinField struct {
 	Attributes []*Attribute // any other field-level annotations (tolerated, not yet acted on)
 }
 
+// PromptDecl is the shared-frontend AST node for a struct-form
+// prompt declaration (`prompt NAME { field type @required; ... }`).
+// Introduced by memql#319 (sub-epic #309 / #306 child C) so the
+// unified-kinds loader can parse prompts through the langparser
+// instead of the hand-rolled prompt_parser.go mini-parser.
+//
+// Annotation surface (validated by the converter, not the parser):
+//
+//	@enabled / @disabled              lifecycle (engine-side flags)
+//	@description("text")              documentation
+//	@defaultProvider("name")          SI provider pinned by default
+//	@templateFile("file.tmpl")        sidecar template path (relative to the prompt .memql file)
+//
+// Field grammar mirrors BuiltinField: `<name> <type> [@required
+// @description("...") @enum(...) @default(...)]`. Type accepts
+// primitives (string, bool, integer, number, object) and the
+// `[]primitive` array-of-primitive shorthand (recorded as Type="[]X"
+// like BuiltinField does — the memql-side converter normalises this
+// to the prompt-internal "array" + elementType form).
+//
+// The legacy inline `@template("""...""")` body-level annotation is
+// NOT supported on this path; every shipped prompt uses
+// @templateFile + a sidecar today. The langparser's lexer doesn't
+// tokenise triple-quoted strings, so an attempt to parse an inline
+// template fails loud with a migration-pointing error; if the inline
+// form becomes load-bearing again, the lexer grows triple-quoted
+// support first.
+type PromptDecl struct {
+	Name       string        // prompt name
+	Attributes []*Attribute  // prompt-level annotations
+	Fields     []*PromptField // body field declarations (the input schema)
+	Path       string        // source path, for errors/diagnostics
+}
+
+func (*PromptDecl) node() {}
+
+// PromptField is a single field declaration inside a PromptDecl
+// body. Mirrors BuiltinField (memql#318) so the per-construct
+// playbook for langparser-native struct declarations stays uniform.
+type PromptField struct {
+	Name       string
+	Type       string       // e.g. "string", "object", "[]object"
+	Required   bool         // from @required
+	Attributes []*Attribute // any other field-level annotations (@description / @enum / @default)
+}
+
 // ShapeDecl is the shared-frontend AST node for a struct-form shape
 // declaration (`shape NAME { id; payload.X; ... }`). Introduced by
 // memql#315 (sub-epic #309 / #306 child C) so the unified-kinds loader
