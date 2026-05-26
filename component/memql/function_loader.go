@@ -111,6 +111,16 @@ func extractLeadingCommentBlock(content string) string {
 //   - Unlimited queries per file
 //   - Automations should be in automations/ directory, not queries/mutations
 func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry) (*Function, error) {
+	// Author-facing retirement (memql#303): reject the legacy
+	// procedural form `func (Receiver) name(ctx any) ...` before any
+	// rewriting runs. The internal IR is still procedural (the
+	// rewriter below synthesises it from struct form), but no .memql
+	// author may write that shape directly. The compiler test fixtures
+	// that consume procedural source bypass this loader entirely.
+	if err := languageParser.RejectLegacyProceduralAuthorForm(content); err != nil {
+		return nil, fmt.Errorf("%s: %w", origin, err)
+	}
+
 	// Snapshot the signature-bound concepts BEFORE NormaliseAll
 	// rewrites the struct form to procedural -- once the rewrite runs
 	// the `<kind> <Concept> <name> {` shape is gone and the regex

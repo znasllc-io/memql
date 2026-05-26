@@ -184,6 +184,40 @@ func extractArgsBlock(body string) (string, error) {
 // Public chain: NormaliseAll
 // =============================================================================
 
+// legacyProceduralAuthorForm matches `func (Receiver) name(...)` at
+// column 0. Pinned to the 12 receiver names the engine has ever
+// accepted as author-written procedural form. memql#303 retired the
+// author-facing procedural surface: the DSL-load entry point
+// (component/memql.tryParseNewFunctionSyntax) calls
+// RejectLegacyProceduralAuthorForm before NormaliseAll runs, so any
+// author-written .memql slice in that shape fails fast with a
+// migration hint.
+//
+// The check is NOT applied inside NormaliseAll itself because the
+// per-construct rewriters below synthesise procedural source as an
+// internal IR (e.g. `func (Query) NAME(_ any) (any, error) { return
+// X, nil }`) -- gating NormaliseAll directly would block the
+// rewriter's own output from re-entering the parser. The compiler
+// API (component/language/compiler.CompileSource) likewise calls
+// NormaliseAll on whatever source the caller hands it; its unit
+// tests historically use procedural source as compiler-IR fixtures,
+// which remains supported.
+var legacyProceduralAuthorForm = regexp.MustCompile(`(?m)^func \((Query|Mutation|Logic|Spec|Automation|Builtin|Prompt|Provider|Shape|Tool|Policy|Seed)\)`)
+
+// RejectLegacyProceduralAuthorForm returns an error when the source
+// contains author-written procedural form (`func (Receiver) name(ctx
+// any) ...`) for any of the 12 retired receiver names. Called by
+// the DSL load-time entry point (memql#303); see the comment on
+// legacyProceduralAuthorForm for why this isn't wired into
+// NormaliseAll directly.
+func RejectLegacyProceduralAuthorForm(source string) error {
+	m := legacyProceduralAuthorForm.FindStringSubmatch(source)
+	if m == nil {
+		return nil
+	}
+	return fmt.Errorf("legacy procedural form `func (%s) ...` is retired (memql#303) -- author every construct in struct form: `<kind> <Concept> <name> { args { ... } ... }`", m[1])
+}
+
 // NormaliseAll runs every struct-form rewriter in sequence: query,
 // mutation, logic, automation, file-top args. Each stage is a no-op
 // when the source doesn't match its detector. Errors from any
