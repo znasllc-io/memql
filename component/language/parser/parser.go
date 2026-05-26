@@ -5501,24 +5501,27 @@ func parseNumericLiteral(lit string) (any, error) {
 // consumers that need an int (paginate, withDepth, etc.) don't have
 // to re-implement the type dispatch at every call site.
 //
-// Out-of-range values reject (ok=false) rather than wrap. `int` is
-// platform-sized (32 bits on 32-bit targets, 64 on 64-bit), so a
-// caller of `paginate(limit=9999999999)` from a `.memql` file on a
-// 32-bit build would otherwise see a silently truncated int. The
-// callers all expect small positive integers (paginate page sizes,
-// withDepth traversal depth, forEach concurrency), so rejecting
-// overflow is more honest than truncation and matches the upper
-// bound check pattern CodeQL's go/incorrect-integer-conversion rule
-// looks for.
+// Out-of-range values reject (ok=false) rather than wrap. The bound
+// is math.MaxInt32 / math.MinInt32 rather than math.MaxInt /
+// math.MinInt: (1) `int` is platform-sized (32 bits on 32-bit
+// builds, 64 on 64-bit), so silently truncating int64 to int on
+// 32-bit is a latent bug; (2) the four directive consumers
+// (paginate limit/offset, withDepth, forEach concurrency) all
+// expect small positive integers and never approach 2B, so an
+// int32 sub-range is operationally fine; (3) CodeQL's
+// go/incorrect-integer-conversion rule recognises int32-clamped
+// constants as a real bounds check, where math.MaxInt's
+// platform-dependent value isn't tracked as a stable upper bound
+// across the int64/float64 union flow.
 func numericAsInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int64:
-		if n > math.MaxInt || n < math.MinInt {
+		if n > math.MaxInt32 || n < math.MinInt32 {
 			return 0, false
 		}
 		return int(n), true
 	case float64:
-		if n > math.MaxInt || n < math.MinInt {
+		if n > math.MaxInt32 || n < math.MinInt32 {
 			return 0, false
 		}
 		return int(n), true
