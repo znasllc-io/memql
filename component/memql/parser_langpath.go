@@ -70,7 +70,15 @@ func parseViaLangparser(query string) (ExpressionNode, error) {
 	}
 	converted, err := NewASTConverter().ConvertExpression(parsed)
 	if err != nil {
-		return nil, err
+		// Same #249 soak posture as the parse-error path above: any
+		// ASTConverter error falls back to the memql parser so the
+		// caller gets a canonical sentinel chain. The converter
+		// can fail on grammar the langparser accepts but our
+		// AST-mapping doesn't yet cover (e.g. a future expression
+		// shape) -- without this conversion, callers grepping
+		// `errors.Is(err, ErrInvalidArgument)` would see a bare
+		// converter error and miss the wrap.
+		return nil, errLangparserUnsupported
 	}
 	return flattenRuntimeFunctionArgs(converted), nil
 }
@@ -324,6 +332,15 @@ func containsConceptMemqlVersionShape(query string) bool {
 			continue
 		}
 		if query[j:j+len(target)] != target {
+			continue
+		}
+		// Right-boundary check: the literal `memql:version` must end
+		// at end-of-query OR followed by a non-ident char (whitespace,
+		// `)`, `;`, etc.). Otherwise `concept==memql:versionfoo` would
+		// false-positive when both parsers would produce equivalent
+		// generic ComparisonExpression for that input.
+		end := j + len(target)
+		if end < len(query) && isIdentChar(query[end]) {
 			continue
 		}
 		return true

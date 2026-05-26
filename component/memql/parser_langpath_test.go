@@ -218,6 +218,35 @@ func TestLangparserPathFallsBackOnInOperator(t *testing.T) {
 	}
 }
 
+// TestContainsConceptMemqlVersionRightBoundary pins the PR #279
+// review fix: a literal `memql:version` must end at a true word
+// boundary, so `concept==memql:versionfoo` does NOT trigger the
+// targeted fallback (would have forced unnecessary fallback for
+// queries both parsers handle equivalently as a generic
+// ComparisonExpression).
+func TestContainsConceptMemqlVersionRightBoundary(t *testing.T) {
+	cases := []struct {
+		name   string
+		query  string
+		expect bool
+	}{
+		{"exact match", `concept==memql:version`, true},
+		{"trailing whitespace", `concept==memql:version `, true},
+		{"followed by close paren", `paginate(concept==memql:version, 1)`, true},
+		{"followed by semicolon (compound)", `concept==memql:version;payload.x==1`, true},
+		{"trailing ident chars must NOT match", `concept==memql:versionfoo`, false},
+		{"trailing digit must NOT match", `concept==memql:version2`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := containsConceptMemqlVersionShape(c.query)
+			if got != c.expect {
+				t.Errorf("containsConceptMemqlVersionShape(%q) = %v; want %v", c.query, got, c.expect)
+			}
+		})
+	}
+}
+
 // TestContainsRuntimeCallBoundary pins the word-boundary semantics
 // of the containsRuntimeCall helper -- a substring match would
 // false-positive on `payload.shapeId` / `myShape(` / a quoted
