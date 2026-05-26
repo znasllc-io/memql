@@ -22,9 +22,9 @@
 //
 //   @description("text")    Human-readable description.       optional
 //   @row                    Kind marker: projects row fields. optional*
-//   @caller                 Kind marker: projects auth envelope. optional*
+//   @actor                 Kind marker: projects auth envelope. optional*
 //
-//   (* a shape must carry at least one of @row / @caller. Both is
+//   (* a shape must carry at least one of @row / @actor. Both is
 //      allowed but no current users exist.)
 //
 // The `@useConcept(...)` family was retired in the import-model pivot.
@@ -93,23 +93,23 @@ shape statusRowTrait {
 //   4. Caller shape -- auth envelope projection
 // =============================================================================
 //
-// A caller shape declares `@caller` (project auth envelope) instead of
-// `@row`. Body paths reference `caller.*` fields. The canonical example
-// is `callerActor`, used by every context-spec via the spec's
-// `@shape("callerActor")` binding.
+// A caller shape declares `@actor` (project auth envelope) instead of
+// `@row`. Body paths reference `actor.*` fields. The canonical example
+// is `actorEnvelope`, used by every context-spec via the spec's
+// `@shape("actorEnvelope")` binding.
 
-@caller
+@actor
 @description("Caller envelope projection: authenticated actor, role, and now.")
-shape callerActor {
-  caller.userId
-  caller.role
-  caller.identityId
-  caller.isClusterOwner
-  caller.now
+shape actorEnvelope {
+  actor.userId
+  actor.role
+  actor.identityId
+  actor.isClusterOwner
+  actor.now
 }
 
 // =============================================================================
-//   5. Mixed @row + @caller -- both worlds
+//   5. Mixed @row + @actor -- both worlds
 // =============================================================================
 //
 // A shape MAY carry both kind markers. Body paths can then reference
@@ -117,13 +117,13 @@ shape callerActor {
 // current users exist.
 
 @row
-@caller
+@actor
 @description("Hypothetical mixed projection -- row + caller envelope.")
 shape participant participantWithCallerContext {
   row.id
   payload.displayName
-  caller.userId
-  caller.role
+  actor.userId
+  actor.role
 }
 
 // =============================================================================
@@ -149,7 +149,7 @@ shape participant participantWithCallerContext {
 //                        (`<conceptName>.X`) is rejected at load time
 //                        by the legacy-filter-form validator.
 //
-//   caller.X             Auth-envelope reference. Requires @caller.
+//   actor.X             Auth-envelope reference. Requires @actor.
 
 @row
 @description("Demonstrates the body path forms in one place.")
@@ -211,11 +211,11 @@ shape participant pathSyntaxExample {
 //
 //   - From a spec's `@shape("...")` binding:
 //
-//         use common.shapes.{ callerActor }
+//         use common.shapes.{ actorEnvelope }
 //
-//         @shape("callerActor")
+//         @shape("actorEnvelope")
 //         spec requiresAdmin {
-//           caller.role == "admin"
+//           actor.role == "admin"
 //         }
 //
 //     The shape must exist at engine startup. The post-load

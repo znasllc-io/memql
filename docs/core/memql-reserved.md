@@ -55,24 +55,24 @@ in `docs/core/memql-authoring-rules.md` (gotcha #19).
 
 ---
 
-## 3. Caller-envelope fields
+## 3. Actor-envelope fields
 
-Inside a `@caller` shape or a context-spec, the engine exposes a
-fixed envelope. Field paths under `caller.` are restricted to:
+Inside an `@actor` shape or a context-spec, the engine exposes a
+fixed envelope. Field paths under `actor.` are restricted to:
 
 | Path | What |
 |------|------|
-| `caller.userId` | The acting user's id. |
-| `caller.role` | Cluster role: `owner` / `admin` / `writer` / `reader`. |
-| `caller.identityId` | The credential row (token, magic-link, PAT). |
-| `caller.isClusterOwner` | Bool short-circuit; bypasses the per-partition ACL. |
-| `caller.partitions` | All partitions the actor has access to. |
-| `caller.partition` | Active partition for this request. |
-| `caller.now` | RFC3339 timestamp at evaluation start. |
-| `caller.config.<key>` | Allow-listed config entries. |
+| `actor.userId` | The acting user's id. |
+| `actor.role` | Cluster role: `owner` / `admin` / `writer` / `reader`. |
+| `actor.identityId` | The credential row (token, magic-link, PAT). |
+| `actor.isClusterOwner` | Bool short-circuit; bypasses the per-partition ACL. |
+| `actor.now` | RFC3339 timestamp at evaluation start. |
+| `actor.config.<key>` | Allow-listed config entries. |
 
-The fields are the only names valid under `caller.` -- a typo like
-`caller.userid` (lowercase) is a hard error.
+The fields are the only names valid under `actor.` -- a typo like
+`actor.userid` (lowercase) is a hard error. The `caller.X` / `@caller`
+spellings are retired in #221; the parser rejects them with a
+migration hint pointing at the canonical `actor.X` / `@actor`.
 
 ---
 

@@ -151,21 +151,36 @@ func (p *shapeMemQLParser) parseDecorator(decl *shapeDecl) error {
 		decl.kindRow = true
 		return nil
 
-	case "caller":
-		// Flag annotation: no parens, no value.
+	case "actor":
+		// Flag annotation: no parens, no value. The shape kind
+		// keyword for the auth-envelope projection. The internal
+		// flag is still named kindCaller (the Go-side type stays
+		// CallerReference) -- that is implementation detail; the
+		// DSL author surface is @actor.
 		decl.kindCaller = true
 		return nil
+
+	case "caller":
+		// @caller is retired (#221) in favour of @actor for one
+		// vocabulary across the DSL. Drain any inline value so
+		// the parser stays in a consistent state, then surface
+		// the migration hint.
+		p.SkipWhitespaceInline()
+		if !p.EOF() && p.Peek() == '(' {
+			p.SkipBalancedParens()
+		}
+		return fmt.Errorf("@caller is retired (#221) -- use @actor; the field accessor renamed at the same time (caller.X -> actor.X)")
 
 	default:
 		// Unknown decorator -- hard reject. Drain any arguments so
 		// the parser stays in a consistent state, then surface a
 		// structured error. The full surface for shapes is:
-		// @description, @row, @caller, @useConcept.
+		// @description, @row, @actor, @useConcept.
 		p.SkipWhitespaceInline()
 		if !p.EOF() && p.Peek() == '(' {
 			p.SkipBalancedParens()
 		}
-		return fmt.Errorf("unknown shape annotation @%s -- the supported surface is @description, @row, @caller, @useConcept", name)
+		return fmt.Errorf("unknown shape annotation @%s -- the supported surface is @description, @row, @actor, @useConcept", name)
 	}
 }
 
@@ -320,14 +335,14 @@ func (p *shapeMemQLParser) readShapePath() string {
 // Storage form:
 //   - `payload.X` -- a concept-payload field.
 //   - `id` / `createdAt` / etc. -- a row intrinsic (bare).
-//   - `caller.X` -- the engine envelope.
+//   - `actor.X` -- the engine envelope (auth context).
 //
 // Inputs the author can write:
 //   - `row.payload.X` (legacy) -> `payload.X`
 //   - `row.X` -> `X` (intrinsic; trims the `row.` prefix)
 //   - `<conceptBareName>.X` -> `payload.X` (canonical; the bare name
 //     must appear in the shape's @useConcept(...) target list)
-//   - `caller.X` -> `caller.X` (unchanged)
+//   - `actor.X` -> `actor.X` (unchanged)
 //
 // Paths that don't match any of the above are returned verbatim --
 // the downstream evaluator surfaces the error if the form is
@@ -336,7 +351,7 @@ func translateShapeBodyPath(path string, useConcepts []string) string {
 	if strings.HasPrefix(path, "row.") {
 		return strings.TrimPrefix(path, "row.")
 	}
-	if strings.HasPrefix(path, "caller.") {
+	if strings.HasPrefix(path, "actor.") {
 		return path
 	}
 	if idx := strings.Index(path, "."); idx > 0 {

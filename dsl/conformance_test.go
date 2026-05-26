@@ -33,15 +33,17 @@ func itoa(i int) string { return strconv.Itoa(i) }
 // This test parses each .memql file line-structure-only (no full
 // parser), extracts filter clauses, and rejects any predicate whose
 // LHS starts with `<conceptName>.` or `?.<conceptName>.` where
-// <conceptName> is not "payload" / "args" / "actor" / "caller" or
-// one of the row intrinsics.
+// <conceptName> is not "payload" / "args" / "actor" or one of the
+// row intrinsics. (`caller` is retired in #221 -- the parser
+// rejects the accessor; TestNoCallerVocabulary catches author drift
+// earlier with a clear file:line.)
 func TestFilterSyntaxCanonical(t *testing.T) {
 	intrinsics := map[string]bool{
 		"id": true, "concept": true, "createdAt": true,
 		"createdBy": true, "partition": true, "type": true,
 		"schema": true, "payload": true,
 		// reserved engine-side names that may appear bare on the LHS
-		"args": true, "actor": true, "caller": true, "now": true,
+		"args": true, "actor": true, "now": true,
 		"config": true, "trace": true,
 	}
 
@@ -259,10 +261,10 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 //
 // The test HARD-FAILS on any flagged construct -- the per-domain
 // follow-up PRs for #54 closed every existing gap, and any new
-// user-scope read/write needs to either include a caller-check
-// (`actor.userId` / `caller.userId` reference, or an `isClusterOwner`
-// admin gate) or carry an explicit `@public` annotation
-// acknowledging the intent.
+// user-scope read/write needs to either include an actor-check
+// (`actor.userId` reference, or an `isClusterOwner` admin gate)
+// or carry an explicit `@public` annotation acknowledging the
+// intent.
 func TestPerRowAuthzClassification(t *testing.T) {
 	type counts struct {
 		owned   int
@@ -333,10 +335,8 @@ func TestPerRowAuthzClassification(t *testing.T) {
 
 			hasPublic := strings.Contains(preamble, "@public")
 			hasAdmin := strings.Contains(body, "actor.isClusterOwner") ||
-				strings.Contains(body, "requiresClusterOwner") ||
-				strings.Contains(body, "caller.isClusterOwner")
-			hasOwner := strings.Contains(body, "actor.userId") ||
-				strings.Contains(body, "caller.userId")
+				strings.Contains(body, "requiresClusterOwner")
+			hasOwner := strings.Contains(body, "actor.userId")
 			referencesUserScope := strings.Contains(body, "payload.ownerUserId") ||
 				strings.Contains(body, "payload.userId") ||
 				strings.Contains(body, "payload.actorUserId") ||
@@ -614,6 +614,99 @@ func hasFilterOperator(pred string) bool {
 		}
 	}
 	return false
+}
+
+// TestNoCallerVocabulary is the #221 conformance guardrail: every
+// loaded .memql file must use the canonical `actor.X` auth-context
+// accessor and the `@actor` shape kind annotation. The retired
+// `caller.X` / `@caller` spellings are rejected by both parsers, so
+// any drift would already break loading -- but a static-grep test
+// surfaces the violation with a clean file:line and a migration
+// hint rather than relying on log-scraping the load failure.
+//
+// _reference/ files are documentation templates not loaded by the
+// engine; this test treats them as out-of-scope (matches the
+// existing per-row-authz classification test's exclusion).
+func TestNoCallerVocabulary(t *testing.T) {
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	// Match the accessor or annotation, not the English word "caller"
+	// in comments / @description text. We surface only the structural
+	// forms that survive into the parsed body: `caller.<ident>` (any
+	// position) and `@caller` (start of line / after whitespace).
+	accessorRe := regexp.MustCompile(`(?:^|[^A-Za-z0-9_])caller\.[A-Za-z_]`)
+	annotationRe := regexp.MustCompile(`(?m)^[ \t]*@caller\b`)
+
+	type hit struct {
+		file string
+		line int
+		form string
+	}
+	var hits []hit
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") {
+			continue
+		}
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		// Strip /* */ block comments and // line comments so an
+		// English `caller.` inside a @description literal or a doc
+		// header doesn't trip the check. We do this at line granularity
+		// since the DSL doesn't use /* */ blocks; line stripping is
+		// enough.
+		for i, line := range strings.Split(string(raw), "\n") {
+			stripped := stripLineComment(line)
+			if accessorRe.MatchString(stripped) {
+				hits = append(hits, hit{p, i + 1, "caller.X"})
+			}
+			if annotationRe.MatchString(stripped) {
+				hits = append(hits, hit{p, i + 1, "@caller"})
+			}
+		}
+	}
+	if len(hits) > 0 {
+		sort.Slice(hits, func(i, j int) bool {
+			if hits[i].file != hits[j].file {
+				return hits[i].file < hits[j].file
+			}
+			return hits[i].line < hits[j].line
+		})
+		var sb strings.Builder
+		sb.WriteString("epic #218 / #221: caller. and @caller are retired -- use actor. and @actor.\n")
+		for _, h := range hits {
+			sb.WriteString("  " + h.file + ":" + itoa(h.line) + " " + h.form + "\n")
+		}
+		t.Errorf("%s", sb.String())
+	}
+}
+
+// stripLineComment trims `// ...` from the end of a line, preserving
+// any `//` that appears inside a string literal. The DSL's string
+// literals use double quotes only, so a simple quote-aware walk is
+// enough.
+func stripLineComment(line string) string {
+	inStr := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == '"' && (i == 0 || line[i-1] != '\\') {
+			inStr = !inStr
+			continue
+		}
+		if !inStr && c == '/' && i+1 < len(line) && line[i+1] == '/' {
+			return line[:i]
+		}
+	}
+	return line
 }
 
 // Compile-time guarantee that fs is referenced.

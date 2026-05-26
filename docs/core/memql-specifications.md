@@ -19,12 +19,12 @@ which fields the body references:
   intrinsics (`id`, `concept`, `type`, `createdAt`, `createdBy`,
   `schema`). The expression compiles into a SQL `WHERE` fragment
   and pushes down to the database for filtering.
-- **Context-specs** -- the body references `caller.X` only
-  (e.g. `caller.role`, `caller.isClusterOwner`). The expression
+- **Context-specs** -- the body references `actor.X` only
+  (e.g. `actor.role`, `actor.isClusterOwner`). The expression
   evaluates in-process; called from policies via `spec("name")` for
-  caller-based checks like "is admin", "owns partition", etc.
+  actor-based checks like "is admin", "owns partition", etc.
 
-Bodies that mix both flavors (row + caller references in the same
+Bodies that mix both flavors (row + actor references in the same
 expression) are rejected at load time.
 
 ## Authoring rules
@@ -34,7 +34,7 @@ expression) are rejected at load time.
 - Side-effect free. Specs cannot call mutation functions, and
   cannot call other procedural DSL receivers.
 - Prefer `spec*` naming for row-specs (matches the call sites in
-  query filter clauses). Caller-only context-specs may drop the
+  query filter clauses). Actor-only context-specs may drop the
   prefix when the name reads more naturally (`requiresAdmin`).
 - The legacy `func (Spec) name(ctx any) bool { return <expr> }`
   form is retired; the parser rejects it with a migration hint.
@@ -74,9 +74,9 @@ query queryHumanParticipants {
 
 ```memql
 @enabled
-@description("Caller holds an admin or owner role")
+@description("Actor holds an admin or owner role")
 spec requiresAdmin {
-  caller.role == "admin"
+  actor.role == "admin"
 }
 ```
 
@@ -117,7 +117,7 @@ is rejected at load time when ALL of the following hold:
 2. Its body contains zero `policy(...)` and zero `spec(...)`
    sub-routine calls.
 3. It returns `bool`.
-4. Its body reads only `caller.*` (no `ctx.*` / `args` / `payload`
+4. Its body reads only `actor.*` (no `ctx.*` / `args` / `payload`
    references).
 
 When all four are true the policy is structurally a context-spec and
@@ -126,7 +126,7 @@ migration message naming the target spec file path:
 
 ```
 policy "canViewAdminSettings" has no policy-only annotations and no
-sub-policy calls (body reads only caller.* and contains no
+sub-policy calls (body reads only actor.* and contains no
 policy()/spec() calls); author as a spec instead. Move to
 dsl/specs/<namespace>/canViewAdminSettings.memql, change the receiver
 to `spec`, and replace `policy("canViewAdminSettings")` calls with

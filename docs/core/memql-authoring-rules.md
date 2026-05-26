@@ -9,7 +9,7 @@ When you find a new gotcha, **add it here**. Future you (and every
 other agent) will thank you.
 
 > **Companion reference:** every name the engine reserves -- top-level
-> identifiers, row intrinsics, caller-envelope fields, construct
+> identifiers, row intrinsics, actor-envelope fields, construct
 > keywords, annotation names, import aliases -- is indexed in
 > [memql-reserved.md](memql-reserved.md). Read that doc before
 > picking a field or arg name; this doc is for gotchas that survive

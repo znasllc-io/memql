@@ -233,17 +233,17 @@ func (c *ASTConverter) convertComparisonExpr(expr *languageParser.ComparisonExpr
 	// Convert value - might be an ArgReference from parser.
 	value := expr.Value
 	if argRef, ok := expr.Value.(*languageParser.ArgRefExpr); ok {
-		// The language parser routes bare `actor.X` / `caller.X`
-		// auth-context accessors through ArgRefExpr (carrying the
-		// prefix). Those are NOT caller-passed args -- map them to the
-		// engine CallerReference so they resolve from the caller's
+		// The language parser routes bare `actor.X` auth-context
+		// accessors through ArgRefExpr (carrying the prefix). Those
+		// are NOT caller-passed args -- map them to the engine
+		// CallerReference so they resolve from the actor's
 		// AccessContext at filter time (resolveCallerReferences ->
 		// resolveCallerPath), e.g. queryCurrentUser's `id==actor.userId`.
 		// Without this they become an ArgReference, miss the args bag,
 		// and the comparison silently matches zero rows. See memql#216.
+		// caller.X retired by #221; the language parser rejects it,
+		// so this CutPrefix only sees actor.X.
 		if path, ok := strings.CutPrefix(argRef.Path, "actor."); ok {
-			value = &CallerReference{Path: path}
-		} else if path, ok := strings.CutPrefix(argRef.Path, "caller."); ok {
 			value = &CallerReference{Path: path}
 		} else {
 			value = &ArgReference{Path: argRef.Path}
@@ -823,7 +823,7 @@ func classifySpecKind(expr ExpressionNode) (SpecKind, error) {
 		}
 		first := strings.ToLower(strings.TrimSpace(ref.Parts[0]))
 		switch first {
-		case "caller":
+		case "actor":
 			hasContext = true
 		case "payload", "meta", "id", "concept", "type", "createdat", "createdby", "schema":
 			hasRow = true
@@ -831,7 +831,7 @@ func classifySpecKind(expr ExpressionNode) (SpecKind, error) {
 	})
 	switch {
 	case hasRow && hasContext:
-		return "", fmt.Errorf("spec body mixes row references (payload / intrinsics) with context references (caller.*) -- split into a row-spec + a context-spec and compose via a policy")
+		return "", fmt.Errorf("spec body mixes row references (payload / intrinsics) with context references (actor.*) -- split into a row-spec + a context-spec and compose via a policy")
 	case hasContext:
 		return SpecKindContext, nil
 	default:

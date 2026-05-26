@@ -214,9 +214,9 @@ trait traitIsUsable {
 }
 
 @enabled
-@description("Caller must hold an identity-issued JWT with admin or owner role.")
+@description("Actor must hold an identity-issued JWT with admin or owner role.")
 trait traitRequiresAdmin {
-  caller.role == "admin"
+  actor.role == "admin"
 }
 
 // ---- specs/v1/common/statusIsActive.memql ----

@@ -15,7 +15,7 @@ import (
 //   - tier mismatch errors when opts.RequiredTier doesn't match
 //   - unknown policy errors cleanly
 //   - bool body resolves true/false from ctx
-//   - caller.* reads pull from the auth.AccessContext
+//   - actor.* reads pull from the auth.AccessContext
 //   - cycle detection fires when a policy is re-entered
 
 func TestEvaluatePolicy_BoolBody_FromCtx(t *testing.T) {
@@ -84,12 +84,12 @@ func TestEvaluatePolicy_UnknownPolicy(t *testing.T) {
 	require.Contains(t, err.Error(), "not registered")
 }
 
-func TestEvaluatePolicy_CallerReference(t *testing.T) {
+func TestEvaluatePolicy_ActorReference(t *testing.T) {
 	registry := mustBuildPolicyRegistry(t, `@tier("core")
 @audited
 @description("admin check")
 func (Policy) requiresAdmin(_ any) bool {
-  return caller.role == "admin"
+  return actor.role == "admin"
 }`)
 	engine := &MemQLEngine{policyFunctions: registry}
 
@@ -113,12 +113,12 @@ func (Policy) requiresAdmin(_ any) bool {
 // message must hint the migration path so the author knows to move
 // the file to dsl/v1/specs/.
 func TestPolicyLoad_RejectsSpecShapedBody(t *testing.T) {
-	// Spec-shaped: caller-only boolean, no @audited / @frontend_visible
+	// Spec-shaped: actor-only boolean, no @audited / @frontend_visible
 	// / @cacheable / @traces_persisted. Loader must reject.
 	src := `@tier("core")
 @description("admin check -- should have been a spec")
 func (Policy) badSpecShapedPolicy(_ any) bool {
-  return caller.role == "admin"
+  return actor.role == "admin"
 }`
 	_, err := parsePolicyFunctionFile("badSpecShapedPolicy.memql", "core", []byte(src))
 	require.Error(t, err)
@@ -131,7 +131,7 @@ func (Policy) badSpecShapedPolicy(_ any) bool {
 @audited
 @description("admin check -- explicit policy")
 func (Policy) explicitAuditedPolicy(_ any) bool {
-  return caller.role == "admin"
+  return actor.role == "admin"
 }`
 	_, err = parsePolicyFunctionFile("explicitAuditedPolicy.memql", "core", []byte(srcAudited))
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func (Policy) vendorPolicy(ctx any) bool {
 }
 
 // TestEvaluateSpec_ContextSpec_AdminRole — exercises the Phase A
-// spec broadening: a context-spec body reads `caller.role` and is
+// spec broadening: a context-spec body reads `actor.role` and is
 // callable from Go via engine.EvaluateSpec AND from a policy body
 // via the new `spec("name")` builtin. Verifies the row-vs-context
 // classifier picked SpecKindContext and that the auth context flows
@@ -164,9 +164,9 @@ func (Policy) vendorPolicy(ctx any) bool {
 func TestEvaluateSpec_ContextSpec_AdminRole(t *testing.T) {
 	registry := newSpecRegistry()
 	src := `@description("admin check")
-@useShape(callerActor)
+@useShape(actorEnvelope)
 spec requiresAdmin {
-  caller.role == "admin"
+  actor.role == "admin"
 }`
 	specObj, err := parseSpecMemQL("requiresAdmin.memql", []byte(src))
 	require.NoError(t, err)
@@ -218,9 +218,9 @@ spec rowOnly {
 func TestPolicyBody_SpecBuiltin(t *testing.T) {
 	specRegistry := newSpecRegistry()
 	specSrc := `@description("admin check")
-@useShape(callerActor)
+@useShape(actorEnvelope)
 spec requiresAdmin {
-  caller.role == "admin"
+  actor.role == "admin"
 }`
 	specObj, err := parseSpecMemQL("requiresAdmin.memql", []byte(specSrc))
 	require.NoError(t, err)
