@@ -1,6 +1,6 @@
 // shapes.memql -- safety namespace.
 
-use safety.concepts.{ classification, approvalRequest }
+use safety.concepts.{ classification, approvalRequest, outputScreening }
 
 @row
 @concepts("v1:safety:classification")
@@ -47,4 +47,28 @@ shape approvalRequest approvalRequestFull {
   payload.agentId
   payload.ownerUserId
   payload.planId
+}
+
+@row
+@concepts("v1:safety:outputScreening")
+@description("Comprehensive projection of every v1:safety:outputScreening field. Backs the retention sweep + future cockpit prompt-injection dashboard.")
+shape outputScreening outputScreeningFull {
+  row.id
+  row.createdAt
+  payload.contentType
+  payload.contentLength
+  payload.redactedSample
+  payload.tier
+  payload.categories
+  payload.verdict
+  payload.screener
+  payload.ruleId
+  payload.confidence
+  payload.reason
+  payload.latencyMs
+  payload.agentId
+  payload.ownerUserId
+  payload.planId
+  payload.correlationId
+  payload.mode
 }

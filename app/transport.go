@@ -26,6 +26,14 @@ func (a *App) transportBase() {
 	//     default on when engine is ready)
 	a.wireSafetyGate()
 
+	// Safety output screener (memql#233). Parallel substrate to the
+	// command-classifier gate above; screens INCOMING content (tool
+	// outputs, HTTP fetches, file reads) for prompt-injection before
+	// re-ingestion. Same env-knob shape (MEMQL_SAFETY_OUTPUT_SCREEN_MODE
+	// + MEMQL_SAFETY_PERSIST_CLASSIFICATIONS opt-out for the
+	// persisting recorder).
+	a.wireOutputGate()
+
 	// === gRPC Server ===
 	memqlGRPCAddr := strings.TrimSpace(os.Getenv("MEMQL_GRPC_ADDRESS"))
 	a.grpcServer = memqlgrpc.NewServer(memqlGRPCAddr, a.Logger)

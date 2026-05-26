@@ -74,3 +74,46 @@ func callOneRecorder(r DecisionRecorder, ctx context.Context, desc ActionDescrip
 	}()
 	r.Record(ctx, desc, cls, decision, mode)
 }
+
+// FanoutScreeningRecorder is the output-screening parallel of
+// FanoutRecorder (memql#233). Composes N ScreeningRecorders with
+// the same per-sink panic-recovery contract: a misconfigured sink
+// can't crash the ingress path or starve later sinks.
+type FanoutScreeningRecorder struct {
+	recorders []ScreeningRecorder
+}
+
+// NewFanoutScreeningRecorder returns a fanout over the given
+// recorders. Nil entries are dropped. Same convenience contract
+// as NewFanoutRecorder.
+func NewFanoutScreeningRecorder(recorders ...ScreeningRecorder) FanoutScreeningRecorder {
+	out := make([]ScreeningRecorder, 0, len(recorders))
+	for _, r := range recorders {
+		if r != nil {
+			out = append(out, r)
+		}
+	}
+	return FanoutScreeningRecorder{recorders: out}
+}
+
+// Record dispatches to every contained recorder with per-call
+// panic recovery + slog.Warn on recovered panics.
+func (f FanoutScreeningRecorder) Record(ctx context.Context, in ScreeningInput, res ScreeningResult, mode OutputMode) {
+	for _, r := range f.recorders {
+		callOneScreeningRecorder(r, ctx, in, res, mode)
+	}
+}
+
+func callOneScreeningRecorder(r ScreeningRecorder, ctx context.Context, in ScreeningInput, res ScreeningResult, mode OutputMode) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Warn("safety.FanoutScreeningRecorder: recorder panicked",
+				"component", "safety.fanout_screening_recorder",
+				"recorder_type", fmt.Sprintf("%T", r),
+				"content_type", string(in.ContentType),
+				"verdict", string(res.Verdict),
+				"panic", fmt.Sprintf("%v", rec))
+		}
+	}()
+	r.Record(ctx, in, res, mode)
+}

@@ -1,6 +1,6 @@
 // mutations.memql -- safety namespace.
 
-use safety.concepts.{ classification, approvalRequest }
+use safety.concepts.{ classification, approvalRequest, outputScreening }
 
 @enabled
 @description("Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.")
@@ -90,5 +90,46 @@ mutation approvalRequest mutationResolveApprovalRequest {
     args.decidedBy
     decidedAt: now
     args.decisionReason
+  }
+}
+
+@enabled
+@description("Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).")
+mutation outputScreening mutationInsertOutputScreening {
+  args {
+    contentType    string @required
+    contentLength  float
+    redactedSample string
+    tier           string @required
+    categories     string
+    verdict        string @required
+    screener       string @required
+    ruleId         string
+    confidence     float
+    reason         string
+    latencyMs      float
+    agentId        string
+    ownerUserId    string
+    planId         string
+    correlationId  string
+    mode           string @required
+  }
+  insert outputScreening {
+    args.contentType
+    args.contentLength
+    args.redactedSample
+    args.tier
+    args.categories
+    args.verdict
+    args.screener
+    args.ruleId
+    args.confidence
+    args.reason
+    args.latencyMs
+    args.agentId
+    args.ownerUserId
+    args.planId
+    args.correlationId
+    args.mode
   }
 }

@@ -69,3 +69,41 @@ concept approvalRequest {
   ownerUserId      string   @description("Owning user id (whose Plan / agent triggered this). Drives the cockpit's per-user inbox.")
   planId           string   @description("Plan id, when the action was Plan-scoped. Lets the cockpit deep-link the request back to the parked Plan once the Plan-parking integration lands.")
 }
+
+// outputScreening -- the substrate for incoming-content prompt-
+// injection screening (memql#233). Distinct from `classification`:
+//
+//   - classification covers AGENCY -- "should this command run?"
+//   - outputScreening covers INGRESS -- "should this string land in
+//     the model's context?"
+//
+// Three ingress paths drive rows: tool outputs (text returned by
+// tools the model invoked), HTTP fetches (workbench/agent
+// http_fetch bodies), file reads (workbench/computer-use fs_read
+// results), and knowledge seed material newly indexed. Shadow rows
+// accumulate as the substrate for the FP/FN measurement (#235); the
+// cockpit prompt-injection dashboard layers reads on top
+// (separate memql-cockpit follow-up).
+//
+// Retention follows the same pattern as classification: env-tunable
+// MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90),
+// observation-only purge until the engine grows a delete() mutation.
+@description("One row per output-screening decision. Captures what the OutputGate decided about a single piece of incoming content before the model re-ingested it. Distinct from v1:safety:classification: classification covers agency (should this command run?); outputScreening covers ingress (should this string land in the model's context?). Retention is governed by MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90).")
+concept outputScreening {
+  contentType    string @required @description("Ingress channel: `tool_output` / `http_fetch` / `file_read` / `knowledge_seed`. Lets ops slice screening data by attack surface.")
+  contentLength  float  @description("Byte length of the screened content BEFORE the redactedSample truncation. Useful for spotting bloat-attack vectors (megabyte-scale content with one tiny injection buried).")
+  redactedSample string @description("First N bytes of the content after secret-redaction. Capped at 4 KiB by the recorder so a poisoned 100 MB document doesn't blow the row up. Lets ops inspect what fired the verdict without keeping the whole payload.")
+  tier           string @required @description("Risk tier the screener assigned: `none` (clean) / `low` / `medium` / `high` (suspicious) / `critical` (overt injection).")
+  categories     string @description("Comma-separated category list: `prompt_injection` / `instruction_override` / `role_hijack` / `exfiltration` / `delimiter_abuse`. Empty for tier=none.")
+  verdict        string @required @description("What the OutputGate decided: `clean` / `suspicious` / `blocked`. In shadow mode the gate always returns clean to the surface regardless; in enforce mode this is honoured (suspicious -> log + pass; blocked -> drop).")
+  screener       string @required @description("Verdict source: `rule` (deterministic pattern) / `model` (LLM classifier; not shipped today) / `cache` / `noop` / `disabled`.")
+  ruleId         string @description("Stable rule identifier (`prompt_injection.ignore_previous`, etc.). Empty for noop/disabled sources.")
+  confidence     float  @description("Screener self-reported confidence [0, 1]. Rule verdicts are 1.0 by convention.")
+  reason         string @description("Short human-readable explanation -- which specific pattern fired. <= 200 chars.")
+  latencyMs      float  @description("Total screening latency in ms. float (matches classification.latencyMs) since `number` isn't a DSL primitive.")
+  agentId        string @description("Agent that triggered the ingress (where applicable; tool outputs always have one; HTTP fetches usually do).")
+  ownerUserId    string @description("Owning user id.")
+  planId         string @description("Plan id, when the ingress was Plan-scoped.")
+  correlationId  string @description("Correlation id linking back to the dispatch.")
+  mode           string @required @description("OutputGate mode at decision time: `off`|`shadow`|`enforce`. `shadow` rows are observation-only -- the surface re-ingested the content regardless of `verdict`.")
+}

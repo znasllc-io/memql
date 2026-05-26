@@ -4707,6 +4707,134 @@ func MutationExpireAccessRequestBuild(args MutationExpireAccessRequestArgs) stri
 	return b.String()
 }
 
+// MutationInsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
+//
+// Bound concept: outputScreening.
+type MutationInsertOutputScreeningArgs struct {
+	ContentType    string
+	ContentLength  any
+	RedactedSample string
+	Tier           string
+	Categories     string
+	Verdict        string
+	Screener       string
+	RuleId         string
+	Confidence     any
+	Reason         string
+	LatencyMs      any
+	AgentId        string
+	OwnerUserId    string
+	PlanId         string
+	CorrelationId  string
+	Mode           string
+}
+
+// MutationInsertOutputScreening calls the engine mutation mutationInsertOutputScreening.
+func (qc *QueryClient) MutationInsertOutputScreening(ctx context.Context, args MutationInsertOutputScreeningArgs) (*Result, error) {
+	call := MutationInsertOutputScreeningBuild(args)
+	return qc.executeNamed(ctx, "mutationInsertOutputScreening", call)
+}
+
+func MutationInsertOutputScreeningBuild(args MutationInsertOutputScreeningArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationInsertOutputScreening({")
+	b.WriteString("contentType: ")
+	b.WriteString(fmt.Sprintf("%q", args.ContentType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("contentLength: ")
+	b.WriteString(fmt.Sprintf("%q", args.ContentLength))
+	if args.RedactedSample != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("redactedSample: ")
+		b.WriteString(fmt.Sprintf("%q", args.RedactedSample))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.Categories != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("categories: ")
+		b.WriteString(fmt.Sprintf("%q", args.Categories))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verdict: ")
+	b.WriteString(fmt.Sprintf("%q", args.Verdict))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("screener: ")
+	b.WriteString(fmt.Sprintf("%q", args.Screener))
+	if args.RuleId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ruleId: ")
+		b.WriteString(fmt.Sprintf("%q", args.RuleId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	if args.Reason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(fmt.Sprintf("%q", args.Reason))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("latencyMs: ")
+	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
+	if args.AgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	}
+	if args.PlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
+	if args.CorrelationId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("correlationId: ")
+		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mode: ")
+	b.WriteString(fmt.Sprintf("%q", args.Mode))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationInsertPolicyTrace -- Persist a single policy evaluation trace to v1:platform:policyTrace.
 //
 // Bound concept: policyTrace.

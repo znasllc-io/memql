@@ -1,7 +1,7 @@
 // queries.memql -- safety namespace.
 
-use safety.concepts.{ classification, approvalRequest }
-use safety.shapes.{ classificationFull, approvalRequestFull }
+use safety.concepts.{ classification, approvalRequest, outputScreening }
+use safety.shapes.{ classificationFull, approvalRequestFull, outputScreeningFull }
 
 @enabled
 @description("Returns every v1:safety:classification row. Used by the retention sweep (mirrors queryAllPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.")
@@ -28,4 +28,11 @@ query approvalRequest queryApprovalRequestById {
   }
   filter  id==args.id
   shape   approvalRequestFull
+}
+
+@enabled
+@description("Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.")
+query outputScreening queryAllOutputScreenings {
+  filter  payload.contentType!=""
+  shape   outputScreeningFull
 }
