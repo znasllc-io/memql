@@ -216,8 +216,16 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry) (int, error) 
 }
 
 // LoadUnifiedBuiltins walks the new tree, parses every `builtin NAME
-// { ... }` block, and upserts into the FunctionRegistry (builtins
-// are functions internally).
+// { ... }` block through the langparser's load-time path, and upserts
+// into the FunctionRegistry (builtins are functions internally).
+//
+// memql#318 (sub-epic #309 / #306 child C) migrated the parsing half
+// off the hand-rolled parseBuiltinMemQL onto
+// languageParser.ParseBuiltinDecl + the in-package
+// builtinDeclToFunction converter. The hand-rolled parser is
+// unreferenced from production after this child; tests in
+// builtin_parser_test.go still exercise it pending the final deletion
+// in #306 child D (#310).
 func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("function registry is nil")
@@ -228,7 +236,13 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry) (int, 
 		"builtin",
 		baseloader.ReadAll(logger),
 		extractAdapter,
-		parseBuiltinMemQL,
+		func(origin string, raw []byte) (*Function, error) {
+			decl, err := languageParser.ParseBuiltinDecl(string(raw))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", origin, err)
+			}
+			return builtinDeclToFunction(decl, origin)
+		},
 		registry.Upsert,
 	)
 }
