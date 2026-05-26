@@ -179,8 +179,9 @@ func TestParseMetaCommand_LangparserFlagDoesNotMatter(t *testing.T) {
 	}
 
 	// The shim runs ABOVE both parsers, so the same query must produce
-	// the same plan regardless of useLangparserRuntime. This locks in
-	// the #256 contract for the #249 default-flip.
+	// the same plan regardless of which parser is selected via
+	// UseLangparserRuntime. Locks in the #256 contract that #249's
+	// default-flip relies on.
 	for _, q := range queries {
 		t.Run(q, func(t *testing.T) {
 			engine.UseLangparserRuntime(false)
