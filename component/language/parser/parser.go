@@ -493,8 +493,16 @@ func (p *Parser) parseDefinition() (Node, error) {
 		if err == nil {
 			attributes = nil
 		}
+	case p.check(TokenIdentifier) && p.current.Literal == "policy":
+		// Contextual keyword: `policy` at top-of-file introduces an
+		// SI Router routing-policy declaration. memql#333 (sub-epic
+		// #329 / Stage 1C of #310).
+		def, err = p.parsePolicyDecl(attributes)
+		if err == nil {
+			attributes = nil
+		}
 	default:
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', or 'prompt'", p.current.Literal)
+		return nil, newParseErrorf(&p.current, "unexpected token %q, expected 'func', 'concept', 'shape', 'provider', 'builtin', 'tool', 'prompt', or 'policy'", p.current.Literal)
 	}
 
 	if err != nil {
