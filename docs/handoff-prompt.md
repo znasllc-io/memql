@@ -45,9 +45,6 @@ AUTO-MEMORY (persists across sessions, indexed by MEMORY.md):
 
 HANDOFF DOCS (currently open work, in repo at memql/docs/):
 
-  - handoff-ctx-purge.md                   historical record of the
-                                           shipped ctx-envelope purge;
-                                           deletable once a release ships.
   - planning/portal-ai-router-handoff.md   product spec for the Portal
                                            team; under product review.
 

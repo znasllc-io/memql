@@ -38,18 +38,18 @@ func (Policy) ctxField(ctx any) bool {
 	require.Equal(t, false, result)
 }
 
-func TestEvaluatePolicy_CtxInputPathExplicitAndShorthand(t *testing.T) {
-	// Verifies the ctx-envelope rule: caller args land under
-	// ctx.input. The body should be able to read them via the
-	// canonical `ctx.input.X` path AND the shorthand `ctx.X` path
-	// (which the resolver auto-falls-back to ctx.input.X).
-	registryExplicit := mustBuildPolicyRegistry(t, `@tier("bff")
-@description("explicit ctx.input.<key> read")
-func (Policy) ctxInputExplicit(ctx any) bool {
-  return ctx.input.vendor == "anam"
+func TestEvaluatePolicy_ArgsCanonicalAndCtxShorthand(t *testing.T) {
+	// Post-#302 contract: caller args resolve via the canonical
+	// `args.X` form (or its equivalent `ctx.X` shorthand, which both
+	// parsers lower to the same ArgReference AST node). The legacy
+	// `ctx.input.X` longhand is retired.
+	registryCanonical := mustBuildPolicyRegistry(t, `@tier("bff")
+@description("canonical args.<key> read")
+func (Policy) argsCanonical(_ any) bool {
+  return args.vendor == "anam"
 }`)
-	engine := &MemQLEngine{policyFunctions: registryExplicit}
-	result, _, err := engine.EvaluatePolicy(context.Background(), "ctxInputExplicit", map[string]any{"vendor": "anam"}, PolicyEvalOptions{})
+	engine := &MemQLEngine{policyFunctions: registryCanonical}
+	result, _, err := engine.EvaluatePolicy(context.Background(), "argsCanonical", map[string]any{"vendor": "anam"}, PolicyEvalOptions{})
 	require.NoError(t, err)
 	require.Equal(t, true, result)
 

@@ -60,9 +60,12 @@ type inlineSpecDefinition struct {
 
 // ArgReference represents a reference to a named function argument.
 // It's stored as the Value in a ComparisonExpression and resolved at
-// execution time. Produced by parsing the canonical `ctx.<path>`
-// syntax (see parseCtxReference); the legacy `ctx.fieldName` form
-// that originally produced this node is retired.
+// execution time. Produced by parsing the canonical `args.<path>`
+// syntax (see parseArgsReference) or the equivalent `ctx.<path>`
+// shorthand (see parseCtxReference); both produce the same AST node
+// so the rest of the validator / executor pipeline stays single-
+// shape. The legacy `ctx.input.<path>` longhand was retired in
+// memql#302.
 type ArgReference struct {
 	Path string // e.g., "spaceId" or "options.limit"
 }

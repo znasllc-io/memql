@@ -403,7 +403,7 @@ stateDiagram-v2
 | Area | What's in flight | Tracking doc | Risk if shipped half-done |
 |---|---|---|---|
 | Import-model refactor (Commit 2) | Migrate 570+ files from `@useConcept` to `import (...)` blocks; rewrite `@trigger` and `@handler` symbol refs; collapse 654 files to ~65 | `docs/dsl-import-model-refactor.md` | **High.** Until done, two load paths coexist; per-file registries can't replace global ones; multi-construct files break the rewriter. |
-| Multi-step Logic execution (F.5) | Step-runner integration with `LogicRunner` | `docs/handoff-ctx-purge.md` (closed) | Medium. Logic blocks that need intermediate steps fall back to single-statement form today. |
+| Multi-step Logic execution (F.5) | Step-runner integration with `LogicRunner` | Shipped via memql#302 / #303 (ctx-envelope purge); see `LogicRunner` in `component/automations/logic_runner.go`. | Done. |
 | Planner orchestrator | 7 remaining tasks (cognition triage, lazy embedding, entity-schema inference, dedup, token budget, community gating, NemoClaw wiring) | `docs/PLANNER_TODO.md` | Medium. Schema is in place; only the orchestrator goroutine is missing. |
 | MemQL Sense import awareness | Cross-file go-to-definition + autocomplete after import-model refactor | `dsl-import-model-refactor.md` "Open items" | Low for MVP; reduces author velocity if missing. |
 

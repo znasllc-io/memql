@@ -3378,9 +3378,8 @@ parser, with `args.X` source-rewritten to `ctx.X`. **Don't author
 that form.** Every receiver kind has a struct form -- queries
 above, mutations next to them, logic with `body { ... ; return
 <expr> }`, automations as `step` lists. The `(ctx any)` parameter
-and `ctx.output =` boilerplate are leftover scaffolding being
-removed; see [handoff-ctx-purge.md](../handoff-ctx-purge.md) for
-the cleanup status.
+and `ctx.output =` boilerplate were retired in memql#302 / #303;
+the canonical form returns the value directly.
 
 ### Built-in Functions
 
