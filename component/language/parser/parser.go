@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -5499,11 +5500,27 @@ func parseNumericLiteral(lit string) (any, error) {
 // and float64 (decimals and pre-#255 emissions) so directive-arg
 // consumers that need an int (paginate, withDepth, etc.) don't have
 // to re-implement the type dispatch at every call site.
+//
+// Out-of-range values reject (ok=false) rather than wrap. `int` is
+// platform-sized (32 bits on 32-bit targets, 64 on 64-bit), so a
+// caller of `paginate(limit=9999999999)` from a `.memql` file on a
+// 32-bit build would otherwise see a silently truncated int. The
+// callers all expect small positive integers (paginate page sizes,
+// withDepth traversal depth, forEach concurrency), so rejecting
+// overflow is more honest than truncation and matches the upper
+// bound check pattern CodeQL's go/incorrect-integer-conversion rule
+// looks for.
 func numericAsInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int64:
+		if n > math.MaxInt || n < math.MinInt {
+			return 0, false
+		}
 		return int(n), true
 	case float64:
+		if n > math.MaxInt || n < math.MinInt {
+			return 0, false
+		}
 		return int(n), true
 	}
 	return 0, false
