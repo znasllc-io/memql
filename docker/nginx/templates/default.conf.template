@@ -11,8 +11,10 @@
 #   app.${DOMAIN}        -> CoPresent SPA (Vite dev server on the
 #                            developer's host machine)
 #   identity.${DOMAIN}   -> identity service HTTP surface
-#   bff.${DOMAIN}        -> BFF gRPC + HTTP (WS bridge,
-#                            attachments, polyphon, healthz)
+#   bff.${DOMAIN}        -> BFF gRPC + HTTP (/memql/ws bridge,
+#                            attachments, polyphon, healthz);
+#                            /memql/audio is proxied through to the
+#                            voice node (STT lives there, not the bff)
 #   agent.${DOMAIN}      -> Agent gRPC (WorkerService.Stream) + HTTP
 #
 # TLS:
