@@ -3,6 +3,8 @@ package memql
 import (
 	"reflect"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestApplyToolDefaults_FillsMissing(t *testing.T) {
@@ -160,9 +162,13 @@ tool myTool {
   keyword   string  @description("LLM-supplied")
   ownerUserId string @autoInjected @description("server-stamped")
 }`
-	tools, err := parseToolMemQL("test.memql", []byte(src))
+	decl, err := langparser.ParseToolDecl(src)
 	if err != nil {
-		t.Fatalf("parseToolMemQL: %v", err)
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	tools, err := toolDeclToTool(decl, "test.memql")
+	if err != nil {
+		t.Fatalf("toolDeclToTool: %v", err)
 	}
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))

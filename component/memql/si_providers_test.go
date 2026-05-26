@@ -4,7 +4,32 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
+
+// parseProviderForTest is a thin wrapper that routes through the
+// langparser path + the in-package converter, matching the shape
+// the deleted hand-rolled parseProviderMemQL returned. Used by the
+// tests below in place of the retired parser.
+func parseProviderForTest(t *testing.T, origin string, raw []byte) *ProviderConfig {
+	t.Helper()
+	decl, err := langparser.ParseProviderDecl(string(raw))
+	require.NoError(t, err, "ParseProviderDecl %s", origin)
+	cfg, err := providerDeclToProviderConfig(decl)
+	require.NoError(t, err, "providerDeclToProviderConfig %s", origin)
+	return cfg
+}
+
+// tryParseProviderForTest is the error-path variant -- returns the
+// converter error directly so tests can assert on the message.
+func tryParseProviderForTest(raw []byte) (*ProviderConfig, error) {
+	decl, err := langparser.ParseProviderDecl(string(raw))
+	if err != nil {
+		return nil, err
+	}
+	return providerDeclToProviderConfig(decl)
+}
 
 func TestParseProviderConfigsSupportsArrays(t *testing.T) {
 	t.Setenv("TEST_OPENAI_KEY", "secret")
@@ -67,8 +92,7 @@ provider openai {
   }
 }
 `)
-	cfg, err := parseProviderMemQL("test/_base.memql", raw)
-	require.NoError(t, err)
+	cfg := parseProviderForTest(t, "test/_base.memql", raw)
 	require.Equal(t, "openai", cfg.Name)
 	require.Equal(t, "OpenAI", cfg.Type)
 	require.True(t, cfg.Base)
@@ -87,8 +111,7 @@ provider chat5Mini {
   }
 }
 `)
-	cfg, err := parseProviderMemQL("test/chat5Mini.memql", raw)
-	require.NoError(t, err)
+	cfg := parseProviderForTest(t, "test/chat5Mini.memql", raw)
 	require.Equal(t, "chat5Mini", cfg.Name)
 	require.Equal(t, "openai", cfg.Extends)
 	require.Equal(t, "gpt-5-mini", cfg.Model)
@@ -109,8 +132,7 @@ provider stream5.2 {
   }
 }
 `)
-	cfg, err := parseProviderMemQL("test/stream5.2.memql", raw)
-	require.NoError(t, err)
+	cfg := parseProviderForTest(t, "test/stream5.2.memql", raw)
 	require.Equal(t, "stream5.2", cfg.Name)
 	require.Equal(t, "openai", cfg.Extends)
 	require.Equal(t, "OpenAIStream", cfg.Type) // explicitly overridden
@@ -128,7 +150,7 @@ provider badProvider {
   }
 }
 `)
-	_, err := parseProviderMemQL("test/bad.memql", raw)
+	_, err := tryParseProviderForTest(raw)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "@model is required")
 }
