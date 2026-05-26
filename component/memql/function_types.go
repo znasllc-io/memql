@@ -288,16 +288,6 @@ func validateFunctionName(name string) error {
 	return nil
 }
 
-// FunctionCallExpression references a named function invocation with arguments.
-type FunctionCallExpression struct {
-	Name string
-	// Args is the JSON object passed to the function (as map[string]any).
-	// All functions require an argument object (can be empty {}).
-	Args map[string]any
-}
-
-func (*FunctionCallExpression) isExpressionNode() {}
-
 // ArgRefExpression references a value from the function arguments.
 // Used in function expressions as $args.fieldName syntax.
 type ArgRefExpression struct {
