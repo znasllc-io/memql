@@ -13,6 +13,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/component/safety"
 )
 
 // Integration is the workbench IntegrationProvider. It owns the
@@ -107,6 +108,19 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	innerArgs, _ := args["args"].(map[string]any)
 	if innerArgs == nil {
 		innerArgs = map[string]any{}
+	}
+
+	// Safety classifier (memql#229). Workbench is sandboxed per-Plan
+	// so blast radius is bounded -- fail-OPEN on classifier error.
+	// In shadow mode (the default) this is observation-only; the
+	// legacy EnforceExecAllowlist in handleExec stays the active
+	// block on exec until #235 flips enforce. Runs BEFORE the
+	// remote-forward branch so cluster + local paths agree on the
+	// audit shape.
+	safetyDesc := buildSafetyDescriptor(action, planId, innerArgs)
+	decision, cls, classErr := safety.DefaultGate().Evaluate(ctx, safetyDesc)
+	if proceed, reason := safety.EnforceDecision(decision, cls, classErr, false); !proceed {
+		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 
 	// Cluster mode: try the remote forwarder first. On
