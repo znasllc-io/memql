@@ -1,6 +1,6 @@
 // logic.memql -- safety namespace.
 
-use safety.queries.{ queryAllSafetyClassifications }
+use safety.queries.{ queryAllSafetyClassifications, queryAllOutputScreenings }
 use platform.queries.{ queryGlobalVariable }
 
 @enabled
@@ -15,6 +15,29 @@ logic logicPurgeExpiredSafetyClassifications {
 
     emitObservation := publishEvent({
       topic: "safety.classification.retention.observed",
+      payload: {
+        candidateCount: allRows.Len(),
+        retentionDays: coalesce(retentionDays.First().payload.value, "90"),
+        timestamp: timestamp()
+      }
+    })
+
+    return allRows.Len()
+  }
+}
+
+@enabled
+@description("Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors logicPurgeExpiredSafetyClassifications.")
+logic logicPurgeExpiredOutputScreenings {
+  args {
+    event object @required
+  }
+  body {
+    allRows := queryAllOutputScreenings({})
+    retentionDays := queryGlobalVariable({ name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS" })
+
+    emitObservation := publishEvent({
+      topic: "safety.outputScreening.retention.observed",
       payload: {
         candidateCount: allRows.Len(),
         retentionDays: coalesce(retentionDays.First().payload.value, "90"),

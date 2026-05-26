@@ -369,6 +369,26 @@ func LogicPurgeExpiredArchivedSpacesBuild(args LogicPurgeExpiredArchivedSpacesAr
 	return b.String()
 }
 
+// LogicPurgeExpiredOutputScreenings -- Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors logicPurgeExpiredSafetyClassifications.
+type LogicPurgeExpiredOutputScreeningsArgs struct {
+	Event map[string]any
+}
+
+// LogicPurgeExpiredOutputScreenings calls the engine logic logicPurgeExpiredOutputScreenings.
+func (qc *QueryClient) LogicPurgeExpiredOutputScreenings(ctx context.Context, args LogicPurgeExpiredOutputScreeningsArgs) (*Result, error) {
+	call := LogicPurgeExpiredOutputScreeningsBuild(args)
+	return qc.executeNamed(ctx, "logicPurgeExpiredOutputScreenings", call)
+}
+
+func LogicPurgeExpiredOutputScreeningsBuild(args LogicPurgeExpiredOutputScreeningsArgs) string {
+	var b strings.Builder
+	b.WriteString("logicPurgeExpiredOutputScreenings({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicPurgeExpiredPolicyTraces -- Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.
 type LogicPurgeExpiredPolicyTracesArgs struct {
 	Event map[string]any

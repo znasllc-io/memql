@@ -455,6 +455,23 @@ func QueryAllDocumentChunkDomainsBuild(args QueryAllDocumentChunkDomainsArgs) st
 	return "queryAllDocumentChunkDomains({})"
 }
 
+// QueryAllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
+//
+// Bound concept: outputScreening.
+type QueryAllOutputScreeningsArgs struct {
+}
+
+// QueryAllOutputScreenings calls the engine query queryAllOutputScreenings.
+func (qc *QueryClient) QueryAllOutputScreenings(ctx context.Context, args QueryAllOutputScreeningsArgs) (*Result, error) {
+	call := QueryAllOutputScreeningsBuild(args)
+	return qc.executeNamed(ctx, "queryAllOutputScreenings", call)
+}
+
+func QueryAllOutputScreeningsBuild(args QueryAllOutputScreeningsArgs) string {
+	_ = args
+	return "queryAllOutputScreenings({})"
+}
+
 // QueryAllPlans -- Every Plan. Backs the global Tasks panel; the frontend pins current-space rows to the top of each lifecycle group.
 //
 // Bound concept: plan.

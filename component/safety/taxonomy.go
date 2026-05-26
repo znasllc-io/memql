@@ -94,5 +94,13 @@ const (
 	CategoryCredentialAccess    Category = "credential_access"
 	CategorySandboxEscape       Category = "sandbox_escape"
 	CategoryPromptInjection     Category = "prompt_injection"
+	// Output-screening-specific categories (memql#233). Distinct
+	// from CategoryPromptInjection (the umbrella) so downstream
+	// dashboards can ladder responses by sub-type -- a role-hijack
+	// attempt may warrant a stricter posture than a generic
+	// instruction-override pattern.
+	CategoryInstructionOverride Category = "instruction_override"
+	CategoryRoleHijack          Category = "role_hijack"
+	CategoryDelimiterAbuse      Category = "delimiter_abuse"
 	CategoryUnknown             Category = "unknown"
 )

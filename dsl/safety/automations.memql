@@ -1,6 +1,6 @@
 // automations.memql -- safety namespace.
 
-use safety.logic.{ logicPurgeExpiredSafetyClassifications }
+use safety.logic.{ logicPurgeExpiredSafetyClassifications, logicPurgeExpiredOutputScreenings }
 
 // purgeExpiredSafetyClassifications
 // =================================
@@ -22,5 +22,21 @@ use safety.logic.{ logicPurgeExpiredSafetyClassifications }
 automation purgeExpiredSafetyClassifications {
   step run {
     logic purgeExpiredSafetyClassifications { event: event }
+  }
+}
+
+// purgeExpiredOutputScreenings (memql#233)
+// =======================================
+//
+// Daily 02:40 UTC sweep over v1:safety:outputScreening rows older
+// than MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90).
+// Same observation-only pattern as purgeExpiredSafetyClassifications.
+// Offset by 5 minutes so the two safety crons don't contend.
+@enabled
+@trigger(schedule="0 40 2 * * *")
+@description("Daily 02:40 UTC sweep: identifies output-screening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Observation-only until MemQL gains row-removal support.")
+automation purgeExpiredOutputScreenings {
+  step run {
+    logic purgeExpiredOutputScreenings { event: event }
   }
 }

@@ -172,6 +172,48 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		}
 	}
 
+	// memql#233: output-screening pass on http_fetch response body
+	// before it lands in the model's context. Fetched HTML/JSON from
+	// the open web is the highest-risk ingress vector for prompt
+	// injection -- a poisoned page can convert agentic AI into a
+	// confused-deputy attack. Shadow mode (the default) just records
+	// what would have fired; enforce mode replaces Blocked content
+	// with a sanitised stub so the model still sees that SOMETHING
+	// happened but can't follow embedded instructions. Per-surface
+	// wiring lands incrementally -- this is the demonstration
+	// integration; tool_output / file_read / knowledge_seed follow.
+	//
+	// CRITICAL: gated on res.Action only, NOT res.OK. handleHTTPFetch
+	// flips res.OK on the HTTP status code (< 400), but a 4xx/5xx
+	// response body still flows to the model when the agent
+	// processes the error. An attacker who controls a URL can serve
+	// a 403 with a poisoned body and bypass the screener entirely
+	// if we gated on res.OK. Screening runs for ALL http_fetch
+	// outcomes; only the body-replacement on Blocked depends on
+	// having a body to replace.
+	if res.Action == "http_fetch" {
+		if pl, ok := res.Payload.(map[string]any); ok {
+			if body, ok := pl["body"].(string); ok && body != "" {
+				outGate := safety.DefaultOutputGate()
+				in := safety.ScreeningInput{
+					ContentType: safety.ContentTypeHTTPFetch,
+					Content:     body,
+					Caller: safety.CallerContext{
+						AgentID: agentId,
+						PlanID:  planId,
+						TaskID:  taskId,
+					},
+				}
+				verdict, sr, _ := outGate.Screen(ctx, in)
+				if verdict == safety.ScreeningVerdictBlocked {
+					pl["body"] = safety.SanitisedReplacement(in, sr)
+					pl["screenedBy"] = sr.RuleID
+					pl["screenReason"] = sr.Reason
+				}
+			}
+		}
+	}
+
 	if i.logger != nil {
 		level := slog.LevelInfo
 		if !res.OK {

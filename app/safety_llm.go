@@ -140,6 +140,55 @@ func (a *App) buildSafetyApprovalSink() safety.ApprovalSink {
 	})
 }
 
+// wireOutputGate builds the per-node output-screening gate
+// (memql#233). Mirrors wireSafetyGate but with the OutputGate
+// shape: a Screener chain (rule-only today; LLM screener deferred)
+// + a Recorder fanout (slog + persisting v1:safety:outputScreening).
+//
+// Idempotent + non-fatal: if the engine isn't ready (very early
+// boot) or persistence is opted out, the gate stays slog-only.
+// Logs the outcome of each half -- ops can grep `safety output
+// screener:` to see which nodes have which layers.
+//
+// Called from transportBase alongside wireSafetyGate so both halves
+// are configured before any handler can dispatch.
+func (a *App) wireOutputGate() {
+	// Rule screener with the canonical default pattern set. App
+	// boot doesn't append deployment-specific rules today; the
+	// extension point is here when it does.
+	screener := safety.NewRuleScreener(safety.DefaultScreenRules()...)
+
+	// Recorder fanout: slog (always) + persisting
+	// (engine-required; opt-out via env).
+	var rec safety.ScreeningRecorder = safety.SlogScreeningRecorder{Logger: a.Logger}
+	off := strings.ToLower(strings.TrimSpace(os.Getenv(EnvPersistClassifications)))
+	if off == "off" || off == "false" || off == "0" {
+		a.Logger.Info("safety output screener: persistence disabled (MEMQL_SAFETY_PERSIST_CLASSIFICATIONS)",
+			"component", "safety.output")
+	} else if a.engine != nil {
+		rec = safety.NewFanoutScreeningRecorder(
+			rec,
+			recorder.NewOutputPersistingRecorder(engineMutationRunner{engine: a.engine}, a.Logger),
+		)
+		a.Logger.Info("safety output screener: persistence enabled (v1:safety:outputScreening)",
+			"component", "safety.output")
+	} else {
+		a.Logger.Warn("safety output screener: engine not ready; persistence disabled",
+			"component", "safety.output")
+	}
+
+	mode := safety.OutputModeFromEnv()
+	a.Logger.Info("safety output screener: gate wired",
+		"component", "safety.output",
+		"mode", string(mode))
+	safety.SetDefaultOutputGate(safety.NewOutputGate(safety.OutputGateOptions{
+		Screener: screener,
+		Recorder: rec,
+		Mode:     mode,
+		Logger:   a.Logger,
+	}))
+}
+
 // engineApprovalAdapter wraps memql.MemQLEngine to satisfy
 // approval.Engine -- one method, returns (any, error). Keeps the
 // approval package engine-independent (mirrors engineMutationRunner).
