@@ -1435,3 +1435,62 @@ type ProviderDecl struct {
 }
 
 func (*ProviderDecl) node() {}
+
+// ToolDecl is the shared-frontend AST node for an SI tool
+// declaration. Mirrors ConceptDecl / ShapeDecl / ProviderDecl in
+// role: the langparser produces this typed node so the per-construct
+// loader (component/memql.LoadUnifiedTools) can consume it without
+// running its own hand-rolled parser.
+//
+// Authoring shape:
+//
+//	@enabled
+//	@description("Search for users.")
+//	@handler(type="query", query="concept==v1:memql:backend:user")
+//	@executionTime("fast")
+//	tool searchUsers {
+//	  active  boolean  @description("Filter by active status")
+//	  limit   integer  @default("10") @description("Max results")
+//	}
+//
+// The handler attribute carries multiple named arguments (type,
+// query, name, url, method); the parser splits them out so the
+// loader doesn't reparse the @handler args every call. The
+// rateLimit attribute is similar (maxCalls, periodSeconds). Field-
+// level @autoInjected is captured as a per-field flag.
+type ToolDecl struct {
+	Name        string
+	Description string
+
+	// Handler routes the tool to its execution backend.
+	HandlerType   string // "query" / "function" / "webhook" / "delegate"
+	HandlerName   string // function name (for type=function) OR query expression (for type=query)
+	HandlerURL    string // webhook URL (for type=webhook)
+	HandlerMethod string // webhook HTTP method (upper-cased; default applied later by the converter)
+
+	// Annotations.
+	Destructive          bool   // @destructive flag
+	RequiresConfirmation bool   // @requiresConfirmation flag
+	ExecutionTime        string // "fast" / "medium" / "slow"
+	RateLimitMaxCalls    int    // 0 = no rate limit; @rateLimit(maxCalls=...)
+	RateLimitPeriod      int    // seconds; paired with RateLimitMaxCalls
+
+	// Fields populates the tool's input schema.
+	Fields []ToolFieldDecl
+}
+
+func (*ToolDecl) node() {}
+
+// ToolFieldDecl is one entry in a ToolDecl's input-schema field list.
+// Mirrors the trailing-annotation syntax `name type @required
+// @description(\"...\") @enum(\"a\", \"b\") @default(\"x\")
+// @autoInjected`.
+type ToolFieldDecl struct {
+	Name         string
+	Type         string   // "string" / "integer" / "int" / "number" / "float" / "boolean" / "bool" / "object" / "array"
+	Required     bool     // @required flag
+	AutoInjected bool     // @autoInjected -- value is stamped server-side; LLM-supplied values are dropped at dispatch
+	Description  string   // @description("...") value
+	EnumValues   []string // @enum("a", "b", "c") values; empty = no enum constraint
+	Default      string   // @default("x") value, stored as a string regardless of the field's declared type
+}
