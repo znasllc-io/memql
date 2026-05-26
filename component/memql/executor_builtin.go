@@ -145,11 +145,11 @@ func (e *MemQLEngine) evaluateServiceVersionExpression(ctx context.Context) ([]m
 
 func builtinErrorFromArgs(args map[string]any) error {
 	if args == nil {
-		return fmt.Errorf("error() requires a message")
+		return fmt.Errorf("%w: error() requires a message", ErrInvalidArgument)
 	}
 	raw, ok := args["message"]
 	if !ok {
-		return fmt.Errorf("error() requires a message")
+		return fmt.Errorf("%w: error() requires a message", ErrInvalidArgument)
 	}
 	message, ok := raw.(string)
 	if !ok || strings.TrimSpace(message) == "" {
@@ -208,13 +208,13 @@ func (e *MemQLEngine) evaluateValidateExpression(ctx context.Context, args map[s
 	// Extract concept name from args
 	conceptName, ok := args["concept"].(string)
 	if !ok || conceptName == "" {
-		return nil, fmt.Errorf("validate() requires 'concept' field as a string")
+		return nil, fmt.Errorf("%w: validate() requires 'concept' field as a string", ErrInvalidArgument)
 	}
 
 	// Extract payload from args
 	payload, ok := args["payload"].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("validate() requires 'payload' field as an object")
+		return nil, fmt.Errorf("%w: validate() requires 'payload' field as an object", ErrInvalidArgument)
 	}
 
 	// Look up the concept
@@ -477,7 +477,7 @@ func (e *MemQLEngine) evaluateToolsExpression(ctx context.Context) ([]memorynode
 func (e *MemQLEngine) evaluateHelpExpression(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	name, ok := args["name"].(string)
 	if !ok || name == "" {
-		return nil, fmt.Errorf("help() requires 'name' argument")
+		return nil, fmt.Errorf("%w: help() requires 'name' argument", ErrInvalidArgument)
 	}
 
 	actor, err := mutationActor(ctx)
@@ -741,12 +741,12 @@ func (e *MemQLEngine) evaluateShapeHelpExpression(ctx context.Context, args map[
 	}
 
 	if args == nil {
-		return nil, fmt.Errorf("shapeHelp() requires arguments (args is nil)")
+		return nil, fmt.Errorf("%w: shapeHelp() requires arguments (args is nil)", ErrInvalidArgument)
 	}
 
 	name, ok := args["name"].(string)
 	if !ok || name == "" {
-		return nil, fmt.Errorf("shapeHelp() requires 'name' argument (got args: %v)", args)
+		return nil, fmt.Errorf("%w: shapeHelp() requires 'name' argument (got args: %v)", ErrInvalidArgument, args)
 	}
 
 	actor, err := mutationActor(ctx)

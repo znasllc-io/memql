@@ -11,10 +11,21 @@ import (
 var (
 	// ErrEngineNotInitialized indicates the engine has not yet been initialized with concept metadata.
 	ErrEngineNotInitialized = errors.New("memory engine not initialized")
-	// ErrInvalidQuerySyntax indicates the provided query failed initial validation.
+	// ErrInvalidQuerySyntax indicates the provided query failed initial validation
+	// at the parse step (dangling operators, unexpected tokens, unterminated
+	// constructs, etc.). The parser's errorf helper wraps every position-aware
+	// error with this sentinel; tests assert it via errors.Is.
 	ErrInvalidQuerySyntax = errors.New("invalid query syntax")
 	// ErrEmptyQuery indicates the supplied MemQL string did not contain any expressions.
 	ErrEmptyQuery = errors.New("query is empty")
+	// ErrInvalidArgument indicates a builtin / directive / function call was
+	// invoked with arguments that don't match its contract -- wrong arity,
+	// missing required field, wrong shape. Distinct from ErrInvalidQuerySyntax
+	// (which is for parse-level lexical / structural errors); a call that
+	// parses but has bad args wraps THIS sentinel, not the syntax one. Tests
+	// assert via errors.Is so the parser-side wording can change without
+	// breaking the assertion (#257 / for #249).
+	ErrInvalidArgument = errors.New("invalid argument")
 	// ErrExecutionNotImplemented indicates execution is not yet available.
 	ErrExecutionNotImplemented = errors.New("execution not implemented")
 )

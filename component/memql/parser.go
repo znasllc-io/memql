@@ -585,7 +585,7 @@ func (p *parser) parseFunctionCall() (ExpressionNode, error) {
 		// Empty parentheses () - use empty object
 		args = make(map[string]any)
 	} else {
-		return nil, p.errorf(p.peek(), "function %q requires a JSON object argument, got %q", name, p.peek().literal)
+		return nil, p.argErrorf(p.peek(), "function %q requires a JSON object argument, got %q", name, p.peek().literal)
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' to close function call"); err != nil {
@@ -807,13 +807,13 @@ func (p *parser) parseConceptsFunction() (ExpressionNode, error) {
 		patternTok := p.next()
 		pattern := patternTok.literal
 		if pattern == "" {
-			return nil, p.errorf(patternTok, "concepts() pattern cannot be empty")
+			return nil, p.argErrorf(patternTok, "concepts() pattern cannot be empty")
 		}
 		args = map[string]any{"pattern": pattern}
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' after concepts arguments"); err != nil {
-		return nil, p.errorf(fnTok, "concepts() accepts an optional string pattern argument")
+		return nil, p.argErrorf(fnTok, "concepts() accepts an optional string pattern argument")
 	}
 
 	return &BuiltinFunctionExpression{
@@ -833,26 +833,26 @@ func (p *parser) parseValidateFunction() (ExpressionNode, error) {
 
 	// Expect a JSON object as the argument
 	if p.peek().typ != tokBraceOpen {
-		return nil, p.errorf(fnTok, "validate() requires a JSON object argument with 'concept' and 'payload' fields")
+		return nil, p.argErrorf(fnTok, "validate() requires a JSON object argument with 'concept' and 'payload' fields")
 	}
 
 	args, err := p.parseFunctionArgs()
 	if err != nil {
-		return nil, p.errorf(fnTok, "validate() argument: %v", err)
+		return nil, p.argErrorf(fnTok, "validate() argument: %v", err)
 	}
 
 	// Validate required fields
 	concept, ok := args["concept"]
 	if !ok {
-		return nil, p.errorf(fnTok, "validate() requires 'concept' field in argument")
+		return nil, p.argErrorf(fnTok, "validate() requires 'concept' field in argument")
 	}
 	if _, ok := concept.(string); !ok {
-		return nil, p.errorf(fnTok, "validate() 'concept' field must be a string")
+		return nil, p.argErrorf(fnTok, "validate() 'concept' field must be a string")
 	}
 
 	_, hasPayload := args["payload"]
 	if !hasPayload {
-		return nil, p.errorf(fnTok, "validate() requires 'payload' field in argument")
+		return nil, p.argErrorf(fnTok, "validate() requires 'payload' field in argument")
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' after validate arguments"); err != nil {
@@ -910,23 +910,23 @@ func (p *parser) parseHelpBuiltin() (ExpressionNode, error) {
 		var err error
 		args, err = p.parseFunctionArgs()
 		if err != nil {
-			return nil, p.errorf(fnTok, "help() argument: %v", err)
+			return nil, p.argErrorf(fnTok, "help() argument: %v", err)
 		}
 	case tokString:
 		// Allow shorthand: help("functionName")
 		nameTok := p.next()
 		args = map[string]any{"name": nameTok.literal}
 	default:
-		return nil, p.errorf(fnTok, "help() requires a name argument: help(\"name\") or help({\"name\": \"...\"})")
+		return nil, p.argErrorf(fnTok, "help() requires a name argument: help(\"name\") or help({\"name\": \"...\"})")
 	}
 
 	// Validate required name field
 	name, ok := args["name"]
 	if !ok {
-		return nil, p.errorf(fnTok, "help() requires 'name' field in argument")
+		return nil, p.argErrorf(fnTok, "help() requires 'name' field in argument")
 	}
 	if _, ok := name.(string); !ok {
-		return nil, p.errorf(fnTok, "help() 'name' field must be a string")
+		return nil, p.argErrorf(fnTok, "help() 'name' field must be a string")
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' after help arguments"); err != nil {
@@ -1023,7 +1023,7 @@ func (p *parser) parseContentIdBuiltin() (ExpressionNode, error) {
 
 	// Expect a JSON object as the argument
 	if p.peek().typ != tokBraceOpen {
-		return nil, p.errorf(fnTok, "contentId() requires a JSON object argument")
+		return nil, p.argErrorf(fnTok, "contentId() requires a JSON object argument")
 	}
 
 	args, err := p.parseFunctionArgs()
@@ -1052,7 +1052,7 @@ func (p *parser) parsePreviewInsertBuiltin() (ExpressionNode, error) {
 
 	// Expect a JSON object as the argument
 	if p.peek().typ != tokBraceOpen {
-		return nil, p.errorf(fnTok, "previewInsert() requires a JSON object argument")
+		return nil, p.argErrorf(fnTok, "previewInsert() requires a JSON object argument")
 	}
 
 	args, err := p.parseFunctionArgs()
@@ -1095,7 +1095,7 @@ func (p *parser) parseSort() (ExpressionNode, error) {
 	}
 
 	if p.peek().typ == tokParenClose {
-		return nil, p.errorf(fnTok, "sort() requires an expression argument")
+		return nil, p.argErrorf(fnTok, "sort() requires an expression argument")
 	}
 
 	target, err := p.parseOr(true)
@@ -1109,7 +1109,7 @@ func (p *parser) parseSort() (ExpressionNode, error) {
 	}
 
 	if len(fields) == 0 {
-		return nil, p.errorf(fnTok, "sort() requires at least one field")
+		return nil, p.argErrorf(fnTok, "sort() requires at least one field")
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' to close sort()"); err != nil {
@@ -1173,7 +1173,7 @@ func (p *parser) parseSelect() (ExpressionNode, error) {
 	}
 
 	if p.peek().typ == tokParenClose {
-		return nil, p.errorf(fnTok, "select() requires an expression argument")
+		return nil, p.argErrorf(fnTok, "select() requires an expression argument")
 	}
 
 	target, err := p.parseOr(true)
@@ -1182,7 +1182,7 @@ func (p *parser) parseSelect() (ExpressionNode, error) {
 	}
 
 	if p.peek().typ == tokParenClose {
-		return nil, p.errorf(p.peek(), "select() requires at least one field")
+		return nil, p.argErrorf(p.peek(), "select() requires at least one field")
 	}
 
 	fields, err := p.parseFieldReferenceList("select", true)
@@ -1191,7 +1191,7 @@ func (p *parser) parseSelect() (ExpressionNode, error) {
 	}
 
 	if len(fields) == 0 {
-		return nil, p.errorf(fnTok, "select() requires at least one field")
+		return nil, p.argErrorf(fnTok, "select() requires at least one field")
 	}
 
 	if _, err := p.expect(tokParenClose, "expected ')' to close select()"); err != nil {
@@ -1228,7 +1228,7 @@ func (p *parser) parsePaginate() (ExpressionNode, error) {
 	}
 
 	if p.peek().typ == tokParenClose {
-		return nil, p.errorf(fnTok, "paginate() requires an expression argument")
+		return nil, p.argErrorf(fnTok, "paginate() requires an expression argument")
 	}
 
 	target, err := p.parseOr(true)
@@ -2042,7 +2042,7 @@ func (p *parser) parseComparison() (ExpressionNode, error) {
 		switch strings.ToLower(strings.TrimSpace(dirTok.literal)) {
 		case "cache":
 			if cacheHint != nil {
-				return nil, p.errorf(dirTok, "cache() directive already specified")
+				return nil, p.argErrorf(dirTok, "cache() directive already specified")
 			}
 			cacheHint, err = p.parseCacheHintDirective()
 			if err != nil {
@@ -2050,17 +2050,17 @@ func (p *parser) parseComparison() (ExpressionNode, error) {
 			}
 		case "fields":
 			if !strings.EqualFold(baseField, "concept") {
-				return nil, p.errorf(dirTok, "@fields() is only supported on concept comparisons")
+				return nil, p.argErrorf(dirTok, "@fields() is only supported on concept comparisons")
 			}
 			if len(fieldSelections) > 0 {
-				return nil, p.errorf(dirTok, "@fields() directive already specified")
+				return nil, p.argErrorf(dirTok, "@fields() directive already specified")
 			}
 			fieldSelections, err = p.parseFieldsDirective(dirTok)
 			if err != nil {
 				return nil, err
 			}
 			if len(fieldSelections) == 0 {
-				return nil, p.errorf(dirTok, "@fields() directive requires at least one field")
+				return nil, p.argErrorf(dirTok, "@fields() directive requires at least one field")
 			}
 		default:
 			return nil, p.errorf(dirTok, "unsupported directive %q", dirTok.literal)
@@ -2147,27 +2147,27 @@ func (p *parser) parseComparison() (ExpressionNode, error) {
 
 	if cacheHint != nil {
 		if !strings.EqualFold(baseField, "concept") {
-			return nil, p.errorf(fieldTok, "cache() hints are only supported on concept field")
+			return nil, p.argErrorf(fieldTok, "cache() hints are only supported on concept field")
 		}
 		if op != OpEq {
-			return nil, p.errorf(opTok, "cache() hints require concept==\"name\" comparison")
+			return nil, p.argErrorf(opTok, "cache() hints require concept==\"name\" comparison")
 		}
 		strValue, ok := value.(string)
 		if !ok || strings.TrimSpace(strValue) == "" {
-			return nil, p.errorf(fieldTok, "cache() hints require concept string literal value")
+			return nil, p.argErrorf(fieldTok, "cache() hints require concept string literal value")
 		}
 	}
 
 	if len(fieldSelections) > 0 {
 		if !strings.EqualFold(baseField, "concept") {
-			return nil, p.errorf(fieldTok, "@fields() is only supported on concept comparisons")
+			return nil, p.argErrorf(fieldTok, "@fields() is only supported on concept comparisons")
 		}
 		if op != OpEq {
-			return nil, p.errorf(opTok, "@fields() requires concept==\"name\" comparison")
+			return nil, p.argErrorf(opTok, "@fields() requires concept==\"name\" comparison")
 		}
 		strValue, ok := value.(string)
 		if !ok || strings.TrimSpace(strValue) == "" {
-			return nil, p.errorf(fieldTok, "@fields() requires concept string literal value")
+			return nil, p.argErrorf(fieldTok, "@fields() requires concept string literal value")
 		}
 	}
 
@@ -2231,7 +2231,7 @@ func (p *parser) parseBuiltinFunctionCall(callName string, fn *Function) (Expres
 		}
 	case BuiltinArgProfileObject:
 		if p.peek().typ != tokBraceOpen {
-			return nil, p.errorf(fnTok, "%s() requires a JSON object argument", callName)
+			return nil, p.argErrorf(fnTok, "%s() requires a JSON object argument", callName)
 		}
 		parsed, err := p.parseFunctionArgs()
 		if err != nil {
@@ -2330,11 +2330,11 @@ func (p *parser) parseStringOrObjectBuiltinArgs(fnTok token, callName string, co
 		}
 		key := strings.TrimSpace(contract.StringKey)
 		if key != "" {
-			return nil, p.errorf(fnTok, "%s() requires a %s argument: %s(\"%s\") or %s({\"%s\": \"...\"})", callName, key, callName, key, callName, key)
+			return nil, p.argErrorf(fnTok, "%s() requires a %s argument: %s(\"%s\") or %s({\"%s\": \"...\"})", callName, key, callName, key, callName, key)
 		}
-		return nil, p.errorf(fnTok, "%s() requires an argument", callName)
+		return nil, p.argErrorf(fnTok, "%s() requires an argument", callName)
 	default:
-		return nil, p.errorf(fnTok, "%s() argument must be a string or JSON object", callName)
+		return nil, p.argErrorf(fnTok, "%s() argument must be a string or JSON object", callName)
 	}
 }
 
@@ -2344,14 +2344,14 @@ func validateBuiltinCallArgs(callName string, args map[string]any, contract *Bui
 	}
 	for _, required := range contract.Required {
 		if _, ok := args[required]; !ok {
-			return fmt.Errorf("%s() requires '%s' field in argument", callName, required)
+			return fmt.Errorf("%w: %s() requires '%s' field in argument", ErrInvalidArgument, callName, required)
 		}
 	}
 	if contract.Properties != nil {
 		if contract.AdditionalProperties != nil && !*contract.AdditionalProperties {
 			for key := range args {
 				if _, ok := contract.Properties[key]; !ok {
-					return fmt.Errorf("%s() does not accept '%s' field in argument", callName, key)
+					return fmt.Errorf("%w: %s() does not accept '%s' field in argument", ErrInvalidArgument, callName, key)
 				}
 			}
 		}
@@ -2361,11 +2361,11 @@ func validateBuiltinCallArgs(callName string, args map[string]any, contract *Bui
 				continue
 			}
 			if !builtinArgTypeMatches(rawVal, expected) {
-				return fmt.Errorf("%s() '%s' field must be %s", callName, key, expected)
+				return fmt.Errorf("%w: %s() '%s' field must be %s", ErrInvalidArgument, callName, key, expected)
 			}
 			if strings.EqualFold(expected, "string") {
 				if s, ok := rawVal.(string); ok && strings.TrimSpace(s) == "" {
-					return fmt.Errorf("%s() %s cannot be empty", callName, key)
+					return fmt.Errorf("%w: %s() %s cannot be empty", ErrInvalidArgument, callName, key)
 				}
 			}
 		}
@@ -2892,6 +2892,28 @@ func (p *parser) errorf(tok token, format string, args ...any) error {
 	return fmt.Errorf("%w: %s at position %d", ErrInvalidQuerySyntax, msg, tok.pos)
 }
 
+// argErrorf is the sibling of errorf for arg-validation errors --
+// the call parsed cleanly but its args don't match the contract
+// (wrong arity, wrong shape, missing required field, directive
+// applied to the wrong target). Wraps ErrInvalidArgument instead
+// of ErrInvalidQuerySyntax so tests can distinguish "this is an
+// arg error" from "this is a parse syntax error" via errors.Is
+// without coupling to message text (#257).
+//
+// Use this at sites where the failure is about WHAT the call
+// asked for, not HOW the source was structured. Examples in
+// parser.go: cache() hint targeting a non-concept field, sort()
+// with no expression, paginate() limit syntax, @fields() applied
+// to a non-concept comparison, concepts() with an empty pattern,
+// validate()/help() missing the required arg shape.
+func (p *parser) argErrorf(tok token, format string, args ...any) error {
+	msg := fmt.Sprintf(format, args...)
+	if tok.typ == tokEOF {
+		return fmt.Errorf("%w: %s at end of query", ErrInvalidArgument, msg)
+	}
+	return fmt.Errorf("%w: %s at position %d", ErrInvalidArgument, msg, tok.pos)
+}
+
 type insertFunctionParser struct {
 	input []rune
 	pos   int
@@ -3140,7 +3162,7 @@ func (p *parser) parseCacheHintDirective() (*int, error) {
 	}
 	ttl, parseErr := strconv.Atoi(strings.TrimSpace(valueTok.literal))
 	if parseErr != nil || ttl < 0 {
-		return nil, p.errorf(valueTok, "cache() directive requires a non-negative integer TTL")
+		return nil, p.argErrorf(valueTok, "cache() directive requires a non-negative integer TTL")
 	}
 
 	if _, err := p.expect(tokParenClose, "cache() directive requires ')'"); err != nil {
@@ -3423,7 +3445,7 @@ func validateFieldReference(ref *FieldReference) error {
 			return nil
 		}
 		if _, ok := canonicalMetadataFieldName(ref.Parts[1]); !ok {
-			return fmt.Errorf("meta field %q is not supported", ref.Parts[1])
+			return fmt.Errorf("%w: meta field %q is not supported", ErrInvalidArgument, ref.Parts[1])
 		}
 		return nil
 	case "id", "concept", "type", "createdat", "createdby", "schema":
@@ -3489,7 +3511,7 @@ func validateFieldReference(ref *FieldReference) error {
 	last := ref.Parts[len(ref.Parts)-1]
 	if last == "*" {
 		if len(ref.Parts) < 3 {
-			return fmt.Errorf("payload wildcards must follow at least one property")
+			return fmt.Errorf("%w: payload wildcards must follow at least one property", ErrInvalidArgument)
 		}
 		ref.Wildcard = true
 	} else {
