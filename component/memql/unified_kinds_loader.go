@@ -483,10 +483,18 @@ func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry) (int, error) 
 		for _, slice := range ExtractKeywordSlices(raw.Content, "seed") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
 			source := preamble + slice.Source
-			decl, err := parseSeedMemQL(origin, []byte(source))
+			astDecl, err := languageParser.ParseSeedDecl(source)
 			if err != nil {
 				if logger != nil {
 					logger.Warn("memql.unifiedSeedLoader: parse failed",
+						"file", raw.Path, "seed", slice.Name, "error", err)
+				}
+				continue
+			}
+			decl, err := seedDeclASTToInternal(astDecl)
+			if err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedSeedLoader: convert failed",
 						"file", raw.Path, "seed", slice.Name, "error", err)
 				}
 				continue

@@ -1612,3 +1612,90 @@ type PolicyDecl struct {
 }
 
 func (*PolicyDecl) node() {}
+
+// SeedDecl is the shared-frontend AST node for a `seed NAME { ... }`
+// declaration. Introduced by memql#335 (sub-epic #329 / #310 Stage 1C)
+// so the unified-seeds loader can parse seeds through the langparser
+// instead of the hand-rolled seed_parser.go mini-parser.
+//
+// Authoring shape (canonical, post-migration):
+//
+//	use agents.concepts.{ agent }
+//
+//	@scope("perUser")
+//	@templateFile("templates/assistant.tmpl")
+//	@description("Per-user Assistant baseline.")
+//	seed agent assistant {
+//	  name:        "Assistant"
+//	  description: "Designated fallback."
+//	  providerConfig {
+//	    llm {
+//	      policyName: "balancedChat"
+//	      temperature: 0.7
+//	    }
+//	  }
+//	}
+//
+// The two-identifier signature `seed <Concept> <name> { ... }` binds
+// the seed to a concept resolved via the file's Form B imports. The
+// legacy single-identifier form (`seed <name>` + file-top
+// `use <ns>.<concept>`) is preserved through SignatureConcept = ""
+// + non-empty UseNamespace / UseConcept on the converter side.
+//
+// Body grammar:
+//   - `<field>: <scalar>` -- scalar value (string / int / float / bool)
+//   - `<field>: ["a", "b"]` -- string-array value (no other element types)
+//   - `<field> { ... }` -- nested block (recursive)
+//
+// Type unions sit on SeedValue.Kind; nested blocks recurse via
+// SeedBlock so the loader (and the in-memql converter that bridges
+// to the existing `seedDecl` / `seedBlock` internal types) can walk
+// the tree without re-parsing.
+type SeedDecl struct {
+	Name             string       // declaration name (`seed XXX`)
+	SignatureConcept string       // bound concept from the two-identifier signature, if any
+	Description      string       // @description
+	Namespace        string       // @namespace
+	Version          string       // @version
+	Scope            string       // @scope: "global" | "perUser" (empty -> loader applies default)
+	TemplateFile     string       // @templateFile path (optional)
+	Body             *SeedBlock   // root body block (always non-nil)
+	Path             string       // source path, for errors/diagnostics
+}
+
+func (*SeedDecl) node() {}
+
+// SeedBlock is one `{ ... }` worth of field assignments + nested
+// blocks. Insertion order is preserved via Keys so downstream
+// diagnostics and the materialiser see fields in author order.
+type SeedBlock struct {
+	Keys   []string              // insertion order of Fields + Nested keys (union)
+	Fields map[string]*SeedValue // scalar / string-array values
+	Nested map[string]*SeedBlock // nested blocks, keyed by field name
+}
+
+// SeedValueKind enumerates the typed scalar forms a seed field can
+// carry. Mirrors the in-memql `seedValueKind` enum 1:1; the converter
+// preserves the kind tag without rewriting.
+type SeedValueKind int
+
+const (
+	SeedValueNone SeedValueKind = iota
+	SeedValueString
+	SeedValueInt
+	SeedValueFloat
+	SeedValueBool
+	SeedValueStringArray
+)
+
+// SeedValue is the typed value of one `<field>: <value>` body
+// assignment. Only one of String / Int / Float / Bool / StringArray
+// is populated, indicated by Kind.
+type SeedValue struct {
+	Kind        SeedValueKind
+	String      string
+	Int         int64
+	Float       float64
+	Bool        bool
+	StringArray []string
+}

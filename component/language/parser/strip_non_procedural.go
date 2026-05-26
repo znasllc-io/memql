@@ -46,6 +46,14 @@ var nonProceduralHeaders = []string{
 	// `provider`, `tool`, `policy` left out: parseProviderDecl /
 	// parseToolDecl / parsePolicyDecl handle them natively
 	// (sub-epic #309 children #316 / #317, sub-epic #329 child #333).
+	//
+	// `seed`, `spec`, `trait` STAY in this list even though their
+	// dedicated loaders parse them via the native parseSeedDecl /
+	// parseSpecDecl entry points. The strip path keeps the general
+	// dslimports.Load flow happy when a file contains nothing but
+	// these constructs and reaches the bare ParseFileSource path
+	// (which would otherwise try to parse `seed agent <name> {`
+	// as a top-level expression and fail).
 	"shape", "builtin", "prompt",
 	"seed", "spec", "trait",
 }
