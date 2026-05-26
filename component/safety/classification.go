@@ -21,15 +21,21 @@ const (
 // ActionDescriptor. Carries the tier + categories the decision
 // policy keys off, the reason/explanation that lands in audit + the
 // "why was I asked to approve this?" approval UI, and the
-// provenance (source / latency / confidence) that observability
-// needs to tune the system.
+// provenance (source / rule id / latency / confidence) that
+// observability needs to tune the system.
 type Classification struct {
 	Tier       RiskTier
 	Categories []Category
-	// Reason is a short human-readable explanation -- which rule
-	// fired, what the model flagged. Lands in audit + the approval
-	// surface; keep it short and quotable.
+	// Reason is a short human-readable explanation -- which specific
+	// pattern fired, what the model flagged. Lands in audit + the
+	// approval surface; keep it short and quotable.
 	Reason string
+	// RuleID identifies the rule (or model prompt) that produced
+	// this verdict, e.g. `shell.destructive` or `model.classify_v1`.
+	// Empty when SourceNoop / SourceDisabled. Stable + greppable --
+	// used by audit and the red-team corpus to track per-rule
+	// behaviour over time.
+	RuleID string
 	// Confidence is the classifier's self-reported confidence in
 	// [0.0, 1.0]. Rule verdicts are 1.0 by convention; model
 	// verdicts carry the model's own estimate. The decision policy
