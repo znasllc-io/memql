@@ -408,11 +408,15 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 
 	// Slow path: DB (singleflight to avoid herd).
 	anyVal, _, _ := c.spaceInfoSF.Do(spaceId, func() (any, error) {
-		query := fmt.Sprintf(`shape(
-			paginate(concept==v1:cognition:space;id==%s, 1),
-			"spaceFull"
-		)`, escapeJSONString(spaceId))
-
+		// memql#289 (sub-epic #286): migrated from a handwritten
+		// `shape(paginate(filter;id==%s, 1), "spaceFull")` runtime
+		// query to the existing DSL-defined querySpaceMeta. The
+		// id== filter naturally returns 0-or-1 rows so no
+		// sort/paginate directives are needed (unlike sibling
+		// children B + D which required the #294 directive
+		// wiring). Downstream spaceFull-shape extraction is
+		// unchanged. Unblocks #250.
+		query := fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, escapeJSONString(spaceId))
 		result, err := c.engine.Execute(ctx, query)
 		if err != nil {
 			return spaceInfo{}, nil
