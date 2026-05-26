@@ -5,26 +5,6 @@ import (
 	"strings"
 )
 
-func parseStandaloneExpression(input string) (ExpressionNode, error) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return nil, fmt.Errorf("expression is empty")
-	}
-	tokens, err := tokenize(trimmed)
-	if err != nil {
-		return nil, err
-	}
-	p := newParser(tokens, nil)
-	expr, err := p.parse()
-	if err != nil {
-		return nil, err
-	}
-	if p.peek().typ != tokEOF {
-		return nil, p.errorf(p.peek(), "unexpected token %q after expression", p.peek().literal)
-	}
-	return expr, nil
-}
-
 func detectSIUsage(expr ExpressionNode) bool {
 	if expr == nil {
 		return false

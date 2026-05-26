@@ -542,8 +542,3 @@ func TestResolvePlanFunctions_SpecCallRejectsArgs(t *testing.T) {
 	require.Contains(t, err.Error(), "does not accept arguments")
 }
 
-func TestParseStandaloneExpression_BareSpecRejected(t *testing.T) {
-	_, err := parseStandaloneExpression("specIsOpen")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be invoked with parentheses")
-}
