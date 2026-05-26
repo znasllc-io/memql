@@ -49,16 +49,21 @@ func surfaceModeEnv(surface Surface) string {
 	return ""
 }
 
-// ModeForSurface returns the effective Mode for `surface`. Reads
-// the per-surface env var first; falls back to the global
-// MEMQL_COMMAND_CLASSIFIER_MODE (via ModeFromEnv). Unrecognised
-// values default to shadow (matches ModeFromEnv's safe-default
-// posture).
+// ModeForSurface returns the effective Mode for `surface`,
+// considering ONLY env vars. Reads MEMQL_SAFETY_<SURFACE>_MODE
+// first; falls back to the global MEMQL_COMMAND_CLASSIFIER_MODE
+// (via ModeFromEnv). Unrecognised values default to shadow.
 //
-// Read at every call -- per-surface env knobs are operator-flippable
-// without restart in principle (though in practice the process must
-// restart to pick up env changes; the per-call read is for tests +
-// future hot-reload).
+// **Caution: this function does NOT consult the constructed
+// Gate's `mode`.** Production code (Gate.Evaluate, EnforceDecision)
+// uses the internal `resolveModeForSurface(surface, fallback)`
+// with the Gate's construction-time mode as the fallback so test
+// gates that pin `Mode: ModeEnforce` keep working. ModeForSurface
+// is an operator-facing convenience for tooling that wants the
+// "what would a fresh Gate pick up from env right now?" answer.
+// Don't use it to drive operator-facing dashboards or logs that
+// claim to report what the running gate is doing -- the running
+// gate may have a different construction-time fallback.
 func ModeForSurface(surface Surface) Mode {
 	if env := surfaceModeEnv(surface); env != "" {
 		if v := strings.TrimSpace(os.Getenv(env)); v != "" {

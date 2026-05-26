@@ -63,6 +63,17 @@ func ruleShellHistoryClear(desc ActionDescriptor) (Classification, error) {
 // shell-scripting in the workbench), so default-deny would block
 // too much. Operator approves via the #232 approval flow when
 // they trust the source.
+//
+// CATEGORY CHOICE: deliberately NOT CategoryRemoteCode here even
+// though a subshell can carry remote-code. CategoryRemoteCode is a
+// FLOOR category in decision_policy.go::effectiveTier -- it would
+// promote our TierMedium to TierCritical, which the
+// DefaultDecisionPolicy maps to DecisionDeny, bypassing the
+// approval flow this rule docstring promises. CategoryUnknown
+// keeps the rule at TierMedium so the matrix routes to Ask
+// (computer-use surface) / Allow-with-interact-scope (workbench),
+// honouring the intent: 'we can't classify this -- escalate to
+// the human + approval flow rather than blanket deny.'
 func ruleShellSubshellInject(desc ActionDescriptor) (Classification, error) {
 	if desc.Action != ActionExec {
 		return Classification{}, ErrNoClassifierOpinion
@@ -70,7 +81,7 @@ func ruleShellSubshellInject(desc ActionDescriptor) (Classification, error) {
 	if subshellRe.MatchString(desc.Payload.Command) {
 		return cls(TierMedium,
 			"command contains a subshell ($(...), backticks, or <(...)) that bypasses rule-based analysis",
-			CategoryRemoteCode), nil
+			CategoryUnknown), nil
 	}
 	return Classification{}, ErrNoClassifierOpinion
 }
