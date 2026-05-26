@@ -403,7 +403,3 @@ logic logicRevokeExpiredDelegations {
     return expiredDelegations.Len()
   }
 }
-
-    logic revokeExpiredDelegations { now: timestamp() }
-
-    logic revokeExpiredDelegations { now: timestamp() }
