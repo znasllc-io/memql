@@ -15,27 +15,12 @@ var (
 	parserTestRegistryErr  error
 )
 
-func TestTokenizeEqualityOperator(t *testing.T) {
-	// The shared lexer merges `v1:conversation` into a single identifier
-	// token because `:` followed by alphanumeric is part of the concept
-	// literal form. The query parser's readIdentifierLiteral still
-	// accepts the legacy three-token form (`v1`, `:`, `conversation`)
-	// for hand-written whitespace like `v1 : conversation`.
-	query := "concept==v1:conversation"
-	tokens, err := tokenize(query)
-	require.NoError(t, err)
-	require.Len(t, tokens, 4)
-	require.Equal(t, tokIdentifier, tokens[0].typ)
-	require.Equal(t, "concept", tokens[0].literal)
-	require.Equal(t, tokOperator, tokens[1].typ)
-	require.Equal(t, "==", tokens[1].literal)
-	require.Equal(t, tokIdentifier, tokens[2].typ)
-	require.Equal(t, "v1:conversation", tokens[2].literal)
-	require.Equal(t, tokEOF, tokens[3].typ)
-
-	plan := mustParse(t, query)
-	require.NotNil(t, plan)
-}
+// TestTokenizeEqualityOperator was retired in #328 alongside the
+// recursive-descent parser's `tokenize` + `tokenType` types. The
+// langparser's own lexer tests (component/language/parser/lexer_test.go)
+// cover the same surface from the langparser side; the engine-side
+// guarantee (parse-then-shape) is exercised by
+// `TestParseBasicComparison` and friends below.
 
 func TestParseBasicComparison(t *testing.T) {
 	plan := mustParse(t, "concept==v1:conversation")

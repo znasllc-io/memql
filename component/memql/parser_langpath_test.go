@@ -2,7 +2,6 @@ package memql
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 )
 
@@ -296,39 +295,13 @@ func TestParseViaLangparser_CoversCorpus(t *testing.T) {
 	}
 }
 
-// TestParseViaLangparser_Equivalence is the #248 acceptance test:
-// for every representative runtime query shape, the langparser path
-// must produce the SAME engine AST as the memql parser. If a
-// future change to either parser silently diverges from the other,
-// this test fails.
-//
-// The comparison uses reflect.DeepEqual on the engine ExpressionNode
-// tree. Both paths emit the exact same engine AST types
-// (*ComparisonExpression, *FunctionCallExpression, *LogicalExpression,
-// *ActorReference, *ArgReference, ...) so DeepEqual is a precise check
-// -- a structural divergence would surface as a Go-level inequality.
-func TestParseViaLangparser_Equivalence(t *testing.T) {
-	for _, tc := range representativeRuntimeQueries {
-		t.Run(tc.name, func(t *testing.T) {
-			langNode, err := parseViaLangparser(tc.query)
-			if err != nil {
-				t.Fatalf("parseViaLangparser(%q): %v", tc.query, err)
-			}
-			tokens, err := tokenize(tc.query)
-			if err != nil {
-				t.Fatalf("tokenize(%q): %v", tc.query, err)
-			}
-			memqlNode, err := newParser(tokens, nil).parse()
-			if err != nil {
-				t.Fatalf("memql parse(%q): %v", tc.query, err)
-			}
-			if !reflect.DeepEqual(langNode, memqlNode) {
-				t.Errorf("cross-parser AST divergence on %q:\n  langparser path: %#v\n  memql path:      %#v",
-					tc.query, langNode, memqlNode)
-			}
-		})
-	}
-}
+// TestParseViaLangparser_Equivalence was retired in #328 alongside
+// the recursive-descent parser (the `tokenize` + `newParser` /
+// `(p *parser).parse()` surface this test compared against). With
+// only one runtime parser left, the cross-parser equivalence
+// assertion is undefined. `TestParseViaLangparser_CoversCorpus`
+// above keeps the corpus exercised against the surviving
+// (langparser) path.
 
 // TestParseViaLangparser_RejectsTimestampSuffix asserts the upfront
 // langparserPathUnsupported detector catches the `@latest` /

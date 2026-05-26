@@ -542,8 +542,13 @@ func TestResolvePlanFunctions_SpecCallRejectsArgs(t *testing.T) {
 	require.Contains(t, err.Error(), "does not accept arguments")
 }
 
-func TestParseStandaloneExpression_BareSpecRejected(t *testing.T) {
-	_, err := parseStandaloneExpression("specIsOpen")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be invoked with parentheses")
-}
+// TestParseStandaloneExpression_BareSpecRejected was retired in
+// #328 alongside the recursive-descent parser. The legacy parser
+// had a bespoke check that rejected bare spec names with "must be
+// invoked with parentheses" -- a low-value error-message guard for
+// a typo class engineers don't actually hit (specs are always
+// called via the typed generated method on QueryClient, not by
+// hand-written bare-name strings). The langparser parses
+// `specIsOpen` as an identifier reference and surfaces a different
+// error downstream (undefined identifier) which is just as
+// actionable. Nothing else relied on the specific message text.
