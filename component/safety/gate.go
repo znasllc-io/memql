@@ -103,24 +103,31 @@ func (r SlogRecorder) Record(ctx context.Context, desc ActionDescriptor, cls Cla
 }
 
 // Gate is the single choke point every execution surface (worker /
-// tool / workbench) routes through before dispatch. Phase 0 ships
-// the gate; #229 wires the call sites. Phase 0 returns Allow for
-// every action -- the real decision logic lands with #231 (the
-// `commandRiskDecision` Policy DSL evaluation), and the fail-closed
-// semantics for computer-use land with #229.
+// tool / workbench) routes through before dispatch. Phase 0 shipped
+// the gate; #229 wired the call sites; #231 plugs in the real
+// decision policy (the `decide` stub now delegates to a
+// DecisionPolicy). Fail-closed semantics for computer-use are
+// handled by per-surface `EnforceDecision` calls (see global.go).
 type Gate struct {
-	classifier Classifier
-	recorder   DecisionRecorder
-	mode       Mode
+	classifier     Classifier
+	recorder       DecisionRecorder
+	mode           Mode
+	decisionPolicy DecisionPolicy
 }
 
 // GateOptions configures NewGate. All fields are optional; sensible
 // defaults are applied: NoopClassifier, SlogRecorder with the
-// default logger, ModeFromEnv.
+// default logger, ModeFromEnv, DefaultDecisionPolicy.
 type GateOptions struct {
 	Classifier Classifier
 	Recorder   DecisionRecorder
 	Mode       Mode
+	// DecisionPolicy maps Classification + caller context to an
+	// allow/ask/deny Decision. nil -> DefaultDecisionPolicy (the
+	// #231 matrix). Override for tests (deterministic verdicts)
+	// or to swap in a DSL-backed impl once procedural Policy DSL
+	// is exercised.
+	DecisionPolicy DecisionPolicy
 	// Logger is used only when Recorder is nil -- the default
 	// SlogRecorder is built around it.
 	Logger *slog.Logger
@@ -146,7 +153,16 @@ func NewGate(opts GateOptions) *Gate {
 	if mode == "" {
 		mode = ModeFromEnv()
 	}
-	return &Gate{classifier: classifier, recorder: recorder, mode: mode}
+	decisionPolicy := opts.DecisionPolicy
+	if decisionPolicy == nil {
+		decisionPolicy = DefaultDecisionPolicy{}
+	}
+	return &Gate{
+		classifier:     classifier,
+		recorder:       recorder,
+		mode:           mode,
+		decisionPolicy: decisionPolicy,
+	}
 }
 
 // Mode returns the gate's configured mode. Useful for tests + for
@@ -196,7 +212,7 @@ func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, C
 		g.recorder.Record(ctx, desc, errCls, DecisionAllow, g.mode)
 		return DecisionAllow, errCls, err
 	}
-	decision := g.decide(cls)
+	decision := g.decide(cls, desc)
 	if g.mode == ModeShadow {
 		// Record what we WOULD have decided, but always allow.
 		g.recorder.Record(ctx, desc, cls, decision, g.mode)
@@ -206,12 +222,16 @@ func (g *Gate) Evaluate(ctx context.Context, desc ActionDescriptor) (Decision, C
 	return decision, cls, nil
 }
 
-// decide is the Phase 0 placeholder for the real decision policy.
-// Always returns DecisionAllow. #231 replaces this with an
-// EvaluatePolicy call against the `commandRiskDecision` core-tier
-// policy that maps (tier, categories, scope, capability, prefs) ->
-// allow/ask/deny.
-func (g *Gate) decide(_ Classification) Decision {
-	// TODO(#231): replace with engine.EvaluatePolicy("commandRiskDecision", ...).
-	return DecisionAllow
+// decide consults the configured DecisionPolicy. The DefaultDecisionPolicy
+// (the #231 matrix) ships with NewGate when no override is supplied.
+// Pass desc so the policy can read surface + caller scope/capability --
+// computer-use is one notch stricter than sandboxed surfaces, and
+// medium-tier on sandboxed surfaces depends on scope.
+func (g *Gate) decide(cls Classification, desc ActionDescriptor) Decision {
+	return g.decisionPolicy.Decide(DecisionInput{
+		Classification: cls,
+		Surface:        desc.Surface,
+		Scope:          desc.Caller.Scope,
+		Capability:     desc.Caller.Capability,
+	})
 }
