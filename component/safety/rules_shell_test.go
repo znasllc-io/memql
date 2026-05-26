@@ -109,11 +109,11 @@ func TestShellSudo(t *testing.T) {
 		}
 	}
 	allow := []string{
-		"ls",                     // no sudo
-		"chown jose /tmp/x",      // chown to non-root user
-		"chown jose /root/foo",   // path contains /root/ but owner is not root -- was a false-positive before
+		"ls",                      // no sudo
+		"chown jose /tmp/x",       // chown to non-root user
+		"chown jose /root/foo",    // path contains /root/ but owner is not root -- was a false-positive before
 		"chown jose:wheel /etc/x", // priv-esc target but owner not root -- still escalate (system_write rule catches the /etc write)
-		"echo 'do not use sudo'", // sudo inside a quoted string -- false-positive caveat: regex doesn't parse quotes
+		"echo 'do not use sudo'",  // sudo inside a quoted string -- false-positive caveat: regex doesn't parse quotes
 	}
 	for _, cmd := range allow {
 		// Caveat: the echo case will false-positive (regex sees `sudo` inside the quoted arg).
