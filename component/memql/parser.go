@@ -3008,20 +3008,30 @@ func (p *insertFunctionParser) errorf(pos int, format string, args ...any) error
 	return fmt.Errorf("%w: %s at position %d", ErrInvalidQuerySyntax, message, pos)
 }
 
-// tokenize splits the input string into parseable tokens by delegating
-// to the shared language/parser lexer and remapping its richer token
-// stream onto the query-parser's legacy token vocabulary.
+// tokenize lexes a runtime query expression by delegating to the
+// shared language/parser lexer. Both DSL parsers now share BOTH the
+// lexer AND the token-type enum (the local `tokFoo` constants below
+// are aliases for `langparser.TokenFoo`), so there is no "translate
+// token type to a local vocabulary" step anymore -- only the runtime
+// grammar's two semantic adjustments survive (#242 / epic #218):
 //
-// The shared lexer returns keyword tokens (in, has, not, if, func, ...)
-// and reads concept names like v1:cognition:space as a single
-// identifier. The memql query parser predates both conventions: it
-// inspects identifier literals directly (`in`, `has`, `not`, `true`,
-// `false`, `null`) and threads `v1`, `:`, `cognition` back together in
-// readIdentifierLiteral. The shared lexer's wider identifier (which
-// absorbs the colon when followed by alphanumeric) is a strict superset
-// of the three-token form — either tokenisation compiles to the same
-// string — so the legacy loop is now a no-op for concept-literal
-// cases and still handles hand-written paths like `v1` then `:`.
+//   - `$` operator is emitted by the lexer for `$var` references
+//     in the load-time grammar; the runtime grammar doesn't accept
+//     standalone `$`, so we reject here with a clean "unexpected
+//     token" error rather than letting it flow into the parser as
+//     a generic operator.
+//   - `TokenBang` (`!`) is surfaced as a generic `tokOperator` so
+//     runtime grammars that don't accept a standalone `!` error at
+//     the parse step rather than the lexer step.
+//   - Keyword tokens (`TokenKeywordFunc`, `TokenKeywordIn`, ...)
+//     are flattened to `tokIdentifier` so the runtime parser's
+//     literal-string keyword checks (`in`, `has`, `not`, `nil`,
+//     `null`) keep matching. The runtime parser decides for itself
+//     whether a given identifier acts as a keyword in context.
+//
+// Before #242 the function did a per-TokenType `switch` mapping each
+// shared token type to a local enum value; that mapping retired when
+// the local enum became an alias for `langparser.TokenType`.
 func tokenize(query string) ([]token, error) {
 	lex := langparser.NewLexer(query)
 	tokens := make([]token, 0)
@@ -3030,9 +3040,17 @@ func tokenize(query string) ([]token, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidQuerySyntax, err.Error())
 		}
-		converted, ok := convertSharedToken(tok)
-		if !ok {
-			return nil, fmt.Errorf("%w: unexpected token %q at position %d", ErrInvalidQuerySyntax, tok.Literal, tok.Pos)
+		if tok.Type == langparser.TokenOperator && tok.Literal == "$" {
+			return nil, fmt.Errorf("%w: unexpected token %q at position %d",
+				ErrInvalidQuerySyntax, tok.Literal, tok.Pos)
+		}
+		converted := token{typ: tok.Type, literal: tok.Literal, pos: tok.Pos}
+		switch {
+		case tok.Type == langparser.TokenBang:
+			converted.typ = tokOperator
+			converted.literal = "!"
+		case tok.Type >= langparser.TokenKeywordQuery:
+			converted.typ = tokIdentifier
 		}
 		tokens = append(tokens, converted)
 		if tok.Type == langparser.TokenEOF {
@@ -3042,98 +3060,37 @@ func tokenize(query string) ([]token, error) {
 	return tokens, nil
 }
 
-// convertSharedToken maps a shared-lexer Token onto the memql query
-// parser's legacy token shape. Keyword tokens are collapsed back to
-// tokIdentifier so the query parser's literal-string checks for `in`,
-// `has`, `not`, `nil`, `null`, etc. continue to match; the query
-// parser decides for itself whether a given identifier is a keyword
-// in context.
-func convertSharedToken(tok langparser.Token) (token, bool) {
-	switch tok.Type {
-	case langparser.TokenEOF:
-		return token{typ: tokEOF, pos: tok.Pos}, true
-	case langparser.TokenIdentifier:
-		return token{typ: tokIdentifier, literal: tok.Literal, pos: tok.Pos}, true
-	case langparser.TokenNumber:
-		return token{typ: tokNumber, literal: tok.Literal, pos: tok.Pos}, true
-	case langparser.TokenString:
-		return token{typ: tokString, literal: tok.Literal, pos: tok.Pos}, true
-	case langparser.TokenOperator:
-		// `$` is emitted by the shared lexer but has no meaning in
-		// a standalone query expression.
-		if tok.Literal == "$" {
-			return token{}, false
-		}
-		return token{typ: tokOperator, literal: tok.Literal, pos: tok.Pos}, true
-	case langparser.TokenParenOpen:
-		return token{typ: tokParenOpen, literal: "(", pos: tok.Pos}, true
-	case langparser.TokenParenClose:
-		return token{typ: tokParenClose, literal: ")", pos: tok.Pos}, true
-	case langparser.TokenBraceOpen:
-		return token{typ: tokBraceOpen, literal: "{", pos: tok.Pos}, true
-	case langparser.TokenBraceClose:
-		return token{typ: tokBraceClose, literal: "}", pos: tok.Pos}, true
-	case langparser.TokenBracketOpen:
-		return token{typ: tokBracketOpen, literal: "[", pos: tok.Pos}, true
-	case langparser.TokenBracketClose:
-		return token{typ: tokBracketClose, literal: "]", pos: tok.Pos}, true
-	case langparser.TokenColon:
-		return token{typ: tokColon, literal: ":", pos: tok.Pos}, true
-	case langparser.TokenSemicolon:
-		return token{typ: tokSemicolon, literal: ";", pos: tok.Pos}, true
-	case langparser.TokenComma:
-		return token{typ: tokComma, literal: ",", pos: tok.Pos}, true
-	case langparser.TokenAt:
-		return token{typ: tokAt, literal: "@", pos: tok.Pos}, true
-	case langparser.TokenDefine:
-		return token{typ: tokDefine, literal: ":=", pos: tok.Pos}, true
-	case langparser.TokenQuestion:
-		return token{typ: tokQuestion, literal: "?", pos: tok.Pos}, true
-	case langparser.TokenQuestionDot:
-		return token{typ: tokQuestionDot, literal: "?.", pos: tok.Pos}, true
-	case langparser.TokenAmpAmp:
-		return token{typ: tokAmpAmp, literal: "&&", pos: tok.Pos}, true
-	case langparser.TokenQuestionQuestion:
-		return token{typ: tokQuestionQuestion, literal: "??", pos: tok.Pos}, true
-	case langparser.TokenBang:
-		// Surface as an operator; query grammars that don't accept
-		// a standalone `!` will error at the parse step.
-		return token{typ: tokOperator, literal: "!", pos: tok.Pos}, true
-	default:
-		// Every keyword token (TokenKeywordFunc, TokenKeywordIn, ...)
-		// is collapsed to an identifier so the query parser's
-		// literal-based keyword checks keep working.
-		if tok.Type >= langparser.TokenKeywordQuery {
-			return token{typ: tokIdentifier, literal: tok.Literal, pos: tok.Pos}, true
-		}
-		return token{}, false
-	}
-}
-
-// tokenType enumerates lexical token categories.
-type tokenType int
+// tokenType is a type alias for langparser.TokenType -- the memql
+// query parser shares the language parser's lexer AND its token-type
+// enum (#242 / epic #218). The local `tokFoo` constants below alias
+// the canonical `langparser.TokenFoo` values so the parser's 250+
+// token-type comparisons keep their concise form without committing
+// to two enums that have to be kept in sync. The local `token` data
+// carrier (struct below) stays parser-local: it's just a 3-field
+// record with names that match the rest of this file's idioms.
+type tokenType = langparser.TokenType
 
 const (
-	tokEOF tokenType = iota
-	tokIdentifier
-	tokNumber
-	tokString
-	tokOperator
-	tokParenOpen
-	tokParenClose
-	tokBraceOpen
-	tokBraceClose
-	tokBracketOpen
-	tokBracketClose
-	tokColon
-	tokSemicolon
-	tokComma
-	tokAt
-	tokDefine
-	tokQuestion         // ? for ternary operator (future)
-	tokQuestionDot      // ?. for optional/conditional filters
-	tokAmpAmp           // && for logical AND
-	tokQuestionQuestion // ?? for null coalescing
+	tokEOF              tokenType = langparser.TokenEOF
+	tokIdentifier       tokenType = langparser.TokenIdentifier
+	tokNumber           tokenType = langparser.TokenNumber
+	tokString           tokenType = langparser.TokenString
+	tokOperator         tokenType = langparser.TokenOperator
+	tokParenOpen        tokenType = langparser.TokenParenOpen
+	tokParenClose       tokenType = langparser.TokenParenClose
+	tokBraceOpen        tokenType = langparser.TokenBraceOpen
+	tokBraceClose       tokenType = langparser.TokenBraceClose
+	tokBracketOpen      tokenType = langparser.TokenBracketOpen
+	tokBracketClose     tokenType = langparser.TokenBracketClose
+	tokColon            tokenType = langparser.TokenColon
+	tokSemicolon        tokenType = langparser.TokenSemicolon
+	tokComma            tokenType = langparser.TokenComma
+	tokAt               tokenType = langparser.TokenAt
+	tokDefine           tokenType = langparser.TokenDefine
+	tokQuestion         tokenType = langparser.TokenQuestion         // ? for ternary operator (future)
+	tokQuestionDot      tokenType = langparser.TokenQuestionDot      // ?. for optional/conditional filters
+	tokAmpAmp           tokenType = langparser.TokenAmpAmp           // && for logical AND
+	tokQuestionQuestion tokenType = langparser.TokenQuestionQuestion // ?? for null coalescing
 )
 
 type token struct {
