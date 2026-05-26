@@ -80,6 +80,64 @@ func TestRecordEmitsExpectedQueryShape(t *testing.T) {
 	}
 }
 
+func TestRecordDropsSurfaceFieldsOnCredentialAccess(t *testing.T) {
+	// safety.RedactedPayload is pass-through for Command / URL /
+	// Paths. When the classifier flags credential_access the rule
+	// fired on something in those fields (URL userinfo, env-var
+	// assignment, etc.), so persisting them verbatim would leak the
+	// credential into shadow-mode telemetry. The recorder must drop
+	// them before marshalling.
+	runner := &stubRunner{}
+	p := New(runner, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	desc := safety.NewExecAction(safety.SurfaceWorkbench,
+		"curl https://user:secret-token-xyz@example.com/api",
+		safety.CallerContext{})
+	p.Record(context.Background(), desc,
+		safety.Classification{
+			Tier:       safety.TierHigh,
+			Categories: []safety.Category{safety.CategoryCredentialAccess},
+			Reason:     "URL contains userinfo",
+			Source:     safety.SourceRule,
+		},
+		safety.DecisionDeny, safety.ModeShadow)
+
+	q := runner.Queries()[0]
+	if strings.Contains(q, "secret-token-xyz") {
+		t.Errorf("credential leaked into persisted query: %q", q)
+	}
+	if !strings.Contains(q, "[REDACTED:credential_access]") {
+		t.Errorf("expected [REDACTED:credential_access] marker, got: %q", q)
+	}
+	// Reason field must SURVIVE -- it's the triage context.
+	if !strings.Contains(q, "URL contains userinfo") {
+		t.Errorf("reason field should survive scrub: %q", q)
+	}
+}
+
+func TestRecordKeepsCommandWhenNotCredentialAccess(t *testing.T) {
+	// The defensive scrub fires only on credential_access -- other
+	// rule categories (destructive, etc.) should leave Command
+	// intact so ops can see what was flagged.
+	runner := &stubRunner{}
+	p := New(runner, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	desc := safety.NewExecAction(safety.SurfaceWorkbench, "rm -rf /tmp/foo",
+		safety.CallerContext{})
+	p.Record(context.Background(), desc,
+		safety.Classification{
+			Tier:       safety.TierHigh,
+			Categories: []safety.Category{safety.CategoryDestructive},
+			Source:     safety.SourceRule,
+		},
+		safety.DecisionAsk, safety.ModeShadow)
+	q := runner.Queries()[0]
+	if !strings.Contains(q, "rm -rf /tmp/foo") {
+		t.Errorf("destructive-but-not-credential command should survive: %q", q)
+	}
+	if strings.Contains(q, "[REDACTED:credential_access]") {
+		t.Errorf("scrub should NOT fire on destructive-only category: %q", q)
+	}
+}
+
 func TestRecordRedactsSecretsBeforePersist(t *testing.T) {
 	runner := &stubRunner{}
 	p := New(runner, slog.New(slog.NewTextHandler(io.Discard, nil)))

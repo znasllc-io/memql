@@ -4695,7 +4695,7 @@ func MutationInsertPolicyTraceBuild(args MutationInsertPolicyTraceArgs) string {
 	return b.String()
 }
 
-// MutationInsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. All arg values arrive already redacted by safety.RedactedPayload, so this mutation does not need its own scrub pass.
+// MutationInsertSafetyClassification -- Insert one v1:safety:classification row recording the Gate's decision for a single proposed action. Called from component/safety/recorder/persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. argsRedacted is scrubbed by the caller: Body + Args run through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/Authorization fragments replaced with [REDACTED]); when the classifier flags `credential_access` the recorder additionally drops Command/URL/Paths to avoid persisting credential-bearing surface strings (the rule's reason is preserved). This mutation does not perform its own scrub pass.
 //
 // Bound concept: classification.
 type MutationInsertSafetyClassificationArgs struct {

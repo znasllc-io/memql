@@ -15,7 +15,7 @@
 concept classification {
   surface       string @required @description("Execution surface: `computer_use_headless`/`_embodied`, `workbench`, `tool_webhook`, `tool_integration`.")
   action        string @required @description("Abstract action: exec / fs_read / fs_write / fs_list / fs_stat / http_fetch / gui_input / screenshot / webhook / tool_call.")
-  argsRedacted  string @description("JSON-encoded redacted payload. Secrets (TOKEN/SECRET/PASSWORD/API_KEY/Authorization/etc.) replaced with [REDACTED] by safety.RedactedPayload BEFORE marshalling.")
+  argsRedacted  string @description("JSON-encoded redacted payload. Body + Args go through safety.RedactedPayload (TOKEN/SECRET/PASSWORD/API_KEY/Authorization fragments -> [REDACTED]). Command / URL / Paths / Method / ToolName are passed through verbatim UNLESS the classifier flagged `credential_access` (URL with userinfo, env-var assignment in a shell command, etc.), in which case the recorder drops those surface fields entirely so credentials never reach the persisted row -- the rule's reason field still carries enough context for triage. Empty when the descriptor's payload was already empty.")
   tier          string @required @description("Risk tier: `none`|`low`|`medium`|`high`|`critical`.")
   categories    string @description("Comma-separated category list (e.g. `destructive,credential_access`). Empty for tier=none.")
   decision      string @required @description("What the Gate decided: `allow`|`ask`|`deny`. In shadow mode the surface always proceeds regardless; in enforce mode this is honoured.")

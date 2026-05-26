@@ -84,8 +84,26 @@ func (p *PersistingRecorder) Record(ctx context.Context, desc safety.ActionDescr
 // shape isn't worth the per-row overhead until the cockpit needs
 // it). All string-typed fields stay strings; numeric fields stay
 // numeric so the mutation arg-coercion path doesn't have to parse.
+//
+// Defensive credential scrub: safety.RedactedPayload's per-field
+// guarantee is "Body + Args are scrubbed; Command/URL/Paths/Method/
+// ToolName are pass-through." When the classifier flagged
+// credential_access (URL with userinfo, env-var assignment in a
+// shell command, etc.) those surface strings almost certainly carry
+// the credential the rule fired on. We don't want to persist that
+// even in shadow-mode telemetry, so we drop the surface strings
+// from the recorded payload when credential_access is in the
+// category set. The rule's `reason` field still ships, which is
+// enough context for triage without leaking the credential. Other
+// categories (destructive, etc.) leave Command intact -- the
+// classifier didn't flag the command as credential-bearing.
 func buildArgs(desc safety.ActionDescriptor, cls safety.Classification, decision safety.Decision, mode safety.Mode) map[string]any {
 	red := safety.RedactedPayload(desc.Payload)
+	if hasCategory(cls.Categories, safety.CategoryCredentialAccess) {
+		red.Command = "[REDACTED:credential_access]"
+		red.URL = "[REDACTED:credential_access]"
+		red.Paths = nil
+	}
 	redactedJSON, _ := json.Marshal(red)
 	cats := make([]string, 0, len(cls.Categories))
 	for _, c := range cls.Categories {
@@ -109,6 +127,18 @@ func buildArgs(desc safety.ActionDescriptor, cls safety.Classification, decision
 		"correlationId": desc.Caller.CorrelationID,
 		"mode":          string(mode),
 	}
+}
+
+// hasCategory reports whether `target` appears in `cats`. Tiny
+// helper so the credential-access defensive-scrub branch in
+// buildArgs reads at the call site.
+func hasCategory(cats []safety.Category, target safety.Category) bool {
+	for _, c := range cats {
+		if c == target {
+			return true
+		}
+	}
+	return false
 }
 
 // buildMutationQuery composes the memql mutation call string. Keys
