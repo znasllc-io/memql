@@ -139,11 +139,17 @@ func (c *CognitionIntegration) getLatestSpaceContextSnapshot(ctx context.Context
 	if spaceId == "" {
 		return nil, fmt.Errorf("spaceId is empty")
 	}
-	// Shape only the snapshot field for deterministic comparison.
-	query := fmt.Sprintf(`shape(
-  paginate(sort(concept==v1:cognition:space:context;payload.spaceId==%s, "createdAt", "desc"), 1),
-  {"snapshot": node("payload.snapshot")}
-)`, escapeJSONString(spaceId))
+	// memql#290 (sub-epic #286, final child): migrated from a
+	// handwritten `shape(paginate(sort(filter, "createdAt",
+	// "desc"), 1), {"snapshot": node("payload.snapshot")})`
+	// runtime query to the DSL-defined queryLatestSpaceContextSnapshot,
+	// which uses the snapshot-only spaceContextSnapshotOnly shape
+	// + the sort/paginate directives wired in memql#294. The
+	// projection minimises wire payload for the deterministic-
+	// comparison path. Downstream extractDataFromResult sees the
+	// same `{"snapshot": <map>}` shape so the type-switch below is
+	// unchanged. Closes sub-epic #286; unblocks #250.
+	query := fmt.Sprintf(`queryLatestSpaceContextSnapshot({spaceId: %s})`, escapeJSONString(spaceId))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
