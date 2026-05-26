@@ -57,6 +57,8 @@ func TestFSWriteSystem(t *testing.T) {
 		"/Library/LaunchAgents/com.evil.plist",
 		"/usr/bin/evil",
 		"/usr/local/bin/x",
+		"/app/.env",            // dotenv credential overwrite (symmetric with the read rule)
+		"/app/.env.production", // dotenv variant
 	}
 	for _, p := range deny {
 		cls, err := ruleFSWriteSystem(fsWrite(p))

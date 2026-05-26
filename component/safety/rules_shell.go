@@ -91,9 +91,12 @@ var (
 	sudoRe = regexp.MustCompile(`(?:^|[\s;|&])sudo\b`)
 	// `su -`, `su root`, `su - root` -- substitute-user invocation.
 	suUserRe = regexp.MustCompile(`(?:^|[\s;|&])su\s+(?:-|root\b|[a-zA-Z_][a-zA-Z0-9_-]*\s*$)`)
-	// `chown root` / `chown -R root:wheel /tmp/...` -- making
-	// agent-owned files root-owned is a classic priv-esc setup.
-	chownRootRe = regexp.MustCompile(`\bchown\b[^|;&\n]*\broot\b`)
+	// `chown root /path`, `chown -R root:wheel /path`, `chown jose:root /path`
+	// -- making agent-owned files root-owned is a classic priv-esc setup.
+	// Match `root` only as the OWNER spec (immediately after chown +
+	// flags), not anywhere later in the line: a benign
+	// `chown jose /root/foo` (path containing `/root/`) must NOT fire.
+	chownRootRe = regexp.MustCompile(`\bchown\s+(?:-[a-zA-Z]+\s+)*(?:root(?::\w+)?|[a-zA-Z0-9_]+:root)\b`)
 )
 
 func ruleShellSudo(desc ActionDescriptor) (Classification, error) {

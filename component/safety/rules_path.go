@@ -115,6 +115,13 @@ func matchSensitiveWrite(path string) (bool, string, []Category) {
 		strings.HasPrefix(low, "/system/") {
 		return true, "system binary path", []Category{CategoryPrivilegeEscalation}
 	}
+	// `.env` and `.env.*` are credential-laden config files;
+	// fs_write to them is a credential-rotation/poisoning vector
+	// (mirrors the symmetric check on the fs_read side).
+	base := basename(path)
+	if base == ".env" || strings.HasPrefix(base, ".env.") {
+		return true, "dotenv-style file", []Category{CategoryCredentialAccess, CategoryPersistence}
+	}
 	return false, "", nil
 }
 
