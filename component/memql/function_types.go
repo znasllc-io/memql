@@ -125,7 +125,8 @@ type Function struct {
 
 	// --- Attribute values ---
 
-	// Enabled indicates if the function is active (default: false, must use @enabled)
+	// Enabled indicates if the function is active. Default is true; use
+	// @disabled to opt out. @enabled is a no-op accepted for legacy DSL.
 	Enabled bool
 
 	// Deprecated contains deprecation message if set (empty = not deprecated)
