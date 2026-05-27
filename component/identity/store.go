@@ -481,6 +481,130 @@ func (s *Store) CreateIdentityVoiceAgentToken(
 }
 
 // ---------------------------------------------------------------------------
+// Node-token identity rows (memql#338 / #343)
+// ---------------------------------------------------------------------------
+
+// NodeTokenBinding is the (nodeType, nodeId) pair the bootstrap
+// handler keys node_token identity rows on. Equality on this pair
+// is the row's logical identity -- the actual identityId is a
+// synthetic v1:identity:identity id minted at first-bootstrap and
+// reused across subsequent restarts of the same (nodeType, nodeId).
+type NodeTokenBinding struct {
+	NodeType string
+	NodeId   string
+}
+
+// NodeTokenLookup is what LookupNodeTokenIdentityByBinding returns
+// when a row exists for the given (nodeType, nodeId). The bootstrap
+// handler uses Active to refuse to re-mint a revoked credential
+// silently; IdentityId is reused on the JWT subject so subsequent
+// audit lookups correlate across restarts.
+type NodeTokenLookup struct {
+	IdentityId string
+	Active     bool
+}
+
+// LookupNodeTokenIdentityByBinding returns the v1:identity:identity
+// row for the given (nodeType, nodeId), or (nil, nil) when no row
+// exists yet (a first-time bootstrap for that binding). Returns
+// rows even when active=false so the bootstrap handler can detect
+// "the operator revoked this row" and refuse to re-mint silently.
+func (s *Store) LookupNodeTokenIdentityByBinding(
+	ctx context.Context,
+	b NodeTokenBinding,
+) (*NodeTokenLookup, error) {
+	var sb strings.Builder
+	sb.WriteString(`queryNodeTokenIdentityByBinding({`)
+	writeKVString(&sb, "nodeType", b.NodeType, true)
+	writeKVString(&sb, "nodeId", b.NodeId, false)
+	sb.WriteString(`})`)
+	result, err := s.Engine.Execute(ctx, sb.String())
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup node_token identity: %w", err)
+	}
+	if result == nil || result.Bundle == nil || len(result.Bundle.Nodes) == 0 {
+		return nil, nil
+	}
+	node := result.Bundle.Nodes[0]
+	if node == nil {
+		return nil, nil
+	}
+	out := &NodeTokenLookup{IdentityId: strings.TrimSpace(node.GetId())}
+	if node.Payload != nil {
+		// `active` is a bool; the proto-struct accessor returns false
+		// when the field is missing, which is the desired
+		// "treat-as-revoked" fallback.
+		out.Active = node.Payload.GetFields()["active"].GetBoolValue()
+	}
+	if out.IdentityId == "" {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// CreateNodeTokenIdentity inserts a fresh v1:identity:identity row
+// for the node_token credential type. Used by both the operator
+// CLI (`memql node-token mint`) and the /node/bootstrap handler's
+// first-time path. keyHash is the SHA-256 hex digest of an
+// auxiliary random bearer kept only for fingerprint audit; the
+// actual auth credential handed to the node is a class="node" JWT
+// signed via JWTIssuer.IssueNodeAccessToken.
+//
+// expiresAt / bootstrappedAt / bootstrappedFrom are optional; pass
+// the empty string for "not set." memql#343.
+func (s *Store) CreateNodeTokenIdentity(
+	ctx context.Context,
+	identityId, userId, nodeId, nodeType, keyHash, mintedBy,
+	expiresAt, bootstrappedAt, bootstrappedFrom string,
+) error {
+	var b strings.Builder
+	b.WriteString(`mutationCreateNodeTokenIdentity({`)
+	writeKVString(&b, "identityId", identityId, true)
+	writeKVString(&b, "userId", userId, false)
+	writeKVString(&b, "nodeId", nodeId, false)
+	writeKVString(&b, "nodeType", nodeType, false)
+	writeKVString(&b, "keyHash", keyHash, false)
+	writeKVString(&b, "mintedBy", mintedBy, false)
+	writeKVString(&b, "expiresAt", expiresAt, false)
+	writeKVString(&b, "bootstrappedAt", bootstrappedAt, false)
+	writeKVString(&b, "bootstrappedFrom", bootstrappedFrom, false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return fmt.Errorf("identity.store: create node_token identity: %w", err)
+	}
+	return nil
+}
+
+// StampNodeTokenBootstrap updates the audit fields on an existing
+// node_token identity row when the /node/bootstrap handler issues a
+// fresh JWT for it. Pass through the full credentials payload --
+// MutationStmt's update() semantics replace the credentials object
+// whole (not deep-merge), so the caller must restate every field it
+// wants preserved. memql#343.
+func (s *Store) StampNodeTokenBootstrap(
+	ctx context.Context,
+	identityId, userId, nodeId, nodeType, keyHash, mintedBy,
+	expiresAt, bootstrappedAt, bootstrappedFrom string,
+) error {
+	var b strings.Builder
+	b.WriteString(`mutationStampNodeTokenBootstrap({`)
+	writeKVString(&b, "identityId", identityId, true)
+	writeKVString(&b, "userId", userId, false)
+	writeKVString(&b, "nodeId", nodeId, false)
+	writeKVString(&b, "nodeType", nodeType, false)
+	writeKVString(&b, "keyHash", keyHash, false)
+	writeKVString(&b, "mintedBy", mintedBy, false)
+	writeKVString(&b, "expiresAt", expiresAt, false)
+	writeKVString(&b, "bootstrappedAt", bootstrappedAt, false)
+	writeKVString(&b, "bootstrappedFrom", bootstrappedFrom, false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return fmt.Errorf("identity.store: stamp node_token bootstrap audit: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Auth sessions
 // ---------------------------------------------------------------------------
 

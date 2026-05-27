@@ -1707,6 +1707,51 @@ func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindA
 	return b.String()
 }
 
+// QueryNodeTokenIdentities -- List every node_token identity across the cluster (active + inactive). memql#343.
+//
+// Bound concept: identity.
+type QueryNodeTokenIdentitiesArgs struct {
+}
+
+// QueryNodeTokenIdentities calls the engine query queryNodeTokenIdentities.
+func (qc *QueryClient) QueryNodeTokenIdentities(ctx context.Context, args QueryNodeTokenIdentitiesArgs) (*Result, error) {
+	call := QueryNodeTokenIdentitiesBuild(args)
+	return qc.executeNamed(ctx, "queryNodeTokenIdentities", call)
+}
+
+func QueryNodeTokenIdentitiesBuild(args QueryNodeTokenIdentitiesArgs) string {
+	_ = args
+	return "queryNodeTokenIdentities({})"
+}
+
+// QueryNodeTokenIdentityByBinding -- Lookup a node_token identity by its (nodeType, nodeId) binding. memql#343.
+//
+// Bound concept: identity.
+type QueryNodeTokenIdentityByBindingArgs struct {
+	NodeType string
+	NodeId   string
+}
+
+// QueryNodeTokenIdentityByBinding calls the engine query queryNodeTokenIdentityByBinding.
+func (qc *QueryClient) QueryNodeTokenIdentityByBinding(ctx context.Context, args QueryNodeTokenIdentityByBindingArgs) (*Result, error) {
+	call := QueryNodeTokenIdentityByBindingBuild(args)
+	return qc.executeNamed(ctx, "queryNodeTokenIdentityByBinding", call)
+}
+
+func QueryNodeTokenIdentityByBindingBuild(args QueryNodeTokenIdentityByBindingArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNodeTokenIdentityByBinding({")
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryOwnedSpaceById -- Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like GCS uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.
 //
 // Bound concept: space.

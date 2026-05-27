@@ -960,6 +960,113 @@ mutation identity mutationCreateWorkerTokenIdentity {
   }
 }
 
+// ---- mutations/v1/identity/createNodeTokenIdentity.memql ----
+
+// createNodeTokenIdentity
+// =======================
+//
+// Creates a v1:identity:identity row of identityType="node_token"
+// for a cluster-internal node binary (bff / voice / cognition /
+// agent / planner / workbench). Two paths create rows here:
+//
+//   1. Operator CLI (`memql node-token mint --node-id ... --node-type ...`)
+//      stamps mintedBy with the human operator's userId; keyHash is the
+//      SHA-256 of an auxiliary random bearer kept only for fingerprint
+//      audit (the actual auth credential handed to the node is a
+//      class="node" JWT signed via JWTIssuer.IssueNodeAccessToken).
+//
+//   2. Self-bootstrap via POST /node/bootstrap (memql#338) stamps
+//      mintedBy with `system:node-bootstrap` and additionally stamps
+//      bootstrappedAt / bootstrappedFrom via the companion
+//      mutationStampNodeTokenBootstrap below. memql#343.
+//
+// The row is keyed by (nodeType, nodeId); the lookup pattern in
+// queryNodeTokenIdentityByBinding lets the bootstrap handler reuse
+// an existing row on the second restart of a given node rather than
+// piling up stale rows.
+
+@enabled
+@description("Create a node_token identity (machine credential for a cluster-internal node binary). Stores only the SHA-256 hex hash; the actual credential is a class=node JWT.")
+mutation identity mutationCreateNodeTokenIdentity {
+  args {
+    identityId        string  @required
+    userId            string  @required
+    nodeId            string  @required
+    nodeType          string  @required
+    keyHash           string  @required
+    mintedBy          string  @required
+    expiresAt         string
+    bootstrappedAt    string
+    bootstrappedFrom  string
+  }
+  insert identity {
+    id: args.identityId
+    args.userId
+    identityType: "node_token"
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        keyHash: args.keyHash,
+        mintedBy: args.mintedBy,
+        expiresAt: coalesce(args.expiresAt, ""),
+        lastConnectAt: "",
+        bootstrappedAt: coalesce(args.bootstrappedAt, ""),
+        bootstrappedFrom: coalesce(args.bootstrappedFrom, "")
+      }
+    label: args.nodeType
+    usableByAgents: false
+    active: true
+  }
+}
+
+// ---- mutations/v1/identity/stampNodeTokenBootstrap.memql ----
+
+// stampNodeTokenBootstrap
+// =======================
+//
+// Updates the audit fields on an existing node_token identity row
+// when the /node/bootstrap handler issues a fresh JWT for it
+// (memql#338 / #343). Bumps bootstrappedAt + bootstrappedFrom +
+// keyHash (the auxiliary bearer rotates with each bootstrap call so
+// the fingerprint stays correlated). lastConnectAt is updated by the
+// NodeService.Stream interceptor's hello path, not by this mutation.
+// Mutations use update() (not insert) -- the row already exists from
+// either an earlier bootstrap or an operator-CLI mint.
+
+@enabled
+@description("Update audit fields on a node_token identity row when the bootstrap handler issues a fresh JWT for it. memql#343.")
+mutation identity mutationStampNodeTokenBootstrap {
+  args {
+    identityId        string  @required
+    userId            string  @required
+    nodeId            string  @required
+    nodeType          string  @required
+    keyHash           string  @required
+    mintedBy          string  @required
+    expiresAt         string  @required
+    bootstrappedAt    string  @required
+    bootstrappedFrom  string  @required
+  }
+  update identity {
+    id: args.identityId
+    args.userId
+    identityType: "node_token"
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        keyHash: args.keyHash,
+        mintedBy: args.mintedBy,
+        expiresAt: args.expiresAt,
+        lastConnectAt: "",
+        bootstrappedAt: args.bootstrappedAt,
+        bootstrappedFrom: args.bootstrappedFrom
+      }
+    label: args.nodeType
+    usableByAgents: false
+    active: true
+  }
+}
+
 // ---- mutations/v1/identity/createVoiceAgentTokenIdentity.memql ----
 
 // createVoiceAgentTokenIdentity
