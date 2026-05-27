@@ -604,6 +604,169 @@ func (s *Store) StampNodeTokenBootstrap(
 	return nil
 }
 
+// NodeTokenRow is the projection the admin UI consumes via the
+// /admin/tokens page (memql#350). Mirrors the credentials variant
+// schema -- nodeId / nodeType / mintedBy / expiresAt /
+// bootstrappedAt / bootstrappedFrom / lastConnectAt -- plus the row-
+// level Active flag the revocation surface flips and the createdAt
+// stamp for chronological sorting.
+//
+// MintedBy carries the human user-id when the row was minted out-of-
+// band via the operator CLI; bootstrap-path rows carry the synthetic
+// `system:node-bootstrap` token (see component/identity/http/
+// node_bootstrap.go::mintNodeBootstrapToken). The admin UI renders
+// "(bootstrapped)" in the Minted-by column when MintedBy starts with
+// "system:".
+type NodeTokenRow struct {
+	ID                string
+	UserId            string
+	NodeId            string
+	NodeType          string
+	KeyHash           string
+	MintedBy          string
+	ExpiresAt         string
+	LastConnectAt     string
+	BootstrappedAt    string
+	BootstrappedFrom  string
+	Active            bool
+	CreatedAt         time.Time
+}
+
+// ListNodeTokenIdentities returns every node_token identity row in
+// the cluster (active + revoked) so the admin UI can show revoked
+// rows explicitly rather than ghosting them. Backs the
+// `/admin/tokens` Node-tokens section per memql#350.
+func (s *Store) ListNodeTokenIdentities(ctx context.Context) ([]NodeTokenRow, error) {
+	nodes, err := s.executeAndExtract(ctx, `queryNodeTokenIdentities({})`)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: list node_token identities: %w", err)
+	}
+	out := make([]NodeTokenRow, 0, len(nodes))
+	for _, n := range nodes {
+		row := nodeTokenRowFromNode(n)
+		if row == nil {
+			continue
+		}
+		out = append(out, *row)
+	}
+	return out, nil
+}
+
+// LookupNodeTokenIdentityById returns the node_token identity row by
+// its canonical id, or nil when no row matches. Used by the admin
+// revoke handler to load the current credentials before issuing the
+// whole-replace update. Filtered to node_token rows on the DSL
+// side (queryNodeTokenIdentityById carries the
+// traitIdentityIsNodeToken predicate) -- a caller that passes a PAT
+// id by mistake gets nil rather than a spurious revoke.
+func (s *Store) LookupNodeTokenIdentityById(ctx context.Context, identityId string) (*NodeTokenRow, error) {
+	if strings.TrimSpace(identityId) == "" {
+		return nil, nil
+	}
+	q := fmt.Sprintf(`queryNodeTokenIdentityById({identityId: "%s"})`, escapeMemQLString(identityId))
+	nodes, err := s.executeAndExtract(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup node_token identity %q: %w", identityId, err)
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	return nodeTokenRowFromNode(nodes[0]), nil
+}
+
+// RevokeNodeTokenIdentity flips a node_token row's active flag to
+// false (memql#350). update() has whole-replace semantics on nested
+// objects, so we look up the live credentials first and restate
+// every field on the mutation. The /node/bootstrap pre-mint gate
+// (memql#343) consults active and refuses to re-mint a revoked row,
+// so flipping the flag is the load-bearing revocation surface.
+func (s *Store) RevokeNodeTokenIdentity(ctx context.Context, identityId string) error {
+	row, err := s.LookupNodeTokenIdentityById(ctx, identityId)
+	if err != nil {
+		return fmt.Errorf("identity.store: revoke node_token: lookup %q: %w", identityId, err)
+	}
+	if row == nil {
+		return fmt.Errorf("identity.store: revoke node_token: row %q not found", identityId)
+	}
+	var b strings.Builder
+	b.WriteString(`mutationRevokeNodeTokenIdentity({`)
+	writeKVString(&b, "identityId", row.ID, true)
+	writeKVString(&b, "userId", row.UserId, false)
+	writeKVString(&b, "nodeId", row.NodeId, false)
+	writeKVString(&b, "nodeType", row.NodeType, false)
+	writeKVString(&b, "keyHash", row.KeyHash, false)
+	writeKVString(&b, "mintedBy", row.MintedBy, false)
+	writeKVString(&b, "expiresAt", row.ExpiresAt, false)
+	writeKVString(&b, "lastConnectAt", row.LastConnectAt, false)
+	writeKVString(&b, "bootstrappedAt", row.BootstrappedAt, false)
+	writeKVString(&b, "bootstrappedFrom", row.BootstrappedFrom, false)
+	b.WriteString(`})`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+		return fmt.Errorf("identity.store: revoke node_token %q: %w", identityId, err)
+	}
+	return nil
+}
+
+// nodeTokenRowFromNode lifts a single MemoryNode (from
+// queryNodeTokenIdentities / queryIdentityById's identityFull shape)
+// into the admin-facing NodeTokenRow projection. The credentials
+// sub-object lives under payload.credentials per the
+// `@variant(discriminator="identityType")` schema; we navigate the
+// structpb directly because there's no generic typed-cred-lookup
+// helper today.
+func nodeTokenRowFromNode(node *memqlv1.MemoryNode) *NodeTokenRow {
+	if node == nil {
+		return nil
+	}
+	g := newFieldGetter(node)
+	out := &NodeTokenRow{
+		ID:       firstNonEmpty(g.str("id"), node.GetId()),
+		UserId:   g.str("userId"),
+		Active:   g.boolField("active"),
+		MintedBy: g.str("mintedBy"),
+	}
+	if out.ID == "" {
+		return nil
+	}
+	if node.Payload != nil {
+		if v, ok := node.Payload.GetFields()["credentials"]; ok && v != nil {
+			if sv := v.GetStructValue(); sv != nil {
+				creds := sv.GetFields()
+				if s, ok := creds["nodeId"]; ok {
+					out.NodeId = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["nodeType"]; ok {
+					out.NodeType = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["keyHash"]; ok {
+					out.KeyHash = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["mintedBy"]; ok && out.MintedBy == "" {
+					// Some shapes carry mintedBy on the credentials
+					// sub-object rather than the row level. Prefer
+					// the row-level value when set; fall through to
+					// the credentials value when not.
+					out.MintedBy = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["expiresAt"]; ok {
+					out.ExpiresAt = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["lastConnectAt"]; ok {
+					out.LastConnectAt = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["bootstrappedAt"]; ok {
+					out.BootstrappedAt = strings.TrimSpace(s.GetStringValue())
+				}
+				if s, ok := creds["bootstrappedFrom"]; ok {
+					out.BootstrappedFrom = strings.TrimSpace(s.GetStringValue())
+				}
+			}
+		}
+	}
+	out.CreatedAt = g.time("createdAt")
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Auth sessions
 // ---------------------------------------------------------------------------

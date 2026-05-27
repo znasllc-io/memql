@@ -356,6 +356,13 @@ func (a *App) integrationsIdentity() {
 		a.fatal("failed to construct identity admin server", "error", err, "component", identity.ComponentName)
 	}
 	adminSrv.SetPATAdapter(patStore)
+	// memql#350: the /admin/tokens Node-tokens section + revoke
+	// route is backed by the identity Store's NodeTokenIdentity
+	// methods (ListNodeTokenIdentities / LookupNodeTokenIdentityById
+	// / RevokeNodeTokenIdentity). The narrow adapter shape lives in
+	// the admin package; an inline struct satisfying it is the
+	// thinnest wiring.
+	adminSrv.SetNodeTokenAdapter(&storeNodeTokenAdapter{store: store})
 	svc.SetAdminMounter(adminSrv)
 
 	a.identityService = svc
@@ -555,4 +562,34 @@ func (a *App) shutdownIdentityService(ctx context.Context) error {
 		return nil
 	}
 	return svc.Shutdown(ctx)
+}
+
+// storeNodeTokenAdapter satisfies admin.NodeTokenAdapter via the
+// identity.Store's NodeTokenIdentity surface (memql#350). Lives
+// here rather than in the admin package so the admin layer stays
+// decoupled from the concrete store type -- the package depends on
+// the narrow port shape, the wiring layer satisfies it.
+type storeNodeTokenAdapter struct {
+	store *identity.Store
+}
+
+func (a *storeNodeTokenAdapter) ListAll(ctx context.Context) ([]identity.NodeTokenRow, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	return a.store.ListNodeTokenIdentities(ctx)
+}
+
+func (a *storeNodeTokenAdapter) LookupById(ctx context.Context, identityId string) (*identity.NodeTokenRow, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	return a.store.LookupNodeTokenIdentityById(ctx, identityId)
+}
+
+func (a *storeNodeTokenAdapter) Revoke(ctx context.Context, identityId string) error {
+	if a == nil || a.store == nil {
+		return fmt.Errorf("storeNodeTokenAdapter: nil store")
+	}
+	return a.store.RevokeNodeTokenIdentity(ctx, identityId)
 }

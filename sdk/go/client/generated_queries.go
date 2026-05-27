@@ -1752,6 +1752,28 @@ func QueryNodeTokenIdentityByBindingBuild(args QueryNodeTokenIdentityByBindingAr
 	return b.String()
 }
 
+// QueryNodeTokenIdentityById -- Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.
+//
+// Bound concept: identity.
+type QueryNodeTokenIdentityByIdArgs struct {
+	IdentityId string
+}
+
+// QueryNodeTokenIdentityById calls the engine query queryNodeTokenIdentityById.
+func (qc *QueryClient) QueryNodeTokenIdentityById(ctx context.Context, args QueryNodeTokenIdentityByIdArgs) (*Result, error) {
+	call := QueryNodeTokenIdentityByIdBuild(args)
+	return qc.executeNamed(ctx, "queryNodeTokenIdentityById", call)
+}
+
+func QueryNodeTokenIdentityByIdBuild(args QueryNodeTokenIdentityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNodeTokenIdentityById({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryOwnedSpaceById -- Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like GCS uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.
 //
 // Bound concept: space.

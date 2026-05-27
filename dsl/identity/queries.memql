@@ -1215,3 +1215,25 @@ query identity queryNodeTokenIdentities {
   filter  traitIdentityIsNodeToken
   shape   identityFull
 }
+
+// ---- queries/v1/identity/nodeTokenIdentityById.memql ----
+
+// queryNodeTokenIdentityById
+// ==========================
+//
+// Lookup a single node_token identity row by its canonical id.
+// Backs the /admin/tokens revoke flow (memql#350) -- the handler
+// resolves the form-submitted id to the live row, then issues the
+// whole-replace mutationRevokeNodeTokenIdentity restating every
+// credentials field.
+
+@enabled
+@public
+@description("Lookup a single node_token identity row by canonical id. Drives the admin revoke path. memql#350.")
+query identity queryNodeTokenIdentityById {
+  args {
+    identityId  string  @required
+  }
+  filter  traitIdentityIsNodeToken; id==args.identityId
+  shape   identityFull
+}
