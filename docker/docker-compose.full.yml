@@ -649,6 +649,11 @@ services:
       # precedence order). Don't add per-key entries here unless
       # another env value substitutes from them.
       IDENTITY_BOOTSTRAP_DOMAIN: ${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
+      # memql#374: suppress the owner "Claim ownership" email when set.
+      # `make dev-refresh` exports MAIL_SUPPRESS_OWNER_BOOTSTRAP=1 so
+      # iterative DB wipes don't produce an inbox storm. Production /
+      # staging deploys leave it unset; the email behaves as before.
+      MAIL_SUPPRESS_OWNER_BOOTSTRAP: ${MAIL_SUPPRESS_OWNER_BOOTSTRAP:-}
       # Waitlist is the conservative default — strangers can't grab
       # accounts on a fresh cluster, the operator reviews each request
       # from /admin/access-requests. Switch to open / domain_restricted /

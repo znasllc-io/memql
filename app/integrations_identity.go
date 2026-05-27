@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -435,6 +436,20 @@ func (a *App) attemptAutoBootstrap(
 	if err := store.PersistClusterSettings(ctx, row); err != nil {
 		a.Logger.Warn("identity auto-bootstrap: persist clusterSettings failed; falling back to interactive /setup",
 			"error", err, "component", identity.ComponentName)
+		return
+	}
+
+	// MAIL_SUPPRESS_OWNER_BOOTSTRAP suppresses the owner magic-link email
+	// (memql#374). Set by `make dev-refresh` so iterative DB wipes don't
+	// produce an inbox storm; the operator is the same person across
+	// refreshes + the clusterSettings row is already persisted above, so
+	// the cluster is functionally bootstrapped without the email.
+	// Unset in staging / production deploys; behaviour there is unchanged.
+	if os.Getenv("MAIL_SUPPRESS_OWNER_BOOTSTRAP") != "" {
+		a.Logger.Info("identity auto-bootstrap: owner email suppressed by MAIL_SUPPRESS_OWNER_BOOTSTRAP",
+			"owner_email", cfg.Bootstrap.OwnerEmail,
+			"domain", cfg.Bootstrap.Domain,
+			"component", identity.ComponentName)
 		return
 	}
 

@@ -250,6 +250,13 @@ function main() {
     step0_install_deps
     step1_load_genesis
     step2_export_running_state
+    # memql#374: dev-refresh wipes the postgres volume on every run,
+    # which forces identity to re-fire the owner "Claim ownership" email.
+    # Multi-iteration debug sessions stack 5-10+ emails in the inbox.
+    # The MAIL_SUPPRESS_OWNER_BOOTSTRAP knob in attemptAutoBootstrap
+    # writes the clusterSettings row but skips the mlIssuer.Issue call;
+    # the operator can still claim ownership via /setup if they need to.
+    export MAIL_SUPPRESS_OWNER_BOOTSTRAP=1
     step3_wipe_and_restart
     step4_mint_voice_agent_token
     step4b_mint_node_tokens
