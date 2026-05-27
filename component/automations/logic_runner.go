@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,6 +109,28 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 			returnStep = step
 			continue
 		}
+		// Builtin RHS short-circuit: a step assignment whose body is a
+		// positional helper (`coalesce(args.X, "default")`,
+		// `concat(...)`, ...) gets evaluated against the local
+		// Evaluator. Bypassing engine.Execute is required because
+		// these helpers are not registered as user functions in the
+		// engine's function registry -- the engine would fail the
+		// lookup with `function "coalesce" not found`. See #362.
+		if step.Type == StepTypeQuery && step.Query != nil {
+			if val, handled, err := r.tryEvaluateBuiltinLocally(step.Query.Query, evaluator); err != nil {
+				return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
+			} else if handled {
+				now := time.Now()
+				evaluator.SetStepResult(step.ID, &StepResult{
+					StepId:      step.ID,
+					Status:      "success",
+					StartedAt:   now,
+					CompletedAt: now,
+					Result:      val,
+				})
+				continue
+			}
+		}
 		if err := r.runOneStep(ctx, step, stepCtx, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 		}
@@ -131,6 +154,15 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 	// engine.Execute via the step registry.
 	if returnStep.Query != nil {
 		if val, handled, err := r.tryEvaluateReturnLocally(returnStep.Query.Query, evaluator); err != nil {
+			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
+		} else if handled {
+			return val, nil
+		}
+		// Builtin return short-circuit: `return coalesce(stepX, stepY.First())`.
+		// Same rationale as the step-RHS short-circuit above -- these
+		// helpers aren't engine-registered functions and would fail
+		// the lookup. See #362.
+		if val, handled, err := r.tryEvaluateBuiltinLocally(returnStep.Query.Query, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
 		} else if handled {
 			return val, nil
@@ -190,6 +222,233 @@ func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator
 		return nil, false, err
 	}
 	return val, true, nil
+}
+
+// tryEvaluateBuiltinLocally evaluates positional helper builtins
+// (`coalesce(...)`) against the logic's local Evaluator without
+// round-tripping through engine.Execute. These helpers are not
+// registered in the engine's function registry, so dispatching
+// through the query step path fails with `function "<name>" not
+// found` (#362). The mutation-template evaluator handles them when
+// they appear inside an `insert {...}` arg block, but logic-body
+// step RHS values and `return` expressions land here.
+//
+// Returns (value, true, nil) when expr matches a known builtin and
+// every arg resolves cleanly. Returns (nil, false, nil) when expr
+// is not a recognised builtin call -- the caller falls back to
+// engine.Execute via the step registry. Returns (nil, false, err)
+// on a hard resolution error (e.g. arg references a step that
+// isn't bound).
+func (r *LogicRunner) tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" || !strings.HasSuffix(expr, ")") {
+		return nil, false, nil
+	}
+	open := strings.IndexByte(expr, '(')
+	if open <= 0 {
+		return nil, false, nil
+	}
+	name := strings.TrimSpace(expr[:open])
+	if !isPositionalBuiltinName(name) {
+		return nil, false, nil
+	}
+	inner := expr[open+1 : len(expr)-1]
+	rawArgs, err := splitTopLevelArgs(inner)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse %s args: %w", name, err)
+	}
+	switch name {
+	case "coalesce":
+		val, err := evaluateCoalesceArgs(rawArgs, evaluator)
+		if err != nil {
+			return nil, false, err
+		}
+		return val, true, nil
+	}
+	// Unreachable -- isPositionalBuiltinName admits the same set this
+	// switch handles. Surface as a hard error so a future extension to
+	// the admit set without a handler doesn't silently fall through.
+	return nil, false, fmt.Errorf("positional builtin %q has no local evaluator", name)
+}
+
+// isPositionalBuiltinName reports whether name is a helper builtin
+// the logic runner evaluates locally. Today only `coalesce` is on
+// this list (the only helper that appears outside mutation arg
+// blocks across the live DSL tree); extending the set is a matter
+// of adding a name here and a case in tryEvaluateBuiltinLocally's
+// switch.
+func isPositionalBuiltinName(name string) bool {
+	switch name {
+	case "coalesce":
+		return true
+	}
+	return false
+}
+
+// splitTopLevelArgs splits the inside of a function call (`a, b,
+// c.method()`) on top-level commas, respecting nested parens,
+// brackets, braces, and quoted strings. Returns the slice of arg
+// expressions in order; empty inner returns a nil slice.
+func splitTopLevelArgs(inner string) ([]string, error) {
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return nil, nil
+	}
+	var (
+		args      []string
+		depth     int
+		inString  bool
+		quoteChar byte
+		start     = 0
+	)
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if inString {
+			if c == '\\' && i+1 < len(inner) {
+				i++
+				continue
+			}
+			if c == quoteChar {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			inString = true
+			quoteChar = c
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+			if depth < 0 {
+				return nil, fmt.Errorf("unbalanced brackets")
+			}
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(inner[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	if depth != 0 || inString {
+		return nil, fmt.Errorf("unbalanced brackets or quotes")
+	}
+	args = append(args, strings.TrimSpace(inner[start:]))
+	return args, nil
+}
+
+// evaluateCoalesceArgs returns the first non-nil / non-empty value
+// from rawArgs, evaluating each through the local Evaluator. Matches
+// the "first non-missing value" semantics the mutation-template
+// evaluator implements for the same builtin (mutation_templates.go's
+// evalCoalesce). Empty strings are treated as missing so callers can
+// rely on `coalesce(args.X, "fallback")` to land the fallback when
+// args.X is absent.
+func evaluateCoalesceArgs(rawArgs []string, evaluator *Evaluator) (any, error) {
+	for _, raw := range rawArgs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		val, err := evaluateScalarArg(raw, evaluator)
+		if err != nil {
+			return nil, err
+		}
+		if val == nil {
+			continue
+		}
+		if s, ok := val.(string); ok && strings.TrimSpace(s) == "" {
+			continue
+		}
+		return val, nil
+	}
+	return nil, nil
+}
+
+// evaluateScalarArg resolves a single positional-builtin arg
+// expression to its runtime value against the local Evaluator:
+//
+//   - Quoted string literal (`"x"`, `'x'`) -> string value
+//   - Numeric / bool / null literal              -> typed value
+//   - `args.X.Y`, `event.X`, `steps.X`           -> resolved via $-path
+//   - `stepName` / `stepName.method()`           -> resolved via step ref
+//
+// Soft-fails (returns nil) when a $-path can't be resolved, mirroring
+// the soft-resolution semantics the automations evaluator uses for
+// `$coalesce(...)` -- coalesce's whole job is to tolerate missing
+// values and pick the next fallback.
+func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	// Quoted string.
+	if (strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"")) ||
+		(strings.HasPrefix(raw, "'") && strings.HasSuffix(raw, "'")) {
+		unquoted, err := strconv.Unquote(raw)
+		if err != nil {
+			return nil, fmt.Errorf("unquote %q: %w", raw, err)
+		}
+		return unquoted, nil
+	}
+	// Literals.
+	switch raw {
+	case "null":
+		return nil, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	// Numeric literal.
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return n, nil
+	}
+	if n, err := strconv.ParseFloat(raw, 64); err == nil {
+		return n, nil
+	}
+	// $-prefixed expression -- delegate to the evaluator.
+	if strings.HasPrefix(raw, "$") {
+		val, err := evaluator.EvaluateValue(raw)
+		if err != nil {
+			return nil, nil //nolint:nilerr // soft-fail for coalesce
+		}
+		return val, nil
+	}
+	// Step reference or known custom-var path (`args.X.Y`, `event.X`,
+	// `item.X`). EvaluateStepReference handles bare step names and
+	// step.method() shapes; for paths whose first segment is one of
+	// the well-known custom-var roots (`args`, `event`, `ctx`) we
+	// upgrade to $-form so resolvePath drives the lookup.
+	firstSegment := raw
+	if dot := strings.IndexAny(raw, "."); dot > 0 {
+		firstSegment = raw[:dot]
+	}
+	if isCustomVarRoot(firstSegment) {
+		val, err := evaluator.EvaluateValue("$" + raw)
+		if err != nil {
+			return nil, nil //nolint:nilerr // soft-fail for coalesce
+		}
+		return val, nil
+	}
+	val, err := evaluator.EvaluateStepReference(raw)
+	if err != nil {
+		return nil, nil //nolint:nilerr // soft-fail for coalesce
+	}
+	return val, nil
+}
+
+// isCustomVarRoot reports whether segment is a well-known root the
+// evaluator seeds for logic bodies (see newEvaluatorForLogic and
+// resolvePath). Anything else falls through to step-reference
+// resolution.
+func isCustomVarRoot(segment string) bool {
+	switch segment {
+	case "args", "event", "ctx", "input", "item":
+		return true
+	}
+	return false
 }
 
 // runOneStep evaluates an optional condition, dispatches the step,
