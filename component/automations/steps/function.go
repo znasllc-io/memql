@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -149,12 +150,42 @@ func renderMemQLValue(value any) string {
 		return "false"
 	case float64, float32, int, int32, int64, uint, uint32, uint64:
 		return fmt.Sprintf("%v", v)
+	case []string:
+		// Common typed-slice case the type-switch above doesn't catch.
+		// Falling through to default produces Go's `[a b c]` format
+		// (unquoted, space-separated) which the langparser rejects
+		// with `expected ']', got "b"`. Render as a proper MemQL
+		// array literal of quoted strings instead. memql#344.
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			items = append(items, renderMemQLValue(item))
+		}
+		return fmt.Sprintf("[%s]", strings.Join(items, ", "))
 	case []any:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
 			items = append(items, renderMemQLValue(item))
 		}
 		return fmt.Sprintf("[%s]", strings.Join(items, ", "))
+	case map[string]string:
+		// Common typed-map case the type-switch above doesn't catch
+		// (event payloads carry `nodeIdentity.Labels` as
+		// map[string]string; identity-provider info carries similar
+		// shapes). Falling through to default produces Go's
+		// `map[k:v k2:v2]` format which the langparser rejects with
+		// `expected '}', got "["` -- the exact failure from
+		// memql#344. Render as a proper MemQL object literal of
+		// quoted key/value pairs.
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(v[key])))
+		}
+		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for key := range v {
@@ -164,6 +195,64 @@ func renderMemQLValue(value any) string {
 		parts := make([]string, 0, len(keys))
 		for _, key := range keys {
 			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(v[key])))
+		}
+		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
+	default:
+		// Reflection fallback: catch any typed slice or map the
+		// explicit cases above don't enumerate (e.g.
+		// []map[string]any, map[string]int, custom alias types
+		// from upstream packages). Without this, the value gets
+		// fmt.Sprintf("%v", ...) which produces Go-format text the
+		// langparser rejects. Falling back to reflection-based
+		// rendering preserves the contract: "every value reaches the
+		// runtime parser as valid MemQL text." memql#344.
+		return renderMemQLValueReflect(value)
+	}
+}
+
+// renderMemQLValueReflect handles slice/map values whose element
+// type isn't enumerated in renderMemQLValue's type switch. Walks
+// the value via the reflect package so any typed slice (e.g.
+// []int, []bool, []customString) and any typed map (e.g.
+// map[string]int) renders as a valid MemQL array / object literal.
+//
+// Non-slice / non-map values fall back to fmt.Sprintf("%v", ...)
+// which matches the historical default-case behaviour for genuine
+// unknown scalars (uncommon -- the explicit cases cover every
+// runtime-arg value type seen on the production paths).
+func renderMemQLValueReflect(value any) string {
+	if value == nil {
+		return "null"
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		items := make([]string, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			items = append(items, renderMemQLValue(rv.Index(i).Interface()))
+		}
+		return fmt.Sprintf("[%s]", strings.Join(items, ", "))
+	case reflect.Map:
+		// String-keyed maps render as MemQL object literals.
+		// Non-string-keyed maps (rare; arrives only when an
+		// upstream API misuses the args bag) fall back to %v --
+		// we have no MemQL surface to express them and producing
+		// invalid syntax is more honest than silently mis-rendering.
+		if rv.Type().Key().Kind() != reflect.String {
+			return fmt.Sprintf("%v", value)
+		}
+		keys := make([]string, 0, rv.Len())
+		iter := rv.MapRange()
+		valuesByKey := make(map[string]any, rv.Len())
+		for iter.Next() {
+			k := iter.Key().String()
+			keys = append(keys, k)
+			valuesByKey[k] = iter.Value().Interface()
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%q: %s", key, renderMemQLValue(valuesByKey[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 	default:
