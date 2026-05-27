@@ -1,15 +1,10 @@
 package main
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
-	"sort"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/znasllc-io/memql/app"
 	"github.com/znasllc-io/memql/component/genesis"
@@ -19,18 +14,12 @@ import (
 	"github.com/znasllc-io/memql/core/logger"
 )
 
-const (
-	dependencyShutdownTimeout = 30 * time.Second
-	versionFilePath           = "VERSION"
-)
+const versionFilePath = "VERSION"
 
 var (
 	fatalWithLoggerFn       = logger.FatalWithLogger
 	fatalFn                 = logger.Fatal
 	loadServiceEnvOptionsFn = service.LoadDefaultServiceEnvOptions
-	startDependenciesFn     = startDependencies
-	waitForShutdownSignalFn = waitForShutdownSignal
-	stopDependenciesFn      = stopDependencies
 	resolveVersionFn        = resolveServiceVersion
 )
 
@@ -59,83 +48,21 @@ func main() {
 		serviceLogger.Info("local .env override applied", "vars", overridden)
 	}
 
-	version := resolveVersionFn()
-
-	application := app.Build(serviceLogger, version, app.Overrides{
-		FatalWithLogger:   fatalWithLoggerFn,
-		LoadServiceEnvOpt: loadServiceEnvOptionsFn,
+	app.Run(app.RunConfig{
+		Logger:  serviceLogger,
+		Version: resolveVersionFn(),
+		Overrides: app.Overrides{
+			FatalWithLogger:   fatalWithLoggerFn,
+			LoadServiceEnvOpt: loadServiceEnvOptionsFn,
+		},
+		// Wire the health-dependency surface so /healthz reports
+		// per-component readiness. Lives in component/server so
+		// non-server consumers (subcommands, tests) don't drag it
+		// in by default; the carrier binary explicitly opts in.
+		SetHealth: func(deps []common.Dependency) {
+			server.SetHealthDependencies(deps)
+		},
 	})
-
-	server.SetHealthDependencies(application.Dependencies)
-
-	startDependenciesFn(application.Dependencies...)
-
-	// Emit system.startup event for cluster bootstrap and node self-registration automations.
-	application.EmitSystemStartup()
-
-	sig := waitForShutdownSignalFn()
-	serviceLogger.Info("shutdown signal received", "signal", sig.String())
-
-	// Emit system.shutdown event for node deregistration automation.
-	application.EmitSystemShutdown()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), dependencyShutdownTimeout)
-	defer cancel()
-
-	stopDependenciesFn(shutdownCtx, application.Dependencies...)
-
-	serviceLogger.Info("shutdown complete")
-}
-
-func startDependencies(dependencies ...common.Dependency) {
-	for _, dependency := range dependencies {
-		dependency.Start(context.Background())
-	}
-}
-
-func stopDependencies(ctx context.Context, dependencies ...common.Dependency) {
-	if len(dependencies) == 0 {
-		return
-	}
-
-	ordered := append([]common.Dependency(nil), dependencies...)
-
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].Order() == ordered[j].Order() {
-			return i > j
-		}
-		return ordered[i].Order() > ordered[j].Order()
-	})
-
-	for _, dependency := range ordered {
-		stopCtx := ctx
-
-		if stopCtx == nil {
-			stopCtx = context.Background()
-		}
-
-		var cancel context.CancelFunc
-
-		if _, hasDeadline := stopCtx.Deadline(); !hasDeadline {
-			stopCtx, cancel = context.WithTimeout(context.Background(), dependencyShutdownTimeout)
-		}
-
-		dependency.Stop(stopCtx)
-
-		if cancel != nil {
-			cancel()
-		}
-	}
-}
-
-func waitForShutdownSignal() os.Signal {
-	signals := make(chan os.Signal, 1)
-
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-
-	defer signal.Stop(signals)
-
-	return <-signals
 }
 
 func resolveServiceVersion() string {

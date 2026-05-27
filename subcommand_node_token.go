@@ -148,7 +148,7 @@ func runNodeTokenMint(args []string) int {
 		d.Start(context.Background())
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), dependencyShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), app.DefaultRunShutdownTimeout)
 		defer cancel()
 		for i := len(deps) - 1; i >= 0; i-- {
 			deps[i].Stop(shutdownCtx)

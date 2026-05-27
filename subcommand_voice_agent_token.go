@@ -134,7 +134,7 @@ func runVoiceAgentTokenMint(args []string) int {
 		d.Start(context.Background())
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), dependencyShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), app.DefaultRunShutdownTimeout)
 		defer cancel()
 		// Stop in reverse start order; the order is small and
 		// shutdown is best-effort, so a simple reverse loop is fine.
