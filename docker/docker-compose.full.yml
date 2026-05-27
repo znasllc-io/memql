@@ -450,9 +450,17 @@ services:
   # context to send; agent runs the prompt, the tool-calling loop,
   # and streams deltas back via NodeService.AiForward.
   agent:
+    # memql#370: agent is the CoPresent carrier binary built with the
+    # `agent` build tag, NOT the plain memql agent. The carrier wraps
+    # memql/app's bootstrap + blank-imports memql-bff-copresent's
+    # integrations + DSL so the agent node renders the `agentReply`
+    # prompt (the chat-reply hot path) that lives in
+    # memql-bff-copresent/dsl/copresent/. Mirrors the bff service's
+    # carrier wiring from memql#356; the carrier Dockerfile now
+    # accepts BUILD_TAGS via ARG (visionarys-io/memql-bff-copresent#73).
     build:
-      context: ..
-      dockerfile: docker/memql.Dockerfile
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: agent
     container_name: memql-agent
