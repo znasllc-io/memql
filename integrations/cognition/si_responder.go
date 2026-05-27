@@ -283,6 +283,18 @@ func (a *agentPayload) tools() []string {
 	return extractStringSlice(a.Capabilities, "tools")
 }
 
+// skillIds returns the agent's declared skill ids (from
+// capabilities.skillIds). Per the skills-primitive migration
+// (#158, shipped 2026-05-21), this is the canonical capability
+// surface; tools()/domains() above are the retired flat lists kept
+// for backward-compat readers.
+func (a *agentPayload) skillIds() []string {
+	if a == nil {
+		return nil
+	}
+	return extractStringSlice(a.Capabilities, "skillIds")
+}
+
 // ClawCapable returns true when the agent has the claw (NemoClaw) capability enabled.
 func (a *agentPayload) ClawCapable() bool {
 	if a == nil || a.Capabilities == nil {

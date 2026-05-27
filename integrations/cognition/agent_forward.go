@@ -107,7 +107,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 		ParticipantId: strings.TrimSpace(participantId),
 		History:       convertHistoryToProto(history),
 		Routing:       buildRoutingContext(ctx, trigger, spaceId, si, peerAgents, humanParticipants, currentSpeakerParticipantId),
-		ActingAgent:   buildActingAgentIdentity(agent),
+		ActingAgent:   c.buildActingAgentIdentity(ctx, agent),
 		Attachments:   convertAttachmentsToProto(attachmentSummaries),
 		Hints:         map[string]string{},
 	}
@@ -381,6 +381,14 @@ func buildRoutingContext(ctx context.Context, trigger, spaceId string, si spaceI
 // ActingAgentIdentity message so the agent node can render the prompt
 // with the full scope-fence inputs: role, domains, keywords, tools,
 // system prompt.
+//
+// Pure projection from the legacy flat capability lists
+// (capabilities.tools / capabilities.domains). Per the skills-primitive
+// migration (#158), the canonical capability surface is now
+// capabilities.skillIds[]; callers that need the union of legacy +
+// skill-resolved capabilities should use
+// (*CognitionIntegration).buildActingAgentIdentity, which runs
+// engine.ResolveSkills + merges the result into Tools / Domains.
 func buildActingAgentIdentity(agent *agentPayload) *memqlv1.ActingAgentIdentity {
 	if agent == nil {
 		return nil
@@ -403,6 +411,74 @@ func buildActingAgentIdentity(agent *agentPayload) *memqlv1.ActingAgentIdentity 
 		Tools:        agent.tools(),
 	}
 	return id
+}
+
+// buildActingAgentIdentity is the cognition-side wrapper that
+// resolves the agent's `capabilities.skillIds[]` into concrete
+// tool slugs + domain ids and merges them into the legacy
+// capability surface before projecting to proto. memql#376 -- the
+// Assistant baseline (and every agent that carries the operator
+// suite, computer-use, workbench, etc.) writes its capabilities
+// exclusively through skillIds, so without this resolution the
+// agent node receives an empty Tools list and the LLM never sees
+// uiClick / uiNavigate / canvasPublish / ... etc.
+//
+// Unknown skill ids are warn-logged and skipped (ResolveSkills's
+// best-effort posture); a resolver failure falls back to the pure
+// flat-list projection so the legacy path stays intact.
+func (c *CognitionIntegration) buildActingAgentIdentity(ctx context.Context, agent *agentPayload) *memqlv1.ActingAgentIdentity {
+	id := buildActingAgentIdentity(agent)
+	if id == nil || c == nil || c.engine == nil || agent == nil {
+		return id
+	}
+	skillIds := agent.skillIds()
+	if len(skillIds) == 0 {
+		return id
+	}
+	bundle, err := c.engine.ResolveSkills(ctx, skillIds)
+	if err != nil {
+		c.Logger.Warn("ActingAgent: ResolveSkills failed; falling back to legacy capability flat list",
+			"agent_id", agent.ID,
+			"skill_count", len(skillIds),
+			"error", err,
+		)
+		return id
+	}
+	id.Tools = mergeUniqueStrings(id.Tools, bundle.ToolSlugs)
+	id.Domains = mergeUniqueStrings(id.Domains, bundle.DomainIds)
+	return id
+}
+
+// mergeUniqueStrings appends every element of b to a (preserving a's
+// order) without introducing duplicates. Empty / whitespace-only
+// entries are dropped to keep the resulting tool list clean for the
+// LLM prompt renderer.
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range b {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // convertAttachmentsToProto maps attachment summaries onto the proto
