@@ -817,3 +817,88 @@ func TestParseObjectLiteral_UnquotedKeys(t *testing.T) {
 		t.Errorf("expected unquoted keys to parse cleanly, got %+v", obj)
 	}
 }
+
+// TestConvertArgReferences locks in the memql#367 fix: ArgRefExpr
+// nodes that compile via expressionToString to `arg("path")` get
+// rewritten to `$args.path` so the LogicRunner's evaluator (which
+// seeds caller args into its custom map under the `args` key)
+// resolves the path through `resolvePath`. Without the rewrite the
+// MutationExecutor receives the literal string `arg("path")` and
+// stamps it onto the inserted row.
+func TestConvertArgReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "single arg path",
+			in:   `arg("event.payload.node.id")`,
+			want: `$args.event.payload.node.id`,
+		},
+		{
+			name: "multiple arg refs in one expression",
+			in:   `concat(arg("a"), arg("b"))`,
+			want: `concat($args.a, $args.b)`,
+		},
+		{
+			name: "actor reference preserved (resolved elsewhere at filter time)",
+			in:   `arg("actor.userId")`,
+			want: `arg("actor.userId")`,
+		},
+		{
+			name: "mixed actor + args",
+			in:   `concat(arg("event.id"), arg("actor.userId"))`,
+			want: `concat($args.event.id, arg("actor.userId"))`,
+		},
+		{
+			name: "bare actor literal preserved",
+			in:   `arg("actor")`,
+			want: `arg("actor")`,
+		},
+		{
+			name: "no arg refs untouched",
+			in:   `concat("hello", $event.payload.id)`,
+			want: `concat("hello", $event.payload.id)`,
+		},
+		{
+			name: "empty string untouched",
+			in:   ``,
+			want: ``,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := convertArgReferences(tt.in)
+			if got != tt.want {
+				t.Errorf("convertArgReferences(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCompileStepHelperValue_ArgsShorthandRawString locks in the
+// memql#367 fix for the OTHER path: bare `args.X` raw-string values
+// (the parser stores shorthand-key entries as raw source text, not
+// as AST nodes) get the `$` prefix so the evaluator resolves them
+// through the args custom map.
+func TestCompileStepHelperValue_ArgsShorthandRawString(t *testing.T) {
+	c := New(Config{})
+	got := c.compileStepHelperValue("args.event.payload.node.id")
+	want := "$args.event.payload.node.id"
+	if got != want {
+		t.Errorf("compileStepHelperValue(shorthand args path) = %v, want %v", got, want)
+	}
+
+	// Already-prefixed paths are passthrough.
+	got = c.compileStepHelperValue("$args.event.id")
+	if got != "$args.event.id" {
+		t.Errorf("compileStepHelperValue($args.X) should be unchanged, got %v", got)
+	}
+
+	// Existing event./item. handling stays intact.
+	got = c.compileStepHelperValue("event.payload.id")
+	if got != "$event.payload.id" {
+		t.Errorf("compileStepHelperValue(event.X) = %v, want $event.X", got)
+	}
+}
