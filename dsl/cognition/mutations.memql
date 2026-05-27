@@ -3,8 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, chunk, micState, misrouteFeedback, participant, presence, privateUtterance, response, session, space, utterance, videoOverride }
-use identity.concepts.{ request }
+use cognition.concepts.{ audioOverride, chunk, clientToolRequest, clientToolResponse, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
 
 @enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
@@ -312,7 +311,7 @@ mutation space mutationDeleteSpaceNow {
 
 @enabled
 @description("Emit a client-tool request envelope for cross-node relay to a browser stream.")
-mutation request mutationEmitClientToolRequest {
+mutation clientToolRequest mutationEmitClientToolRequest {
   args {
     requestId      string  @required
     callId         string  @required
@@ -323,7 +322,7 @@ mutation request mutationEmitClientToolRequest {
     agentId        string
     expiresAt      string
   }
-  insert request {
+  insert clientToolRequest {
     id: args.requestId
     args.callId
     args.toolName
@@ -349,7 +348,7 @@ mutation request mutationEmitClientToolRequest {
 
 @enabled
 @description("Emit a client-tool response envelope fulfilling a pending clientToolRequest.")
-mutation response mutationEmitClientToolResponse {
+mutation clientToolResponse mutationEmitClientToolResponse {
   args {
     responseId    string  @required
     callId        string  @required
@@ -358,7 +357,7 @@ mutation response mutationEmitClientToolResponse {
     errorMessage  string
     spaceId       string
   }
-  insert response {
+  insert clientToolResponse {
     id: args.responseId
     args.callId
     args.contentJSON
