@@ -146,26 +146,58 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 }
 
 // tryEvaluateReturnLocally short-circuits engine.Execute for return
-// expressions whose body is purely a method call on a bound step
-// result -- `expiredDelegations.Len()`, `existing.First()`,
-// `rows.Empty()`, etc. The engine's expression parser doesn't
-// recognise the dotted shape and looks up `expiredDelegations.Len`
-// as a top-level function ("function not found").
+// expressions the engine's parser would mis-resolve against the
+// global function / spec registry. Two shapes are handled here:
+//
+//  1. Bare step name -- `return nodeRecord` after
+//     `nodeRecord := mutationCreateNode(...)`. The engine treats a
+//     bare identifier as a spec / function name and errors with
+//     `unknown spec "nodeRecord"`; the step variable lives in the
+//     LogicRunner's per-call scope, which engine.Execute can't see.
+//     See memql#363. Returns the step's `Result` field directly --
+//     equivalent to `$steps.<id>.result`.
+//
+//  2. Method call on a bound step result -- `expiredDelegations.Len()`,
+//     `existing.First()`, `rows.Empty()`, etc. The engine's
+//     expression parser doesn't recognise the dotted shape and looks
+//     up `expiredDelegations.Len` as a top-level function ("function
+//     not found"). The local Evaluator's EvaluateStepReference
+//     understands the `$steps.<id>.<method>` shorthand.
 //
 // Returns (value, true, nil) when the expression matched a known
-// step-method shape and resolved cleanly via the local Evaluator.
-// Returns (nil, false, nil) when the expression doesn't match the
-// shape -- the caller should fall back to engine.Execute via the
-// step registry.
-// Returns (nil, false, err) on a hard error (e.g. step exists but
-// the dotted suffix didn't resolve).
+// shape and resolved cleanly via the local Evaluator.
+// Returns (nil, false, nil) when the expression doesn't match any
+// of the recognised shapes -- the caller should fall back to
+// engine.Execute via the step registry.
+// Returns (nil, true, err) on a hard error (step exists but the
+// suffix didn't resolve).
 func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, false, nil
 	}
-	// Must end in `()` -- the step-method shape from the DSL is
-	// always `stepName.method()`.
+	// Bare step name. Must be a single identifier (letters / digits /
+	// underscore, starting with letter or underscore) AND match a
+	// known step ID. Reject anything else so a literal like `42`,
+	// a quoted string, or a global function name still falls through
+	// to engine.Execute.
+	if isBareIdentifier(expr) {
+		if !evaluator.HasStep(expr) {
+			return nil, false, nil
+		}
+		// Resolve via the canonical `$steps.<id>.result` path so
+		// downstream behaviour matches what an author would get if
+		// they wrote `return $steps.<id>.result` explicitly. The
+		// special-case in resolvePath (case "result") unwraps the
+		// StepResult struct to its .Result field.
+		val, err := evaluator.EvaluateValue("$steps." + expr + ".result")
+		if err != nil {
+			return nil, true, fmt.Errorf("resolve step %q result: %w", expr, err)
+		}
+		return val, true, nil
+	}
+	// Method-call shape. Must end in `()` -- the step-method shape
+	// from the DSL is always `stepName.method()`.
 	inner := strings.TrimSuffix(expr, "()")
 	if inner == expr {
 		return nil, false, nil
@@ -190,6 +222,35 @@ func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator
 		return nil, false, err
 	}
 	return val, true, nil
+}
+
+// isBareIdentifier reports whether s is a single identifier token --
+// a letter or underscore followed by letters, digits, or underscores.
+// Used to recognise a step-name return like `return nodeRecord`
+// without misclassifying numeric literals, strings, or compound
+// expressions.
+func isBareIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if !isIdentStart(r) {
+				return false
+			}
+			continue
+		}
+		if !isIdentStart(r) && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isIdentStart(r rune) bool {
+	return r == '_' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z')
 }
 
 // runOneStep evaluates an optional condition, dispatches the step,

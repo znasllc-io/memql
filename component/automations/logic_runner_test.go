@@ -327,10 +327,11 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 }
 
 // TestLogicRunner_TryEvaluateReturnLocally_FallsThrough pins that
-// expressions which AREN'T pure step-method calls report handled=false
-// so the caller falls back to engine.Execute. This protects compound
-// expressions, mutation calls, and literals from being silently
-// short-circuited.
+// expressions which AREN'T a recognised local shape report
+// handled=false so the caller falls back to engine.Execute. This
+// protects compound expressions, mutation calls, literals, and
+// references to globally-defined functions / specs from being
+// silently short-circuited.
 func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
 	evaluator := NewEvaluator()
@@ -346,7 +347,11 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 		{"compound coalesce", `coalesce(rows.First(), "fallback")`},
 		{"mutation call", `mutationCreateThing({name: "x"})`},
 		{"builtin call", `ensureDailySpaceForCaller({})`},
-		{"plain step name (no parens)", `rows`},
+		// Bare identifier with no matching step -- falls through so
+		// engine.Execute can try the global function / spec registry.
+		// (When the bare identifier DOES match a step, see
+		// TestLogicRunner_TryEvaluateReturnLocally_BareStepName.)
+		{"unknown bare identifier", `someGlobalFunc`},
 		{"unknown step", `notARealStep.Len()`},
 		{"single-segment call", `someFunc()`},
 		{"empty expr", ``},
@@ -361,6 +366,98 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 				t.Errorf("expected handled=false for %q (should fall through to engine.Execute)", tt.expr)
 			}
 		})
+	}
+}
+
+// TestLogicRunner_TryEvaluateReturnLocally_BareStepName pins the
+// memql#363 fix: a Logic body that closes with `return <stepName>`
+// after `<stepName> := <call>(...)` resolves to that step's bound
+// Result via the local Evaluator, bypassing engine.Execute (which
+// treats a bare identifier as a spec/function name and errors with
+// `unknown spec "<stepName>"` because the step variable lives in
+// the LogicRunner's per-call scope, not the global registry).
+//
+// Reproduces the logicRegisterNode failure: the cluster bootstrap
+// logic does `nodeRecord := mutationCreateNode(...)` followed by
+// `return nodeRecord`. Before this fix, every node's startup
+// fired the logic, hit engine.Execute on the bare identifier, and
+// failed with `unknown spec "nodeRecord"`.
+func TestLogicRunner_TryEvaluateReturnLocally_BareStepName(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	evaluator := NewEvaluator()
+
+	// Shape mirrors what stepRegistry.Execute writes for a mutation
+	// step: Status=success, Result is the mutation's output payload.
+	mutationOutput := map[string]any{
+		"id":   "v1:cluster:node:abc",
+		"type": "bff",
+	}
+	evaluator.SetStepResult("nodeRecord", &StepResult{
+		Status: "success",
+		Result: mutationOutput,
+	})
+
+	val, handled, err := r.tryEvaluateReturnLocally("nodeRecord", evaluator)
+	if err != nil {
+		t.Fatalf("tryEvaluateReturnLocally(`nodeRecord`): %v", err)
+	}
+	if !handled {
+		t.Fatalf("expected handled=true for bare step name; got handled=false")
+	}
+	// The fix routes through `$steps.<id>.result`, which unwraps the
+	// StepResult struct to the raw Result field -- exactly what the
+	// author meant by `return nodeRecord`.
+	got, ok := val.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any result, got %T (%#v)", val, val)
+	}
+	if got["id"] != "v1:cluster:node:abc" {
+		t.Errorf("result.id = %#v, want %q", got["id"], "v1:cluster:node:abc")
+	}
+	if got["type"] != "bff" {
+		t.Errorf("result.type = %#v, want %q", got["type"], "bff")
+	}
+
+	// A bare identifier that does NOT match a step must still fall
+	// through (it might be a global function or a spec the engine can
+	// resolve), so we don't accidentally claim to have handled it.
+	_, handled, err = r.tryEvaluateReturnLocally("notAStep", evaluator)
+	if err != nil {
+		t.Errorf("unknown bare identifier should not error here: %v", err)
+	}
+	if handled {
+		t.Errorf("expected handled=false for bare identifier that's not a known step")
+	}
+}
+
+// TestIsBareIdentifier pins the helper that drives the new
+// bare-step short-circuit so a literal like `42`, a quoted
+// string, or a compound expression doesn't sneak past as a step
+// reference.
+func TestIsBareIdentifier(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"nodeRecord", true},
+		{"_underscore", true},
+		{"a", true},
+		{"camelCase123", true},
+		{"snake_case", true},
+		{"", false},
+		{"123leading", false},
+		{"with space", false},
+		{`"quoted"`, false},
+		{"a.b", false},
+		{"a()", false},
+		{"a+b", false},
+		{"coalesce(a, b)", false},
+	}
+	for _, tc := range cases {
+		got := isBareIdentifier(tc.in)
+		if got != tc.want {
+			t.Errorf("isBareIdentifier(%q) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }
 
