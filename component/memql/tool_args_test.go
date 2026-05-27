@@ -150,6 +150,71 @@ func TestApplyToolDefaults_AutoInjectedStripsEvenWhenNoDefaults(t *testing.T) {
 	}
 }
 
+// TestToolParser_OperatorAnnotations locks the full path for a
+// client-executed operator-UI tool: parser captures
+// @clientExecution / @allowedRoles / @scopes on the *ast.ToolDecl,
+// toolDeclToTool copies them onto the runtime *Tool so the registry
+// + tool-calling loop see them correctly.
+func TestToolParser_OperatorAnnotations(t *testing.T) {
+	src := `@clientExecution
+@allowedRoles("assistant", "specialist")
+@scopes("operator")
+@description("Operator UI: click a target element")
+tool uiClick {
+  selector  string  @required @description("CSS selector or test-id")
+}`
+	decl, err := langparser.ParseToolDecl(src)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	tools, err := toolDeclToTool(decl, "test.memql")
+	if err != nil {
+		t.Fatalf("toolDeclToTool: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	got := tools[0]
+	if !got.ClientExecution {
+		t.Error("ClientExecution = false, want true")
+	}
+	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
+		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)
+	}
+	if !reflect.DeepEqual(got.Scopes, []string{"operator"}) {
+		t.Errorf("Scopes = %v, want [operator]", got.Scopes)
+	}
+}
+
+// TestToolParser_OperatorAnnotations_AbsentMeansEmpty locks the
+// negative path: a tool with NO operator annotations leaves the
+// runtime fields at their zero values, so non-operator tools don't
+// accidentally pick up dispatch / role / scope gates.
+func TestToolParser_OperatorAnnotations_AbsentMeansEmpty(t *testing.T) {
+	src := `@description("Plain tool, no operator annotations")
+tool plainTool {
+  keyword  string
+}`
+	decl, err := langparser.ParseToolDecl(src)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	tools, err := toolDeclToTool(decl, "test.memql")
+	if err != nil {
+		t.Fatalf("toolDeclToTool: %v", err)
+	}
+	got := tools[0]
+	if got.ClientExecution {
+		t.Error("ClientExecution = true, want false")
+	}
+	if got.AllowedRoles != nil {
+		t.Errorf("AllowedRoles = %v, want nil", got.AllowedRoles)
+	}
+	if got.Scopes != nil {
+		t.Errorf("Scopes = %v, want nil", got.Scopes)
+	}
+}
+
 func TestToolParser_AutoInjectedAnnotation(t *testing.T) {
 	// Parser-level smoke: a tool field with @autoInjected lands as
 	// a Tool.AutoInjectedFields entry. The integration with

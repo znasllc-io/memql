@@ -82,6 +82,12 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 					decl.RateLimitPeriod = n
 				}
 			}
+		case "clientExecution":
+			decl.ClientExecution = true
+		case "allowedRoles":
+			decl.AllowedRoles = attrStringListValue(attr)
+		case "scopes":
+			decl.Scopes = attrStringListValue(attr)
 		}
 	}
 
@@ -173,6 +179,38 @@ func attrArgString(attr *ast.Attribute, name string) string {
 		return strconv.FormatFloat(s, 'f', -1, 64)
 	}
 	return ""
+}
+
+// attrStringListValue extracts an ordered string list from a
+// leading-attribute argument set. Handles all three storage shapes
+// the parser produces for positional string arguments:
+//   - []string (multi-value path in parsePositionalAttrs)
+//   - []any   (in-body @enum path that goes through parseValue)
+//   - string  (single-value form, e.g. @allowedRoles("assistant"))
+//
+// Returns nil when the annotation has no value.
+func attrStringListValue(attr *ast.Attribute) []string {
+	if attr == nil || attr.Value == nil {
+		return nil
+	}
+	switch v := attr.Value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	}
+	return nil
 }
 
 // attrEnumValues extracts the ordered string list from an
