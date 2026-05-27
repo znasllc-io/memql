@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -89,13 +90,13 @@ func convertEventReferences(query string) string {
 }
 
 // compileStepHelperValue converts function-call args to evaluator format.
-// Handles ExpressionNode (stringify), map (recursive), string (event refs).
+// Handles ExpressionNode (stringify), map (recursive), string (event/args/item refs).
 func (c *Compiler) compileStepHelperValue(v any) any {
 	if v == nil {
 		return nil
 	}
 	if expr, ok := v.(parser.ExpressionNode); ok {
-		return convertEventReferences(c.expressionToString(expr))
+		return convertArgReferences(convertEventReferences(c.expressionToString(expr)))
 	}
 	if m, ok := v.(map[string]any); ok {
 		out := make(map[string]any, len(m))
@@ -111,11 +112,57 @@ func (c *Compiler) compileStepHelperValue(v any) any {
 		if strings.HasPrefix(s, "item.") && !strings.HasPrefix(s, "$") {
 			return "$" + s
 		}
+		// Shorthand `args.X.Y` paths land here as raw strings (the parser
+		// stores the literal source text for shorthand-key entries in
+		// object literals -- see parser.go's parseObject loop). Lift to
+		// the `$args.X.Y` form so the evaluator's resolvePath finds
+		// `args` in the custom map LogicRunner seeds.
+		if strings.HasPrefix(s, "args.") && !strings.HasPrefix(s, "$") {
+			return "$" + s
+		}
 		if (strings.Contains(s, ".result.") || strings.Contains(s, ".metadata.")) && !strings.HasPrefix(s, "$") {
 			return "$" + s
 		}
 	}
 	return v
+}
+
+// argRefPattern matches the `arg("path")` stringification ArgRefExpr emits
+// from expressionToString. The path is captured for rewrite. Anchored on
+// `arg(` not just `arg` so identifiers ending in `arg` don't match.
+var argRefPattern = regexp.MustCompile(`arg\("([^"]+)"\)`)
+
+// convertArgReferences rewrites the `arg("path")` shape that
+// expressionToString emits for ArgRefExpr nodes back into the
+// `$args.path` form the runtime evaluator resolves through the
+// custom map. Skip paths starting with `actor.`: the parser also
+// represents `actor.userId` as ArgRefExpr (path "actor.userId") so
+// the actor accessor and the args accessor share the AST node, and
+// the actor accessor goes through a different resolution path
+// (resolveActorReferences) at filter time. The `actor.` prefix is
+// the disambiguator; leave those serializations alone.
+//
+// Without this rewrite, mutation step payloads stamped from a logic
+// body like `mutation({nodeType: args.event.payload.node.type})`
+// land as the literal string `arg("event.payload.node.type")` (the
+// MutationExecutor's evaluateValue has no handler for the `arg(`
+// prefix and treats the whole expression as a string literal).
+// memql#367.
+func convertArgReferences(s string) string {
+	if !strings.Contains(s, `arg("`) {
+		return s
+	}
+	return argRefPattern.ReplaceAllStringFunc(s, func(match string) string {
+		m := argRefPattern.FindStringSubmatch(match)
+		if len(m) != 2 {
+			return match
+		}
+		path := m[1]
+		if strings.HasPrefix(path, "actor.") || path == "actor" {
+			return match
+		}
+		return "$args." + path
+	})
 }
 
 // isRuntimeReference checks if a string value is a runtime reference that should not be quoted.
