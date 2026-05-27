@@ -1433,8 +1433,9 @@ func (Automation) scheduledTask(_ any) {
 	}
 }
 
-func TestParser_GoStyleDefaultDisabled(t *testing.T) {
-	// Without @enabled, automation should be disabled by default
+func TestParser_GoStyleDefaultEnabled(t *testing.T) {
+	// Without any annotation, a function is enabled by default. @disabled
+	// is the explicit opt-out.
 	input := `
 func (Automation) myAutomation(_ any) {
   step1 := query {
@@ -1465,9 +1466,46 @@ func (Automation) myAutomation(_ any) {
 		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
 	}
 
-	// Should be disabled by default
+	if !funcDef.Enabled {
+		t.Error("Expected function to be enabled by default (no @disabled attribute)")
+	}
+}
+
+func TestParser_GoStyleDisabledAttribute(t *testing.T) {
+	// @disabled is the explicit opt-out from the default-enabled behaviour.
+	input := `
+@disabled
+func (Automation) myAutomation(_ any) {
+  step1 := query {
+    concept==v1:user
+  }
+  return step1
+}
+`
+	lexer := NewLexer(input)
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		t.Fatalf("Lexer error: %v", err)
+	}
+
+	parser := NewParser(tokens)
+	ast, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("Parser error: %v", err)
+	}
+
+	file, ok := ast.(*File)
+	if !ok {
+		t.Fatalf("Expected File, got %T", ast)
+	}
+
+	funcDef, ok := file.Definitions[0].(*FunctionDef)
+	if !ok {
+		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
+	}
+
 	if funcDef.Enabled {
-		t.Error("Expected function to be disabled by default (no @enabled attribute)")
+		t.Error("Expected function to be disabled by @disabled attribute")
 	}
 }
 

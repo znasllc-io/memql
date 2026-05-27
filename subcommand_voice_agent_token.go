@@ -107,7 +107,21 @@ func runVoiceAgentTokenMint(args []string) int {
 		// Non-fatal -- envelope/container env may already cover everything.
 	}
 
-	logger := mustCreateServiceLogger()
+	// CLI subcommand: logs to stderr so stdout stays clean for the
+	// minted bearer (which scripts/dev/lib.sh's mint_voice_agent_token
+	// captures via $(...)). See main.go::mustCreateCLILogger for the
+	// full rationale + memql#353 for what broke before the split.
+	//
+	// Same os.Stdout-redirect pattern subcommand_node_token.go uses;
+	// component-internal loggers (15+ of them) hardcode os.Stdout, so
+	// the swap is the surgical fix that doesn't require touching every
+	// component. realStdout is the saved fd we write the bearer
+	// through; everything else goes to stderr.
+	realStdout := os.Stdout
+	os.Stdout = os.Stderr
+	defer func() { os.Stdout = realStdout }()
+
+	logger := mustCreateCLILogger()
 	application := app.Build(logger, resolveVersionFn(), app.Overrides{})
 
 	// Start ONLY the dependencies the mint touches (database +
@@ -120,7 +134,7 @@ func runVoiceAgentTokenMint(args []string) int {
 		d.Start(context.Background())
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), dependencyShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), app.DefaultRunShutdownTimeout)
 		defer cancel()
 		// Stop in reverse start order; the order is small and
 		// shutdown is best-effort, so a simple reverse loop is fine.
@@ -155,7 +169,16 @@ func runVoiceAgentTokenMint(args []string) int {
 	expiresAt := now.Add(resolvedTTL).Format(time.RFC3339Nano)
 
 	store := &identity.Store{Engine: application.Engine(), Logger: logger}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Stamp the system actor onto the context so the per-row authz
+	// gate the engine added (memql#347 era) accepts the write. The
+	// CLI mint subcommand is unauthenticated by design -- the
+	// operator is `docker exec`ing the binary -- so we use the same
+	// synthetic actor identity's own bootstrap path uses for non-
+	// HTTP entry points. Without this, store.CreateIdentityVoiceAgentToken
+	// rejects with "no actor found in context" and the bearer never
+	// gets minted. memql#353.
+	ctx := identity.ContextWithSystemActor(context.Background())
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := store.CreateIdentityVoiceAgentToken(
 		ctx,
@@ -194,9 +217,12 @@ func runVoiceAgentTokenMint(args []string) int {
 		fmt.Fprintf(os.Stderr, "voice-agent-token mint: wrote bearer to %s (mode 0600); identity=%s instance=%s expires=%s\n",
 			*out, identityId, *instanceId, jwtExpiresAt.Format(time.RFC3339))
 	} else {
-		// stdout = the bearer alone, no decoration, so the make
-		// target / dev-refresh can capture it with $(...).
-		fmt.Println(bearer)
+		// Write through the saved realStdout fd; the global os.Stdout
+		// has been redirected to stderr for the duration of the
+		// subcommand so component-internal loggers don't pollute the
+		// caller's `bearer=$(...)` capture. See the os.Stdout swap
+		// near the top of this function + memql#353.
+		fmt.Fprintln(realStdout, bearer)
 		fmt.Fprintf(os.Stderr, "voice-agent-token mint: minted identity=%s instance=%s expires=%s\n",
 			identityId, *instanceId, jwtExpiresAt.Format(time.RFC3339))
 	}

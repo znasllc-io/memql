@@ -43,11 +43,17 @@ services:
 
   # BFF node -- backend for frontend (domain-specific), primary API surface
   bff:
+    # memql#356: bff is the CoPresent carrier binary, NOT the plain
+    # memql bff. The carrier wraps memql/app's bootstrap + blank-
+    # imports memql-bff-copresent's integrations + DSL so the SPA's
+    # copresent queries (querySystemConfig, mutationUpsertOnboarding,
+    # queryCanvasStatesForSpace, ...) resolve against a live engine.
+    # Build context spans BOTH memql/ + memql-bff-copresent/ as
+    # workspace siblings; see memql-bff-copresent/Dockerfile for the
+    # rationale.
     build:
-      context: ..
-      dockerfile: docker/memql.Dockerfile
-      args:
-        BUILD_TAGS: bff
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
     container_name: memql-bff
     hostname: bff
     env_file:

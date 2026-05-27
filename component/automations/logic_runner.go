@@ -177,27 +177,49 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 	return nil, nil
 }
 
-// tryEvaluateReturnLocally short-circuits engine.Execute for return
-// expressions whose body is purely a method call on a bound step
-// result -- `expiredDelegations.Len()`, `existing.First()`,
-// `rows.Empty()`, etc. The engine's expression parser doesn't
-// recognise the dotted shape and looks up `expiredDelegations.Len`
-// as a top-level function ("function not found").
+// tryEvaluateReturnLocally short-circuits engine.Execute for two
+// return-expression shapes that the engine's expression parser
+// mis-resolves:
+//
+//   - Bare step-variable references -- `return nodeRecord` after
+//     `nodeRecord := mutationCreateNode(...)`. The engine treats the
+//     bare identifier as a spec name and emits `unknown spec
+//     "nodeRecord"`.
+//   - Step-method calls -- `expiredDelegations.Len()`,
+//     `existing.First()`, `rows.Empty()`, etc. The engine looks the
+//     dotted name up as a top-level function and emits "function not
+//     found".
+//
+// The local Evaluator already understands both shapes (`steps` map
+// for bare lookup, `EvaluateStepReference` for the dotted path), so
+// we route through it before the engine sees the expression. Any
+// shape outside this set falls back to engine.Execute via the step
+// registry.
 //
 // Returns (value, true, nil) when the expression matched a known
-// step-method shape and resolved cleanly via the local Evaluator.
-// Returns (nil, false, nil) when the expression doesn't match the
-// shape -- the caller should fall back to engine.Execute via the
-// step registry.
-// Returns (nil, false, err) on a hard error (e.g. step exists but
-// the dotted suffix didn't resolve).
+// step-reference shape and resolved cleanly. Returns
+// (nil, false, nil) when the expression doesn't match -- the caller
+// should fall back to engine.Execute. Returns (nil, false, err) on
+// a hard error (e.g. step exists but the dotted suffix didn't
+// resolve).
 func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, false, nil
 	}
-	// Must end in `()` -- the step-method shape from the DSL is
-	// always `stepName.method()`.
+
+	// Bare step-variable reference: a single identifier (no parens,
+	// no dot, no whitespace) whose name matches a bound step. Same
+	// package, so the unexported steps map is in scope -- mirrors the
+	// `_return` lookup at the tail of RunLogic.
+	if isBareIdentifier(expr) && evaluator.HasStep(expr) {
+		if result := evaluator.steps[expr]; result != nil {
+			return result.Result, true, nil
+		}
+		return nil, true, nil
+	}
+
+	// Step-method call: `stepName.method()`.
 	inner := strings.TrimSuffix(expr, "()")
 	if inner == expr {
 		return nil, false, nil
@@ -449,6 +471,27 @@ func isCustomVarRoot(segment string) bool {
 		return true
 	}
 	return false
+}
+
+// isBareIdentifier returns true when expr is a single identifier --
+// letters, digits, and underscores only, starting with a letter or
+// underscore. Used to gate the bare-step-variable fast path in
+// tryEvaluateReturnLocally.
+func isBareIdentifier(expr string) bool {
+	if expr == "" {
+		return false
+	}
+	for i, r := range expr {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // runOneStep evaluates an optional condition, dispatches the step,
