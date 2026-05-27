@@ -60,10 +60,15 @@ func presenceRecordId(participantId string) string {
 	if pid == "" {
 		return ""
 	}
-	// Deterministic ID: one presence record per participant
-	// (append-only versions). The canonical id format already carries
-	// `:participantPresence:` in the middle position; the shortId
-	// stays the bare participant id.
+	// Deterministic ID: one presence record per participant.
+	// `Concept.validateShortId` requires a bare shortId (no colons) OR
+	// the concept-qualified form; the participant id
+	// `v1:cognition:participant:<short>` is neither, so we take the
+	// last `:`-delimited segment and let `Concept.storageId` prepend
+	// `v1:cognition:participant:presence:`.
+	if idx := strings.LastIndex(pid, ":"); idx >= 0 {
+		return pid[idx+1:]
+	}
 	return pid
 }
 
