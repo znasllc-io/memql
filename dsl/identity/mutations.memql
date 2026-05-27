@@ -1067,6 +1067,65 @@ mutation identity mutationStampNodeTokenBootstrap {
   }
 }
 
+// ---- mutations/v1/identity/revokeNodeTokenIdentity.memql ----
+
+// revokeNodeTokenIdentity
+// =======================
+//
+// Flips a node_token identity row's `active` flag to false. Called
+// by the /admin/tokens revoke handler (memql#350) so operators can
+// kill a single compromised node credential without rotating the
+// cluster-wide bootstrap secret.
+//
+// Whole-replace semantics: the engine's update() mutation does NOT
+// deep-merge nested objects, so this mutation takes every
+// credentials field as an explicit arg. The Store assembles the
+// full credentials block from the existing row before issuing the
+// call -- callers MUST pass through the live values to avoid
+// silently dropping audit fields. memql#343's
+// /node/bootstrap pre-mint gate consults `active` and refuses to
+// re-mint a revoked row, so flipping the flag is the load-bearing
+// revocation surface.
+//
+// lastConnectAt is passed through (rather than reset) so the
+// admin UI continues to show "when was this node last online" on
+// the revoked row -- useful for incident triage.
+
+@enabled
+@description("Revoke a node_token identity by flipping active=false on the row. Whole-replace update semantics require restating every credentials field. memql#350.")
+mutation identity mutationRevokeNodeTokenIdentity {
+  args {
+    identityId        string  @required
+    userId            string  @required
+    nodeId            string  @required
+    nodeType          string  @required
+    keyHash           string  @required
+    mintedBy          string  @required
+    expiresAt         string  @required
+    lastConnectAt     string  @required
+    bootstrappedAt    string  @required
+    bootstrappedFrom  string  @required
+  }
+  update identity {
+    id: args.identityId
+    args.userId
+    identityType: "node_token"
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        keyHash: args.keyHash,
+        mintedBy: args.mintedBy,
+        expiresAt: args.expiresAt,
+        lastConnectAt: args.lastConnectAt,
+        bootstrappedAt: args.bootstrappedAt,
+        bootstrappedFrom: args.bootstrappedFrom
+      }
+    label: args.nodeType
+    usableByAgents: false
+    active: false
+  }
+}
+
 // ---- mutations/v1/identity/createVoiceAgentTokenIdentity.memql ----
 
 // createVoiceAgentTokenIdentity

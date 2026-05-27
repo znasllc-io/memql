@@ -6569,6 +6569,82 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	return b.String()
 }
 
+// MutationRevokeNodeTokenIdentity -- Revoke a node_token identity by flipping active=false on the row. Whole-replace update semantics require restating every credentials field. memql#350.
+//
+// Bound concept: identity.
+type MutationRevokeNodeTokenIdentityArgs struct {
+	IdentityId       string
+	UserId           string
+	NodeId           string
+	NodeType         string
+	KeyHash          string
+	MintedBy         string
+	ExpiresAt        string
+	LastConnectAt    string
+	BootstrappedAt   string
+	BootstrappedFrom string
+}
+
+// MutationRevokeNodeTokenIdentity calls the engine mutation mutationRevokeNodeTokenIdentity.
+func (qc *QueryClient) MutationRevokeNodeTokenIdentity(ctx context.Context, args MutationRevokeNodeTokenIdentityArgs) (*Result, error) {
+	call := MutationRevokeNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "mutationRevokeNodeTokenIdentity", call)
+}
+
+func MutationRevokeNodeTokenIdentityBuild(args MutationRevokeNodeTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRevokeNodeTokenIdentity({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("keyHash: ")
+	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastConnectAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.LastConnectAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bootstrappedAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bootstrappedFrom: ")
+	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRevokePATIdentity -- Soft-revoke a PAT identity (api_key) by inserting a new version with active=false.
 //
 // Bound concept: identity.

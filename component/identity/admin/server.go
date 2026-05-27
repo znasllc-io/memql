@@ -54,6 +54,13 @@ type AdminServer struct {
 	// Phase 7: PAT management. Wired by SetPATAdapter from
 	// app/integrations_identity.go after the engine is up.
 	patAdapter PATAdapter
+
+	// memql#350: node-token management on the same /admin/tokens
+	// page. Wired by SetNodeTokenAdapter from
+	// app/integrations_identity.go after the engine is up. Nil-
+	// safe: the page degrades to "PATs only" when this isn't wired
+	// (e.g. an identity binary built without the node-token surface).
+	nodeTokenAdapter NodeTokenAdapter
 }
 
 // Built-in nav links rendered in the layout header on every admin
@@ -141,6 +148,7 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /admin/tokens", gated(s.handleTokensList))
 	mux.HandleFunc("POST /admin/tokens/revoke", gated(s.handleTokensRevoke))
+	mux.HandleFunc("POST /admin/tokens/node/revoke", gated(s.handleNodeTokensRevoke))
 
 	mux.HandleFunc("GET /admin/jwks", gated(s.handleJWKS))
 	mux.HandleFunc("POST /admin/jwks/rotate", gated(s.handleJWKSRotate))
