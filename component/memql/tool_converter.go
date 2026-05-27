@@ -100,7 +100,14 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 		Description:        decl.Description,
 		InputSchema:        json.RawMessage(schemaJSON),
 		AutoInjectedFields: autoInjected,
+		ClientExecution:    decl.ClientExecution,
 		Origin:             origin,
+	}
+	if len(decl.AllowedRoles) > 0 {
+		tool.AllowedRoles = append([]string(nil), decl.AllowedRoles...)
+	}
+	if len(decl.Scopes) > 0 {
+		tool.Scopes = append([]string(nil), decl.Scopes...)
 	}
 
 	// Handler. Match the legacy mapping of @handler args to

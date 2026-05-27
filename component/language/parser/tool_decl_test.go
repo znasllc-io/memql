@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -203,5 +204,111 @@ func TestParseToolDecl_RejectsMissingName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tool") {
 		t.Errorf("error should mention tool, got %v", err)
+	}
+}
+
+// TestParseToolDecl_ClientExecution locks @clientExecution as a flag
+// annotation that flips ToolDecl.ClientExecution. The operator UI
+// primitives (uiClick / uiNavigate / etc.) carry this so the agent's
+// tool loop dispatches to the browser via ClientToolCall instead of
+// trying to execute server-side.
+func TestParseToolDecl_ClientExecution(t *testing.T) {
+	source := `@clientExecution
+@description("Click a UI element in the browser")
+tool uiClick {
+  selector  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	if !got.ClientExecution {
+		t.Error("ClientExecution = false, want true")
+	}
+}
+
+// TestParseToolDecl_AllowedRoles locks @allowedRoles("a", "b") as a
+// positional string list landing on ToolDecl.AllowedRoles in order.
+func TestParseToolDecl_AllowedRoles(t *testing.T) {
+	source := `@allowedRoles("assistant", "specialist")
+@description("Restricted tool")
+tool restrictedTool {
+  arg  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	want := []string{"assistant", "specialist"}
+	if !reflect.DeepEqual(got.AllowedRoles, want) {
+		t.Errorf("AllowedRoles = %v, want %v", got.AllowedRoles, want)
+	}
+}
+
+// TestParseToolDecl_AllowedRolesSingleValue locks the single-string
+// form @allowedRoles("assistant") -- still lands as a 1-element list.
+func TestParseToolDecl_AllowedRolesSingleValue(t *testing.T) {
+	source := `@allowedRoles("assistant")
+@description("Restricted tool")
+tool restrictedTool {
+  arg  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	want := []string{"assistant"}
+	if !reflect.DeepEqual(got.AllowedRoles, want) {
+		t.Errorf("AllowedRoles = %v, want %v", got.AllowedRoles, want)
+	}
+}
+
+// TestParseToolDecl_Scopes locks @scopes("a", "b") as a positional
+// string list landing on ToolDecl.Scopes in order. Mirrors the
+// dispatcher's superset check (caller scopes must contain all tool
+// scopes).
+func TestParseToolDecl_Scopes(t *testing.T) {
+	source := `@scopes("operator", "navigate")
+@description("Operator tool")
+tool operatorTool {
+  arg  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	want := []string{"operator", "navigate"}
+	if !reflect.DeepEqual(got.Scopes, want) {
+		t.Errorf("Scopes = %v, want %v", got.Scopes, want)
+	}
+}
+
+// TestParseToolDecl_AllThreeAnnotations locks the realistic operator-UI
+// authoring shape: every operator primitive will carry all three.
+func TestParseToolDecl_AllThreeAnnotations(t *testing.T) {
+	source := `@clientExecution
+@allowedRoles("assistant", "specialist")
+@scopes("operator")
+@description("Operator UI: click a target element")
+tool uiClick {
+  selector  string  @required
+}`
+
+	got, err := ParseToolDecl(source)
+	if err != nil {
+		t.Fatalf("ParseToolDecl: %v", err)
+	}
+	if !got.ClientExecution {
+		t.Error("ClientExecution = false, want true")
+	}
+	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
+		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)
+	}
+	if !reflect.DeepEqual(got.Scopes, []string{"operator"}) {
+		t.Errorf("Scopes = %v, want [operator]", got.Scopes)
 	}
 }

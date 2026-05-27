@@ -1548,11 +1548,14 @@ type ToolDecl struct {
 	HandlerMethod string // webhook HTTP method (upper-cased; default applied later by the converter)
 
 	// Annotations.
-	Destructive          bool   // @destructive flag
-	RequiresConfirmation bool   // @requiresConfirmation flag
-	ExecutionTime        string // "fast" / "medium" / "slow"
-	RateLimitMaxCalls    int    // 0 = no rate limit; @rateLimit(maxCalls=...)
-	RateLimitPeriod      int    // seconds; paired with RateLimitMaxCalls
+	Destructive          bool     // @destructive flag
+	RequiresConfirmation bool     // @requiresConfirmation flag
+	ExecutionTime        string   // "fast" / "medium" / "slow"
+	RateLimitMaxCalls    int      // 0 = no rate limit; @rateLimit(maxCalls=...)
+	RateLimitPeriod      int      // seconds; paired with RateLimitMaxCalls
+	ClientExecution      bool     // @clientExecution flag -- dispatched to the browser via ClientToolCall instead of executing server-side
+	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction
+	Scopes               []string // @scopes("operator", ...) -- caller must hold a superset
 
 	// Fields populates the tool's input schema.
 	Fields []ToolFieldDecl
