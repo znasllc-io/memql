@@ -45,14 +45,46 @@ seed agent assistant {
     voiceToVoice: true
     claw:         false
 
-    // tools[] left empty for the Phase 5 baseline. The UI-driving
-    // tools the strawman referenced (uiClick, uiNarrate, uiDescribe,
-    // respondToUser) live in the CoPresent product layer and aren't
-    // part of memql core's tool registry. When CoPresent grows its
-    // own tool declarations, the seed can extend tools here.
-    tools:    []
+    // skillIds is the sole capability surface post the skills primitive
+    // migration (2026-05-21). The Assistant baseline carries the
+    // operator suite + the supporting knowledge baselines + the
+    // headless / embodied execution surfaces:
+    //
+    //   - copresent-control      drives the SPA (uiClick / uiNavigate /
+    //                            uiType / ... -- the operator primitives;
+    //                            slug expands at dispatch via
+    //                            component/memql/operator_caps.go).
+    //   - copresent-ui           knowledge baseline behind UI walkthroughs
+    //                            (panels, routing, create-modal flows,
+    //                            presence + chat + canvas).
+    //   - copresent-canvas       canvas timeline authoring (row shape,
+    //                            kind / data / visibility / importance).
+    //   - workbench-baseline     workbench-use (filesystem + shell + http
+    //                            on the per-Plan sandbox). Universal,
+    //                            no scope gate.
+    //   - operator-computer-use  workerHost / workerComputer / workerStatus
+    //                            on the user's machine. Gated by
+    //                            agentAuthorization.computerUseScope +
+    //                            kill switch; opt-in per-Plan via
+    //                            requestComputerUseScope.
+    //
+    // The first three live in memql-bff-copresent/dsl/copresent/skills.memql;
+    // the last two ship in dsl/agents/skills/foundational.memql in core.
+    // memql#376.
+    skillIds: [
+      "copresent-control",
+      "copresent-ui",
+      "copresent-canvas",
+      "workbench-baseline",
+      "operator-computer-use",
+    ]
 
-    domains:  ["general"]
+    // tools[] / domains[] are the retired flat-list capability surface
+    // (skills migration #158). Kept empty for backward-compat readers
+    // that haven't been swept yet; the live capability comes from skillIds
+    // above.
+    tools:    []
+    domains:  []
     keywords: []
   }
 
