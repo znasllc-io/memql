@@ -9,9 +9,50 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/server"
 )
+
+// nodeTokenRevocationResolver bridges the node package's
+// NodeTokenRevocationResolver port to a live *identity.Store. Lives
+// in the app/ layer so the node package stays free of any identity-
+// store dependency -- node sits below identity in the dependency
+// graph; this bridge connects them at wire time.
+//
+// "Not found" is treated as not-revoked: an operator-CLI-minted token
+// from before memql#347's persistence shipped has no row to look up,
+// but its JWT signature is still valid. Only an explicit row state
+// (Active == false from a /admin/tokens revoke) stops it. memql#349.
+type nodeTokenRevocationResolver struct {
+	Store *identity.Store
+}
+
+// IsNodeTokenRevoked implements node.NodeTokenRevocationResolver.
+// Looks up the v1:identity:identity[node_token] row by
+// (nodeType, nodeId) via the store API memql#347 shipped. Returns
+// true when the row exists AND Active == false (operator-revoked).
+// Lookup failures surface as errors so the interceptor logs +
+// rejects rather than silently admitting traffic on a partial check.
+func (r *nodeTokenRevocationResolver) IsNodeTokenRevoked(ctx context.Context, nodeType, nodeId string) (bool, error) {
+	if r == nil || r.Store == nil {
+		return false, nil
+	}
+	row, err := r.Store.LookupNodeTokenIdentityByBinding(ctx, identity.NodeTokenBinding{
+		NodeType: nodeType,
+		NodeId:   nodeId,
+	})
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		// No persisted row -- operator-CLI mint that pre-dates #347
+		// persistence, or single-node dev. Treat as not-revoked; the
+		// JWT signature is still the authority.
+		return false, nil
+	}
+	return !row.Active, nil
+}
 
 // cluster wires distributed node components via bootstrap strategy and emits
 // the system.startup event with infrastructure metadata for automations.
@@ -91,12 +132,25 @@ func (a *App) cluster() {
 	}
 
 	// Install the class="node" JWT enforcement interceptor on
-	// NodeService.Stream (#105). When the verifier isn't wired
-	// (single-node dev / binaries with no identity) the interceptor
-	// is a no-op pass-through; otherwise NodeService.Stream rejects
-	// every non-node-class bearer.
+	// NodeService.Stream (#105) + the memql#349 revocation gate that
+	// rides alongside. When the verifier isn't wired (single-node dev
+	// / binaries with no identity) the interceptor is a no-op pass-
+	// through; otherwise NodeService.Stream rejects every non-node-
+	// class bearer AND every NodeService.Stream open from a node
+	// whose v1:identity:identity[node_token] row is Active == false
+	// (operator has revoked via /admin/tokens). The revocation check
+	// short-circuits to a 5s in-process cache so a healthy peer
+	// pinging every ~30s costs at most one DB read per cache window.
 	if nodeServer != nil && a.identityVerifier != nil {
-		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptor(a.identityVerifier, a.Logger))
+		var revCheck *node.NodeRevocationCheck
+		if a.engine != nil {
+			revCheck = &node.NodeRevocationCheck{
+				Resolver: &nodeTokenRevocationResolver{
+					Store: &identity.Store{Engine: a.engine, Logger: a.Logger},
+				},
+			}
+		}
+		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptorWithRevocation(a.identityVerifier, revCheck, a.Logger))
 	}
 
 	if peerMgr != nil {
