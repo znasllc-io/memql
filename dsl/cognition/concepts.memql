@@ -172,7 +172,7 @@ concept presence {
   reason  string  @description("Optional, user-friendly explanation for state (avoid internal jargon).")
   sinceAt  datetime  @required  @description("When this state began (best-effort).")
   spaceId  string  @required  @description("ID of the space this presence snapshot belongs to.")
-  state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working")  @required  @description("High-level, user-friendly state for UI rendering.")
+  state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working", "using_tool", "researching", "investigating")  @required  @description("High-level, user-friendly state for UI rendering.")
 
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
   @relationship(type="parent", field="participantId", target="v1:cognition:participant", direction="outgoing")

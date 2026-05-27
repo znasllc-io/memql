@@ -7,6 +7,7 @@ import (
 	"time"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Presence states are intentionally UI-friendly and stable.
@@ -61,9 +62,29 @@ func presenceRecordId(participantId string) string {
 		return ""
 	}
 	// Deterministic ID: one presence record per participant
-	// (append-only versions). The canonical id format already carries
-	// `:participantPresence:` in the middle position; the shortId
-	// stays the bare participant id.
+	// (append-only versions). The presence concept lives at
+	// `v1:cognition:participant:presence`, so the shortId we hand to
+	// insert() must be a BARE slug -- never a colon-bearing canonical
+	// id. The participant id is itself canonical
+	// (`v1:cognition:participant:<short>`), so strip it down to the
+	// participant's short id via ParseNodeId. Anything else
+	// (a slug minted client-side, a legacy bare id) falls through as
+	// the trimmed string and is accepted by validateShortId so long
+	// as it stays colon-free.
+	//
+	// Why this matters: validateShortId on the presence concept
+	// requires either (1) a bare slug with no colons or (2) a string
+	// prefixed with the concept name + ":". `v1:cognition:participant:<short>`
+	// fits NEITHER shape -- the prefix is `v1:cognition:participant:`
+	// not `v1:cognition:participant:presence:`. Handing the raw
+	// participant id in produces a hard insert error, every presence
+	// upsert in cognition_handler.go silently swallows it
+	// (`_ = c.upsertParticipantPresence(...)`), and the SPA's status
+	// pill / chat activity band never transition off "Idle".
+	// Closes copresent#114.
+	if _, shortId, err := id.ParseNodeId(pid); err == nil && shortId != "" {
+		return shortId
+	}
 	return pid
 }
 
@@ -77,8 +98,8 @@ func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, sp
 		return fmt.Errorf("spaceId and participantId are required")
 	}
 
-	id := presenceRecordId(participantId)
-	if id == "" {
+	recordId := presenceRecordId(participantId)
+	if recordId == "" {
 		return fmt.Errorf("invalid presence record id")
 	}
 
@@ -106,7 +127,7 @@ func (c *CognitionIntegration) upsertParticipantPresence(ctx context.Context, sp
 
 	query := fmt.Sprintf(`insert("%s", id=%s, payload=%s)`,
 		memoryNodes.ConceptCognitionParticipantPresence,
-		escapeJSONString(id),
+		escapeJSONString(recordId),
 		mustJSON(payload),
 	)
 	_, err := c.engine.Execute(ctx, query)
