@@ -308,19 +308,25 @@ type NodeIssueInput struct {
 // v1:identity:identity row + v1:cluster:node id + node type. Same
 // signing-key material as the user-token path -- the verifier
 // validates both with the same JWKS-published EdDSA key.
-func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (string, time.Time, error) {
+//
+// Returns (signedJWT, expiresAt, jti, err). The jti is the unique
+// per-mint identifier stamped into the JWT's `jti` claim; memql#343
+// surfaces it back to /node/bootstrap so the bootstrap path can
+// record "which JTI is the current row state" on the persisted
+// v1:identity:identity row without re-parsing the signed token.
+func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (string, time.Time, string, error) {
 	if strings.TrimSpace(in.IdentityId) == "" {
-		return "", time.Time{}, errors.New("identity: NodeIssueInput.IdentityId required")
+		return "", time.Time{}, "", errors.New("identity: NodeIssueInput.IdentityId required")
 	}
 	if strings.TrimSpace(in.NodeId) == "" {
-		return "", time.Time{}, errors.New("identity: NodeIssueInput.NodeId required")
+		return "", time.Time{}, "", errors.New("identity: NodeIssueInput.NodeId required")
 	}
 	if strings.TrimSpace(in.NodeType) == "" {
-		return "", time.Time{}, errors.New("identity: NodeIssueInput.NodeType required")
+		return "", time.Time{}, "", errors.New("identity: NodeIssueInput.NodeType required")
 	}
 	mat := j.keys.Current()
 	if mat == nil {
-		return "", time.Time{}, errors.New("identity: no current signing key (was KeyManager.Load() called?)")
+		return "", time.Time{}, "", errors.New("identity: no current signing key (was KeyManager.Load() called?)")
 	}
 	ttl := in.TTLOverride
 	if ttl <= 0 {
@@ -329,7 +335,7 @@ func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (stri
 	expiresAt := now.Add(ttl)
 	jti, err := newJTI()
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
+		return "", time.Time{}, "", fmt.Errorf("identity: generate jti: %w", err)
 	}
 	claims := AccessTokenClaims{
 		Class:    ClassNode,
@@ -349,9 +355,9 @@ func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (stri
 	tok.Header["kid"] = mat.KID
 	signed, err := tok.SignedString(mat.Private)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("identity: sign node access token: %w", err)
+		return "", time.Time{}, "", fmt.Errorf("identity: sign node access token: %w", err)
 	}
-	return signed, expiresAt, nil
+	return signed, expiresAt, jti, nil
 }
 
 // VoiceAgentIssueInput is the per-call payload for

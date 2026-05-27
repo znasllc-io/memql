@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/emailsender"
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity/nodetoken"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
@@ -176,6 +177,11 @@ func (a *App) integrationsIdentity() {
 		Logger:            a.Logger,
 		Abuse:             abuseMW,
 		LiveTokenSettings: liveSettings.TokenSettings,
+		// memql#343: row-persistence side of /node/bootstrap. Shares
+		// the same engine + logger as the identity Store. Nil-safe in
+		// the handler so a deployment that explicitly wants the
+		// pre-#343 synthetic-IdentityId shape can leave this nil.
+		NodeTokenStore: &nodetoken.Store{Engine: a.engine, Logger: a.Logger},
 	}
 	svc.SetHTTPMounter(httpSrv)
 
@@ -356,6 +362,10 @@ func (a *App) integrationsIdentity() {
 		a.fatal("failed to construct identity admin server", "error", err, "component", identity.ComponentName)
 	}
 	adminSrv.SetPATAdapter(patStore)
+	// memql#343: re-uses the same nodetoken.Store wired into the HTTP
+	// /node/bootstrap path above. Same engine, same logger; the admin
+	// page reads it from the same source of truth.
+	adminSrv.SetNodeTokenAdapter(httpSrv.NodeTokenStore)
 	svc.SetAdminMounter(adminSrv)
 
 	a.identityService = svc

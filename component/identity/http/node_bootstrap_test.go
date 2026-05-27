@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/nodetoken"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // newBootstrapTestServer assembles a Server with the bits
@@ -322,4 +327,173 @@ func TestHandleNodeBootstrap_EmptyTokenClassDefaultsToNode(t *testing.T) {
 	claims, err := s.Issuer.VerifyAccessToken(resp.PlainToken, time.Now().UTC().Add(time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, identity.ClassNode, claims.Class)
+}
+
+// fakeNodeTokenEngine is a recording stub for testing the
+// row-persistence path memql#343 added. Captures every Execute
+// call and (when lookupRow is non-nil) returns it as the response
+// to queryNodeTokenByIdentityId so we can simulate "row already
+// exists" or "row is revoked" paths.
+type fakeNodeTokenEngine struct {
+	calls []string
+	// lookupRow, when non-nil, is returned by every Execute that
+	// matches a queryNodeTokenByIdentityId. Lets tests stage "row
+	// already exists" or "row is revoked".
+	lookupRow *struct {
+		IdentityId string
+		Active     bool
+		RevokedAt  string
+	}
+}
+
+func (e *fakeNodeTokenEngine) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	_ = ctx
+	e.calls = append(e.calls, query)
+	if strings.HasPrefix(query, "queryNodeTokenByIdentityId") && e.lookupRow != nil {
+		creds, _ := structpb.NewStruct(map[string]any{
+			"nodeId":    "x",
+			"nodeType":  "bff",
+			"revokedAt": e.lookupRow.RevokedAt,
+		})
+		payload := &structpb.Struct{Fields: map[string]*structpb.Value{
+			"active":      structpb.NewBoolValue(e.lookupRow.Active),
+			"credentials": structpb.NewStructValue(creds),
+		}}
+		return &memqlengine.ExecuteResult{
+			Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+				{Id: e.lookupRow.IdentityId, Payload: payload},
+			}},
+		}, nil
+	}
+	// Lookup-miss + every mutation: return empty result (success).
+	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+}
+
+// newBootstrapTestServerWithStore wires the same fixture as
+// newBootstrapTestServer but additionally attaches a NodeTokenStore
+// backed by the supplied fake engine so the persistence path runs.
+func newBootstrapTestServerWithStore(t *testing.T, bootstrapSecret string, eng *fakeNodeTokenEngine) *Server {
+	t.Helper()
+	s := newBootstrapTestServer(t, bootstrapSecret)
+	s.NodeTokenStore = &nodetoken.Store{Engine: eng}
+	return s
+}
+
+// TestHandleNodeBootstrap_CreatesRowOnFirstCall asserts a bootstrap
+// call against a node with no existing row issues a single
+// mutationCreateNodeTokenIdentity with the canonical row id, system-
+// user sentinel, and origin stamping (bootstrappedAt /
+// bootstrappedFrom).
+func TestHandleNodeBootstrap_CreatesRowOnFirstCall(t *testing.T) {
+	const secret = "secret"
+	eng := &fakeNodeTokenEngine{}
+	s := newBootstrapTestServerWithStore(t, secret, eng)
+
+	body := `{"nodeId":"v1:cluster:node:bff-local","nodeType":"bff"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	require.GreaterOrEqual(t, len(eng.calls), 2, "calls=%v", eng.calls)
+	assert.True(t, strings.HasPrefix(eng.calls[0], "queryNodeTokenByIdentityId"), "first call should be the lookup")
+	createCallIdx := -1
+	for i, c := range eng.calls {
+		if strings.HasPrefix(c, "mutationCreateNodeTokenIdentity") {
+			createCallIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, createCallIdx, "expected a mutationCreateNodeTokenIdentity call; calls=%v", eng.calls)
+	create := eng.calls[createCallIdx]
+	for _, fragment := range []string{
+		`identityId:"v1:identity:identity:node:bff:v1:cluster:node:bff-local"`,
+		`userId:"system:node_bootstrap"`,
+		`mintedBy:"system:node_bootstrap"`,
+		`nodeId:"v1:cluster:node:bff-local"`,
+		`nodeType:"bff"`,
+		`bootstrappedFrom:"`, // exact IP varies under httptest, but field must be present
+		`bootstrappedAt:"`,
+	} {
+		assert.Contains(t, create, fragment, "mutation missing %q", fragment)
+	}
+}
+
+// TestHandleNodeBootstrap_UpdatesRowOnRebootstrap asserts when the
+// row already exists the handler issues mutationRecordNodeTokenBootstrap
+// (update path), not another Create. The origin signals (bootstrappedAt
+// + bootstrappedFrom) must NOT be re-passed -- the update path
+// preserves them server-side; re-passing would corrupt the "first
+// seen" signal.
+func TestHandleNodeBootstrap_UpdatesRowOnRebootstrap(t *testing.T) {
+	const secret = "secret"
+	eng := &fakeNodeTokenEngine{
+		lookupRow: &struct {
+			IdentityId string
+			Active     bool
+			RevokedAt  string
+		}{
+			IdentityId: "v1:identity:identity:node:bff:v1:cluster:node:bff-local",
+			Active:     true,
+			RevokedAt:  "",
+		},
+	}
+	s := newBootstrapTestServerWithStore(t, secret, eng)
+
+	body := `{"nodeId":"v1:cluster:node:bff-local","nodeType":"bff"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	updateCallIdx := -1
+	for i, c := range eng.calls {
+		if strings.HasPrefix(c, "mutationRecordNodeTokenBootstrap") {
+			updateCallIdx = i
+			break
+		}
+		assert.False(t, strings.HasPrefix(c, "mutationCreateNodeTokenIdentity"), "re-bootstrap must NOT issue a Create; calls=%v", eng.calls)
+	}
+	require.NotEqual(t, -1, updateCallIdx, "expected mutationRecordNodeTokenBootstrap; calls=%v", eng.calls)
+	update := eng.calls[updateCallIdx]
+	assert.Contains(t, update, `identityId:"v1:identity:identity:node:bff:v1:cluster:node:bff-local"`)
+	assert.Contains(t, update, `lastBootstrappedAt:"`)
+	// memql#343 v2: the whole-credentials replace fix REQUIRES every
+	// preserved-origin field to appear (otherwise the variant-
+	// discriminator validator rejects the update). The earlier
+	// "must not appear" expectation was wrong -- pinning the correct
+	// shape here.
+	assert.Contains(t, update, "bootstrappedAt:")
+	assert.Contains(t, update, "bootstrappedFrom:")
+	assert.Contains(t, update, "nodeId:")
+	assert.Contains(t, update, "nodeType:")
+}
+
+// TestHandleNodeBootstrap_RejectsRevokedRow asserts a bootstrap against
+// a row with non-empty revokedAt is rejected with 403 node_token_revoked
+// and no JWT is minted. The pre-mint gate prevents the verifier from
+// having to reject a fresh credential the operator already revoked.
+func TestHandleNodeBootstrap_RejectsRevokedRow(t *testing.T) {
+	const secret = "secret"
+	eng := &fakeNodeTokenEngine{
+		lookupRow: &struct {
+			IdentityId string
+			Active     bool
+			RevokedAt  string
+		}{
+			IdentityId: "v1:identity:identity:node:bff:v1:cluster:node:bff-local",
+			Active:     false,
+			RevokedAt:  "2026-05-26T12:00:00Z",
+		},
+	}
+	s := newBootstrapTestServerWithStore(t, secret, eng)
+
+	body := `{"nodeId":"v1:cluster:node:bff-local","nodeType":"bff"}`
+	rec := driveBootstrapRequest(t, s, secret, body)
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+	resp := decodeBootstrapResponse(t, rec)
+	assert.False(t, resp.Success)
+	assert.Equal(t, "node_token_revoked", resp.ErrorCode)
+	assert.Empty(t, resp.PlainToken, "must not mint a JWT for a revoked node")
+
+	for _, c := range eng.calls {
+		assert.False(t, strings.HasPrefix(c, "mutationCreateNodeTokenIdentity"), "revoked path must not Create; calls=%v", eng.calls)
+		assert.False(t, strings.HasPrefix(c, "mutationRecordNodeTokenBootstrap"), "revoked path must not Record; calls=%v", eng.calls)
+	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
+	"github.com/znasllc-io/memql/component/identity/nodetoken"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
@@ -61,6 +62,16 @@ type Server struct {
 	// default; a row missing the field entirely behaves the same).
 	// See identity.LiveTokenSettings for the contract.
 	LiveTokenSettings func(ctx context.Context) identity.LiveTokenSettings
+
+	// NodeTokenStore wires the v1:identity:identity row-persistence
+	// side of the /node/bootstrap path (memql#343). When non-nil, every
+	// bootstrap call looks up the canonical row id, creates on miss /
+	// updates on hit, and rejects when the row carries a non-empty
+	// revokedAt. When nil, the bootstrap path falls back to the
+	// pre-#343 synthetic-IdentityId behaviour -- the verifier still
+	// trusts the JWT but operators have no visibility / revocability.
+	// Tests and minimal deployments can leave this nil.
+	NodeTokenStore *nodetoken.Store
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for

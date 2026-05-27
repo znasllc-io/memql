@@ -2701,6 +2701,92 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 	return b.String()
 }
 
+// MutationCreateNodeTokenIdentity -- First-time create of a node_token identity row. Called by /node/bootstrap on cache-miss; operator-CLI mints can also call this directly. mintedBy='system:node_bootstrap' marks the bootstrap-path origin.
+//
+// Bound concept: identity.
+type MutationCreateNodeTokenIdentityArgs struct {
+	IdentityId         string
+	UserId             string
+	NodeId             string
+	NodeType           string
+	KeyHash            string
+	MintedBy           string
+	ExpiresAt          string
+	BootstrappedAt     string
+	BootstrappedFrom   string
+	LastBootstrappedAt string
+}
+
+// MutationCreateNodeTokenIdentity calls the engine mutation mutationCreateNodeTokenIdentity.
+func (qc *QueryClient) MutationCreateNodeTokenIdentity(ctx context.Context, args MutationCreateNodeTokenIdentityArgs) (*Result, error) {
+	call := MutationCreateNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateNodeTokenIdentity", call)
+}
+
+func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateNodeTokenIdentity({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if args.KeyHash != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("keyHash: ")
+		b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.BootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	}
+	if args.BootstrappedFrom != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedFrom: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	}
+	if args.LastBootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastBootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastBootstrappedAt))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.
@@ -5874,6 +5960,100 @@ func MutationRecordMisrouteFeedbackBuild(args MutationRecordMisrouteFeedbackArgs
 	return b.String()
 }
 
+// MutationRecordNodeTokenBootstrap -- Re-bootstrap update on an existing node_token row. Caller assembles the full merged credentials object Go-side; the mutation does a whole-replace under the variant discriminator.
+//
+// Bound concept: identity.
+type MutationRecordNodeTokenBootstrapArgs struct {
+	IdentityId         string
+	NodeId             string
+	NodeType           string
+	MintedBy           string
+	KeyHash            string
+	ExpiresAt          string
+	BootstrappedAt     string
+	BootstrappedFrom   string
+	LastBootstrappedAt string
+	LastConnectAt      string
+	RevokedAt          string
+}
+
+// MutationRecordNodeTokenBootstrap calls the engine mutation mutationRecordNodeTokenBootstrap.
+func (qc *QueryClient) MutationRecordNodeTokenBootstrap(ctx context.Context, args MutationRecordNodeTokenBootstrapArgs) (*Result, error) {
+	call := MutationRecordNodeTokenBootstrapBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordNodeTokenBootstrap", call)
+}
+
+func MutationRecordNodeTokenBootstrapBuild(args MutationRecordNodeTokenBootstrapArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordNodeTokenBootstrap({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if args.KeyHash != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("keyHash: ")
+		b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	}
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.BootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	}
+	if args.BootstrappedFrom != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedFrom: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastBootstrappedAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.LastBootstrappedAt))
+	if args.LastConnectAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastConnectAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastConnectAt))
+	}
+	if args.RevokedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revokedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordRouterCall -- Record a single SI call through the memQL SI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
 // Bound concept: call.
@@ -6489,6 +6669,100 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRevokeNodeTokenIdentity -- Operator revoke of a node_token row. Caller assembles the full credentials object Go-side; this mutation flips active=false and stamps revokedAt as part of the whole-replace.
+//
+// Bound concept: identity.
+type MutationRevokeNodeTokenIdentityArgs struct {
+	IdentityId         string
+	NodeId             string
+	NodeType           string
+	MintedBy           string
+	KeyHash            string
+	ExpiresAt          string
+	BootstrappedAt     string
+	BootstrappedFrom   string
+	LastBootstrappedAt string
+	LastConnectAt      string
+	RevokedAt          string
+}
+
+// MutationRevokeNodeTokenIdentity calls the engine mutation mutationRevokeNodeTokenIdentity.
+func (qc *QueryClient) MutationRevokeNodeTokenIdentity(ctx context.Context, args MutationRevokeNodeTokenIdentityArgs) (*Result, error) {
+	call := MutationRevokeNodeTokenIdentityBuild(args)
+	return qc.executeNamed(ctx, "mutationRevokeNodeTokenIdentity", call)
+}
+
+func MutationRevokeNodeTokenIdentityBuild(args MutationRevokeNodeTokenIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRevokeNodeTokenIdentity({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeType: ")
+	b.WriteString(fmt.Sprintf("%q", args.NodeType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mintedBy: ")
+	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
+	if args.KeyHash != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("keyHash: ")
+		b.WriteString(fmt.Sprintf("%q", args.KeyHash))
+	}
+	if args.ExpiresAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expiresAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	}
+	if args.BootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
+	}
+	if args.BootstrappedFrom != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bootstrappedFrom: ")
+		b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	}
+	if args.LastBootstrappedAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastBootstrappedAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastBootstrappedAt))
+	}
+	if args.LastConnectAt != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastConnectAt: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastConnectAt))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revokedAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
 	b.WriteString("})")
 	return b.String()
 }

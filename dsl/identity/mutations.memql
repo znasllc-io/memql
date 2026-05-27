@@ -1597,3 +1597,173 @@ mutation user mutationUpdateUser {
     args.payload
   }
 }
+
+// ---- mutations/v1/identity/createNodeTokenIdentity.memql ----
+
+// createNodeTokenIdentity
+// =======================
+//
+// First-time persistence of a v1:identity:identity row for a node-class
+// JWT. Called from /node/bootstrap (memql#343) when the lookup-by-
+// identityId query returns nothing: this is the very first bootstrap
+// for the given (nodeType, nodeId).
+//
+// The row's id is the deterministic synthetic shape #338 already coined:
+// `v1:identity:identity:node:<nodeType>:<nodeId>`. That means second-
+// and-later bootstraps of the same node find the same row and call
+// mutationRecordNodeTokenBootstrap instead (which updates
+// lastBootstrappedAt + keyHash but preserves bootstrappedAt /
+// bootstrappedFrom).
+//
+// mintedBy is set to the synthetic 'system:node_bootstrap' marker
+// for bootstrap-minted rows. Operator-CLI mints (the original #105
+// path) pass the operator's actual userId.
+
+@enabled
+@description("First-time create of a node_token identity row. Called by /node/bootstrap on cache-miss; operator-CLI mints can also call this directly. mintedBy='system:node_bootstrap' marks the bootstrap-path origin.")
+mutation identity mutationCreateNodeTokenIdentity {
+  args {
+    identityId         string  @required
+    userId             string  @required
+    nodeId             string  @required
+    nodeType           string  @required
+    keyHash            string
+    mintedBy           string  @required
+    expiresAt          string
+    bootstrappedAt     string
+    bootstrappedFrom   string
+    lastBootstrappedAt string
+  }
+  insert identity {
+    id: args.identityId
+    args.userId
+    identityType: "node_token"
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        keyHash: coalesce(args.keyHash, ""),
+        mintedBy: args.mintedBy,
+        expiresAt: coalesce(args.expiresAt, ""),
+        lastConnectAt: "",
+        bootstrappedAt: coalesce(args.bootstrappedAt, ""),
+        bootstrappedFrom: coalesce(args.bootstrappedFrom, ""),
+        lastBootstrappedAt: coalesce(args.lastBootstrappedAt, ""),
+        revokedAt: ""
+      }
+    label: concat("node:", args.nodeType, ":", args.nodeId)
+    usableByAgents: false
+    active: true
+  }
+}
+
+// ---- mutations/v1/identity/recordNodeTokenBootstrap.memql ----
+
+// recordNodeTokenBootstrap
+// ========================
+//
+// Re-bootstrap update for an existing node_token identity row.
+// Called from /node/bootstrap when the lookup-by-identityId query
+// returns a row: the node is restarting (or its dev container is
+// being re-created) and a fresh JWT has just been minted.
+//
+// The mutation accepts every credentials field as an explicit arg
+// because memql's `update identity { credentials: {...} }` is a
+// whole-replace of the credentials object, NOT a deep merge. The
+// caller (nodetoken.Store.RecordBootstrap, which already has the
+// existing row from the pre-mint lookup) assembles the full merged
+// credentials in Go and passes it through here; preserved-origin
+// fields (bootstrappedAt + bootstrappedFrom) come from the existing
+// row, updated fields (keyHash / expiresAt / lastBootstrappedAt)
+// come from the fresh mint.
+//
+// Whole-replace was the source of the original bug: passing only the
+// 3 updated fields wiped the discriminator's required-field set
+// (nodeId / nodeType / mintedBy) and the credentials-oneOf
+// validation rejected the merged payload.
+
+@enabled
+@description("Re-bootstrap update on an existing node_token row. Caller assembles the full merged credentials object Go-side; the mutation does a whole-replace under the variant discriminator.")
+mutation identity mutationRecordNodeTokenBootstrap {
+  args {
+    identityId         string  @required
+    nodeId             string  @required
+    nodeType           string  @required
+    mintedBy           string  @required
+    keyHash            string
+    expiresAt          string
+    bootstrappedAt     string
+    bootstrappedFrom   string
+    lastBootstrappedAt string  @required
+    lastConnectAt      string
+    revokedAt          string
+  }
+  update identity {
+    id: args.identityId
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        mintedBy: args.mintedBy,
+        keyHash: coalesce(args.keyHash, ""),
+        expiresAt: coalesce(args.expiresAt, ""),
+        bootstrappedAt: coalesce(args.bootstrappedAt, ""),
+        bootstrappedFrom: coalesce(args.bootstrappedFrom, ""),
+        lastBootstrappedAt: args.lastBootstrappedAt,
+        lastConnectAt: coalesce(args.lastConnectAt, ""),
+        revokedAt: coalesce(args.revokedAt, "")
+      }
+  }
+}
+
+// ---- mutations/v1/identity/revokeNodeTokenIdentity.memql ----
+
+// revokeNodeTokenIdentity
+// =======================
+//
+// Operator-driven revoke of a node_token row from /admin/tokens.
+// Flips active=false on the top-level concept AND stamps
+// credentials.revokedAt with the revocation timestamp.
+//
+// Same whole-replace pattern as mutationRecordNodeTokenBootstrap:
+// the caller (nodetoken.Store.RevokeAt) fetches the existing row,
+// preserves every other credentials field, and only touches
+// revokedAt. Top-level active flag is set on the partial update
+// (top-level fields ARE shallow-merged).
+//
+// The verifier's NodeRevocationCheck reads credentials.revokedAt on
+// every NodeService.Stream open and rejects when it's non-empty --
+// so the revoke takes effect on the very next dial (modulo the 5s
+// cache TTL), no waiting for token TTL.
+
+@enabled
+@description("Operator revoke of a node_token row. Caller assembles the full credentials object Go-side; this mutation flips active=false and stamps revokedAt as part of the whole-replace.")
+mutation identity mutationRevokeNodeTokenIdentity {
+  args {
+    identityId         string  @required
+    nodeId             string  @required
+    nodeType           string  @required
+    mintedBy           string  @required
+    keyHash            string
+    expiresAt          string
+    bootstrappedAt     string
+    bootstrappedFrom   string
+    lastBootstrappedAt string
+    lastConnectAt      string
+    revokedAt          string  @required
+  }
+  update identity {
+    id: args.identityId
+    active: false
+    credentials: {
+        nodeId: args.nodeId,
+        nodeType: args.nodeType,
+        mintedBy: args.mintedBy,
+        keyHash: coalesce(args.keyHash, ""),
+        expiresAt: coalesce(args.expiresAt, ""),
+        bootstrappedAt: coalesce(args.bootstrappedAt, ""),
+        bootstrappedFrom: coalesce(args.bootstrappedFrom, ""),
+        lastBootstrappedAt: coalesce(args.lastBootstrappedAt, ""),
+        lastConnectAt: coalesce(args.lastConnectAt, ""),
+        revokedAt: args.revokedAt
+      }
+  }
+}

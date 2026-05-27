@@ -472,6 +472,23 @@ func QueryAllDocumentChunkDomainsBuild(args QueryAllDocumentChunkDomainsArgs) st
 	return "queryAllDocumentChunkDomains({})"
 }
 
+// QueryAllNodeTokens -- List every node_token identity row in the cluster. Returns active + inactive (revoked rows stay visible for audit).
+//
+// Bound concept: identity.
+type QueryAllNodeTokensArgs struct {
+}
+
+// QueryAllNodeTokens calls the engine query queryAllNodeTokens.
+func (qc *QueryClient) QueryAllNodeTokens(ctx context.Context, args QueryAllNodeTokensArgs) (*Result, error) {
+	call := QueryAllNodeTokensBuild(args)
+	return qc.executeNamed(ctx, "queryAllNodeTokens", call)
+}
+
+func QueryAllNodeTokensBuild(args QueryAllNodeTokensArgs) string {
+	_ = args
+	return "queryAllNodeTokens({})"
+}
+
 // QueryAllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors queryAllSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
 //
 // Bound concept: outputScreening.
@@ -1703,6 +1720,28 @@ func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindA
 	}
 	b.WriteString("capability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Capability))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryNodeTokenByIdentityId -- Hot-path node-token lookup by canonical identity id. Returns active + inactive rows. Backs the verifier's revocation check + /node/bootstrap row-dedup.
+//
+// Bound concept: identity.
+type QueryNodeTokenByIdentityIdArgs struct {
+	IdentityId string
+}
+
+// QueryNodeTokenByIdentityId calls the engine query queryNodeTokenByIdentityId.
+func (qc *QueryClient) QueryNodeTokenByIdentityId(ctx context.Context, args QueryNodeTokenByIdentityIdArgs) (*Result, error) {
+	call := QueryNodeTokenByIdentityIdBuild(args)
+	return qc.executeNamed(ctx, "queryNodeTokenByIdentityId", call)
+}
+
+func QueryNodeTokenByIdentityIdBuild(args QueryNodeTokenByIdentityIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNodeTokenByIdentityId({")
+	b.WriteString("identityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	b.WriteString("})")
 	return b.String()
 }

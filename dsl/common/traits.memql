@@ -330,6 +330,20 @@ trait traitIdentityIsWorkerToken {
   payload.identityType=="worker_token"
 }
 
+// ---- traitIdentityIsNodeToken ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "node_token". Node tokens are admitted only
+// on the NodeService gRPC path; this trait scopes per-node-binding
+// credential lookups (used by the verifier's revocation check and
+// by /admin/tokens for the node-token surface).
+
+@enabled
+@description("Matches v1:identity:identity rows with identityType=='node_token'.")
+trait traitIdentityIsNodeToken {
+  payload.identityType=="node_token"
+}
+
 // ---- traitIsDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

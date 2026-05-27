@@ -13,6 +13,32 @@ type AdminPATRow struct {
 	CreatedAt  string
 }
 
+// AdminNodeTokenRow is the per-row v1:identity:identity[node_token]
+// projection rendered into /admin/tokens (memql#343). Distinct from
+// AdminPATRow because the operational signals differ: a PAT cares
+// about owner + label + last-used; a node token cares about which
+// node binding it serves, when + from where it was bootstrapped, and
+// the JWT JTI of the most-recent mint.
+//
+// MintedBy reads "system:node_bootstrap" for rows created by the
+// /node/bootstrap endpoint; operator-CLI mints (the original #105
+// path) carry the admin's userId instead. The template renders
+// "(bootstrapped)" for the sentinel.
+type AdminNodeTokenRow struct {
+	ID                 string
+	NodeID             string
+	NodeType           string
+	MintedBy           string
+	KeyHashJTI         string
+	Active             bool
+	ExpiresAt          string
+	LastConnectAt      string
+	BootstrappedAt     string
+	BootstrappedFrom   string
+	LastBootstrappedAt string
+	RevokedAt          string
+}
+
 // AdminTokensData drives /admin/tokens.
 type AdminTokensData struct {
 	Layout      LayoutData
@@ -20,6 +46,13 @@ type AdminTokensData struct {
 	Tokens      []AdminPATRow
 	TotalCount  int
 	ActiveCount int
+
+	// memql#343: node-token surface on the same page (one nav link,
+	// one operator concept = "tokens"). The slices are independent --
+	// either may be empty.
+	NodeTokens            []AdminNodeTokenRow
+	NodeTokenTotalCount   int
+	NodeTokenActiveCount  int
 }
 
 templ AdminTokens(data AdminTokensData) {
@@ -61,7 +94,106 @@ templ AdminTokens(data AdminTokensData) {
 				</p>
 			}
 		</div>
+		<div class="card card-full mt-4">
+			<h1 class="card-title">Node tokens</h1>
+			<p class="card-subtitle">
+				Cluster-internal class="node" JWTs. Rows minted by the
+				<code>/node/bootstrap</code> endpoint (memql#343) carry
+				<em>(bootstrapped)</em> in the Minted by column; operator-CLI
+				mints carry the admin's userId. Revoke stops the next
+				<code>NodeService.Stream</code> open from the affected node.
+			</p>
+			if len(data.NodeTokens) == 0 {
+				<p class="text-muted mt-2">No node tokens have been minted yet.</p>
+			} else {
+				<div class="table-wrap">
+					<table class="data">
+						<thead>
+							<tr>
+								<th>Node</th>
+								<th>Minted by</th>
+								<th>Status</th>
+								<th>Last connect</th>
+								<th>Bootstrapped</th>
+								<th>From</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, t := range data.NodeTokens {
+								@adminNodeTokensRow(t, data.Layout.CSRFToken)
+							}
+						</tbody>
+					</table>
+				</div>
+				<p class="text-small text-muted mt-4">
+					Total: { formatInt(data.NodeTokenTotalCount) } ({ formatInt(data.NodeTokenActiveCount) } active).
+				</p>
+			}
+		</div>
 	}
+}
+
+templ adminNodeTokensRow(t AdminNodeTokenRow, csrfToken string) {
+	<tr>
+		<td>
+			<span class="badge badge-muted">{ t.NodeType }</span>
+			{ " " }
+			<code class="text-small">{ t.NodeID }</code>
+		</td>
+		<td>
+			if t.MintedBy == "system:node_bootstrap" {
+				<span class="text-muted">(bootstrapped)</span>
+			} else {
+				<code class="text-small">{ t.MintedBy }</code>
+			}
+		</td>
+		<td>
+			if t.Active {
+				<span class="badge">active</span>
+			} else {
+				<span class="badge badge-muted">revoked</span>
+				if t.RevokedAt != "" {
+					<br/>
+					<span class="text-small text-muted">{ t.RevokedAt }</span>
+				}
+			}
+		</td>
+		<td>
+			if t.LastConnectAt != "" {
+				{ t.LastConnectAt }
+			} else {
+				<span class="text-muted">never</span>
+			}
+		</td>
+		<td>
+			if t.LastBootstrappedAt != "" {
+				{ t.LastBootstrappedAt }
+			} else if t.BootstrappedAt != "" {
+				{ t.BootstrappedAt }
+			} else {
+				<span class="text-muted">&mdash;</span>
+			}
+		</td>
+		<td>
+			if t.BootstrappedFrom != "" {
+				<code class="text-small">{ t.BootstrappedFrom }</code>
+			} else {
+				<span class="text-muted">&mdash;</span>
+			}
+		</td>
+		<td>
+			if t.Active {
+				<form method="POST" action="/admin/tokens/node/revoke" style="display:inline;" data-submit-once data-confirm="Revoke this node token? The next bootstrap or stream open from this node will be rejected.">
+					@CSRFField(csrfToken)
+					<input type="hidden" name="id" value={ t.ID }/>
+					<button type="submit" class="btn btn-danger btn-small">
+						Revoke
+					</button>
+				</form>
+			}
+		</td>
+	</tr>
 }
 
 templ adminTokensRow(t AdminPATRow, csrfToken string) {

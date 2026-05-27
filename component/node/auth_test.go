@@ -99,7 +99,7 @@ func TestNodeClassStreamInterceptor_AdmitsNodeClassToken(t *testing.T) {
 	km, iss := newIssuer(t, srv.URL)
 	mux.Handle("/.well-known/jwks.json", jwksHandler(km))
 
-	tok, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
+	tok, _, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
 		IdentityId: "v1:identity:identity:node-cog-1",
 		NodeId:     "v1:cluster:node:cognition-1",
 		NodeType:   "cognition",
@@ -180,7 +180,7 @@ func TestNodeClassStreamInterceptor_RejectsExpiredNodeToken(t *testing.T) {
 
 	// Mint a node token with iat 2h in the past + a 1h TTL.
 	past := time.Now().UTC().Add(-2 * time.Hour)
-	tok, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
+	tok, _, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
 		IdentityId:  "v1:identity:identity:node-x",
 		NodeId:      "v1:cluster:node:x",
 		NodeType:    "bff",

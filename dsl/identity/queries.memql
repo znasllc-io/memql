@@ -1159,3 +1159,58 @@ query identity queryWorkerTokensForUser {
   filter  traitIdentityIsWorkerToken; payload.userId==args.userId
   shape   identityFull
 }
+
+// ---- queries/v1/identity/nodeTokenByIdentityId.memql ----
+
+// queryNodeTokenByIdentityId
+// ==========================
+//
+// Hot-path lookup for the verifier's NodeService.Stream revocation
+// check (memql#343 phase E). The presented JWT carries the row's
+// canonical id as its `sub` claim; the verifier extracts that, looks
+// up the row, and rejects when credentials.revokedAt is non-empty
+// (or active=false).
+//
+// Returns rows even when active=false so the interceptor can stamp
+// a precise audit reason ("node token revoked") rather than a generic
+// "not found".
+//
+// Also called from /node/bootstrap to dedup re-bootstraps -- if the
+// row exists, the bootstrap handler calls mutationRecordNodeTokenBootstrap
+// (update); if not, it calls mutationCreateNodeTokenIdentity (insert).
+
+@enabled
+@description("Hot-path node-token lookup by canonical identity id. Returns active + inactive rows. Backs the verifier's revocation check + /node/bootstrap row-dedup.")
+query identity queryNodeTokenByIdentityId {
+  args {
+    identityId  string  @required
+  }
+  filter  traitIdentityIsNodeToken; id==args.identityId
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/allNodeTokens.memql ----
+
+// queryAllNodeTokens
+// ==================
+//
+// Lists every node_token identity row in the cluster. Backs the
+// /admin/tokens "node tokens" section: operators see which nodes
+// have bootstrapped, when, from where, and which are revoked.
+//
+// Returns both active + inactive (revoked stays visible for audit;
+// the admin template renders the revocation timestamp).
+
+@enabled
+// `@public` marks this query as intentionally not caller-scoped.
+// Backs the /admin/tokens page (admin-only at the web-handler layer;
+// the query itself doesn't carry a user filter). Same auth shape as
+// the analogous PAT / worker-token admin queries.
+@public
+@description("List every node_token identity row in the cluster. Returns active + inactive (revoked rows stay visible for audit).")
+query identity queryAllNodeTokens {
+  args {
+  }
+  filter  traitIdentityIsNodeToken
+  shape   identityFull
+}

@@ -155,7 +155,7 @@ func runNodeTokenMint(args []string) int {
 	}
 
 	now := time.Now().UTC()
-	bearer, jwtExpiresAt, err := svc.Issuer().IssueNodeAccessToken(
+	bearer, jwtExpiresAt, _, err := svc.Issuer().IssueNodeAccessToken(
 		identity.NodeIssueInput{
 			IdentityId:  identityId,
 			NodeId:      *nodeId,

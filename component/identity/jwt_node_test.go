@@ -31,7 +31,7 @@ func TestIssueNodeAccessToken_StampsClassAndBinding(t *testing.T) {
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
-	tok, exp, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
+	tok, exp, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
 		IdentityId: "v1:identity:identity:node-cog-1",
 		NodeId:     "v1:cluster:node:cognition-1",
 		NodeType:   "cognition",
@@ -77,7 +77,7 @@ func TestIssueNodeAccessToken_RejectsEmptyFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := iss.IssueNodeAccessToken(tc.in, time.Now().UTC())
+			_, _, _, err := iss.IssueNodeAccessToken(tc.in, time.Now().UTC())
 			require.Error(t, err)
 		})
 	}

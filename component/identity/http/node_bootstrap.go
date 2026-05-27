@@ -9,7 +9,19 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/nodetoken"
 )
+
+// nodeBootstrapSystemUserId is the sentinel v1:identity:user.id stamped
+// on the userId field of every bootstrap-created v1:identity:identity
+// row (memql#343). The userId field on the identity concept is required
+// but not foreign-keyed -- a sentinel value with the `system:` prefix
+// is the established way to mark "this row was created without an
+// authenticated user behind it" (matches the SystemBootstrapMintedBy
+// pattern nodetoken.Store uses for the mintedBy field). The
+// /admin/tokens page renders rows with this owner as "(bootstrapped)"
+// rather than trying to look up a real user.
+const nodeBootstrapSystemUserId = "system:node_bootstrap"
 
 // node_bootstrap.go implements the `POST /node/bootstrap` endpoint
 // that lets a cluster binary (bff / agent / cognition / planner /
@@ -170,9 +182,28 @@ func (s *Server) handleNodeBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// mintNodeBootstrapToken is the original class="node" mint path,
-// extracted from handleNodeBootstrap so the multi-class dispatcher
-// reads cleanly. memql#338 contract preserved verbatim.
+// mintNodeBootstrapToken is the class="node" mint path. memql#338
+// shipped the original synthetic-IdentityId variant (mint + return,
+// no persistence); memql#343 layers row persistence on top so
+// /admin/tokens can display + revoke each node-token row.
+//
+// Flow (post-#343, NodeTokenStore wired):
+//
+//  1. Compute the deterministic row id via
+//     nodetoken.CanonicalIdentityIdFor(nodeType, nodeId). Re-bootstraps
+//     of the same node hit the same row.
+//  2. Look up the row. If it exists AND is revoked, reject with 403
+//     -- operator has explicitly revoked this node, the bootstrap
+//     handler must NOT re-mint.
+//  3. Mint the JWT via IssueNodeAccessToken (now returns the JTI).
+//  4. Create the row on cache-miss (stamps bootstrappedAt +
+//     bootstrappedFrom); update on cache-hit (refreshes keyHash +
+//     expiresAt + lastBootstrappedAt; preserves origin signals).
+//
+// When NodeTokenStore is nil (tests / minimal deployments), the
+// handler falls back to the pre-#343 mint-and-return shape. The JWT
+// is still functional via the verifier's JWKS-only path; what's lost
+// is the operator-visibility / revocability surface.
 func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, body NodeBootstrapRequest) {
 	nodeType := strings.TrimSpace(body.NodeType)
 	nodeId := strings.TrimSpace(body.NodeId)
@@ -185,19 +216,56 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Synthetic IdentityId. The verifier doesn't look up identity rows
-	// during JWT validation -- it trusts the signed `node_id` /
-	// `node_type` claims directly -- so a synthetic subject works
-	// fine for getting peer auth functional. A follow-up can persist
-	// real identity rows so /admin/tokens can display + revoke per-
-	// node tokens (see memql#338's notes).
-	syntheticIdentityId := "v1:identity:identity:node:" + nodeType + ":" + nodeId
+	// Deterministic row id. The verifier reads this same value from
+	// the JWT's `sub` claim and looks up the row on every
+	// NodeService.Stream open (the revocation gate, phase E). Pre-#343
+	// the id was synthetic-only; post-#343 it points at a real row
+	// when NodeTokenStore is wired.
+	identityId := nodetoken.CanonicalIdentityIdFor(nodeType, nodeId)
 
-	token, expiresAt, err := s.Issuer.IssueNodeAccessToken(identity.NodeIssueInput{
-		IdentityId: syntheticIdentityId,
+	// Pre-mint revocation gate. If the operator has revoked this
+	// node from /admin/tokens, refuse to mint a fresh token rather
+	// than producing one the verifier will immediately reject -- saves
+	// the round-trip + makes the audit trail honest.
+	var existing *nodetoken.Row
+	if s.NodeTokenStore != nil {
+		row, err := s.NodeTokenStore.LookupByIdentityId(r.Context(), identityId)
+		if err != nil && s.Logger != nil {
+			// Lookup failure logged but doesn't block the mint --
+			// availability beats consistency for the bootstrap path
+			// (the verifier still has the revocation check downstream
+			// once the store is reachable again).
+			s.Logger.Warn("node_bootstrap_lookup_failed",
+				"error", err.Error(),
+				"identity_id", identityId,
+			)
+		}
+		if row != nil && row.IsRevoked() {
+			if s.Logger != nil {
+				s.Logger.Info("node_bootstrap_rejected_revoked",
+					"identity_id", identityId,
+					"node_type", nodeType,
+					"node_id", nodeId,
+					"revoked_at", row.RevokedAt.Format(time.RFC3339),
+					"remote", clientIP(r),
+				)
+			}
+			writeJSON(w, http.StatusForbidden, NodeBootstrapResponse{
+				Success:   false,
+				Error:     "node token has been revoked by operator",
+				ErrorCode: "node_token_revoked",
+			})
+			return
+		}
+		existing = row
+	}
+
+	now := time.Now().UTC()
+	token, expiresAt, jti, err := s.Issuer.IssueNodeAccessToken(identity.NodeIssueInput{
+		IdentityId: identityId,
 		NodeId:     nodeId,
 		NodeType:   nodeType,
-	}, time.Now().UTC())
+	}, now)
 	if err != nil {
 		errorId := generateErrorId()
 		if s.Logger != nil {
@@ -217,21 +285,69 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Persist or update the v1:identity:identity row. Best-effort:
+	// row-write failures don't fail the mint (the JWT is already
+	// signed + the verifier can still validate it via JWKS); they
+	// surface as warn-level logs the operator can investigate.
+	rowOp := "skipped"
+	if s.NodeTokenStore != nil {
+		if existing == nil {
+			cerr := s.NodeTokenStore.Create(r.Context(), nodetoken.CreateInput{
+				IdentityId:         identityId,
+				UserId:             nodeBootstrapSystemUserId,
+				NodeId:             nodeId,
+				NodeType:           nodeType,
+				KeyHash:            jti,
+				MintedBy:           nodetoken.SystemBootstrapMintedBy,
+				ExpiresAt:          expiresAt,
+				BootstrappedAt:     now,
+				BootstrappedFrom:   clientIP(r),
+				LastBootstrappedAt: now,
+			})
+			if cerr != nil {
+				if s.Logger != nil {
+					s.Logger.Warn("node_bootstrap_row_create_failed",
+						"error", cerr.Error(),
+						"identity_id", identityId,
+					)
+				}
+				rowOp = "create_failed"
+			} else {
+				rowOp = "created"
+			}
+		} else {
+			rerr := s.NodeTokenStore.RecordBootstrap(r.Context(), existing, jti, expiresAt, now)
+			if rerr != nil {
+				if s.Logger != nil {
+					s.Logger.Warn("node_bootstrap_row_update_failed",
+						"error", rerr.Error(),
+						"identity_id", identityId,
+					)
+				}
+				rowOp = "update_failed"
+			} else {
+				rowOp = "updated"
+			}
+		}
+	}
+
 	if s.Logger != nil {
 		s.Logger.Info("node_bootstrap_issued",
 			"token_class", "node",
 			"node_type", nodeType,
 			"node_id", nodeId,
-			"identity_id", syntheticIdentityId,
+			"identity_id", identityId,
+			"jti", jti,
 			"expires_at", expiresAt.Format(time.RFC3339),
 			"remote", clientIP(r),
+			"row_op", rowOp,
 		)
 	}
 
 	writeJSON(w, http.StatusOK, NodeBootstrapResponse{
 		Success:    true,
 		PlainToken: token,
-		IdentityId: syntheticIdentityId,
+		IdentityId: identityId,
 		NodeType:   nodeType,
 		NodeId:     nodeId,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),

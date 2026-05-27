@@ -9,9 +9,39 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	"github.com/znasllc-io/memql/component/identity/nodetoken"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/server"
 )
+
+// nodetokenRevocationResolver bridges the node package's
+// NodeTokenRevocationResolver port to a live *nodetoken.Store. Lives
+// in the app/ layer so the node package stays free of any
+// nodetoken / identity dependency -- node sits below identity in the
+// dependency graph; the bridge connects them at wire time.
+type nodetokenRevocationResolver struct {
+	Store *nodetoken.Store
+}
+
+// IsNodeTokenRevoked implements node.NodeTokenRevocationResolver.
+// "Not found" is treated as not-revoked: an operator-CLI-minted token
+// that hasn't been persisted via the bootstrap path is still valid
+// per the JWT signature; only an explicit revoke row state stops it.
+// Lookup failures surface as errors so the interceptor logs + rejects
+// rather than silently admitting traffic on a partial check.
+func (r *nodetokenRevocationResolver) IsNodeTokenRevoked(ctx context.Context, identityId string) (bool, error) {
+	if r == nil || r.Store == nil {
+		return false, nil
+	}
+	row, err := r.Store.LookupByIdentityId(ctx, identityId)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return false, nil
+	}
+	return row.IsRevoked(), nil
+}
 
 // cluster wires distributed node components via bootstrap strategy and emits
 // the system.startup event with infrastructure metadata for automations.
@@ -96,7 +126,22 @@ func (a *App) cluster() {
 	// is a no-op pass-through; otherwise NodeService.Stream rejects
 	// every non-node-class bearer.
 	if nodeServer != nil && a.identityVerifier != nil {
-		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptor(a.identityVerifier, a.Logger))
+		// memql#343: the revocation gate. When the identity service
+		// is reachable (a.engine is the same engine the nodetoken
+		// store sits on top of) every NodeService.Stream open consults
+		// the node-token row's revokedAt + active flags via a
+		// short-TTL in-process cache. Operator clicks "revoke" in
+		// /admin/tokens -> the next stream open from that node is
+		// rejected within DefaultNodeRevocationCacheTTL (5s).
+		var revCheck *node.NodeRevocationCheck
+		if a.engine != nil {
+			revCheck = &node.NodeRevocationCheck{
+				Resolver: &nodetokenRevocationResolver{
+					Store: &nodetoken.Store{Engine: a.engine, Logger: a.Logger},
+				},
+			}
+		}
+		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptorWithRevocation(a.identityVerifier, revCheck, a.Logger))
 	}
 
 	if peerMgr != nil {
