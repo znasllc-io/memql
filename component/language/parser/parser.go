@@ -853,6 +853,16 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 		Args:     args,
 		Returns:  returns,
 		Body:     body,
+		// Functions default to enabled. @disabled flips this off;
+		// @enabled is a no-op kept for backward compatibility.
+		// Pre-#360 the default was false, which silently disabled
+		// every logic function in the tree that authors had written
+		// without @enabled -- including chat-reply (logicGenerateResponse),
+		// greet-on-join's auto-join (logicAutoJoinSI), and the
+		// retention sweeps. Queries / mutations / automations all
+		// carried @enabled explicitly so the flip changes behaviour
+		// only for the under-annotated logic surface.
+		Enabled: true,
 	}
 	// If a file-top `args { ... }` block was parsed just before this
 	// definition, attach it. The args block is the canonical author
