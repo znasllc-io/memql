@@ -117,7 +117,25 @@ func runNodeTokenMint(args []string) int {
 		// Non-fatal -- envelope/container env may already cover everything.
 	}
 
-	logger := mustCreateServiceLogger()
+	// CLI subcommand: logs to stderr so stdout stays clean for the
+	// minted bearer (which scripts/dev/mint-node-tokens.sh captures
+	// via $(...)). See main.go::mustCreateCLILogger for the full
+	// rationale + memql#353 for what broke before the split.
+	//
+	// 15+ component-internal loggers (memql, automations, events,
+	// memoryNodesDB, cache, language, etc.) are hardcoded to write
+	// to os.Stdout. Refactoring every one to accept a writer is the
+	// right long-term shape, but for the immediate fix we redirect
+	// os.Stdout to os.Stderr for the duration of this subcommand and
+	// save the real stdout fd to write the bearer through at the end.
+	// All component-internal logs now go to stderr alongside the
+	// CLI logger's; the bearer is the ONLY thing operators can
+	// capture via `bearer=$(docker exec ... mint)`.
+	realStdout := os.Stdout
+	os.Stdout = os.Stderr
+	defer func() { os.Stdout = realStdout }()
+
+	logger := mustCreateCLILogger()
 	application := app.Build(logger, resolveVersionFn(), app.Overrides{})
 
 	// Start ONLY the dependencies the mint touches (database +
@@ -177,9 +195,14 @@ func runNodeTokenMint(args []string) int {
 		fmt.Fprintf(os.Stderr, "node-token mint: wrote bearer to %s (mode 0600); node=%s type=%s expires=%s\n",
 			*out, *nodeId, *nodeType, jwtExpiresAt.Format(time.RFC3339))
 	} else {
-		// stdout = the bearer alone, no decoration, so the make
-		// target / dev-refresh can capture it with $(...).
-		fmt.Println(bearer)
+		// realStdout = the actual stdout this subcommand was invoked
+		// with. The os.Stdout swap above redirected the global to
+		// stderr so component-internal loggers don't pollute the
+		// caller's capture; we write the bearer through the saved
+		// fd so `bearer=$(docker exec ... mint)` sees exactly one
+		// line. fmt.Println(bearer) would have written to the
+		// REDIRECTED os.Stdout (== stderr) and lost the bearer.
+		fmt.Fprintln(realStdout, bearer)
 		fmt.Fprintf(os.Stderr, "node-token mint: minted node=%s type=%s expires=%s\n",
 			*nodeId, *nodeType, jwtExpiresAt.Format(time.RFC3339))
 	}
