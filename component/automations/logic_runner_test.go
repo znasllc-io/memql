@@ -397,6 +397,169 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 	}
 }
 
+// TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce pins the
+// positional-builtin short-circuit (#362). Before this lands,
+// `return coalesce(stepX, stepY.First())` and step-RHS
+// `enabled := coalesce(args.X, true)` both fall through to
+// engine.Execute, which fails the lookup with `function "coalesce"
+// not found`. The local short-circuit evaluates each arg against
+// the bound Evaluator (args via custom-var resolution, step refs
+// via EvaluateStepReference, literals via strconv parsing) and
+// applies the first-non-empty semantics.
+func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+
+	t.Run("first non-empty arg wins", func(t *testing.T) {
+		evaluator := NewEvaluator()
+		val, handled, err := r.tryEvaluateBuiltinLocally(`coalesce("first", "second")`, evaluator)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if !handled {
+			t.Fatalf("expected handled=true for `coalesce(\"first\", \"second\")`")
+		}
+		if val != "first" {
+			t.Errorf("val = %#v, want %q", val, "first")
+		}
+	})
+
+	t.Run("empty string is skipped to fallback", func(t *testing.T) {
+		evaluator := NewEvaluator()
+		val, _, err := r.tryEvaluateBuiltinLocally(`coalesce("", "fallback")`, evaluator)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if val != "fallback" {
+			t.Errorf("val = %#v, want %q", val, "fallback")
+		}
+	})
+
+	t.Run("args.X.Y resolves via the custom-var path", func(t *testing.T) {
+		// Mirrors cluster/logic.memql line 26:
+		//   coalesce(args.event.payload.database.host, "localhost")
+		evaluator := NewEvaluator()
+		evaluator.SetCustom("args", map[string]any{
+			"event": map[string]any{
+				"payload": map[string]any{
+					"database": map[string]any{"host": "live.host"},
+				},
+			},
+		})
+		val, handled, err := r.tryEvaluateBuiltinLocally(
+			`coalesce(args.event.payload.database.host, "localhost")`,
+			evaluator,
+		)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if !handled {
+			t.Fatalf("expected handled=true")
+		}
+		if val != "live.host" {
+			t.Errorf("val = %#v, want %q", val, "live.host")
+		}
+	})
+
+	t.Run("missing args.X.Y falls through to literal fallback", func(t *testing.T) {
+		evaluator := NewEvaluator()
+		evaluator.SetCustom("args", map[string]any{
+			"event": map[string]any{"payload": map[string]any{}},
+		})
+		val, _, err := r.tryEvaluateBuiltinLocally(
+			`coalesce(args.event.payload.database.host, "localhost")`,
+			evaluator,
+		)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if val != "localhost" {
+			t.Errorf("val = %#v, want %q (default)", val, "localhost")
+		}
+	})
+
+	t.Run("bare step ref + step.method() return values", func(t *testing.T) {
+		// Mirrors cluster/logic.memql line 52:
+		//   return coalesce(clusterRecord, existing.First())
+		// When the create-branch ran, clusterRecord is bound. When it
+		// didn't, clusterRecord.Status=="skipped" and the fallback is
+		// the first existing row.
+		evaluator := NewEvaluator()
+		evaluator.SetStepResult("clusterRecord", &StepResult{
+			Status: "success",
+			Result: map[string]any{"id": "new-cluster"},
+		})
+		val, _, err := r.tryEvaluateBuiltinLocally(
+			`coalesce(clusterRecord, existing.First())`,
+			evaluator,
+		)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		// clusterRecord resolves to its StepResult — non-nil so coalesce
+		// picks it. We just check it's non-nil because the bare-step
+		// path returns the *StepResult itself.
+		if val == nil {
+			t.Fatalf("expected non-nil clusterRecord arg, got nil")
+		}
+	})
+
+	t.Run("non-builtin name returns handled=false", func(t *testing.T) {
+		evaluator := NewEvaluator()
+		val, handled, err := r.tryEvaluateBuiltinLocally(`someUserFunc("a", "b")`, evaluator)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if handled {
+			t.Errorf("expected handled=false for unknown name; got val=%#v", val)
+		}
+	})
+
+	t.Run("bare step name with no parens returns handled=false", func(t *testing.T) {
+		// The bare step-name case (no parens / no method) does NOT match
+		// the `<name>(...)` shape; it falls through to engine.Execute.
+		// This pins that the builtin matcher doesn't accidentally
+		// swallow bare identifiers.
+		evaluator := NewEvaluator()
+		_, handled, _ := r.tryEvaluateBuiltinLocally("clusterRecord", evaluator)
+		if handled {
+			t.Errorf("expected handled=false for bare identifier")
+		}
+	})
+}
+
+// TestSplitTopLevelArgs pins the arg splitter -- the helper has to
+// keep nested parens (`x.method()`, `inner(a, b)`), brackets, braces,
+// and quoted strings as a single arg even when they contain commas.
+func TestSplitTopLevelArgs(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{`a, b`, []string{"a", "b"}},
+		{`"a, b", c`, []string{`"a, b"`, "c"}},
+		{`x.method(), y`, []string{"x.method()", "y"}},
+		{`outer(a, b), z`, []string{"outer(a, b)", "z"}},
+		{`{a: 1, b: 2}, x`, []string{"{a: 1, b: 2}", "x"}},
+		{``, nil},
+		{`single`, []string{"single"}},
+	}
+	for _, tc := range cases {
+		got, err := splitTopLevelArgs(tc.in)
+		if err != nil {
+			t.Fatalf("splitTopLevelArgs(%q): %v", tc.in, err)
+		}
+		if len(got) != len(tc.want) {
+			t.Errorf("splitTopLevelArgs(%q) = %#v, want %#v", tc.in, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("splitTopLevelArgs(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
 // TestLogicRunner_RejectsNilBody pins that the runner errors on a
 // nil body rather than panicking. Production never hits this path
 // (the function loader only stamps LogicSteps when there's a multi-
