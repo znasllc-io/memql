@@ -326,6 +326,39 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	}
 }
 
+// TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable pins the
+// memql#363 regression fix: a `return nodeRecord` after a
+// `nodeRecord := mutation...` step must resolve to the step's bound
+// value, not surface as `unknown spec "nodeRecord"` when the engine's
+// query parser treats the bare identifier as a spec name.
+func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
+	r := NewLogicRunner(nil, nil, nil)
+	evaluator := NewEvaluator()
+	evaluator.SetStepResult("nodeRecord", &StepResult{
+		Status: "success",
+		Result: map[string]any{
+			"Bundle": map[string]any{
+				"nodes": []any{map[string]any{"id": "v1:cluster:node:bff-local"}},
+			},
+		},
+	})
+
+	val, handled, err := r.tryEvaluateReturnLocally("nodeRecord", evaluator)
+	if err != nil {
+		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+	}
+	if !handled {
+		t.Fatalf("expected handled=true for bare step identifier `nodeRecord`")
+	}
+	bundle, ok := val.(map[string]any)
+	if !ok {
+		t.Fatalf("bare step-variable return: got %T, want map[string]any", val)
+	}
+	if _, ok := bundle["Bundle"]; !ok {
+		t.Errorf("bare step-variable return: missing Bundle key, got %#v", bundle)
+	}
+}
+
 // TestLogicRunner_TryEvaluateReturnLocally_FallsThrough pins that
 // expressions which AREN'T pure step-method calls report handled=false
 // so the caller falls back to engine.Execute. This protects compound
@@ -346,8 +379,8 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 		{"compound coalesce", `coalesce(rows.First(), "fallback")`},
 		{"mutation call", `mutationCreateThing({name: "x"})`},
 		{"builtin call", `ensureDailySpaceForCaller({})`},
-		{"plain step name (no parens)", `rows`},
 		{"unknown step", `notARealStep.Len()`},
+		{"bare unknown identifier", `notARealStep`},
 		{"single-segment call", `someFunc()`},
 		{"empty expr", ``},
 	}
