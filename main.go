@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -156,6 +157,43 @@ func resolveServiceVersion() string {
 }
 
 func mustCreateServiceLogger() *slog.Logger {
+	return mustCreateLoggerWithWriter(os.Stdout)
+}
+
+// mustCreateCLILogger builds the same logger mustCreateServiceLogger
+// builds but writes JSON to os.Stderr instead of os.Stdout.
+//
+// Why this exists (memql#353): CLI subcommands (node-token mint /
+// voice-agent-token mint) print the minted bearer to stdout so the
+// `bearer=$(docker exec memql ... mint)` shell capture in
+// scripts/dev/mint-node-tokens.sh + scripts/dev/lib.sh's
+// mint_voice_agent_token can pull it out. Under the previous
+// stdout-bound service logger, every app.Build() + dep.Start()
+// startup INFO log landed on stdout BEFORE the bearer, so the shell
+// capture ended up with a multi-line "bearer" of JSON log lines +
+// the JWT. That value got stamped into .env.local.node-tokens as a
+// MEMQL_<TYPE>_NODE_TOKEN= value; the next `source` of the file
+// failed at line 5 with `time:2026-05-27T01:15:00...: command not
+// found` because the JSON shaped like a shell statement that bash
+// couldn't parse.
+//
+// Switching the CLI's logger to stderr keeps the contract clean:
+// stdout = data (the bearer), stderr = diagnostics (slog JSON + the
+// "minted node=X type=Y" summary fmt.Fprintf already writes there).
+// The server boot path (main.go's serviceLogger) stays on stdout so
+// the docker compose log capture / Cloud Run log ingestion that
+// already consume container stdout aren't affected.
+func mustCreateCLILogger() *slog.Logger {
+	return mustCreateLoggerWithWriter(os.Stderr)
+}
+
+// mustCreateLoggerWithWriter is the shared body of
+// mustCreateServiceLogger + mustCreateCLILogger; only the writer
+// differs. Loads serviceOpts the same way (LoggerLevel honoured)
+// and routes through core/logger.New so the redaction handler +
+// ordered JSON writer + component-name field land identically on
+// both paths.
+func mustCreateLoggerWithWriter(w io.Writer) *slog.Logger {
 	serviceOpts, err := loadServiceEnvOptionsFn()
 
 	if err != nil {
@@ -174,5 +212,5 @@ func mustCreateServiceLogger() *slog.Logger {
 		level = parsedLevel
 	}
 
-	return logger.New(common.ComponentName(serviceOpts.Name), os.Stdout, level)
+	return logger.New(common.ComponentName(serviceOpts.Name), w, level)
 }
