@@ -1025,7 +1025,7 @@ mutation presence mutationUpdateParticipantPresence {
     presenceId       string
     participantId    string  @required
     spaceId          string  @required
-    state            string  @required  @enum("idle", "listening", "thinking", "typing", "responding", "working", "waiting", "needs_human", "paused", "error")
+    state            string  @required  @enum("idle", "listening", "thinking", "typing", "responding", "working", "waiting", "needs_human", "needs_clarification", "paused", "error", "using_tool", "researching", "investigating")
     label            string  @required
     reason           string
     sinceAt          string

@@ -8450,7 +8450,7 @@ type MutationUpdateParticipantPresenceArgs struct {
 	PresenceId    string
 	ParticipantId string
 	SpaceId       string
-	// Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | paused | error
+	// Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | needs_clarification | paused | error | using_tool | researching | investigating
 	State           string
 	Label           string
 	Reason          string
