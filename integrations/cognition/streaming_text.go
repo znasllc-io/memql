@@ -178,7 +178,18 @@ func shouldFlushTextBuffer(buf string) bool {
 // transition is in-place -- no React remount, no avatar flicker. Every
 // caller MUST supply a non-empty replyId; passing "" is a bug.
 func (c *CognitionIntegration) mutationEmitTextChunk(ctx context.Context, spaceId, participantId, replyId, text string, index int, done bool) {
-	chunkId := fmt.Sprintf("%s-%d-%d", spaceId, time.Now().UnixNano(), index)
+	// Colon-free chunkId. The dsl mutation's id template is
+	// `concat("text-chunk-", args.chunkId)`, so anything we pass becomes
+	// the persisted row's shortId after the prefix. Canonical-id
+	// validation requires shortIds to be a bare slug / UUID with no
+	// colons -- so we MUST NOT splice the full spaceId (which is
+	// `v1:cognition:space:...`) into chunkId. (memql#372.)
+	//
+	// Per-chunk uniqueness comes from the (UnixNano, index) pair --
+	// per-turn correlation is already carried via replyId. spaceId
+	// previously appeared here only to namespace IDs across spaces,
+	// which the canonical concept-id system handles for us.
+	chunkId := fmt.Sprintf("%d-%d", time.Now().UnixNano(), index)
 
 	doneStr := "false"
 	if done {
