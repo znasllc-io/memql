@@ -387,6 +387,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			var idTemplate any = stmt.IDTemplate
 			var createdAtTemplate any = stmt.CreatedAtTemplate
 			var payloadTemplate any = payloadObj
+			var payloadOverlay map[string]any
 			if payloadObj != nil {
 				if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
 					idTemplate = idVal
@@ -394,7 +395,8 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
 					createdAtTemplate = createdAtVal
 				}
-				if payloadVal, ok := payloadObj["payload"]; ok {
+				payloadVal, hasPayloadKey := payloadObj["payload"]
+				if hasPayloadKey {
 					// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
 					payloadTemplate = payloadVal
 				}
@@ -405,6 +407,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
 				if payloadTemplate == nil {
 					payloadTemplate = payloadObj
+				} else if hasPayloadKey && len(payloadObj) > 0 {
+					// The insert block mixed `args.payload` (the splat) with
+					// explicit fields like `ownerUserId: actor.userId`. Keep
+					// the explicit fields as an overlay -- renderMutationTemplate
+					// evaluates the splat first, then overlays these, so an
+					// authz-relevant server-side stamp wins over any caller-
+					// supplied value in the splat payload (memql#401). Without
+					// this branch the explicit fields were silently dropped.
+					payloadOverlay = payloadObj
 				}
 			}
 
@@ -418,13 +429,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				mutationConcept = boundConcept
 			}
 			fn.MutationTemplate = &FunctionMutationTemplate{
-				Kind:              stmt.Kind,
-				Concept:           mutationConcept,
-				IDTemplate:        idTemplate,
-				CreatedAtTemplate: createdAtTemplate,
-				PayloadTemplate:   payloadTemplate,
-				ParentTemplate:    parentTemplate,
-				AliasOfTemplate:   aliasOfTemplate,
+				Kind:                   stmt.Kind,
+				Concept:                mutationConcept,
+				IDTemplate:             idTemplate,
+				CreatedAtTemplate:      createdAtTemplate,
+				PayloadTemplate:        payloadTemplate,
+				PayloadOverlayTemplate: payloadOverlay,
+				ParentTemplate:         parentTemplate,
+				AliasOfTemplate:        aliasOfTemplate,
 			}
 			fn.ExprSource = extractExpressionFromContent(content)
 

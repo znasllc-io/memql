@@ -40,7 +40,7 @@ mutation participant mutationAddAgentToSpace {
 // The caller is responsible for passing the full updated payload (e.g., active=false, status="archived").
 
 @enabled
-@description("Insert a new version of a space record (typically used to archive a space).")
+@description("Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. memql#401.")
 mutation space mutationArchiveSpace {
   args {
     spaceId  string  @required
@@ -48,6 +48,7 @@ mutation space mutationArchiveSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.payload
   }
 }
@@ -285,7 +286,7 @@ mutation space mutationCreateSpace {
 // status="archived").
 
 @enabled
-@description("Insert a new version of a space record marking it as hard-deleted (deleted=true).")
+@description("Insert a new version of a space record marking it as hard-deleted (deleted=true). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationDeleteSpaceNow {
   args {
     spaceId  string  @required
@@ -293,6 +294,7 @@ mutation space mutationDeleteSpaceNow {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.payload
   }
 }
@@ -585,7 +587,7 @@ mutation participant mutationRemoveAgentFromSpace {
 // The caller is responsible for passing the full updated payload (append-only model).
 
 @enabled
-@description("Insert a new version of a space record (typically used to rename a space).")
+@description("Insert a new version of a space record (typically used to rename a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationRenameSpace {
   args {
     spaceId  string  @required
@@ -593,6 +595,7 @@ mutation space mutationRenameSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.payload
   }
 }
@@ -612,7 +615,7 @@ mutation space mutationRenameSpace {
 // copresentMutations.ts wrappers compose the per-state payload.
 
 @enabled
-@description("Insert a new version of a space record to restore it to the active state.")
+@description("Insert a new version of a space record to restore it to the active state. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationRestoreSpace {
   args {
     spaceId  string  @required
@@ -620,6 +623,7 @@ mutation space mutationRestoreSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.payload
   }
 }
@@ -643,7 +647,7 @@ mutation space mutationRestoreSpace {
 // payload composition.
 
 @enabled
-@description("Insert a new version of a space record with the 'saved' status payload.")
+@description("Insert a new version of a space record with the 'saved' status payload. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).")
 mutation space mutationSaveSpace {
   args {
     spaceId  string  @required
@@ -651,6 +655,7 @@ mutation space mutationSaveSpace {
   }
   insert space {
     id: args.spaceId
+    ownerUserId: actor.userId
     args.payload
   }
 }
