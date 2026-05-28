@@ -1,0 +1,37 @@
+// specs.memql
+//
+// Agent-namespace specs -- concept-specific boolean predicates for
+// v1:agents:agent rows. The three kind filters here are the
+// SPA-side read surface for epic copresent#121 (Phase 2): the
+// Agents panel filters its list to `kind=assistant`, the planner
+// trace viewer surfaces specialists per Plan via `kind=specialist`,
+// and the system bucket is filtered OUT of every user-facing
+// surface via the same predicate consumed from the negative side
+// (NOT specAgentKindSystem at the cognition dispatch layer ->
+// `cognition_handler.go:1572`, factory dedupe ->
+// `factory.go:226`, and integration registration ->
+// `integration.go:251`).
+//
+// The three kinds are mutually exclusive (the schema enforces it
+// via the enum); a row that matches one cannot match either of the
+// other two.
+
+use agents.concepts.{ agent }
+
+@enabled
+@description("Matches v1:agents:agent rows where payload.kind == 'assistant' -- user-facing conversational agents (the per-user General Assistant; the only kind the CoPresent CreateAgentModal mints).")
+spec specAgentKindAssistant {
+  payload.kind == "assistant"
+}
+
+@enabled
+@description("Matches v1:agents:agent rows where payload.kind == 'specialist' -- tool-driven agents (planner-provisioned for capability gaps under memql#399, or user-created with role=specialist). Specialists answer through tools; they never participate in spaces as conversational members.")
+spec specAgentKindSpecialist {
+  payload.kind == "specialist"
+}
+
+@enabled
+@description("Matches v1:agents:agent rows where payload.kind == 'system' -- platform-internal agents (MemQL Planner, MemQL Trainer, future system-owned ones). System agents must never be candidates for utterance routing, the CreateAgent role picker, or the planner's match/extend dedupe; consumers use this spec on the negative side to filter them out of every user-facing surface.")
+spec specAgentKindSystem {
+  payload.kind == "system"
+}

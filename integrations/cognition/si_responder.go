@@ -220,7 +220,7 @@ type agentPayload struct {
 	Personality     string                 `json:"personality,omitempty"`
 	SystemPrompt    string                 `json:"systemPrompt,omitempty"`
 	Role            string                 `json:"role,omitempty"` // "specialist" | "assistant"
-	Kind            string                 `json:"kind,omitempty"` // "system" | "user" -- platform infrastructure agents (Kind=="system") are filtered out of utterance-routing candidates in buildAgentCandidates so they're never dispatched by the router/conductor.
+	Kind            string                 `json:"kind,omitempty"` // "assistant" | "specialist" | "system" (memql#398). Platform-infrastructure agents (Kind=="system") are filtered out of utterance-routing candidates in buildAgentCandidates so they're never dispatched by the router/conductor.
 	Gender          string                 `json:"gender,omitempty"`
 	AudioControl    string                 `json:"audioControl,omitempty"` // "always_on" | "always_off" | "mirror_user"
 	ProviderConfig  map[string]interface{} `json:"providerConfig,omitempty"`

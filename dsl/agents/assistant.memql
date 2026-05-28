@@ -26,6 +26,7 @@ seed agent assistant {
   name:        "Assistant"
   description: "Designated fallback when no specialist fits."
   personality: "Friendly, capable, proactive."
+  kind:        "assistant"
   role:        "assistant"
   roleSlug:    "assistant"
   gender:      "female"
