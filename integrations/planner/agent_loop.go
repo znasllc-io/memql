@@ -420,9 +420,14 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 	// parser would silently drop the args, so we build the call
 	// literal by hand. %q quotes the string values per MemQL string
 	// syntax.
+	//
+	// planId is threaded through so the factory can stamp
+	// lineage.originatingPlanId + lineage.createdBy="planner" on the
+	// new specialist (memql#399). The factory hard-stamps
+	// kind="specialist" on any agent it creates regardless of caller.
 	call := fmt.Sprintf(
-		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q})`,
-		goal, ownerUserId, spaceId,
+		`ensureAgentForGoal({goal:%q, ownerUserId:%q, spaceId:%q, planId:%q})`,
+		goal, ownerUserId, spaceId, planId,
 	)
 	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
