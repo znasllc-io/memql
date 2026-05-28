@@ -116,8 +116,11 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		// Copy-on-write: if PayloadTemplate happens to alias the args
 		// map (legal in the no-args.payload code path), writing the
 		// overlay into payloadMap would mutate the caller's args. Take
-		// a shallow clone before overlaying.
-		overlaid := make(map[string]any, len(payloadMap)+len(tmpl.PayloadOverlayTemplate))
+		// a shallow clone before overlaying. No size hint on the make:
+		// CodeQL's "size computation may overflow" check fires on
+		// summed lengths, and the perf delta of pre-sizing isn't worth
+		// silencing it -- payloads are small (handful of fields).
+		overlaid := make(map[string]any)
 		for k, v := range payloadMap {
 			overlaid[k] = v
 		}
