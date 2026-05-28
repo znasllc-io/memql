@@ -23,7 +23,7 @@ type AgentDefinition struct {
 	Description string
 	Role        string // "specialist" | "assistant"
 	RoleSlug    string
-	Kind        string // "system" | "user" -- platform infrastructure vs user-facing. Read directly from the row's `kind` field. Cognition routing skips Kind=="system" agents from utterance dispatch candidates; the agent factory skips them from match/extend dedupe targets.
+	Kind        string // "assistant" | "specialist" | "system" -- first-class agent identity (memql#398). Read directly from the row's `kind` field. Cognition routing skips Kind=="system" agents from utterance dispatch candidates; the agent factory skips them from match/extend dedupe targets. "assistant" is the per-user GA (CoPresent CreateAgentModal default); "specialist" is tool-driven (planner-provisioned under memql#399 or user-created with role=specialist); "system" is platform infrastructure (MemQL Planner / MemQL Trainer). Schema invariant: Kind == "system" OR Kind == Role.
 	DisplayName string
 	Personality string
 	Gender      string // "female" | "male"
