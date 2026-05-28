@@ -44,7 +44,7 @@ use agents.queries.{ queryAgentById, queryAssistantAgentForUser }
 use cognition.builtins.{ ensureDailySpaceForCaller, ensureDailySpaceForUser, rolloverDailySpacesAllUsers }
 use cognition.mutations.{ mutationCreateSessionForParticipant, mutationDeleteSpaceNow, mutationJoinSpaceAsSI, mutationSendTextUtterance }
 use cognition.queries.{ queryExpiredArchivedSpaces, queryHasSIResponseForReply, queryParticipantByAgentSpace, queryParticipantSession }
-use identity.queries.{ queryUsersActiveInSpace }
+use identity.queries.{ queryUserById, queryUsersActiveInSpace }
 
 @description("Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's General Assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). Idempotent. Emits 'si.auto-joined' for observability. Specialist auto-join is deferred until the runtime can iterate selectedAgentIds.")
 logic logicAutoJoinSI {
@@ -64,16 +64,43 @@ logic logicAutoJoinSI {
   // up with N participants pointing at N hash-derived agent ids
   // that didn't match any real agent. memql#273.
   //
-  // queryAssistantAgentForUser returns 0 or 1 rows filtered on
-  // (ownerUserId, roleSlug="assistant"); the seed materializer
-  // guarantees one assistant per user. The actual canonical id is
-  // pulled out via coalesce(..., "") -- the function-step arg
-  // evaluator's path resolver navigates getGA.First().id only
-  // when the expression is wrapped in a recognised builtin like
-  // coalesce/first/cond (sharedArgEvaluator path); a naked
-  // `getGA.First().id` would render as a literal string into the
-  // outgoing mutation.
-  getGA := queryAssistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
+  // Multi-assistant resolution (memql#408 / copresent#125):
+  // The owner may have multiple assistant agents (kind="assistant",
+  // roleSlug="assistant"); the SPA persists their currently-selected
+  // one on User.preferences.activeAssistantId. We honour that
+  // explicit pick by looking up the user, reading the active id,
+  // and if present resolving the agent directly via queryAgentById.
+  // When the active id is empty (single-assistant user, or a freshly
+  // bootstrapped user before the SPA stamps the field) we fall back
+  // to the legacy queryAssistantAgentForUser path which keys on
+  // (ownerUserId, roleSlug="assistant").
+  //
+  // Both queries return 0 or 1 rows in the steady state; the actual
+  // canonical id is pulled out via coalesce(..., "") -- the
+  // function-step arg evaluator's path resolver navigates
+  // getGA.First().id only when the expression is wrapped in a
+  // recognised builtin like coalesce/first/cond (sharedArgEvaluator
+  // path); a naked `getGA.First().id` would render as a literal
+  // string into the outgoing mutation.
+  getUser := queryUserById({ userId: args.event.payload.ownerUserId })
+  activeAssistantId := coalesce(getUser.First().payload.preferences.activeAssistantId, "")
+
+  // When activeAssistantId is set we look up that agent by id.
+  // When it isn't we fall back to the legacy roleSlug-keyed query.
+  // Exactly one of the two steps actually fires per invocation,
+  // determined by the activeAssistantId emptiness.
+  getActiveGA := if activeAssistantId != "" {
+    queryAgentById({ agentId: activeAssistantId })
+  }
+  getFallbackGA := if activeAssistantId == "" {
+    queryAssistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
+  }
+
+  // coalesce(activeGA, fallbackGA) picks whichever query produced
+  // a row. Both .First() accessors are wrapped so the path
+  // resolver evaluates them rather than rendering as literal
+  // strings (same caveat as the original getGA.First().id read).
+  getGA := coalesce(getActiveGA, getFallbackGA)
 
   // Existence check on the participant uses the SAME agent id the
   // mutation below will write, so re-fires of this automation see
