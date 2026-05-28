@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseparser"
@@ -36,6 +37,18 @@ type FunctionMutationTemplate struct {
 	// PayloadTemplate is the payload template (required).
 	// It must evaluate to an object (map[string]any) at execution time.
 	PayloadTemplate any
+
+	// PayloadOverlayTemplate carries explicit insert-block fields that
+	// must overlay on top of the splatted PayloadTemplate at render
+	// time. Populated only when the insert block mixes `args.<arg>`
+	// (which sets PayloadTemplate to the whole evaluated object) with
+	// other explicit fields like `ownerUserId: actor.userId`. The
+	// overlay wins on key collision so authz-relevant server-side
+	// stamps cannot be displaced by a caller's payload (memql#401).
+	// Each entry's value is an expression that the standard
+	// mutationTemplateEvaluator resolves -- same surface as the
+	// regular payload object literal.
+	PayloadOverlayTemplate map[string]any
 
 	// ParentTemplate is an optional parent relationship hint.
 	ParentTemplate any
@@ -91,6 +104,31 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	payloadMap, ok := payloadAny.(map[string]any)
 	if !ok || payloadMap == nil {
 		return MutationNode{}, fmt.Errorf("payload must evaluate to an object")
+	}
+
+	// Overlay explicit insert-block fields onto the splatted payload.
+	// Used when the insert block mixes `args.<arg>` (which became the
+	// PayloadTemplate) with explicit per-field stamps like
+	// `ownerUserId: actor.userId`. Overlay-wins precedence so authz-
+	// relevant server-side values can't be displaced by a caller's
+	// splat payload (memql#401).
+	if len(tmpl.PayloadOverlayTemplate) > 0 {
+		// Copy-on-write: if PayloadTemplate happens to alias the args
+		// map (legal in the no-args.payload code path), writing the
+		// overlay into payloadMap would mutate the caller's args. Take
+		// a shallow clone before overlaying.
+		overlaid := make(map[string]any, len(payloadMap)+len(tmpl.PayloadOverlayTemplate))
+		for k, v := range payloadMap {
+			overlaid[k] = v
+		}
+		for k, tpl := range tmpl.PayloadOverlayTemplate {
+			val, err := eval.evalValue(ctx, tpl)
+			if err != nil {
+				return MutationNode{}, fmt.Errorf("evaluate payload overlay field %q: %w", k, err)
+			}
+			overlaid[k] = val
+		}
+		payloadMap = overlaid
 	}
 
 	// Auto-canonicalize @relationship payload fields. Every concept's
@@ -315,6 +353,59 @@ func (e *mutationTemplateEvaluator) evalString(ctx context.Context, s string) (a
 			return missingValue{}, nil
 		}
 		return val, nil
+	}
+
+	// actor.X -- auth-context accessor. Resolved from the caller's
+	// auth.AccessContext (set by the gRPC middleware), NOT from
+	// caller-passed args. Without this case `actor.userId` in a
+	// mutation insert payload would fall through as the literal string
+	// "actor.userId" (memql#401 finding) -- which is exactly the bug
+	// `mutationCreateSpace`'s server-side ownerUserId stamp was meant
+	// to avoid. Matches the comparison-position resolution in
+	// component/memql/executor.go:resolveActorPath; supported paths
+	// are userId / identityId / role / primaryEmail / isOwner.
+	if strings.HasPrefix(trimmed, "actor.") {
+		path := strings.TrimSpace(strings.TrimPrefix(trimmed, "actor."))
+		if path == "" {
+			return nil, fmt.Errorf("actor: actor path is required")
+		}
+		for i := 0; i < len(path); i++ {
+			c := path[i]
+			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+				continue
+			}
+			return nil, fmt.Errorf("actor.<path>: invalid character %q in %q", c, trimmed)
+		}
+		ac, _ := auth.AccessFromContext(ctx)
+		switch path {
+		case "userId":
+			if ac == nil {
+				return "", nil
+			}
+			return ac.UserId, nil
+		case "identityId":
+			if ac == nil {
+				return "", nil
+			}
+			return ac.IdentityId, nil
+		case "role":
+			if ac == nil {
+				return "", nil
+			}
+			return string(ac.Role), nil
+		case "primaryEmail":
+			if ac == nil {
+				return "", nil
+			}
+			return ac.PrimaryEmail, nil
+		case "isOwner":
+			if ac == nil {
+				return true, nil
+			}
+			return ac.IsClusterOwner(), nil
+		default:
+			return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
+		}
 	}
 
 	// timestamp()/now()

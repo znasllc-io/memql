@@ -96,7 +96,7 @@ func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) st
 	return b.String()
 }
 
-// MutationArchiveSpace -- Insert a new version of a space record (typically used to archive a space).
+// MutationArchiveSpace -- Insert a new version of a space record (typically used to archive a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload -- per-row authz already gates that only the owner reaches this mutation, and at create time ownerUserId == actor.userId. memql#401.
 //
 // Bound concept: space.
 type MutationArchiveSpaceArgs struct {
@@ -4618,7 +4618,7 @@ func MutationDeleteRecordBuild(args MutationDeleteRecordArgs) string {
 	return b.String()
 }
 
-// MutationDeleteSpaceNow -- Insert a new version of a space record marking it as hard-deleted (deleted=true).
+// MutationDeleteSpaceNow -- Insert a new version of a space record marking it as hard-deleted (deleted=true). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
 //
 // Bound concept: space.
 type MutationDeleteSpaceNowArgs struct {
@@ -6291,7 +6291,7 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 	return b.String()
 }
 
-// MutationRenameSpace -- Insert a new version of a space record (typically used to rename a space).
+// MutationRenameSpace -- Insert a new version of a space record (typically used to rename a space). Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
 //
 // Bound concept: space.
 type MutationRenameSpaceArgs struct {
@@ -6389,7 +6389,7 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 	return b.String()
 }
 
-// MutationRestoreSpace -- Insert a new version of a space record to restore it to the active state.
+// MutationRestoreSpace -- Insert a new version of a space record to restore it to the active state. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
 //
 // Bound concept: space.
 type MutationRestoreSpaceArgs struct {
@@ -6800,7 +6800,7 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 	return b.String()
 }
 
-// MutationSaveSpace -- Insert a new version of a space record with the 'saved' status payload.
+// MutationSaveSpace -- Insert a new version of a space record with the 'saved' status payload. Server-side stamps ownerUserId from actor.userId so callers don't need to thread it through the payload (memql#401).
 //
 // Bound concept: space.
 type MutationSaveSpaceArgs struct {
