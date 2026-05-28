@@ -31,6 +31,12 @@ const factoryResultConcept = "integration:agents:factory-result"
 //	goal         string  required -- the user-stated goal
 //	ownerUserId  string  required -- target agent owner
 //	spaceId      string  optional -- forwarded to the analysis prompt
+//	planId       string  optional -- planner-driven callers pass the
+//	                                  originating v1:planner:plan.id so
+//	                                  createAgent can stamp
+//	                                  lineage.originatingPlanId on the new
+//	                                  specialist (memql#399). GA-driven
+//	                                  ensureAgent tool calls omit it.
 //
 // Behavior:
 //
@@ -75,6 +81,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("ensureForGoal: 'ownerUserId' argument is required")
 	}
+	planId, _ := args["planId"].(string)
 
 	// Step 1-2: load the user's agents + the role catalog. Both are
 	// best-effort -- the analysis prompt tolerates an empty slice.
@@ -112,7 +119,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 		roleSlug = updated.RoleSlug
 		action = "extend"
 	case "create":
-		created, err := i.createAgent(ctx, ownerUserId, decision, roleCatalog)
+		created, err := i.createAgent(ctx, ownerUserId, decision, roleCatalog, planId)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +175,7 @@ type agentSnapshot struct {
 	Id           string
 	Name         string
 	RoleSlug     string
-	Kind         string // "system" | "user" -- read from agent.kind so loadExistingAgents can filter platform infrastructure out of the dedupe candidate pool
+	Kind         string // "assistant" | "specialist" | "system" (memql#398) -- read from agent.kind so loadExistingAgents can filter platform infrastructure (Kind=="system") out of the dedupe candidate pool. Planner-created specialists carry Kind=="specialist" (memql#399); user-created agents via CoPresent CreateAgentModal carry Kind=="assistant".
 	SkillIds     []string
 	Domains      []string // resolved union across SkillIds
 	Tools        []string // resolved union across SkillIds
@@ -323,16 +330,26 @@ func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot,
 // createAgent composes the new agent's capabilities from the role
 // catalog row + the analysis-proposed additions and writes via
 // mutationCreateAgent. roleCatalog is the snapshot loaded above so
-// we don't re-query.
-func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decision factoryDecision, roleCatalog []roleSnapshot) (agentSnapshot, error) {
-	role, ok := findRoleBySlug(roleCatalog, decision.RoleSlug)
-	if !ok {
-		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=create but roleSlug %q not in catalog", decision.RoleSlug)
-	}
+// we don't re-query. planId is the originating v1:planner:plan.id for
+// planner-driven calls; the empty string means GA-driven (no plan
+// back-pointer to stamp).
+//
+// Stamping: kind="specialist" is hard-coded -- the factory only ever
+// creates specialists (GA-driven ensureAgent has the same semantics,
+// and the assistant + system agents come from their own seed
+// materializers). lineage.originatingPlanId is stamped when planId is
+// non-empty; the lineage.createdBy bucket is "planner" for plan-driven
+// calls and "user" otherwise (the GA's ensureAgent tool is invoked
+// from a user turn).
+// buildCreateAgentArgs composes the args map for mutationCreateAgent
+// from a factory decision + role snapshot + optional planId. Extracted
+// from createAgent so tests can pin the contract (kind="specialist",
+// lineage stamping per planId presence) without needing an engine
+// handle (memql#399).
+func buildCreateAgentArgs(agentId, ownerUserId string, decision factoryDecision, role roleSnapshot, planId string) map[string]any {
 	skillIds := unionStrings(role.LockedSkillIds, role.DefaultSkillIds)
 	skillIds = unionStrings(skillIds, decision.SkillIds)
 
-	agentId := id.NewShortId()
 	caps := map[string]any{
 		"skillIds": skillIds,
 		"keywords": []string{},
@@ -348,17 +365,45 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	provider := map[string]any{
 		"llm": map[string]any{"policyName": coalesceString(role.RecommendedPolicySlug, "balancedChat")},
 	}
-	insertArgs := map[string]any{
+	// Lineage attribution. The createdBy bucket is the agent.lineage
+	// field (NOT the row intrinsic createdBy that the engine stamps from
+	// the actor) -- it records the bootstrap source ("user" vs "planner"
+	// vs "system"). The factory is invoked from both the planner loop
+	// (planId set) and the GA ensureAgent tool (planId empty), so we
+	// derive the bucket from planId presence.
+	lineageBucket := "user"
+	if planId != "" {
+		lineageBucket = "planner"
+	}
+	lineage := map[string]any{
+		"createdBy": lineageBucket,
+	}
+	if planId != "" {
+		lineage["originatingPlanId"] = planId
+	}
+	return map[string]any{
 		"agentId":        agentId,
 		"ownerUserId":    ownerUserId,
 		"name":           role.Name, // user can rename later
 		"description":    role.SystemPromptHints,
+		"kind":           "specialist",
 		"role":           "specialist",
 		"roleSlug":       role.Slug,
 		"capabilities":   caps,
 		"providerConfig": provider,
+		"lineage":        lineage,
 		"active":         true,
 	}
+}
+
+func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decision factoryDecision, roleCatalog []roleSnapshot, planId string) (agentSnapshot, error) {
+	role, ok := findRoleBySlug(roleCatalog, decision.RoleSlug)
+	if !ok {
+		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=create but roleSlug %q not in catalog", decision.RoleSlug)
+	}
+	agentId := id.NewShortId()
+	insertArgs := buildCreateAgentArgs(agentId, ownerUserId, decision, role, planId)
+	skillIds, _ := insertArgs["capabilities"].(map[string]any)["skillIds"].([]string)
 	argsJSON, err := json.Marshal(insertArgs)
 	if err != nil {
 		return agentSnapshot{}, fmt.Errorf("marshal create args: %w", err)
