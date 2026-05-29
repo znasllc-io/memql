@@ -309,8 +309,17 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// makes that contract load-bearing on every write path (cockpit
 	// edit, CoPresent edit, GA-driven extend, automation). See
 	// agent_lock_validation.go.
+	//
+	// Agent-kind actor-scope guard: rejects user-actor writes that
+	// try to stamp kind in ("system", "specialist"). Only the
+	// SeedMaterializer and the planner integration -- both running
+	// under system:* actors -- may write those kinds. See
+	// agent_kind_actor_validation.go and znasllc-io/memql#403.
 	if conceptMeta.Name == conceptAgentsAgent {
 		if err := e.validateAgentLockedItems(ctx, payload, mutation.ID, actor); err != nil {
+			return nil, err
+		}
+		if err := e.validateAgentKindActorScope(ctx, payload, actor); err != nil {
 			return nil, err
 		}
 	}

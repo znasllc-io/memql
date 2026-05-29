@@ -631,7 +631,7 @@ func MutationCreateAdHocPlanBuild(args MutationCreateAdHocPlanArgs) string {
 	return b.String()
 }
 
-// MutationCreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the system actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. The BFF gRPC handler that fronts this mutation rejects explicit `kind in (\"system\", \"specialist\
+// MutationCreateAgent -- Create a new AI agent template. The `kind` arg defaults to `assistant` -- the safe value for the CoPresent CreateAgentModal flow. The SeedMaterializer (running under the `system:seedMaterializer` actor) passes `kind: \"system\"` when materializing platform agents (MemQL Planner / MemQL Trainer). The planner integration (running under the `system:planner` actor; memql#399) passes `kind: \"specialist\"` when auto-provisioning a specialist for a Plan's capability gap. User-actor calls that try to pass `kind in (\"system\", \"specialist\
 //
 // Bound concept: agent.
 type MutationCreateAgentArgs struct {
