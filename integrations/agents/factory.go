@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -110,7 +112,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 		roleSlug = match.RoleSlug
 		action = "match"
 	case "extend":
-		updated, err := i.extendAgent(ctx, existing, decision)
+		updated, err := i.extendAgent(ctx, ownerUserId, existing, decision, planId)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +296,27 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 // extensions only ADD ids, never remove, so the path is safe. The
 // effective max-skills cap is also enforced server-side -- a decision
 // that would push the agent over the cap rejects loudly.
-func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot, decision factoryDecision) (agentSnapshot, error) {
+//
+// After the agent-row update lands, one v1:agents:skillChangeEvent row
+// is appended per skill that is net-new on the agent post-extend (in
+// the merged set but not the pre-extend set). This is the audit trail
+// the Tasks UI reads to render "extended for Plan X" (memql#405).
+// Attribution branches on planId presence -- the same discriminator
+// createAgent uses for lineage (memql#399):
+//   - planId != "": planner-driven extend. actorAgentId is the
+//     per-user Planner Agent (`plannerAgent-<userId>`); planId carries
+//     the originating Plan id. (The planner invokes the factory under a
+//     system-actor context, so the context actor is NOT the right
+//     attribution -- the per-user planner agent id is.)
+//   - planId == "": GA-driven extend (the ensureAgent tool, invoked
+//     from a user turn). actorUserId is the agent owner; planId empty.
+//
+// Kind audit (memql#398/#405): a target row carrying the retired
+// kind enum value ("user" or "") can only survive on a stale dev DB.
+// We warn-log and skip the kind-related work -- the row is already
+// orphaned by the schema enforcement and the dev should reset their
+// DB; the factory does NOT try to repair it via update.
+func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, existing []agentSnapshot, decision factoryDecision, planId string) (agentSnapshot, error) {
 	if decision.TargetAgentId == "" {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=extend but targetAgentId is empty")
 	}
@@ -302,6 +324,20 @@ func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot,
 	if !ok {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=extend targetAgentId %q not found", decision.TargetAgentId)
 	}
+
+	// Kind audit-pass: a pre-#398 row with the retired enum value gets
+	// a warning, then the kind-related work is skipped. (Extend touches
+	// no kind field today, so "skip" is a documented no-op -- the
+	// warning is the load-bearing part: it tells the dev the row is
+	// orphaned by schema enforcement.)
+	if target.Kind == "user" || target.Kind == "" {
+		slog.Default().Warn("agents factory: extendAgent target carries retired kind enum value; skipping kind work (reset your dev DB)",
+			"component", "agents-factory",
+			"agentId", target.Id,
+			"kind", target.Kind)
+	}
+
+	preExtendSkills := append([]string(nil), target.SkillIds...)
 	mergedSkills := unionStrings(target.SkillIds, decision.SkillIds)
 	caps := map[string]any{}
 	for k, v := range target.Capabilities {
@@ -317,14 +353,131 @@ func (i *Integration) extendAgent(ctx context.Context, existing []agentSnapshot,
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute mutationUpdateAgent: %w", err)
 	}
+
+	// Snapshot the resolved before/after capability shape for the audit
+	// rows. Best-effort -- a resolve failure leaves the snapshot empty;
+	// the event's skillId + actor attribution is the load-bearing part.
+	before := resolvedCapShape(ctx, i.engine, preExtendSkills)
+
 	target.SkillIds = mergedSkills
 	// Refresh the resolved Domains / Tools so callers reading them
 	// see the post-extension surface.
+	after := map[string]any{}
 	if bundle, rerr := i.engine.ResolveSkills(ctx, mergedSkills); rerr == nil {
 		target.Domains = bundle.DomainIds
 		target.Tools = bundle.ToolSlugs
+		after = capShapeFromBundle(bundle.DomainIds, bundle.ToolSlugs, bundle.LiveSourceIds)
+	}
+
+	// Append one skillChangeEvent per net-new skill. Failures here are
+	// non-fatal: the agent-row update already landed and is the source
+	// of truth; the audit log is denormalized history. We surface a
+	// warning rather than aborting the extend.
+	netNew := diffStrings(mergedSkills, preExtendSkills)
+	for _, skillId := range netNew {
+		evArgs := buildSkillChangeEventArgs(id.NewShortId(), target.Id, skillId, ownerUserId, planId, before, after)
+		evJSON, merr := json.Marshal(evArgs)
+		if merr != nil {
+			slog.Default().Warn("agents factory: marshal skillChangeEvent args failed; skipping audit row",
+				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", merr)
+			continue
+		}
+		evQuery := fmt.Sprintf(`mutationCreateSkillChangeEvent(%s)`, string(evJSON))
+		if _, eerr := i.engine.Execute(ctx, evQuery); eerr != nil {
+			slog.Default().Warn("agents factory: write skillChangeEvent failed; agent update already committed",
+				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", eerr)
+		}
 	}
 	return target, nil
+}
+
+// buildSkillChangeEventArgs composes the args map for
+// mutationCreateSkillChangeEvent recording one net-new skill landing on
+// an agent during an extend. Extracted (mirroring buildCreateAgentArgs,
+// memql#399) so a unit test can pin the attribution contract without an
+// engine handle (memql#405).
+//
+// Attribution branches on planId presence:
+//   - planId != "": planner-driven. actorAgentId = `plannerAgent-<userId>`
+//     (the per-user Planner Agent), actorUserId empty, planId stamped.
+//   - planId == "": GA-driven. actorUserId = ownerUserId, actorAgentId
+//     empty, planId empty.
+//
+// The skillChangeEvent concept declares the two actor fields as mutually
+// exclusive (exactly one set per event); this builder honors that.
+func buildSkillChangeEventArgs(eventId, targetAgentId, skillId, ownerUserId, planId string, before, after map[string]any) map[string]any {
+	args := map[string]any{
+		"skillChangeEventId": eventId,
+		"targetAgentId":      targetAgentId,
+		"skillId":            skillId,
+		"changeKind":         "attached",
+		"before":             before,
+		"after":              after,
+	}
+	if planId != "" {
+		args["actorAgentId"] = plannerAgentId(ownerUserId)
+		args["planId"] = planId
+	} else {
+		args["actorUserId"] = ownerUserId
+		args["planId"] = ""
+	}
+	return args
+}
+
+// plannerAgentId derives the per-user Planner Agent's deterministic id
+// from the owner user id. Mirrors the seed materializer's
+// `<seedName>-<userShortId>` form (component/memql/seed_materializer.go:
+// deterministicPerUserSeedId) -- the canonical user prefix is stripped
+// so the tail matches the materialized row's id.
+func plannerAgentId(ownerUserId string) string {
+	return "plannerAgent-" + strings.TrimPrefix(ownerUserId, "v1:identity:user:")
+}
+
+// resolvedCapShape resolves the given skill ids to a capability-shape
+// snapshot {domainIds, toolSlugs, liveSourceIds}. Best-effort: a
+// resolve failure (or empty input) yields an empty shape.
+func resolvedCapShape(ctx context.Context, engine memql.IntegrationEngineAccess, skillIds []string) map[string]any {
+	if engine == nil || len(skillIds) == 0 {
+		return map[string]any{}
+	}
+	bundle, err := engine.ResolveSkills(ctx, skillIds)
+	if err != nil {
+		return map[string]any{}
+	}
+	return capShapeFromBundle(bundle.DomainIds, bundle.ToolSlugs, bundle.LiveSourceIds)
+}
+
+func capShapeFromBundle(domainIds, toolSlugs, liveSourceIds []string) map[string]any {
+	return map[string]any{
+		"domainIds":     append([]string(nil), domainIds...),
+		"toolSlugs":     append([]string(nil), toolSlugs...),
+		"liveSourceIds": append([]string(nil), liveSourceIds...),
+	}
+}
+
+// diffStrings returns the members of a that are not present in b,
+// preserving a's order and skipping empties / duplicates.
+func diffStrings(a, b []string) []string {
+	exclude := make(map[string]struct{}, len(b))
+	for _, s := range b {
+		exclude[s] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(a))
+	out := make([]string, 0, len(a))
+	for _, s := range a {
+		if s == "" {
+			continue
+		}
+		if _, skip := exclude[s]; skip {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // createAgent composes the new agent's capabilities from the role
