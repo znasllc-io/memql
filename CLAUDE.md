@@ -38,18 +38,25 @@ memQL/
 │   ├── transport.go   Phase 5: gRPC + HTTP + WS endpoints
 │   ├── cluster.go     Phase 6: distributed node bootstrap
 │   └── adapters.go    Engine adapter types
-├── dsl/v1/            Consolidated MemQL DSL tree (every .memql file)
-│   ├── concepts/      Concept definitions (schemas)
-│   ├── mutations/     Mutation functions
-│   ├── queries/       Query functions
-│   ├── specs/         Specification predicates
-│   ├── automations/   Event-driven workflows (+ Go runtime under same dir)
-│   ├── prompts/       SI prompt templates
-│   ├── providers/     SI provider configurations
-│   ├── shapes/        Reusable shape templates
-│   ├── tools/         SI tool definitions
-│   └── policies/      SI Router routing strategies (v1/) + cross-cutting
-│                      decision policies (core/, bff/ — Phase 2+ populates)
+├── dsl/               Consolidated MemQL DSL tree (every .memql file),
+│   │                  flattened to per-namespace per-construct files
+│   ├── <namespace>/   One directory per namespace (agents, cluster,
+│   │   │              cognition, common, curriculum, data, identity,
+│   │   │              knowledge, memql, observability, planner,
+│   │   │              platform, policies, providers, router, safety,
+│   │   │              workbench, worker)
+│   │   ├── concepts.memql     Concept definitions (schemas)
+│   │   ├── mutations.memql    Mutation functions
+│   │   ├── queries.memql      Query functions
+│   │   ├── specs.memql        Specification predicates
+│   │   ├── shapes.memql       Reusable shape templates
+│   │   ├── builtins.memql     Go-backed executors
+│   │   ├── tools.memql        SI tool definitions
+│   │   ├── prompts.memql      SI prompt schemas (+ prompts/*.tmpl)
+│   │   ├── automations.memql  Event-driven workflows
+│   │   └── ...                (not every namespace carries every construct)
+│   └── _reference/    Per-construct authoring reference skeletons
+│                      (_concept / _shape / _spec / _trait / _agent)
 ├── integrations/      External services + DSL-callable capabilities (Go)
 ├── component/         Core Go components
 │   ├── bus/           Channel-based inter-component communication (Go)
@@ -80,15 +87,15 @@ memQL/
 
 | Directory | Purpose | Language | CLAUDE.md |
 |-----------|---------|----------|-----------|
-| `dsl/v1/automations/` | Event-driven automations | MemQL | [→](dsl/v1/automations/CLAUDE.md) |
-| `dsl/v1/queries/` | Query functions | MemQL | [→](dsl/v1/queries/CLAUDE.md) |
-| `dsl/v1/mutations/` | Mutation functions | MemQL | — |
-| `dsl/v1/specs/` | Specification predicates | MemQL | — |
-| `dsl/v1/tools/` | SI tool definitions | MemQL | — |
-| `dsl/v1/prompts/` | SI prompt templates | MemQL | — |
-| `dsl/v1/providers/` | SI provider configurations | MemQL | — |
-| `dsl/v1/shapes/` | Reusable shape templates | MemQL | [→](dsl/v1/shapes/CLAUDE.md) |
-| `dsl/v1/policies/` | SI Router policies + cross-cutting decision policies | MemQL | — |
+| `dsl/<ns>/automations.memql` | Event-driven automations | MemQL | — |
+| `dsl/<ns>/queries.memql` | Query functions | MemQL | — |
+| `dsl/<ns>/mutations.memql` | Mutation functions | MemQL | — |
+| `dsl/<ns>/specs.memql` | Specification predicates | MemQL | — |
+| `dsl/<ns>/tools.memql` | SI tool definitions | MemQL | — |
+| `dsl/<ns>/prompts.memql` | SI prompt schemas (+ `prompts/*.tmpl`) | MemQL | — |
+| `dsl/providers/providers.memql` | SI provider configurations | MemQL | — |
+| `dsl/<ns>/shapes.memql` | Reusable shape templates | MemQL | — |
+| `dsl/policies/policies.memql` | Cross-cutting decision policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
@@ -170,8 +177,8 @@ go test ./...
 
 memQL uses a single long-lived branch: `main`. Core engine, wire
 protocol, and product-specific DSL (concepts, queries, mutations,
-shapes, automations, tools, prompts under `dsl/v1/concepts/v1/copresent/`,
-`dsl/v1/tools/v1/copresent/`, etc.) all live here. A separate
+shapes, automations, tools, prompts under `dsl/cognition/concepts.memql`,
+`dsl/cognition/tools/`, etc.) all live here. A separate
 `bff/copresent` branch was retired on 2026-04-20 once the dual-branch
 overhead stopped paying for itself.
 
@@ -432,7 +439,7 @@ memQL centralizes all SI operations through a pluggable provider system:
 - **Multi-provider architecture** - Unified interfaces (`ChatSIProvider`, `VisionSIProvider`, `TTSSIProvider`, `ChatStreamProvider`) with pluggable backends
 - **OpenAI providers** - GPT-4, GPT-5-mini for chat, vision, TTS, and STT
 - **Anthropic providers** - Claude Opus, Sonnet, Haiku for chat and vision
-- **Provider configuration** - MemQL files in `dsl/v1/providers/v1/` directory (e.g., `dsl/v1/providers/v1/openai/chat54Mini.memql`)
+- **Provider configuration** - MemQL provider records in `dsl/providers/providers.memql`
 - **Provider selection** - Default provider via config, or per-request via `provider` parameter
 
 ### SI Endpoints (gRPC on `MemqlService.Stream`)
@@ -564,7 +571,7 @@ the `/memql/audio` WebSocket still consumes.
 
 Cognition decides whether and which agent should respond to an utterance,
 then dispatches the turn. The text path uses a **single LLM brain**: the
-conductor (`dsl/v1/prompts/v1/cognition/conductorTurn.tmpl`) emits both the
+conductor (`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the
 routing decision (fitScore / turnMode / handoff / severity) and the
 per-agent plan (primary / sequence / chime-ins / instructions) in one
 structured-output call. The standalone router LLM call only fires for
@@ -612,7 +619,7 @@ call by name (no engine executor exists for it), parses the args as
 `integrations/agent/envelope.go` for the schema and
 `integrations/agent/streaming.go` for the interception path. The
 prompt enforces it via the OUTPUT CONTRACT block at the top of
-`dsl/v1/prompts/v1/agent/agentReply.tmpl`.
+`dsl/cognition/prompts/cognitionReply.tmpl`.
 
 `citations` is a list of `{domainId, matchedPhrase}` pairs naming
 knowledge-domain sources the agent drew from; cognition stamps them
@@ -633,7 +640,7 @@ the agent used no trained sources, citations is an empty array.
 - **Development:** Docker Compose overlay (`docker-compose.nemoclaw.yml`, port 18789)
 - **Cloud:** Cloud Run multi-container sidecar (`service.nemoclaw.yaml`)
 - **Agent capability:** `claw` flag on agent concept enables coding tools
-- **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (in `dsl/v1/tools/v1/claw/`)
+- **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
 
 ### Workers (computer_use_headless / computer_use_embodied)
 
@@ -662,7 +669,7 @@ work is the Workbench, documented in the next section.
     same cross-cutting trio. Mouse / keyboard / screenshot on the
     user's machine.
 - **Tools:** `workerHost` (HEADLESS) and `workerComputer` (GUI),
-  both discriminated-union tools under `dsl/v1/tools/v1/agent/worker/`.
+  both discriminated-union tools under the `dsl/worker/` namespace.
 - **Gateway:** `WorkerService.Stream` gRPC service on the agent
   node. Auth via worker-specific tokens
   (`mql_wkr_<43 base64url chars>` -- the `worker_token` variant on
@@ -812,23 +819,32 @@ See [docs/auth/](docs/auth/):
 
 ## DSL Tree Layout
 
-Every `.memql` file lives under `dsl/v1/<type>/v1/<namespace>/...` (e.g.
-`dsl/v1/queries/v1/cognition/spaceParticipants.memql`). The per-type
-Go packages still expose embedded FS variables, but loaders read
-through `Source()`, which routes through
+The DSL tree is **flattened per construct**: every namespace gets one
+directory under `dsl/<namespace>/`, and within it each construct kind
+is consolidated into a single `<construct>s.memql` file (e.g.
+`dsl/cognition/queries.memql`, `dsl/identity/concepts.memql`,
+`dsl/providers/providers.memql`). This replaces the older
+per-construct + per-namespace nested skeleton (the retired
+`dsl/<version>/<type>/<version>/<namespace>/...` tree). The flattened tree is produced
+by the [`scripts/restructure-by-construct`](scripts/restructure-by-construct/main.go)
+regenerator. Authoring reference skeletons live under
+`dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`).
+The per-type Go packages still expose embedded FS variables, but
+loaders read through `Source()`, which routes through
 [`component/memql/dslfs`](component/memql/dslfs/dslfs.go).
 
 ### `MEMQL_DSL_PATH` override
 
 When `MEMQL_DSL_PATH` is unset, the binary reads its baked-in embedded
 tree. When `MEMQL_DSL_PATH=/path/to/dsl-root` is set and the root
-contains a sub-directory matching a DSL type (e.g. `<root>/queries`),
-that type reads from disk instead of the embedded copy. Per-type
-partial overrides are supported — missing-from-disk types fall back
-to embedded.
+contains a namespace sub-directory with the expected
+`<construct>s.memql` files (e.g. `<root>/cognition/queries.memql`),
+that tree reads from disk instead of the embedded copy. Per-namespace
+partial overrides are supported — missing-from-disk constructs fall
+back to embedded.
 
 Use cases:
-- Dev hacking — point at the in-tree `dsl/v1/` so a restart picks up
+- Dev hacking — point at the in-tree `dsl/` so a restart picks up
   edits without rebuilding the binary.
 - Per-deploy patches — overlay a small subset on top of an immutable
   image.
@@ -924,9 +940,11 @@ How the DSL constructs lean on each other. Each layer can only depend
   load time (Phase C migration nudge -- move it to `specs/` and
   call it via `spec("name")`).
 
-**Construct files live under `dsl/v1/<type>/v1/<namespace>/...`**
-(concepts/, specs/, shapes/, mutations/, queries/, builtins/,
-providers/, prompts/, tools/, automations/, policies/).
+**Construct files live under `dsl/<namespace>/<construct>s.memql`**
+(concepts, specs, shapes, mutations, queries, builtins, providers,
+prompts, tools, automations, traits — one consolidated file per
+construct kind per namespace; policies are consolidated in
+`dsl/policies/policies.memql`).
 
 ## Argument resolution
 
@@ -989,30 +1007,19 @@ etc.).
 memQL ships a **Policy** DSL construct for cross-cutting decision
 logic — authorization checks, vendor selection, feature flagging,
 UI gating. Policies are pure functions (read context, call
-sub-policies, return a value) defined under `dsl/v1/policies/`.
-Separate from the older SI Router routing policies under
-`dsl/v1/policies/v1/...` — different syntax, different purpose;
-both load at startup.
+sub-policies, return a value) consolidated in
+`dsl/policies/policies.memql`.
 
-### Directory layout
+### Layering
 
-```
-dsl/v1/policies/
-├── v1/                              SI Router routing policies (legacy block syntax)
-├── core/                            Foundational, per-node-type, inviolable
-│   ├── auth/                        Authn / role checks
-│   ├── partition/                   Partition gating
-│   ├── bff/ cognition/ agent/ ...   Per-node-type core invariants
-└── bff/                             Product layer; can call core
-    ├── voice/                       Voice-agent decisions
-    ├── copresent/                   CoPresent product gates
-    └── ...
-```
+Policies split into two tiers (by naming / annotation within the
+consolidated file):
 
-`core` policies are platform invariants — auth interceptors call
-only `core/*`. `bff` policies are product decisions — they can
-call `core/*` (downward delegation allowed) but `core` MUST NOT call
-`bff`. The lint at registration time enforces this.
+- **core** policies are platform invariants — auth interceptors call
+  only `core` policies.
+- **bff** policies are product decisions — they can call `core`
+  (downward delegation allowed) but `core` MUST NOT call `bff`. The
+  lint at registration time enforces this.
 
 ### Authoring shape
 
@@ -1410,7 +1417,7 @@ Bodies that mix both flavors are rejected at load time.
 Concept-specific specs bind to a concept-bound `@row` shape;
 actor-side specs bind to an `@actor` shape; cross-concept specs
 bind to a **trait shape** (a `@row` shape without `@concepts(...)` —
-the predicate scaffolds under `dsl/v1/shapes/v1/trait/`:
+the predicate scaffolds in `dsl/common/shapes.memql`:
 `activeRowTrait`, `statusRowTrait`, `deletedRowTrait`,
 `archivedRowTrait`, `savedRowTrait`, `validationRowTrait`).
 
@@ -1445,7 +1452,7 @@ and rejected at parse time.
 **Policy → spec migration nudge.** A policy whose body is a pure
 caller-only boolean with no policy-only annotations gets rejected at
 load time. The engine emits a message pointing at the migration
-target (move the file under `dsl/v1/specs/...`, switch the receiver
+target (move the predicate into `dsl/<namespace>/specs.memql`, switch the receiver
 to `spec`, and have any caller use `spec("name")` instead of
 `policy("name")`).
 
@@ -1527,11 +1534,11 @@ Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
 Package: `component/memql/sense/` -- pure Go, no gRPC dependency. gRPC handlers in `component/grpc/sense_handlers.go`.
 
 ### Platform Concepts
-Platform-level metadata (dsl/v1/concepts/v1/platform/)
+Platform-level metadata (dsl/platform/concepts.memql)
 - `v1:platform:partition` -- Data isolation boundary (standard, dedicated, personal)
 
 ### Cluster Concepts
-Distributed node system metadata (dsl/v1/concepts/v1/cluster/)
+Distributed node system metadata (dsl/cluster/concepts.memql)
 - `v1:cluster:node` -- Registered node in the cluster
 - `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner). Optional `codeReference` field links this row to its architecture-model service id (consumed by the cockpit's Topology drill-down).
 - `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions (legacy name)
@@ -1545,7 +1552,7 @@ See [docs/architecture/auto-generated-diagrams.md](docs/architecture/auto-genera
 - `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
 
 ### Identity Concepts
-Auth + access metadata (dsl/v1/concepts/v1/identity/, all `@scope("global")`)
+Auth + access metadata (dsl/identity/concepts.memql, all `@scope("global")`)
 - `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, CoPresent Control settings)
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token)
 - `v1:identity:authSession` -- per-token session record (used for revocation)
@@ -1585,8 +1592,7 @@ their `presentExhibit` / `dismissExhibit` / `updateScene` mutations)
 has been deleted -- those concepts had zero producers and zero
 consumers and the new model picked one concept over four.
 
-Schema highlights (concept body in
-`dsl/v1/concepts/v1/copresent/canvasState/concept.memql`):
+Schema highlights (the `v1:copresent:canvasState` concept body):
 
 - `space` -- target `v1:cognition:space.id` (every viewer of that
   space gets the row, subject to visibility filtering).
@@ -1605,12 +1611,11 @@ Schema highlights (concept body in
 
 Two paths write canvasState rows:
 
-1. **Tool path** (agent presentations, public visibility):
-   `dsl/v1/tools/v1/copresent/canvas/toolCanvasPublish.memql` -- the
+1. **Tool path** (agent presentations, public visibility): the
    `canvas.publish` tool. Invoked by agents from inside their tool
    loop with `kind` + `data` + optional `importance` / `note`.
 2. **Frontend direct mutation path** (owner-private welcome cards):
-   `dsl/v1/mutations/v1/copresent/createCanvasState.memql`. The CoPresent
+   the `createCanvasState` mutation. The CoPresent
    frontend calls this at the end of every create-modal flow --
    agent.created (AgentsListPanel), group.created (SettingsListPanel),
    and space.created (useCreateAndJoinSpace). All three use the same
@@ -1662,14 +1667,14 @@ side too: `cursorTweenMs`, `takeoverMode` (clean / dim),
 Mutations: `createSpace`, `archiveSpace`, `saveSpace`,
 `restoreSpace`, `deleteSpaceNow`, `createDailySpace`. Queries:
 `activeSpaces`, `savedSpaces`, `archivedSpaces`,
-`expiredArchivedSpaces`, `allArchivedSpacesAcrossUsers`. All under
-`dsl/v1/mutations/v1/cognition/` and `dsl/v1/queries/v1/cognition/`.
+`expiredArchivedSpaces`, `allArchivedSpacesAcrossUsers`. All in
+`dsl/cognition/mutations.memql` and `dsl/cognition/queries.memql`.
 
 ### Invitations (Identity Primitive)
 
 Token-hashed invitation credential for user and guest flows. Lives
 under `v1:identity:invitation`; product-specific mutations layer on
-top (e.g. `dsl/v1/mutations/v1/copresent/sendGuestInvite.memql`).
+top (e.g. `sendGuestInvite` in `dsl/cognition/mutations.memql`).
 
 Two gRPC messages drive the guest flow:
 
@@ -1692,9 +1697,9 @@ partition checks). The memQL WS bridge accepts the token as
 the WebSocket upgrade.
 
 Shipped. Key files:
-- `dsl/v1/concepts/v1/identity/invitation/concept.memql` -- identity-owned schema.
-- `dsl/v1/queries/v1/identity/invitationByTokenHash.memql` + `invitationById.memql`.
-- `dsl/v1/shapes/v1/identity/invitationFull.memql`.
+- `dsl/identity/concepts.memql` -- the identity-owned `invitation` schema.
+- `dsl/identity/queries.memql` -- `invitationByTokenHash` + `invitationById`.
+- `dsl/identity/shapes.memql` -- the `invitationFull` shape.
 - `component/grpc/guest_handlers.go` + `guest_stream_interceptor.go`.
 - `integrations/email/` -- self-registering plug-in exposing
   `integration.email.sendEmail`. GraphSender (OAuth client-credentials
@@ -1706,8 +1711,8 @@ Shipped. Key files:
   `SMTP_FROM_NAME` for SMTP; leave both unset for LogSender.
 
 Product-specific mutations (creating product-scoped invitations,
-joining spaces as a guest, participation lifecycle) live under
-`dsl/v1/mutations/v1/copresent/`.
+joining spaces as a guest, participation lifecycle) live in
+`dsl/cognition/mutations.memql`.
 
 ### Planner / Knowledge / Validation (v1)
 
@@ -1804,7 +1809,7 @@ LLM-backed re-analysis ships with the async planner integration.
   consumes it. Historical bucket query
   `queryHistoricalPlanMetrics` backs the blending logic.
 
-- **LLM-backed refinement** -- `dsl/v1/prompts/v1/copresent/refineAnalysis.{memql,tmpl}`
+- **LLM-backed refinement** -- the `refineAnalysis` prompt
   + handleRefinementPlan automation rewritten to call
   `si("refineAnalysis", ...)` against the parent's output.
 
@@ -1843,13 +1848,14 @@ LLM-backed re-analysis ships with the async planner integration.
   spend update.
 
 - **Cognition plan-triage prompt** --
-  `dsl/v1/prompts/v1/cognition/cognitionPlanTriage.{memql,tmpl}` ships
-  the per-message classification (needsPlan + planHint). Wiring
+  `dsl/cognition/prompts/cognitionPlanTriage.tmpl` (schema in
+  `dsl/cognition/prompts.memql`) ships the per-message classification
+  (needsPlan + planHint). Wiring
   into the live chat-message dispatch is the final integration
   step the planner-side handler will pick up.
 
 - **Entity-schema inference prompt** --
-  `dsl/v1/prompts/v1/copresent/inferEntitySchema.{memql,tmpl}` ships the
+  the `inferEntitySchema` prompt ships the
   per-domain schema proposal called by the entity-inference Plan
   on second-Document trigger.
 
