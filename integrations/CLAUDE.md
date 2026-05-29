@@ -92,7 +92,8 @@ integrations/
 ├── stt/              # Speech-to-text (batch transcribe capability + streaming session)
 └── training/         # Per-agent train pipeline (identity embedding + distilled system prompt + just-in-time knowledge seeding)
 
-# NemoClaw is invoked via webhook tools (tools/v1/claw/), not a Go integration here.
+# NemoClaw is invoked via webhook tools (claw coding-agent tool surface,
+# defined alongside the agent tool definitions), not a Go integration here.
 ```
 
 ---
@@ -107,7 +108,7 @@ registered: `cognitionScore`, `cognitionTrackPresence`,
 
 **Single LLM brain on the text path** (shipped 2026-04-26 in
 4249c0b). The conductor (`conductor_consult.go` +
-`prompts/v1/cognition/conductorTurn.tmpl`) emits both the routing
+`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the routing
 decision (`fitScore`, `turnMode`, `handoff`, `severity`) and the
 per-agent plan (primary, sequence, chime-ins, instructions) in one
 structured-output call. The standalone router LLM call in
@@ -396,7 +397,7 @@ certain node types.
 
 **5. Expose it from the DSL via a builtin**
 ```memql
-// queries/v1/common/builtin/builtin<Name>DoThing.memql
+// in dsl/common/builtins.memql
 @executor("integration.<name>.doThing")
 func (Builtin) <name>DoThing { ... }
 ```

@@ -73,9 +73,9 @@ component/
 - `integration_provider.go` - IntegrationProvider interface and IntegrationCapability struct
 - `integration_registry.go` - Thread-safe registry for integration providers and capabilities
 - `integration_engine.go` - IntegrationEngineAccess narrow interface for integrations
-- `prompt_loader.go` - Loads Prompt definitions from `prompts/v1/**/*.memql`
-- `provider_loader.go` - Loads Provider definitions from `providers/v1/**/*.memql`
-- `shape_loader.go` - Loads Shape definitions from `shapes/v1/**/*.memql`
+- `prompt_loader.go` - Loads Prompt definitions from `dsl/<ns>/prompts.memql` (template bodies under `dsl/<ns>/prompts/*.tmpl`)
+- `provider_loader.go` - Loads Provider definitions from `dsl/providers/providers.memql`
+- `shape_loader.go` - Loads Shape definitions sliced out of `dsl/<ns>/<construct>.memql`
 - `arch.md` - Architecture documentation
 
 **What It Does:**

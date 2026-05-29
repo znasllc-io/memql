@@ -71,8 +71,8 @@ The cognition-API frontend reference doc was retired in 2026-04 -- it
 was a snapshot of the cognition wire surface that drifted faster than
 it could be maintained. The wire is now the proto in
 `component/grpc/memql.proto`; query/mutation function names live in
-`queries/v1/cognition/` and `mutations/v1/cognition/` and are the
-authoritative source.
+`dsl/cognition/queries.memql` and `dsl/cognition/mutations.memql` and
+are the authoritative source.
 
 ---
 
