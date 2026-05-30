@@ -10,6 +10,19 @@ it is a contract + migration design grounded in the tree as it stands after
 the Go voice-agent cutover (epic #449). Every load-bearing claim cites a real
 `path:line`. The headline is in section 0.
 
+> **Implementation status (#480, text convergence).** Stage 0 and the data
+> half of Stage 1 (section 6) have landed: the converged contract now lives in
+> the shared `integrations/agentdef` package -- `AgentGenerationContract`,
+> `BuildGenerationContract`, and the shared `RenderIdentityBlock`, all pure and
+> golden-tested. The cognition text path (`integrations/agent/prompt_data.go`)
+> projects its `assistant` block through `BuildGenerationContract`, so the text
+> path now reads the converged definition; the projection is byte-identical to
+> the prior inline mapping (same trim/omit-empty), pinned by
+> `prompt_data_test.go`. The remaining Stage 1/2 work -- routing the
+> `cognitionReply.tmpl` identity region AND the voice session instructions
+> through `RenderIdentityBlock`, plus the cross-modality byte-identical golden
+> test -- lands with #478, when the voice path adopts the same shared renderer.
+
 > **Framing note.** Epic #475 states the problem as "two authors": voice
 > replies come from gpt-realtime, text replies from cognition. The spike's
 > first job was to verify that against the code. The finding (section 1) is
