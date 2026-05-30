@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/integrations/agentdef"
 )
 
 // buildPromptData converts the proto AgentGenerateTurnMsg into the
@@ -160,33 +161,52 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 		"name": strings.TrimSpace(msg.AgentId),
 	}
 	if acting := msg.ActingAgent; acting != nil {
-		if name := strings.TrimSpace(acting.Name); name != "" {
-			assistant["name"] = name
+		// Project the agent identity through the converged generation
+		// contract (#476/#480) so the text path reads the SAME definition the
+		// voice path will read (#478) -- neither can render a field the other
+		// can't. BuildGenerationContract applies the same trim/omit-empty
+		// normalization this block did inline, so the rendered prompt is
+		// byte-identical; the new `identityBlock` is the shared region the
+		// voice path adopts in #478.
+		contract := agentdef.BuildGenerationContract(agentdef.ContractInput{
+			AgentID:      acting.Id,
+			Name:         acting.Name,
+			Description:  acting.Description,
+			Personality:  acting.Personality,
+			SystemPrompt: acting.SystemPrompt,
+			Role:         acting.Role,
+			Domains:      acting.Domains,
+			Keywords:     acting.Keywords,
+			ToolSlugs:    acting.Tools,
+		})
+		if contract.Name != "" {
+			assistant["name"] = contract.Name
 		}
-		if id := strings.TrimSpace(acting.Id); id != "" {
-			assistant["id"] = id
+		if contract.AgentID != "" {
+			assistant["id"] = contract.AgentID
 		}
-		if desc := strings.TrimSpace(acting.Description); desc != "" {
-			assistant["description"] = desc
+		if contract.Description != "" {
+			assistant["description"] = contract.Description
 		}
-		if personality := strings.TrimSpace(acting.Personality); personality != "" {
-			assistant["personality"] = personality
+		if contract.Personality != "" {
+			assistant["personality"] = contract.Personality
 		}
-		if sp := strings.TrimSpace(acting.SystemPrompt); sp != "" {
-			assistant["systemPrompt"] = sp
+		if contract.SystemPrompt != "" {
+			assistant["systemPrompt"] = contract.SystemPrompt
 		}
-		if role := strings.TrimSpace(acting.Role); role != "" {
-			assistant["role"] = role
+		if contract.Role != "" {
+			assistant["role"] = contract.Role
 		}
-		if len(acting.Domains) > 0 {
-			assistant["domains"] = acting.Domains
+		if len(contract.Domains) > 0 {
+			assistant["domains"] = contract.Domains
 		}
-		if len(acting.Keywords) > 0 {
-			assistant["keywords"] = acting.Keywords
+		if len(contract.Keywords) > 0 {
+			assistant["keywords"] = contract.Keywords
 		}
-		if len(acting.Tools) > 0 {
-			assistant["tools"] = acting.Tools
+		if len(contract.ToolSlugs) > 0 {
+			assistant["tools"] = contract.ToolSlugs
 		}
+		assistant["identityBlock"] = agentdef.RenderIdentityBlock(contract)
 	}
 	if routing != nil {
 		if roster := formatPeerRoster(routing.Peers); roster != "" {
