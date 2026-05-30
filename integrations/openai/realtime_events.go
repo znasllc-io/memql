@@ -53,6 +53,13 @@ const (
 	serverEventInputSpeechStarted    = "input_audio_buffer.speech_started"
 	serverEventError                 = "error"
 
+	// Native input-transcription events (#478). When the session configures
+	// input transcription, the model emits the user's transcript on these --
+	// the channel that feeds the human's chat transcript without a separate
+	// Deepgram pass on the critical path. Same wire names asr.go consumes.
+	serverEventInputTranscriptDelta = "conversation.item.input_audio_transcription.delta"
+	serverEventInputTranscriptDone  = "conversation.item.input_audio_transcription.completed"
+
 	// Preview-spelling aliases (2024 preview model). Mapped onto the GA names
 	// in parseServerEvent so a pinned preview model still decodes.
 	previewEventAudioDelta      = "response.audio.delta"
@@ -75,10 +82,46 @@ type RealtimeTool struct {
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
-// SessionConfig is the conductor-gate session.update payload (spike section
-// 3.1): turn_detection is always null (the model never self-triggers), audio
-// in/out are PCM at OpenAISampleRate, and the static persona instructions +
-// resolved realtime voice are carried verbatim.
+// TurnDetectionConfig configures the model's server-side turn detection. When a
+// SessionConfig carries a non-nil TurnDetection, encodeSessionUpdate emits it in
+// place of the explicit null -- letting the model detect end-of-turn and (when
+// CreateResponse is set) author its own reply natively (#478, the 1-on-1 native
+// mode). A nil TurnDetection preserves the conductor-gated posture
+// (turn_detection:null), which the multi-party path (#433) depends on.
+type TurnDetectionConfig struct {
+	// Type is the detector, e.g. "semantic_vad" (meaning-based end-of-turn) or
+	// "server_vad" (silence-timer).
+	Type string `json:"type"`
+	// CreateResponse lets the model auto-create a response when it detects
+	// end-of-turn (native authorship). False keeps detection without auto-reply.
+	CreateResponse bool `json:"create_response"`
+	// InterruptResponse lets a new user onset interrupt the in-flight response
+	// natively (model-driven barge-in), so the executor need not drive
+	// response.cancel from a separate VAD on the native path.
+	InterruptResponse bool `json:"interrupt_response"`
+	// Eagerness tunes semantic_vad's turn-end sensitivity ("low" | "medium" |
+	// "high" | "auto"). Omitted when empty.
+	Eagerness string `json:"eagerness,omitempty"`
+}
+
+// InputTranscriptionConfig enables the model's native transcription of the
+// user's input audio (the conversation.item.input_audio_transcription.* events),
+// so the human's chat transcript comes from the realtime model rather than a
+// separate Deepgram pass on the critical path (#478). Nil leaves input
+// transcription off -- the current default.
+type InputTranscriptionConfig struct {
+	// Model is the transcription model id (e.g. "gpt-4o-mini-transcribe").
+	Model string `json:"model"`
+	// Language is an optional ISO-639-1 hint; omitted when empty.
+	Language string `json:"language,omitempty"`
+}
+
+// SessionConfig is the session.update payload (spike section 3.1). By default
+// turn_detection is null (the conductor gate -- the model never self-triggers)
+// and input transcription is off; audio in/out are PCM at OpenAISampleRate, and
+// the static persona instructions + resolved realtime voice are carried
+// verbatim. Setting TurnDetection / InputTranscription switches the session to
+// the #478 native 1-on-1 posture (the model owns the turn).
 type SessionConfig struct {
 	// Instructions is the static persona instruction block
 	// (agent.BuildSessionPersona().Instructions).
@@ -88,26 +131,41 @@ type SessionConfig struct {
 	Voice string
 	// Tools is the function-tool allowlist (empty under #457; #458 fills it).
 	Tools []RealtimeTool
+	// TurnDetection, when non-nil, enables model-driven turn detection (the
+	// #478 native path). Nil keeps turn_detection:null (the conductor gate).
+	TurnDetection *TurnDetectionConfig
+	// InputTranscription, when non-nil, enables native input-audio
+	// transcription (#478). Nil leaves it off.
+	InputTranscription *InputTranscriptionConfig
 }
 
-// encodeSessionUpdate renders the session.update client event with
-// turn_detection explicitly null. The null is load-bearing: it disables the
-// model's input VAD, auto-commit, and auto-response so memQL's conductor is
-// the sole driver of response.create (spike section 3.1).
+// encodeSessionUpdate renders the session.update client event. turn_detection is
+// emitted as the explicit null of the conductor gate when cfg.TurnDetection is
+// nil (the null is load-bearing: it disables the model's input VAD, auto-commit,
+// and auto-response so memQL's conductor is the sole driver of response.create,
+// spike section 3.1), or as the configured detector object when set (the #478
+// native path). Native input-audio transcription is added under audio.input only
+// when cfg.InputTranscription is set.
 func encodeSessionUpdate(cfg SessionConfig) ([]byte, error) {
 	audioFmt := RealtimeAudioFormat{Type: "audio/pcm", Rate: audio.OpenAISampleRate}
+	inputAudio := map[string]any{"format": audioFmt}
+	if cfg.InputTranscription != nil {
+		inputAudio["transcription"] = cfg.InputTranscription
+	}
 	session := map[string]any{
 		"type":         "realtime",
 		"instructions": cfg.Instructions,
 		"audio": map[string]any{
-			"input":  map[string]any{"format": audioFmt},
+			"input":  inputAudio,
 			"output": map[string]any{"format": audioFmt, "voice": cfg.Voice},
 		},
-		// turn_detection: null -- option A, the conductor gate. Encoded
-		// explicitly so the JSON carries the key with a null value rather
-		// than omitting it (omitting it would let the server apply its
-		// server_vad default).
-		"turn_detection": nil,
+	}
+	// Encoded explicitly (key present with a null value rather than omitted) so
+	// the server does not fall back to its server_vad default on the gated path.
+	if cfg.TurnDetection != nil {
+		session["turn_detection"] = cfg.TurnDetection
+	} else {
+		session["turn_detection"] = nil
 	}
 	if len(cfg.Tools) > 0 {
 		session["tools"] = cfg.Tools
@@ -232,6 +290,12 @@ const (
 	// emitted when option-B input VAD is configured; under option A the
 	// barge-in trigger comes from the turn machine, not this event).
 	EventInputSpeechStarted
+	// EventInputTranscriptDelta carries a streamed token of the USER's input
+	// transcript (native input transcription, #478). Text holds the token.
+	EventInputTranscriptDelta
+	// EventInputTranscriptDone carries the final USER input transcript for an
+	// item (#478). Text holds the full transcript.
+	EventInputTranscriptDone
 	// EventError carries an API error message.
 	EventError
 )
@@ -331,6 +395,12 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 		ev.Arguments = raw.Arguments
 	case serverEventInputSpeechStarted:
 		ev.Kind = EventInputSpeechStarted
+	case serverEventInputTranscriptDelta:
+		ev.Kind = EventInputTranscriptDelta
+		ev.Text = raw.Delta
+	case serverEventInputTranscriptDone:
+		ev.Kind = EventInputTranscriptDone
+		ev.Text = raw.Transcript
 	case serverEventError:
 		ev.Kind = EventError
 		ev.ErrorMessage = raw.Error.Message

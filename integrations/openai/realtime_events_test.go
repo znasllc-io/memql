@@ -71,6 +71,58 @@ func TestEncodeSessionUpdate_WithTools(t *testing.T) {
 	assert.Equal(t, "auto", session["tool_choice"])
 }
 
+func TestEncodeSessionUpdate_NativeTurnDetection(t *testing.T) {
+	data, err := encodeSessionUpdate(SessionConfig{
+		Instructions: "You are Sofia.",
+		Voice:        "marin",
+		TurnDetection: &TurnDetectionConfig{
+			Type:              "semantic_vad",
+			CreateResponse:    true,
+			InterruptResponse: true,
+			Eagerness:         "auto",
+		},
+		InputTranscription: &InputTranscriptionConfig{Model: "gpt-4o-mini-transcribe"},
+	})
+	require.NoError(t, err)
+
+	session := decodeJSON(t, data)["session"].(map[string]any)
+	// turn_detection is the configured object, NOT null.
+	td := session["turn_detection"].(map[string]any)
+	assert.Equal(t, "semantic_vad", td["type"])
+	assert.Equal(t, true, td["create_response"])
+	assert.Equal(t, true, td["interrupt_response"])
+	assert.Equal(t, "auto", td["eagerness"])
+
+	// Input transcription nested under audio.input.
+	input := session["audio"].(map[string]any)["input"].(map[string]any)
+	transcription := input["transcription"].(map[string]any)
+	assert.Equal(t, "gpt-4o-mini-transcribe", transcription["model"])
+	// Language omitted when empty.
+	_, hasLang := transcription["language"]
+	assert.False(t, hasLang)
+}
+
+func TestEncodeSessionUpdate_NilTurnDetectionStaysNull(t *testing.T) {
+	// Regression guard for the multi-party path: a nil TurnDetection must still
+	// emit the explicit null, and no transcription block.
+	data, err := encodeSessionUpdate(SessionConfig{Instructions: "x", Voice: "alloy"})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"turn_detection":null`)
+	input := decodeJSON(t, data)["session"].(map[string]any)["audio"].(map[string]any)["input"].(map[string]any)
+	_, hasTranscription := input["transcription"]
+	assert.False(t, hasTranscription, "no input transcription when unset")
+}
+
+func TestParseServerEvent_InputTranscript(t *testing.T) {
+	delta := parseServerEvent([]byte(`{"type":"conversation.item.input_audio_transcription.delta","delta":"cut the"}`))
+	assert.Equal(t, EventInputTranscriptDelta, delta.Kind)
+	assert.Equal(t, "cut the", delta.Text)
+
+	done := parseServerEvent([]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"cut the cloud spend"}`))
+	assert.Equal(t, EventInputTranscriptDone, done.Kind)
+	assert.Equal(t, "cut the cloud spend", done.Text)
+}
+
 func TestEncodeInputAudioAppend_Base64(t *testing.T) {
 	pcm := []byte{0x01, 0x02, 0x03, 0x04}
 	data, err := encodeInputAudioAppend(pcm)
