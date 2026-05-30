@@ -143,7 +143,6 @@ mutation space mutationCreateDailySpace {
 //   spaceId (string, required)       - Space ID
 //   participantId (string, required) - SI participant ID
 //   agentId (string, required)       - Agent template ID
-//   displayName (string, required)   - SI display name
 //   text (string, required)          - Greeting text
 //   greetingKind (string, required)  - "agentGreeting"
 //
@@ -154,10 +153,17 @@ mutation space mutationCreateDailySpace {
 //     spaceId: "space-123",
 //     participantId: "ai-sofia-space-123",
 //     agentId: "sofia",
-//     displayName: "Sofia",
 //     text: "Hi everyone!",
 //     greetingKind: "agentGreeting"
 //   })
+//
+// Note: the SI display name is NOT written onto the utterance row --
+// `displayName` is not a field on v1:cognition:utterance (the concept
+// enforces additionalProperties:false), so writing it rejected the
+// insert and the join greeting never landed (memql#419). The name is
+// already carried by the participant referenced via participantId;
+// consumers derive it from there, exactly as every other utterance
+// insert does.
 //
 
 @enabled
@@ -167,14 +173,12 @@ mutation utterance mutationCreateGreetingUtterance {
     spaceId        string  @required
     participantId  string  @required
     agentId        string  @required
-    displayName    string  @required
     text           string  @required
     greetingKind   string  @required
   }
   insert utterance {
     args.spaceId
     args.participantId
-    args.displayName
     participantType: "si"
     utteranceType: "text"
     args.text

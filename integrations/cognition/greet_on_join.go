@@ -290,12 +290,17 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 	// Persist via the existing greeting mutation -- preserves the
 	// kind=="agentGreeting" marker so queryGreetingUtterance and
 	// agentInteractionCount keep counting it the same way.
+	// NOTE: displayName is deliberately NOT passed into the utterance
+	// insert -- it is not a field on v1:cognition:utterance (the concept
+	// enforces additionalProperties:false), so including it rejected the
+	// insert and the join greeting silently never landed (memql#419).
+	// The SI display name is already carried by the participant row
+	// referenced via participantId; consumers derive it from there.
 	mutation := fmt.Sprintf(
-		`mutationCreateGreetingUtterance({spaceId: %s, participantId: %s, agentId: %s, displayName: %s, text: %s, greetingKind: "agentGreeting"})`,
+		`mutationCreateGreetingUtterance({spaceId: %s, participantId: %s, agentId: %s, text: %s, greetingKind: "agentGreeting"})`,
 		escapeJSONString(spaceId),
 		escapeJSONString(participantId),
 		escapeJSONString(agentId),
-		escapeJSONString(displayName),
 		escapeJSONString(response),
 	)
 	if _, err := c.engine.Execute(ctx, mutation); err != nil {
