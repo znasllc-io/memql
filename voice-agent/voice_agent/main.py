@@ -29,6 +29,7 @@ from voice_agent.avatar_drive import start_avatar
 from voice_agent.avatar_plugin import build_avatar
 from voice_agent.config import Config, load_config, setup_logging
 from voice_agent.grpc_client import MemqlGrpcClient
+from voice_agent.mcp_tool_bridge import wire_realtime_mcp_tools
 from voice_agent.memql_llm_plugin import MemqlLLM
 from voice_agent.persona_resolver import Persona, resolve_persona
 from voice_agent.realtime_executor import select_voice_executor
@@ -242,6 +243,32 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.info(
             "agent session built with realtime executor (turn_detection=None, #432)"
         )
+        # MCP tool bridge (#435): expose ONLY the low-risk read-tool
+        # allowlist (web search, knowledge lookup, recent-chat) to the
+        # realtime model via async function calling, and mirror every
+        # model-driven call into cognition. Privileged / side-effecting
+        # tools (computer_use, copresent_control, mutations) stay
+        # cognition-mediated + authorized and are never exposed here.
+        # Best-effort: a failure to list/bridge tools degrades to "no
+        # model-driven tools" and never aborts the session build.
+        try:
+            bridge = await wire_realtime_mcp_tools(
+                executor_plan.realtime_model,
+                client=client,
+                space_id=space_id,
+                agent_id=ga_agent_id,
+            )
+            if bridge is not None:
+                logger.info(
+                    "realtime mcp bridge: exposed=%s withheld=%s",
+                    bridge.exposed_tool_names,
+                    bridge.denied_tool_names,
+                )
+        except Exception:  # noqa: BLE001 -- tool bridging must not break voice
+            logger.exception(
+                "realtime mcp bridge wiring failed -- continuing with no "
+                "model-driven tools (privileged tools were never exposed)"
+            )
     else:
         session = AgentSession(vad=vad, stt=stt, llm=llm, tts=tts)
         logger.info("agent session built with cascade executor (STT->cognition->TTS)")
