@@ -177,7 +177,8 @@ func resolveGroupGAAgentId(s *streamSession, spaceId string) string {
 		}
 		return ""
 	}
-	query := fmt.Sprintf(`queryGroupGAForSpace({spaceId: "%s"})`, canonicalSpace)
+	canonicalSpaceJSON, _ := json.Marshal(canonicalSpace)
+	query := fmt.Sprintf(`queryGroupGAForSpace({spaceId: %s})`, string(canonicalSpaceJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		if s.logger != nil {
@@ -249,16 +250,19 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 
 	ctx := contextWithVoiceAgentActor(context.Background())
 
-	// 1) Active per-(space, agent) override.
-	overrideQuery := fmt.Sprintf(`%s({spaceId: "%s"})`, queryName, spaceId)
+	// 1) Active per-(space, agent) override. Marshal spaceId so an embedded
+	// double quote cannot break out of the DSL string literal.
+	spaceIdJSON, _ := json.Marshal(spaceId)
+	overrideQuery := fmt.Sprintf(`%s({spaceId: %s})`, queryName, string(spaceIdJSON))
 	if result, err := s.service.engine.Execute(ctx, overrideQuery); err == nil {
 		if mode, ok := extractAgentChannelMode(result.OutputPayload(), agentId); ok {
 			return mode
 		}
 	}
 
-	// 2) Agent record's default.
-	agentQuery := fmt.Sprintf(`from(v1:agents:agent) ?.id=="%s" select id, payload.%s`, agentId, field)
+	// 2) Agent record's default. Marshal agentId (field is a fixed column name).
+	agentIdJSON, _ := json.Marshal(agentId)
+	agentQuery := fmt.Sprintf(`from(v1:agents:agent) ?.id==%s select id, payload.%s`, string(agentIdJSON), field)
 	if result, err := s.service.engine.Execute(ctx, agentQuery); err == nil {
 		if mode, ok := extractFirstAgentField(result.OutputPayload(), field); ok && isValidChannelMode(mode) {
 			return mode
@@ -290,9 +294,14 @@ func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
 		return out
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
+	// JSON-marshal the interpolated id so an id containing a double quote cannot
+	// break out of the DSL string literal (CodeQL "unsafe quoting"). marshal
+	// yields a quoted, escaped literal, so the surrounding "%s" quotes are
+	// dropped and %s carries the full `"<escaped>"` token.
+	agentIdJSON, _ := json.Marshal(agentId)
 	query := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id=="%s" select id, payload.name, payload.role, payload.description, payload.personality`,
-		agentId)
+		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality`,
+		string(agentIdJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		return out
@@ -644,9 +653,17 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	}
 
 	go func() {
+		// JSON-marshal every interpolated string so a value containing a double
+		// quote cannot break out of its DSL string literal (CodeQL "unsafe
+		// quoting"). text already used this; do the same for the id fields and
+		// the source enum.
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "%s", pipeline: "voice-agent"}})`,
-			utteranceId, spaceId, speakerId, string(textJSON), inputMethod)
+		utteranceIdJSON, _ := json.Marshal(utteranceId)
+		spaceIdJSON, _ := json.Marshal(spaceId)
+		speakerIdJSON, _ := json.Marshal(speakerId)
+		inputMethodJSON, _ := json.Marshal(inputMethod)
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: %s, spaceId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
+			string(utteranceIdJSON), string(spaceIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
 		if _, err := s.service.engine.Execute(ctx, query); err != nil {
@@ -1108,9 +1125,15 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 			replyToClause = fmt.Sprintf(`, replyToId: %s`, string(replyToJSON))
 		}
 
+		// JSON-marshal the interpolated ids so an id containing a double quote
+		// cannot break out of its DSL string literal (CodeQL unsafe-quoting,
+		// alert #188). text / source / replyTo already use this escaping.
+		utteranceIdJSON, _ := json.Marshal(utteranceId)
+		spaceIdJSON, _ := json.Marshal(spaceId)
+		participantIdJSON, _ := json.Marshal(participantId)
 		query := fmt.Sprintf(
-			`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", participantType: "si", text: %s%s, source: %s%s})`,
-			utteranceId, spaceId, participantId,
+			`mutationSendTextUtterance({utteranceId: %s, spaceId: %s, participantId: %s, participantType: "si", text: %s%s, source: %s%s})`,
+			string(utteranceIdJSON), string(spaceIdJSON), string(participantIdJSON),
 			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
 		)
 
