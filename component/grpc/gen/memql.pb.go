@@ -11148,9 +11148,16 @@ type VoiceAgentFinalTranscript struct {
 	// Provider confidence, 0.0-1.0 (Deepgram surfaces this).
 	Confidence float32 `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`
 	// Wall-clock millis the utterance ended (voice-agent side).
-	EndedAtMs     int64 `protobuf:"varint,6,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	EndedAtMs int64 `protobuf:"varint,6,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
+	// Native-authored flag (#478, 1-on-1 native mode). True when the realtime
+	// model already authored AND spoke the reply to this user turn natively
+	// (turn_detection: semantic_vad), so the server must stamp this user
+	// utterance transcript-only (source.inputMethod="realtimeVoice") and
+	// cognition must NOT author a second reply. False is the conductor-gated /
+	// cascade path: cognition authors as today.
+	NativeAuthored bool `protobuf:"varint,7,opt,name=native_authored,json=nativeAuthored,proto3" json:"native_authored,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VoiceAgentFinalTranscript) Reset() {
@@ -11223,6 +11230,13 @@ func (x *VoiceAgentFinalTranscript) GetEndedAtMs() int64 {
 		return x.EndedAtMs
 	}
 	return 0
+}
+
+func (x *VoiceAgentFinalTranscript) GetNativeAuthored() bool {
+	if x != nil {
+		return x.NativeAuthored
+	}
+	return false
 }
 
 type VoiceAgentFinalAck struct {
@@ -13087,7 +13101,7 @@ const file_memql_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\xdc\x01\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x85\x02\n" +
 	"\x19VoiceAgentFinalTranscript\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
@@ -13098,7 +13112,8 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"confidence\x18\x05 \x01(\x02R\n" +
 	"confidence\x12\x1e\n" +
-	"\vended_at_ms\x18\x06 \x01(\x03R\tendedAtMs\"\xcc\x01\n" +
+	"\vended_at_ms\x18\x06 \x01(\x03R\tendedAtMs\x12'\n" +
+	"\x0fnative_authored\x18\a \x01(\bR\x0enativeAuthored\"\xcc\x01\n" +
 	"\x12VoiceAgentFinalAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +

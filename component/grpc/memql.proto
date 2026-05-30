@@ -1726,6 +1726,13 @@ message VoiceAgentFinalTranscript {
   float confidence = 5;
   // Wall-clock millis the utterance ended (voice-agent side).
   int64 ended_at_ms = 6;
+  // Native-authored flag (#478, 1-on-1 native mode). True when the realtime
+  // model already authored AND spoke the reply to this user turn natively
+  // (turn_detection: semantic_vad), so the server must stamp this user
+  // utterance transcript-only (source.inputMethod="realtimeVoice") and
+  // cognition must NOT author a second reply. False is the conductor-gated /
+  // cascade path: cognition authors as today.
+  bool native_authored = 7;
 }
 
 message VoiceAgentFinalAck {

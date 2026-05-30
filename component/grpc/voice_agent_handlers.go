@@ -633,10 +633,20 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	// practice but cheap belt-and-suspenders.
 	utteranceId := fmt.Sprintf("utt-%d-%s", time.Now().UnixNano(), randHex(8))
 
+	// In the #478 native 1-on-1 path the realtime model already authored AND
+	// spoke the reply, so this user utterance is transcript-only: stamp
+	// inputMethod="realtimeVoice" (isTranscriptOnlyRealtimeUtterance) so the
+	// cognition automation skips authoring a second reply. The conductor-gated /
+	// cascade path keeps inputMethod="stt" so cognition authors as today.
+	inputMethod := "stt"
+	if msg.GetNativeAuthored() {
+		inputMethod = "realtimeVoice"
+	}
+
 	go func() {
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "voice-agent"}})`,
-			utteranceId, spaceId, speakerId, string(textJSON))
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "%s", pipeline: "voice-agent"}})`,
+			utteranceId, spaceId, speakerId, string(textJSON), inputMethod)
 
 		ctx := contextWithVoiceAgentActor(context.Background())
 		if _, err := s.service.engine.Execute(ctx, query); err != nil {
@@ -905,6 +915,18 @@ func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAg
 	pt := asString(nodeFields, "participantType")
 	if pt != "si" {
 		return voiceAgentReply{}, false
+	}
+	// Skip utterances the realtime model already spoke natively (#478). The
+	// gpt-realtime output capture (handleVoiceAgentRealtimeOutput) inserts a
+	// participantType="si" utterance stamped source.outputMethod="realtimeVoice";
+	// without this guard the speak subscriber would match it and push a
+	// VoiceAgentSpeak, making the model re-voice its own reply (double-speak).
+	// The speak path exists to voice TEXT replies cognition authored, never
+	// audio the model already produced.
+	if source := pickMap(nodeFields, "source"); source != nil {
+		if strings.TrimSpace(asString(source, "outputMethod")) == "realtimeVoice" {
+			return voiceAgentReply{}, false
+		}
 	}
 	_ = gaAgentId // retained on the signature for caller-side logging
 	text := strings.TrimSpace(asString(nodeFields, "text"))
