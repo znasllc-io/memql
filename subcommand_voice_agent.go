@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/znasllc-io/memql/integrations/voice/agent"
@@ -47,7 +48,22 @@ func runVoiceAgentSubcommand(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := agent.Run(ctx, agent.RunOptions{RoomName: *roomName}); err != nil {
+	// Resolve the room: --room, then MEMQL_VOICE_ROOM_NAME. With a room set we
+	// run that single room (production / explicit dev). With no room we hand off
+	// to the auto-join dispatcher, which watches LiveKit for active polyphon
+	// rooms and joins one (dev convenience) or idles when auto-join is disabled.
+	room := strings.TrimSpace(*roomName)
+	if room == "" {
+		room = strings.TrimSpace(os.Getenv("MEMQL_VOICE_ROOM_NAME"))
+	}
+
+	var err error
+	if room != "" {
+		err = agent.Run(ctx, agent.RunOptions{RoomName: room})
+	} else {
+		err = agent.RunDispatcher(ctx, agent.RunOptions{})
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "voice-agent: %v\n", err)
 		return 1
 	}

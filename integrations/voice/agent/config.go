@@ -56,6 +56,13 @@ type Config struct {
 	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
 	// native authorship for a single-human standard space). Default true.
 	RealtimeNativeTurn bool
+	// VoiceAutoJoin enables the dev auto-join dispatcher: when the voice-agent
+	// is launched with no --room / MEMQL_VOICE_ROOM_NAME, it watches LiveKit for
+	// active polyphon-<spaceId> rooms and joins one, so voice "just works" in
+	// dev without launching a per-room process by hand. Default true; production
+	// launches the agent per-room (--room), so it never hits this path. Set
+	// MEMQL_VOICE_AUTOJOIN=false to force the plain idle behaviour instead.
+	VoiceAutoJoin bool
 	// RealtimeMultiPartySemanticVad enables the #481 multi-party gate:
 	// semantic_vad turn detection + the conductor gate + native generation for
 	// a >=2-human room (vs the turn_detection:null + Deepgram path). Default
@@ -190,6 +197,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// standard space has exactly one human. On by default; set
 	// MEMQL_REALTIME_NATIVE_TURN=false to keep the conductor gate on the
 	// realtime path (a finer-grained rollback than dropping to the cascade).
+	cfg.VoiceAutoJoin = get("MEMQL_VOICE_AUTOJOIN", "true") != "false"
 	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
 	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 	// #481 multi-party semantic_vad gate -- opt-in (default false), pending live

@@ -102,6 +102,18 @@ func TestLoadConfig_CascadeOptOut(t *testing.T) {
 
 // TestLoadConfig_NativeTurnOptOut: native 1-on-1 is on by default but can be
 // disabled (the finer-grained realtime rollback per #478).
+func TestLoadConfig_VoiceAutoJoinDefaultAndOptOut(t *testing.T) {
+	cfg, err := LoadConfig(envMap(baseEnv()))
+	require.NoError(t, err)
+	assert.True(t, cfg.VoiceAutoJoin, "auto-join defaults on")
+
+	env := baseEnv()
+	env["MEMQL_VOICE_AUTOJOIN"] = "false"
+	cfg, err = LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.False(t, cfg.VoiceAutoJoin)
+}
+
 func TestLoadConfig_MultiPartySemanticVadOptIn(t *testing.T) {
 	// #481 multi-party semantic_vad is off by default, opt-in via env.
 	cfg, err := LoadConfig(envMap(baseEnv()))
