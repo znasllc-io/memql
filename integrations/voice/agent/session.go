@@ -12,7 +12,7 @@ import (
 )
 
 // session.go ports the top-level session lifecycle from
-// voice-agent/voice_agent/main.py (entrypoint): open the gRPC session with a
+// the Python voice-agent's main.py (entrypoint): open the gRPC session with a
 // VoiceAgentSessionStart, consume the SessionAck (canonical voice, avatar
 // persona id, initial audio/video modes), join the LiveKit room, run until
 // the room closes, and announce VoiceAgentSessionEnd on teardown.

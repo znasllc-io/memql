@@ -16,7 +16,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// grpc_client.go is the Go analog of voice-agent/voice_agent/grpc_client.py.
+// grpc_client.go is the Go analog of the Python voice-agent's grpc_client.py.
 // It owns one bidirectional MemqlService.Stream connection for a voice-agent
 // session: send-side methods enqueue MemqlClientMessage envelopes onto a
 // shared channel drained by the write loop; the read loop fans incoming

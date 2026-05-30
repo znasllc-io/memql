@@ -58,7 +58,7 @@ func printVoiceAgentTokenUsage() {
 	fmt.Fprintln(os.Stderr, `usage: memql voice-agent-token <subcommand> [flags]
 
 Subcommands:
-  mint    Mint a class="voice_agent" JWT for a Python voice-agent process.
+  mint    Mint a class="voice_agent" JWT for the Go voice-agent process.
 
 Run "memql voice-agent-token mint --help" for mint-specific flags.`)
 }

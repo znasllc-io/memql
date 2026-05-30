@@ -7,7 +7,7 @@ import (
 )
 
 // executor_select.go is the Go analog of the Python
-// voice-agent/voice_agent/realtime_executor.py::select_voice_executor: it
+// the Python voice-agent's realtime_executor.py::select_voice_executor: it
 // resolves WHICH voice executor a session is built around, behind the same
 // seam the cascade plugs into.
 //

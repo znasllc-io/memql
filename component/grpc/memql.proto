@@ -161,7 +161,7 @@ message MemqlClientMessage {
     // -------------------------------------------------------------
     // Realtime Voice + Video architecture (Initiative C, 2026-05).
     // -------------------------------------------------------------
-    // The Python voice-agent process (LiveKit Agents 1.5) speaks
+    // The Go voice-agent process (integrations/voice/agent) speaks
     // these messages over MemqlService.Stream. Authenticated via a
     // service-account JWT; the stream interceptor restricts that
     // identity-type to ONLY this group of message types -- it has
@@ -1620,8 +1620,8 @@ message RevokeWorkerTokenResult {
 // Realtime Voice + Video (Initiative C, 2026-05-10)
 // -----------------------------------------------------------------------------
 //
-// The Python voice-agent process (LiveKit Agents 1.5, lives at
-// memql/voice-agent/) speaks these messages over MemqlService.Stream
+// The Go voice-agent process (lives at integrations/voice/agent)
+// speaks these messages over MemqlService.Stream
 // while authenticated as a service account. The stream interceptor
 // pins service-account callers to this set of message types only --
 // they CANNOT execute queries, run mutations, or call any other

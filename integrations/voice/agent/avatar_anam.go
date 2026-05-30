@@ -1,8 +1,8 @@
 package agent
 
 // avatar_anam.go is the direct Go integration of the Anam REST API, replacing
-// the Python livekit-plugins-anam SDK + the AnamPersonaSession subclass in
-// voice-agent/voice_agent/anam_persona_session.py. No Python, no LiveKit
+// the retired Python Anam LiveKit plugin + the AnamPersonaSession subclass in
+// the Python voice-agent's anam_persona_session.py. No Python, no LiveKit
 // plugin -- just Anam's documented HTTP endpoints.
 //
 // Flow (the ephemeral client-audio path, so the avatar lip-syncs OUR audio

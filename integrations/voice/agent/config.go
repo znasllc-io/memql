@@ -1,7 +1,7 @@
 // Package agent is the Go voice-agent: the media participant that joins a
 // LiveKit room on behalf of a memQL space's General Assistant, opens a
 // MemqlService.Stream gRPC session, and runs the turn-taking / STT / TTS
-// orchestration that the retired Python voice-agent (voice-agent/, LiveKit
+// orchestration that the retired Python voice-agent (LiveKit
 // Agents 1.5) used to own.
 //
 // This file is the foundational skeleton landed for issue #454 (epic #449):

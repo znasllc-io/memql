@@ -7,7 +7,7 @@ import (
 )
 
 // realtime_lifecycle.go is the Go analog of the RealtimeSessionLifecycle half of
-// voice-agent/voice_agent/realtime_lifecycle.py (#439 -> #459). It bounds one
+// the Python voice-agent's realtime_lifecycle.py (#439 -> #459). It bounds one
 // realtime speech-to-speech session in a multi-party room so that an always-on
 // model listening to a polyphon room (up to 5 humans + 1 assistant) cannot burn
 // audio tokens unbounded. It owns *when* a warm session lives, mutes, and dies;

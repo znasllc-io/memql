@@ -1,7 +1,7 @@
 package agent
 
 // realtime_budget.go is the Go analog of the RealtimeBudget + TeardownReason
-// half of voice-agent/voice_agent/realtime_lifecycle.py (#439 -> #459). It holds
+// half of the Python voice-agent's realtime_lifecycle.py (#439 -> #459). It holds
 // the resolved cost guardrails for one realtime session and the classification
 // of WHY a session was torn down. It is pure Go and CGO-free: no timers, no
 // goroutines, no media -- just the value types the watchdog (realtime_lifecycle.go)

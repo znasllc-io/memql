@@ -1,6 +1,6 @@
 package agent
 
-// avatar_dispatch.go is the Go port of voice-agent/voice_agent/avatar_plugin.py:
+// avatar_dispatch.go is the Go port of the Python voice-agent's avatar_plugin.py:
 // the pure vendor-selection + gating logic that decides, from the Config and
 // the resolved Persona, WHICH vendor (if any) renders this session's avatar
 // and with which persona/avatar id. It is CGO-free and fully unit-tested in

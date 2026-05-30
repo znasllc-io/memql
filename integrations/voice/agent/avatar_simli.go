@@ -1,8 +1,8 @@
 package agent
 
 // avatar_simli.go is the direct Go integration of the Simli REST API,
-// replacing the Python livekit-plugins-simli SDK. Same two-step shape as the
-// stock plugin's AvatarSession.start, ported 1:1:
+// replacing the retired Python Simli LiveKit plugin. Same two-step shape as
+// the stock plugin's AvatarSession.start, ported 1:1:
 //
 //  1. POST {base}/compose/token (header x-simli-api-key) with the face id +
 //     session knobs -> a session token.

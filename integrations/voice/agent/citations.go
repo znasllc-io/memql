@@ -4,7 +4,7 @@ package agent
 // realtime turn's spoken transcript by post-hoc phrase-matching against the
 // grounding context that was injected into the session (#456 grounding ->
 // #458 citations). It is the Go port of
-// voice-agent/voice_agent/realtime_output.py's CitationResolver +
+// the Python voice-agent's realtime_output.py's CitationResolver +
 // build_citation_resolver.
 //
 // Why phrase matching. The cascade carries citations on the respondToUser

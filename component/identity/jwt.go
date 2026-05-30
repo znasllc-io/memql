@@ -88,7 +88,7 @@ const (
 	// ClassNode marks a cluster-internal node service-account token
 	// (#105). NodeService.Stream rejects every other class.
 	ClassNode = "node"
-	// ClassVoiceAgent marks the Python voice-agent process's
+	// ClassVoiceAgent marks the Go voice-agent process's
 	// service-account token (#109). MemqlService.Stream's
 	// voice-agent interceptor admits this class and pins the call
 	// to VoiceAgent* payload types -- a leaked voice-agent token
@@ -356,7 +356,7 @@ func (j *JWTIssuer) IssueNodeAccessToken(in NodeIssueInput, now time.Time) (stri
 
 // VoiceAgentIssueInput is the per-call payload for
 // IssueVoiceAgentAccessToken. Voice-agent tokens authenticate the
-// Python voice-agent process on MemqlService.Stream; the
+// Go voice-agent process on MemqlService.Stream; the
 // interceptor pins the surface to VoiceAgent* payload types so a
 // leaked credential can't drive other RPCs.
 //

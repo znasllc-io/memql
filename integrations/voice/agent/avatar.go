@@ -1,7 +1,7 @@
 package agent
 
 // avatar.go is the audio-source-agnostic avatar core for the Go voice-agent,
-// the port of voice-agent/voice_agent/avatar_drive.py plus the shared HTTP
+// the port of the Python voice-agent's avatar_drive.py plus the shared HTTP
 // plumbing the vendor clients (avatar_anam.go / avatar_simli.go) ride on.
 //
 // The whole vendor REST/dispatch layer is PURE Go (CGO-free) so it builds and

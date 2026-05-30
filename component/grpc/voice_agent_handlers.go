@@ -36,9 +36,9 @@ func randHex(n int) string {
 // Realtime Voice + Video gRPC handlers (Initiative C, Phase 6 wiring).
 // -----------------------------------------------------------------------------
 //
-// The Python voice-agent process (memql/voice-agent/, LiveKit Agents 1.5)
-// authenticates as a service account and speaks the VoiceAgent* message
-// surface. These handlers translate that surface into:
+// The Go voice-agent process (integrations/voice/agent) authenticates as a
+// service account and speaks the VoiceAgent* message surface. These handlers
+// translate that surface into:
 //
 //   1. Custom voice events on the event bus (partial transcripts) -- so
 //      the chat UI can ghost-text the in-progress utterance via the
@@ -87,9 +87,8 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	}
 
 	// The voice-agent currently sends a placeholder ga_agent_id of
-	// the form "<space_slug>-ga" (see voice-agent/voice_agent/main.py;
-	// the real wiring through the LiveKit token is a Phase 11 follow-
-	// up). Override rows and agent records are keyed by the GA's real
+	// the form "<space_slug>-ga" (the real wiring through the LiveKit
+	// token is a follow-up). Override rows and agent records are keyed by the GA's real
 	// canonical agent id, so the placeholder can't address them. Look
 	// the real id up from the space's group-GA participant; fall back
 	// to the wire value when the lookup fails so we don't regress

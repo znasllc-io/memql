@@ -1,6 +1,6 @@
 package agent
 
-// persona.go is the Go port of voice-agent/voice_agent/persona_resolver.py:
+// persona.go is the Go port of the Python voice-agent's persona_resolver.py:
 // it turns the resolved SessionAck (canonical voice, avatar persona id,
 // initial audio/video gate modes) into a single Persona value the rest of
 // the agent consumes. The Python module owned the gRPC round-trip itself;
@@ -31,7 +31,7 @@ const (
 )
 
 // Persona is the resolved per-session runtime configuration for one GA, the
-// Go analog of voice-agent/voice_agent/persona_resolver.py::Persona.
+// Go analog of the Python voice-agent's persona_resolver.py::Persona.
 //
 // It is produced once at session bring-up by ResolvePersona(ack, cfg) and
 // held for the lifetime of the LiveKit room. Mid-session state changes (the

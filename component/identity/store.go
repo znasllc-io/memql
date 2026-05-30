@@ -452,7 +452,7 @@ func (s *Store) CreateIdentityMagicLink(ctx context.Context, identityId, userId,
 }
 
 // CreateIdentityVoiceAgentToken creates a v1:identity:identity row with
-// the voice_agent_token variant for a Python voice-agent process.
+// the voice_agent_token variant for the Go voice-agent process.
 // keyHash is the SHA-256 hex digest of an auxiliary random bearer; the
 // actual auth credential handed to the voice-agent is a
 // class="voice_agent" JWT signed via

@@ -1,7 +1,7 @@
 package agent
 
 // instructions.go is the Go port of the persona-instruction half of
-// voice-agent/voice_agent/realtime_instructions.py: it composes the static
+// the Python voice-agent's realtime_instructions.py: it composes the static
 // realtime session "instructions" string from a Persona's identity + style,
 // trimmed to identity + style + spoken constraints. The conductor layers the
 // per-turn directive (mode / brevity / angle) ON TOP of this via the
