@@ -181,6 +181,18 @@ services:
     container_name: memql-app
     hostname: app
     working_dir: /app
+    # The CoPresent SPA is gated behind the "frontend" profile so the
+    # two dev-refresh entrypoints split cleanly (memql#461):
+    #   - memQL repo `make dev-refresh` does a no-arg `up` -> the
+    #     profiled `app` is SKIPPED -> backend cluster only, no frontend.
+    #   - copresent repo `make dev-refresh` delegates to memQL's refresh
+    #     (cluster) then explicitly `up -d app` (an explicitly-named
+    #     service starts regardless of profile activation) -> cluster
+    #     PLUS frontend.
+    # To bring the frontend up from the memQL repo directly, add
+    # `--profile frontend` to the compose command.
+    profiles:
+      - frontend
     # Install deps into the named volume on first boot, then run the
     # full dev stack (Vite + Express). --legacy-peer-deps mirrors the
     # production Dockerfile.
