@@ -97,3 +97,30 @@ func BuildSessionPersona(p Persona) SessionPersona {
 		Voice:        ResolveRealtimeVoice(p),
 	}
 }
+
+// RealtimeInstructionsForReply renders the per-response instructions string for
+// one conductor-gated realtime response (#432 section 2.4 / 3.3). It is the
+// realtime analog of the cascade's per-turn prompt: the conductor's decision
+// reaches the executor as the GA's reply text (via VoiceAgentTurnComplete),
+// and the speech-to-speech model needs that decision rendered as per-response
+// `instructions` that override the session default for this one response.
+//
+// The conductor already made the turn-shaping decision server-side (mode /
+// brevity / suppression collapse into "speak this text" vs "stay silent" over
+// the VoiceAgent* seam the cascade shares -- see realtime_executor.go), so the
+// rendered directive instructs the model to convey that decided content in the
+// persona's voice rather than re-deriving an answer. Empty reply -> empty
+// instructions (the caller never calls CreateResponse for a suppressed turn).
+func RealtimeInstructionsForReply(reply string) string {
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return ""
+	}
+	lines := []string{
+		"Respond now in your persona's voice. Convey the following, naturally " +
+			"and concisely, as spoken dialogue -- do not read it verbatim or add " +
+			"help-desk scaffolding:",
+		reply,
+	}
+	return strings.Join(lines, "\n")
+}

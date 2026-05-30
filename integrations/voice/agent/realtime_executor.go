@@ -1,0 +1,615 @@
+package agent
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/integrations/openai"
+)
+
+// realtime_executor.go is the Go realtime voice loop: it slots BEHIND THE SAME
+// SEAM as the cascade (cascade.go) -- same turn-taking machine, same gRPC
+// VoiceAgent* contract, same SpeakSink registration -- but drives the OpenAI
+// gpt-realtime speech-to-speech model instead of the Deepgram STT->cognition->
+// Deepgram TTS pipeline. It is the Go analog of
+// voice-agent/voice_agent/realtime_executor.py + the realtime branch of
+// main.py, and implements the merged designs in
+// docs/voice/432-conductor-response-gate.md (conductor gate) and
+// docs/voice/433-multiparty-audio-routing.md (multi-party routing).
+//
+// It is pure Go and CGO-free: it depends only on small interfaces (the
+// realtimeSession seam below, the gRPC Client, the audioSink). The websocket
+// client (integrations/openai/realtime.go) is itself CGO-free; the room
+// audio-publish glue is the only voice-tagged code. So the conductor gate
+// (response.create on engage, suppress on defer, cancel on barge-in) and the
+// multi-party labeled-item injection are unit-testable in the default CI lane.
+//
+// Conductor gate (the heart, #432). The executor reuses the EXACT decision the
+// cascade reuses: a human final transcript drives a VoiceAgentTurnRequest; the
+// server's VoiceAgentTurnComplete carries the conductor's decision -- non-empty
+// final text means "the assistant should speak" (engage), empty means the
+// conductor/classifier suppressed the turn (defer/silence). On engage the
+// executor drives exactly one realtime response.create with a per-response
+// instructions directive; on suppress it sends nothing. There is exactly one
+// response.create emitter and it is gated on the conductor's decision -- the
+// model never self-triggers (turn_detection:null on the session). Barge-in
+// reuses the turn-taking machine's OnBargeIn signal (transition C) and issues
+// response.cancel + output_audio_buffer.clear.
+//
+// Multi-party routing (#433). Each human's final transcript is injected into
+// the realtime session as a labeled conversation.item ("[name . role] text")
+// so the model can attribute statements to the right speaker even when it never
+// heard their audio. The active-speaker PCM is streamed to the model
+// (SendAudio) for prosody + barge-in; under turn_detection:null this never
+// auto-triggers a response.
+
+// realtimeSession is the executor's seam onto the gpt-realtime websocket
+// client (integrations/openai.RealtimeSession). Defined locally so the executor
+// is testable with a mock and so the room-publish glue stays the only thing
+// importing the live client. It is the wider-vocabulary analog of the cascade's
+// ttsSynthesizer seam.
+type realtimeSession interface {
+	// SendAudio streams one PCM16 16 kHz active-speaker chunk to the model.
+	SendAudio(pcm16k []byte) error
+	// CommitInput commits the buffered input audio as a user item (no response).
+	CommitInput() error
+	// InjectItem injects a labeled conversation item (multi-party / grounding).
+	InjectItem(item openai.ConversationItem) error
+	// CreateResponse drives one response.create (the conductor gate engage).
+	CreateResponse(instructions string) error
+	// CancelResponse cancels the in-flight response + clears output audio.
+	CancelResponse() error
+	// AudioOut is the decoded PCM16 (24 kHz) output-audio channel.
+	AudioOut() <-chan []byte
+	// Events is the transcript / function-call / lifecycle event channel.
+	Events() <-chan openai.RealtimeServerEvent
+	// Close tears down the session.
+	Close() error
+}
+
+// RealtimeExecutor owns one space's realtime voice loop. It binds a turn-taking
+// machine (turntaking.go) to the realtime session and the gRPC client, mirroring
+// the Cascade's structure so it registers as a SpeakSink and consumes ASR
+// results through the same surface.
+type RealtimeExecutor struct {
+	cfg     CascadeConfig
+	client  *Client
+	session realtimeSession
+	sink    audioSink
+	persona SessionPersona
+	roster  *participantRoster
+	logger  *slog.Logger
+
+	machine *TurnMachine
+
+	seq atomic.Int64
+
+	// respMu guards the in-flight output-pump cancel + the response-in-flight
+	// flag so barge-in can stop playout without racing a new response.
+	respMu     sync.Mutex
+	pumpCancel context.CancelFunc
+	inFlight   bool
+
+	// lastSpeaker is the per-track identity of the human whose final
+	// transcript most recently committed a turn. Captured at OnFinal time so
+	// onCommittedTurn (which the machine invokes with only the text) can stamp
+	// the correct speaker on the VoiceAgentTurnRequest in a multi-human room
+	// (#433). Guarded since the ASR consume goroutine writes it and the turn
+	// goroutine reads it.
+	speakerMu   sync.Mutex
+	lastSpeaker string
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// NewRealtimeExecutor builds a realtime executor. persona is the resolved
+// static session persona (#456, BuildSessionPersona) the websocket client was
+// configured with; session is the live realtime session seam; sink is the
+// room-publish seam (real PCMLocalTrack in the voice build, in-memory in tests).
+func NewRealtimeExecutor(
+	parent context.Context,
+	cfg CascadeConfig,
+	client *Client,
+	session realtimeSession,
+	sink audioSink,
+	persona SessionPersona,
+	logger *slog.Logger,
+) *RealtimeExecutor {
+	ctx, cancel := context.WithCancel(parent)
+	e := &RealtimeExecutor{
+		cfg:     cfg,
+		client:  client,
+		session: session,
+		sink:    sink,
+		persona: persona,
+		roster:  newParticipantRoster(),
+		logger:  logger,
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+	e.machine = NewTurnMachine(TurnCallbacks{
+		OnFinalTranscript: e.onCommittedTurn,
+		OnAssistantStart:  e.onAssistantStart,
+		OnBargeIn:         e.onBargeIn,
+	}, logger)
+	return e
+}
+
+// Start moves the machine to listening and begins draining the model's
+// output-audio channel into the room sink. Call once the room is joined and
+// the session is configured.
+func (e *RealtimeExecutor) Start() {
+	e.machine.Start()
+	go e.drainAudioOut()
+	go e.drainEvents()
+}
+
+// Close tears down the executor: cancels any in-flight playout, stops the
+// machine, closes the session. Idempotent.
+func (e *RealtimeExecutor) Close() {
+	e.cancelPump()
+	e.machine.Stop()
+	_ = e.session.Close()
+	e.cancel()
+}
+
+// Machine exposes the turn-taking machine (tests / diagnostics).
+func (e *RealtimeExecutor) Machine() *TurnMachine { return e.machine }
+
+// SetParticipant registers a participant's display name + role so the
+// multi-party labeled-item injection can prefix their transcripts with
+// "[name . role]" (#433 section 3). Safe for concurrent use.
+func (e *RealtimeExecutor) SetParticipant(identity, displayName, role string) {
+	e.roster.set(identity, displayName, role)
+}
+
+// ConsumeASR drives the machine from one human track's Deepgram ASR result
+// stream (one goroutine per human track -- the multi-party fan-out, #433). It
+// maps each result onto a turn-taking input exactly as the cascade does, and
+// additionally streams the active-speaker audio path is wired by the room glue
+// via SendAudio (not here -- this consumes the per-track STT result stream).
+func (e *RealtimeExecutor) ConsumeASR(speakerIdentity string, results <-chan polyphon.ASRResult) {
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case r, ok := <-results:
+			if !ok {
+				return
+			}
+			e.handleASRResult(speakerIdentity, r)
+		}
+	}
+}
+
+// StreamAudio appends one active-speaker PCM16 16 kHz chunk to the realtime
+// input buffer (the prosody + barge-in audio path, #433 section 2b). The room
+// glue calls this for the LiveKit-reported active human's decoded frames. Under
+// turn_detection:null it never auto-triggers a response.
+func (e *RealtimeExecutor) StreamAudio(pcm16k []byte) {
+	if len(pcm16k) == 0 {
+		return
+	}
+	if err := e.session.SendAudio(pcm16k); err != nil && e.logger != nil {
+		e.logger.Debug("voice-agent realtime: send audio failed", "err", err)
+	}
+}
+
+// handleASRResult routes one ASR result for a given speaker. Split out for
+// direct unit testing.
+func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
+	if r.Kind == polyphon.ASRKindSpeechStarted {
+		e.machine.OnSpeechStarted()
+		return
+	}
+	text := strings.TrimSpace(r.Text)
+	if text == "" {
+		return
+	}
+	if r.IsFinal {
+		// Inject the labeled conversation item BEFORE committing the turn so
+		// the model has the attributed text in context regardless of whether
+		// it heard this speaker's audio (#433 section 2a). The turn machine
+		// then commits the human turn (transition D) -> onCommittedTurn drives
+		// the VoiceAgentTurnRequest + the conductor gate.
+		e.injectLabeledTranscript(speakerIdentity, text)
+		e.setLastSpeaker(speakerIdentity)
+		e.machine.OnFinal(text)
+		return
+	}
+	e.machine.OnInterim(text)
+	e.forwardPartial(speakerIdentity, text)
+}
+
+// injectLabeledTranscript injects a human final as a labeled user
+// conversation.item ("[name . role] text") so the model can attribute it
+// (#433). The input audio buffer also carries the active speaker's audio; this
+// is the text channel that makes "as Maria mentioned..." possible.
+func (e *RealtimeExecutor) injectLabeledTranscript(speakerIdentity, text string) {
+	label := e.roster.label(speakerIdentity)
+	labeled := text
+	if label != "" {
+		labeled = "[" + label + "] " + text
+	}
+	if err := e.session.InjectItem(openai.ConversationItem{Role: "user", Text: labeled}); err != nil && e.logger != nil {
+		e.logger.Debug("voice-agent realtime: inject labeled transcript failed", "err", err)
+	}
+}
+
+// forwardPartial sends a VoiceAgentPartialTranscript (best-effort), identical
+// to the cascade so the live chat transcript renders the same on both paths.
+func (e *RealtimeExecutor) forwardPartial(speakerIdentity, text string) {
+	seq := e.seq.Add(1)
+	envelope := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
+			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
+				SpaceId:       e.cfg.SpaceID,
+				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
+				PartialText:   text,
+				Sequence:      seq,
+			},
+		},
+	}
+	if err := e.client.Send(e.ctx, envelope); err != nil && e.logger != nil {
+		e.logger.Debug("voice-agent realtime: partial transcript send failed", "err", err)
+	}
+}
+
+// onCommittedTurn fires when the machine commits a human turn (transition D).
+// It forwards the VoiceAgentFinalTranscript (inserts the chat utterance +
+// fires the cognition automation, exactly as the cascade does) and drives a
+// streaming VoiceAgentTurnRequest. The TurnRequest reply IS the conductor gate:
+// a non-empty VoiceAgentTurnComplete final text means engage, empty means
+// suppress. Runs on its own goroutine so the ASR consume loop is never blocked.
+func (e *RealtimeExecutor) onCommittedTurn(text string) {
+	e.seq.Store(0)
+	speaker := e.getLastSpeaker()
+	e.forwardFinal(speaker, text)
+	go e.runTurn(speaker, text)
+}
+
+func (e *RealtimeExecutor) setLastSpeaker(identity string) {
+	e.speakerMu.Lock()
+	e.lastSpeaker = identity
+	e.speakerMu.Unlock()
+}
+
+func (e *RealtimeExecutor) getLastSpeaker() string {
+	e.speakerMu.Lock()
+	defer e.speakerMu.Unlock()
+	return e.lastSpeaker
+}
+
+// forwardFinal sends a VoiceAgentFinalTranscript (best-effort).
+func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string) {
+	envelope := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{
+			VoiceAgentFinalTranscript: &memqlv1.VoiceAgentFinalTranscript{
+				SpaceId:       e.cfg.SpaceID,
+				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
+				FinalText:     text,
+			},
+		},
+	}
+	if err := e.client.Send(e.ctx, envelope); err != nil && e.logger != nil {
+		e.logger.Warn("voice-agent realtime: final transcript send failed", "err", err)
+	}
+}
+
+// runTurn drives one VoiceAgentTurnRequest and consumes its streamed reply --
+// the conductor gate. The server pushes VoiceAgentTurnDelta + a terminal
+// VoiceAgentTurnComplete; the complete's final text carries the conductor's
+// decision (non-empty = engage, empty = suppress). On engage it commits the
+// input buffer, renders the per-response directive, and drives the machine's
+// speak path (transition B), which calls CreateResponse. On suppress nothing
+// is spoken -- the model never self-triggers.
+func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
+	utterance = strings.TrimSpace(utterance)
+	if utterance == "" {
+		return
+	}
+	envelope := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
+			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
+				SpaceId:       e.cfg.SpaceID,
+				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
+				UtteranceText: utterance,
+				GaAgentId:     e.cfg.GaAgentID,
+				Thread:        e.cfg.Thread,
+			},
+		},
+	}
+	replies, release, err := e.client.StreamRequest(e.ctx, envelope)
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Warn("voice-agent realtime: turn request failed", "err", err)
+		}
+		return
+	}
+	defer release()
+
+	var reply strings.Builder
+	var utteranceID, requestID string
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case msg, ok := <-replies:
+			if !ok {
+				return
+			}
+			if delta := msg.GetVoiceAgentTurnDelta(); delta != nil {
+				reply.WriteString(delta.GetTextDelta())
+				if requestID == "" {
+					requestID = delta.GetRequestId()
+				}
+				continue
+			}
+			if done := msg.GetVoiceAgentTurnComplete(); done != nil {
+				final := strings.TrimSpace(done.GetFinalText())
+				if final == "" {
+					final = strings.TrimSpace(reply.String())
+				}
+				utteranceID = done.GetUtteranceId()
+				if requestID == "" {
+					requestID = done.GetRequestId()
+				}
+				if done.GetErrorCode() != "" && e.logger != nil {
+					e.logger.Warn("voice-agent realtime: turn complete with error",
+						"error_code", done.GetErrorCode(),
+						"error_message", done.GetErrorMessage())
+				}
+				// Conductor gate: empty final -> suppress (defer / silence) ->
+				// emit NO response.create. Non-empty -> engage -> drive exactly
+				// one response.create through the speak path.
+				if final == "" {
+					if e.logger != nil {
+						e.logger.Debug("voice-agent realtime: conductor suppressed turn (no response.create)")
+					}
+					return
+				}
+				e.machine.OnSpeak(SpeakDirective{
+					Text:        final,
+					UtteranceID: utteranceID,
+					RequestID:   requestID,
+				})
+				return
+			}
+		}
+	}
+}
+
+// Speak drives the conductor-gated speak path from an unsolicited
+// VoiceAgentSpeak push (the SpeakSink seam Session.onVoiceAgentSpeak calls).
+// Returns true when the directive was accepted (assistant-turn entered).
+func (e *RealtimeExecutor) Speak(req SpeakDirective) bool {
+	if strings.TrimSpace(req.Text) == "" {
+		return false
+	}
+	return e.machine.OnSpeak(req)
+}
+
+// onAssistantStart drives one realtime response.create for an accepted speak
+// directive (transition B / conductor gate engage). It commits the input
+// buffer (so the model's response is grounded in the active speaker's audio),
+// renders the per-response instructions directive from the conductor's reply,
+// and fires CreateResponse. The model then streams output audio (drained by
+// drainAudioOut) and its transcript (drained by drainEvents). A pump-cancel is
+// registered so barge-in (onBargeIn) can stop playout.
+func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
+	// Commit the buffered active-speaker audio as the user turn before the
+	// response so the model answers with the latest prosody context.
+	if err := e.session.CommitInput(); err != nil && e.logger != nil {
+		e.logger.Debug("voice-agent realtime: commit input failed", "err", err)
+	}
+
+	instructions := RealtimeInstructionsForReply(req.Text)
+	_, cancel := context.WithCancel(e.ctx)
+	e.setInFlight(cancel)
+
+	if e.logger != nil {
+		e.logger.Info("voice trace: turntaking event",
+			"stage", "turntaking.assistant.speak",
+			"executor", "realtime",
+			"request_id", req.RequestID,
+			"utterance_id", req.UtteranceID,
+			"chars", len(req.Text))
+	}
+
+	if err := e.session.CreateResponse(instructions); err != nil {
+		if e.logger != nil {
+			e.logger.Warn("voice-agent realtime: response.create failed", "err", err, "request_id", req.RequestID)
+		}
+		e.clearInFlight()
+		e.machine.OnAssistantDone()
+		return
+	}
+	// The response lifecycle (EventResponseDone) collapses assistant-turn back
+	// to listening via drainEvents; the output-audio pump is the AudioOut
+	// drain. We do NOT call OnAssistantDone here -- the response is in flight.
+}
+
+// onBargeIn cancels the in-flight realtime response when a human onset
+// interrupts the assistant (transition C). It cancels the response (stops the
+// model + clears its output buffer) and flushes the room sink so the already-
+// published tail is dropped immediately.
+func (e *RealtimeExecutor) onBargeIn() {
+	if e.logger != nil {
+		e.logger.Info("voice trace: turntaking event", "stage", "turntaking.bargein.audio_cut", "executor", "realtime")
+	}
+	if e.isInFlight() {
+		if err := e.session.CancelResponse(); err != nil && e.logger != nil {
+			e.logger.Warn("voice-agent realtime: response.cancel failed", "err", err)
+		}
+	}
+	e.cancelPump()
+	e.sink.Flush()
+}
+
+// drainAudioOut pumps the model's decoded PCM16 output frames into the room
+// sink. It runs for the life of the session; the channel closes when the
+// session ends.
+func (e *RealtimeExecutor) drainAudioOut() {
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case frame, ok := <-e.session.AudioOut():
+			if !ok {
+				return
+			}
+			if len(frame) == 0 {
+				continue
+			}
+			if err := e.sink.WriteFrame(frame); err != nil {
+				if e.logger != nil {
+					e.logger.Warn("voice-agent realtime: room audio write failed", "err", err)
+				}
+				return
+			}
+		}
+	}
+}
+
+// drainEvents consumes the non-audio event stream: response lifecycle (to clear
+// the in-flight flag + collapse the turn), the captured transcript, and tool
+// calls. Output capture (transcript -> VoiceAgentRealtimeOutput) and the MCP
+// tool bridge are #458 -- the seams are marked below.
+func (e *RealtimeExecutor) drainEvents() {
+	var transcript strings.Builder
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case ev, ok := <-e.session.Events():
+			if !ok {
+				return
+			}
+			switch ev.Kind {
+			case openai.EventResponseCreated:
+				e.respMu.Lock()
+				e.inFlight = true
+				e.respMu.Unlock()
+			case openai.EventResponseDone:
+				e.clearInFlight()
+				e.machine.OnAssistantDone()
+				transcript.Reset()
+			case openai.EventTranscriptDelta:
+				transcript.WriteString(ev.Text)
+			case openai.EventTranscriptDone:
+				// TODO(#458): forward the captured assistant transcript as a
+				// VoiceAgentRealtimeOutput so chat/canvas/audit render the
+				// realtime turn, with citations. The proto message
+				// (VoiceAgentRealtimeOutput) already exists; the capture +
+				// citation extraction is #458's scope.
+				if e.logger != nil {
+					final := ev.Text
+					if final == "" {
+						final = transcript.String()
+					}
+					e.logger.Debug("voice-agent realtime: assistant transcript", "chars", len(final))
+				}
+			case openai.EventFunctionArgsDone:
+				// TODO(#458): dispatch the model's function call through the MCP
+				// tool bridge on a worker goroutine (off this drain loop so a
+				// long tool never blocks audio -- spike section 5), then
+				// SendFunctionResult + CreateResponse to continue. #457 ships
+				// the seam; the bridge is #458.
+				if e.logger != nil {
+					e.logger.Info("voice-agent realtime: function call (deferred to #458)",
+						"name", ev.FuncName, "call_id", ev.CallID)
+				}
+			}
+		}
+	}
+}
+
+func (e *RealtimeExecutor) setInFlight(cancel context.CancelFunc) {
+	e.respMu.Lock()
+	if e.pumpCancel != nil {
+		e.pumpCancel()
+	}
+	e.pumpCancel = cancel
+	e.inFlight = true
+	e.respMu.Unlock()
+}
+
+func (e *RealtimeExecutor) clearInFlight() {
+	e.respMu.Lock()
+	e.inFlight = false
+	e.pumpCancel = nil
+	e.respMu.Unlock()
+}
+
+func (e *RealtimeExecutor) isInFlight() bool {
+	e.respMu.Lock()
+	defer e.respMu.Unlock()
+	return e.inFlight
+}
+
+func (e *RealtimeExecutor) cancelPump() {
+	e.respMu.Lock()
+	cancel := e.pumpCancel
+	e.pumpCancel = nil
+	e.inFlight = false
+	e.respMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// resolveSpeaker maps a per-track participant identity to the speaker_user_id
+// stamped on the wire. In a 1:1 standard space the cascade leaves this empty
+// (server resolves the active speaker); in multi-human rooms the per-track
+// identity IS the speaker, so we forward it verbatim (#433 section 3).
+func (e *RealtimeExecutor) resolveSpeaker(identity string) string {
+	if id := strings.TrimSpace(identity); id != "" {
+		return id
+	}
+	return e.cfg.SpeakerUserID
+}
+
+// participantRoster resolves a participant identity to a "[name . role]" label
+// for the multi-party labeled-item injection (#433 section 3). Resolved at
+// join (one lookup, cached) by the room glue via RealtimeExecutor.SetParticipant.
+type participantRoster struct {
+	mu      sync.RWMutex
+	entries map[string]string // identity -> "name . role"
+}
+
+func newParticipantRoster() *participantRoster {
+	return &participantRoster{entries: make(map[string]string)}
+}
+
+func (r *participantRoster) set(identity, displayName, role string) {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return
+	}
+	name := strings.TrimSpace(displayName)
+	role = strings.TrimSpace(role)
+	var label string
+	switch {
+	case name != "" && role != "":
+		label = name + " · " + role
+	case name != "":
+		label = name
+	case role != "":
+		label = role
+	}
+	r.mu.Lock()
+	r.entries[identity] = label
+	r.mu.Unlock()
+}
+
+func (r *participantRoster) label(identity string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.entries[strings.TrimSpace(identity)]
+}
