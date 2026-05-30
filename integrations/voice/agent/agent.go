@@ -54,20 +54,31 @@ func Run(ctx context.Context, opts RunOptions) error {
 		logger = newLogger(cfg.LogLevel)
 	}
 
-	token, err := ResolveVoiceAgentToken(ctx, getenv, nil, logger)
-	if err != nil {
-		return fmt.Errorf("voice-agent: resolve token: %w", err)
-	}
-	cfg.VoiceAgentToken = token
-
 	roomName := strings.TrimSpace(opts.RoomName)
 	if roomName == "" {
 		roomName = strings.TrimSpace(getenv("MEMQL_VOICE_ROOM_NAME"))
 	}
 	if roomName == "" {
-		return fmt.Errorf(
-			"voice-agent: room name is required (set MEMQL_VOICE_ROOM_NAME or pass RoomName)")
+		// No room to join. The voice-agent runs as a long-running service but
+		// is a per-room participant; until a voice session assigns it a room
+		// there is nothing to do. Exiting here would make docker crash-loop the
+		// container (the historical "room name is required" failure), so instead
+		// idle until the process is signalled. Provide a room via --room or
+		// MEMQL_VOICE_ROOM_NAME (memQL convention: polyphon-<spaceId>) and
+		// restart to join one. Token resolution is skipped while idle -- no
+		// credential is needed to do nothing.
+		logger.Info("voice-agent: no room configured -- idling until signalled " +
+			"(set --room or MEMQL_VOICE_ROOM_NAME=polyphon-<spaceId> and restart to join a room)")
+		<-ctx.Done()
+		logger.Info("voice-agent: idle shutdown (context cancelled)")
+		return nil
 	}
+
+	token, err := ResolveVoiceAgentToken(ctx, getenv, nil, logger)
+	if err != nil {
+		return fmt.Errorf("voice-agent: resolve token: %w", err)
+	}
+	cfg.VoiceAgentToken = token
 
 	logger.Info("voice-agent starting",
 		"livekit", cfg.LiveKitURL, "memql", cfg.MemqlGRPCAddr,
