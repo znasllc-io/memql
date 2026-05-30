@@ -447,7 +447,28 @@ setup-tls:
 # Docker image targets
 # ---------------------------------------------------------------------------
 
-.PHONY: docker docker-bff docker-voice docker-cognition docker-agent docker-planner
+.PHONY: docker docker-bff docker-voice docker-cognition docker-agent docker-planner release
+
+## Cut an immutable release image memql:<VERSION> from VERSION + the short
+## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
+## the single number CoPresent pins (deploy/backend-version, copresent#140)
+## is this image tag, not a go.mod require. The X.Y.Z tag is write-once:
+## pushing over an existing tag is refused without --allow-overwrite.
+## Implementation lives in scripts/release/release.sh per the function-based
+## shell-script convention (CLAUDE.md).
+##   make release                                   # local image, VERSION semver prefix
+##   make release VERSION=2.4.0                      # explicit version, local only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1  # build + push to shared ACR
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1   # plan only
+release:
+	@bash scripts/release/release.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${REGISTRY:+--registry=$$REGISTRY} \
+		$${ACR:+--acr=$$ACR} \
+		$${PUSH:+--push} \
+		$${ALLOW_OVERWRITE:+--allow-overwrite} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
 
 ## Build the default Docker image (BFF)
 docker:
@@ -633,6 +654,10 @@ help:
 	@echo "  make lint         Run fmt + vet"
 	@echo "  make tidy         Tidy go.mod dependencies"
 	@echo "  make generate     Run code generation (protobuf)"
+	@echo ""
+	@echo "RELEASE"
+	@echo "  make release                            Cut immutable memql:<VERSION> image (VERSION + short SHA)"
+	@echo "  make release VERSION=X.Y.Z ACR=acrmemql PUSH=1   Build + push the pinnable release tag to the shared ACR"
 	@echo ""
 	@echo "DOCKER"
 	@echo "  make docker            Build default Docker image"
