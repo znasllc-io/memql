@@ -32,6 +32,23 @@ class Config:
     # Deepgram (STT + TTS)
     deepgram_api_key: str
 
+    # Voice executor selection (Hybrid Realtime Voice epic #440, issue
+    # #434). "cascade" (default) is the existing Deepgram STT -> memql
+    # cognition -> Deepgram TTS path. "realtime" swaps in the OpenAI
+    # gpt-realtime speech-to-speech model behind the MemqlLLM seam.
+    # The default is deliberately "cascade" so there is no regression:
+    # realtime is strictly opt-in. When "realtime" is selected but its
+    # prerequisites are missing (no OpenAI key, plugin import fails,
+    # session build errors), the selection logic falls back to cascade
+    # automatically -- see voice_agent.realtime_executor.select_voice_executor.
+    voice_executor: str  # 'cascade' | 'realtime'
+    # OpenAI API key for the Realtime executor. Only required when
+    # voice_executor == "realtime"; unused on the cascade path.
+    openai_api_key: str | None
+    # gpt-realtime model id. Overridable so a room can pin a specific
+    # snapshot without a code change.
+    realtime_model: str
+
     # memql gRPC
     memql_grpc_addr: str
     # Identity-issued class="voice_agent" JWT bearer presented on
@@ -226,6 +243,9 @@ def load_config() -> Config:
         livekit_api_key=_get_required("LIVEKIT_API_KEY"),
         livekit_api_secret=_get_required("LIVEKIT_API_SECRET"),
         deepgram_api_key=_get_required("MEMQL_DEEPGRAM_API_KEY"),
+        voice_executor=_get("MEMQL_VOICE_EXECUTOR", "cascade").lower(),
+        openai_api_key=_get("OPENAI_API_KEY") or None,
+        realtime_model=_get("MEMQL_REALTIME_MODEL", "gpt-realtime"),
         memql_grpc_addr=_get_required("MEMQL_GRPC_ADDR"),
         voice_agent_token=_resolve_voice_agent_token(),
         avatar_vendor=_get("MEMQL_AVATAR_VENDOR", "anam").lower(),
@@ -253,6 +273,19 @@ def load_config() -> Config:
         dg_endpointing_ms=_get_int("POLYPHON_DEEPGRAM_ENDPOINTING_MS", 2000),
         dg_utterance_end_ms=_get_int("POLYPHON_DEEPGRAM_UTTERANCE_END_MS", 0),
     )
+
+    if cfg.voice_executor not in ("cascade", "realtime"):
+        raise RuntimeError(
+            f"MEMQL_VOICE_EXECUTOR={cfg.voice_executor!r} -- must be 'cascade' or 'realtime'"
+        )
+    if cfg.voice_executor == "realtime" and not cfg.openai_api_key:
+        # Do not hard-fail: the realtime selection falls back to the
+        # cascade at session-build time. Warn loudly so the operator
+        # knows the realtime path will not engage.
+        logger.warning(
+            "MEMQL_VOICE_EXECUTOR=realtime but OPENAI_API_KEY is unset -- "
+            "the realtime executor will fall back to the cascade path"
+        )
 
     if cfg.avatar_vendor not in ("anam", "simli", "none"):
         raise RuntimeError(
