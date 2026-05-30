@@ -152,3 +152,49 @@ func RealtimeInstructionsForReply(reply string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// RealtimeInstructionsForDirective renders the per-response instructions for a
+// conductor GATE decision (#477/#479): a content-free mode+brevity directive the
+// model conditions its OWN generation on, NOT authored reply text. This is the
+// "WHEN not WHAT" half of epic #475 -- the conductor decides whether/how-briefly
+// to speak, the model decides the words. It is the sibling to
+// RealtimeInstructionsForReply: that one carries cognition's authored words ("convey
+// the following"); this one carries only the turn-shaping directive so the model
+// authors natively, so a spoken reply and a typed reply cannot drift in content.
+//
+// mode / brevity are the wire-string forms of the conductor's DirectiveMode /
+// Brevity (taken as plain strings so the voice agent does not import the
+// cognition package). An empty/"defer" mode returns "" -- the gate suppresses
+// the turn and never calls CreateResponse. Unknown values fall back to the
+// substantive primary/normal framing rather than going silent.
+func RealtimeInstructionsForDirective(mode, brevity string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	brevity = strings.ToLower(strings.TrimSpace(brevity))
+
+	// Defer / empty -> suppress: the caller must not drive CreateResponse.
+	if mode == "" || mode == "defer" {
+		return ""
+	}
+
+	lines := []string{"Respond now in your own persona's voice. Generate your own reply -- do not wait for or repeat any provided text."}
+
+	switch mode {
+	case "brief_ack":
+		lines = append(lines, "This is a brief acknowledgment: one short sentence, no agenda.")
+	case "chimein":
+		lines = append(lines, "Others are also responding this turn. Add only your distinct angle; do not restate what was already said.")
+	default: // "primary" and any unknown mode
+		lines = append(lines, "Answer the user directly and substantively.")
+	}
+
+	switch brevity {
+	case "short":
+		lines = append(lines, "Keep it to one short sentence.")
+	case "detailed":
+		lines = append(lines, "A longer answer is warranted; stay focused.")
+	default: // "normal" and any unknown brevity
+		lines = append(lines, "Keep it to a few sentences.")
+	}
+
+	return strings.Join(lines, "\n")
+}

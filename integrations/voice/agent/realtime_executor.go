@@ -456,9 +456,30 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 						"error_code", done.GetErrorCode(),
 						"error_message", done.GetErrorMessage())
 				}
-				// Conductor gate: empty final -> suppress (defer / silence) ->
-				// emit NO response.create. Non-empty -> engage -> drive exactly
-				// one response.create through the speak path.
+				// Gate path (#477/#479): when the conductor sent a directive_mode
+				// it decided WHEN + brevity and the MODEL authors WHAT. "defer"
+				// suppresses; any other mode engages with a content-free directive
+				// (no authored text). When directive_mode is empty we take the
+				// legacy authored-text path below (model re-voices final_text).
+				if directiveMode := strings.TrimSpace(done.GetDirectiveMode()); directiveMode != "" {
+					if strings.EqualFold(directiveMode, "defer") {
+						if e.logger != nil {
+							e.logger.Debug("voice-agent realtime: conductor gate deferred (no response.create)")
+						}
+						return
+					}
+					e.machine.OnSpeak(SpeakDirective{
+						UtteranceID: utteranceID,
+						RequestID:   requestID,
+						Mode:        directiveMode,
+						Brevity:     strings.TrimSpace(done.GetBrevity()),
+					})
+					return
+				}
+
+				// Legacy conductor gate: empty final -> suppress (defer / silence)
+				// -> emit NO response.create. Non-empty -> engage -> drive exactly
+				// one response.create conveying the authored text.
 				if final == "" {
 					if e.logger != nil {
 						e.logger.Debug("voice-agent realtime: conductor suppressed turn (no response.create)")
@@ -509,7 +530,14 @@ func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
 		e.lifecycle.NoteEngaged()
 	}
 
+	// Gate path (#479): a non-empty Mode means the conductor sent a directive,
+	// so render the content-free mode+brevity directive and let the MODEL author
+	// the reply. Otherwise convey the authored Text (the legacy re-voice path,
+	// also used by the unsolicited VoiceAgentSpeak chat-reply push).
 	instructions := RealtimeInstructionsForReply(req.Text)
+	if strings.TrimSpace(req.Mode) != "" {
+		instructions = RealtimeInstructionsForDirective(req.Mode, req.Brevity)
+	}
 	_, cancel := context.WithCancel(e.ctx)
 	e.setInFlight(cancel)
 

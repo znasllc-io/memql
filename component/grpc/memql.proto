@@ -1799,6 +1799,15 @@ message VoiceAgentTurnComplete {
   string effective_video_mode = 5;
   string error_code = 6;
   string error_message = 7;
+  // Conductor GATE decision (#477/#479): when set, this turn carries a
+  // content-free mode+brevity directive the realtime model conditions its OWN
+  // generation on, instead of final_text the model re-voices. directive_mode is
+  // the DirectiveMode wire string (primary | brief_ack | chimein | defer);
+  // brevity is short | normal | detailed. Empty directive_mode = the legacy
+  // authored-text path (final_text). This is how "the conductor decides WHEN,
+  // the model decides WHAT" reaches the executor.
+  string directive_mode = 8;
+  string brevity = 9;
 }
 
 // VoiceAgentSpeak is a server-pushed "synthesize and publish

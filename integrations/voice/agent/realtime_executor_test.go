@@ -451,3 +451,67 @@ func TestRealtimeExecutor_NativeMode_InputTranscriptForwarded(t *testing.T) {
 	assert.True(t, final.GetNativeAuthored(), "native human final must be marked native-authored")
 	assert.False(t, hasTurnRequest(fs), "no conductor round-trip on the native path")
 }
+
+// replyToTurnWithDirective makes the fake server reply to a VoiceAgentTurnRequest
+// with a conductor GATE directive (mode + brevity) instead of authored text --
+// the #479 "WHEN not WHAT" path.
+func replyToTurnWithDirective(fs *fakeStream, mode, brevity string) {
+	fs.onSend = func(env *memqlv1.MemqlClientMessage) {
+		if env.GetVoiceAgentTurnRequest() == nil {
+			return
+		}
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: env.GetMessageId(),
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
+				VoiceAgentTurnComplete: &memqlv1.VoiceAgentTurnComplete{
+					RequestId: "r1", UtteranceId: "u1",
+					DirectiveMode: mode, Brevity: brevity,
+				},
+			},
+		})
+	}
+}
+
+// TestRealtimeExecutor_GateDirective_ModelAuthors verifies the #479 gate path:
+// a directive (engage, primary, short) drives exactly one response.create whose
+// instructions tell the MODEL to author its own reply (mode+brevity), never the
+// "convey the following" authored-text framing.
+func TestRealtimeExecutor_GateDirective_ModelAuthors(t *testing.T) {
+	fs := newFakeStream()
+	replyToTurnWithDirective(fs, "primary", "short")
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+
+	e.handleASRResult("user-1", polyphon.ASRResult{Text: "how does oauth refresh work", IsFinal: true})
+
+	require.Eventually(t, func() bool {
+		return rt.responseCount() == 1
+	}, 2*time.Second, 10*time.Millisecond, "engage directive drives one response.create")
+
+	resp := rt.lastResponse()
+	assert.Contains(t, resp, "Generate your own reply", "model authors on the gate path")
+	assert.Contains(t, resp, "one short sentence", "brevity=short framing present")
+	assert.NotContains(t, resp, "Convey the following", "no authored-text re-voice framing on the gate path")
+}
+
+// TestRealtimeExecutor_GateDirective_DeferSuppresses verifies a "defer" directive
+// emits NO response.create -- the floor stays with the humans.
+func TestRealtimeExecutor_GateDirective_DeferSuppresses(t *testing.T) {
+	fs := newFakeStream()
+	replyToTurnWithDirective(fs, "defer", "short")
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+
+	e.handleASRResult("user-1", polyphon.ASRResult{Text: "mm, anyway", IsFinal: true})
+
+	require.Eventually(t, func() bool {
+		for _, env := range fs.sentEnvelopes() {
+			if env.GetVoiceAgentTurnRequest() != nil {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 0, rt.responseCount(), "defer directive must not call response.create")
+}
