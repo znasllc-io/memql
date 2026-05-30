@@ -13,7 +13,7 @@
 #
 #   1. Tiger Cloud service -- create-or-verify (existence-checked
 #      before create, so a service is never duplicated):
-#        memql-<env>   service in Azure, region East US
+#        memql-<env>   service in Azure, region East US 2
 #      then confirm the two extensions memQL needs are present:
 #        timescaledb   (Timescale Community)
 #        vector        (pgvector)
@@ -45,11 +45,20 @@ set -uo pipefail
 # CONFIGURATION
 #=============================================================================
 
-# Placement. The DB lives in Tiger Cloud on Azure, East US -- the
-# locked region from the epic architecture (#491). The Tiger CLI's
-# Azure region slug for East US is "azure-eastus".
-readonly REGION_DISPLAY="Azure East US"
-readonly TIGER_REGION="azure-eastus"
+# Placement. The DB lives in Tiger Cloud on Azure, East US 2 -- the
+# locked region from the epic architecture (#491). Tiger's Azure region
+# slugs are prefixed "az-" (NOT "azure-"), and Tiger offers East US 2
+# (not plain East US), so the validated slug is "az-eastus2".
+readonly REGION_DISPLAY="Azure East US 2"
+readonly TIGER_REGION="az-eastus2"
+
+# Service sizing. Tiger's `service create` takes --cpu as a plain
+# MILLICORES integer (500 = 0.5 CPU -- NOT "500m") and --memory as a GB
+# integer (2 = 2 GB). Allowed combos: shared, 500/2, 1000/4, 2000/8,
+# 4000/16, ... Staging defaults to the smallest dedicated tier; these are
+# script vars so production can override to a larger tier.
+TIGER_CPU="500"
+TIGER_MEMORY="2"
 
 # memQL needs TimescaleDB (Community) for hypertables + pgvector for
 # embedding similarity. These are confirmed (not installed) -- Tiger
@@ -311,14 +320,17 @@ function ensure_service() {
         return 0
     fi
 
-    info "creating tiger service ${SERVICE_NAME} in ${REGION_DISPLAY}..."
+    info "creating tiger service ${SERVICE_NAME} in ${REGION_DISPLAY} (cpu=${TIGER_CPU} mem=${TIGER_MEMORY}GB)..."
     # --no-wait would return before the service is provisioned; we let
-    # the CLI block so the DSN read below sees a ready service. The
-    # exact flag surface is pinned to the tiger CLI's documented
-    # `service create` options.
+    # the CLI block so the DSN read below sees a ready service. --cpu is
+    # plain millicores (500 = 0.5 CPU) and --memory is GB; the addons
+    # pre-enable timescaledb + vector. Pinned to the validated `tiger
+    # service create` surface.
     run_or_plan tiger service create \
         --name "${SERVICE_NAME}" \
         --region "${TIGER_REGION}" \
+        --cpu "${TIGER_CPU}" \
+        --memory "${TIGER_MEMORY}" \
         --addons time-series,ai
     record_created "tiger-service: ${SERVICE_NAME}"
 }
@@ -327,10 +339,27 @@ function ensure_service() {
 # EXTENSIONS -- confirm timescaledb + pgvector
 #=============================================================================
 
-# Run a SQL probe against the service via the tiger CLI's psql-style
-# bridge. We don't open a raw psql connection here -- `tiger service`
-# brokers credentials, which keeps the DSN out of this script's
-# environment until the explicit DSN-read step below.
+# Locate a psql binary. On macOS libpq is keg-only, so psql often isn't
+# on PATH even when installed -- fall back to the Homebrew keg path.
+function find_psql() {
+    if have psql; then
+        command -v psql
+        return 0
+    fi
+    if [ -x "/opt/homebrew/opt/libpq/bin/psql" ]; then
+        echo "/opt/homebrew/opt/libpq/bin/psql"
+        return 0
+    fi
+    return 1
+}
+
+# Confirm timescaledb + vector are enabled on the service. There is NO
+# `tiger service exec`; instead we resolve the DSN (see resolve_dsn) and
+# run CREATE EXTENSION IF NOT EXISTS over psql. With --addons
+# time-series,ai both are pre-enabled (verified live: timescaledb
+# 2.27.0, vector 0.8.2), so this is a no-op confirm in practice. Kept
+# non-fatal (ON_ERROR_STOP=0): a failure warns + records_skipped rather
+# than aborting the run.
 function ensure_extensions() {
     section "Extensions on ${SERVICE_NAME}"
 
@@ -344,32 +373,71 @@ function ensure_extensions() {
         return 0
     fi
 
-    local ext
-    for ext in "${REQUIRED_EXTENSIONS[@]}"; do
-        if [ "$DRY_RUN" = true ]; then
-            echo "  [plan] tiger service exec ${SERVICE_NAME} -- CREATE EXTENSION IF NOT EXISTS ${ext}"
-            continue
-        fi
+    # Build the SQL once -- one psql invocation enables both.
+    local sql
+    sql="CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE EXTENSION IF NOT EXISTS vector;"
 
-        # CREATE EXTENSION IF NOT EXISTS is itself idempotent -- it's a
-        # no-op when the extension is already enabled, and enables it
-        # when the platform allows. timescaledb is pre-enabled on Tiger
-        # Cloud; vector may need this call on first provision.
-        if tiger service exec "${SERVICE_NAME}" -- \
-            "CREATE EXTENSION IF NOT EXISTS ${ext};" >/dev/null 2>&1; then
-            log "[ok] extension ${ext} present/enabled"
-            record_exists "extension: ${ext}"
-        else
-            warn "could not confirm extension ${ext} on ${SERVICE_NAME}"
-            warn "  (verify in the Tiger Cloud console; vector may need a plan that offers pgvector)"
-            record_skipped "extension: ${ext}"
-        fi
-    done
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] read DSN: tiger db connection-string <SERVICE_ID for ${SERVICE_NAME}> --with-password"
+        echo "  [plan] psql \"<DSN>\" -v ON_ERROR_STOP=0 -c \"${sql}\""
+        return 0
+    fi
+
+    local dsn
+    if ! dsn="$(resolve_dsn)"; then
+        warn "could not resolve a DSN for ${SERVICE_NAME} -- skipping extension check."
+        warn "  (provision the service first, or export ${DSN_ENV_VAR})"
+        record_skipped "extensions: ${SERVICE_NAME}"
+        return 0
+    fi
+
+    local psql_bin
+    if ! psql_bin="$(find_psql)"; then
+        warn "psql not found (libpq is keg-only on macOS) -- skipping extension check."
+        warn "  Install: brew install libpq   (or run 'make deploy-setup')"
+        record_skipped "extensions: ${SERVICE_NAME}"
+        unset dsn
+        return 0
+    fi
+
+    # CREATE EXTENSION IF NOT EXISTS is idempotent -- a no-op when already
+    # enabled. ON_ERROR_STOP=0 keeps the whole thing non-fatal.
+    if "${psql_bin}" "${dsn}" -v ON_ERROR_STOP=0 -c "${sql}" >/dev/null 2>&1; then
+        log "[ok] extensions timescaledb + vector present/enabled"
+        record_exists "extensions: timescaledb, vector"
+    else
+        warn "could not confirm extensions on ${SERVICE_NAME} via psql"
+        warn "  (verify in the Tiger Cloud console; with --addons time-series,ai both should be pre-enabled)"
+        record_skipped "extensions: ${SERVICE_NAME}"
+    fi
+    unset dsn
 }
 
 #=============================================================================
 # DSN -> KEY VAULT (write only on change)
 #=============================================================================
+
+# Resolve the SERVICE ID for SERVICE_NAME. `tiger db connection-string`
+# takes a service ID, not a name, so we look the id up from the JSON
+# listing (match .name == SERVICE_NAME, take .service_id). Printed to
+# stdout; empty + non-zero when it can't be resolved.
+function resolve_service_id() {
+    if ! have tiger || ! have jq; then
+        return 1
+    fi
+    local listing id
+    listing="$(tiger service list -o json 2>/dev/null || echo '')"
+    if [ -z "${listing}" ]; then
+        return 1
+    fi
+    id="$(echo "${listing}" | jq -r --arg n "${SERVICE_NAME}" \
+        'if type=="array" then (.[] | select(.name == $n) | .service_id) else (select(.name == $n) | .service_id) end' \
+        2>/dev/null | head -1)"
+    if [ -z "${id}" ] || [ "${id}" = "null" ]; then
+        return 1
+    fi
+    printf '%s' "${id}"
+}
 
 # Read the connection DSN for the service from the tiger CLI. Printed to
 # stdout; empty + non-zero if it can't be resolved. An exported
@@ -386,10 +454,19 @@ function resolve_dsn() {
         return 1
     fi
 
-    local dsn
-    # `tiger service get-connection-string` is the documented surface
-    # for a service's libpq DSN. We request the pooler/primary URI.
-    dsn="$(tiger service get-connection-string "${SERVICE_NAME}" --format uri 2>/dev/null || echo '')"
+    local dsn service_id
+    # The validated surface is `tiger db connection-string <SERVICE_ID>
+    # --with-password` -- it prints a plain postgres:// URI on stdout
+    # (omit --with-password and the URI carries no password). The arg is
+    # a SERVICE ID, so resolve the id from the name first. The just-
+    # created service is also set as the default service, so a no-arg
+    # call works as a fallback.
+    if service_id="$(resolve_service_id)"; then
+        dsn="$(tiger db connection-string "${service_id}" --with-password 2>/dev/null || echo '')"
+    fi
+    if [ -z "${dsn:-}" ]; then
+        dsn="$(tiger db connection-string --with-password 2>/dev/null || echo '')"
+    fi
     if [ -z "${dsn}" ]; then
         return 1
     fi
@@ -405,7 +482,7 @@ function store_dsn() {
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [plan] read DSN: tiger service get-connection-string ${SERVICE_NAME} --format uri"
+        echo "  [plan] read DSN: tiger db connection-string <SERVICE_ID for ${SERVICE_NAME}> --with-password"
         echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${DSN_KV_SECRET} --value <DSN> (only if changed)"
         return 0
     fi
