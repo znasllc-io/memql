@@ -741,6 +741,15 @@ func (e *RealtimeExecutor) drainEvents() {
 // round-trip never blocks the event drain. A nil forwarder or a blank
 // transcript is a no-op; a failed insert is logged (the voice turn still
 // played). The Go analog of realtime_output.py::_schedule_forward.
+//
+// SPOKEN == SHOWN (#482). This is the single source of truth for the assistant
+// utterance: `text` is the model's own spoken-audio transcript
+// (EventTranscriptDone / the accumulated EventTranscriptDelta stream), forwarded
+// VERBATIM (the forwarder only trims surrounding whitespace). There is no
+// re-rendering between what was said and what is shown -- because the model both
+// generates and speaks the reply (#478/#479), the spoken audio and the chat
+// utterance share one source by construction. Pinned by
+// TestRealtimeExecutor_SpokenEqualsShown.
 func (e *RealtimeExecutor) captureOutput(text string) {
 	if e.outputForwarder == nil {
 		return

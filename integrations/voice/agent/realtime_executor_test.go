@@ -562,3 +562,47 @@ func TestRealtimeExecutor_GatedSemanticVad_InputTranscriptDrivesGate(t *testing.
 	require.Eventually(t, func() bool { return rt.responseCount() == 1 }, 2*time.Second, 10*time.Millisecond)
 	assert.Contains(t, rt.lastResponse(), "Generate your own reply")
 }
+
+// TestRealtimeExecutor_SpokenEqualsShown pins epic #475 / #482's core promise:
+// the assistant's SPOKEN audio transcript is captured VERBATIM as the chat
+// utterance -- there is no re-rendering between what the model said and what the
+// record shows. Drives the model's output-transcript events through the
+// executor and asserts the forwarded utterance text equals the spoken transcript.
+func TestRealtimeExecutor_SpokenEqualsShown(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+
+	sender := &fakeOutputSender{ack: &memqlv1.VoiceAgentRealtimeOutputAck{Success: true, UtteranceId: "utt-1"}}
+	e.SetOutputForwarder(NewRealtimeOutputForwarder(sender, "s1", "s1-ga", NewCitationResolver(GroundingContext{})))
+
+	// The model streams its spoken transcript, then signals done with the full
+	// text. Whatever it SAID is exactly what must be SHOWN.
+	spoken := "The cloud spend is the place to start; it's the biggest line item."
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "The cloud spend is the place to start; "}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "it's the biggest line item."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: spoken}
+
+	require.Eventually(t, func() bool { return sender.lastSent() != nil }, 2*time.Second, 10*time.Millisecond,
+		"the spoken transcript must be captured as an utterance")
+	assert.Equal(t, spoken, sender.lastSent().GetText(),
+		"shown utterance text must equal the spoken audio transcript verbatim")
+}
+
+// TestRealtimeExecutor_SpokenEqualsShown_AccumulatedDeltas verifies the same
+// guarantee when the done event carries no text: the accumulated per-delta
+// transcript IS the shown utterance (no token is dropped or rephrased).
+func TestRealtimeExecutor_SpokenEqualsShown_AccumulatedDeltas(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	sender := &fakeOutputSender{ack: &memqlv1.VoiceAgentRealtimeOutputAck{Success: true, UtteranceId: "utt-2"}}
+	e.SetOutputForwarder(NewRealtimeOutputForwarder(sender, "s1", "s1-ga", NewCitationResolver(GroundingContext{})))
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Yes, "}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "I can help with that."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone} // no text -> use accumulated
+
+	require.Eventually(t, func() bool { return sender.lastSent() != nil }, 2*time.Second, 10*time.Millisecond)
+	assert.Equal(t, "Yes, I can help with that.", sender.lastSent().GetText())
+}
