@@ -30,10 +30,20 @@ the Go voice-agent cutover (epic #449). Every load-bearing claim cites a real
 >   (`voice_agent_handlers.go` `resolveAgentPersona`) and resolved into the
 >   `Persona` (`persona.go`), so the voice session now renders the real agent
 >   instead of "Assistant, General Assistant".
-> - **Remaining (#478).** Stage 3 (native authorship: `semantic_vad`, conductor
->   off the 1-on-1 critical path, delete the `runTurn` round-trip +
->   `RealtimeInstructionsForReply` so gpt-realtime authors its own turn) is the
->   headline turn-detection rework, tracked as the rest of #478.
+> - **Stage 3 native authorship (#478, 3a-3d).** The native 1-on-1 turn is
+>   implemented: the openai client supports `semantic_vad` + native input
+>   transcription (3a); the server stamps native user turns transcript-only so
+>   cognition skips authoring -- the keystone that prevents the double-author
+>   (3b); the executor runs a runtime native gate where gpt-realtime owns the
+>   turn and the human transcript comes from the model, with Deepgram off the
+>   1-on-1 critical path (3c); and the room layer flips `turn_detection` between
+>   `null` (>=2 humans) and `semantic_vad` (exactly one) by live human count,
+>   behind `MEMQL_REALTIME_NATIVE_TURN` (3d).
+> - **Remaining (#478).** Per-turn knowledge grounding for the native path
+>   (Stage 3e) is split into #490: it needs a new grounding gRPC + server-side
+>   domain resolution + a `create_response:false` redesign of the native flow,
+>   none locally verifiable (voice CGO lane + live model), so it lands as its
+>   own validated PR.
 
 > **Framing note.** Epic #475 states the problem as "two authors": voice
 > replies come from gpt-realtime, text replies from cognition. The spike's
