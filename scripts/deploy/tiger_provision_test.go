@@ -74,7 +74,7 @@ func TestTigerHelp(t *testing.T) {
 
 // TestTigerDryRunStagingPlan asserts the staging dry-run exits 0,
 // mutates nothing (every tiger/az call is a [plan] line), provisions the
-// memql-staging service in Azure East US, confirms the timescaledb +
+// memql-staging service in Azure East US 2, confirms the timescaledb +
 // vector extensions, and plans the DSN -> Key Vault write under the same
 // secret name the bootstrap uses.
 func TestTigerDryRunStagingPlan(t *testing.T) {
@@ -84,10 +84,12 @@ func TestTigerDryRunStagingPlan(t *testing.T) {
 	}
 
 	// Side-effect-free guarantee: in dry-run every mutating tiger / az
-	// call must be prefixed with the [plan] marker.
+	// call must be prefixed with the [plan] marker. (The extension check
+	// now runs over psql against the resolved DSN -- there is no
+	// `tiger service exec` -- so we guard psql too.)
 	for _, line := range strings.Split(out, "\n") {
 		trimmed := strings.TrimSpace(line)
-		for _, mut := range []string{"tiger service create", "tiger service exec", "az keyvault"} {
+		for _, mut := range []string{"tiger service create", "tiger db connection-string", "psql ", "az keyvault"} {
 			if strings.HasPrefix(trimmed, mut) {
 				t.Errorf("dry-run appears to execute %q (no [plan] marker): %q", mut, trimmed)
 			}
@@ -96,7 +98,7 @@ func TestTigerDryRunStagingPlan(t *testing.T) {
 
 	mustContain := []string{
 		"memql-staging",        // per-env service name
-		"azure-eastus",         // Azure East US region slug
+		"az-eastus2",           // Azure East US 2 region slug (validated)
 		"timescaledb",          // Timescale Community extension
 		"vector",               // pgvector extension
 		"kv-memql-staging",     // per-env Key Vault

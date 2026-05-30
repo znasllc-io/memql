@@ -521,6 +521,7 @@ function ensure_key_vault() {
     if [ "$DRY_RUN" = false ] && az keyvault show --name "${KV_NAME}" >/dev/null 2>&1; then
         log "[ok] key vault ${KV_NAME} already exists"
         record_exists "key-vault: ${KV_NAME}"
+        grant_kv_secrets_officer
         return 0
     fi
 
@@ -531,6 +532,57 @@ function ensure_key_vault() {
         --location "${REGION}" \
         --only-show-errors
     record_created "key-vault: ${KV_NAME}"
+    grant_kv_secrets_officer
+}
+
+# Grant the signed-in operator the "Key Vault Secrets Officer" role at
+# the vault scope. The vault is RBAC-mode, so without this the secret
+# writes in load_secrets fail (Forbidden) -- validated live. Idempotent:
+# az role assignment create is a no-op when the assignment already
+# exists. The secrets phase depends on this, so it runs before
+# load_secrets. Routed through run_or_plan so --dry-run stays clean.
+#
+# TODO(deploy): `make deploy` must additionally grant each Container
+# App's managed identity the "Key Vault Secrets User" role at this vault
+# scope so the apps can READ these secrets at runtime. Not implemented
+# here (the Container Apps don't exist yet at bootstrap time).
+function grant_kv_secrets_officer() {
+    local oid vault_id
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] az ad signed-in-user show --query id -o tsv"
+        echo "  [plan] az keyvault show --name ${KV_NAME} --query id -o tsv"
+        echo "  [plan] az role assignment create --role \"Key Vault Secrets Officer\" --assignee <oid> --scope <vaultId>"
+        return 0
+    fi
+
+    oid="$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo '')"
+    if [ -z "${oid}" ]; then
+        warn "could not resolve signed-in user object id -- skipping ${KV_NAME} RBAC grant."
+        warn "  Secret writes may fail (Forbidden) until the operator has 'Key Vault Secrets Officer'."
+        record_skipped "kv-role: Key Vault Secrets Officer (${KV_NAME})"
+        return 0
+    fi
+
+    vault_id="$(az keyvault show --name "${KV_NAME}" --query id -o tsv 2>/dev/null || echo '')"
+    if [ -z "${vault_id}" ]; then
+        warn "could not resolve vault id for ${KV_NAME} -- skipping RBAC grant."
+        record_skipped "kv-role: Key Vault Secrets Officer (${KV_NAME})"
+        return 0
+    fi
+
+    info "granting 'Key Vault Secrets Officer' on ${KV_NAME} to the signed-in operator..."
+    if az role assignment create \
+        --role "Key Vault Secrets Officer" \
+        --assignee "${oid}" \
+        --scope "${vault_id}" \
+        --only-show-errors >/dev/null 2>&1; then
+        record_changed "kv-role: Key Vault Secrets Officer (${KV_NAME})"
+    else
+        # Already-assigned is the common idempotent case; az returns
+        # non-zero. Treat as already-correct rather than a hard failure.
+        log "[ok] 'Key Vault Secrets Officer' already granted on ${KV_NAME} (or grant unchanged)"
+        record_exists "kv-role: Key Vault Secrets Officer (${KV_NAME})"
+    fi
 }
 
 function ensure_container_apps_env() {
