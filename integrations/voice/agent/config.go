@@ -35,6 +35,13 @@ type Config struct {
 	LiveKitURL       string
 	LiveKitAPIKey    string
 	LiveKitAPISecret string
+	// LiveKitPublicURL is the externally-reachable LiveKit URL the avatar
+	// vendor's cloud engine (#460) dials in on. The agent's own LiveKitURL is
+	// usually an internal hostname (ws://livekit:7880), unreachable from
+	// outside; when set this takes precedence for the avatar session-token
+	// environment. Optional; falls back to LiveKitURL. Mirrors the Python
+	// LIVEKIT_PUBLIC_URL handling in anam_persona_session.py.
+	LiveKitPublicURLEnv string
 
 	// Deepgram (STT + TTS). Carried here for #455; not consumed yet.
 	DeepgramAPIKey string
@@ -87,6 +94,15 @@ type Config struct {
 // AvatarEnabled reports whether an avatar vendor is configured.
 func (c Config) AvatarEnabled() bool {
 	return c.AvatarVendor == "anam" || c.AvatarVendor == "simli"
+}
+
+// LiveKitPublicURL is the URL the avatar vendor's cloud engine should dial to
+// join the room: LIVEKIT_PUBLIC_URL when set, else the agent's own LiveKitURL.
+func (c Config) LiveKitPublicURL() string {
+	if v := strings.TrimSpace(c.LiveKitPublicURLEnv); v != "" {
+		return v
+	}
+	return c.LiveKitURL
 }
 
 // Getenv is the environment accessor LoadConfig reads through. Overridable in
@@ -143,6 +159,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	if cfg.LiveKitAPISecret, err = getRequired("LIVEKIT_API_SECRET"); err != nil {
 		return Config{}, err
 	}
+	cfg.LiveKitPublicURLEnv = get("LIVEKIT_PUBLIC_URL", "")
 	if cfg.DeepgramAPIKey, err = getRequired("MEMQL_DEEPGRAM_API_KEY"); err != nil {
 		return Config{}, err
 	}
