@@ -74,7 +74,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		"avatar", cfg.AvatarVendor, "executor", cfg.VoiceExecutor, "room", roomName)
 
 	client := NewClient(cfg.MemqlGRPCAddr, cfg.VoiceAgentToken, opts.Dialer, logger)
-	joiner := NewRoomJoiner(cfg, logger)
+	joiner := NewRoomJoiner(cfg, client, logger)
 	session := NewSession(cfg, client, roomName, joiner, logger)
 
 	return session.Run(ctx)

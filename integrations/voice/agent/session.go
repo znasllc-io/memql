@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -62,6 +63,12 @@ type RoomRequest struct {
 	GaAgentID string
 	RoomName  string
 	Ack       SessionAck
+
+	// RegisterSpeakSink lets the room joiner register the cascade (#455)
+	// as the VoiceAgentSpeak consumer once the audio loop is constructed,
+	// so unsolicited speak pushes reach TTS playout. nil-safe: the
+	// CGO-free build never calls it. Set by Session.Run.
+	RegisterSpeakSink func(SpeakSink)
 }
 
 // Session drives one voice-agent session against a single memQL space.
@@ -74,6 +81,31 @@ type Session struct {
 	spaceID   string
 	gaAgentID string
 	roomName  string
+
+	// speakSink, when set, receives unsolicited VoiceAgentSpeak pushes so
+	// the cascade audio loop (#455) can drive TTS playout. The voice-build
+	// room joiner registers the cascade here once it is constructed; in the
+	// default build it stays nil and pushes are logged only. Guarded by
+	// speakMu since the read-loop goroutine (onVoiceAgentSpeak) and the
+	// joiner goroutine (SetSpeakSink) touch it from different goroutines.
+	speakMu   sync.Mutex
+	speakSink SpeakSink
+}
+
+// SpeakSink consumes an unsolicited VoiceAgentSpeak directive. It is
+// implemented by the cascade orchestrator (#455). Defined on the session
+// so the voice-build room joiner can register the cascade without the
+// CGO-free session lifecycle importing the media layer.
+type SpeakSink interface {
+	Speak(SpeakDirective) bool
+}
+
+// SetSpeakSink registers the VoiceAgentSpeak consumer (the cascade). Safe
+// for concurrent use with onVoiceAgentSpeak.
+func (s *Session) SetSpeakSink(sink SpeakSink) {
+	s.speakMu.Lock()
+	s.speakSink = sink
+	s.speakMu.Unlock()
 }
 
 // NewSession builds a session for the given space. roomName is the LiveKit
@@ -130,10 +162,11 @@ func (s *Session) Run(ctx context.Context) error {
 	reason := "normal"
 	if s.joiner != nil {
 		req := RoomRequest{
-			SpaceID:   s.spaceID,
-			GaAgentID: s.gaAgentID,
-			RoomName:  s.roomName,
-			Ack:       ack,
+			SpaceID:           s.spaceID,
+			GaAgentID:         s.gaAgentID,
+			RoomName:          s.roomName,
+			Ack:               ack,
+			RegisterSpeakSink: s.SetSpeakSink,
 		}
 		r, joinErr := s.joiner.JoinAndServe(ctx, req)
 		if r != "" {
@@ -245,12 +278,25 @@ func (s *Session) onVoiceAgentSpeak(envelope *memqlv1.MemqlServerMessage) error 
 		return nil
 	}
 	if s.logger != nil {
-		s.logger.Info("voice-agent speak request (audio playout deferred to #455)",
+		s.logger.Info("voice-agent speak request",
 			"request_id", speak.GetRequestId(),
 			"utterance_id", speak.GetUtteranceId(),
 			"text_len", len(text))
 	}
-	// TODO(#455): drive the TTS / realtime audio playout pipeline from this
-	// push (the Go analog of main.py::_on_voice_agent_speak -> session.say).
+	// Forward to the cascade audio loop (#455) when wired (voice build).
+	// The cascade drives the conductor-gated TTS playout (transition B,
+	// the Go analog of main.py::_on_voice_agent_speak -> session.say). In
+	// the default CGO-free build no sink is registered and the push is
+	// logged only -- the wire path stays provably reachable.
+	s.speakMu.Lock()
+	sink := s.speakSink
+	s.speakMu.Unlock()
+	if sink != nil {
+		sink.Speak(SpeakDirective{
+			Text:        text,
+			UtteranceID: speak.GetUtteranceId(),
+			RequestID:   speak.GetRequestId(),
+		})
+	}
 	return nil
 }

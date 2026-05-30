@@ -11,6 +11,6 @@ import "log/slog"
 // "run the gRPC handshake and return" (used by the default build + the
 // CGO-free tests). The real LiveKit join lives in room_voice.go and is only
 // compiled into the voice node binary.
-func NewRoomJoiner(_ Config, _ *slog.Logger) RoomJoiner {
+func NewRoomJoiner(_ Config, _ *Client, _ *slog.Logger) RoomJoiner {
 	return nil
 }

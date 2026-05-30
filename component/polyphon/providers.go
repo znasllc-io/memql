@@ -54,12 +54,41 @@ func DefaultASRConfig() ASRConfig {
 	}
 }
 
+// ASRResultKind discriminates the turn-structure role of an ASRResult.
+// It is an additive, backward-compatible enrichment of the stream
+// contract (see docs/voice/452-turntaking-orchestration-go.md, step 1):
+// the zero value (ASRKindTranscript) preserves the historical
+// interim/final-via-IsFinal behavior, so existing consumers that only
+// read Text/IsFinal are unaffected. The Go turn-taking machine (#455)
+// additionally reads Kind to drive barge-in onset off ASRKindSpeechStarted.
+type ASRResultKind int
+
+const (
+	// ASRKindTranscript is the default kind: a transcript update whose
+	// finality is carried by IsFinal (interim when false, committed
+	// end-of-utterance when true). This is the only kind pre-#455
+	// providers emitted, so it is the zero value for backward
+	// compatibility.
+	ASRKindTranscript ASRResultKind = iota
+	// ASRKindSpeechStarted marks a voice-activity onset (Deepgram's
+	// SpeechStarted VAD event). It carries no transcript text; it is the
+	// signal the turn-taking machine uses to enter human-turn and to
+	// raise a barge-in candidate while the assistant has the floor.
+	ASRKindSpeechStarted
+)
+
 // ASRResult is a transcription result from the ASR provider.
 type ASRResult struct {
 	Text       string  `json:"text"`
 	IsFinal    bool    `json:"isFinal"`
 	Confidence float64 `json:"confidence"`
 	SpeakerId  string  `json:"speakerId,omitempty"` // Only if diarization enabled
+	// Kind discriminates the turn-structure role of this result.
+	// The zero value (ASRKindTranscript) preserves the historical
+	// Text/IsFinal behavior; ASRKindSpeechStarted carries an onset
+	// signal with no text. Additive for the turn-taking machine (#455);
+	// transcript-only consumers ignore it.
+	Kind ASRResultKind `json:"kind,omitempty"`
 }
 
 // TTSProvider abstracts text-to-speech synthesis. The implementation is

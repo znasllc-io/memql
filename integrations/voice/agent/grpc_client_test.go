@@ -139,6 +139,67 @@ func TestClient_SendRequest_ContextCancel(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func TestClient_StreamRequest_CollectsCorrelatedReplies(t *testing.T) {
+	fs := newFakeStream()
+	// On a TurnRequest, push two deltas + a complete correlated to the
+	// request's message id (the streaming reply shape).
+	fs.onSend = func(env *memqlv1.MemqlClientMessage) {
+		if env.GetVoiceAgentTurnRequest() == nil {
+			return
+		}
+		corr := env.GetMessageId()
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: corr,
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnDelta{
+				VoiceAgentTurnDelta: &memqlv1.VoiceAgentTurnDelta{TextDelta: "Hello "},
+			},
+		})
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: corr,
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnDelta{
+				VoiceAgentTurnDelta: &memqlv1.VoiceAgentTurnDelta{TextDelta: "world"},
+			},
+		})
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: corr,
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
+				VoiceAgentTurnComplete: &memqlv1.VoiceAgentTurnComplete{FinalText: "Hello world"},
+			},
+		})
+	}
+	c := newTestClient(t, fs)
+
+	ch, release, err := c.StreamRequest(context.Background(), &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
+			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{SpaceId: "s1", GaAgentId: "s1-ga", UtteranceText: "hi"},
+		},
+	})
+	require.NoError(t, err)
+	defer release()
+
+	var deltas []string
+	var final string
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			if d := msg.GetVoiceAgentTurnDelta(); d != nil {
+				deltas = append(deltas, d.GetTextDelta())
+			}
+			if done := msg.GetVoiceAgentTurnComplete(); done != nil {
+				final = done.GetFinalText()
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for streamed replies")
+		}
+		if final != "" {
+			break
+		}
+	}
+	assert.Equal(t, []string{"Hello ", "world"}, deltas)
+	assert.Equal(t, "Hello world", final)
+}
+
 func TestClient_PushHandler_Dispatch(t *testing.T) {
 	fs := newFakeStream()
 	c := NewClient("test:0", "tok", fakeDialer(fs), nil)

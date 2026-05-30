@@ -37,6 +37,12 @@ import (
 // memory growth.
 const sendQueueDepth = 256
 
+// streamReplyDepth bounds a per-StreamRequest reply channel. A single
+// turn produces a small, bounded run of VoiceAgentTurnDelta messages plus
+// one terminal VoiceAgentTurnComplete; the buffer keeps the read loop from
+// blocking on a momentarily-slow consumer without risking unbounded growth.
+const streamReplyDepth = 16
+
 // ErrClientClosed is returned by send paths after the client is closed.
 var ErrClientClosed = errors.New("voice-agent gRPC client is closed")
 
@@ -68,16 +74,17 @@ type Client struct {
 	dial   Dialer
 	logger *slog.Logger
 
-	mu           sync.Mutex
-	stream       streamConn
-	closeConn    func()
-	sendCh       chan *memqlv1.MemqlClientMessage
-	waiters      map[string]chan *memqlv1.MemqlServerMessage
-	pushHandlers map[string]PushHandler
-	closed       bool
-	readErr      error
-	done         chan struct{}
-	writeStopped chan struct{}
+	mu            sync.Mutex
+	stream        streamConn
+	closeConn     func()
+	sendCh        chan *memqlv1.MemqlClientMessage
+	waiters       map[string]chan *memqlv1.MemqlServerMessage
+	streamWaiters map[string]chan *memqlv1.MemqlServerMessage
+	pushHandlers  map[string]PushHandler
+	closed        bool
+	readErr       error
+	done          chan struct{}
+	writeStopped  chan struct{}
 }
 
 // NewClient builds a Client for addr authenticating with token. A nil dialer
@@ -89,15 +96,16 @@ func NewClient(addr, token string, dial Dialer, logger *slog.Logger) *Client {
 		dial = defaultDialer
 	}
 	return &Client{
-		addr:         addr,
-		token:        token,
-		dial:         dial,
-		logger:       logger,
-		sendCh:       make(chan *memqlv1.MemqlClientMessage, sendQueueDepth),
-		waiters:      make(map[string]chan *memqlv1.MemqlServerMessage),
-		pushHandlers: make(map[string]PushHandler),
-		done:         make(chan struct{}),
-		writeStopped: make(chan struct{}),
+		addr:          addr,
+		token:         token,
+		dial:          dial,
+		logger:        logger,
+		sendCh:        make(chan *memqlv1.MemqlClientMessage, sendQueueDepth),
+		waiters:       make(map[string]chan *memqlv1.MemqlServerMessage),
+		streamWaiters: make(map[string]chan *memqlv1.MemqlServerMessage),
+		pushHandlers:  make(map[string]PushHandler),
+		done:          make(chan struct{}),
+		writeStopped:  make(chan struct{}),
 	}
 }
 
@@ -159,7 +167,9 @@ func (c *Client) Close() {
 	closeConn := c.closeConn
 	stream := c.stream
 	waiters := c.waiters
+	streamWaiters := c.streamWaiters
 	c.waiters = make(map[string]chan *memqlv1.MemqlServerMessage)
+	c.streamWaiters = make(map[string]chan *memqlv1.MemqlServerMessage)
 	c.mu.Unlock()
 
 	// Stop the write loop, then flush whatever it had not yet drained. The
@@ -179,6 +189,11 @@ func (c *Client) Close() {
 	}
 	// Fail pending waiters so awaiting callers unblock rather than hang.
 	for _, ch := range waiters {
+		close(ch)
+	}
+	// Close stream waiters too so a caller ranging over a StreamRequest
+	// channel unblocks on teardown rather than hanging.
+	for _, ch := range streamWaiters {
 		close(ch)
 	}
 }
@@ -285,6 +300,24 @@ func (c *Client) dispatch(envelope *memqlv1.MemqlServerMessage) {
 		return
 	}
 
+	// A streaming waiter receives EVERY message correlated to its id and
+	// stays registered until the caller releases it (a turn produces a run
+	// of TurnDelta + a terminal TurnComplete). Do not close it here.
+	c.mu.Lock()
+	streamCh, streamOK := c.streamWaiters[correlate]
+	c.mu.Unlock()
+	if streamOK {
+		select {
+		case streamCh <- envelope:
+		default:
+			if c.logger != nil {
+				c.logger.Warn("voice-agent stream reply channel full; dropping",
+					"correlate_to", correlate, "payload", ServerPayloadName(envelope))
+			}
+		}
+		return
+	}
+
 	payloadName := ServerPayloadName(envelope)
 	c.mu.Lock()
 	h := c.pushHandlers[payloadName]
@@ -345,6 +378,55 @@ func (c *Client) SendRequest(ctx context.Context, envelope *memqlv1.MemqlClientM
 	case <-c.done:
 		return nil, c.closeReason()
 	}
+}
+
+// StreamRequest is the multi-reply analog of SendRequest: it sends one
+// request and returns a channel that receives EVERY server message
+// correlated to the request's generated message id, until the caller
+// invokes the returned release func (or the client closes). This is the
+// shape the streaming VoiceAgentTurnRequest needs -- the server pushes a
+// run of VoiceAgentTurnDelta messages followed by a terminal
+// VoiceAgentTurnComplete, all correlated to the TurnRequest's message id
+// (see component/grpc/voice_agent_handlers.go::handleVoiceAgentTurnRequest).
+// It is the Go analog of the Python grpc_client's send_stream_request /
+// release_stream pair.
+//
+// The caller MUST call release exactly once (deferred) so the per-id
+// stream waiter is unregistered. The returned channel is closed when the
+// client tears down; the caller decides termination by inspecting the
+// payloads it receives (e.g. stop on VoiceAgentTurnComplete).
+func (c *Client) StreamRequest(ctx context.Context, envelope *memqlv1.MemqlClientMessage) (<-chan *memqlv1.MemqlServerMessage, func(), error) {
+	if envelope == nil {
+		return nil, nil, fmt.Errorf("voice-agent StreamRequest: nil envelope")
+	}
+	messageID := uuid.NewString()
+	envelope.MessageId = messageID
+
+	ch := make(chan *memqlv1.MemqlServerMessage, streamReplyDepth)
+	release := func() {
+		c.mu.Lock()
+		if cur, ok := c.streamWaiters[messageID]; ok && cur == ch {
+			delete(c.streamWaiters, messageID)
+		}
+		c.mu.Unlock()
+	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, nil, ErrClientClosed
+	}
+	if c.streamWaiters == nil {
+		c.streamWaiters = make(map[string]chan *memqlv1.MemqlServerMessage)
+	}
+	c.streamWaiters[messageID] = ch
+	c.mu.Unlock()
+
+	if err := c.enqueue(ctx, envelope); err != nil {
+		release()
+		return nil, nil, err
+	}
+	return ch, release, nil
 }
 
 // Send fires an envelope without awaiting a reply (e.g. VoiceAgentSessionEnd
