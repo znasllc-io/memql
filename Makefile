@@ -541,6 +541,39 @@ dev-fresh:
 	@bash scripts/dev/refresh.sh
 
 # ---------------------------------------------------------------------------
+# Azure deployment (staging foundation -- epic #491)
+# ---------------------------------------------------------------------------
+# Idempotent bootstrap that installs/verifies + authenticates the
+# toolchain (az + containerapp ext, gh, tiger, docker, jq, psql) and
+# creates/converges the core Azure resources (resource group, shared
+# Basic ACR, per-env Key Vault, Container Apps environment) plus loads
+# secrets into the Key Vault. Re-runnable -- the second consecutive run
+# is a no-op. Implementation lives in .claude/scripts/deploy-setup.sh
+# per the function-based-shell-script convention (CLAUDE.md). Per #492,
+# this target lives under .claude/scripts/ rather than scripts/ because
+# it's the deploy-tier bootstrap defined by the Skills+Scripts
+# architecture, not a dev-loop helper.
+
+.PHONY: deploy-setup
+
+## Bootstrap the Azure deployment foundation for ENV (staging|production,
+## default staging). Idempotent: installs/verifies the toolchain and
+## creates-or-converges the resource group, shared Basic ACR, per-env
+## Key Vault, and Container Apps environment, then loads secrets into the
+## Key Vault. Pass DRY_RUN=1 to print the plan without mutating, or
+## ARGS=... to forward extra flags (e.g. --secrets-file=...). Run with
+## `--help` semantics via ARGS=--help.
+##   make deploy-setup                          # staging
+##   make deploy-setup DRY_RUN=1                # staging, plan only
+##   make deploy-setup ENV=production DRY_RUN=1
+##   make deploy-setup ARGS=--secrets-file=~/.memql/deploy.staging.env
+deploy-setup:
+	@bash .claude/scripts/deploy-setup.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+# ---------------------------------------------------------------------------
 # Utility targets
 # ---------------------------------------------------------------------------
 
@@ -618,6 +651,10 @@ help:
 	@echo "  make dev-refresh               Verify deps -> decrypt genesis -> wipe -> restart -> seed"
 	@echo "                                 (dev-fresh works as an alias)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
+	@echo ""
+	@echo "AZURE DEPLOY (epic #491)"
+	@echo "  make deploy-setup              Idempotent Azure + toolchain bootstrap (ENV=staging|production)"
+	@echo "  make deploy-setup DRY_RUN=1    Same, but print the plan without mutating"
 	@echo ""
 	@echo "UTILITY"
 	@echo "  make clean        Remove build artifacts"
