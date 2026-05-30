@@ -144,6 +144,22 @@ def test_realtime_model_built_in_conductor_gate_posture(monkeypatch: pytest.Monk
     assert model.kwargs["api_key"] == "sk-test"
 
 
+def test_realtime_model_carries_persona_instructions_and_voice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #436: the static persona (instructions + gpt-realtime voice) must be
+    # wired onto the model at build time. The default _persona() has no
+    # role/style, so the neutral persona renders -- non-empty instructions
+    # and a valid voice still land.
+    _install_fake_openai_plugin(monkeypatch)
+    model = build_realtime_executor(_config(voice_executor="realtime"), _persona())
+    assert isinstance(model, _FakeRealtimeModel)
+    instructions = model.kwargs["instructions"]
+    assert isinstance(instructions, str) and instructions.strip()
+    # alto -> the female realtime voice (see OPENAI_REALTIME_VOICES).
+    assert model.kwargs["voice"] == "marin"
+
+
 # --- selection: realtime falls back to cascade on every failure mode ---
 
 

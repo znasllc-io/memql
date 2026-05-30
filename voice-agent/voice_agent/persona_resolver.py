@@ -49,6 +49,19 @@ class Persona:
     avatar_vendor: str  # 'anam' | 'simli' | '' (unstamped legacy persona)
     initial_audio_mode: str
     initial_video_mode: str
+    # Persona-prompt fields -- the identity + style the Realtime executor
+    # renders into its session instructions (#436), mirroring the cognition
+    # agent prompt's "YOUR IDENTITY" / "Personality & Instructions" blocks
+    # (dsl/cognition/prompts/cognitionReply.tmpl). All optional: the cascade
+    # path never reads them, and the Realtime executor falls back to a
+    # neutral assistant persona when they are unset. Sourced from the
+    # VoiceAgentSessionAck when it carries them and read defensively via
+    # getattr so a proto that has not yet stamped these fields degrades to
+    # the neutral default rather than failing the session.
+    display_name: str = ""
+    role: str = ""  # personaProfile.role -- e.g. "General Assistant"
+    description: str = ""  # one-line role description
+    style: str = ""  # personaProfile.style / personality guidance
 
 
 def _resolve_tts_voice(canonical: str) -> str:
@@ -90,6 +103,11 @@ async def resolve_persona(
     # follow-up will stamp it when the agent record's avatarVendor
     # field is populated. Until then we trust the runtime vendor
     # (passed in by the caller) to drive plugin selection.
+    #
+    # Persona-prompt fields (role / description / style) are read
+    # defensively: the ack proto may not yet carry them, in which case
+    # getattr returns "" and the Realtime executor renders its neutral
+    # default persona. No proto change is required for #436 to ship.
     return Persona(
         canonical_voice=canonical,
         tts_voice_id=_resolve_tts_voice(canonical),
@@ -97,4 +115,8 @@ async def resolve_persona(
         avatar_vendor=avatar_vendor,
         initial_audio_mode=ack.initial_audio_mode or "mirror_user",
         initial_video_mode=ack.initial_video_mode or "mirror_user",
+        display_name=str(getattr(ack, "ga_display_name", "") or ""),
+        role=str(getattr(ack, "ga_role", "") or ""),
+        description=str(getattr(ack, "ga_description", "") or ""),
+        style=str(getattr(ack, "ga_style", "") or ""),
     )
