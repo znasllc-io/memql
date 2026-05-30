@@ -100,6 +100,123 @@ stubbed pending that same validation.
 
 ---
 
+## Release & versioning (semver tag -> immutable image)
+
+This section establishes memQL's release convention for the Azure
+deployment foundation (znasllc-io/memql#493, epic #491): a memQL
+**semver tag** maps to a single **immutable container image**, and
+that image tag is the one number CoPresent pins.
+
+### Dependency direction (why memQL carries no BFF require)
+
+memQL is the **upstream** module. The CoPresent BFF
+(`github.com/visionarys-io/memql-bff-copresent`) imports memQL's Go
+packages (`app`, `server`, `genesis`, `core/...`) and mounts its own
+`copresent/` DSL subtree into memQL's engine at boot via
+`dsl.RegisterTree` (see [`dsl/embed.go`](dsl/embed.go)). The import
+graph therefore points **BFF -> memQL**, not the other way:
+
+```
+  memql-bff-copresent  (require memql + replace ../memql for dev)
+            │  imports app/server/genesis, calls dsl.RegisterTree
+            ▼
+        memql            (no source import of the BFF)
+```
+
+Because memQL imports **zero** BFF packages, a `require
+github.com/visionarys-io/memql-bff-copresent` line in memQL's
+`go.mod` does not survive `go mod tidy` — Go strips any required
+module that nothing in the build graph imports. (Verified: a manual
+`go get ...@v0.2.0` adds an `// indirect` line that the next
+`go mod tidy` removes, and `GOWORK=off go build ./...` still
+succeeds because there was nothing BFF-shaped to resolve.) Forcing
+the require via a blank import is impossible anyway — the BFF imports
+memQL, so memQL importing the BFF would be a compile-time import
+cycle.
+
+The pin that actually matters flows the other way and is an **image
+tag**, not a module version: memQL releases `memql:X.Y.Z`, and
+CoPresent's `deploy/backend-version` file pins that tag
+(visionarys-io/copresent#140). The `go.work` workspace at the repo
+parent (`use ./memql ./memql-bff-copresent ./memql-cockpit`) is what
+gives local cross-repo dev its edit-and-rebuild loop; it is unchanged
+by this convention. CI / release builds run with `GOWORK=off` so they
+resolve purely from `go.mod` + `go.sum`.
+
+A CI-style guard for this lives in
+[`scripts/release/release_test.go`](scripts/release/release_test.go)
+(`TestStandaloneBuildResolves`): it runs `GOWORK=off go mod verify`
+so a regression that made the standalone build need the workspace
+fails `go test ./...`.
+
+### `make release` — cut an immutable image
+
+```bash
+# Local image, version = the VERSION file's semver prefix:
+make release
+
+# Explicit version, build + push the pinnable tag to the shared ACR:
+make release VERSION=2.4.0 ACR=acrmemql PUSH=1
+
+# Plan only (build/push nothing):
+make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1
+```
+
+The target is a one-liner over
+[`scripts/release/release.sh`](scripts/release/release.sh) (per the
+function-based shell-script convention in CLAUDE.md). It:
+
+- Resolves the version from `--version` or the clean **semver
+  prefix** of the `VERSION` file (the part before the first `-`; the
+  file's epoch suffix `2.3.0-<epoch>` is a dev stamp and is dropped
+  for a release tag). The version must be strict `X.Y.Z`.
+- Resolves the short git SHA and stamps it onto the image as
+  `org.opencontainers.image.revision` (plus
+  `org.opencontainers.image.version`), so the immutable `X.Y.Z` tag
+  is always traceable back to an exact commit. A dirty tree marks the
+  revision `<sha>-dirty`.
+- Builds from [`docker/memql.Dockerfile`](docker/memql.Dockerfile)
+  and tags `<registry/>memql:X.Y.Z` (registry derived from `ACR`
+  -> `<acr>.azurecr.io`, or set directly via `REGISTRY`; empty =
+  local-only).
+- Treats the tag as **write-once**: with `PUSH=1` it refuses to
+  overwrite an existing `X.Y.Z` tag in the registry unless
+  `ALLOW_OVERWRITE=1` is passed. That immutability is what makes the
+  tag a trustworthy pin for CoPresent.
+
+### Promotion flow (memQL tag -> image -> CoPresent pin)
+
+```
+   git tag vX.Y.Z on memql main        (architect cuts the tag)
+            │
+            ▼
+   make release VERSION=X.Y.Z ACR=acrmemql PUSH=1
+            │   builds + pushes acrmemql.azurecr.io/memql:X.Y.Z (immutable)
+            ▼
+   CoPresent deploy/backend-version = X.Y.Z      (reviewed PR; copresent#140)
+            │   make check-backend-pin verifies the image exists in ACR
+            ▼
+   CoPresent staging/prod deploy runs against the pinned backend image
+```
+
+The backend lane (`ca-memql-*` tracking memQL `main`) moves
+continuously; the **pinned** lane (`ca-memql-pinned` behind
+`api.staging.copresent.ai`) only moves when someone bumps
+CoPresent's `backend-version` to a new `memql:X.Y.Z` in a reviewed
+PR. One memQL tag transitively fixes one BFF-compatible engine build.
+
+### Versioning lineage
+
+The `VERSION` file currently reads `2.3.0-<epoch>` (a dev stamp), and
+the only git tag on the repo is `v0.1.0`. The first clean release tag
+should reconcile the `2.3.x` lineage in `VERSION` rather than continue
+the orphaned `v0.1.x` line — i.e. `v2.4.0` (semver minor bump over the
+`2.3.x` working line, signalling the first deployable Azure cut). The
+actual tag is the architect's call; this document describes the
+mechanism, not the number.
+
+---
+
 ## Environments
 
 | Environment | Region | Database | Purpose | Access |
