@@ -104,6 +104,13 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	audioMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
 	videoMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "video")
 
+	// Load the GA's persona identity (#478) from the agent record so the voice
+	// session renders the real agent via the shared agentdef identity block,
+	// not the neutral "Assistant, General Assistant" default. Best-effort: a
+	// query failure leaves the fields empty and the voice builder degrades to
+	// the neutral default, so the session still comes up.
+	persona := resolveAgentPersona(s, gaAgentId)
+
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
 			"request_id", requestId,
@@ -112,7 +119,9 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 			"room_name", msg.GetRoomName(),
 			"avatar_vendor", msg.GetAvatarVendor(),
 			"audio_mode", audioMode,
-			"video_mode", videoMode)
+			"video_mode", videoMode,
+			"persona_name", persona.name,
+			"persona_populated", persona.name != "" || persona.description != "" || persona.personality != "")
 	}
 
 	// Bind the stream to this (space, ga_agent_id) and kick off the
@@ -133,6 +142,10 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 				GaAvatarPersonaId: "",
 				InitialAudioMode:  audioMode,
 				InitialVideoMode:  videoMode,
+				GaDisplayName:     persona.name,
+				GaRole:            persona.role,
+				GaDescription:     persona.description,
+				GaPersonality:     persona.personality,
 			},
 		},
 	})
@@ -253,6 +266,43 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 	}
 
 	return fallback
+}
+
+// agentPersonaFields is the GA persona identity loaded from the agent record
+// for the session ack (#478): the human-facing name, role label, role
+// description, and personality prose. Each is "" when the record omits it; the
+// voice instruction builder degrades to the neutral default per field.
+type agentPersonaFields struct {
+	name        string
+	role        string
+	description string
+	personality string
+}
+
+// resolveAgentPersona loads the GA's persona identity from its v1:agents:agent
+// record in one query, mirroring resolveInitialChannelMode's agent-record read.
+// Best-effort: any failure (nil engine, query error, missing row) returns the
+// zero value so the caller stamps empty persona fields and the voice session
+// falls back to the neutral default rather than failing bring-up.
+func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
+	var out agentPersonaFields
+	if s == nil || s.service == nil || s.service.engine == nil {
+		return out
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
+	query := fmt.Sprintf(
+		`from(v1:agents:agent) ?.id=="%s" select id, payload.name, payload.role, payload.description, payload.personality`,
+		agentId)
+	result, err := s.service.engine.Execute(ctx, query)
+	if err != nil {
+		return out
+	}
+	payload := result.OutputPayload()
+	out.name, _ = extractFirstAgentField(payload, "name")
+	out.role, _ = extractFirstAgentField(payload, "role")
+	out.description, _ = extractFirstAgentField(payload, "description")
+	out.personality, _ = extractFirstAgentField(payload, "personality")
+	return out
 }
 
 // normalizeResultRows accepts a shape() / from-select result payload
@@ -583,10 +633,20 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	// practice but cheap belt-and-suspenders.
 	utteranceId := fmt.Sprintf("utt-%d-%s", time.Now().UnixNano(), randHex(8))
 
+	// In the #478 native 1-on-1 path the realtime model already authored AND
+	// spoke the reply, so this user utterance is transcript-only: stamp
+	// inputMethod="realtimeVoice" (isTranscriptOnlyRealtimeUtterance) so the
+	// cognition automation skips authoring a second reply. The conductor-gated /
+	// cascade path keeps inputMethod="stt" so cognition authors as today.
+	inputMethod := "stt"
+	if msg.GetNativeAuthored() {
+		inputMethod = "realtimeVoice"
+	}
+
 	go func() {
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "stt", pipeline: "voice-agent"}})`,
-			utteranceId, spaceId, speakerId, string(textJSON))
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "%s", pipeline: "voice-agent"}})`,
+			utteranceId, spaceId, speakerId, string(textJSON), inputMethod)
 
 		ctx := contextWithVoiceAgentActor(context.Background())
 		if _, err := s.service.engine.Execute(ctx, query); err != nil {
@@ -856,6 +916,18 @@ func extractGAReplyFromEvent(e events.Event, spaceId, gaAgentId string) (voiceAg
 	if pt != "si" {
 		return voiceAgentReply{}, false
 	}
+	// Skip utterances the realtime model already spoke natively (#478). The
+	// gpt-realtime output capture (handleVoiceAgentRealtimeOutput) inserts a
+	// participantType="si" utterance stamped source.outputMethod="realtimeVoice";
+	// without this guard the speak subscriber would match it and push a
+	// VoiceAgentSpeak, making the model re-voice its own reply (double-speak).
+	// The speak path exists to voice TEXT replies cognition authored, never
+	// audio the model already produced.
+	if source := pickMap(nodeFields, "source"); source != nil {
+		if strings.TrimSpace(asString(source, "outputMethod")) == "realtimeVoice" {
+			return voiceAgentReply{}, false
+		}
+	}
 	_ = gaAgentId // retained on the signature for caller-side logging
 	text := strings.TrimSpace(asString(nodeFields, "text"))
 	if text == "" {
@@ -935,13 +1007,13 @@ func trailingSlug(id string) string {
 //
 //   - participantType="si"  (the value the frontend keys sender lookup on)
 //   - participantId         = the GA's v1:cognition:participant row id,
-//                             NOT the agent template id (resolved here via
-//                             querySiParticipantForSpace)
+//     NOT the agent template id (resolved here via
+//     querySiParticipantForSpace)
 //   - utteranceType="text"  (transcript is text; audio rode LiveKit)
 //   - source                = {outputMethod:"voice", inputMethod:"realtime",
-//                              pipeline:"voice-agent-realtime", agentId}
+//     pipeline:"voice-agent-realtime", agentId}
 //   - citations             = same {domainId, matchedPhrase} entries the
-//                             cascade persists (omitted entirely when empty)
+//     cascade persists (omitted entirely when empty)
 //
 // so chat (streaming reveal + role label + citation chips), canvas
 // announcements, conductor history, and audit all read a realtime voice

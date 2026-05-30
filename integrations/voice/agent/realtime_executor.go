@@ -110,6 +110,15 @@ type RealtimeExecutor struct {
 
 	seq atomic.Int64
 
+	// nativeMode is the #478 1-on-1 gate: when true, gpt-realtime owns the turn
+	// (turn_detection: semantic_vad set by the room layer), authors natively,
+	// and barge-in is the model's job -- so the executor does NOT round-trip the
+	// conductor (runTurn) and the human transcript comes from the model's native
+	// input-transcription events, not Deepgram. When false (the default) the
+	// executor runs the conductor gate exactly as before (multi-party path).
+	// Switchable at runtime by the room layer as the human count crosses 1<->2.
+	nativeMode atomic.Bool
+
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
 	// flag so barge-in can stop playout without racing a new response.
 	respMu     sync.Mutex
@@ -214,6 +223,22 @@ func (e *RealtimeExecutor) SetToolBridge(b *McpToolBridge) {
 	e.toolBridge = b
 }
 
+// SetNativeMode toggles the #478 1-on-1 native gate. true = gpt-realtime owns
+// the turn (no conductor round-trip, native input transcript, model-driven
+// barge-in); false = the conductor gate (multi-party path). The room layer
+// drives this from the live human count and pairs it with a session.update that
+// flips turn_detection. Safe for concurrent use.
+func (e *RealtimeExecutor) SetNativeMode(native bool) {
+	e.nativeMode.Store(native)
+	if e.logger != nil {
+		e.logger.Info("voice-agent realtime: gate mode set",
+			"mode", map[bool]string{true: "native (model-owns-turn)", false: "conductor-gated"}[native])
+	}
+}
+
+// isNativeMode reports whether the 1-on-1 native gate is active.
+func (e *RealtimeExecutor) isNativeMode() bool { return e.nativeMode.Load() }
+
 // ConsumeASR drives the machine from one human track's Deepgram ASR result
 // stream (one goroutine per human track -- the multi-party fan-out, #433). It
 // maps each result onto a turn-taking input exactly as the cascade does, and
@@ -249,6 +274,13 @@ func (e *RealtimeExecutor) StreamAudio(pcm16k []byte) {
 // handleASRResult routes one ASR result for a given speaker. Split out for
 // direct unit testing.
 func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
+	// Native 1-on-1 mode: gpt-realtime transcribes the human, detects the turn,
+	// authors + speaks, and handles barge-in -- so Deepgram results are not
+	// consumed at all (Deepgram stays warm only for the cascade fallback). The
+	// only executor input on the native path is StreamAudio (PCM -> model).
+	if e.isNativeMode() {
+		return
+	}
 	if r.Kind == polyphon.ASRKindSpeechStarted {
 		e.machine.OnSpeechStarted()
 		return
@@ -314,8 +346,18 @@ func (e *RealtimeExecutor) forwardPartial(speakerIdentity, text string) {
 // suppress. Runs on its own goroutine so the ASR consume loop is never blocked.
 func (e *RealtimeExecutor) onCommittedTurn(text string) {
 	e.seq.Store(0)
+	// Native 1-on-1 mode: gpt-realtime owns the turn -- it detects end-of-turn
+	// (semantic_vad), authors + speaks natively, and the human transcript is
+	// captured from the model's native input-transcription events (drainEvents),
+	// not this Deepgram-driven commit. So we neither forward this final (the
+	// native path inserts the user utterance, stamped transcript-only) nor
+	// round-trip the conductor. Guarded defensively even though the room layer
+	// also stops feeding Deepgram finals into the machine in native mode.
+	if e.isNativeMode() {
+		return
+	}
 	speaker := e.getLastSpeaker()
-	e.forwardFinal(speaker, text)
+	e.forwardFinal(speaker, text, false)
 	go e.runTurn(speaker, text)
 }
 
@@ -331,14 +373,18 @@ func (e *RealtimeExecutor) getLastSpeaker() string {
 	return e.lastSpeaker
 }
 
-// forwardFinal sends a VoiceAgentFinalTranscript (best-effort).
-func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string) {
+// forwardFinal sends a VoiceAgentFinalTranscript (best-effort). nativeAuthored
+// marks the #478 native path: the realtime model already authored AND spoke the
+// reply, so the server stamps this user utterance transcript-only and cognition
+// does not author a second reply.
+func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuthored bool) {
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{
 			VoiceAgentFinalTranscript: &memqlv1.VoiceAgentFinalTranscript{
-				SpaceId:       e.cfg.SpaceID,
-				SpeakerUserId: e.resolveSpeaker(speakerIdentity),
-				FinalText:     text,
+				SpaceId:        e.cfg.SpaceID,
+				SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
+				FinalText:      text,
+				NativeAuthored: nativeAuthored,
 			},
 		},
 	}
@@ -537,6 +583,10 @@ func (e *RealtimeExecutor) drainAudioOut() {
 // tool bridge are #458 -- the seams are marked below.
 func (e *RealtimeExecutor) drainEvents() {
 	var transcript strings.Builder
+	// inputTranscript accumulates the model's native transcription of the
+	// human's audio (#478 native mode), so the chat transcript comes from the
+	// realtime model rather than a Deepgram pass on the critical path.
+	var inputTranscript strings.Builder
 	for {
 		select {
 		case <-e.ctx.Done():
@@ -571,6 +621,27 @@ func (e *RealtimeExecutor) drainEvents() {
 					final = transcript.String()
 				}
 				e.captureOutput(final)
+			case openai.EventInputTranscriptDelta:
+				// Native human transcript (#478): stream the running text as a
+				// partial so chat ghost-texts the in-progress user utterance,
+				// exactly as the Deepgram interim path does -- but sourced from
+				// the model, with Deepgram off the 1-on-1 critical path.
+				inputTranscript.WriteString(ev.Text)
+				e.forwardPartial("", inputTranscript.String())
+			case openai.EventInputTranscriptDone:
+				// The human's final utterance, native-authored: the model has
+				// already authored + spoken its reply, so forward the final
+				// marked native so the server stamps it transcript-only and
+				// cognition does not author a second reply.
+				final := strings.TrimSpace(ev.Text)
+				if final == "" {
+					final = strings.TrimSpace(inputTranscript.String())
+				}
+				inputTranscript.Reset()
+				e.seq.Store(0)
+				if final != "" {
+					e.forwardFinal("", final, true)
+				}
 			case openai.EventFunctionArgsDone:
 				// #458 MCP tool bridge: dispatch the model's function call on a
 				// worker goroutine (OFF this drain loop so a long tool never

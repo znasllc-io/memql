@@ -15,7 +15,11 @@ package agent
 // identity is rendered so the realtime voice stays on-task instead of
 // free-wheeling. Pure / deterministic; unit-tested without a session.
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/znasllc-io/memql/integrations/agentdef"
+)
 
 const (
 	// defaultPersonaName / defaultPersonaRole are the neutral identity used
@@ -55,12 +59,17 @@ func BuildPersonaInstructions(p Persona) string {
 		"You are " + name + ", the " + role + " in a live voice conversation.",
 	}
 
-	if description := strings.TrimSpace(p.Description); description != "" {
-		lines = append(lines, description)
-	}
-
-	if style := strings.TrimSpace(p.Style); style != "" {
-		lines = append(lines, "", "Style and personality:", style)
+	// The identity + personality + domains region comes from the SHARED
+	// renderer (agentdef.RenderIdentityBlock, #476/#480) -- the exact same block
+	// the cognition text path embeds (prompt_data.go's assistant.identityBlock)
+	// -- so voice and text cannot say different things about the agent. The
+	// voice-specific framing (the lead line above and the spoken constraints
+	// below) is layered AROUND it, never inside it. Empty for a persona with no
+	// description / style (the starved-ack case today, until the proto stamps
+	// the persona fields -- see persona.go); the neutral lead + constraints
+	// still render so the voice stays on-task.
+	if block := agentdef.RenderIdentityBlock(personaContract(p)); block != "" {
+		lines = append(lines, block)
 	}
 
 	lines = append(lines,
@@ -73,6 +82,25 @@ func BuildPersonaInstructions(p Persona) string {
 	)
 
 	return strings.Join(lines, "\n")
+}
+
+// personaContract projects a voice Persona into the converged generation
+// contract (#476) so the voice renderer consumes the SAME agentdef projection
+// the text path consumes -- neither modality can read a persona field the other
+// can't. The voice Persona's Style maps to the contract's Personality (the
+// system-prompt prose); Description, Role, and the voice/avatar fields carry
+// across directly. Voice carries no grounding domains on the ack today, so the
+// contract's Domains line is simply absent until the proto stamps them.
+func personaContract(p Persona) agentdef.AgentGenerationContract {
+	return agentdef.BuildGenerationContract(agentdef.ContractInput{
+		Name:            p.DisplayName,
+		Role:            p.Role,
+		Description:     p.Description,
+		Personality:     p.Style,
+		CanonicalVoice:  p.CanonicalVoice,
+		AvatarPersonaID: p.AvatarPersonaID,
+		AvatarVendor:    p.AvatarVendor,
+	})
 }
 
 // SessionPersona is the resolved static configuration for a realtime session:

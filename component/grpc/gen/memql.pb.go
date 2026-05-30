@@ -10783,8 +10783,19 @@ type VoiceAgentSessionAck struct {
 	// 'always_on' / 'always_off' / 'mirror_user'.
 	InitialAudioMode string `protobuf:"bytes,7,opt,name=initial_audio_mode,json=initialAudioMode,proto3" json:"initial_audio_mode,omitempty"`
 	InitialVideoMode string `protobuf:"bytes,8,opt,name=initial_video_mode,json=initialVideoMode,proto3" json:"initial_video_mode,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// GA persona identity (#478), loaded from the v1:agents:agent record:
+	// name, role label, role description, and personality prose. The voice
+	// session renders the REAL agent from these (via the shared
+	// agentdef.RenderIdentityBlock the text path uses) instead of the neutral
+	// "Assistant, General Assistant" default. Each is empty when the agent
+	// record omits it -- the voice instruction builder degrades to the neutral
+	// default per field, so a partial ack never breaks the session.
+	GaDisplayName string `protobuf:"bytes,9,opt,name=ga_display_name,json=gaDisplayName,proto3" json:"ga_display_name,omitempty"`
+	GaRole        string `protobuf:"bytes,10,opt,name=ga_role,json=gaRole,proto3" json:"ga_role,omitempty"`
+	GaDescription string `protobuf:"bytes,11,opt,name=ga_description,json=gaDescription,proto3" json:"ga_description,omitempty"`
+	GaPersonality string `protobuf:"bytes,12,opt,name=ga_personality,json=gaPersonality,proto3" json:"ga_personality,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VoiceAgentSessionAck) Reset() {
@@ -10869,6 +10880,34 @@ func (x *VoiceAgentSessionAck) GetInitialAudioMode() string {
 func (x *VoiceAgentSessionAck) GetInitialVideoMode() string {
 	if x != nil {
 		return x.InitialVideoMode
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaDisplayName() string {
+	if x != nil {
+		return x.GaDisplayName
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaRole() string {
+	if x != nil {
+		return x.GaRole
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaDescription() string {
+	if x != nil {
+		return x.GaDescription
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaPersonality() string {
+	if x != nil {
+		return x.GaPersonality
 	}
 	return ""
 }
@@ -11109,9 +11148,16 @@ type VoiceAgentFinalTranscript struct {
 	// Provider confidence, 0.0-1.0 (Deepgram surfaces this).
 	Confidence float32 `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`
 	// Wall-clock millis the utterance ended (voice-agent side).
-	EndedAtMs     int64 `protobuf:"varint,6,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	EndedAtMs int64 `protobuf:"varint,6,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`
+	// Native-authored flag (#478, 1-on-1 native mode). True when the realtime
+	// model already authored AND spoke the reply to this user turn natively
+	// (turn_detection: semantic_vad), so the server must stamp this user
+	// utterance transcript-only (source.inputMethod="realtimeVoice") and
+	// cognition must NOT author a second reply. False is the conductor-gated /
+	// cascade path: cognition authors as today.
+	NativeAuthored bool `protobuf:"varint,7,opt,name=native_authored,json=nativeAuthored,proto3" json:"native_authored,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VoiceAgentFinalTranscript) Reset() {
@@ -11184,6 +11230,13 @@ func (x *VoiceAgentFinalTranscript) GetEndedAtMs() int64 {
 		return x.EndedAtMs
 	}
 	return 0
+}
+
+func (x *VoiceAgentFinalTranscript) GetNativeAuthored() bool {
+	if x != nil {
+		return x.NativeAuthored
+	}
+	return false
 }
 
 type VoiceAgentFinalAck struct {
@@ -13012,7 +13065,7 @@ const file_memql_proto_rawDesc = "" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x1b\n" +
 	"\troom_name\x18\x04 \x01(\tR\broomName\x12#\n" +
-	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xce\x02\n" +
+	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xdd\x03\n" +
 	"\x14VoiceAgentSessionAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -13023,7 +13076,12 @@ const file_memql_proto_rawDesc = "" +
 	"\x12ga_canonical_voice\x18\x05 \x01(\tR\x10gaCanonicalVoice\x12/\n" +
 	"\x14ga_avatar_persona_id\x18\x06 \x01(\tR\x11gaAvatarPersonaId\x12,\n" +
 	"\x12initial_audio_mode\x18\a \x01(\tR\x10initialAudioMode\x12,\n" +
-	"\x12initial_video_mode\x18\b \x01(\tR\x10initialVideoMode\"\x85\x01\n" +
+	"\x12initial_video_mode\x18\b \x01(\tR\x10initialVideoMode\x12&\n" +
+	"\x0fga_display_name\x18\t \x01(\tR\rgaDisplayName\x12\x17\n" +
+	"\aga_role\x18\n" +
+	" \x01(\tR\x06gaRole\x12%\n" +
+	"\x0ega_description\x18\v \x01(\tR\rgaDescription\x12%\n" +
+	"\x0ega_personality\x18\f \x01(\tR\rgaPersonality\"\x85\x01\n" +
 	"\x14VoiceAgentSessionEnd\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
@@ -13043,7 +13101,7 @@ const file_memql_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\xdc\x01\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x85\x02\n" +
 	"\x19VoiceAgentFinalTranscript\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
@@ -13054,7 +13112,8 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"confidence\x18\x05 \x01(\x02R\n" +
 	"confidence\x12\x1e\n" +
-	"\vended_at_ms\x18\x06 \x01(\x03R\tendedAtMs\"\xcc\x01\n" +
+	"\vended_at_ms\x18\x06 \x01(\x03R\tendedAtMs\x12'\n" +
+	"\x0fnative_authored\x18\a \x01(\bR\x0enativeAuthored\"\xcc\x01\n" +
 	"\x12VoiceAgentFinalAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +

@@ -1667,6 +1667,17 @@ message VoiceAgentSessionAck {
   // 'always_on' / 'always_off' / 'mirror_user'.
   string initial_audio_mode = 7;
   string initial_video_mode = 8;
+  // GA persona identity (#478), loaded from the v1:agents:agent record:
+  // name, role label, role description, and personality prose. The voice
+  // session renders the REAL agent from these (via the shared
+  // agentdef.RenderIdentityBlock the text path uses) instead of the neutral
+  // "Assistant, General Assistant" default. Each is empty when the agent
+  // record omits it -- the voice instruction builder degrades to the neutral
+  // default per field, so a partial ack never breaks the session.
+  string ga_display_name = 9;
+  string ga_role = 10;
+  string ga_description = 11;
+  string ga_personality = 12;
 }
 
 // VoiceAgentSessionEnd closes a session. Memql persists a
@@ -1715,6 +1726,13 @@ message VoiceAgentFinalTranscript {
   float confidence = 5;
   // Wall-clock millis the utterance ended (voice-agent side).
   int64 ended_at_ms = 6;
+  // Native-authored flag (#478, 1-on-1 native mode). True when the realtime
+  // model already authored AND spoke the reply to this user turn natively
+  // (turn_detection: semantic_vad), so the server must stamp this user
+  // utterance transcript-only (source.inputMethod="realtimeVoice") and
+  // cognition must NOT author a second reply. False is the conductor-gated /
+  // cascade path: cognition authors as today.
+  bool native_authored = 7;
 }
 
 message VoiceAgentFinalAck {

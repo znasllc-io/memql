@@ -389,3 +389,65 @@ func TestRealtimeExecutor_ToolBridge_DispatchesAndContinues(t *testing.T) {
 		return rt.responseCount() >= 1
 	}, 2*time.Second, 10*time.Millisecond, "a CreateResponse continues the model with the tool result")
 }
+
+// findFinalTranscript returns the first VoiceAgentFinalTranscript among the
+// recorded sends, or nil.
+func findFinalTranscript(fs *fakeStream) *memqlv1.VoiceAgentFinalTranscript {
+	for _, env := range fs.sentEnvelopes() {
+		if f := env.GetVoiceAgentFinalTranscript(); f != nil {
+			return f
+		}
+	}
+	return nil
+}
+
+func hasTurnRequest(fs *fakeStream) bool {
+	for _, env := range fs.sentEnvelopes() {
+		if env.GetVoiceAgentTurnRequest() != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRealtimeExecutor_NativeMode_NoConductorRoundTrip verifies the #478 native
+// gate: with native mode on, a (defensive) Deepgram final does NOT round-trip
+// the conductor (no VoiceAgentTurnRequest) and drives no response.create -- the
+// model owns the turn.
+func TestRealtimeExecutor_NativeMode_NoConductorRoundTrip(t *testing.T) {
+	fs := newFakeStream()
+	replyToTurn(fs, "should not be requested")
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	e.SetNativeMode(true)
+
+	e.handleASRResult("user-1", polyphon.ASRResult{Text: "what's the plan", IsFinal: true})
+
+	time.Sleep(80 * time.Millisecond)
+	assert.False(t, hasTurnRequest(fs), "native mode must not round-trip the conductor")
+	assert.Equal(t, 0, rt.responseCount(), "native mode: the model self-triggers, not the executor")
+}
+
+// TestRealtimeExecutor_NativeMode_InputTranscriptForwarded verifies the native
+// human transcript path: the model's input-transcription events are forwarded
+// as a partial + a native-authored final (so the server stamps it
+// transcript-only), with no conductor round-trip.
+func TestRealtimeExecutor_NativeMode_InputTranscriptForwarded(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	e.SetNativeMode(true)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDelta, Text: "cut the "}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "cut the cloud spend"}
+
+	var final *memqlv1.VoiceAgentFinalTranscript
+	require.Eventually(t, func() bool {
+		final = findFinalTranscript(fs)
+		return final != nil
+	}, 2*time.Second, 10*time.Millisecond, "native input transcript must forward a final")
+
+	assert.Equal(t, "cut the cloud spend", final.GetFinalText())
+	assert.True(t, final.GetNativeAuthored(), "native human final must be marked native-authored")
+	assert.False(t, hasTurnRequest(fs), "no conductor round-trip on the native path")
+}

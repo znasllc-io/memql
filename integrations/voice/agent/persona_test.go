@@ -40,11 +40,39 @@ func TestResolvePersona_NeutralDefaultsWhenUnset(t *testing.T) {
 	assert.True(t, p.AudioEnabled())
 	assert.True(t, p.VideoEnabled())
 
-	// Persona-prompt fields default empty (not on the ack today).
+	// Persona-prompt fields default empty when the ack omits them; the
+	// instruction builder renders the neutral default per field.
 	assert.Equal(t, "", p.DisplayName)
 	assert.Equal(t, "", p.Role)
 	assert.Equal(t, "", p.Description)
 	assert.Equal(t, "", p.Style)
+}
+
+// TestResolvePersona_PersonaFieldsFromAck asserts the persona identity fields
+// (#478) flow from the ack into the Persona, with the agent record's
+// personality prose mapped onto Style (the field the shared identity block
+// renders as the personality region).
+func TestResolvePersona_PersonaFieldsFromAck(t *testing.T) {
+	ack := SessionAck{
+		CanonicalVoice: "alto",
+		DisplayName:    "Sofia",
+		Role:           "assistant",
+		Description:    "Sales Specialist",
+		Personality:    "Warm, concise, never pushy.",
+	}
+	p := ResolvePersona(ack, Config{AvatarVendor: "none"})
+
+	assert.Equal(t, "Sofia", p.DisplayName)
+	assert.Equal(t, "assistant", p.Role)
+	assert.Equal(t, "Sales Specialist", p.Description)
+	assert.Equal(t, "Warm, concise, never pushy.", p.Style)
+
+	// And the populated persona renders the real agent, not the neutral default.
+	out := BuildPersonaInstructions(p)
+	assert.Contains(t, out, "You are Sofia, the assistant in a live voice conversation.")
+	assert.Contains(t, out, "Role: Sales Specialist")
+	assert.Contains(t, out, "Warm, concise, never pushy.")
+	assert.NotContains(t, out, "You are Assistant, the General Assistant")
 }
 
 func TestResolvePersona_AudioOffGatesVideoOff(t *testing.T) {

@@ -10,18 +10,40 @@ it is a contract + migration design grounded in the tree as it stands after
 the Go voice-agent cutover (epic #449). Every load-bearing claim cites a real
 `path:line`. The headline is in section 0.
 
-> **Implementation status (#480, text convergence).** Stage 0 and the data
-> half of Stage 1 (section 6) have landed: the converged contract now lives in
-> the shared `integrations/agentdef` package -- `AgentGenerationContract`,
-> `BuildGenerationContract`, and the shared `RenderIdentityBlock`, all pure and
-> golden-tested. The cognition text path (`integrations/agent/prompt_data.go`)
-> projects its `assistant` block through `BuildGenerationContract`, so the text
-> path now reads the converged definition; the projection is byte-identical to
-> the prior inline mapping (same trim/omit-empty), pinned by
-> `prompt_data_test.go`. The remaining Stage 1/2 work -- routing the
-> `cognitionReply.tmpl` identity region AND the voice session instructions
-> through `RenderIdentityBlock`, plus the cross-modality byte-identical golden
-> test -- lands with #478, when the voice path adopts the same shared renderer.
+> **Implementation status.**
+>
+> - **Stage 0 + Stage 1 data (#480).** The converged contract lives in the
+>   shared `integrations/agentdef` package -- `AgentGenerationContract`,
+>   `BuildGenerationContract`, and the shared `RenderIdentityBlock`, all pure
+>   and golden-tested. The cognition text path
+>   (`integrations/agent/prompt_data.go`) projects its `assistant` block through
+>   `BuildGenerationContract`, byte-identical to the prior inline mapping
+>   (pinned by `prompt_data_test.go`).
+> - **Stage 2 renderer convergence + persona population (#478).** The voice
+>   persona renderer (`integrations/voice/agent/instructions.go`
+>   `BuildPersonaInstructions`) now embeds the SAME `agentdef.RenderIdentityBlock`
+>   the text path embeds, via a `personaContract(Persona)` adapter -- so both
+>   modalities describe the agent through one renderer (cross-modality test in
+>   `instructions_test.go`). And the starved persona is fixed: `VoiceAgentSessionAck`
+>   carries `ga_display_name` / `ga_role` / `ga_description` / `ga_personality`
+>   (section 6.3), loaded server-side from the `v1:agents:agent` record
+>   (`voice_agent_handlers.go` `resolveAgentPersona`) and resolved into the
+>   `Persona` (`persona.go`), so the voice session now renders the real agent
+>   instead of "Assistant, General Assistant".
+> - **Stage 3 native authorship (#478, 3a-3d).** The native 1-on-1 turn is
+>   implemented: the openai client supports `semantic_vad` + native input
+>   transcription (3a); the server stamps native user turns transcript-only so
+>   cognition skips authoring -- the keystone that prevents the double-author
+>   (3b); the executor runs a runtime native gate where gpt-realtime owns the
+>   turn and the human transcript comes from the model, with Deepgram off the
+>   1-on-1 critical path (3c); and the room layer flips `turn_detection` between
+>   `null` (>=2 humans) and `semantic_vad` (exactly one) by live human count,
+>   behind `MEMQL_REALTIME_NATIVE_TURN` (3d).
+> - **Remaining (#478).** Per-turn knowledge grounding for the native path
+>   (Stage 3e) is split into #490: it needs a new grounding gRPC + server-side
+>   domain resolution + a `create_response:false` redesign of the native flow,
+>   none locally verifiable (voice CGO lane + live model), so it lands as its
+>   own validated PR.
 
 > **Framing note.** Epic #475 states the problem as "two authors": voice
 > replies come from gpt-realtime, text replies from cognition. The spike's

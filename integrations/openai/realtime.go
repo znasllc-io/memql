@@ -91,10 +91,11 @@ type RealtimeSession struct {
 	done    chan struct{}
 }
 
-// Connect dials the gpt-realtime conversation endpoint, sends the conductor-
-// gate session.update (turn_detection:null), and starts the reader goroutine.
-// On any failure it closes the socket and returns an error so the caller can
-// fall back to the cascade.
+// Connect dials the gpt-realtime conversation endpoint, sends the initial
+// session.update from sess (turn_detection:null for the conductor gate, or the
+// configured detector for the #478 native path), and starts the reader
+// goroutine. On any failure it closes the socket and returns an error so the
+// caller can fall back to the cascade.
 func (c *RealtimeClient) Connect(ctx context.Context, sess SessionConfig) (*RealtimeSession, error) {
 	url := realtimeConvBaseURL + "?model=" + c.model
 
@@ -237,6 +238,20 @@ func (s *RealtimeSession) sendSessionUpdate(ctx context.Context, sess SessionCon
 		return err
 	}
 	return s.conn.Write(ctx, websocket.MessageText, data)
+}
+
+// UpdateSession sends a fresh session.update to reconfigure the live session --
+// e.g. flipping turn_detection between the conductor-gated null and the #478
+// native semantic_vad when a space's human count crosses 1<->2. It goes through
+// the guarded write path so it is safe to call concurrently with the audio-input
+// and conductor goroutines, and reuses encodeSessionUpdate so the wire shape is
+// identical to the connect-time config.
+func (s *RealtimeSession) UpdateSession(sess SessionConfig) error {
+	data, err := encodeSessionUpdate(sess)
+	if err != nil {
+		return err
+	}
+	return s.write(data)
 }
 
 // write sends one client event under the guarded writer (spike section 4: the
