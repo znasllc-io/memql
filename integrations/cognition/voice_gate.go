@@ -1,6 +1,48 @@
 package cognition
 
-import "strings"
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/znasllc-io/memql/component/events"
+)
+
+// VoiceGateDirectiveTopic is the event-bus subject the voice gate publishes its
+// per-turn decision on (#477/#479). It MUST match the relay's constant in
+// component/grpc/voice_agent_handlers.go (voiceGateDirectiveTopic): the voice
+// turn relay subscribes to it and forwards the directive on
+// VoiceAgentTurnComplete so the realtime model authors the words itself.
+const VoiceGateDirectiveTopic = "voice.gate.directive"
+
+// publishVoiceGateDirective publishes a gate decision for a voice turn so the
+// relay forwards it (engage -> the model authors with the mode+brevity
+// directive; defer -> suppress). Best-effort: a nil eventBus is a no-op. The
+// payload keys mirror what extractVoiceGateDirective decodes (space-scoped --
+// voice is GA-only, so no per-agent key is needed).
+func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, spaceId, utteranceId string, d VoiceGateDecision) {
+	if c == nil || c.eventBus == nil {
+		return
+	}
+	partition := ""
+	if p, ok := ctx.Value(partitionCtxKey{}).(string); ok {
+		partition = p
+	}
+	c.eventBus.Publish(events.Event{
+		Topic:     VoiceGateDirectiveTopic,
+		Kind:      events.KindAIEvent,
+		Timestamp: time.Now().UTC(),
+		Payload: map[string]any{
+			"spaceId":     spaceId,
+			"engage":      d.Engage,
+			"mode":        d.Mode,
+			"brevity":     d.Brevity,
+			"utteranceId": utteranceId,
+		},
+		Metadata:  map[string]string{"source": "cognition.voice_gate", "reason": d.Reason},
+		Partition: partition,
+	})
+}
 
 // voice_gate.go is the cheap, heuristic-first conductor GATE for voice turns
 // (#477 design, #479 build). It answers WHEN (and how briefly) the assistant

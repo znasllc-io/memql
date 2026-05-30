@@ -55,3 +55,27 @@ func TestExtractGAReplyFromEvent_AcceptsReplyWithoutSource(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "No source here.", reply.text)
 }
+
+// TestExtractVoiceGateDirective_EngageAndDefer pins the #479 gate-directive
+// decode: an engage directive for the space decodes its mode/brevity; a defer
+// decodes engage=false; a different space is rejected.
+func TestExtractVoiceGateDirective_EngageAndDefer(t *testing.T) {
+	engage := events.Event{Payload: map[string]any{
+		"spaceId": "space-1", "engage": true, "mode": "primary", "brevity": "short", "utteranceId": "u1",
+	}}
+	d, ok := extractVoiceGateDirective(engage, "space-1", "ga-1")
+	assert.True(t, ok)
+	assert.True(t, d.engage)
+	assert.Equal(t, "primary", d.mode)
+	assert.Equal(t, "short", d.brevity)
+	assert.Equal(t, "u1", d.utteranceId)
+
+	deferred := events.Event{Payload: map[string]any{"spaceId": "space-1", "engage": false}}
+	d, ok = extractVoiceGateDirective(deferred, "space-1", "ga-1")
+	assert.True(t, ok)
+	assert.False(t, d.engage)
+
+	// A directive for a different space is not matched.
+	_, ok = extractVoiceGateDirective(engage, "space-2", "ga-1")
+	assert.False(t, ok)
+}
