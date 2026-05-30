@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,15 +21,21 @@ import (
 type fakeRealtimeSession struct {
 	mu sync.Mutex
 
-	responses []string // CreateResponse instructions, in order
-	cancels   int      // CancelResponse calls
-	commits   int      // CommitInput calls
-	injected  []openai.ConversationItem
-	audioIn   [][]byte
+	responses       []string // CreateResponse instructions, in order
+	cancels         int      // CancelResponse calls
+	commits         int      // CommitInput calls
+	injected        []openai.ConversationItem
+	audioIn         [][]byte
+	functionResults []fakeFunctionResult
 
 	audioOut chan []byte
 	events   chan openai.RealtimeServerEvent
 	closed   bool
+}
+
+type fakeFunctionResult struct {
+	callID string
+	output string
 }
 
 func newFakeRealtimeSession() *fakeRealtimeSession {
@@ -70,6 +77,13 @@ func (f *fakeRealtimeSession) CreateResponse(instructions string) error {
 func (f *fakeRealtimeSession) CancelResponse() error {
 	f.mu.Lock()
 	f.cancels++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeRealtimeSession) SendFunctionResult(callID, output string) error {
+	f.mu.Lock()
+	f.functionResults = append(f.functionResults, fakeFunctionResult{callID: callID, output: output})
 	f.mu.Unlock()
 	return nil
 }
@@ -297,4 +311,81 @@ func TestRealtimeExecutor_OutputAudio_PublishedToSink(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return e.Machine().State() == StateListening && !e.isInFlight()
 	}, 2*time.Second, 10*time.Millisecond, "response.done collapses assistant-turn to listening")
+}
+
+// TestRealtimeExecutor_OutputCapture_ForwardsTranscript verifies the #458
+// output-capture seam: an EventTranscriptDone drives a VoiceAgentRealtimeOutput
+// to memQL (so chat/canvas render the realtime turn).
+func TestRealtimeExecutor_OutputCapture_ForwardsTranscript(t *testing.T) {
+	fs := newFakeStream()
+	var outputs int32
+	fs.onSend = func(env *memqlv1.MemqlClientMessage) {
+		if env.GetVoiceAgentRealtimeOutput() == nil {
+			return
+		}
+		atomic.AddInt32(&outputs, 1)
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: env.GetMessageId(),
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentRealtimeOutputAck{
+				VoiceAgentRealtimeOutputAck: &memqlv1.VoiceAgentRealtimeOutputAck{Success: true, UtteranceId: "utt-x"},
+			},
+		})
+	}
+	c := newTestClient(t, fs)
+	rt := newFakeRealtimeSession()
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+		c, rt, &recordingSink{}, SessionPersona{}, nil)
+	e.SetOutputForwarder(NewRealtimeOutputForwarder(c, "s1", "s1-ga", NewCitationResolver(GroundingContext{})))
+	t.Cleanup(e.Close)
+	e.Start()
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "Here is the answer."}
+
+	require.Eventually(t, func() bool {
+		for _, env := range fs.sentEnvelopes() {
+			if env.GetVoiceAgentRealtimeOutput() != nil &&
+				env.GetVoiceAgentRealtimeOutput().GetText() == "Here is the answer." {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "transcript done must forward a VoiceAgentRealtimeOutput")
+}
+
+// TestRealtimeExecutor_ToolBridge_DispatchesAndContinues verifies the #458 MCP
+// tool-bridge seam: an EventFunctionArgsDone runs the tool through the bridge,
+// returns the result via SendFunctionResult, and chains a CreateResponse so the
+// model continues with the result.
+func TestRealtimeExecutor_ToolBridge_DispatchesAndContinues(t *testing.T) {
+	fs := newFakeStream()
+	c := newTestClient(t, fs)
+	rt := newFakeRealtimeSession()
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{SpaceID: "s1", GaAgentID: "s1-ga"},
+		c, rt, &recordingSink{}, SessionPersona{}, nil)
+
+	transport := func(_ context.Context, _ string, _ map[string]any) (string, bool, error) {
+		return "tool output text", false, nil
+	}
+	bridge := NewMcpToolBridge(transport, nil,
+		[]*memqlv1.ToolDefinition{td("webSearch", false, "read")}, "s1", "s1-ga", nil)
+	bridge.RealtimeTools() // populate exposed set
+	e.SetToolBridge(bridge)
+	t.Cleanup(e.Close)
+	e.Start()
+
+	rt.events <- openai.RealtimeServerEvent{
+		Kind: openai.EventFunctionArgsDone, CallID: "call_1", FuncName: "webSearch", Arguments: `{"q":"x"}`,
+	}
+
+	require.Eventually(t, func() bool {
+		rt.mu.Lock()
+		defer rt.mu.Unlock()
+		return len(rt.functionResults) == 1 &&
+			rt.functionResults[0].callID == "call_1" &&
+			rt.functionResults[0].output == "tool output text"
+	}, 2*time.Second, 10*time.Millisecond, "tool result returned via SendFunctionResult")
+
+	require.Eventually(t, func() bool {
+		return rt.responseCount() >= 1
+	}, 2*time.Second, 10*time.Millisecond, "a CreateResponse continues the model with the tool result")
 }
