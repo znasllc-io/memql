@@ -29,6 +29,9 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "ws://livekit:7880", cfg.LiveKitURL)
 	assert.Equal(t, "realtime", cfg.VoiceExecutor)
 	assert.Equal(t, "gpt-realtime", cfg.RealtimeModel)
+	// #478 native 1-on-1 is on by default with a sensible transcription model.
+	assert.True(t, cfg.RealtimeNativeTurn)
+	assert.Equal(t, "gpt-4o-mini-transcribe", cfg.RealtimeTranscriptionModel)
 	assert.Equal(t, 300, cfg.RealtimeIdleTimeoutSec)
 	assert.Equal(t, 1800, cfg.RealtimeMaxSessionSec)
 	assert.Equal(t, 1_000_000, cfg.RealtimeMaxAudioTokens)
@@ -95,6 +98,16 @@ func TestLoadConfig_CascadeOptOut(t *testing.T) {
 	cfg, err := LoadConfig(envMap(env))
 	require.NoError(t, err)
 	assert.Equal(t, "cascade", cfg.VoiceExecutor)
+}
+
+// TestLoadConfig_NativeTurnOptOut: native 1-on-1 is on by default but can be
+// disabled (the finer-grained realtime rollback per #478).
+func TestLoadConfig_NativeTurnOptOut(t *testing.T) {
+	env := baseEnv()
+	env["MEMQL_REALTIME_NATIVE_TURN"] = "false"
+	cfg, err := LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.False(t, cfg.RealtimeNativeTurn)
 }
 
 func TestLoadConfig_IntFallbackOnGarbage(t *testing.T) {

@@ -274,6 +274,13 @@ func (e *RealtimeExecutor) StreamAudio(pcm16k []byte) {
 // handleASRResult routes one ASR result for a given speaker. Split out for
 // direct unit testing.
 func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
+	// Native 1-on-1 mode: gpt-realtime transcribes the human, detects the turn,
+	// authors + speaks, and handles barge-in -- so Deepgram results are not
+	// consumed at all (Deepgram stays warm only for the cascade fallback). The
+	// only executor input on the native path is StreamAudio (PCM -> model).
+	if e.isNativeMode() {
+		return
+	}
 	if r.Kind == polyphon.ASRKindSpeechStarted {
 		e.machine.OnSpeechStarted()
 		return

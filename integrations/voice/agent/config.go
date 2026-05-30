@@ -53,6 +53,12 @@ type Config struct {
 	VoiceExecutor string // "cascade" | "realtime"
 	OpenAIAPIKey  string // only required on the realtime path (#457)
 	RealtimeModel string
+	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
+	// native authorship for a single-human standard space). Default true.
+	RealtimeNativeTurn bool
+	// RealtimeTranscriptionModel is the model id for the realtime session's
+	// native input-audio transcription on the native path (#478).
+	RealtimeTranscriptionModel string
 
 	// Realtime lifecycle + cost guardrails (#439 / #459). Parsed here so the
 	// env surface matches the Python agent; enforcement lands in #459.
@@ -175,6 +181,12 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "realtime"))
 	cfg.OpenAIAPIKey = get("OPENAI_API_KEY", "")
 	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime")
+	// #478 native 1-on-1: gpt-realtime owns the turn (semantic_vad) when a
+	// standard space has exactly one human. On by default; set
+	// MEMQL_REALTIME_NATIVE_TURN=false to keep the conductor gate on the
+	// realtime path (a finer-grained rollback than dropping to the cascade).
+	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
+	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
 	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
 	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)

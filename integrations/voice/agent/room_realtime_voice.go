@@ -86,6 +86,19 @@ type realtimeRoomBridge struct {
 	executor  *RealtimeExecutor
 	lifecycle *RealtimeSessionLifecycle // cost guardrails (#459)
 
+	// Gate-mode control (#478): when nativeEnabled, the bridge flips the
+	// realtime session between the conductor gate (>=2 humans) and native
+	// model-owns-turn mode (exactly 1 human) via session.UpdateSession +
+	// executor.SetNativeMode. sessionBase holds the persona/voice/tools so the
+	// two configs can be rebuilt; gateNative (under gateMu) tracks the live mode.
+	nativeEnabled      bool
+	transcriptionModel string
+	language           string
+	sessionBase        openai.SessionConfig
+
+	gateMu     sync.Mutex
+	gateNative bool
+
 	mu      sync.Mutex
 	streams map[string]polyphon.ASRStream // by participant identity
 
@@ -134,11 +147,16 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	)
 	realtimeTools := toolBridge.RealtimeTools()
 
-	session, err := rtClient.Connect(ctx, openai.SessionConfig{
+	// Connect with the conductor-gated base config (turn_detection:null). The
+	// bridge flips to the #478 native config (semantic_vad + input transcription)
+	// via session.UpdateSession once exactly one human is present -- see
+	// applyGateMode. sessionBase is retained so both configs can be rebuilt.
+	sessionBase := openai.SessionConfig{
 		Instructions: req.Executor.SessionPersona.Instructions,
 		Voice:        req.Executor.SessionPersona.Voice,
 		Tools:        realtimeTools,
-	})
+	}
+	session, err := rtClient.Connect(ctx, sessionBase)
 	if err != nil {
 		return nil, fmt.Errorf("voice-agent realtime room: realtime connect: %w", err)
 	}
@@ -199,16 +217,84 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	lifecycle.Start(0)
 
 	return &realtimeRoomBridge{
-		cfg:       cfg,
-		roomReq:   req,
-		logger:    logger,
-		asr:       asr,
-		session:   session,
-		local:     local,
-		executor:  executor,
-		lifecycle: lifecycle,
-		streams:   make(map[string]polyphon.ASRStream),
+		cfg:                cfg,
+		roomReq:            req,
+		logger:             logger,
+		asr:                asr,
+		session:            session,
+		local:              local,
+		executor:           executor,
+		lifecycle:          lifecycle,
+		nativeEnabled:      cfg.RealtimeNativeTurn,
+		transcriptionModel: cfg.RealtimeTranscriptionModel,
+		language:           cfg.DGLanguage,
+		sessionBase:        sessionBase,
+		streams:            make(map[string]polyphon.ASRStream),
 	}, nil
+}
+
+// nativeSessionConfig returns the base session config with semantic_vad turn
+// detection + native input transcription enabled -- the #478 native 1-on-1
+// posture where gpt-realtime owns the turn.
+func (b *realtimeRoomBridge) nativeSessionConfig() openai.SessionConfig {
+	cfg := b.sessionBase
+	cfg.TurnDetection = &openai.TurnDetectionConfig{
+		Type:              "semantic_vad",
+		CreateResponse:    true,
+		InterruptResponse: true,
+		Eagerness:         "auto",
+	}
+	cfg.InputTranscription = &openai.InputTranscriptionConfig{
+		Model:    b.transcriptionModel,
+		Language: b.language,
+	}
+	return cfg
+}
+
+// applyGateMode flips the realtime session between the conductor gate and the
+// #478 native mode based on the live human count: native when exactly one human
+// shares the space with the GA (and native is enabled), gated otherwise. It is
+// idempotent -- a no-op when the resolved mode already matches -- and sends a
+// session.update + executor.SetNativeMode only on a transition. Called after the
+// lifecycle's human-count changes (track-subscribe / participant-disconnect).
+//
+// v1 limitation: reconfiguring turn_detection mid-call can race an in-flight
+// native response if a second human joins exactly as the model is speaking. The
+// transition is rare (a participant entering/leaving a 1-on-1), so v1 reconfigures
+// on the boundary and lets the current response finish; a settle/queue is a #481
+// (multi-party) follow-up.
+func (b *realtimeRoomBridge) applyGateMode() {
+	if !b.nativeEnabled {
+		return
+	}
+	b.mu.Lock()
+	humanCount := len(b.streams)
+	b.mu.Unlock()
+	wantNative := humanCount == 1
+
+	b.gateMu.Lock()
+	defer b.gateMu.Unlock()
+	if wantNative == b.gateNative {
+		return
+	}
+
+	cfg := b.sessionBase // gated (turn_detection:null)
+	if wantNative {
+		cfg = b.nativeSessionConfig()
+	}
+	if err := b.session.UpdateSession(cfg); err != nil {
+		if b.logger != nil {
+			b.logger.Warn("voice-agent realtime room: gate-mode session update failed",
+				"want_native", wantNative, "err", err)
+		}
+		return
+	}
+	b.executor.SetNativeMode(wantNative)
+	b.gateNative = wantNative
+	if b.logger != nil {
+		b.logger.Info("voice-agent realtime room: gate mode applied",
+			"native", wantNative, "human_count", humanCount)
+	}
 }
 
 // onTrackSubscribed opens a Deepgram STT stream for a newly-subscribed human
@@ -252,6 +338,11 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 	if !alreadyTracked && b.lifecycle != nil {
 		b.lifecycle.NoteHumanJoined()
 	}
+	// Re-resolve the gate mode on a real human-count change (#478): exactly one
+	// human -> native (model owns the turn); a second human -> conductor gate.
+	if !alreadyTracked {
+		b.applyGateMode()
+	}
 
 	go b.executor.ConsumeASR(identity, stream.Results())
 
@@ -287,6 +378,11 @@ func (b *realtimeRoomBridge) onParticipantDisconnected(rp *lksdk.RemoteParticipa
 	// tears the warm session down.
 	if tracked && b.lifecycle != nil {
 		b.lifecycle.NoteHumanLeft()
+	}
+	// A departure changes the human count -> re-resolve the gate mode (#478):
+	// dropping back to one human re-enters native mode.
+	if tracked {
+		b.applyGateMode()
 	}
 }
 
