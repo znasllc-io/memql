@@ -10783,8 +10783,19 @@ type VoiceAgentSessionAck struct {
 	// 'always_on' / 'always_off' / 'mirror_user'.
 	InitialAudioMode string `protobuf:"bytes,7,opt,name=initial_audio_mode,json=initialAudioMode,proto3" json:"initial_audio_mode,omitempty"`
 	InitialVideoMode string `protobuf:"bytes,8,opt,name=initial_video_mode,json=initialVideoMode,proto3" json:"initial_video_mode,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// GA persona identity (#478), loaded from the v1:agents:agent record:
+	// name, role label, role description, and personality prose. The voice
+	// session renders the REAL agent from these (via the shared
+	// agentdef.RenderIdentityBlock the text path uses) instead of the neutral
+	// "Assistant, General Assistant" default. Each is empty when the agent
+	// record omits it -- the voice instruction builder degrades to the neutral
+	// default per field, so a partial ack never breaks the session.
+	GaDisplayName string `protobuf:"bytes,9,opt,name=ga_display_name,json=gaDisplayName,proto3" json:"ga_display_name,omitempty"`
+	GaRole        string `protobuf:"bytes,10,opt,name=ga_role,json=gaRole,proto3" json:"ga_role,omitempty"`
+	GaDescription string `protobuf:"bytes,11,opt,name=ga_description,json=gaDescription,proto3" json:"ga_description,omitempty"`
+	GaPersonality string `protobuf:"bytes,12,opt,name=ga_personality,json=gaPersonality,proto3" json:"ga_personality,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VoiceAgentSessionAck) Reset() {
@@ -10869,6 +10880,34 @@ func (x *VoiceAgentSessionAck) GetInitialAudioMode() string {
 func (x *VoiceAgentSessionAck) GetInitialVideoMode() string {
 	if x != nil {
 		return x.InitialVideoMode
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaDisplayName() string {
+	if x != nil {
+		return x.GaDisplayName
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaRole() string {
+	if x != nil {
+		return x.GaRole
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaDescription() string {
+	if x != nil {
+		return x.GaDescription
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetGaPersonality() string {
+	if x != nil {
+		return x.GaPersonality
 	}
 	return ""
 }
@@ -13012,7 +13051,7 @@ const file_memql_proto_rawDesc = "" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x1b\n" +
 	"\troom_name\x18\x04 \x01(\tR\broomName\x12#\n" +
-	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xce\x02\n" +
+	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xdd\x03\n" +
 	"\x14VoiceAgentSessionAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -13023,7 +13062,12 @@ const file_memql_proto_rawDesc = "" +
 	"\x12ga_canonical_voice\x18\x05 \x01(\tR\x10gaCanonicalVoice\x12/\n" +
 	"\x14ga_avatar_persona_id\x18\x06 \x01(\tR\x11gaAvatarPersonaId\x12,\n" +
 	"\x12initial_audio_mode\x18\a \x01(\tR\x10initialAudioMode\x12,\n" +
-	"\x12initial_video_mode\x18\b \x01(\tR\x10initialVideoMode\"\x85\x01\n" +
+	"\x12initial_video_mode\x18\b \x01(\tR\x10initialVideoMode\x12&\n" +
+	"\x0fga_display_name\x18\t \x01(\tR\rgaDisplayName\x12\x17\n" +
+	"\aga_role\x18\n" +
+	" \x01(\tR\x06gaRole\x12%\n" +
+	"\x0ega_description\x18\v \x01(\tR\rgaDescription\x12%\n" +
+	"\x0ega_personality\x18\f \x01(\tR\rgaPersonality\"\x85\x01\n" +
 	"\x14VoiceAgentSessionEnd\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +

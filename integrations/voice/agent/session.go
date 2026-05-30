@@ -40,6 +40,15 @@ type SessionAck struct {
 	AvatarPersonaID string
 	InitialAudio    string // "always_on" | "always_off" | "mirror_user"
 	InitialVideo    string
+
+	// Persona identity (#478), stamped from the v1:agents:agent record so the
+	// voice session renders the real agent via the shared identity block. Each
+	// is "" when the ack omits it (a partial / starved ack); ResolvePersona +
+	// the instruction builder degrade to the neutral default per field.
+	DisplayName string
+	Role        string
+	Description string
+	Personality string
 }
 
 // RoomJoiner joins the LiveKit room for a session and blocks until the room
@@ -282,13 +291,20 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 		AvatarPersonaID: ackMsg.GetGaAvatarPersonaId(),
 		InitialAudio:    ackMsg.GetInitialAudioMode(),
 		InitialVideo:    ackMsg.GetInitialVideoMode(),
+		DisplayName:     ackMsg.GetGaDisplayName(),
+		Role:            ackMsg.GetGaRole(),
+		Description:     ackMsg.GetGaDescription(),
+		Personality:     ackMsg.GetGaPersonality(),
 	}
 	if s.logger != nil {
 		s.logger.Info("voice-agent session ack",
 			"canonical_voice", ack.CanonicalVoice,
 			"avatar_persona", ack.AvatarPersonaID,
 			"initial_audio", ack.InitialAudio,
-			"initial_video", ack.InitialVideo)
+			"initial_video", ack.InitialVideo,
+			"display_name", ack.DisplayName,
+			"role", ack.Role,
+			"persona_populated", ack.DisplayName != "" || ack.Description != "" || ack.Personality != "")
 	}
 	return ack, nil
 }

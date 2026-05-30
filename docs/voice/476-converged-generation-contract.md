@@ -19,19 +19,21 @@ the Go voice-agent cutover (epic #449). Every load-bearing claim cites a real
 >   (`integrations/agent/prompt_data.go`) projects its `assistant` block through
 >   `BuildGenerationContract`, byte-identical to the prior inline mapping
 >   (pinned by `prompt_data_test.go`).
-> - **Stage 2 renderer convergence (#478).** The voice persona renderer
->   (`integrations/voice/agent/instructions.go` `BuildPersonaInstructions`) now
->   embeds the SAME `agentdef.RenderIdentityBlock` the text path embeds, via a
->   `personaContract(Persona)` adapter -- so both modalities describe the agent
->   through one renderer (cross-modality test in `instructions_test.go`).
-> - **Remaining (#478).** Stage 2 persona *population* still needs the
->   `VoiceAgentSessionAck` proto extension (section 6.3) -- deferred because
->   regenerating the proto here downgrades the committed protoc version header
->   (local v3.21.12 vs committed v5.29.3), which the `sdk-gen-check` lane would
->   flag; it needs the pinned protoc toolchain. Stage 3 (native authorship:
->   `semantic_vad`, conductor off the 1-on-1 critical path, delete the `runTurn`
->   round-trip + `RealtimeInstructionsForReply`) is the headline turn-detection
->   rework, tracked as the rest of #478.
+> - **Stage 2 renderer convergence + persona population (#478).** The voice
+>   persona renderer (`integrations/voice/agent/instructions.go`
+>   `BuildPersonaInstructions`) now embeds the SAME `agentdef.RenderIdentityBlock`
+>   the text path embeds, via a `personaContract(Persona)` adapter -- so both
+>   modalities describe the agent through one renderer (cross-modality test in
+>   `instructions_test.go`). And the starved persona is fixed: `VoiceAgentSessionAck`
+>   carries `ga_display_name` / `ga_role` / `ga_description` / `ga_personality`
+>   (section 6.3), loaded server-side from the `v1:agents:agent` record
+>   (`voice_agent_handlers.go` `resolveAgentPersona`) and resolved into the
+>   `Persona` (`persona.go`), so the voice session now renders the real agent
+>   instead of "Assistant, General Assistant".
+> - **Remaining (#478).** Stage 3 (native authorship: `semantic_vad`, conductor
+>   off the 1-on-1 critical path, delete the `runTurn` round-trip +
+>   `RealtimeInstructionsForReply` so gpt-realtime authors its own turn) is the
+>   headline turn-detection rework, tracked as the rest of #478.
 
 > **Framing note.** Epic #475 states the problem as "two authors": voice
 > replies come from gpt-realtime, text replies from cognition. The spike's

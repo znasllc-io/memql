@@ -62,12 +62,14 @@ type Persona struct {
 	InitialVideoMode string
 
 	// Persona-prompt fields -- the identity + style the realtime executor
-	// (#457) renders into its session instructions, mirroring the cognition
-	// agent prompt's identity / personality blocks. All optional and NOT on
-	// VoiceAgentSessionAck today; they resolve to "" here and the instruction
-	// builder (instructions.go) renders a neutral default persona from them.
-	// TODO(#456-followup): populate from the ack once the proto stamps
-	// ga_display_name / ga_role / ga_description / ga_style.
+	// (#457) renders into its session instructions through the shared
+	// agentdef.RenderIdentityBlock (#476/#480), the SAME block the cognition
+	// text path renders, so voice and text cannot diverge. Populated from the
+	// session ack's ga_display_name / ga_role / ga_description / ga_personality
+	// (#478), loaded server-side from the v1:agents:agent record. Each is
+	// optional: an ack that omits a field resolves it to "" and the instruction
+	// builder renders the neutral default per field. Style carries the agent
+	// record's personality prose.
 	DisplayName string
 	Role        string
 	Description string
@@ -138,7 +140,12 @@ func ResolvePersona(ack SessionAck, cfg Config) Persona {
 		AvatarVendor:     cfg.AvatarVendor,
 		InitialAudioMode: audio,
 		InitialVideoMode: video,
-		// Persona-prompt fields are not on the ack today; neutral defaults
-		// are rendered by the instruction builder. See the struct doc.
+		// Persona-prompt fields from the ack (#478). Style maps from the
+		// agent record's personality prose. Empty when the ack omits them;
+		// the instruction builder renders the neutral default per field.
+		DisplayName: ack.DisplayName,
+		Role:        ack.Role,
+		Description: ack.Description,
+		Style:       ack.Personality,
 	}
 }
