@@ -270,6 +270,77 @@ path is wired and parameterized but stubbed.
 
 ---
 
+## Genesis envelope in cloud — the A2 secrets model
+
+The cloud cluster's config is the **genesis envelope**: ~150 vars
+(OpenAI / Anthropic / Deepgram / JumpCloud / avatar keys, identity
+URLs, …). Locally, `make dev-refresh` decrypts `genesis.znas`
+host-side into a plaintext `env_file` that docker-compose mounts. For
+cloud we keep the envelope **sealed** and decrypt it **in-process at
+boot** — it never lands on disk decrypted in Azure. This is the
+architect-chosen **A2** model (issue #518, epic #491).
+
+### How it works
+
+A boot hook in `component/genesis` (`AutoloadFromEnv`, called from
+`main.go` before any config is read) is gated by one env var:
+
+| Env var | Role |
+|---------|------|
+| `MEMQL_GENESIS_AUTOLOAD` | Master switch. Set to `true` to enable in-process decrypt. **Unset/anything else = no-op** — local dev's `env_file` path is completely untouched. |
+| `MEMQL_GENESIS_B64` | The **encrypted** envelope, base64-encoded, carried directly in an env var. **Preferred for cloud**: decoded and decrypted in memory, never written to disk. |
+| `MEMQL_GENESIS_PATH` | Path to a sealed envelope file (default `~/.memql/genesis.znas`). Used when `MEMQL_GENESIS_B64` is empty. |
+| `MEMQL_MASTER_KEY` | The 32-byte (64 hex chars) key that decrypts the envelope. Already read from the process env by the `secret`/`genesis` packages. |
+
+When `MEMQL_GENESIS_AUTOLOAD=true`, boot:
+
+1. Sources the encrypted envelope bytes from `MEMQL_GENESIS_B64`
+   (preferred) or, if absent, from the `MEMQL_GENESIS_PATH` file.
+2. Decrypts in-process under `MEMQL_MASTER_KEY` via the existing
+   `secret.OpenBlob` path (`genesis.OpenBytes` for the B64 case —
+   the in-memory twin of `OpenFile`, so the ciphertext never touches
+   a temp file).
+3. Applies each entry to the process environment **set-if-absent** —
+   it never overwrites a var that is already set.
+
+### Overrides win (set-if-absent)
+
+The set-if-absent rule is the crux of the model. Container App
+overrides — the Tiger `MEMORY_NODES_DATABASE_DSN` (a Key Vault secret
+reference), `MEMQL_NODE_TYPE`, identity host URLs,
+`SERVER_ALLOWED_ORIGINS` — are set in the container's environment
+**before** the process starts. Because auto-load only fills in vars
+that are *absent*, those per-deploy overrides always win over the
+envelope's local-dev defaults. The envelope is the **base layer**;
+the Container App env is the override layer on top.
+
+(Locally the layering is the same shape: genesis envelope = base, the
+repo-root `.env` override = top. The difference is local dev decrypts
+host-side into `env_file` and does not set `MEMQL_GENESIS_AUTOLOAD`,
+so this in-process path is dormant.)
+
+### Fail-closed
+
+If `MEMQL_GENESIS_AUTOLOAD=true` but the envelope or master key is
+missing or undecryptable, boot **fails with a clear fatal error** —
+it does not silently come up mis-configured:
+
+- `MEMQL_MASTER_KEY` unset → fatal.
+- No envelope source (`MEMQL_GENESIS_B64` empty **and** the path
+  doesn't exist) → fatal.
+- Bad base64, truncated/tampered ciphertext, or wrong master key →
+  fatal.
+
+### Deploy wiring (next step)
+
+The deploy script passes the sealed envelope as `MEMQL_GENESIS_B64`
+and `MEMQL_MASTER_KEY` (the latter as a Key Vault secret reference,
+like the DSN) to each Container App, alongside the per-node overrides.
+That deploy-script rework is tracked as the follow-up to #518 and
+replaces the earlier "6 individual secrets" approach.
+
+---
+
 ## Release & versioning (semver tag -> immutable image)
 
 This section establishes memQL's release convention for the Azure
