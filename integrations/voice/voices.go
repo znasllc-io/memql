@@ -119,6 +119,41 @@ var openAIVoiceMap = map[string]string{
 	"atlas":    "onyx",
 }
 
+// openAIRealtimeVoiceMap maps canonical names to gpt-realtime GA voice
+// ids. The Realtime API accepts its OWN voice set, which is NOT the same
+// as the standard TTS catalog: the GA realtime voices are alloy, ash,
+// ballad, cedar, coral, echo, marin, sage, shimmer, verse. Notably the
+// TTS-only ids "nova" and "onyx" (used by openAIVoiceMap) are NOT valid
+// realtime voices, so realtime MUST resolve through this dedicated map
+// rather than sharing openAIVoiceMap -- otherwise a session would be
+// handed a voice id the Realtime API rejects.
+//
+// marin and cedar are OpenAI's two newest GA realtime voices and the
+// recommended defaults (marin female-leaning, cedar male-leaning); the
+// rest of the bucket is filled from the gender-appropriate GA set to keep
+// each agent's timbre distinct. Any unmapped canonical falls back to the
+// gender-appropriate GA default (see ResolveVoice).
+var openAIRealtimeVoiceMap = map[string]string{
+	// female bucket
+	"alto":    "marin",
+	"soprano": "shimmer",
+	"mezzo":   "coral",
+	"lyric":   "sage",
+	"aria":    "coral",
+	"cadence": "marin",
+	"harmony": "sage",
+	"nova":    "shimmer",
+	// male bucket
+	"tenor":    "cedar",
+	"baritone": "ash",
+	"bass":     "ash",
+	"echo":     "echo",
+	"anchor":   "verse",
+	"marcus":   "ballad",
+	"drake":    "cedar",
+	"atlas":    "verse",
+}
+
 // deepgramVoiceMap maps canonical names to Deepgram Aura-2 voice ids
 // (`aura-2-<name>-<lang>` form -- the same string Deepgram's
 // /v1/speak `model` parameter accepts). Picked to roughly match the
@@ -153,8 +188,10 @@ var deepgramVoiceMap = map[string]string{
 // canonical name is unknown. Picked to be safe + inoffensive for
 // either gender.
 var providerDefaults = map[string]string{
-	"openai":          "alloy",
-	"openai-realtime": "alloy",
+	"openai": "alloy",
+	// marin is OpenAI's recommended GA realtime voice -- a good,
+	// configurable default per #483. Cedar is its male-leaning sibling.
+	"openai-realtime": "marin",
 	"deepgram":        "aura-2-thalia-en",
 }
 
@@ -208,8 +245,9 @@ func PickVoiceForGender(gender string, exclude []string) string {
 // the canonical name is unknown, so the audio path never goes silent.
 //
 // Provider name is normalised case-insensitively; "openai-realtime"
-// shares OpenAI's catalog. Empty canonical falls back to the
-// provider default.
+// resolves through its own GA realtime voice set (marin/cedar/...),
+// which differs from the standard TTS catalog. Empty canonical falls
+// back to the provider default.
 func ResolveVoice(canonical, provider string) string {
 	canon := strings.ToLower(strings.TrimSpace(canonical))
 	prov := strings.ToLower(strings.TrimSpace(provider))
@@ -219,11 +257,24 @@ func ResolveVoice(canonical, provider string) string {
 	}
 
 	switch prov {
-	case "openai", "openai-realtime", "":
+	case "openai", "":
 		if id, ok := openAIVoiceMap[canon]; ok && id != "" {
 			return id
 		}
 		return providerDefault("openai")
+	case "openai-realtime":
+		// Realtime has its own GA voice set (marin/cedar/...); an unknown
+		// canonical falls back to a gender-appropriate GA voice so the
+		// session never receives a voice id the Realtime API rejects.
+		if id, ok := openAIRealtimeVoiceMap[canon]; ok && id != "" {
+			return id
+		}
+		switch CanonicalGender(canon) {
+		case "male":
+			return "cedar"
+		default:
+			return providerDefault("openai-realtime")
+		}
 	case "deepgram":
 		if id, ok := deepgramVoiceMap[canon]; ok && id != "" {
 			return id

@@ -337,7 +337,7 @@ delivery).
 | `POLYPHON_OPENAI_TTS_VOICE`    | none             | OpenAI TTS voice (`alloy`, `echo`, `nova`, ...).                                 |
 | `POLYPHON_PREDICTION_ENGINE_URL` | none           | External Polyphon prediction engine; absent = embedded engine.                   |
 | `VOICE_AGENT_TOKEN`            | unset            | Identity-issued `class="voice_agent"` JWT the Go voice-agent presents on `MemqlService.Stream`. When empty the agent self-bootstraps via `/node/bootstrap` (dev). See `docs/auth/voice-agent-jwt.md`. |
-| `MEMQL_VOICE_EXECUTOR`         | `cascade`        | Go voice-agent executor: `cascade` (Deepgram STT -> cognition -> Deepgram TTS) or `realtime` (OpenAI gpt-realtime speech-to-speech). |
+| `MEMQL_VOICE_EXECUTOR`         | `realtime`       | Go voice-agent executor: `realtime` (OpenAI gpt-realtime speech-to-speech, the default since #483) or `cascade` (Deepgram STT -> cognition -> Deepgram TTS). Realtime degrades cleanly to the cascade when its preconditions fail (no `OPENAI_API_KEY` / persona build), logging the reason -- so a fresh run uses realtime and there is no silent cascade surprise. Set `cascade` to opt out. The active executor is logged loudly at session start (`voice-agent voice executor: ...`). |
 | `MEMQL_VOICE_ROOM_NAME`        | unset            | LiveKit room the Go voice-agent joins (memQL convention: `polyphon-<spaceId>`). Falls back here when no `--room` flag is passed. |
 | `MEMQL_AVATAR_VENDOR`          | `anam`           | Avatar vendor on the voice-agent side: `anam`, `simli`, or `none`.               |
 | `ANAM_API_KEY`                 | unset            | Anam (CARA-3) API key. Required when avatar vendor=anam.                         |

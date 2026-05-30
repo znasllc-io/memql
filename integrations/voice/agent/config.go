@@ -167,7 +167,12 @@ func LoadConfig(getenv Getenv) (Config, error) {
 		return Config{}, err
 	}
 
-	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "cascade"))
+	// Realtime (OpenAI gpt-realtime speech-to-speech) is the default executor
+	// (#483): a fresh run uses the realtime path. It degrades cleanly back to
+	// the cascade when its preconditions fail (missing OPENAI_API_KEY / persona
+	// build) -- see SelectVoiceExecutor -- and the cascade stays available
+	// explicitly via MEMQL_VOICE_EXECUTOR=cascade.
+	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "realtime"))
 	cfg.OpenAIAPIKey = get("OPENAI_API_KEY", "")
 	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime")
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)

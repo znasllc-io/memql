@@ -27,7 +27,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	cfg, err := LoadConfig(envMap(baseEnv()))
 	require.NoError(t, err)
 	assert.Equal(t, "ws://livekit:7880", cfg.LiveKitURL)
-	assert.Equal(t, "cascade", cfg.VoiceExecutor)
+	assert.Equal(t, "realtime", cfg.VoiceExecutor)
 	assert.Equal(t, "gpt-realtime", cfg.RealtimeModel)
 	assert.Equal(t, 300, cfg.RealtimeIdleTimeoutSec)
 	assert.Equal(t, 1800, cfg.RealtimeMaxSessionSec)
@@ -85,6 +85,16 @@ func TestLoadConfig_RealtimeAndOverrides(t *testing.T) {
 	assert.Equal(t, "none", cfg.AvatarVendor)
 	assert.False(t, cfg.AvatarEnabled())
 	assert.Equal(t, "DEBUG", cfg.LogLevel)
+}
+
+// TestLoadConfig_CascadeOptOut: realtime is the default (#483), so cascade
+// must be selectable explicitly as the opt-out.
+func TestLoadConfig_CascadeOptOut(t *testing.T) {
+	env := baseEnv()
+	env["MEMQL_VOICE_EXECUTOR"] = "cascade"
+	cfg, err := LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.Equal(t, "cascade", cfg.VoiceExecutor)
 }
 
 func TestLoadConfig_IntFallbackOnGarbage(t *testing.T) {
