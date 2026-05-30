@@ -1,10 +1,102 @@
 # memQL Deployment Strategy
 
-**Last Updated**: February 21, 2026
+**Last Updated**: May 30, 2026
 
 ## Overview
 
 memQL uses **manual deployments** with automatic database migrations. The automatic deployment trigger has been **disabled** to ensure controlled, coordinated deployments of both code and database changes.
+
+> **Platform migration in progress (epic #491).** The staging/production
+> sections below describe the current **Google Cloud Run** deployment.
+> A migration to **Azure Container Apps + Tiger Cloud** is underway; the
+> first piece — an idempotent `make deploy-setup` bootstrap — has landed
+> (see [Azure deploy bootstrap](#azure-deploy-bootstrap-make-deploy-setup)).
+> The GCP docs are retained until the migration completes (later issues
+> in the epic handle the cutover); do not treat them as removed yet.
+
+---
+
+## Azure deploy bootstrap (`make deploy-setup`)
+
+`make deploy-setup` is the re-runnable foundation for the Azure
+deployment (epic #491, issue #492). It is **idempotent**: it installs/
+verifies + authenticates the toolchain and creates-or-converges the
+core Azure resources, so re-running converges to correct state with no
+duplicates and no drift. The implementation is function-based bash at
+[`.claude/scripts/deploy-setup.sh`](.claude/scripts/deploy-setup.sh),
+per the Skills+Scripts architecture.
+
+### Usage
+
+```bash
+make deploy-setup                          # bootstrap staging (default)
+make deploy-setup DRY_RUN=1                # print the plan, mutate nothing
+make deploy-setup ENV=production DRY_RUN=1 # production path (parameterized stub)
+make deploy-setup ARGS=--secrets-file=~/.memql/deploy.staging.env
+make deploy-setup ARGS=--help              # full flag reference
+```
+
+`ENV` selects the environment (`staging` default, or `production`).
+`DRY_RUN=1` forwards `--dry-run`, which prints the full plan and a
+state report without touching Azure. `ARGS=...` forwards extra flags
+to the script.
+
+### What it does
+
+1. **Toolchain** — install-if-missing-else-verify + authenticate:
+   `az` (+ the `containerapp` extension), `gh`, the **Tiger Data CLI**
+   `tiger`, `docker`, `jq`, `psql`. On macOS, installs go through
+   Homebrew; on other platforms the script verifies and prints an
+   install hint rather than running `sudo` from a make target. It
+   never triggers an interactive login automatically — it detects
+   whether `az` / `gh` / `tiger` sessions exist and tells you exactly
+   which `… login` command to run if not.
+2. **Azure resources** (create-or-converge, region **East US**), with
+   an existence check before every create so nothing is duplicated:
+   - `rg-memql-<env>` — resource group
+   - `acrmemql` — container registry (Basic SKU, **shared** across
+     envs; anchored to the staging resource group)
+   - `kv-memql-<env>` — Key Vault
+   - `cae-memql-<env>` — Container Apps environment
+3. **Secrets → Key Vault** — refreshes the deployment secrets
+   (`MEMORY_NODES_DATABASE_DSN`, content-ID salt,
+   `MEMQL_SI_OPENAI_API_KEY`, `MEMQL_SI_OPENAI_PROJECT_ID`, and the
+   Discord webhook URLs). The secret **names** are authoritative from
+   [`service.yaml`](service.yaml); the **values** are pulled from a
+   gitignored env file (`--secrets-file`, default `.env.deploy.<env>`)
+   or prompted interactively — **never** hardcoded in the repo. A
+   value is only written when it differs from what's already stored,
+   so re-runs are a true no-op.
+4. **State report** — prints what already existed, what was created,
+   what was reconciled, and what was skipped (missing tool / auth /
+   value).
+
+### Secret values file
+
+Provide secret values via a gitignored file (matched by the repo's
+`.env.*` ignore rules), one `KEY=VALUE` per line, using the env-var
+names from `service.yaml`. Example `.env.deploy.staging`:
+
+```
+MEMORY_NODES_DATABASE_DSN=postgres://...
+MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT=...
+MEMQL_SI_OPENAI_API_KEY=sk-...
+MEMQL_SI_OPENAI_PROJECT_ID=proj_...
+MEMQL_SECRET_VARIABLE_DISCORD_DEVAUTO_WEBHOOK_URL=https://discord.com/api/webhooks/...
+MEMQL_SECRET_VARIABLE_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
+Already-exported environment variables take precedence over the file.
+
+### Status / remaining work
+
+The script is correct, `shellcheck`-clean, and fully dry-run-able, and
+is covered by Go tests under [`scripts/deploy/`](scripts/deploy/) that
+run in CI (`go test ./...`). It has **not** yet been run against a live
+Azure subscription — that validation is the remaining step and is
+gated on the operator's `az login` access (epic #491 external
+prerequisite). The `production` path is wired and parameterized but
+stubbed pending that same validation.
 
 ---
 
