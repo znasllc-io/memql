@@ -170,8 +170,12 @@ def build_realtime_executor(cfg: Config, persona: Persona) -> Any:
         # TODO(#438): drive the avatar lip-sync from the realtime audio
         #   output. The cascade wires the avatar in main.py; the realtime
         #   output-audio -> avatar hookup is #438.
-        # TODO(#439): session lifecycle + cost guardrails (max duration,
-        #   token ceilings, kill-switch integration). Not wired here.
+        # Session lifecycle + cost guardrails (max duration, idle teardown,
+        #   token ceilings, empty-room + kill-switch teardown) are owned by
+        #   voice_agent.realtime_lifecycle (#439). The executor stays a pure
+        #   model factory: main.py builds a RealtimeSessionLifecycle around
+        #   this model and feeds it room + activity events. Nothing to wire
+        #   on the model itself here.
         realtime_model = openai.realtime.RealtimeModel(
             model=cfg.realtime_model,
             api_key=cfg.openai_api_key,

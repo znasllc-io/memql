@@ -32,6 +32,11 @@ from voice_agent.grpc_client import MemqlGrpcClient
 from voice_agent.memql_llm_plugin import MemqlLLM
 from voice_agent.persona_resolver import Persona, resolve_persona
 from voice_agent.realtime_executor import select_voice_executor
+from voice_agent.realtime_lifecycle import (
+    RealtimeSessionLifecycle,
+    TeardownReason,
+    build_realtime_lifecycle,
+)
 from voice_agent.stt_plugin import attach_transcript_forwarding, build_stt
 from voice_agent.thread_context import ThreadContext
 from voice_agent.transcript_forwarder import TranscriptForwarder
@@ -319,6 +324,13 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
     )
 
+    # Realtime session lifecycle + cost guardrails (#439). Only the
+    # realtime executor stands up a speech-to-speech session whose
+    # standing audio cost must be bounded; the cascade path leaves this
+    # None. Started AFTER session.start() below so the guardrails arm
+    # around a live session. See voice_agent/realtime_lifecycle.py.
+    lifecycle: RealtimeSessionLifecycle | None = None
+
     try:
         # In LiveKit Agents 1.5, session.start() returns once IO is
         # set up -- it does NOT block until the session ends. To keep
@@ -346,6 +358,63 @@ async def entrypoint(ctx: JobContext) -> None:
             room=ctx.room,
             plan=executor_plan,
         )
+        # Arm the realtime lifecycle + cost guardrails (#439). The
+        # realtime session is built in the warm-but-muted posture
+        # (turn_detection=None, #432 option A); this bounds its standing
+        # cost: idle teardown, max-duration cap, per-session audio-token
+        # budget, and immediate teardown when the room empties of humans.
+        # On a guardrail trip the lifecycle stops the session and the
+        # voice path can degrade to the cascade (lifecycle.should_degrade_
+        # to_cascade). The cascade path never builds a lifecycle.
+        if executor_plan.is_realtime:
+            async def _stop_realtime(reason: TeardownReason) -> None:
+                # Bring the realtime session down deterministically. Closing
+                # the AgentSession releases the model connection so audio
+                # tokens stop accruing; disconnecting the room unblocks the
+                # entrypoint's await-Future and routes to the finally
+                # cleanup. Errors here must not wedge teardown.
+                logger.info(
+                    "stopping realtime session space=%s reason=%s (#439)",
+                    space_id, reason.value,
+                )
+                try:
+                    aclose = getattr(session, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
+                except Exception:  # noqa: BLE001
+                    logger.exception("realtime session aclose failed reason=%s", reason.value)
+                try:
+                    await ctx.room.disconnect()
+                except Exception:  # noqa: BLE001
+                    logger.exception("room disconnect failed reason=%s", reason.value)
+
+            lifecycle = build_realtime_lifecycle(
+                cfg, stop=_stop_realtime, space_id=space_id,
+            )
+            # Seed the human population from the participants already in the
+            # room (the entrypoint waited for at least one before building
+            # the session). STANDARD (human) kind only -- the avatar and any
+            # ingress/egress participants are not humans to talk to.
+            initial_humans = sum(
+                1
+                for p in ctx.room.remote_participants.values()
+                if int(getattr(p, "kind", 0) or 0) == 0
+            )
+            await lifecycle.start(human_count=initial_humans)
+
+            def _on_participant_connected(participant: Any) -> None:
+                if int(getattr(participant, "kind", 0) or 0) != 0:
+                    return  # non-human (avatar / ingress / egress)
+                asyncio.create_task(lifecycle.note_human_joined())
+
+            def _on_participant_disconnected(participant: Any) -> None:
+                if int(getattr(participant, "kind", 0) or 0) != 0:
+                    return
+                asyncio.create_task(lifecycle.note_human_left())
+
+            ctx.room.on("participant_connected", _on_participant_connected)
+            ctx.room.on("participant_disconnected", _on_participant_disconnected)
+
         # Log the input wiring so we can confirm RoomIO bound the
         # participant's audio source. session.input.audio is None when
         # RoomIO rejected the participant (e.g. wrong kind, or
@@ -365,6 +434,16 @@ async def entrypoint(ctx: JobContext) -> None:
         await asyncio.Future()  # blocks until cancelled
     finally:
         transcript_task.cancel()
+        # Stop the realtime lifecycle watchdog (#439). aclose only cancels
+        # the watchdog task -- it does NOT invoke the stop callback, so it
+        # is safe in the cleanup path regardless of whether teardown already
+        # fired. The end-reason carries the guardrail trip when one happened
+        # so memql audit can attribute the close.
+        end_reason = "normal"
+        if lifecycle is not None:
+            if lifecycle.teardown_reason is not None:
+                end_reason = lifecycle.teardown_reason.value
+            await lifecycle.aclose()
         # Announce end-of-session to memql so audit + cleanup can fire.
         try:
             from voice_agent.proto import memql_pb2  # type: ignore
@@ -374,7 +453,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 memql_pb2.VoiceAgentSessionEnd(
                     space_id=space_id,
                     room_name=room_name,
-                    reason="normal",
+                    reason=end_reason,
                 ),
             )
         except Exception:
