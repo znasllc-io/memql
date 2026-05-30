@@ -594,6 +594,45 @@ deploy-setup:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: db-provision deploy
+
+## Provision the managed Tiger Cloud DB (Timescale Community + pgvector)
+## for ENV in Azure East US and wire its DSN into the per-env Key Vault
+## (znasllc-io/memql#494, epic #491). Idempotent: re-running detects the
+## existing service and only rewrites the DSN secret when it rotated.
+## Implementation lives in scripts/deploy/tiger-provision.sh per the
+## function-based shell-script convention (CLAUDE.md).
+##   make db-provision                          # staging
+##   make db-provision DRY_RUN=1                # staging, plan only
+##   make db-provision ENV=production DRY_RUN=1
+db-provision:
+	@bash scripts/deploy/tiger-provision.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Build + push the memQL engine + CoPresent BFF carrier images to the
+## shared ACR, then create-or-update the cluster of Container Apps in
+## cae-memql-<ENV>: one INTERNAL-ingress app per engine node-type
+## (cognition/voice/agent/planner/identity/workbench) from the memql
+## image, plus the EXTERNAL-ingress CoPresent BFF carrier
+## (znasllc-io/memql#495, epic #491). Idempotent. The carrier deploys at
+## a pinnable version copresent fixes later (CARRIER_VERSION). Impl lives
+## in .claude/scripts/deploy.sh per the Skills+Scripts architecture.
+##   make deploy                                          # staging, VERSION from file
+##   make deploy DRY_RUN=1                                # staging, plan only
+##   make deploy ENV=staging CARRIER_VERSION=0.9.0        # pin the carrier tag
+##   make deploy SKIP_BUILD=1 VERSION=0.9.0 CARRIER_VERSION=0.9.0  # deploy pushed tags
+##   make deploy ENV=production DRY_RUN=1
+deploy:
+	@bash .claude/scripts/deploy.sh \
+		--env=$${ENV:-staging} \
+		$${VERSION:+--version=$$VERSION} \
+		$${CARRIER_VERSION:+--carrier-version=$$CARRIER_VERSION} \
+		$${SKIP_BUILD:+--skip-build} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
 # ---------------------------------------------------------------------------
 # Utility targets
 # ---------------------------------------------------------------------------
@@ -680,6 +719,10 @@ help:
 	@echo "AZURE DEPLOY (epic #491)"
 	@echo "  make deploy-setup              Idempotent Azure + toolchain bootstrap (ENV=staging|production)"
 	@echo "  make deploy-setup DRY_RUN=1    Same, but print the plan without mutating"
+	@echo "  make db-provision              Provision Tiger Cloud DB + wire DSN to Key Vault (ENV=...)"
+	@echo "  make db-provision DRY_RUN=1    Same, but print the plan without mutating"
+	@echo "  make deploy                    Build/push + deploy the cluster to Container Apps (ENV=...)"
+	@echo "  make deploy DRY_RUN=1          Same, but print the full deploy plan without mutating"
 	@echo ""
 	@echo "UTILITY"
 	@echo "  make clean        Remove build artifacts"

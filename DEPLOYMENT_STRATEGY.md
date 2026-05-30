@@ -100,6 +100,176 @@ stubbed pending that same validation.
 
 ---
 
+## Tiger Cloud DB provisioning (`make db-provision`)
+
+`make db-provision` provisions the managed **Tiger Cloud** (Timescale
+Community + pgvector) database for the environment and wires its
+connection DSN into the per-env Key Vault (epic #491, issue #494). It is
+**idempotent**: a re-run detects the existing service and only rewrites
+the DSN secret when it actually rotated. The implementation is
+function-based bash at
+[`scripts/deploy/tiger-provision.sh`](scripts/deploy/tiger-provision.sh),
+per the Skills+Scripts architecture.
+
+### Usage
+
+```bash
+make db-provision                          # provision staging DB (default)
+make db-provision DRY_RUN=1                # print the plan, mutate nothing
+make db-provision ENV=production DRY_RUN=1 # production path (parameterized stub)
+make db-provision ARGS=--help              # full flag reference
+```
+
+`ENV` selects the environment (`staging` default, or `production`).
+`DRY_RUN=1` forwards `--dry-run`, which prints the full plan and a
+state report without touching Tiger Cloud or Azure.
+
+### What it does
+
+1. **Tiger Cloud service** — via the **Tiger Data CLI** (`tiger`),
+   create-or-verify the `memql-<env>` service in **Azure East US**
+   (region slug `azure-eastus`). The service is existence-checked
+   before create (matched on the service name in `tiger service list`),
+   so it is never duplicated.
+2. **Extensions** — confirm the two extensions memQL needs:
+   `timescaledb` (Timescale Community, pre-enabled on Tiger Cloud) and
+   `vector` (pgvector). The check runs an idempotent
+   `CREATE EXTENSION IF NOT EXISTS` against the service, which is a
+   no-op when the extension is already enabled.
+3. **DSN → Key Vault** — read the service's libpq connection DSN from
+   the `tiger` CLI and store it as the Key Vault secret
+   `memory-nodes-database-dsn` in `kv-memql-<env>`. The secret name is
+   the **same** one [`deploy-setup.sh`](.claude/scripts/deploy-setup.sh)
+   uses for `MEMORY_NODES_DATABASE_DSN`, so the two scripts converge on
+   one secret. The value is only written when it differs from what's
+   already stored — so a re-run that didn't rotate the DSN is a true
+   no-op. An exported `MEMORY_NODES_DATABASE_DSN` overrides the read
+   (lets an operator wire a manually-rotated DSN).
+4. **Auto-migrations** — memQL runs migrations on backend start
+   (`MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`,
+   `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true` from
+   [`service.yaml`](service.yaml)), so the schema converges against
+   this DB on the first deploy. No separate migration step is needed.
+5. **State report** — prints what already existed, what was created,
+   what was rotated, and what was skipped (missing tool / auth / value).
+
+On a host without the `tiger` CLI (or where it isn't authenticated),
+the script verifies-and-instructs rather than auto-installing — it
+prints the exact `tiger auth login` / install commands and points at
+`make deploy-setup` for the full toolchain bootstrap.
+
+### Status / remaining work
+
+The script is `shellcheck`-clean and fully dry-run-able, and is covered
+by Go tests under [`scripts/deploy/`](scripts/deploy/) that run in CI
+(`go test ./...`). It has **not** yet been run against a live Tiger
+Cloud account — that validation is the remaining step, gated on the
+operator's Tiger Cloud account (epic #491 external prerequisite). The
+exact `tiger` subcommand surface (`service create`,
+`get-connection-string`, `service exec`) is pinned to the documented
+CLI and may need a small adjustment once exercised live. The
+`production` path is wired and parameterized but stubbed.
+
+---
+
+## Cluster deploy to Container Apps (`make deploy`)
+
+`make deploy ENV=staging|production` builds + pushes the cluster images
+and deploys the **cluster of worker nodes** to Azure Container Apps
+(epic #491, issue #495). The backend is **not** a single binary: it is a
+set of node-type workers sharing the one Tiger Cloud DB. The
+implementation is function-based bash at
+[`.claude/scripts/deploy.sh`](.claude/scripts/deploy.sh), per the
+Skills+Scripts architecture, mirroring `deploy-setup.sh`.
+
+### Cluster shape (what gets deployed)
+
+Two image families land in the one ACA environment
+(`cae-memql-<env>`):
+
+| App | Image | `MEMQL_NODE_TYPE` | Ingress | Port |
+|-----|-------|-------------------|---------|------|
+| `ca-memql-cognition-<env>` | `acrmemql.azurecr.io/memql:<ver>` | `cognition` | internal | 8085 |
+| `ca-memql-voice-<env>`     | `…/memql:<ver>` | `voice`     | internal | 8085 |
+| `ca-memql-agent-<env>`     | `…/memql:<ver>` | `agent`     | internal | 8085 |
+| `ca-memql-planner-<env>`   | `…/memql:<ver>` | `planner`   | internal | 8085 |
+| `ca-memql-identity-<env>`  | `…/memql:<ver>` | `identity`  | internal | 8085 |
+| `ca-memql-workbench-<env>` | `…/memql:<ver>` | `workbench` | internal | 8085 |
+| `ca-copresent-bff-<env>`   | `…/memql-bff-copresent:<carrier-ver>` | `bff` | **external** | 8085 |
+
+- The **engine node-types** run the `memql` image, selected by
+  `MEMQL_NODE_TYPE`, and take **internal** ingress — they are workers
+  inside the ACA environment and never face the public internet.
+  (Node-type list + ports match
+  [`docker/docker-compose.cluster.yml`](docker/docker-compose.cluster.yml).)
+- The **CoPresent BFF carrier** runs the `memql-bff-copresent` carrier
+  image (`MEMQL_NODE_TYPE=bff`) and takes **external** ingress — it is
+  the node the frontend hits, mapping to `api.<env>.copresent.ai`
+  later. Its image is built from the **sibling**
+  [`../memql-bff-copresent`](../memql-bff-copresent) repo, whose
+  `make release` build context spans both repos (its `go.mod` has
+  `replace ../memql`). CoPresent **pins** this carrier at a specific
+  version; `--carrier-version` / `CARRIER_VERSION` targets that pinned
+  tag.
+
+### Usage
+
+```bash
+make deploy                                          # staging, VERSION from the VERSION file
+make deploy DRY_RUN=1                                # print the full plan, mutate nothing
+make deploy ENV=staging CARRIER_VERSION=0.9.0        # pin the BFF carrier tag
+make deploy SKIP_BUILD=1 VERSION=0.9.0 CARRIER_VERSION=0.9.0  # deploy already-pushed tags
+make deploy ENV=production DRY_RUN=1                 # production path (parameterized stub)
+make deploy ARGS=--help                              # full flag reference
+```
+
+`ENV` selects the environment. `VERSION` is the engine (`memql`) image
+tag (default: the [`VERSION`](VERSION) file's semver). `CARRIER_VERSION`
+is the BFF carrier tag (default: the sibling repo's `VERSION`, else
+`VERSION`). `SKIP_BUILD=1` deploys already-pushed tags without
+rebuilding. `DRY_RUN=1` forwards `--dry-run`.
+
+### What it does
+
+1. **Build + push** the two images to the shared ACR (`acrmemql`):
+   the engine image via this repo's
+   [`scripts/release/release.sh`](scripts/release/release.sh)
+   (`make release` equivalent), and the carrier image via the sibling
+   repo's `make release` (so the cross-repo build context is owned by
+   the repo that defines it). Skippable with `SKIP_BUILD=1`. A pre-step
+   runs `az acr login` so the release scripts' `docker push` can
+   publish.
+2. **Deploy** each Container App, **create-or-update** (idempotent): an
+   existence check (`az containerapp show`) picks `create` vs `update`,
+   so re-running converges with no duplicates. Ingress is converged
+   separately so a flip (internal ↔ external) is reconciled on re-run.
+   Each app gets `--min-replicas 1` and `--system-assigned` managed
+   identity.
+3. **Secrets + env** — the DSN rides a **Key Vault secret reference**
+   (`keyvaultref:…/secrets/memory-nodes-database-dsn` +
+   `identityref:system`) resolved at runtime by the app's managed
+   identity, exposed to the container as
+   `MEMORY_NODES_DATABASE_DSN=secretref:…`. Non-secret env mirrors
+   [`service.yaml`](service.yaml) (`SERVER_ADDRESS=0.0.0.0:8085`,
+   `MEMQL_GRPC_ADDRESS=:50051`, the auto-migrate flags).
+4. **State report** — prints which apps were created vs updated, with
+   which image tags + ingress, and what was skipped.
+
+### Status / remaining work
+
+The script is `shellcheck`-clean and fully dry-run-able, and is covered
+by Go tests under [`scripts/deploy/`](scripts/deploy/) that run in CI
+(`go test ./...`). It has **not** yet been run against a live Azure
+subscription — that validation (plus the live image build/push, which
+needs Docker + the sibling carrier checkout) is the remaining step,
+gated on the same `az login` access and on `make deploy-setup` +
+`make db-provision` having created the resources. The exact
+`az containerapp` flag surface (secret/Key-Vault-ref syntax, ingress
+flip) may need a small adjustment once exercised live. The `production`
+path is wired and parameterized but stubbed.
+
+---
+
 ## Release & versioning (semver tag -> immutable image)
 
 This section establishes memQL's release convention for the Azure
