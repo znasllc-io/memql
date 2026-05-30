@@ -393,13 +393,6 @@ services:
       IDENTITY_BASE_URL: http://localhost:8081
       IDENTITY_KEY_DIR: /var/identity/keys
 
-      # Node-bootstrap secret (memql#338). When set on the identity
-      # service, the POST /node/bootstrap endpoint is enabled; nodes
-      # that boot without an operator-provisioned MEMQL_NODE_TOKEN
-      # present this shared secret to self-mint a class="node" JWT.
-      # Must match the value set on each cluster binary that should be
-      # allowed to self-bootstrap.
-      MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       # Dev escape hatch: admit plaintext HTTP requests to /node/bootstrap.
       # The docker network is in-cluster plain HTTP between containers; the
       # bootstrap endpoint defaults to requiring HTTPS (the secret is a
