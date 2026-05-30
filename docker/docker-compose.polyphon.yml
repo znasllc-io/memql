@@ -75,14 +75,16 @@ services:
     environment:
       # Internal URL the BFF uses for any backend chatter (none today).
       POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
-      # NB: POLYPHON_LIVEKIT_PUBLIC_URL is NOT redeclared here on
-      # purpose. It's sourced from .env.local via env_file so the
-      # ngrok URL (or any other public face) can change without a
-      # compose edit. The historical hardcoded value was
-      # "wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN}" pointing at the
-      # nginx-terminated dev domain; that doesn't work for external
-      # services like Anam's cloud avatar engine, so the runtime
-      # value lives where the rest of the dev env lives.
+      # Browser-reachable LiveKit signal URL handed to the SPA in the
+      # polyphon room token (component/polyphon/localroom.go). The
+      # `${VAR:-default}` form lets a shell/genesis/.env.local value win
+      # -- e.g. an ngrok wss:// URL, which is REQUIRED when the avatar
+      # vendor is a cloud engine (Anam) that must reach LiveKit from the
+      # public internet. When nothing is exported (plain local stack, no
+      # ngrok), it falls back to the nginx-terminated dev domain so the
+      # browser still gets a usable wss:// URL instead of the internal
+      # ws://livekit:7880 -- which an HTTPS page blocks as mixed content.
+      POLYPHON_LIVEKIT_PUBLIC_URL: ${POLYPHON_LIVEKIT_PUBLIC_URL:-wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
       # VOICE_AGENT_TOKEN is the voice-agent's own credential and
@@ -101,6 +103,7 @@ services:
   voice:
     environment:
       POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
+      POLYPHON_LIVEKIT_PUBLIC_URL: ${POLYPHON_LIVEKIT_PUBLIC_URL:-wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
     depends_on:
@@ -109,6 +112,7 @@ services:
   cognition:
     environment:
       POLYPHON_LIVEKIT_URL: "ws://livekit:7880"
+      POLYPHON_LIVEKIT_PUBLIC_URL: ${POLYPHON_LIVEKIT_PUBLIC_URL:-wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
     depends_on:
