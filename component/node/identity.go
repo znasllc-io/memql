@@ -115,6 +115,17 @@ func NewIdentity(version string) *Identity {
 	if ValidNodeTypes[envType] {
 		// Environment variable override (for untagged binaries)
 		nodeType = envType
+	} else if envType != "" {
+		// The operator set an explicit MEMQL_NODE_TYPE that isn't a
+		// mesh worker/bff type (e.g. "identity" for the auth service).
+		// Honor it verbatim rather than silently falling back to the
+		// compiled bff default -- defaulting to bff would (wrongly)
+		// pass the `Type == NodeTypeBFF` gate in app/cluster.go and
+		// start the worker-mesh WorkerDialer, which then dials every
+		// worker tokenless (the identity service has no node token),
+		// spamming "node auth: token extraction failed" every 30s.
+		// A non-bff type fails that gate, so no dialer is started.
+		nodeType = envType
 	}
 	if nodeType == "" {
 		nodeType = NodeTypeBFF
