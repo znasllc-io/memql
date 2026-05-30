@@ -13,12 +13,18 @@ follow-up; this spike says exactly which numbers only live testing can settle.
 
 **VERDICT: GO-WITH-CAVEATS.** See [section 7](#7-feasibility-verdict).
 
+> **Historical note (epic #449 complete).** The Go turn-taking machine this
+> spike designed has shipped in the Go voice-agent
+> (`integrations/voice/agent/turntaking.go`), and the Python LiveKit Agents
+> `AgentSession` it replaced has been deleted. References below to the Python
+> agent describe the spike's starting point, not the current tree.
+
 ---
 
 ## 1. Problem restatement
 
-The Python agent (`voice-agent/voice_agent/main.py`) builds a LiveKit
-`AgentSession` and hands it a VAD, an STT, an LLM, and a TTS. The framework
+The Python agent (its `main.py`) built a LiveKit
+`AgentSession` and handed it a VAD, an STT, an LLM, and a TTS. The framework
 then runs, for free, the orchestration loop that copresent's voice product
 depends on:
 

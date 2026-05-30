@@ -6,7 +6,7 @@ the adaptive layer.
 
 ## What "end of utterance" means in the voice path
 
-The voice-agent process (Python, LiveKit Agents 1.5) treats a chunk of
+The Go voice-agent (`integrations/voice/agent/`) treats a chunk of
 user speech as "done" the moment Deepgram emits a `final=true`
 transcript event for it. That event then becomes a
 `VoiceAgentFinalTranscript` to memql, which inserts the user's chat
@@ -22,22 +22,15 @@ Two Deepgram knobs control the firing:
   = snappier final transcripts; larger = more tolerance for thinking
   pauses inside a sentence.
 - **`utterance_end_ms`** -- hard end-of-utterance silence floor on
-  the Deepgram wire protocol. **The LK Deepgram plugin (1.5) does
-  NOT expose this knob.** Its `STT.__init__` signature only accepts
-  `endpointing_ms`, `vad_events`, and friends -- passing
-  `utterance_end_ms` raises TypeError. The env var
-  `POLYPHON_DEEPGRAM_UTTERANCE_END_MS` is preserved on Config and
-  logged for visibility, but is NOT forwarded to Deepgram today.
-  To actually honor it we'd either patch
-  `livekit-plugins-deepgram` to pipe the kwarg into the
-  connection's `_recognize_impl` query params, or drop the plugin
-  and speak the Deepgram WebSocket directly. Until then,
-  `endpointing_ms` is the only real EOU lever.
+  the Deepgram wire protocol. The Go cascade speaks the Deepgram
+  streaming WebSocket directly (no LiveKit STT plugin in the middle),
+  so it forwards `POLYPHON_DEEPGRAM_UTTERANCE_END_MS` as the
+  `utterance_end_ms` query param when non-zero -- unlike the retired
+  Python path, where the LK Deepgram plugin did not expose this knob.
 
-In the LK Agents 1.5 Deepgram STT plugin, an `UtteranceEnd` event
-from Deepgram causes the plugin to emit a `final` transcript for
-the in-flight phrase. So both knobs feed the same downstream
-"transcript is final, dispatch the agent" signal.
+An `UtteranceEnd` event from Deepgram causes the in-flight phrase to
+be committed as a `final` transcript. So both knobs feed the same
+downstream "transcript is final, dispatch the agent" signal.
 
 There is also a frame-level VAD (Silero) gating audio frames into
 Deepgram, but Silero only decides "this frame is speech vs noise"
@@ -46,12 +39,12 @@ Deepgram's alone.
 
 ## Baseline defaults
 
-Defined in `voice-agent/voice_agent/config.py`:
+Defined in `integrations/voice/agent/config.go` (`LoadConfig`):
 
 | Env var                                 | Default | Effect                          |
 | --------------------------------------- | ------- | ------------------------------- |
 | `POLYPHON_DEEPGRAM_ENDPOINTING_MS`      | `2000`  | Phrase-stable threshold         |
-| `POLYPHON_DEEPGRAM_UTTERANCE_END_MS`    | `0`     | Recorded on Config but **NOT wired through the plugin today** (see above) |
+| `POLYPHON_DEEPGRAM_UTTERANCE_END_MS`    | `0`     | Forwarded to Deepgram as `utterance_end_ms` when non-zero (see above) |
 
 These err on "let the user think." A 500ms phrase commit (the old
 default, ported forward from the retired Bridge Agent) fires on any
@@ -74,10 +67,10 @@ fragments like "um, let me think..." get suppressed BEFORE they cost an
 agent reply. The endpointing knob then becomes a less critical safety
 net rather than the sole gate on "is this thought done."
 
-`POLYPHON_DEEPGRAM_UTTERANCE_END_MS` accepts a value but won't change
-behaviour until the plugin is patched (see above); set it alongside
-endpointing as a forward-compat marker when you have a target floor
-in mind, otherwise leave it at 0.
+`POLYPHON_DEEPGRAM_UTTERANCE_END_MS` is forwarded to Deepgram as a
+hard end-of-utterance silence floor when non-zero; set it alongside
+endpointing when you have a target floor in mind, otherwise leave it
+at 0.
 
 ## The adaptive idea (not built)
 
@@ -130,24 +123,20 @@ tenants. The aggregation lives in a partition-scoped automation
 
 ## Why not just use VAD-based turn detection?
 
-LK Agents 1.5 has a `turn_detection` mode (`vad` / `realtime_llm`)
-that uses the VAD signal to call the turn instead of relying on
-Deepgram's endpointing. We tried this in a prior session; the VAD
-fires on ambient room noise (background chatter, fans, music) and
-produced even worse cut-offs. Deepgram endpointing is signal-aware
-(it knows when the user is mid-phrase vs done) and is the right
-authority. Adaptive tuning of THIS signal is the lever.
+A VAD-driven turn-detection mode uses the VAD signal to call the turn
+instead of relying on Deepgram's endpointing. We tried this in a prior
+session (on the retired LiveKit Agents path); the VAD fires on ambient
+room noise (background chatter, fans, music) and produced even worse
+cut-offs. Deepgram endpointing is signal-aware (it knows when the user
+is mid-phrase vs done) and is the right authority. Adaptive tuning of
+THIS signal is the lever.
 
 ## Pre-flight before re-tuning
 
-Read these in the running voice-agent container before changing
-the defaults:
-
-```
-/usr/local/lib/python3.12/site-packages/livekit/plugins/deepgram/stt.py
-```
-
-Search for `utterance_end_ms` and `endpointing_ms` to confirm the
-plugin still translates them to the Deepgram WebSocket params
-(`endpointing` and `utterance_end_ms`). Deepgram has tweaked these
-between Nova-2 and Nova-3; future model upgrades may force a re-tune.
+The Go cascade's Deepgram streaming URL is built in
+`integrations/deepgram/deepgram.go` (consumed via
+`integrations/voice/agent/stt_pipeline.go`). Before changing the
+defaults, confirm there that `endpointing` and `utterance_end_ms` are
+still mapped to the Deepgram WebSocket query params. Deepgram has
+tweaked these between Nova-2 and Nova-3; future model upgrades may
+force a re-tune.

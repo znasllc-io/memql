@@ -336,7 +336,9 @@ delivery).
 | `POLYPHON_OPENAI_TTS_MODEL`    | none             | OpenAI TTS model for the `/memql/audio` path.                                    |
 | `POLYPHON_OPENAI_TTS_VOICE`    | none             | OpenAI TTS voice (`alloy`, `echo`, `nova`, ...).                                 |
 | `POLYPHON_PREDICTION_ENGINE_URL` | none           | External Polyphon prediction engine; absent = embedded engine.                   |
-| `MEMQL_VOICE_AGENT_SHARED_TOKEN` | unset          | Shared-secret bearer the Python voice-agent presents on `MemqlService.Stream`. Empty disables the voice-agent admit path. |
+| `VOICE_AGENT_TOKEN`            | unset            | Identity-issued `class="voice_agent"` JWT the Go voice-agent presents on `MemqlService.Stream`. When empty the agent self-bootstraps via `/node/bootstrap` (dev). See `docs/auth/voice-agent-jwt.md`. |
+| `MEMQL_VOICE_EXECUTOR`         | `cascade`        | Go voice-agent executor: `cascade` (Deepgram STT -> cognition -> Deepgram TTS) or `realtime` (OpenAI gpt-realtime speech-to-speech). |
+| `MEMQL_VOICE_ROOM_NAME`        | unset            | LiveKit room the Go voice-agent joins (memQL convention: `polyphon-<spaceId>`). Falls back here when no `--room` flag is passed. |
 | `MEMQL_AVATAR_VENDOR`          | `anam`           | Avatar vendor on the voice-agent side: `anam`, `simli`, or `none`.               |
 | `ANAM_API_KEY`                 | unset            | Anam (CARA-3) API key. Required when avatar vendor=anam.                         |
 | `SIMLI_API_KEY`                | unset            | Simli API key. Required when avatar vendor=simli.                                |

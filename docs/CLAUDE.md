@@ -12,7 +12,7 @@ docs/
 ├── CLAUDE.md          This file
 ├── ROADMAP.md         Future-work tracker (deferred items, not abandonment list)
 ├── SERVICE_ACCOUNT_SETUP.md  GCP service account for Cloud Run deploys
-├── polyphon-architecture.md  Voice + video architecture (voice-agent / LiveKit Agents 1.5)
+├── polyphon-architecture.md  Voice + video architecture (Go voice-agent, integrations/voice/agent)
 ├── PLANNER_TODO.md    Planner integration: remaining v1 build-out work
 ├── dsl-import-model-refactor.md  In-flight DSL import-model design + migration plan
 ├── handoff-*.md       Cross-session handoff notes (see "Handoff docs" below)
@@ -98,7 +98,7 @@ are the authoritative source.
 
 | File | What |
 |------|------|
-| `bringup-verification.md` | Operator runbook for end-to-end voice-agent verification. Documents the dev env contract (which var sources which path), the `make voice-loop-test-livekit` smoke check, and the manual round-trip. Read after `make dev-refresh` to confirm voice actually works. |
+| `bringup-verification.md` | Operator runbook for end-to-end voice-agent verification. Documents the dev env contract (which var sources which path) and the manual round-trip. Read after `make dev-refresh` to confirm voice actually works. |
 | `eou-tuning.md` | Voice end-of-utterance (EOU) tuning -- Deepgram `endpointing_ms` / `utterance_end_ms` knobs + a design seed for per-user adaptive endpointing. Read before re-tuning Deepgram or starting on the adaptive layer. |
 
 ---

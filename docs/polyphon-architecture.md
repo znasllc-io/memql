@@ -1,23 +1,25 @@
 # Voice + Video Architecture
 
-The realtime voice + video channel is owned by the Python `voice-agent`
-process under [`voice-agent/`](../voice-agent/) (LiveKit Agents 1.5).
-It joins LiveKit rooms as the General Assistant's sole voice +
-video participant. Specialists are text-only by design (Initiative C):
-they never publish into the LiveKit room, but their replies still
-flow to chat via memql's normal agent dispatch path.
+The realtime voice + video channel is owned by the **Go voice-agent**
+in [`integrations/voice/agent/`](../integrations/voice/agent/), shipped
+as the `voice-agent` subcommand of the `memql-voice` binary
+(`memql-voice voice-agent`; build with `make voice`). It joins LiveKit
+rooms as the General Assistant's sole voice + video participant.
+Specialists are text-only by design (Initiative C): they never publish
+into the LiveKit room, but their replies still flow to chat via memql's
+normal agent dispatch path.
 
 ## Pipeline
 
 ```
 LiveKit room
    |
-   |  (voice-agent process -- Python, LiveKit Agents 1.5)
+   |  (voice-agent subcommand -- Go, integrations/voice/agent)
    |
    +-- Deepgram Nova-3 STT (user audio in)
    |              |
    |              v
-   |        memql LLM custom plugin
+   |        memql gRPC client
    |        speaks the VoiceAgent* gRPC contract on
    |        MemqlService.Stream
    |              |
@@ -32,19 +34,27 @@ LiveKit room
                               videoControl + videoOverride)
 ```
 
+The agent supports two executors selected by `MEMQL_VOICE_EXECUTOR`:
+`cascade` (default -- the Deepgram cascade above) and `realtime`
+(OpenAI gpt-realtime speech-to-speech).
+
 ## Files
 
-- [`voice-agent/`](../voice-agent/) -- Python project. See its
-  [README](../voice-agent/README.md) for setup + per-plugin details.
-- `voice-agent/voice_agent/stt_plugin.py` -- Deepgram Nova-3.
-- `voice-agent/voice_agent/memql_llm_plugin.py` -- memql custom LLM.
-- `voice-agent/voice_agent/tts_plugin.py` -- Deepgram Aura-2.
-- `voice-agent/voice_agent/avatar_plugin.py` -- Anam / Simli.
-- `voice-agent/voice_agent/persona_resolver.py` -- canonical voice
-  + persona id lookup at session start.
-- `voice-agent/voice_agent/transcript_forwarder.py` -- streaming
-  partials + finals over `VoiceAgentPartialTranscript /
-  FinalTranscript`.
+All under [`integrations/voice/agent/`](../integrations/voice/agent/):
+
+- `agent.go` / `config.go` / `bootstrap.go` -- run entry, env loading,
+  class="voice_agent" token resolution.
+- `grpc_client.go` -- speaks the `VoiceAgent*` gRPC contract on
+  `MemqlService.Stream`.
+- `cascade.go` / `stt_pipeline.go` / `tts_pipeline.go` /
+  `turntaking.go` -- Deepgram cascade + turn-taking / barge-in.
+- `realtime_executor.go` / `realtime_lifecycle.go` /
+  `realtime_budget.go` -- the gpt-realtime executor + guardrails.
+- `persona.go` / `grounding.go` / `instructions.go` /
+  `voice_resolve.go` -- persona + grounding parity, canonical voice +
+  persona id lookup at session start.
+- `avatar.go` / `avatar_anam.go` / `avatar_simli.go` /
+  `avatar_dispatch.go` -- Anam / Simli avatar participant.
 
 ## memql side
 
@@ -52,11 +62,10 @@ LiveKit room
 - `component/grpc/voice_agent_handlers.go` -- handlers for the five
   client-to-server message types (SessionStart / End, PartialTranscript,
   FinalTranscript, TurnRequest).
-- `component/grpc/voice_agent_stream_interceptor.go` -- shared-secret
-  bearer (`Authorization: Bearer mql_va_<...>`) pinned to the
-  `VoiceAgent*` message surface. Voice-agent has zero direct
-  graph-write surface.
-- `app/voice_agent.go` -- env var loading.
+- `component/grpc/voice_agent_stream_interceptor.go` -- class="voice_agent"
+  JWT bearer pinned to the `VoiceAgent*` message surface. The
+  voice-agent has zero direct graph-write surface.
+- `app/transport_voice.go` -- voice transport wiring.
 
 ## Concepts
 
@@ -67,15 +76,18 @@ LiveKit room
   session overrides, beat the agent default.
 - `v1:agents:agent.avatarPersonaId` / `avatarVendor` -- vendor-
   issued persona id minted from a still image. Empty disables the
-  avatar plugin (voice-agent falls back to audio-only).
+  avatar (voice-agent falls back to audio-only).
 
 ## Env
 
 | Var | What |
 |---|---|
+| `MEMQL_GRPC_ADDR` | BFF gRPC address the agent dials (e.g. `bff:50051`) |
 | `MEMQL_DEEPGRAM_API_KEY` | Deepgram (STT + TTS) |
-| `MEMQL_VOICE_AGENT_SHARED_TOKEN` | shared secret on the memql side |
-| `VOICE_AGENT_SHARED_TOKEN` | same secret on the voice-agent side |
+| `MEMQL_VOICE_EXECUTOR` | `cascade` (default) or `realtime` |
+| `MEMQL_VOICE_ROOM_NAME` | room to join (fallback when no `--room` flag) |
+| `OPENAI_API_KEY` / `MEMQL_REALTIME_*` | realtime executor path only |
+| `VOICE_AGENT_TOKEN` | identity-issued class="voice_agent" JWT |
 | `MEMQL_AVATAR_VENDOR` | `anam` (default), `simli`, `none` |
 | `ANAM_API_KEY` / `SIMLI_API_KEY` | vendor keys |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit |
@@ -84,23 +96,25 @@ LiveKit room
 
 | Target | Purpose |
 |---|---|
-| `make voice-agent` | Install Python deps + regenerate proto stubs |
-| `make voice-agent-run` | Run worker locally |
-| `make voice-agent-test` | pytest suite |
-| `make voice-agent-docker` | Build the voice-agent container |
-| `make voice-loop-test-livekit` | Smoke + operator runbook |
+| `make voice` | Build the `memql-voice` binary (carries the `voice-agent` subcommand) |
+| `make voice-agent-token` | Mint a class="voice_agent" JWT for the local cluster |
 | `make voice-trace` | Tail voice-path log lines across nodes |
+
+Docker: the `voice-agent` service in
+`docker/docker-compose.polyphon.yml` runs the `memql-voice` image (the
+`voice-runtime` CGO stage) with `command: voice-agent`.
 
 ## What stayed from the legacy Go path
 
 The Go Bridge Agent (`cmd/bridge-agent/` + `component/polyphon/bridge/`)
-was retired in Initiative C Phase 11. What remains on the Go side:
+was retired in Initiative C Phase 11, and the Python voice-agent
+(LiveKit Agents 1.5) was retired in epic #449's cutover. What remains
+on the Go side:
 
 - `integrations/deepgram/` + `integrations/openai/` -- still consumed
   by the `/memql/audio` WebSocket path for voice-first creation modals
-  (CreateSpaceModal, KnowledgeModal, etc.). NOT used by the
-  voice-agent path -- voice-agent talks to Deepgram directly via the
-  `livekit-plugins-deepgram` Python package.
+  (CreateSpaceModal, KnowledgeModal, etc.). The Go voice-agent talks to
+  Deepgram directly from `integrations/voice/agent/`.
 - `integrations/voice/voices.go` -- canonical voice catalog.
 - `integrations/stt/` -- streaming + batch transcription provider.
 - `component/polyphon/` (minus `bridge/`) -- score engine, room

@@ -4,6 +4,13 @@ Spike deliverable for issue #432, part of the Hybrid Realtime Voice epic #440
 (Option B: memQL is the director, OpenAI `gpt-realtime` is the fast voice
 executor).
 
+> **Historical note (epic #449 complete).** This spike predates the Go
+> voice-agent cutover. The Python implementation it describes has been
+> deleted; the realtime gate now lives in the Go
+> voice-agent at `integrations/voice/agent/` (`realtime_executor.go`,
+> `realtime_lifecycle.go`). The Python file references below are the
+> design's starting point, not the current tree.
+
 Status: design + integration plan, grounded in the current code. Live-infra
 latency validation (LiveKit + OpenAI Realtime + Deepgram with real
 credentials and a real room) is a flagged follow-up -- see
@@ -268,7 +275,7 @@ cascade voice path").
 
 ### Step 1 -- Realtime executor behind the `MemqlLLM` seam (depends on #434)
 
-The seam is `voice-agent/voice_agent/memql_llm_plugin.py`. Today `MemqlLLM`
+The seam was the Python voice-agent's `memql_llm_plugin.py`. Today `MemqlLLM`
 (a real `livekit.agents.llm.LLM` subclass) turns each user-final transcript
 into a `VoiceAgentTurnRequest` and streams `VoiceAgentTurnDelta` text back
 (the cascade: text -> Deepgram Aura-2 TTS). The Realtime executor is the
@@ -361,8 +368,8 @@ polyphon-correct interruption from section 3.
 
 ### Step 5 -- Voice-agent translation layer
 
-In `voice-agent/`, add handlers mirroring `_on_voice_agent_speak`
-(`main.py:214`):
+In the (then-Python) voice-agent, add handlers mirroring
+`_on_voice_agent_speak` (`main.py:214`):
 
 - `_on_realtime_respond` -> calls `session.generate_reply(instructions=...)`
   (or the Realtime model's equivalent `response.create`) with the
@@ -380,8 +387,8 @@ In `voice-agent/`, add handlers mirroring `_on_voice_agent_speak`
 | `integrations/cognition/cognition_handler.go` | Realtime branch: run `consultConductor` on voice utterances when executor==realtime; translate `routeOutcome.Respond` into respond/suppress; interruption check. |
 | `component/grpc/memql.proto` + regen | `VoiceAgentRealtimeRespond`, `VoiceAgentRealtimeCancel` server->client messages. |
 | `component/grpc/voice_agent_handlers.go` | Push helpers for the two new messages, hung off `streamSession.sendServerMessage`. |
-| `voice-agent/voice_agent/realtime_executor.py` (new) | Realtime model plugin selected behind the `MemqlLLM` seam; `turn_detection=None`. |
-| `voice-agent/voice_agent/main.py` | Executor selection at session build (line 201); `set_push_handler` for the two new messages. |
+| Python voice-agent `realtime_executor.py` (new) | Realtime model plugin selected behind the `MemqlLLM` seam; `turn_detection=None`. (Now superseded by the Go `realtime_executor.go`.) |
+| Python voice-agent `main.py` | Executor selection at session build (line 201); `set_push_handler` for the two new messages. |
 
 Nothing here deletes or alters the cascade path: `MemqlLLM`,
 `handleVoiceAgentTurnRequest`, `VoiceAgentSpeak`, the suppression classifier,
@@ -441,8 +448,9 @@ not latency.
 
 ### 5.3 Harness
 
-A small Python driver in `voice-agent/` (e.g. `scripts/realtime_latency.py`)
-joins a test room, plays canned WAV utterances for N synthetic humans on
+A small latency-harness driver (envisioned at spike time as a Python script
+alongside the agent) joins a test room, plays canned WAV utterances for N
+synthetic humans on
 separate tracks, and scrapes the structured `voiceTrace` log lines (or
 subscribes to a metrics sink) to compute the splits. Because the metric is the
 delta between two timestamped log lines that already share `request_id` +

@@ -1,7 +1,7 @@
 # Voice-agent service-account JWTs
 
-The Python voice-agent process authenticates to memQL's
-`MemqlService.Stream` via an identity-issued service-account JWT.
+The Go voice-agent (`integrations/voice/agent/`) authenticates to
+memQL's `MemqlService.Stream` via an identity-issued service-account JWT.
 Closes [threat-model §5.2](threat-model.md#52-voice-agent-shared-secret-f4)
 / [#109](https://github.com/znasllc-io/memql/issues/109).
 
@@ -96,12 +96,12 @@ genesis envelope (dev) and the deploy pipeline's secret store
 `docker-compose.polyphon.yml` ships with the self-bootstrap path
 wired by default so a stock `docker compose up` brings the
 voice-agent up cleanly without `make dev-refresh` running first.
-On startup, when `VOICE_AGENT_TOKEN` is empty, the Python
-voice-agent's `load_config` posts to the identity service's
+On startup, when `VOICE_AGENT_TOKEN` is empty, the Go
+voice-agent's `ResolveVoiceAgentToken` posts to the identity service's
 `POST /node/bootstrap` endpoint with `tokenClass="voice_agent"` +
 `instanceId="<MEMQL_VOICE_AGENT_INSTANCE_ID>"`, presenting the
 `MEMQL_NODE_BOOTSTRAP_TOKEN` bootstrap secret. Identity returns a
-minted `class="voice_agent"` JWT and `load_config` uses it for the
+minted `class="voice_agent"` JWT and the agent uses it for the
 rest of the process's lifetime.
 
 The compose file defaults all three knobs to dev sentinels:
@@ -114,9 +114,10 @@ The compose file defaults all three knobs to dev sentinels:
 
 The endpoint reuses the same secret + same bootstrap surface as
 node-class JWTs (memql#338); operators have one secret to rotate
-and one endpoint to audit. The Go-side companion lives in
-`component/node/bootstrap_token.go`; the Python-side companion
-lives in `voice-agent/voice_agent/config.py::_maybe_bootstrap_voice_agent_token`.
+and one endpoint to audit. The node-class companion lives in
+`component/node/bootstrap_token.go`; the voice-agent's companion
+lives in `integrations/voice/agent/bootstrap.go`
+(`maybeBootstrapVoiceAgentToken`).
 
 ### Dev: out-of-band mint (`make dev-refresh`)
 

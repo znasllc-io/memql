@@ -4,9 +4,16 @@ Spike deliverable for issue #453, part of epic #449 ("Replace the Python
 voice-agent with a Go voice agent"). Phase 0, long pole #3. No code
 dependencies; blocks the Go realtime executor (#457).
 
-Status: design + feasibility verdict, grounded in the current repo and the
-live OpenAI Realtime GA API. This document does not change runtime behavior --
-it is a findings doc. The headline is in section 0.
+Status: design + feasibility verdict, grounded in the repo as it stood at
+spike time and the live OpenAI Realtime GA API. This document does not change
+runtime behavior -- it is a findings doc. The headline is in section 0.
+
+> **Historical note (epic #449 complete).** The cutover described as future
+> work here has shipped: the Go voice-agent now lives in
+> `integrations/voice/agent/` (realtime executor in
+> `realtime_executor.go`), and the Python voice-agent it replaced has been
+> deleted. References below to the Python implementation describe the
+> starting point, not the current tree.
 
 ---
 
@@ -61,17 +68,16 @@ Per-issue acceptance mapping is in section 8.
 
 ## 1. The question
 
-Epic #449 is deleting the Python `voice-agent/` and rebuilding it in Go.
-The Python realtime path (epic #440) leans entirely on
-`livekit-plugins-openai`'s `RealtimeModel`, a Python-only SDK that wraps
-the OpenAI Realtime websocket, decodes its events, and bridges audio to
-the LiveKit `AgentSession`. None of that exists for Go.
+Epic #449 is deleting the Python voice-agent and rebuilding it in Go.
+The Python realtime path (epic #440) leaned entirely on the OpenAI LiveKit
+plugin's `RealtimeModel`, a Python-only SDK that wraps the OpenAI Realtime
+websocket, decodes its events, and bridges audio to the LiveKit
+`AgentSession`. None of that exists for Go.
 
 This spike de-risks the replacement: **can a Go process open a
 `gpt-realtime` speech-to-speech session and drive it with the exact
-posture the Python executor uses?** That posture, established by the
-merged spike #432 and implemented in
-`voice-agent/voice_agent/realtime_executor.py`, is:
+posture the Python executor used?** That posture, established by the
+merged spike #432 and implemented in the Python realtime executor, was:
 
 - `turn_detection = None` -- the model never runs input VAD, never
   commits the input buffer, never self-triggers a response. memQL's
