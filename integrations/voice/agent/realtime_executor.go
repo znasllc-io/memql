@@ -64,6 +64,10 @@ type realtimeSession interface {
 	CreateResponse(instructions string) error
 	// CancelResponse cancels the in-flight response + clears output audio.
 	CancelResponse() error
+	// SendFunctionResult returns a tool result by call_id (the MCP tool bridge
+	// async function-call path, #458). It does NOT itself create a response --
+	// the executor chains CreateResponse so the model continues with the result.
+	SendFunctionResult(callID, output string) error
 	// AudioOut is the decoded PCM16 (24 kHz) output-audio channel.
 	AudioOut() <-chan []byte
 	// Events is the transcript / function-call / lifecycle event channel.
@@ -84,6 +88,16 @@ type RealtimeExecutor struct {
 	persona SessionPersona
 	roster  *participantRoster
 	logger  *slog.Logger
+
+	// outputForwarder captures the model's final spoken transcript and forwards
+	// it as a VoiceAgentRealtimeOutput so chat/canvas/audit render the realtime
+	// turn with citations (#458). Nil disables capture (voice still plays; chat
+	// goes dark, same as the pre-#458 state).
+	outputForwarder *RealtimeOutputForwarder
+	// toolBridge dispatches model-driven function calls through the low-risk MCP
+	// tool surface and mirrors them into cognition (#458). Nil disables
+	// model-driven tools (a function-call event is logged and ignored).
+	toolBridge *McpToolBridge
 
 	machine *TurnMachine
 
@@ -186,6 +200,18 @@ func (e *RealtimeExecutor) AttachLifecycle(l *RealtimeSessionLifecycle) { e.life
 // "[name . role]" (#433 section 3). Safe for concurrent use.
 func (e *RealtimeExecutor) SetParticipant(identity, displayName, role string) {
 	e.roster.set(identity, displayName, role)
+}
+
+// SetOutputForwarder attaches the realtime output capture (#458). Call before
+// Start (the drain loop reads it). Nil leaves capture disabled.
+func (e *RealtimeExecutor) SetOutputForwarder(f *RealtimeOutputForwarder) {
+	e.outputForwarder = f
+}
+
+// SetToolBridge attaches the MCP tool bridge (#458). Call before Start (the
+// drain loop reads it). Nil leaves model-driven tools disabled.
+func (e *RealtimeExecutor) SetToolBridge(b *McpToolBridge) {
+	e.toolBridge = b
 }
 
 // ConsumeASR drives the machine from one human track's Deepgram ASR result
@@ -537,31 +563,85 @@ func (e *RealtimeExecutor) drainEvents() {
 			case openai.EventTranscriptDelta:
 				transcript.WriteString(ev.Text)
 			case openai.EventTranscriptDone:
-				// TODO(#458): forward the captured assistant transcript as a
-				// VoiceAgentRealtimeOutput so chat/canvas/audit render the
-				// realtime turn, with citations. The proto message
-				// (VoiceAgentRealtimeOutput) already exists; the capture +
-				// citation extraction is #458's scope.
-				if e.logger != nil {
-					final := ev.Text
-					if final == "" {
-						final = transcript.String()
-					}
-					e.logger.Debug("voice-agent realtime: assistant transcript", "chars", len(final))
+				// #458 output capture: forward the assistant's final transcript
+				// as a VoiceAgentRealtimeOutput so chat/canvas/audit render the
+				// realtime turn with citations (parity with the cascade reply).
+				final := ev.Text
+				if final == "" {
+					final = transcript.String()
 				}
+				e.captureOutput(final)
 			case openai.EventFunctionArgsDone:
-				// TODO(#458): dispatch the model's function call through the MCP
-				// tool bridge on a worker goroutine (off this drain loop so a
-				// long tool never blocks audio -- spike section 5), then
-				// SendFunctionResult + CreateResponse to continue. #457 ships
-				// the seam; the bridge is #458.
-				if e.logger != nil {
-					e.logger.Info("voice-agent realtime: function call (deferred to #458)",
-						"name", ev.FuncName, "call_id", ev.CallID)
-				}
+				// #458 MCP tool bridge: dispatch the model's function call on a
+				// worker goroutine (OFF this drain loop so a long tool never
+				// blocks audio), then SendFunctionResult + CreateResponse so the
+				// model continues with the tool result in context.
+				e.dispatchToolCall(ev.CallID, ev.FuncName, ev.Arguments)
 			}
 		}
 	}
+}
+
+// captureOutput forwards one completed assistant transcript to memQL as an SI
+// utterance (#458 output capture). Runs on its own goroutine so the wire
+// round-trip never blocks the event drain. A nil forwarder or a blank
+// transcript is a no-op; a failed insert is logged (the voice turn still
+// played). The Go analog of realtime_output.py::_schedule_forward.
+func (e *RealtimeExecutor) captureOutput(text string) {
+	if e.outputForwarder == nil {
+		return
+	}
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	go func() {
+		// replyToId is left empty: the realtime model speaks directly and the
+		// triggering human utterance id is not threaded through the gpt-realtime
+		// event stream (matches the Python forwarder's default).
+		utteranceID, err := e.outputForwarder.Forward(e.ctx, text, "")
+		if err != nil {
+			if e.logger != nil {
+				e.logger.Warn("voice-agent realtime: output capture forward failed", "err", err)
+			}
+			return
+		}
+		if e.logger != nil {
+			e.logger.Info("voice-agent realtime: output captured",
+				"utterance_id", utteranceID, "chars", len(text))
+		}
+	}()
+}
+
+// dispatchToolCall runs one model-driven function call through the MCP tool
+// bridge on a worker goroutine (off the event drain so a long tool never
+// blocks audio), returns the result to the model via SendFunctionResult, and
+// chains a CreateResponse so the model continues with the result in context.
+// A nil bridge logs and ignores the call (model-driven tools disabled). The Go
+// analog of the async function-call path in realtime_executor.py.
+func (e *RealtimeExecutor) dispatchToolCall(callID, funcName, arguments string) {
+	if e.toolBridge == nil {
+		if e.logger != nil {
+			e.logger.Debug("voice-agent realtime: function call with no tool bridge (ignored)",
+				"name", funcName, "call_id", callID)
+		}
+		return
+	}
+	go func() {
+		output := e.toolBridge.Dispatch(e.ctx, funcName, arguments)
+		if err := e.session.SendFunctionResult(callID, output); err != nil {
+			if e.logger != nil {
+				e.logger.Warn("voice-agent realtime: send function result failed",
+					"name", funcName, "call_id", callID, "err", err)
+			}
+			return
+		}
+		// Continue the model with the tool result in context. An empty
+		// instructions string falls back to the session-level persona.
+		if err := e.session.CreateResponse(""); err != nil && e.logger != nil {
+			e.logger.Warn("voice-agent realtime: response.create after tool failed",
+				"name", funcName, "call_id", callID, "err", err)
+		}
+	}()
 }
 
 func (e *RealtimeExecutor) setInFlight(cancel context.CancelFunc) {

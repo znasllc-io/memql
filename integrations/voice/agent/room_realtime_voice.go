@@ -118,9 +118,26 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	if err != nil {
 		return nil, fmt.Errorf("voice-agent realtime room: realtime client: %w", err)
 	}
+
+	// MCP tool bridge (#458): fetch the registry, build the low-risk-only tool
+	// set, and configure the session with it. A failed list degrades to no
+	// model-driven tools (FetchToolDefinitions returns nil) -- privileged tools
+	// were never exposed anyway, so this is a safe degradation.
+	toolDefs := FetchToolDefinitions(ctx, client, logger)
+	toolBridge := NewMcpToolBridge(
+		NewGrpcToolCallTransport(client),
+		NewLogMirrorSink(logger),
+		toolDefs,
+		req.SpaceID,
+		req.GaAgentID,
+		logger,
+	)
+	realtimeTools := toolBridge.RealtimeTools()
+
 	session, err := rtClient.Connect(ctx, openai.SessionConfig{
 		Instructions: req.Executor.SessionPersona.Instructions,
 		Voice:        req.Executor.SessionPersona.Voice,
+		Tools:        realtimeTools,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice-agent realtime room: realtime connect: %w", err)
@@ -148,6 +165,16 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		GaAgentID: req.GaAgentID,
 		Thread:    threadContextFor(req),
 	}, client, session, sink, req.Executor.SessionPersona, logger)
+
+	// Output capture (#458): forward the model's final spoken transcript as a
+	// VoiceAgentRealtimeOutput so chat/canvas/audit render the realtime turn.
+	// The citation resolver is built from the session grounding (#456); with no
+	// per-session grounding plumbed yet it is the strict no-op resolver, so an
+	// ungrounded realtime reply lands byte-identical to an ungrounded text reply.
+	executor.SetOutputForwarder(NewRealtimeOutputForwarder(
+		client, req.SpaceID, req.GaAgentID, NewCitationResolver(GroundingContext{}),
+	))
+	executor.SetToolBridge(toolBridge)
 
 	// Cost guardrails (#459): bound the warm session by empty-room / idle /
 	// max-duration / audio-token budget. The stop callback closes the realtime
