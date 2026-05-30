@@ -159,12 +159,31 @@ implementation owned by memQL core, eliminating the only non-Go
 runtime in the tree and pulling the voice path back behind the same
 build-tag model the other node types use.
 
-**Revival source.** The previous Go voice agent (then called the
-Polyphon Bridge Agent) was retired in commit `1af0c60` -- "voice:
-Phase 11 -- retire the Go Bridge Agent (Initiative C)" -- when
-the Python voice-agent shipped as the sole voice participant for
-the General Assistant. The full implementation is recoverable from
-that commit's parent:
+**Revival source (spec only -- code is NOT recoverable from this
+repo).** The previous Go voice agent (then called the Polyphon
+Bridge Agent) was retired when the Python voice-agent shipped as
+the sole voice participant for the General Assistant. The retirement
+was historically attributed to commit `1af0c60` -- "voice: Phase 11
+-- retire the Go Bridge Agent (Initiative C)" -- but **that commit
+no longer exists in this repository, and neither does the bridge
+code it removed.** The repo history was squashed at the repo split:
+the root commit here is "Initial commit: memQL core (post-split
+residual)", `1af0c60` is not a valid git object in current clones
+(`git cat-file -t 1af0c60` reports "Not a valid object name"), and
+`cmd/bridge-agent/` / `component/polyphon/bridge/` appear nowhere in
+this history (`git log --all -- cmd/bridge-agent/` is empty). The
+pre-split history that held the implementation was discarded.
+
+The inventory below is therefore a **specification of what the agent
+covered, not a checkout-able commit.** It is the surviving record of
+the retired component's surface and remains the authoritative guide
+for a from-scratch reimplementation. Recovering the actual source
+would require a pre-split archive or clone of the repository taken
+before the split (if one exists outside this clone); absent that, the
+revival is a reconstruction against this spec plus the current voice
+path, not a `git revert` / checkout.
+
+The retired surface comprised:
 
 - `cmd/bridge-agent/` -- the binary entry point + internal latency
   harness.
@@ -206,9 +225,9 @@ that commit's parent:
 **Why we're not doing it now:** Python's LiveKit Agents 1.5 SDK
 landed faster than rewriting the equivalent in Go, and the voice
 path is product-critical. Defer until the surface stabilizes and
-the Anam / Simli avatar plugin behavior is well-understood; revive
-from `1af0c60`'s parent, port forward, delete `voice-agent/` in the
-same commit.
+the Anam / Simli avatar plugin behavior is well-understood;
+reconstruct from the spec above (or from a pre-split archive if one
+is located), port forward, delete `voice-agent/` in the same commit.
 
 **Repo split implication:** once the Go voice agent is back, the
 voice node folds into the same module boundary as the other node
