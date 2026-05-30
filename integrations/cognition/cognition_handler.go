@@ -1134,9 +1134,18 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		if strings.TrimSpace(gateBrevity) == "" {
 			gateBrevity = string(BrevityShort)
 		}
+		// Grounding (#490, opt-in via MEMQL_VOICE_GROUNDING): retrieve the top
+		// knowledge chunks for this turn over the agent's domains and ride the
+		// rendered block to the executor on the directive, so the model-authored
+		// voice reply is grounded. Off by default; fail-safe (empty -> no
+		// grounding, no behaviour change).
+		var grounding string
+		if voiceGroundingEnabled() {
+			grounding = c.retrieveVoiceGroundingBlock(ctx, scoringUtterance.Text, agent.domains())
+		}
 		c.publishVoiceGateDirective(ctx, spaceId, utterance.ID, VoiceGateDecision{
 			Engage: true, Mode: gateMode, Brevity: gateBrevity, Reason: "voice_engage",
-		})
+		}, grounding)
 		if c.Logger != nil {
 			c.Logger.Info("voice trace: gate directive published",
 				"voiceTrace", utterance.ID,

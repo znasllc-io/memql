@@ -107,6 +107,10 @@ type SpeakDirective struct {
 	// (short|normal|detailed).
 	Mode    string
 	Brevity string
+	// Grounding is the pre-rendered grounding block (#490) injected as a system
+	// conversation.item before response.create on the gate path, so the
+	// model-authored reply is grounded. Empty = no grounding for this turn.
+	Grounding string
 }
 
 // TurnMachine is the five-state turn-taking machine (section 3 of the

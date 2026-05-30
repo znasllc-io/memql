@@ -606,3 +606,41 @@ func TestRealtimeExecutor_SpokenEqualsShown_AccumulatedDeltas(t *testing.T) {
 	require.Eventually(t, func() bool { return sender.lastSent() != nil }, 2*time.Second, 10*time.Millisecond)
 	assert.Equal(t, "Yes, I can help with that.", sender.lastSent().GetText())
 }
+
+// TestRealtimeExecutor_GateDirective_InjectsGrounding verifies the #490 grounding
+// path: a directive carrying a grounding block injects it as a system item
+// BEFORE the model generates, so the model-authored reply is grounded.
+func TestRealtimeExecutor_GateDirective_InjectsGrounding(t *testing.T) {
+	fs := newFakeStream()
+	grounding := "Relevant context:\n[1] (finance) ARR is up 20% YoY."
+	fs.onSend = func(env *memqlv1.MemqlClientMessage) {
+		if env.GetVoiceAgentTurnRequest() == nil {
+			return
+		}
+		fs.push(&memqlv1.MemqlServerMessage{
+			CorrelateTo: env.GetMessageId(),
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
+				VoiceAgentTurnComplete: &memqlv1.VoiceAgentTurnComplete{
+					RequestId: "r1", UtteranceId: "u1",
+					DirectiveMode: "primary", Brevity: "short", Grounding: grounding,
+				},
+			},
+		})
+	}
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+
+	e.handleASRResult("user-1", polyphon.ASRResult{Text: "how's revenue", IsFinal: true})
+
+	require.Eventually(t, func() bool { return rt.responseCount() == 1 }, 2*time.Second, 10*time.Millisecond)
+	// The grounding was injected as a system item.
+	var found bool
+	for _, it := range rt.injectedItems() {
+		if it.Role == "system" && it.Text == grounding {
+			found = true
+		}
+	}
+	assert.True(t, found, "grounding must be injected as a system conversation item before generation")
+	// And the model still authors (directive instructions, not the grounding text).
+	assert.Contains(t, rt.lastResponse(), "Generate your own reply")
+}

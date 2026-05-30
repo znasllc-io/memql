@@ -2,11 +2,124 @@ package cognition
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
 )
+
+// voiceGroundingEnabled reports whether per-turn knowledge grounding is enabled
+// for voice replies (#490). Opt-in via MEMQL_VOICE_GROUNDING=true; off by
+// default so the proven voice path is unchanged until grounding is validated
+// live in a credentialed room.
+func voiceGroundingEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("MEMQL_VOICE_GROUNDING")), "true")
+}
+
+// retrieveVoiceGroundingBlock retrieves the top knowledge chunks for the user
+// turn over the agent's domains and renders a numbered, domain-attributed
+// grounding block the realtime model conditions its native generation on
+// (#490). Runs cognition-side (where retrieval lives) so the gate path can ride
+// the block to the executor on the directive. Best-effort and fail-safe: a nil
+// engine, no domains, a query error, or no chunks returns "" (no grounding for
+// this turn -- the model still answers from persona + conversation).
+func (c *CognitionIntegration) retrieveVoiceGroundingBlock(ctx context.Context, query string, domains []string) string {
+	if c == nil || c.engine == nil {
+		return ""
+	}
+	query = strings.TrimSpace(query)
+	clean := make([]string, 0, len(domains))
+	for _, d := range domains {
+		if d = strings.TrimSpace(d); d != "" {
+			clean = append(clean, d)
+		}
+	}
+	if query == "" || len(clean) == 0 {
+		return ""
+	}
+
+	args, err := json.Marshal(map[string]any{
+		"text":    query,
+		"concept": "v1:common:documentChunk",
+		"domains": clean,
+		"limit":   5,
+	})
+	if err != nil {
+		return ""
+	}
+	result, err := c.engine.Execute(ctx, fmt.Sprintf("similarTo(%s)", string(args)))
+	if err != nil {
+		return ""
+	}
+	data, err := extractDataFromResult(result)
+	if err != nil || data == nil {
+		return ""
+	}
+
+	rows := normalizeGroundingRows(data)
+	if len(rows) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("Relevant context for the current turn (from the space's knowledge). " +
+		"Use it to ground your answer; cite the domain it came from when you rely on it:")
+	idx := 1
+	for _, r := range rows {
+		text := strings.TrimSpace(groundingRowString(r, "text"))
+		if text == "" {
+			continue
+		}
+		domain := strings.TrimSpace(groundingRowString(r, "domainId"))
+		if domain != "" {
+			fmt.Fprintf(&b, "\n[%d] (%s) %s", idx, domain, text)
+		} else {
+			fmt.Fprintf(&b, "\n[%d] %s", idx, text)
+		}
+		idx++
+	}
+	if idx == 1 {
+		return ""
+	}
+	return b.String()
+}
+
+// normalizeGroundingRows coerces a similarTo result payload (any of the shapes
+// the engine emits) into a uniform []map[string]any.
+func normalizeGroundingRows(payload any) []map[string]any {
+	switch v := payload.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, it := range v {
+			if m, ok := it.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		return []map[string]any{v}
+	}
+	return nil
+}
+
+// groundingRowString reads a string field from a chunk row, checking the row
+// directly and a nested "payload" map (the two shapes chunks arrive in).
+func groundingRowString(row map[string]any, key string) string {
+	if s, ok := row[key].(string); ok && s != "" {
+		return s
+	}
+	if payload, ok := row["payload"].(map[string]any); ok {
+		if s, ok := payload[key].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
 
 // VoiceGateDirectiveTopic is the event-bus subject the voice gate publishes its
 // per-turn decision on (#477/#479). It MUST match the relay's constant in
@@ -20,7 +133,7 @@ const VoiceGateDirectiveTopic = "voice.gate.directive"
 // directive; defer -> suppress). Best-effort: a nil eventBus is a no-op. The
 // payload keys mirror what extractVoiceGateDirective decodes (space-scoped --
 // voice is GA-only, so no per-agent key is needed).
-func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, spaceId, utteranceId string, d VoiceGateDecision) {
+func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, spaceId, utteranceId string, d VoiceGateDecision, grounding string) {
 	if c == nil || c.eventBus == nil {
 		return
 	}
@@ -38,6 +151,7 @@ func (c *CognitionIntegration) publishVoiceGateDirective(ctx context.Context, sp
 			"mode":        d.Mode,
 			"brevity":     d.Brevity,
 			"utteranceId": utteranceId,
+			"grounding":   grounding,
 		},
 		Metadata:  map[string]string{"source": "cognition.voice_gate", "reason": d.Reason},
 		Partition: partition,

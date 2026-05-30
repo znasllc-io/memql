@@ -11502,6 +11502,13 @@ type VoiceAgentTurnComplete struct {
 	// the model decides WHAT" reaches the executor.
 	DirectiveMode string `protobuf:"bytes,8,opt,name=directive_mode,json=directiveMode,proto3" json:"directive_mode,omitempty"`
 	Brevity       string `protobuf:"bytes,9,opt,name=brevity,proto3" json:"brevity,omitempty"`
+	// Grounding block (#490): a pre-rendered, numbered, domain-attributed context
+	// block the realtime model conditions its native generation on. Retrieved
+	// cognition-side over the agent's domains for the user turn and injected as a
+	// system conversation.item before response.create on the gate path, so a
+	// model-authored voice reply is grounded + citable. Empty = no grounding for
+	// this turn.
+	Grounding     string `protobuf:"bytes,10,opt,name=grounding,proto3" json:"grounding,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11595,6 +11602,13 @@ func (x *VoiceAgentTurnComplete) GetDirectiveMode() string {
 func (x *VoiceAgentTurnComplete) GetBrevity() string {
 	if x != nil {
 		return x.Brevity
+	}
+	return ""
+}
+
+func (x *VoiceAgentTurnComplete) GetGrounding() string {
+	if x != nil {
+		return x.Grounding
 	}
 	return ""
 }
@@ -13162,7 +13176,7 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"text_delta\x18\x02 \x01(\tR\ttextDelta\"\xe2\x02\n" +
+	"text_delta\x18\x02 \x01(\tR\ttextDelta\"\x80\x03\n" +
 	"\x16VoiceAgentTurnComplete\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
@@ -13175,7 +13189,9 @@ const file_memql_proto_rawDesc = "" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
 	"\rerror_message\x18\a \x01(\tR\ferrorMessage\x12%\n" +
 	"\x0edirective_mode\x18\b \x01(\tR\rdirectiveMode\x12\x18\n" +
-	"\abrevity\x18\t \x01(\tR\abrevity\"\xa2\x01\n" +
+	"\abrevity\x18\t \x01(\tR\abrevity\x12\x1c\n" +
+	"\tgrounding\x18\n" +
+	" \x01(\tR\tgrounding\"\xa2\x01\n" +
 	"\x0fVoiceAgentSpeak\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +

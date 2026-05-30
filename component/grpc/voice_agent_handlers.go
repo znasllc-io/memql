@@ -86,6 +86,7 @@ type voiceGateDirective struct {
 	mode        string
 	brevity     string
 	utteranceId string
+	grounding   string
 }
 
 // extractVoiceGateDirective decodes a voiceGateDirectiveTopic event for the
@@ -108,6 +109,7 @@ func extractVoiceGateDirective(e events.Event, spaceId, gaAgentId string) (voice
 		mode:        strings.TrimSpace(asString(e.Payload, "mode")),
 		brevity:     strings.TrimSpace(asString(e.Payload, "brevity")),
 		utteranceId: asString(e.Payload, "utteranceId"),
+		grounding:   asString(e.Payload, "grounding"),
 	}
 	if v, ok := e.Payload["engage"].(bool); ok {
 		d.engage = v
@@ -901,6 +903,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 			if dir.engage && strings.TrimSpace(dir.mode) != "" && !strings.EqualFold(dir.mode, "defer") {
 				complete.DirectiveMode = dir.mode
 				complete.Brevity = dir.brevity
+				complete.Grounding = dir.grounding
 			}
 			if s.logger != nil {
 				s.logger.Info("voice-agent turn: gate directive",
