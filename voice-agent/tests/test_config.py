@@ -22,6 +22,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         # legacy tests don't accidentally trigger the bootstrap call.
         "MEMQL_NODE_BOOTSTRAP_TOKEN", "IDENTITY_VERIFIER_BASE_URL",
         "MEMQL_VOICE_AGENT_INSTANCE_ID",
+        # memql#434 pluggable voice executor env vars.
+        "MEMQL_VOICE_EXECUTOR", "OPENAI_API_KEY", "MEMQL_REALTIME_MODEL",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -48,6 +50,39 @@ def test_load_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # preserved on Config for the day we patch the plugin or migrate
     # to a raw Deepgram client. See docs/voice/eou-tuning.md.
     assert cfg.dg_utterance_end_ms == 0
+    # memql#434: cascade is the default executor (no regression).
+    assert cfg.voice_executor == "cascade"
+    assert cfg.openai_api_key is None
+    assert cfg.realtime_model == "gpt-realtime"
+
+
+def test_load_config_realtime_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_required(monkeypatch)
+    monkeypatch.setenv("MEMQL_VOICE_EXECUTOR", "realtime")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("MEMQL_REALTIME_MODEL", "gpt-realtime-2025-08")
+    cfg = load_config()
+    assert cfg.voice_executor == "realtime"
+    assert cfg.openai_api_key == "sk-test"
+    assert cfg.realtime_model == "gpt-realtime-2025-08"
+
+
+def test_load_config_realtime_without_key_still_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Selecting realtime without an OpenAI key must NOT hard-fail config
+    # loading -- the selection logic falls back to the cascade at session
+    # build time. load_config only warns.
+    _seed_required(monkeypatch)
+    monkeypatch.setenv("MEMQL_VOICE_EXECUTOR", "realtime")
+    cfg = load_config()
+    assert cfg.voice_executor == "realtime"
+    assert cfg.openai_api_key is None
+
+
+def test_load_config_voice_executor_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_required(monkeypatch)
+    monkeypatch.setenv("MEMQL_VOICE_EXECUTOR", "bogus")
+    with pytest.raises(RuntimeError, match="MEMQL_VOICE_EXECUTOR"):
+        load_config()
 
 
 def test_load_config_avatar_vendor_validation(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -30,6 +30,7 @@ from voice_agent.config import Config, load_config, setup_logging
 from voice_agent.grpc_client import MemqlGrpcClient
 from voice_agent.memql_llm_plugin import MemqlLLM
 from voice_agent.persona_resolver import Persona, resolve_persona
+from voice_agent.realtime_executor import select_voice_executor
 from voice_agent.stt_plugin import attach_transcript_forwarding, build_stt
 from voice_agent.thread_context import ThreadContext
 from voice_agent.transcript_forwarder import TranscriptForwarder
@@ -151,15 +152,29 @@ async def entrypoint(ctx: JobContext) -> None:
     vad = silero.VAD.load()
     # Phase 3: Deepgram Nova-3 STT.
     stt = build_stt(cfg)
+    # Select the voice executor (#434). Default is the cascade -- realtime
+    # is opt-in via MEMQL_VOICE_EXECUTOR=realtime and falls back to the
+    # cascade automatically when unavailable, so the voice path always
+    # comes up. See voice_agent/realtime_executor.py.
+    executor_plan = select_voice_executor(cfg, persona)
+    if executor_plan.fallback_reason:
+        logger.warning(
+            "voice executor fell back to cascade: %s",
+            executor_plan.fallback_reason,
+        )
+
     # Phase 4: memql LLM custom plugin -- VoiceAgentTurnRequest in,
     # VoiceAgentTurnDelta stream out. Specialists handled server-side.
+    # Built for the cascade path; not used when the realtime executor is
+    # selected (the realtime model is itself the speech-to-speech LLM).
     llm = MemqlLLM(
         client=client,
         space_id=space_id,
         ga_agent_id=ga_agent_id,
         thread=thread,
     )
-    # Phase 5: Deepgram Aura-2 TTS with token-streaming input.
+    # Phase 5: Deepgram Aura-2 TTS with token-streaming input. Cascade
+    # only -- the realtime model speaks its own audio output.
     tts = build_tts(cfg, persona)
     # Phase 9: Anam (or Simli) avatar.
     #
@@ -198,7 +213,32 @@ async def entrypoint(ctx: JobContext) -> None:
     # the AgentSession itself is up. Passing avatar in here was
     # silently dead code (the build_avatar() guard masked it) and
     # would have crashed the moment a persona id was available.
-    session = AgentSession(vad=vad, stt=stt, llm=llm, tts=tts)
+    if executor_plan.is_realtime:
+        # Realtime executor (#434): the gpt-realtime model is wired as the
+        # speech-to-speech LLM with turn_detection=None (conductor-gate
+        # posture, #432 option A). No separate TTS -- the model speaks its
+        # own audio. Deepgram STT stays attached (cascade-parity) so
+        # transcripts still flow to memql for conductor scoring, citations
+        # and chat parity per docs/voice/433-multiparty-audio-routing.md.
+        #
+        # TODO(#432): drive response.create / response.cancel from the
+        #   conductor. This session is stood up in the gated posture only;
+        #   the model will not self-respond until the conductor wiring lands.
+        # TODO(#433): replace the single implicit audio input with the
+        #   active-speaker multi-party router so >1 human attributes
+        #   correctly.
+        session = AgentSession(
+            vad=vad,
+            stt=stt,
+            llm=executor_plan.realtime_model,
+            turn_detection=None,
+        )
+        logger.info(
+            "agent session built with realtime executor (turn_detection=None, #432)"
+        )
+    else:
+        session = AgentSession(vad=vad, stt=stt, llm=llm, tts=tts)
+        logger.info("agent session built with cascade executor (STT->cognition->TTS)")
 
     # Register the unsolicited VoiceAgentSpeak handler. memql pushes
     # one Speak per SI reply utterance that lands in this space while
