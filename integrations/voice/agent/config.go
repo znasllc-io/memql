@@ -56,6 +56,13 @@ type Config struct {
 	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
 	// native authorship for a single-human standard space). Default true.
 	RealtimeNativeTurn bool
+	// VoiceGrounding enables per-turn knowledge grounding for voice replies
+	// (#490). When on, 1-on-1 routes through the gate (create_response:false) so
+	// the executor can inject the retrieved grounding block before the model
+	// generates -- otherwise native 1-on-1 (create_response:true) has no inject
+	// window. Off by default; MUST match the cognition-side MEMQL_VOICE_GROUNDING
+	// so retrieval and routing agree.
+	VoiceGrounding bool
 	// VoiceAutoJoin enables the dev auto-join dispatcher: when the voice-agent
 	// is launched with no --room / MEMQL_VOICE_ROOM_NAME, it watches LiveKit for
 	// active polyphon-<spaceId> rooms and joins one, so voice "just works" in
@@ -197,6 +204,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// standard space has exactly one human. On by default; set
 	// MEMQL_REALTIME_NATIVE_TURN=false to keep the conductor gate on the
 	// realtime path (a finer-grained rollback than dropping to the cascade).
+	cfg.VoiceGrounding = get("MEMQL_VOICE_GROUNDING", "false") == "true"
 	cfg.VoiceAutoJoin = get("MEMQL_VOICE_AUTOJOIN", "true") != "false"
 	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
 	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")

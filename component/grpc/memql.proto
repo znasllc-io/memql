@@ -1808,6 +1808,13 @@ message VoiceAgentTurnComplete {
   // the model decides WHAT" reaches the executor.
   string directive_mode = 8;
   string brevity = 9;
+  // Grounding block (#490): a pre-rendered, numbered, domain-attributed context
+  // block the realtime model conditions its native generation on. Retrieved
+  // cognition-side over the agent's domains for the user turn and injected as a
+  // system conversation.item before response.create on the gate path, so a
+  // model-authored voice reply is grounded + citable. Empty = no grounding for
+  // this turn.
+  string grounding = 10;
 }
 
 // VoiceAgentSpeak is a server-pushed "synthesize and publish

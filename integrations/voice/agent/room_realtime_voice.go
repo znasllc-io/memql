@@ -93,6 +93,7 @@ type realtimeRoomBridge struct {
 	// two configs can be rebuilt; gateNative (under gateMu) tracks the live mode.
 	nativeEnabled         bool
 	multiPartySemanticVad bool // #481: multi-party uses semantic_vad + gate when set
+	grounding             bool // #490: route 1-on-1 through the gate so grounding can inject
 	transcriptionModel    string
 	language              string
 	sessionBase           openai.SessionConfig
@@ -232,6 +233,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		lifecycle:             lifecycle,
 		nativeEnabled:         cfg.RealtimeNativeTurn,
 		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad,
+		grounding:             cfg.VoiceGrounding,
 		transcriptionModel:    cfg.RealtimeTranscriptionModel,
 		language:              cfg.DGLanguage,
 		sessionBase:           sessionBase,
@@ -305,6 +307,12 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	var mode int32
 	var cfg openai.SessionConfig
 	switch {
+	case humanCount == 1 && b.grounding:
+		// 1-on-1 with grounding (#490): route through the gate
+		// (create_response:false) so the executor can inject the retrieved
+		// grounding block before generation -- pure native mode has no window.
+		mode = turnModeGatedSemanticVad
+		cfg = b.multiPartySemanticVadConfig()
 	case humanCount == 1:
 		mode = turnModeNative
 		cfg = b.nativeSessionConfig()

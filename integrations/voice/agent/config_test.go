@@ -102,6 +102,17 @@ func TestLoadConfig_CascadeOptOut(t *testing.T) {
 
 // TestLoadConfig_NativeTurnOptOut: native 1-on-1 is on by default but can be
 // disabled (the finer-grained realtime rollback per #478).
+func TestLoadConfig_VoiceGroundingOptIn(t *testing.T) {
+	cfg, err := LoadConfig(envMap(baseEnv()))
+	require.NoError(t, err)
+	assert.False(t, cfg.VoiceGrounding, "grounding defaults off")
+	env := baseEnv()
+	env["MEMQL_VOICE_GROUNDING"] = "true"
+	cfg, err = LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.True(t, cfg.VoiceGrounding)
+}
+
 func TestLoadConfig_VoiceAutoJoinDefaultAndOptOut(t *testing.T) {
 	cfg, err := LoadConfig(envMap(baseEnv()))
 	require.NoError(t, err)

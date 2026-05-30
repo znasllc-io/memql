@@ -512,6 +512,7 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 						RequestID:   requestID,
 						Mode:        directiveMode,
 						Brevity:     strings.TrimSpace(done.GetBrevity()),
+						Grounding:   done.GetGrounding(),
 					})
 					return
 				}
@@ -577,6 +578,16 @@ func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
 	if strings.TrimSpace(req.Mode) != "" {
 		instructions = RealtimeInstructionsForDirective(req.Mode, req.Brevity)
 	}
+
+	// Grounding (#490): inject the retrieved context as an out-of-band system
+	// item BEFORE response.create so the model conditions its native generation
+	// on it. Empty = no-op (grounding disabled / nothing retrieved).
+	if g := strings.TrimSpace(req.Grounding); g != "" {
+		if err := e.session.InjectItem(openai.ConversationItem{Role: "system", Text: g}); err != nil && e.logger != nil {
+			e.logger.Debug("voice-agent realtime: grounding inject failed", "err", err)
+		}
+	}
+
 	_, cancel := context.WithCancel(e.ctx)
 	e.setInFlight(cancel)
 
