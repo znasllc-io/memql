@@ -50,21 +50,20 @@ type audioSink interface {
 	Flush()
 }
 
-// personaVoice resolves the canonical TTS voice id for the assistant. The
-// sibling issue (#456) owns persona/voice resolution; the cascade consumes
-// it through this tiny seam and ships a default so it works standalone.
-// TODO(#456): replace defaultPersonaVoice with the sibling's resolver
-// (persona profile -> canonical voice -> Aura-2 id) once it lands.
+// personaVoice resolves the provider TTS voice id for the assistant. The
+// #456 persona resolver owns the canonical -> provider-voice mapping
+// (ResolveTTSVoice); the voice-build bridge passes its result into the
+// constructor's voiceID. The cascade consumes it through this tiny seam so
+// it stays decoupled from the resolver and works standalone in tests.
 type personaVoice interface {
 	// VoiceID returns the TTS voice id to synthesize with. Empty means
 	// "let the TTS layer pick its configured default."
 	VoiceID() string
 }
 
-// defaultPersonaVoice is the standalone fallback: it returns the canonical
-// voice the SessionAck carried (resolved server-side from the GA controls),
-// or empty to defer to the TTS client's configured default. This is the
-// stub the #456 resolver replaces.
+// defaultPersonaVoice returns the provider voice id passed at construction
+// (ResolveTTSVoice(persona) in the voice build; a literal in tests), or
+// empty to defer to the TTS client's configured default.
 type defaultPersonaVoice struct{ canonical string }
 
 func (d defaultPersonaVoice) VoiceID() string { return strings.TrimSpace(d.canonical) }
@@ -111,17 +110,18 @@ type Cascade struct {
 	cancel context.CancelFunc
 }
 
-// NewCascade builds a cascade orchestrator. canonicalVoice is the voice the
-// SessionAck resolved; it seeds the default persona-voice stub pending the
-// #456 resolver. tts and sink are the synthesis + room-publish seams (real
-// implementations in room_audio_voice.go; in-memory in tests).
+// NewCascade builds a cascade orchestrator. ttsVoiceID is the provider TTS
+// voice id to synthesize with (ResolveTTSVoice(persona) from the #456
+// resolver in the voice build; a literal in tests). tts and sink are the
+// synthesis + room-publish seams (real implementations in
+// room_audio_voice.go; in-memory in tests).
 func NewCascade(
 	parent context.Context,
 	cfg CascadeConfig,
 	client *Client,
 	tts ttsSynthesizer,
 	sink audioSink,
-	canonicalVoice string,
+	ttsVoiceID string,
 	logger *slog.Logger,
 ) *Cascade {
 	ctx, cancel := context.WithCancel(parent)
@@ -130,7 +130,7 @@ func NewCascade(
 		client:  client,
 		tts:     tts,
 		sink:    sink,
-		persona: defaultPersonaVoice{canonical: canonicalVoice},
+		persona: defaultPersonaVoice{canonical: ttsVoiceID},
 		logger:  logger,
 		ctx:     ctx,
 		cancel:  cancel,

@@ -57,12 +57,18 @@ type RoomJoiner interface {
 }
 
 // RoomRequest carries everything the room joiner needs: the room/space
-// identity and the resolved ack. The LiveKit credentials come from Config.
+// identity, the resolved ack, and the resolved Persona (#456). The LiveKit
+// credentials come from Config.
 type RoomRequest struct {
 	SpaceID   string
 	GaAgentID string
 	RoomName  string
 	Ack       SessionAck
+
+	// Persona is the resolved per-session persona/voice/audio-video config
+	// (#456). The cascade loop (#455), realtime executor (#457), and avatar
+	// (#460) consume it.
+	Persona Persona
 
 	// RegisterSpeakSink lets the room joiner register the cascade (#455)
 	// as the VoiceAgentSpeak consumer once the audio loop is constructed,
@@ -81,6 +87,11 @@ type Session struct {
 	spaceID   string
 	gaAgentID string
 	roomName  string
+
+	// persona is the resolved per-session persona (#456), populated from the
+	// SessionAck once start() returns. Read via Persona() by the consumers
+	// (cascade loop / realtime executor / avatar).
+	persona Persona
 
 	// speakSink, when set, receives unsolicited VoiceAgentSpeak pushes so
 	// the cascade audio loop (#455) can drive TTS playout. The voice-build
@@ -107,6 +118,11 @@ func (s *Session) SetSpeakSink(sink SpeakSink) {
 	s.speakSink = sink
 	s.speakMu.Unlock()
 }
+
+// Persona returns the resolved per-session persona (#456). It is populated
+// after a successful start() / Run(); before the handshake completes it is
+// the zero Persona.
+func (s *Session) Persona() Persona { return s.persona }
 
 // NewSession builds a session for the given space. roomName is the LiveKit
 // room name (the memQL convention is "polyphon-<spaceId>"); spaceId is
@@ -152,6 +168,20 @@ func (s *Session) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Resolve the per-session persona/voice/audio-video config from the ack
+	// (#456). Pure resolution -- consumers (#455 cascade loop, #457 realtime
+	// executor, #460 avatar) read it via s.Persona() / RoomRequest.Persona.
+	s.persona = ResolvePersona(ack, s.cfg)
+	if s.logger != nil {
+		s.logger.Info("voice-agent persona resolved",
+			"canonical_voice", s.persona.CanonicalVoice,
+			"tts_voice", ResolveTTSVoice(s.persona),
+			"realtime_voice", ResolveRealtimeVoice(s.persona),
+			"audio_mode", s.persona.InitialAudioMode,
+			"video_mode", s.persona.InitialVideoMode,
+			"avatar_enabled", s.persona.AvatarEnabled())
+	}
+
 	// Register the unsolicited VoiceAgentSpeak handler. memQL pushes one
 	// Speak per SI reply utterance that lands while audio output is enabled
 	// and no VoiceAgentTurnRequest is in flight; the audio loop (#455) drives
@@ -166,6 +196,7 @@ func (s *Session) Run(ctx context.Context) error {
 			GaAgentID:         s.gaAgentID,
 			RoomName:          s.roomName,
 			Ack:               ack,
+			Persona:           s.persona,
 			RegisterSpeakSink: s.SetSpeakSink,
 		}
 		r, joinErr := s.joiner.JoinAndServe(ctx, req)

@@ -83,11 +83,15 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 	}
 
 	sink := &localTrackSink{track: local}
+	// Consume the #456 persona resolver: ResolveTTSVoice maps the resolved
+	// canonical voice to the active provider's voice id (the cascade's TTS
+	// voice). This replaces the standalone canonical-voice default the
+	// cascade ships for tests.
 	cascade := NewCascade(ctx, CascadeConfig{
 		SpaceID:   req.SpaceID,
 		GaAgentID: req.GaAgentID,
 		Thread:    threadContextFor(req),
-	}, client, newDeepgramTTSAdapter(tts, logger), sink, req.Ack.CanonicalVoice, logger)
+	}, client, newDeepgramTTSAdapter(tts, logger), sink, ResolveTTSVoice(req.Persona), logger)
 	cascade.Start()
 
 	return &roomAudioBridge{
