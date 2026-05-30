@@ -38,6 +38,11 @@ from voice_agent.realtime_lifecycle import (
     TeardownReason,
     build_realtime_lifecycle,
 )
+from voice_agent.realtime_output import (
+    RealtimeOutputForwarder,
+    attach_realtime_output_capture,
+    build_citation_resolver,
+)
 from voice_agent.stt_plugin import attach_transcript_forwarding, build_stt
 from voice_agent.thread_context import ThreadContext
 from voice_agent.transcript_forwarder import TranscriptForwarder
@@ -269,6 +274,27 @@ async def entrypoint(ctx: JobContext) -> None:
                 "realtime mcp bridge wiring failed -- continuing with no "
                 "model-driven tools (privileged tools were never exposed)"
             )
+        # Output capture (#437): the realtime model speaks directly and
+        # never routes through VoiceAgentTurnRequest, so nothing would
+        # insert the SI reply utterance. Capture the model's output
+        # transcript + derived citations and forward them to memql so
+        # chat / canvas / conductor history / audit see realtime voice
+        # turns at parity with text turns. The citation resolver consumes
+        # #436's GroundingContext (realtime_instructions.GroundingContext)
+        # to match spoken phrases back to their domain; until the per-turn
+        # grounding context is threaded here it resolves to a no-op, so an
+        # un-grounded realtime reply lands byte-identical to a text reply.
+        attach_realtime_output_capture(
+            session=session,
+            forwarder=RealtimeOutputForwarder(
+                client=client,
+                space_id=space_id,
+                ga_agent_id=ga_agent_id,
+                citation_resolver=build_citation_resolver(
+                    getattr(persona, "grounding", None)
+                ),
+            ),
+        )
     else:
         session = AgentSession(vad=vad, stt=stt, llm=llm, tts=tts)
         logger.info("agent session built with cascade executor (STT->cognition->TTS)")

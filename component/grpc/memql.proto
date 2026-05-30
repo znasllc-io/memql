@@ -178,6 +178,16 @@ message MemqlClientMessage {
     VoiceAgentTurnRequest voice_agent_turn_request = 62;
     VoiceAgentSessionStart voice_agent_session_start = 63;
     VoiceAgentSessionEnd voice_agent_session_end = 64;
+    // Realtime output capture (#437). When the realtime executor owns
+    // the voice (MEMQL_VOICE_EXECUTOR=realtime), OpenAI's gpt-realtime
+    // model speaks the assistant turn directly -- it does NOT route
+    // through VoiceAgentTurnRequest, so cognition never inserts the SI
+    // reply utterance. The voice-agent captures the model's output
+    // transcript + derived citations and forwards them here; the
+    // server inserts the SI utterance with full chat/canvas/audit
+    // parity (same shape as a text/cascade reply). See
+    // handleVoiceAgentRealtimeOutput.
+    VoiceAgentRealtimeOutput voice_agent_realtime_output = 65;
     // EvaluatePolicy -- runtime invocation of a `func (Policy)`
     // declared under dsl/v1/policies/{core,bff}/...  The handler
     // requires the policy to carry @frontend_visible AND tier=bff;
@@ -278,6 +288,10 @@ message MemqlServerMessage {
     // AgentSession.say(text) so Aura-2 synthesizes and publishes
     // alongside the existing TurnRequest path.
     VoiceAgentSpeak voice_agent_speak = 100;
+    // Realtime output-capture ack (#437). Confirms the SI utterance
+    // insert for a realtime assistant turn and returns the canonical
+    // utterance id so the voice-agent can correlate + audit.
+    VoiceAgentRealtimeOutputAck voice_agent_realtime_output_ack = 101;
     // EvaluatePolicy reply -- carries the policy result, the
     // structured trace tree (when requested), and a typed error
     // string for the typical rejection cases (unknown policy, not
@@ -1790,6 +1804,54 @@ message VoiceAgentSpeak {
   string ga_agent_id = 3;
   string utterance_id = 4;
   string text = 5;
+}
+
+// VoiceAgentRealtimeOutput carries the assistant's spoken output for one
+// realtime turn (#437). The realtime executor (gpt-realtime) speaks
+// directly, bypassing the VoiceAgentTurnRequest path that the cascade
+// uses -- so without this message the SI reply never lands in the graph
+// and chat/canvas/audit go dark for voice turns. The server inserts a
+// v1:cognition:utterance with participantType="si" for the GA, server-
+// stamping partition + createdBy. The voice-agent supplies only the
+// final transcript, attribution context, and derived citations.
+//
+// reply_id is the caller-minted utterance id. It MUST be the same id
+// the voice-agent used to key any in-flight streaming UI state so the
+// committed utterance shares the chat panel's streaming `replyId`
+// contract (see copresent useCopresentChat -- the synthetic in-flight
+// Utterance keyed by replyId swaps in-place when the committed row
+// lands). When empty the server mints one.
+//
+// citations are structured source attributions derived voice-agent-side
+// (the realtime model speaks, so citations can't ride a respondToUser
+// envelope as they do in the cascade -- see #436 grounding). They reuse
+// the AgentTurnCitation shape so the persisted utterance.citations is
+// byte-identical to a text/cascade reply and the frontend's existing
+// citation-chip renderer handles them with no special-casing.
+message VoiceAgentRealtimeOutput {
+  string request_id = 1;
+  string space_id = 2;        // v1:cognition:space.id (bare slug ok)
+  string ga_agent_id = 3;     // v1:agents:agent.id of the speaking GA
+  // Caller-minted utterance id; doubles as the chat streaming replyId.
+  string reply_id = 4;
+  // The assistant's final spoken transcript for this turn.
+  string text = 5;
+  // The user utterance this reply answers, when known. Threads the
+  // reply under the triggering turn for ordering parity with the
+  // cascade (which sets replyToId on the SI utterance).
+  string reply_to_id = 6;
+  // Structured source citations. Empty -> the utterance is inserted
+  // with no citations field at all (visually identical to an
+  // un-grounded text reply).
+  repeated AgentTurnCitation citations = 7;
+}
+
+message VoiceAgentRealtimeOutputAck {
+  string request_id = 1;
+  bool success = 2;
+  string utterance_id = 3;   // canonical row id of the inserted SI utterance
+  string error_code = 4;
+  string error_message = 5;
 }
 
 // -----------------------------------------------------------------------------

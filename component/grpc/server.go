@@ -1071,6 +1071,8 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleVoiceAgentFinalTranscript(envelope, payload.VoiceAgentFinalTranscript)
 	case *memqlv1.MemqlClientMessage_VoiceAgentTurnRequest:
 		return s.handleVoiceAgentTurnRequest(envelope, payload.VoiceAgentTurnRequest)
+	case *memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput:
+		return s.handleVoiceAgentRealtimeOutput(envelope, payload.VoiceAgentRealtimeOutput)
 	default:
 		if s.logger != nil {
 			s.logger.Warn("ignoring unsupported memql client payload", "message_id", envelope.GetMessageId())
