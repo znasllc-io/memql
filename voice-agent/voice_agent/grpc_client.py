@@ -144,7 +144,7 @@ class MemqlGrpcClient:
             logger.exception("memql gRPC read loop crashed")
             raise
 
-    async def send_request(self, payload_field: str, payload: Any, partition: str = "") -> Any:
+    async def send_request(self, payload_field: str, payload: Any) -> Any:
         """Send a one-shot request, await the single matching reply.
 
         `payload_field` is the oneof field name on MemqlClientMessage,
@@ -153,7 +153,9 @@ class MemqlGrpcClient:
         """
         from voice_agent.proto import memql_pb2  # type: ignore
 
-        envelope = memql_pb2.MemqlClientMessage(partition=partition)
+        # `partition` was dropped from the MemqlClientMessage wire in
+        # #56 phase 8 (proto reserves the name); don't set it.
+        envelope = memql_pb2.MemqlClientMessage()
         envelope.message_id = uuid.uuid4().hex
         getattr(envelope, payload_field).CopyFrom(payload)
 
@@ -163,14 +165,16 @@ class MemqlGrpcClient:
         return await future
 
     async def send_stream_request(
-        self, payload_field: str, payload: Any, partition: str = ""
+        self, payload_field: str, payload: Any
     ) -> tuple[str, asyncio.Queue[Any]]:
         """Send a request that streams replies; returns the correlation id and
         a queue the caller drains until the terminal message arrives.
         """
         from voice_agent.proto import memql_pb2  # type: ignore
 
-        envelope = memql_pb2.MemqlClientMessage(partition=partition)
+        # `partition` was dropped from the MemqlClientMessage wire in
+        # #56 phase 8 (proto reserves the name); don't set it.
+        envelope = memql_pb2.MemqlClientMessage()
         envelope.message_id = uuid.uuid4().hex
         getattr(envelope, payload_field).CopyFrom(payload)
 
