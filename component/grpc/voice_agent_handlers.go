@@ -290,9 +290,14 @@ func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
 		return out
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
+	// JSON-marshal the interpolated id so an id containing a double quote cannot
+	// break out of the DSL string literal (CodeQL "unsafe quoting"). marshal
+	// yields a quoted, escaped literal, so the surrounding "%s" quotes are
+	// dropped and %s carries the full `"<escaped>"` token.
+	agentIdJSON, _ := json.Marshal(agentId)
 	query := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id=="%s" select id, payload.name, payload.role, payload.description, payload.personality`,
-		agentId)
+		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality`,
+		string(agentIdJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		return out
@@ -644,9 +649,17 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	}
 
 	go func() {
+		// JSON-marshal every interpolated string so a value containing a double
+		// quote cannot break out of its DSL string literal (CodeQL "unsafe
+		// quoting"). text already used this; do the same for the id fields and
+		// the source enum.
 		textJSON, _ := json.Marshal(text)
-		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", text: %s, source: {inputMethod: "%s", pipeline: "voice-agent"}})`,
-			utteranceId, spaceId, speakerId, string(textJSON), inputMethod)
+		utteranceIdJSON, _ := json.Marshal(utteranceId)
+		spaceIdJSON, _ := json.Marshal(spaceId)
+		speakerIdJSON, _ := json.Marshal(speakerId)
+		inputMethodJSON, _ := json.Marshal(inputMethod)
+		query := fmt.Sprintf(`mutationSendTextUtterance({utteranceId: %s, spaceId: %s, participantId: %s, text: %s, source: {inputMethod: %s, pipeline: "voice-agent"}})`,
+			string(utteranceIdJSON), string(spaceIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
 		if _, err := s.service.engine.Execute(ctx, query); err != nil {
