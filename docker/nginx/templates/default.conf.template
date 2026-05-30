@@ -66,10 +66,14 @@ upstream agent_http     { server agent:8089; }
 upstream identity_http  { server identity:8081; }
 
 # The CoPresent SPA runs as a Vite dev server in the `app` container
-# (see docker-compose.full.yml). Documentation-only, like the blocks
-# above -- the location below uses the runtime-resolver variable form
-# so nginx starts even if `app` is still installing deps / booting.
-upstream app_vite { server app:8080; }
+# (see docker-compose.full.yml). It is gated behind a compose profile
+# (#461) and is NOT present in cluster-only runs -- so do NOT declare a
+# static `upstream app_vite { server app:8080; }` here: nginx resolves a
+# static upstream at config-load and aborts with "host not found in
+# upstream app:8080" when `app` is absent, taking the whole LB (and thus
+# the cluster) down. The `app` location below uses the runtime-resolver
+# variable form (`set $app_target app:8080`) instead, so nginx starts
+# whether or not `app` exists yet and picks it up once the frontend joins.
 
 # -----------------------------------------------------------------
 # Plaintext :80 -> 301 to TLS :443
