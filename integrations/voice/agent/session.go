@@ -70,6 +70,14 @@ type RoomRequest struct {
 	// (#460) consume it.
 	Persona Persona
 
+	// Executor is the resolved voice-executor plan (#457): cascade (default)
+	// or realtime, with a recorded fallback reason when realtime was
+	// requested but unavailable. The voice-build room joiner branches on
+	// Executor.Kind to build the cascade media plane (room_audio_voice.go) or
+	// the realtime media plane (room_realtime_voice.go). The CGO-free build
+	// does not consume it.
+	Executor VoiceExecutorPlan
+
 	// RegisterSpeakSink lets the room joiner register the cascade (#455)
 	// as the VoiceAgentSpeak consumer once the audio loop is constructed,
 	// so unsolicited speak pushes reach TTS playout. nil-safe: the
@@ -189,6 +197,14 @@ func (s *Session) Run(ctx context.Context) error {
 	// the wire path is provably reachable; the actual say() pipeline is #455.
 	s.client.SetPushHandler("VoiceAgentSpeak", s.onVoiceAgentSpeak)
 
+	// Resolve the voice executor (#457) behind the same seam as the cascade.
+	// Default is cascade (no regression); realtime is opt-in via
+	// MEMQL_VOICE_EXECUTOR=realtime and degrades cleanly back to the cascade
+	// when its preconditions fail (missing OPENAI_API_KEY / persona build).
+	// The voice-build room joiner branches on the plan; the CGO-free build
+	// logs it only.
+	executor := SelectVoiceExecutor(s.cfg, s.persona, s.logger)
+
 	reason := "normal"
 	if s.joiner != nil {
 		req := RoomRequest{
@@ -197,6 +213,7 @@ func (s *Session) Run(ctx context.Context) error {
 			RoomName:          s.roomName,
 			Ack:               ack,
 			Persona:           s.persona,
+			Executor:          executor,
 			RegisterSpeakSink: s.SetSpeakSink,
 		}
 		r, joinErr := s.joiner.JoinAndServe(ctx, req)
@@ -212,7 +229,8 @@ func (s *Session) Run(ctx context.Context) error {
 		// Default (CGO-free) build path: no room joiner wired. The session
 		// handshake is complete; the media loop is the voice build's job.
 		s.logger.Info("voice-agent session ack received; no room joiner wired (audio loop is #455)",
-			"space_id", s.spaceID, "canonical_voice", ack.CanonicalVoice)
+			"space_id", s.spaceID, "canonical_voice", ack.CanonicalVoice,
+			"executor", string(executor.Kind), "fallback_reason", executor.FallbackReason)
 	}
 
 	s.end(context.Background(), reason)

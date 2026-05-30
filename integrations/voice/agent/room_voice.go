@@ -69,14 +69,17 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	var reasonMu sync.Mutex
 	disconnectReason := "normal"
 
-	// bridge is the per-session media plane (#455): STT per remote track +
-	// TTS publish, wired to the cascade orchestrator. It is constructed
-	// after the connection is confirmed (it publishes a track), so the
-	// track/participant callbacks reach it through this pointer guarded by
-	// bridgeMu. Until it is set, the callbacks fall through to diagnostics.
+	// bridge is the per-session media plane: the cascade bridge (#455: STT per
+	// remote track + Deepgram TTS publish) or the realtime bridge (#457: STT
+	// for labeled transcripts + active-speaker audio in, gpt-realtime output
+	// audio published), selected behind the executor seam (RoomRequest.Executor).
+	// Both satisfy mediaBridge. It is constructed after the connection is
+	// confirmed (it publishes a track), so the track/participant callbacks
+	// reach it through this pointer guarded by bridgeMu. Until it is set, the
+	// callbacks fall through to diagnostics.
 	var bridgeMu sync.Mutex
-	var bridge *roomAudioBridge
-	getBridge := func() *roomAudioBridge {
+	var bridge mediaBridge
+	getBridge := func() mediaBridge {
 		bridgeMu.Lock()
 		defer bridgeMu.Unlock()
 		return bridge
@@ -149,15 +152,17 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 			"room", room.Name(), "state", string(room.ConnectionState()))
 	}
 
-	// #455 cascade: stand up the media plane now that the connection is
-	// confirmed. The bridge publishes the agent's local audio track and
-	// constructs the cascade orchestrator; OnTrackSubscribed then opens a
-	// Deepgram STT stream per remote human track and feeds it decoded
-	// PCM16. The cascade forwards transcripts, drives turn requests, and
-	// publishes TTS audio back through the bridge's local track.
+	// Stand up the media plane now that the connection is confirmed, behind
+	// the executor-selection seam (#457). The realtime path (gpt-realtime
+	// speech-to-speech) is built only when MEMQL_VOICE_EXECUTOR=realtime
+	// resolved cleanly; otherwise (the default, or a realtime fallback) the
+	// cascade path is built -- no regression. Both publish the agent's local
+	// audio track and register a SpeakSink so unsolicited SI replies reach
+	// playout (conductor gate B); OnTrackSubscribed feeds each remote human
+	// track into the chosen bridge.
 	bridgeCtx, bridgeCancel := context.WithCancel(ctx)
 	defer bridgeCancel()
-	b, err := newRoomAudioBridge(bridgeCtx, j.cfg, req, j.client, room, j.logger)
+	b, speakSink, err := j.buildMediaBridge(bridgeCtx, req, room)
 	if err != nil {
 		return "error", err
 	}
@@ -166,10 +171,8 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	bridgeMu.Unlock()
 	defer b.close()
 
-	// Register the cascade as the VoiceAgentSpeak consumer so unsolicited
-	// SI replies (server pushes) reach TTS playout (conductor gate B).
 	if req.RegisterSpeakSink != nil {
-		req.RegisterSpeakSink(b.cascade)
+		req.RegisterSpeakSink(speakSink)
 	}
 
 	// Block until the room disconnects or the caller cancels.

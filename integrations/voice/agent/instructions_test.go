@@ -56,3 +56,16 @@ func TestBuildSessionPersona(t *testing.T) {
 	assert.Equal(t, ResolveRealtimeVoice(p), sp.Voice)
 	assert.Equal(t, BuildPersonaInstructions(p), sp.Instructions)
 }
+
+func TestRealtimeInstructionsForReply(t *testing.T) {
+	// A decided reply is rendered as a per-response directive that carries the
+	// content verbatim with spoken-register framing (#432 conductor gate).
+	out := RealtimeInstructionsForReply("The cloud spend is the place to start.")
+	assert.Contains(t, out, "The cloud spend is the place to start.")
+	assert.Contains(t, out, "persona's voice")
+
+	// An empty / blank reply renders empty instructions: the caller never
+	// drives response.create for a suppressed turn.
+	assert.Empty(t, RealtimeInstructionsForReply(""))
+	assert.Empty(t, RealtimeInstructionsForReply("   "))
+}
