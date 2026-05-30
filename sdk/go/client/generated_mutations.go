@@ -4670,7 +4670,7 @@ func MutationDeleteUserHardBuild(args MutationDeleteUserHardArgs) string {
 
 // MutationEmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
 //
-// Bound concept: clientToolRequest.
+// Bound concept: request.
 type MutationEmitClientToolRequestArgs struct {
 	RequestId     string
 	CallId        string
@@ -4744,7 +4744,7 @@ func MutationEmitClientToolRequestBuild(args MutationEmitClientToolRequestArgs) 
 
 // MutationEmitClientToolResponse -- Emit a client-tool response envelope fulfilling a pending clientToolRequest.
 //
-// Bound concept: clientToolResponse.
+// Bound concept: response.
 type MutationEmitClientToolResponseArgs struct {
 	ResponseId   string
 	CallId       string
