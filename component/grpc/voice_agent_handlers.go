@@ -70,6 +70,51 @@ const voiceTurnWaitTimeout = 30 * time.Second
 // works" without needing a graph row.
 const voicePartialEventTopic = "voice.partial.utterance"
 
+// voiceGateDirectiveTopic is the event-bus subject the cognition gate
+// (#477/#479) publishes its per-turn decision on: engage(mode, brevity) or
+// defer, INSTEAD of authoring a reply. The voice turn relay subscribes to it
+// and forwards the directive on VoiceAgentTurnComplete so the realtime model
+// authors the words itself. Payload keys: spaceId, gaAgentId, engage (bool),
+// mode, brevity, utteranceId. When no directive is published the relay falls
+// back to the legacy authored-utterance path (extractGAReplyFromEvent).
+const voiceGateDirectiveTopic = "voice.gate.directive"
+
+// voiceGateDirective is the decoded gate decision carried on
+// voiceGateDirectiveTopic.
+type voiceGateDirective struct {
+	engage      bool
+	mode        string
+	brevity     string
+	utteranceId string
+}
+
+// extractVoiceGateDirective decodes a voiceGateDirectiveTopic event for the
+// target (space, agent), or returns ok=false when it is for a different
+// space/agent or malformed.
+func extractVoiceGateDirective(e events.Event, spaceId, gaAgentId string) (voiceGateDirective, bool) {
+	if e.Payload == nil {
+		return voiceGateDirective{}, false
+	}
+	if !spaceIdMatches(asString(e.Payload, "spaceId"), spaceId) {
+		return voiceGateDirective{}, false
+	}
+	// gaAgentId match tolerant of canonical-vs-slug, same shape as the channel
+	// override helper.
+	if evAgent := asString(e.Payload, "gaAgentId"); evAgent != "" &&
+		!channelOverrideTargetsAgent(evAgent, gaAgentId) {
+		return voiceGateDirective{}, false
+	}
+	d := voiceGateDirective{
+		mode:        strings.TrimSpace(asString(e.Payload, "mode")),
+		brevity:     strings.TrimSpace(asString(e.Payload, "brevity")),
+		utteranceId: asString(e.Payload, "utteranceId"),
+	}
+	if v, ok := e.Payload["engage"].(bool); ok {
+		d.engage = v
+	}
+	return d, true
+}
+
 // handleVoiceAgentSessionStart binds a LiveKit room to a memql space.
 // Phase 6: still returns the persona-resolver placeholder; Phase 9
 // fills in avatar_persona_id, Phase 7 fills in the gate state.
@@ -779,6 +824,24 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 		}
 	}, events.WithSubscriberName(fmt.Sprintf("voice-agent-turn-%s", requestId)))
 
+	// Gate path (#477/#479): subscribe to the conductor gate's directive for
+	// this turn. When the gate publishes a decision the model authors the words
+	// itself -- the relay forwards engage(mode, brevity) or defers immediately,
+	// instead of waiting for cognition to author. Whichever of the two paths
+	// fires first wins; absent a directive the legacy authored-utterance path
+	// above still drives the turn.
+	directiveCh := make(chan voiceGateDirective, 4)
+	unsubscribeDirective := s.service.eventBus.Subscribe(voiceGateDirectiveTopic, func(e events.Event) {
+		dir, ok := extractVoiceGateDirective(e, spaceId, gaAgentId)
+		if !ok {
+			return
+		}
+		select {
+		case directiveCh <- dir:
+		default:
+		}
+	}, events.WithSubscriberName(fmt.Sprintf("voice-agent-gate-%s", requestId)))
+
 	// One active turn-request per (space, gaAgent) at a time. If the
 	// user fires a new utterance while the previous turn is still
 	// parked (classifier suppressed it / it hit the 30s timeout / it
@@ -811,6 +874,7 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 
 	go func() {
 		defer unsubscribe()
+		defer unsubscribeDirective()
 		defer cancel()
 		defer func() {
 			s.voiceTurnsMu.Lock()
@@ -822,6 +886,32 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 		}()
 
 		select {
+		case dir := <-directiveCh:
+			// Gate path (#479): the conductor decided WHEN + brevity; the model
+			// authors WHAT. A defer (or an engage with no mode) suppresses with
+			// an empty TurnComplete -- the executor emits no response.create. An
+			// engage forwards the content-free directive; the executor renders it
+			// and the model generates natively (no authored text relayed).
+			complete := &memqlv1.VoiceAgentTurnComplete{
+				RequestId:          requestId,
+				UtteranceId:        dir.utteranceId,
+				EffectiveAudioMode: "mirror_user",
+				EffectiveVideoMode: "mirror_user",
+			}
+			if dir.engage && strings.TrimSpace(dir.mode) != "" && !strings.EqualFold(dir.mode, "defer") {
+				complete.DirectiveMode = dir.mode
+				complete.Brevity = dir.brevity
+			}
+			if s.logger != nil {
+				s.logger.Info("voice-agent turn: gate directive",
+					"request_id", requestId, "space_id", spaceId,
+					"engage", complete.DirectiveMode != "", "mode", dir.mode, "brevity", dir.brevity)
+			}
+			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
+				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
+					VoiceAgentTurnComplete: complete,
+				},
+			})
 		case reply := <-replyCh:
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnDelta{
