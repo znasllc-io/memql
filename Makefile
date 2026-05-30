@@ -44,9 +44,13 @@ build-all: build bff voice cognition agent planner identity healthcheck
 bff:
 	$(GO) build $(GOFLAGS) -tags bff -o $(BIN_DIR)/memql-bff .
 
-## Build voice node binary
+## Build voice node binary. The Go voice-agent's LiveKit server-sdk-go +
+## media-sdk pull a CGO libopus/opusfile/soxr dependency (see docs/voice/
+## 451-livekit-go-room-participation.md, Caveat 1), so this target overrides
+## the repo-wide CGO_ENABLED=0 default. Requires libopus-dev / libopusfile-dev
+## / libsoxr-dev (apt) or opus-dev / opusfile-dev / soxr-dev (apk) installed.
 voice:
-	$(GO) build $(GOFLAGS) -tags voice -o $(BIN_DIR)/memql-voice .
+	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags voice -o $(BIN_DIR)/memql-voice .
 
 ## Build cognition node binary
 cognition:

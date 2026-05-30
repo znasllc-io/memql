@@ -1,0 +1,185 @@
+// Package agent is the Go voice-agent: the media participant that joins a
+// LiveKit room on behalf of a memQL space's General Assistant, opens a
+// MemqlService.Stream gRPC session, and runs the turn-taking / STT / TTS
+// orchestration that the retired Python voice-agent (voice-agent/, LiveKit
+// Agents 1.5) used to own.
+//
+// This file is the foundational skeleton landed for issue #454 (epic #449):
+// config + env loading, the gRPC bidirectional-stream client, the session
+// lifecycle, and the LiveKit room JOIN. The audio loop (STT/TTS, turn-taking,
+// barge-in), persona/grounding parity, the realtime executor, MCP/output, the
+// lifecycle guardrails, and the avatar are out of scope here and left as
+// clearly-marked TODO seams referencing their follow-up issues (#455-#460).
+//
+// Build-tag discipline: everything in this package that imports the LiveKit
+// server SDK or its CGO media-sdk (the libopus/soxr-bound PCM path) lives
+// behind a `//go:build voice` tag so the default CGO-free CI lanes
+// (`go build ./...`, `go vet ./...`, `go test ./...`) never pull CGO. The
+// config, gRPC client, and session lifecycle here are pure-Go and tested in
+// the default lane; the room-join wiring (room_voice.go) is voice-tagged.
+package agent
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Config is the resolved runtime configuration for one voice-agent process.
+// It mirrors the env-var family the Python config.py already defines so a
+// deployment switching from the Python agent to the Go agent re-uses the same
+// names verbatim. Read once at startup.
+type Config struct {
+	// LiveKit room transport.
+	LiveKitURL       string
+	LiveKitAPIKey    string
+	LiveKitAPISecret string
+
+	// Deepgram (STT + TTS). Carried here for #455; not consumed yet.
+	DeepgramAPIKey string
+
+	// Voice executor selection (#440 / #434). "cascade" (default) is the
+	// Deepgram STT -> cognition -> Deepgram TTS path; "realtime" swaps in the
+	// OpenAI gpt-realtime speech-to-speech model. Validated here so a typo
+	// fails loudly at startup; the executor itself is #457.
+	VoiceExecutor string // "cascade" | "realtime"
+	OpenAIAPIKey  string // only required on the realtime path (#457)
+	RealtimeModel string
+
+	// Realtime lifecycle + cost guardrails (#439 / #459). Parsed here so the
+	// env surface matches the Python agent; enforcement lands in #459.
+	RealtimeIdleTimeoutSec int
+	RealtimeMaxSessionSec  int
+	RealtimeMaxAudioTokens int
+
+	// memQL gRPC.
+	MemqlGRPCAddr string
+	// Identity-issued class="voice_agent" JWT bearer presented on every
+	// MemqlService.Stream dial. Resolved by ResolveVoiceAgentToken (operator-
+	// provisioned token, then the self-bootstrap path). The memQL voice-agent
+	// stream interceptor verifies it via the cluster JWKS and admits it to the
+	// VoiceAgent* message surface only.
+	VoiceAgentToken string
+
+	// Avatar (#460). Parsed + validated here; the avatar participant itself is
+	// a follow-up.
+	AvatarVendor         string // "anam" | "simli" | "none"
+	AnamAPIKey           string
+	SimliAPIKey          string
+	AnamDefaultPersonaID string
+	AnamDefaultAvatarID  string
+	AnamDefaultPersonaNm string
+
+	// Logging.
+	LogLevel string
+
+	// Deepgram tuning -- inherited from the Python defaults so the Go path
+	// picks up the same EOU semantics. Consumed by the turn-taking machine
+	// (#455), parsed here for parity.
+	DGASRModel       string
+	DGTTSModel       string
+	DGLanguage       string
+	DGEndpointingMs  int
+	DGUtteranceEndMs int
+}
+
+// AvatarEnabled reports whether an avatar vendor is configured.
+func (c Config) AvatarEnabled() bool {
+	return c.AvatarVendor == "anam" || c.AvatarVendor == "simli"
+}
+
+// Getenv is the environment accessor LoadConfig reads through. Overridable in
+// tests so config resolution can be exercised without touching the real
+// process environment.
+type Getenv func(key string) string
+
+// LoadConfig resolves + validates the voice-agent configuration from the
+// environment. It returns an error rather than panicking so the caller can
+// surface a clean operator diagnostic. The token-resolution step (operator-
+// provisioned vs self-bootstrap) is delegated to ResolveVoiceAgentToken.
+//
+// getenv may be nil, in which case os.Getenv is used.
+func LoadConfig(getenv Getenv) (Config, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	get := func(key, def string) string {
+		v := strings.TrimSpace(getenv(key))
+		if v == "" {
+			return def
+		}
+		return v
+	}
+	getRequired := func(key string) (string, error) {
+		v := strings.TrimSpace(getenv(key))
+		if v == "" {
+			return "", fmt.Errorf("required env var %s is unset", key)
+		}
+		return v, nil
+	}
+	getInt := func(key string, def int) int {
+		raw := strings.TrimSpace(getenv(key))
+		if raw == "" {
+			return def
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			// Match the Python agent: warn-and-fall-back rather than fail.
+			return def
+		}
+		return n
+	}
+
+	var cfg Config
+	var err error
+
+	if cfg.LiveKitURL, err = getRequired("LIVEKIT_URL"); err != nil {
+		return Config{}, err
+	}
+	if cfg.LiveKitAPIKey, err = getRequired("LIVEKIT_API_KEY"); err != nil {
+		return Config{}, err
+	}
+	if cfg.LiveKitAPISecret, err = getRequired("LIVEKIT_API_SECRET"); err != nil {
+		return Config{}, err
+	}
+	if cfg.DeepgramAPIKey, err = getRequired("MEMQL_DEEPGRAM_API_KEY"); err != nil {
+		return Config{}, err
+	}
+	if cfg.MemqlGRPCAddr, err = getRequired("MEMQL_GRPC_ADDR"); err != nil {
+		return Config{}, err
+	}
+
+	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "cascade"))
+	cfg.OpenAIAPIKey = get("OPENAI_API_KEY", "")
+	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime")
+	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
+	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
+	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)
+
+	cfg.AvatarVendor = strings.ToLower(get("MEMQL_AVATAR_VENDOR", "anam"))
+	cfg.AnamAPIKey = get("ANAM_API_KEY", "")
+	cfg.SimliAPIKey = get("SIMLI_API_KEY", "")
+	cfg.AnamDefaultPersonaID = get("ANAM_DEFAULT_PERSONA_ID", "")
+	cfg.AnamDefaultAvatarID = get("ANAM_DEFAULT_AVATAR_ID", "")
+	cfg.AnamDefaultPersonaNm = get("ANAM_DEFAULT_PERSONA_NAME", "Assistant")
+
+	cfg.LogLevel = strings.ToUpper(get("VOICE_AGENT_LOG_LEVEL", "INFO"))
+
+	cfg.DGASRModel = get("POLYPHON_DEEPGRAM_ASR_MODEL", "nova-3")
+	cfg.DGTTSModel = get("POLYPHON_DEEPGRAM_TTS_MODEL", "aura-2")
+	cfg.DGLanguage = get("POLYPHON_DEEPGRAM_LANGUAGE", "en")
+	cfg.DGEndpointingMs = getInt("POLYPHON_DEEPGRAM_ENDPOINTING_MS", 2000)
+	cfg.DGUtteranceEndMs = getInt("POLYPHON_DEEPGRAM_UTTERANCE_END_MS", 0)
+
+	if cfg.VoiceExecutor != "cascade" && cfg.VoiceExecutor != "realtime" {
+		return Config{}, fmt.Errorf(
+			"MEMQL_VOICE_EXECUTOR=%q -- must be 'cascade' or 'realtime'", cfg.VoiceExecutor)
+	}
+	if cfg.AvatarVendor != "anam" && cfg.AvatarVendor != "simli" && cfg.AvatarVendor != "none" {
+		return Config{}, fmt.Errorf(
+			"MEMQL_AVATAR_VENDOR=%q -- must be 'anam', 'simli', or 'none'", cfg.AvatarVendor)
+	}
+
+	return cfg, nil
+}
