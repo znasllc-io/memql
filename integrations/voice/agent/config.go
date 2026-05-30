@@ -56,6 +56,11 @@ type Config struct {
 	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
 	// native authorship for a single-human standard space). Default true.
 	RealtimeNativeTurn bool
+	// RealtimeMultiPartySemanticVad enables the #481 multi-party gate:
+	// semantic_vad turn detection + the conductor gate + native generation for
+	// a >=2-human room (vs the turn_detection:null + Deepgram path). Default
+	// false -- opt-in, pending live validation. Requires RealtimeNativeTurn.
+	RealtimeMultiPartySemanticVad bool
 	// RealtimeTranscriptionModel is the model id for the realtime session's
 	// native input-audio transcription on the native path (#478).
 	RealtimeTranscriptionModel string
@@ -187,6 +192,9 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// realtime path (a finer-grained rollback than dropping to the cascade).
 	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
 	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
+	// #481 multi-party semantic_vad gate -- opt-in (default false), pending live
+	// validation in a >=2-human room.
+	cfg.RealtimeMultiPartySemanticVad = get("MEMQL_REALTIME_MULTIPARTY_SEMANTIC_VAD", "false") == "true"
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
 	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
 	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)

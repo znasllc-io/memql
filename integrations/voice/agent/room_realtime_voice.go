@@ -91,13 +91,18 @@ type realtimeRoomBridge struct {
 	// model-owns-turn mode (exactly 1 human) via session.UpdateSession +
 	// executor.SetNativeMode. sessionBase holds the persona/voice/tools so the
 	// two configs can be rebuilt; gateNative (under gateMu) tracks the live mode.
-	nativeEnabled      bool
-	transcriptionModel string
-	language           string
-	sessionBase        openai.SessionConfig
+	nativeEnabled         bool
+	multiPartySemanticVad bool // #481: multi-party uses semantic_vad + gate when set
+	transcriptionModel    string
+	language              string
+	sessionBase           openai.SessionConfig
 
-	gateMu     sync.Mutex
-	gateNative bool
+	gateMu sync.Mutex
+	// gateTurnMode is the executor turn mode currently applied (one of the
+	// turnMode* constants). Zero value (turnModeGatedCascade) matches the
+	// connect-time config (turn_detection:null), so the first transition is to
+	// native or gated-semantic_vad as the human count resolves.
+	gateTurnMode int32
 
 	mu      sync.Mutex
 	streams map[string]polyphon.ASRStream // by participant identity
@@ -217,19 +222,20 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	lifecycle.Start(0)
 
 	return &realtimeRoomBridge{
-		cfg:                cfg,
-		roomReq:            req,
-		logger:             logger,
-		asr:                asr,
-		session:            session,
-		local:              local,
-		executor:           executor,
-		lifecycle:          lifecycle,
-		nativeEnabled:      cfg.RealtimeNativeTurn,
-		transcriptionModel: cfg.RealtimeTranscriptionModel,
-		language:           cfg.DGLanguage,
-		sessionBase:        sessionBase,
-		streams:            make(map[string]polyphon.ASRStream),
+		cfg:                   cfg,
+		roomReq:               req,
+		logger:                logger,
+		asr:                   asr,
+		session:               session,
+		local:                 local,
+		executor:              executor,
+		lifecycle:             lifecycle,
+		nativeEnabled:         cfg.RealtimeNativeTurn,
+		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad,
+		transcriptionModel:    cfg.RealtimeTranscriptionModel,
+		language:              cfg.DGLanguage,
+		sessionBase:           sessionBase,
+		streams:               make(map[string]polyphon.ASRStream),
 	}, nil
 }
 
@@ -251,18 +257,43 @@ func (b *realtimeRoomBridge) nativeSessionConfig() openai.SessionConfig {
 	return cfg
 }
 
-// applyGateMode flips the realtime session between the conductor gate and the
-// #478 native mode based on the live human count: native when exactly one human
-// shares the space with the GA (and native is enabled), gated otherwise. It is
-// idempotent -- a no-op when the resolved mode already matches -- and sends a
-// session.update + executor.SetNativeMode only on a transition. Called after the
+// multiPartySemanticVadConfig returns the base config with semantic_vad turn
+// detection but create_response:FALSE -- the #481 multi-party posture. The model
+// detects turn-end + transcribes the active speaker but does NOT auto-generate;
+// the conductor gate decides engage/defer and the executor fires CreateResponse
+// on engage. Barge-in is native (interrupt_response).
+func (b *realtimeRoomBridge) multiPartySemanticVadConfig() openai.SessionConfig {
+	cfg := b.sessionBase
+	cfg.TurnDetection = &openai.TurnDetectionConfig{
+		Type:              "semantic_vad",
+		CreateResponse:    false,
+		InterruptResponse: true,
+		Eagerness:         "auto",
+	}
+	cfg.InputTranscription = &openai.InputTranscriptionConfig{
+		Model:    b.transcriptionModel,
+		Language: b.language,
+	}
+	return cfg
+}
+
+// applyGateMode resolves the executor turn mode from the live human count + the
+// deploy flags and applies it (session.update + executor.SetTurnMode) on a
+// transition. One pipeline, one optional gate (#475):
+//   - exactly one human -> native (#478): the model owns the turn.
+//   - >=2 humans + multi-party semantic_vad enabled -> gated-semantic_vad
+//     (#481): the model detects the turn, the conductor gate decides, the model
+//     authors on engage.
+//   - >=2 humans otherwise -> gated-cascade: turn_detection:null + Deepgram +
+//     the conductor gate (the pre-#481 multi-party path).
+//
+// Idempotent (no-op when the resolved mode already matches). Called after the
 // lifecycle's human-count changes (track-subscribe / participant-disconnect).
 //
 // v1 limitation: reconfiguring turn_detection mid-call can race an in-flight
-// native response if a second human joins exactly as the model is speaking. The
-// transition is rare (a participant entering/leaving a 1-on-1), so v1 reconfigures
-// on the boundary and lets the current response finish; a settle/queue is a #481
-// (multi-party) follow-up.
+// response if the human count crosses a boundary as the model is speaking. The
+// transition is rare; v1 reconfigures on the boundary and lets the current
+// response finish; a settle/queue is a follow-up.
 func (b *realtimeRoomBridge) applyGateMode() {
 	if !b.nativeEnabled {
 		return
@@ -270,30 +301,38 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	b.mu.Lock()
 	humanCount := len(b.streams)
 	b.mu.Unlock()
-	wantNative := humanCount == 1
+
+	var mode int32
+	var cfg openai.SessionConfig
+	switch {
+	case humanCount == 1:
+		mode = turnModeNative
+		cfg = b.nativeSessionConfig()
+	case b.multiPartySemanticVad:
+		mode = turnModeGatedSemanticVad
+		cfg = b.multiPartySemanticVadConfig()
+	default:
+		mode = turnModeGatedCascade
+		cfg = b.sessionBase // turn_detection:null
+	}
 
 	b.gateMu.Lock()
 	defer b.gateMu.Unlock()
-	if wantNative == b.gateNative {
+	if mode == b.gateTurnMode {
 		return
-	}
-
-	cfg := b.sessionBase // gated (turn_detection:null)
-	if wantNative {
-		cfg = b.nativeSessionConfig()
 	}
 	if err := b.session.UpdateSession(cfg); err != nil {
 		if b.logger != nil {
 			b.logger.Warn("voice-agent realtime room: gate-mode session update failed",
-				"want_native", wantNative, "err", err)
+				"want_mode", mode, "err", err)
 		}
 		return
 	}
-	b.executor.SetNativeMode(wantNative)
-	b.gateNative = wantNative
+	b.executor.SetTurnMode(mode)
+	b.gateTurnMode = mode
 	if b.logger != nil {
 		b.logger.Info("voice-agent realtime room: gate mode applied",
-			"native", wantNative, "human_count", humanCount)
+			"mode", mode, "human_count", humanCount)
 	}
 }
 
