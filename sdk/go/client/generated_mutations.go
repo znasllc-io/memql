@@ -7184,6 +7184,7 @@ type MutationSendTextUtteranceArgs struct {
 	Text            string
 	ReplyToId       string
 	Source          map[string]any
+	Citations       []map[string]any
 }
 
 // MutationSendTextUtterance calls the engine mutation mutationSendTextUtterance.
@@ -7233,6 +7234,11 @@ func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
 	}
 	b.WriteString("source: ")
 	b.WriteString(renderMemQLValue(args.Source))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("citations: ")
+	b.WriteString(renderMemQLValue(args.Citations))
 	b.WriteString("})")
 	return b.String()
 }

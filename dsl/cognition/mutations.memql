@@ -851,6 +851,7 @@ mutation utterance mutationSendTextUtterance {
     text             string  @required
     replyToId        string
     source           object
+    citations        []object
   }
   insert utterance {
     id: args.utteranceId
@@ -861,6 +862,7 @@ mutation utterance mutationSendTextUtterance {
     args.text
     args.replyToId
     args.source
+    args.citations
   }
 }
 

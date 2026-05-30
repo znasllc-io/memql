@@ -145,7 +145,8 @@ func isVoiceAgentPayload(payload any) bool {
 		*memqlv1.MemqlClientMessage_VoiceAgentSessionEnd,
 		*memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript,
 		*memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript,
-		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest:
+		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest,
+		*memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput:
 		return true
 	}
 	return false

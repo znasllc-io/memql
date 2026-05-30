@@ -922,6 +922,215 @@ func trailingSlug(id string) string {
 // in polyphon_handlers.go; kept distinct so audit + telemetry can tell
 // voice-agent inserts from the legacy bridge-agent inserts during the
 // cutover window.
+// handleVoiceAgentRealtimeOutput captures the assistant's spoken output
+// for one realtime turn and inserts it as an SI utterance with full
+// chat/canvas/audit parity (#437).
+//
+// The cascade routes assistant replies through VoiceAgentTurnRequest --
+// cognition runs the agent loop and inserts the SI utterance itself
+// (insertSIResponse in integrations/cognition/si_responder.go), stamping
+// participantType="si" + citations off the respondToUser envelope. The
+// realtime executor (gpt-realtime) speaks directly and never enters that
+// path, so this handler is the sole writer of realtime SI utterances.
+// It mirrors insertSIResponse's wire shape exactly:
+//
+//   - participantType="si"  (the value the frontend keys sender lookup on)
+//   - participantId         = the GA's v1:cognition:participant row id,
+//                             NOT the agent template id (resolved here via
+//                             querySiParticipantForSpace)
+//   - utteranceType="text"  (transcript is text; audio rode LiveKit)
+//   - source                = {outputMethod:"voice", inputMethod:"realtime",
+//                              pipeline:"voice-agent-realtime", agentId}
+//   - citations             = same {domainId, matchedPhrase} entries the
+//                             cascade persists (omitted entirely when empty)
+//
+// so chat (streaming reveal + role label + citation chips), canvas
+// announcements, conductor history, and audit all read a realtime voice
+// turn identically to a text/cascade turn. reply_id doubles as the
+// utterance id so it matches any in-flight streaming replyId the
+// frontend already keyed.
+func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.VoiceAgentRealtimeOutput) error {
+	if msg == nil {
+		return nil
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+	correlate := envelope.GetMessageId()
+
+	if s.service.engine == nil {
+		return s.sendQueryError(requestId, correlate, codes.Unavailable, "engine not configured")
+	}
+
+	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
+	text := strings.TrimSpace(msg.GetText())
+	if spaceId == "" || gaAgentId == "" || text == "" {
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, gaAgentId, text are required")
+	}
+
+	// The committed utterance id IS the reply_id when provided so it
+	// matches the chat panel's streaming replyId contract. Fall back to
+	// a freshly-minted slug (same flat `utt-<nanos>-<hex>` shape the
+	// final-transcript path uses -- never embed a participant id, which
+	// the canonicalizer would mis-parse as the type tag).
+	utteranceId := strings.TrimSpace(msg.GetReplyId())
+	if utteranceId == "" {
+		utteranceId = fmt.Sprintf("utt-si-%d-%s", time.Now().UnixNano(), randHex(8))
+	}
+	replyToId := strings.TrimSpace(msg.GetReplyToId())
+
+	ack := func(success bool, utterId, code, errMsg string) error {
+		return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
+			Payload: &memqlv1.MemqlServerMessage_VoiceAgentRealtimeOutputAck{
+				VoiceAgentRealtimeOutputAck: &memqlv1.VoiceAgentRealtimeOutputAck{
+					RequestId:    requestId,
+					Success:      success,
+					UtteranceId:  utterId,
+					ErrorCode:    code,
+					ErrorMessage: errMsg,
+				},
+			},
+		})
+	}
+
+	go func() {
+		ctx := contextWithVoiceAgentActor(context.Background())
+
+		// Resolve the GA's SI participant row in the space. The frontend
+		// resolves a sender via participantMap.get(utterance.participantId),
+		// which is the v1:cognition:participant id -- NOT the agent
+		// template id. querySiParticipantForSpace returns the active SI
+		// participant; voice rooms have a single GA, so the first active
+		// SI participant is the speaker.
+		participantId := s.resolveSIParticipantId(ctx, spaceId)
+		if participantId == "" {
+			if s.logger != nil {
+				s.logger.Error("voice-agent realtime output: no SI participant resolved",
+					"request_id", requestId, "space_id", spaceId, "ga_agent_id", gaAgentId)
+			}
+			_ = ack(false, "", "participant_not_found", "no active SI participant in space")
+			return
+		}
+
+		// Source attribution. outputMethod="realtimeVoice" is the
+		// concept's enum value for the gpt-realtime speech-to-speech
+		// path (v1:cognition:utterance.source.outputMethod). pipeline
+		// tags the wire path so cognition's voice-vs-text routing keys
+		// on it; sttProvider/agentId mirror what insertSIResponse stamps.
+		source := map[string]string{
+			"outputMethod": "realtimeVoice",
+			"pipeline":     "voice-agent-realtime",
+			"sttProvider":  "openai-realtime",
+			"agentId":      gaAgentId,
+		}
+		sourceJSON, _ := json.Marshal(source)
+
+		// Citations parity: same {domainId, matchedPhrase} entries the
+		// cascade persists. Dropped entirely when empty so an
+		// un-grounded realtime reply is byte-identical to an un-grounded
+		// text reply (no `"citations": []`).
+		citationsClause := buildRealtimeCitationsClause(msg.GetCitations())
+
+		textJSON, _ := json.Marshal(text)
+		replyToClause := ""
+		if replyToId != "" {
+			replyToJSON, _ := json.Marshal(replyToId)
+			replyToClause = fmt.Sprintf(`, replyToId: %s`, string(replyToJSON))
+		}
+
+		query := fmt.Sprintf(
+			`mutationSendTextUtterance({utteranceId: "%s", spaceId: "%s", participantId: "%s", participantType: "si", text: %s%s, source: %s%s})`,
+			utteranceId, spaceId, participantId,
+			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
+		)
+
+		if _, err := s.service.engine.Execute(ctx, query); err != nil {
+			if s.logger != nil {
+				s.logger.Error("voice-agent realtime output insert failed",
+					"request_id", requestId, "space_id", spaceId,
+					"utterance_id", utteranceId, "error", err)
+			}
+			_ = ack(false, "", "insert_failed", err.Error())
+			return
+		}
+
+		if s.logger != nil {
+			s.logger.Info("voice-agent realtime output inserted",
+				"request_id", requestId, "space_id", spaceId,
+				"utterance_id", utteranceId, "participant_id", participantId,
+				"text_len", len(text), "citations", len(msg.GetCitations()))
+		}
+		_ = ack(true, utteranceId, "", "")
+	}()
+
+	return nil
+}
+
+// resolveSIParticipantId returns the active SI participant row id for a
+// space, or "" if none. Read-only; mirrors the resolution insertSIResponse
+// relies on (participantId must be the v1:cognition:participant id, not
+// the agent template id) so realtime utterances attribute identically.
+func (s *streamSession) resolveSIParticipantId(ctx context.Context, spaceId string) string {
+	if s == nil || s.service == nil || s.service.engine == nil {
+		return ""
+	}
+	spaceJSON, _ := json.Marshal(spaceId)
+	query := fmt.Sprintf(`querySiParticipantForSpace({spaceId: %s})`, string(spaceJSON))
+	result, err := s.service.engine.Execute(ctx, query)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("resolveSIParticipantId query failed",
+				"space_id", spaceId, "error", err)
+		}
+		return ""
+	}
+	for _, row := range normalizeResultRows(result.OutputPayload()) {
+		if v, ok := row["id"].(string); ok && v != "" {
+			return v
+		}
+		if inner, ok := row["payload"].(map[string]any); ok {
+			if v, ok := inner["id"].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+// buildRealtimeCitationsClause renders the `, citations: [...]` mutation
+// clause from the proto citations, or "" when there are none worth
+// emitting. Each entry is validated (both fields non-empty) so a partial
+// citation never lands a malformed chip. Mirrors the citations clause in
+// integrations/cognition/si_responder.go insertSIResponse for byte-for-
+// byte chat-render parity.
+func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string {
+	if len(citations) == 0 {
+		return ""
+	}
+	entries := make([]map[string]string, 0, len(citations))
+	for _, c := range citations {
+		if c == nil {
+			continue
+		}
+		d := strings.TrimSpace(c.GetDomainId())
+		p := strings.TrimSpace(c.GetMatchedPhrase())
+		if d == "" || p == "" {
+			continue
+		}
+		entries = append(entries, map[string]string{
+			"domainId":      d,
+			"matchedPhrase": p,
+		})
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	citationsJSON, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf(`, citations: %s`, string(citationsJSON))
+}
+
 func contextWithVoiceAgentActor(ctx context.Context) context.Context {
 	claims := map[string]any{
 		"sub":   "voice-agent",
