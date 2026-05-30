@@ -361,10 +361,16 @@ func (s *deepgramASRStream) handleEvent(raw []byte) {
 	case "SpeechStarted":
 		// VAD says voice activity just began. The wall-clock between
 		// this and the first non-empty Results event tells us
-		// Deepgram's first-partial latency.
+		// Deepgram's first-partial latency. Surface it as a
+		// speech-started ASRResult (additive Kind discriminator, see
+		// docs/voice/452-turntaking-orchestration-go.md step 1) so the
+		// turn-taking machine can drive human-turn entry + barge-in
+		// onset. Transcript-only consumers ignore the kind and skip the
+		// empty-text result, so this is backward-compatible.
 		s.logger.Info("voice trace: deepgram event",
 			"stage", "deepgram.speech_started",
 		)
+		s.dispatch(polyphon.ASRResult{Kind: polyphon.ASRKindSpeechStarted})
 	case "Metadata":
 		s.logger.Debug("deepgram asr: vad event", "type", env.Type)
 	default:

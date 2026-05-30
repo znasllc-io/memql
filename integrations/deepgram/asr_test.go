@@ -272,6 +272,30 @@ func TestStream_HandleEventDispatchesUtteranceEndJSON(t *testing.T) {
 	}
 }
 
+// TestStream_SpeechStartedSurfacesAsOnset locks in the #455 additive
+// change: a Deepgram SpeechStarted VAD event surfaces as an ASRResult
+// with Kind=ASRKindSpeechStarted (empty text), so the turn-taking machine
+// can drive human-turn entry + barge-in onset. Transcript-only consumers
+// skip the empty text, so the change is backward-compatible.
+func TestStream_SpeechStartedSurfacesAsOnset(t *testing.T) {
+	s := newTestStream()
+	s.handleEvent([]byte(`{"type": "SpeechStarted"}`))
+
+	got := drainResults(s)
+	if len(got) != 1 {
+		t.Fatalf("SpeechStarted produced %d results, want 1", len(got))
+	}
+	if got[0].Kind != polyphon.ASRKindSpeechStarted {
+		t.Errorf("SpeechStarted Kind = %v, want ASRKindSpeechStarted", got[0].Kind)
+	}
+	if got[0].Text != "" {
+		t.Errorf("SpeechStarted carried text %q, want empty", got[0].Text)
+	}
+	if got[0].IsFinal {
+		t.Errorf("SpeechStarted IsFinal=true, want false")
+	}
+}
+
 func TestJoinPhrase(t *testing.T) {
 	cases := []struct{ left, right, want string }{
 		{"", "", ""},

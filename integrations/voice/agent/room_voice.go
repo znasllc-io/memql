@@ -11,10 +11,7 @@ import (
 
 	"github.com/livekit/protocol/auth"
 	lksdk "github.com/livekit/server-sdk-go/v2"
-	lkmedia "github.com/livekit/server-sdk-go/v2/pkg/media"
 	"github.com/pion/webrtc/v4"
-
-	mediasdk "github.com/livekit/media-sdk"
 )
 
 // room_voice.go is the LiveKit media-participant room JOIN for the Go
@@ -42,15 +39,17 @@ const roomConnectTimeout = 30 * time.Second
 // media-participant lifetime for one session.
 type liveKitRoomJoiner struct {
 	cfg    Config
+	client *Client
 	logger *slog.Logger
 }
 
 // NewRoomJoiner builds the voice-build RoomJoiner from the resolved config.
 // The default (CGO-free) build supplies a different constructor
 // (room_default.go) so the package compiles without CGO; only the voice
-// entrypoint calls this one.
-func NewRoomJoiner(cfg Config, logger *slog.Logger) RoomJoiner {
-	return &liveKitRoomJoiner{cfg: cfg, logger: logger}
+// entrypoint calls this one. client is the open gRPC client the cascade
+// audio loop (#455) drives for transcript forwarding + turn requests.
+func NewRoomJoiner(cfg Config, client *Client, logger *slog.Logger) RoomJoiner {
+	return &liveKitRoomJoiner{cfg: cfg, client: client, logger: logger}
 }
 
 // JoinAndServe mints a join token for the agent identity, connects to the
@@ -69,6 +68,19 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	var once sync.Once
 	var reasonMu sync.Mutex
 	disconnectReason := "normal"
+
+	// bridge is the per-session media plane (#455): STT per remote track +
+	// TTS publish, wired to the cascade orchestrator. It is constructed
+	// after the connection is confirmed (it publishes a track), so the
+	// track/participant callbacks reach it through this pointer guarded by
+	// bridgeMu. Until it is set, the callbacks fall through to diagnostics.
+	var bridgeMu sync.Mutex
+	var bridge *roomAudioBridge
+	getBridge := func() *roomAudioBridge {
+		bridgeMu.Lock()
+		defer bridgeMu.Unlock()
+		return bridge
+	}
 
 	cb := &lksdk.RoomCallback{
 		OnDisconnected: func() {
@@ -91,18 +103,23 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 				j.logger.Info("voice-agent room participant disconnected",
 					"identity", rp.Identity())
 			}
+			if b := getBridge(); b != nil {
+				b.onParticipantDisconnected(rp)
+			}
 		},
 		ParticipantCallback: lksdk.ParticipantCallback{
 			OnTrackSubscribed: func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
-				// Diagnostic only for #454 -- mirrors the Python agent's
-				// track_subscribed listener so we can confirm audio tracks
-				// reach the agent. The decode-to-PCM wiring is #455 (see the
-				// seam at the bottom of this file).
 				if j.logger != nil {
 					j.logger.Info("voice-agent track subscribed",
 						"identity", rp.Identity(),
 						"kind", pub.Kind(),
 						"source", pub.Source().String())
+				}
+				// #455 cascade: open a Deepgram STT stream for this human
+				// audio track and feed it decoded PCM16. Falls through to
+				// diagnostics only if the bridge isn't up yet.
+				if b := getBridge(); b != nil {
+					b.onTrackSubscribed(track, pub, rp)
 				}
 			},
 		},
@@ -132,17 +149,28 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 			"room", room.Name(), "state", string(room.ConnectionState()))
 	}
 
-	// TODO(#455): subscribe to remote audio tracks and decode to PCM16 via
-	// lkmedia.NewPCMRemoteTrack(track, sink, lkmedia.WithTargetSampleRate(24000),
-	// lkmedia.WithTargetChannels(1)) wired into the Deepgram STT stream, and
-	// publish agent audio via lkmedia.NewPCMLocalTrack(24000, 1, logger) +
-	// room.LocalParticipant.PublishTrack(...). The turn-taking state machine
-	// (#455) feeds frames in both directions. The references below keep the
-	// CGO media-sdk path compiled and exercised for the #454 build
-	// foundation without standing up the loop.
-	_ = lkmedia.NewPCMRemoteTrack
-	_ = lkmedia.NewPCMLocalTrack
-	var _ mediasdk.PCM16Sample
+	// #455 cascade: stand up the media plane now that the connection is
+	// confirmed. The bridge publishes the agent's local audio track and
+	// constructs the cascade orchestrator; OnTrackSubscribed then opens a
+	// Deepgram STT stream per remote human track and feeds it decoded
+	// PCM16. The cascade forwards transcripts, drives turn requests, and
+	// publishes TTS audio back through the bridge's local track.
+	bridgeCtx, bridgeCancel := context.WithCancel(ctx)
+	defer bridgeCancel()
+	b, err := newRoomAudioBridge(bridgeCtx, j.cfg, req, j.client, room, j.logger)
+	if err != nil {
+		return "error", err
+	}
+	bridgeMu.Lock()
+	bridge = b
+	bridgeMu.Unlock()
+	defer b.close()
+
+	// Register the cascade as the VoiceAgentSpeak consumer so unsolicited
+	// SI replies (server pushes) reach TTS playout (conductor gate B).
+	if req.RegisterSpeakSink != nil {
+		req.RegisterSpeakSink(b.cascade)
+	}
 
 	// Block until the room disconnects or the caller cancels.
 	select {
