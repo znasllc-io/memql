@@ -163,8 +163,13 @@ def build_realtime_executor(cfg: Config, persona: Persona) -> Any:
         # per-turn conductor directive (#432) layers on top via the
         # per-response instructions; grounding (#436) is injected as
         # conversation.items before a response is triggered.
-        # TODO(#435): register the MCP tool bridge on this model so the
-        #   realtime model can call memql tools. No tools wired here.
+        # MCP tool bridge (#435): the low-risk read-tool allowlist is
+        #   exposed to this model and every model-driven call is mirrored
+        #   into cognition by voice_agent.mcp_tool_bridge.
+        #   wire_realtime_mcp_tools(...), called from main.py once the
+        #   gRPC client + space/agent context exist. Privileged tools are
+        #   never exposed here (default-deny). The model is built tool-less;
+        #   the bridge registers tools post-construction.
         # TODO(#437): capture the model's output (transcript + audio) into
         #   utterances + citations. Not wired here.
         # TODO(#438): drive the avatar lip-sync from the realtime audio
