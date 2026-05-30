@@ -153,13 +153,18 @@ services:
     networks:
       - memql-cluster
 
-  # Voice node -- audio I/O pipeline (ASR, TTS, LiveKit)
+  # Voice node -- audio I/O pipeline (ASR, TTS, LiveKit). Built with
+  # CGO + the voice-runtime stage because the Go voice-agent's LiveKit
+  # server-sdk-go + media-sdk pull a CGO libopus/opusfile/soxr dependency
+  # (docs/voice/451-livekit-go-room-participation.md, Caveat 1).
   voice:
     build:
       context: ..
       dockerfile: Dockerfile
+      target: voice-runtime
       args:
         BUILD_TAGS: voice
+        CGO_ENABLED: "1"
     container_name: memql-voice
     hostname: voice
     env_file:

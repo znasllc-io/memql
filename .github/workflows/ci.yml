@@ -34,6 +34,40 @@ jobs:
       - name: go test
         run: go test -count=1 -timeout=300s ./...
 
+  # Voice node CGO build lane. The Go voice-agent (integrations/voice/agent,
+  # epic #449) joins LiveKit rooms via github.com/livekit/server-sdk-go/v2 +
+  # its media-sdk, which pull a CGO libopus/opusfile/soxr dependency (see
+  # docs/voice/451-livekit-go-room-participation.md, Caveat 1). All such code
+  # is behind `//go:build voice`, so the CGO-free lanes above never touch it.
+  # This lane installs the C deps, sets CGO_ENABLED=1, and builds + vets the
+  # voice path so the libopus foundation is actually exercised on every PR.
+  build-voice:
+    name: build voice (cgo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: install libopus + soxr dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libopus-dev libopusfile-dev libsoxr-dev
+      - name: go build -tags voice (CGO)
+        env:
+          CGO_ENABLED: '1'
+        run: go build -tags voice ./...
+      - name: go vet -tags voice (CGO)
+        env:
+          CGO_ENABLED: '1'
+        run: go vet -tags voice ./...
+      - name: go test -tags voice (CGO)
+        env:
+          CGO_ENABLED: '1'
+        run: go test -tags voice -count=1 -timeout=300s ./integrations/voice/...
+
   vet:
     name: vet
     runs-on: ubuntu-latest

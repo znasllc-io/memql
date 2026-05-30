@@ -362,8 +362,10 @@ services:
     build:
       context: ..
       dockerfile: docker/memql.Dockerfile
+      target: voice-runtime
       args:
         BUILD_TAGS: voice
+        CGO_ENABLED: "1"
     container_name: memql-voice
     hostname: voice
     env_file:
