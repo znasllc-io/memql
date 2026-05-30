@@ -217,6 +217,44 @@ func (e *Executor) Execute(ctx context.Context, automation *Automation, triggere
 	return e.ExecuteWithEvent(ctx, automation, triggeredBy, nil)
 }
 
+// buildEventEnvelope produces the object that gets seeded into the
+// evaluator under the `event` global (and as ctx.input) for an
+// automation run.
+//
+// For an EVENT-triggered run it carries the real triggering event's
+// topic / kind / payload. For a SCHEDULE-, manual-, or startup-
+// triggered run (triggeringEvent == nil) it returns a SYNTHETIC
+// object envelope rather than leaving `event` unset.
+//
+// Why synthetic-but-non-nil matters (issue #418): scheduled
+// automations whose step passes the conventional
+// `logic xxx { event: event }` argument (e.g. expireGuestInvitations,
+// magicLinkExpirySweep, rolloverDailySpace, feedbackTimeoutAutoPause)
+// compile that argument to the runtime reference "event". If `event`
+// is unseeded the reference fails to resolve, the function-arg
+// renderer emits the unresolved literal token `event=event`, the
+// engine coerces it to a STRING, and the receiving logic function's
+// `event: object` validation trips with
+// `argument "event": expected object, got string` on every cron tick.
+// Returning an object here keeps BOTH trigger paths' `event` argument
+// an object, so one dispatch-level fix covers every scheduled
+// automation uniformly. The trigger source rides on the payload
+// (`triggeredBy`) so logic bodies can branch on it if needed.
+func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger string) map[string]any {
+	if triggeringEvent != nil {
+		return map[string]any{
+			"topic":   triggeringEvent.Topic,
+			"kind":    triggeringEvent.Kind.String(),
+			"payload": triggeringEvent.Payload,
+		}
+	}
+	return map[string]any{
+		"topic":   trigger,
+		"kind":    triggeredBy,
+		"payload": map[string]any{"triggeredBy": triggeredBy},
+	}
+}
+
 // ExecuteWithEvent runs an automation with an optional triggering event.
 func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
 	if automation == nil {
@@ -280,29 +318,13 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	// two share the same backing map — body authors should write the
 	// `ctx.input.<...>` form going forward; `event.<...>` is kept
 	// for transition and parse-equivalent through Phase B/D.
-	if triggeringEvent != nil {
-		eventMap := map[string]any{
-			"topic":   triggeringEvent.Topic,
-			"kind":    triggeringEvent.Kind.String(),
-			"payload": triggeringEvent.Payload,
-		}
-		evaluator.SetCustom("event", eventMap)
-		evaluator.SetCustom("ctx", map[string]any{
-			"input":  eventMap,
-			"output": nil,
-			"error":  "",
-		})
-	} else {
-		// Cron / startup-triggered automations don't have a trigger
-		// event; their ctx.input is an empty object. We still expose
-		// ctx so `ctx.output = ...` / `ctx.error` reads in cron bodies
-		// have a place to land.
-		evaluator.SetCustom("ctx", map[string]any{
-			"input":  map[string]any{},
-			"output": nil,
-			"error":  "",
-		})
-	}
+	eventEnvelope := buildEventEnvelope(triggeringEvent, triggeredBy, trigger)
+	evaluator.SetCustom("event", eventEnvelope)
+	evaluator.SetCustom("ctx", map[string]any{
+		"input":  eventEnvelope,
+		"output": nil,
+		"error":  "",
+	})
 
 	if e.logger != nil {
 		e.logger.Info("starting automation execution",
