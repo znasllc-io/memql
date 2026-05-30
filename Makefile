@@ -160,11 +160,16 @@ dev-node-tokens-bootstrap:
 run: build
 	./$(BIN_DIR)/memql
 
-## Start full development stack (PostgreSQL + memQL) in Docker
+## Start the backend cluster (PostgreSQL + memQL nodes) in Docker.
+## The CoPresent frontend (`app`) is gated behind the "frontend"
+## compose profile, so this backend-only stack does NOT start it
+## (memql#461). To include the frontend from here, append
+## `--profile frontend`; or run `make dev-refresh` from the copresent
+## repo, which brings up the cluster AND the frontend.
 dev:
 	$(COMPOSE) $(COMPOSE_FULL) up --build
 
-## Start development stack in background
+## Start the backend cluster in background (frontend profiled out; see `dev`)
 dev-bg:
 	$(COMPOSE) $(COMPOSE_FULL) up --build -d
 
