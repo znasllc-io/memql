@@ -181,6 +181,18 @@ func TestParseServerEvent_ResponseLifecycle(t *testing.T) {
 	done := parseServerEvent([]byte(`{"type":"response.done","response":{"id":"resp_1"}}`))
 	assert.Equal(t, EventResponseDone, done.Kind)
 	assert.Equal(t, "resp_1", done.ResponseID)
+	assert.Equal(t, 0, done.AudioTokens, "no usage block -> zero audio tokens")
+}
+
+// TestParseServerEvent_ResponseDoneAudioTokens verifies the per-session
+// token-budget guardrail (#459) gets its input+output audio-token total off the
+// response.done usage block.
+func TestParseServerEvent_ResponseDoneAudioTokens(t *testing.T) {
+	done := parseServerEvent([]byte(`{"type":"response.done","response":{"id":"resp_2",` +
+		`"usage":{"input_token_details":{"audio_tokens":120},"output_token_details":{"audio_tokens":340}}}}`))
+	assert.Equal(t, EventResponseDone, done.Kind)
+	assert.Equal(t, "resp_2", done.ResponseID)
+	assert.Equal(t, 460, done.AudioTokens, "input+output audio tokens summed")
 }
 
 func TestParseServerEvent_FunctionCall(t *testing.T) {

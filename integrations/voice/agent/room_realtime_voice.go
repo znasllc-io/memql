@@ -80,10 +80,11 @@ type realtimeRoomBridge struct {
 	roomReq RoomRequest
 	logger  *slog.Logger
 
-	asr      *deepgram.ASRClient
-	session  *openai.RealtimeSession
-	local    *lkmedia.PCMLocalTrack
-	executor *RealtimeExecutor
+	asr       *deepgram.ASRClient
+	session   *openai.RealtimeSession
+	local     *lkmedia.PCMLocalTrack
+	executor  *RealtimeExecutor
+	lifecycle *RealtimeSessionLifecycle // cost guardrails (#459)
 
 	mu      sync.Mutex
 	streams map[string]polyphon.ASRStream // by participant identity
@@ -174,17 +175,39 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		client, req.SpaceID, req.GaAgentID, NewCitationResolver(GroundingContext{}),
 	))
 	executor.SetToolBridge(toolBridge)
+
+	// Cost guardrails (#459): bound the warm session by empty-room / idle /
+	// max-duration / audio-token budget. The stop callback closes the realtime
+	// session, which unwinds the executor's drain loops; on a cost-guardrail
+	// trip ShouldDegradeToCascade is set for the caller's rebuild decision (the
+	// rebuild itself is a JoinAndServe-level follow-up seam). The executor feeds
+	// engage + audio-token usage; participant join/leave is forwarded below.
+	lifecycle := NewRealtimeLifecycle(
+		RealtimeBudgetFromConfig(cfg),
+		func(reason TeardownReason) error { return session.Close() },
+		logger,
+		withLifecycleSpaceID(req.SpaceID),
+	)
+	executor.AttachLifecycle(lifecycle)
 	executor.Start()
+	// Seed the population from zero and let track-subscribe drive joins: the
+	// empty-room guardrail must not fire before the first human's track lands,
+	// so the idle watchdog (not empty-room) governs a never-populated session.
+	// onTrackSubscribed feeds NoteHumanJoined (deduped per identity) for every
+	// human, including those already present at join (LiveKit replays their
+	// track subscriptions); onParticipantDisconnected feeds NoteHumanLeft.
+	lifecycle.Start(0)
 
 	return &realtimeRoomBridge{
-		cfg:      cfg,
-		roomReq:  req,
-		logger:   logger,
-		asr:      asr,
-		session:  session,
-		local:    local,
-		executor: executor,
-		streams:  make(map[string]polyphon.ASRStream),
+		cfg:       cfg,
+		roomReq:   req,
+		logger:    logger,
+		asr:       asr,
+		session:   session,
+		local:     local,
+		executor:  executor,
+		lifecycle: lifecycle,
+		streams:   make(map[string]polyphon.ASRStream),
 	}, nil
 }
 
@@ -218,8 +241,17 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 		return
 	}
 	b.mu.Lock()
+	_, alreadyTracked := b.streams[identity]
 	b.streams[identity] = stream
 	b.mu.Unlock()
+
+	// Feed the lifecycle's empty-room guardrail (#459) the first time we see a
+	// human participant's track. Keyed on the streams map so a participant
+	// publishing multiple tracks counts once. The matching NoteHumanLeft fires
+	// in onParticipantDisconnected.
+	if !alreadyTracked && b.lifecycle != nil {
+		b.lifecycle.NoteHumanJoined()
+	}
 
 	go b.executor.ConsumeASR(identity, stream.Results())
 
@@ -244,17 +276,26 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 func (b *realtimeRoomBridge) onParticipantDisconnected(rp *lksdk.RemoteParticipant) {
 	identity := rp.Identity()
 	b.mu.Lock()
-	stream := b.streams[identity]
+	stream, tracked := b.streams[identity]
 	delete(b.streams, identity)
 	b.mu.Unlock()
 	if stream != nil {
 		_ = stream.Close()
+	}
+	// Feed the empty-room guardrail (#459) only for a participant we counted on
+	// join, so the join/leave deltas stay balanced and the last human leaving
+	// tears the warm session down.
+	if tracked && b.lifecycle != nil {
+		b.lifecycle.NoteHumanLeft()
 	}
 }
 
 // close tears down the bridge: executor (closes the realtime session) + every
 // STT stream + the local track.
 func (b *realtimeRoomBridge) close() {
+	if b.lifecycle != nil {
+		b.lifecycle.Close()
+	}
 	b.executor.Close()
 	b.mu.Lock()
 	for _, s := range b.streams {
