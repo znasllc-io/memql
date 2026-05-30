@@ -98,6 +98,15 @@ type SpeakDirective struct {
 	UtteranceID string
 	// RequestID is the originating request id for tracing/correlation.
 	RequestID string
+	// Mode / Brevity carry the conductor GATE decision (#477/#479). When Mode is
+	// non-empty, the realtime executor renders a content-free mode+brevity
+	// directive (RealtimeInstructionsForDirective) and the MODEL authors the
+	// reply; when empty, it falls back to conveying Text
+	// (RealtimeInstructionsForReply, the legacy path). Wire-string forms of
+	// DirectiveMode (primary|brief_ack|chimein|defer) and Brevity
+	// (short|normal|detailed).
+	Mode    string
+	Brevity string
 }
 
 // TurnMachine is the five-state turn-taking machine (section 3 of the

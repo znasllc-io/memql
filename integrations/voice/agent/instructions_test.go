@@ -82,6 +82,36 @@ func TestBuildSessionPersona(t *testing.T) {
 	assert.Equal(t, BuildPersonaInstructions(p), sp.Instructions)
 }
 
+func TestRealtimeInstructionsForDirective(t *testing.T) {
+	// Engage directives carry mode + brevity framing and tell the model to
+	// author its OWN reply -- never authored text.
+	primary := RealtimeInstructionsForDirective("primary", "normal")
+	assert.Contains(t, primary, "Generate your own reply")
+	assert.Contains(t, primary, "Answer the user directly")
+	assert.Contains(t, primary, "few sentences")
+	// It must NOT carry the "convey the following" re-voice framing.
+	assert.NotContains(t, primary, "Convey the following")
+
+	briefAck := RealtimeInstructionsForDirective("brief_ack", "short")
+	assert.Contains(t, briefAck, "brief acknowledgment")
+	assert.Contains(t, briefAck, "one short sentence")
+
+	chimein := RealtimeInstructionsForDirective("chimein", "detailed")
+	assert.Contains(t, chimein, "distinct angle")
+	assert.Contains(t, chimein, "longer answer is warranted")
+
+	// defer / empty mode suppress -> empty instructions (caller skips
+	// CreateResponse).
+	assert.Empty(t, RealtimeInstructionsForDirective("defer", "short"))
+	assert.Empty(t, RealtimeInstructionsForDirective("", "normal"))
+	assert.Empty(t, RealtimeInstructionsForDirective("  ", ""))
+
+	// Unknown mode/brevity fall back to substantive primary/normal, never silent.
+	unknown := RealtimeInstructionsForDirective("wat", "huh")
+	assert.Contains(t, unknown, "Answer the user directly")
+	assert.Contains(t, unknown, "few sentences")
+}
+
 func TestRealtimeInstructionsForReply(t *testing.T) {
 	// A decided reply is rendered as a per-response directive that carries the
 	// content verbatim with spoken-register framing (#432 conductor gate).

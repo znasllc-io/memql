@@ -11493,8 +11493,17 @@ type VoiceAgentTurnComplete struct {
 	EffectiveVideoMode string `protobuf:"bytes,5,opt,name=effective_video_mode,json=effectiveVideoMode,proto3" json:"effective_video_mode,omitempty"`
 	ErrorCode          string `protobuf:"bytes,6,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage       string `protobuf:"bytes,7,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Conductor GATE decision (#477/#479): when set, this turn carries a
+	// content-free mode+brevity directive the realtime model conditions its OWN
+	// generation on, instead of final_text the model re-voices. directive_mode is
+	// the DirectiveMode wire string (primary | brief_ack | chimein | defer);
+	// brevity is short | normal | detailed. Empty directive_mode = the legacy
+	// authored-text path (final_text). This is how "the conductor decides WHEN,
+	// the model decides WHAT" reaches the executor.
+	DirectiveMode string `protobuf:"bytes,8,opt,name=directive_mode,json=directiveMode,proto3" json:"directive_mode,omitempty"`
+	Brevity       string `protobuf:"bytes,9,opt,name=brevity,proto3" json:"brevity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VoiceAgentTurnComplete) Reset() {
@@ -11572,6 +11581,20 @@ func (x *VoiceAgentTurnComplete) GetErrorCode() string {
 func (x *VoiceAgentTurnComplete) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *VoiceAgentTurnComplete) GetDirectiveMode() string {
+	if x != nil {
+		return x.DirectiveMode
+	}
+	return ""
+}
+
+func (x *VoiceAgentTurnComplete) GetBrevity() string {
+	if x != nil {
+		return x.Brevity
 	}
 	return ""
 }
@@ -13139,7 +13162,7 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"text_delta\x18\x02 \x01(\tR\ttextDelta\"\xa1\x02\n" +
+	"text_delta\x18\x02 \x01(\tR\ttextDelta\"\xe2\x02\n" +
 	"\x16VoiceAgentTurnComplete\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
@@ -13150,7 +13173,9 @@ const file_memql_proto_rawDesc = "" +
 	"\x14effective_video_mode\x18\x05 \x01(\tR\x12effectiveVideoMode\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage\"\xa2\x01\n" +
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage\x12%\n" +
+	"\x0edirective_mode\x18\b \x01(\tR\rdirectiveMode\x12\x18\n" +
+	"\abrevity\x18\t \x01(\tR\abrevity\"\xa2\x01\n" +
 	"\x0fVoiceAgentSpeak\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
