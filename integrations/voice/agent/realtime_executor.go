@@ -125,6 +125,12 @@ type RealtimeExecutor struct {
 	//     attribution (labeled-item injection), not to drive turns. Multi-party.
 	turnMode atomic.Int32
 
+	// firstAudioPending is set when a response is created and cleared on its
+	// first audio frame, so drainAudioOut can stamp the T3 "realtime.audio.first"
+	// voice-trace exactly once per response (the decision->first-audio
+	// measurement, #484).
+	firstAudioPending atomic.Bool
+
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
 	// flag so barge-in can stop playout without racing a new response.
 	respMu     sync.Mutex
@@ -430,6 +436,13 @@ func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuth
 	if err := e.client.Send(e.ctx, envelope); err != nil && e.logger != nil {
 		e.logger.Warn("voice-agent realtime: final transcript send failed", "err", err)
 	}
+	// T0 (#484): the human turn is committed. The headline decision->first-audio
+	// window opens here; see docs/voice/484-latency-fidelity-measurement.md.
+	if e.logger != nil {
+		e.logger.Info("voice trace: turntaking event",
+			"stage", "voice.final", "executor", "realtime",
+			"space_id", e.cfg.SpaceID, "native_authored", nativeAuthored, "chars", len(text))
+	}
 }
 
 // runTurn drives one VoiceAgentTurnRequest and consumes its streamed reply --
@@ -634,6 +647,12 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			if len(frame) == 0 {
 				continue
 			}
+			// T3 (#484): first audio frame of a response -- the assistant is
+			// audible. T3 - T1 is the headline decision->first-audio latency.
+			if e.firstAudioPending.CompareAndSwap(true, false) && e.logger != nil {
+				e.logger.Info("voice trace: turntaking event",
+					"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
+			}
 			if err := e.sink.WriteFrame(frame); err != nil {
 				if e.logger != nil {
 					e.logger.Warn("voice-agent realtime: room audio write failed", "err", err)
@@ -667,6 +686,8 @@ func (e *RealtimeExecutor) drainEvents() {
 				e.respMu.Lock()
 				e.inFlight = true
 				e.respMu.Unlock()
+				// Arm the T3 first-audio stamp for this response (#484).
+				e.firstAudioPending.Store(true)
 			case openai.EventResponseDone:
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
