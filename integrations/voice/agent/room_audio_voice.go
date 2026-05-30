@@ -82,7 +82,15 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 		return nil, fmt.Errorf("voice-agent room audio: publish track: %w", err)
 	}
 
-	sink := &localTrackSink{track: local}
+	// The cascade's room-publish sink. When an avatar (#460) is enabled for
+	// this session, maybeStartAvatar wraps it so the assistant's PCM is ALSO
+	// forwarded to the avatar participant over a LiveKit byte data-stream for
+	// lip-sync; when no avatar is configured (or its start fails) it returns
+	// the local-track sink unchanged (audio-only). The wrap is at this sink --
+	// the one the cascade AND the realtime executor (#457) write into -- so the
+	// avatar lip-syncs whichever executor produced the frames, source-agnostic.
+	var sink audioSink = &localTrackSink{track: local}
+	sink = maybeStartAvatar(ctx, cfg, req, room, sink, logger)
 	// Consume the #456 persona resolver: ResolveTTSVoice maps the resolved
 	// canonical voice to the active provider's voice id (the cascade's TTS
 	// voice). This replaces the standalone canonical-voice default the
