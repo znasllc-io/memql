@@ -152,24 +152,24 @@ fails `go test ./...`.
 ### `make release` — cut an immutable image
 
 ```bash
-# Local image, version = the VERSION file's semver prefix:
+# Local image, version = the VERSION file's semver (0.9.0):
 make release
 
 # Explicit version, build + push the pinnable tag to the shared ACR:
-make release VERSION=2.4.0 ACR=acrmemql PUSH=1
+make release VERSION=0.9.0 ACR=acrmemql PUSH=1
 
 # Plan only (build/push nothing):
-make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1
+make release VERSION=0.9.0 ACR=acrmemql PUSH=1 DRY_RUN=1
 ```
 
 The target is a one-liner over
 [`scripts/release/release.sh`](scripts/release/release.sh) (per the
 function-based shell-script convention in CLAUDE.md). It:
 
-- Resolves the version from `--version` or the clean **semver
-  prefix** of the `VERSION` file (the part before the first `-`; the
-  file's epoch suffix `2.3.0-<epoch>` is a dev stamp and is dropped
-  for a release tag). The version must be strict `X.Y.Z`.
+- Resolves the version from `--version` or the `VERSION` file (now a
+  plain `X.Y.Z` with no suffix; the script still strips any legacy
+  `-<epoch>` dev stamp before the first `-` for safety). The version
+  must be strict `X.Y.Z`.
 - Resolves the short git SHA and stamps it onto the image as
   `org.opencontainers.image.revision` (plus
   `org.opencontainers.image.version`), so the immutable `X.Y.Z` tag
@@ -207,13 +207,18 @@ PR. One memQL tag transitively fixes one BFF-compatible engine build.
 
 ### Versioning lineage
 
-The `VERSION` file currently reads `2.3.0-<epoch>` (a dev stamp), and
-the only git tag on the repo is `v0.1.0`. The first clean release tag
-should reconcile the `2.3.x` lineage in `VERSION` rather than continue
-the orphaned `v0.1.x` line — i.e. `v2.4.0` (semver minor bump over the
-`2.3.x` working line, signalling the first deployable Azure cut). The
-actual tag is the architect's call; this document describes the
-mechanism, not the number.
+As of the 2026-05-30 platform versioning reset (epic
+[znasllc-io/memql#501](https://github.com/znasllc-io/memql/issues/501)),
+memQL is on a clean **`0.9.0`** baseline. The old `2.3.0-<epoch>` dev
+stamp and the orphaned `v0.1.0` tag are both retired; **git tag is the
+single source of truth** and there are no epoch suffixes. The first
+clean release tag is `v0.9.0`, cut on `main`.
+
+See [VERSIONING.md](VERSIONING.md) for the full policy (semver,
+pre-1.0 rules, `1.0.0` cut at the invite-only beta) and
+[COMPATIBILITY.md](COMPATIBILITY.md) for the platform pin chain
+(copresent → memql-bff-copresent carrier → memQL; memql-cockpit
+declares a minimum memQL/protocol).
 
 ---
 
