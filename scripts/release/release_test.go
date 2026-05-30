@@ -115,11 +115,13 @@ func TestDryRunPlanImmutableTag(t *testing.T) {
 	}
 }
 
-// TestVersionFromFileDropsEpoch proves that with no --version the
-// script derives the clean semver prefix from the VERSION file
-// (which carries a dev epoch suffix like 2.3.0-1776718065) rather
-// than tagging an image with the epoch.
-func TestVersionFromFileDropsEpoch(t *testing.T) {
+// TestVersionFromFileIsCleanSemver proves that with no --version the
+// script derives a clean three-part semver from the VERSION file and
+// never tags an image with a pre-release/epoch suffix. The VERSION
+// file is a plain X.Y.Z post the v0.9.0 reset (epic #501); the script
+// still strips any legacy `-<epoch>` dev stamp as a safety net, which
+// this guard (no `-` in the tag) continues to enforce.
+func TestVersionFromFileIsCleanSemver(t *testing.T) {
 	out, err := run(t, "--dry-run")
 	if err != nil {
 		t.Fatalf("default dry-run exited non-zero: %v\n%s", err, out)
