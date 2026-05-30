@@ -404,15 +404,16 @@ is the live-credential follow-up, same caveat #432 carries.)
 ## 6. Integration plan (the seam)
 
 This stays behind the **same executor-selection seam** the Python path
-established, so there is no regression to the cascade and realtime stays
-opt-in.
+established. Realtime is now the default (#483); the cascade stays
+available as an explicit opt-out and as the safe fallback, so the voice
+path always comes up.
 
 - **Selection flag.** `MEMQL_VOICE_EXECUTOR` (`cascade` | `realtime`),
   read today by `voice_agent/config.py` and consumed by
   `realtime_executor.select_voice_executor`. The Go voice agent keeps the
-  identical env var and the identical default (`cascade`). The Go analog
-  of `VoiceExecutorPlan` / `select_voice_executor` chooses between the Go
-  cascade (#455) and the Go realtime executor (#457), with the same
+  identical env var; the default flipped to `realtime` (#483). The Go
+  analog of `VoiceExecutorPlan` / `select_voice_executor` chooses between
+  the Go cascade (#455) and the Go realtime executor (#457), with the same
   clean fallback-to-cascade-on-any-failure contract
   (`RealtimeExecutorError` -> cascade with a recorded reason).
 

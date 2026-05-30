@@ -35,8 +35,12 @@ LiveKit room
 ```
 
 The agent supports two executors selected by `MEMQL_VOICE_EXECUTOR`:
-`cascade` (default -- the Deepgram cascade above) and `realtime`
-(OpenAI gpt-realtime speech-to-speech).
+`realtime` (default since #483 -- OpenAI gpt-realtime speech-to-speech)
+and `cascade` (the Deepgram cascade above). Realtime degrades cleanly
+to the cascade when its preconditions fail (no `OPENAI_API_KEY` /
+persona build) and the live executor is logged loudly at session
+start. The realtime voice resolves through the catalog's GA voice set
+(`integrations/voice/voices.go`), defaulting to `marin`.
 
 ## Files
 
@@ -84,7 +88,7 @@ All under [`integrations/voice/agent/`](../integrations/voice/agent/):
 |---|---|
 | `MEMQL_GRPC_ADDR` | BFF gRPC address the agent dials (e.g. `bff:50051`) |
 | `MEMQL_DEEPGRAM_API_KEY` | Deepgram (STT + TTS) |
-| `MEMQL_VOICE_EXECUTOR` | `cascade` (default) or `realtime` |
+| `MEMQL_VOICE_EXECUTOR` | `realtime` (default) or `cascade` |
 | `MEMQL_VOICE_ROOM_NAME` | room to join (fallback when no `--room` flag) |
 | `OPENAI_API_KEY` / `MEMQL_REALTIME_*` | realtime executor path only |
 | `VOICE_AGENT_TOKEN` | identity-issued class="voice_agent" JWT |

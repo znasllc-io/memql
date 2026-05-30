@@ -11,13 +11,12 @@ import (
 // resolves WHICH voice executor a session is built around, behind the same
 // seam the cascade plugs into.
 //
-// The default is the cascade (MEMQL_VOICE_EXECUTOR unset or "cascade") -- the
-// realtime path is strictly opt-in, so there is no regression to the shipped
-// cascade voice path (epic #449 / #440 non-goal: "No regression to the
-// existing cascade voice path"). When realtime is requested but cannot be
-// stood up (missing OPENAI_API_KEY, client build error, session config error),
-// the plan falls back to the cascade with a recorded reason -- the voice path
-// therefore always comes up.
+// The default is the realtime path (MEMQL_VOICE_EXECUTOR unset or "realtime")
+// since #483 -- a fresh run uses gpt-realtime. The cascade stays available as
+// an explicit opt-out (MEMQL_VOICE_EXECUTOR=cascade) and as the safe fallback:
+// when realtime is requested but cannot be stood up (missing OPENAI_API_KEY,
+// client build error, session config error), the plan falls back to the
+// cascade with a recorded reason -- the voice path therefore always comes up.
 //
 // This file is pure Go and CGO-free: it only DECIDES the executor and (for the
 // realtime path) validates that the realtime client + session-persona build.
@@ -109,22 +108,30 @@ var realtimeBuildCheck = validateRealtimeBuildable
 // realtime_executor.py::select_voice_executor.
 func SelectVoiceExecutor(cfg Config, persona Persona, logger *slog.Logger) VoiceExecutorPlan {
 	if ExecutorKind(strings.ToLower(strings.TrimSpace(cfg.VoiceExecutor))) != ExecutorRealtime {
-		// Cascade is the default and the only other valid value (LoadConfig
-		// rejects anything else).
+		// Cascade was explicitly requested (realtime is the default since
+		// #483, and LoadConfig rejects anything other than cascade/realtime).
+		// Log it loudly so an operator always knows the slower cascade path is
+		// the one that is live -- no silent surprise about which executor ran.
+		if logger != nil {
+			logger.Info("voice-agent voice executor: cascade " +
+				"(Deepgram STT -> cognition -> Deepgram TTS) -- " +
+				"explicitly selected via MEMQL_VOICE_EXECUTOR=cascade")
+		}
 		return VoiceExecutorPlan{Kind: ExecutorCascade}
 	}
 
 	sp, err := realtimeBuildCheck(cfg, persona)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("voice-agent realtime executor requested but unavailable -- "+
-				"falling back to the cascade voice path", "reason", err.Error())
+			logger.Warn("voice-agent voice executor: cascade (FALLBACK) -- "+
+				"realtime requested but unavailable, degrading to the cascade "+
+				"voice path", "reason", err.Error())
 		}
 		return VoiceExecutorPlan{Kind: ExecutorCascade, FallbackReason: err.Error()}
 	}
 
 	if logger != nil {
-		logger.Info("voice-agent voice executor selected: realtime (gpt-realtime, #457)",
+		logger.Info("voice-agent voice executor: realtime (gpt-realtime, #457) -- live",
 			"realtime_voice", sp.Voice)
 	}
 	return VoiceExecutorPlan{Kind: ExecutorRealtime, SessionPersona: sp}

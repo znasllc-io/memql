@@ -6,10 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestSelectVoiceExecutor_CascadeDefault verifies the no-regression default:
-// an unset / "cascade" MEMQL_VOICE_EXECUTOR resolves to the cascade with no
-// fallback reason, and the realtime build check is never consulted.
-func TestSelectVoiceExecutor_CascadeDefault(t *testing.T) {
+// TestSelectVoiceExecutor_CascadeSelected verifies that anything other than
+// "realtime" resolves to the cascade with no fallback reason, and the realtime
+// build check is never consulted. (The LoadConfig-level default is now
+// realtime per #483 -- see config_test; this guards the selection function's
+// non-realtime branch, which also covers a zero-value Config.)
+func TestSelectVoiceExecutor_CascadeSelected(t *testing.T) {
 	called := false
 	restore := swapRealtimeBuildCheck(func(Config, Persona) (SessionPersona, error) {
 		called = true
