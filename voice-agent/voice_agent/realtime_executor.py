@@ -64,6 +64,7 @@ from typing import Any
 
 from voice_agent.config import Config
 from voice_agent.persona_resolver import Persona
+from voice_agent.realtime_instructions import build_session_persona
 
 logger = logging.getLogger(__name__)
 
@@ -144,15 +145,24 @@ def build_realtime_executor(cfg: Config, persona: Persona) -> Any:
             f"livekit-plugins-openai is not importable: {err}"
         ) from err
 
+    # #436: resolve the static persona (instructions + gpt-realtime voice)
+    # from the assistant's personaProfile. This is the realtime analog of
+    # the cognition agent prompt -- identity + style + constraints, trimmed
+    # so the conductor's per-turn directive (#432) composes on top. Grounding
+    # conversation.items are built per-turn (build_grounding_items) by the
+    # conductor wiring, not at session build. See realtime_instructions.py.
+    session_persona = build_session_persona(persona)
+
     try:
         # turn_detection=None is the conductor-gate posture (option A,
         # docs/voice/432-conductor-response-gate.md section 2.2): the
         # model never self-triggers a response; memql's conductor will
         # drive response.create / response.cancel from a downstream issue.
         #
-        # TODO(#436): inject persona + graph grounding into the session
-        #   instructions here. This executor passes only a minimal
-        #   placeholder instruction; persona/role/grounding is #436's job.
+        # instructions + voice carry the static persona (#436). The
+        # per-turn conductor directive (#432) layers on top via the
+        # per-response instructions; grounding (#436) is injected as
+        # conversation.items before a response is triggered.
         # TODO(#435): register the MCP tool bridge on this model so the
         #   realtime model can call memql tools. No tools wired here.
         # TODO(#437): capture the model's output (transcript + audio) into
@@ -166,6 +176,8 @@ def build_realtime_executor(cfg: Config, persona: Persona) -> Any:
             model=cfg.realtime_model,
             api_key=cfg.openai_api_key,
             turn_detection=REALTIME_TURN_DETECTION,
+            instructions=session_persona.instructions,
+            voice=session_persona.voice,
         )
     except Exception as err:  # noqa: BLE001 -- any build failure -> fallback
         raise RealtimeExecutorError(
@@ -174,9 +186,12 @@ def build_realtime_executor(cfg: Config, persona: Persona) -> Any:
 
     logger.info(
         "realtime executor built model=%s turn_detection=None "
-        "(conductor-gate posture, #432 option A) canonical_voice=%s",
+        "(conductor-gate posture, #432 option A) canonical_voice=%s "
+        "realtime_voice=%s persona_role=%s",
         cfg.realtime_model,
         persona.canonical_voice,
+        session_persona.voice,
+        persona.role or "default",
     )
     return realtime_model
 
