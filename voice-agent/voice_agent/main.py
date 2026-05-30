@@ -25,6 +25,7 @@ from livekit.agents import (
     cli,
 )
 
+from voice_agent.avatar_drive import start_avatar
 from voice_agent.avatar_plugin import build_avatar
 from voice_agent.config import Config, load_config, setup_logging
 from voice_agent.grpc_client import MemqlGrpcClient
@@ -327,21 +328,24 @@ async def entrypoint(ctx: JobContext) -> None:
         # participant disconnects, which raises CancelledError and
         # routes us to the finally block for cleanup.
         await session.start(agent=agent, room=ctx.room)
-        # Start the avatar AFTER the AgentSession is up. The Anam
-        # plugin mints its own LiveKit token (with
-        # ATTRIBUTE_PUBLISH_ON_BEHALF pointing at our local
-        # participant) and joins the room as a separate participant
-        # whose video track is lip-synced to our TTS audio. The
-        # framework's AgentSession wires the lip-sync via
+        # Start the avatar AFTER the AgentSession is up. The Anam plugin
+        # mints its own LiveKit token (with ATTRIBUTE_PUBLISH_ON_BEHALF
+        # pointing at our local participant) and joins the room as a
+        # separate participant whose video track is lip-synced to the
+        # assistant's audio. The framework wires the lip-sync via
         # `agent_session.output.audio` reassignment inside
-        # `avatar.start(...)`. Errors here are non-fatal -- the
-        # voice path stays alive in audio-only mode.
-        if avatar is not None:
-            try:
-                await avatar.start(session, ctx.room)
-                logger.info("avatar started")
-            except Exception:  # noqa: BLE001
-                logger.exception("avatar start failed -- falling back to audio-only")
+        # `avatar.start(...)` -- and BOTH executors forward into that same
+        # sink, so the avatar is audio-source-agnostic (#438): it
+        # lip-syncs the cascade Aura-2 TTS or the realtime gpt-realtime
+        # audio depending only on which executor `executor_plan` selected.
+        # `start_avatar` owns the single start seam and names the audio
+        # source in the log; errors are non-fatal (audio-only fallback).
+        await start_avatar(
+            avatar=avatar,
+            session=session,
+            room=ctx.room,
+            plan=executor_plan,
+        )
         # Log the input wiring so we can confirm RoomIO bound the
         # participant's audio source. session.input.audio is None when
         # RoomIO rejected the participant (e.g. wrong kind, or
