@@ -89,7 +89,14 @@ func (a *App) cluster() {
 		Version:  a.Version,
 		Wiring:   a.wiring,
 	}
-	node.DiscoverPeerAddress(bootCtx)
+	// Only real mesh node types participate in the peer mesh. A node
+	// running an explicit non-mesh MEMQL_NODE_TYPE (e.g. the identity
+	// auth service, which has no node token) must NOT discover + dial a
+	// parent: the ParentConnector would dial it tokenless and spam
+	// "node auth: token extraction failed" on the target every retry.
+	if node.ValidNodeTypes[nodeIdentity.Type] {
+		node.DiscoverPeerAddress(bootCtx)
+	}
 
 	bootstrap := node.BootstrapFor(nodeIdentity.Type)
 	nodeDeps, err := bootstrap.NodeDependencies(bootCtx)

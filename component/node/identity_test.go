@@ -66,15 +66,24 @@ func TestNewIdentity_EnvVars(t *testing.T) {
 	}
 }
 
-func TestNewIdentity_InvalidType(t *testing.T) {
-	t.Setenv("MEMQL_NODE_TYPE", "invalid")
+func TestNewIdentity_ExplicitNonWorkerTypeHonored(t *testing.T) {
+	// An explicit, non-empty MEMQL_NODE_TYPE that isn't a valid mesh
+	// worker/bff type (e.g. "identity" for the auth service) is honored
+	// verbatim rather than silently defaulting to the compiled bff type.
+	// Defaulting to bff would make a non-mesh node pass the
+	// `Type == NodeTypeBFF` gate in app/cluster.go, start the worker
+	// dialer / parent connector, and dial peers tokenless -- spamming
+	// "node auth: token extraction failed" on every target. The non-bff
+	// type fails that gate, so no dialer runs. See #430.
+	t.Setenv("MEMQL_NODE_TYPE", "identity")
 
 	id := NewIdentity("1.0.0")
 
-	// Tagged binaries use compiled type; standalone falls back to standalone
-	expected := CompiledNodeType()
-	if id.Type != expected {
-		t.Errorf("expected %s for invalid type, got %s", expected, id.Type)
+	if id.Type != NodeType("identity") {
+		t.Errorf("expected explicit non-worker type %q to be honored, got %q", "identity", id.Type)
+	}
+	if ValidNodeTypes[id.Type] {
+		t.Errorf("type %q must not be a valid mesh type (it would re-enable peer dialing)", id.Type)
 	}
 }
 

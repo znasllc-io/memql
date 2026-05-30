@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/znasllc-io/memql/component/identity/verifier"
@@ -80,7 +81,11 @@ func NodeClassStreamInterceptor(v *verifier.Verifier, logger *slog.Logger) grpc.
 		tok, err := tokenFromIncomingNodeContext(ctx)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("node auth: token extraction failed", "error", err, "method", info.FullMethod)
+				peerAddr := "unknown"
+				if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+					peerAddr = p.Addr.String()
+				}
+				logger.Warn("node auth: token extraction failed", "error", err, "method", info.FullMethod, "peer", peerAddr)
 			}
 			return status.Error(codes.Unauthenticated, err.Error())
 		}
