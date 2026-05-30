@@ -254,6 +254,12 @@ type RealtimeServerEvent struct {
 	Arguments string
 	// ErrorMessage is set on EventError.
 	ErrorMessage string
+	// AudioTokens is the input+output audio-token count reported on
+	// EventResponseDone (response.usage), fed to the per-session token-budget
+	// guardrail (#459). Zero when the server omits usage. Non-audio token
+	// details (text/cached) are intentionally not summed here: the realtime
+	// cost guardrail bounds the audio path specifically.
+	AudioTokens int
 }
 
 // parseServerEvent decodes one raw server frame into a RealtimeServerEvent.
@@ -270,7 +276,15 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 		Name       string `json:"name"`
 		Arguments  string `json:"arguments"`
 		Response   struct {
-			ID string `json:"id"`
+			ID    string `json:"id"`
+			Usage struct {
+				InputTokenDetails struct {
+					AudioTokens int `json:"audio_tokens"`
+				} `json:"input_token_details"`
+				OutputTokenDetails struct {
+					AudioTokens int `json:"audio_tokens"`
+				} `json:"output_token_details"`
+			} `json:"usage"`
 		} `json:"response"`
 		Error struct {
 			Message string `json:"message"`
@@ -290,6 +304,8 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 	case serverEventResponseDone:
 		ev.Kind = EventResponseDone
 		ev.ResponseID = raw.Response.ID
+		ev.AudioTokens = raw.Response.Usage.InputTokenDetails.AudioTokens +
+			raw.Response.Usage.OutputTokenDetails.AudioTokens
 	case serverEventOutputAudioDelta, previewEventAudioDelta:
 		ev.Kind = EventAudioDelta
 		// delta is base64 PCM16; decode here so the executor handles raw PCM.

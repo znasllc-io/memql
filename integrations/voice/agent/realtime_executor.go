@@ -87,6 +87,13 @@ type RealtimeExecutor struct {
 
 	machine *TurnMachine
 
+	// lifecycle bounds this session's cost (empty-room / idle / max-duration /
+	// token-budget teardown -> degrade to cascade, #459). Optional: nil when no
+	// guardrails are wired. Fed NoteEngaged on a conductor engage and
+	// NoteAudioTokens on each completed response; cancelled on Close. See
+	// realtime_lifecycle.go.
+	lifecycle *RealtimeSessionLifecycle
+
 	seq atomic.Int64
 
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
@@ -155,12 +162,24 @@ func (e *RealtimeExecutor) Start() {
 func (e *RealtimeExecutor) Close() {
 	e.cancelPump()
 	e.machine.Stop()
+	if e.lifecycle != nil {
+		e.lifecycle.Close()
+	}
 	_ = e.session.Close()
 	e.cancel()
 }
 
 // Machine exposes the turn-taking machine (tests / diagnostics).
 func (e *RealtimeExecutor) Machine() *TurnMachine { return e.machine }
+
+// AttachLifecycle wires the cost-guardrail lifecycle (#459) onto the executor so
+// conductor engagements feed the idle clock and completed-response audio-token
+// usage feeds the per-session token budget. The room layer (room_realtime_voice.go,
+// voice-tagged) builds the lifecycle with the room teardown as its stop callback
+// and forwards participant join/leave to it directly; this attach is the
+// executor-internal feed for engage + token usage. Call before Start. Optional --
+// when unset the executor runs without guardrails (the existing behaviour).
+func (e *RealtimeExecutor) AttachLifecycle(l *RealtimeSessionLifecycle) { e.lifecycle = l }
 
 // SetParticipant registers a participant's display name + role so the
 // multi-party labeled-item injection can prefix their transcripts with
@@ -409,6 +428,15 @@ func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
 		e.logger.Debug("voice-agent realtime: commit input failed", "err", err)
 	}
 
+	// Conductor engage: this is the one response.create per "speak" decision
+	// (the model never self-triggers under turn_detection:null), so it is the
+	// canonical point to reset the idle clock on the cost-guardrail lifecycle
+	// (#459) -- an engaged session is doing useful work and must not be
+	// idle-reaped mid-conversation.
+	if e.lifecycle != nil {
+		e.lifecycle.NoteEngaged()
+	}
+
 	instructions := RealtimeInstructionsForReply(req.Text)
 	_, cancel := context.WithCancel(e.ctx)
 	e.setInFlight(cancel)
@@ -500,6 +528,12 @@ func (e *RealtimeExecutor) drainEvents() {
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
 				transcript.Reset()
+				// Feed the completed response's audio-token usage to the cost
+				// guardrail (#459). Crossing the per-session budget tears the
+				// session down and flags degrade-to-cascade.
+				if e.lifecycle != nil && ev.AudioTokens > 0 {
+					e.lifecycle.NoteAudioTokens(ev.AudioTokens)
+				}
 			case openai.EventTranscriptDelta:
 				transcript.WriteString(ev.Text)
 			case openai.EventTranscriptDone:
