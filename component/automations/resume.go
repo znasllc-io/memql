@@ -92,9 +92,16 @@ func (e *Executor) ResumeFrom(
 		evaluator.SetInput(checkpoint.Input)
 	}
 
-	// Restore trigger context from checkpoint
+	// Restore trigger context from checkpoint. When the checkpoint has
+	// no triggering event (cron / manual / startup resume), seed a
+	// synthetic object envelope so step args that pass `event: event`
+	// still resolve to an object rather than the unresolved literal
+	// `event` token (which the engine coerces to a string and the
+	// receiving logic function rejects -- see executor.go / issue #418).
 	if checkpoint.TriggerContext != nil && checkpoint.TriggerContext.Event != nil {
 		evaluator.SetCustom("event", checkpoint.TriggerContext.Event)
+	} else {
+		evaluator.SetCustom("event", buildEventEnvelope(nil, "resume", "resume"))
 	}
 
 	// Rehydrate evaluator with completed step results from checkpoint
