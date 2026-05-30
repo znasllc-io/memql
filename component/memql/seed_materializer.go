@@ -307,11 +307,7 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 // through to the deterministic id rather than yet another UUID --
 // any subsequent retry will then converge on that same value.
 func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedDefinition, userId string) (string, error) {
-	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
-	query := fmt.Sprintf(
-		`concept==%s; payload.ownerUserId==%q; provenance.name==%q`,
-		conceptId, userId, def.Name,
-	)
+	query := buildPerUserDedupQuery(def, userId)
 	result, err := m.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		if m.engine.Logger != nil {
@@ -328,6 +324,44 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 		}
 	}
 	return deterministicPerUserSeedId(def, userId), nil
+}
+
+// buildPerUserDedupQuery builds the dedup-lookup query that finds an
+// already-materialized perUser-seed row for (def, userId).
+//
+// The concept filter uses the canonical bare-RHS `concept==<id>` form
+// (the lexer special-cases the colon-bearing concept literal there --
+// quoting it would break that grammar). Every OTHER comparison RHS is
+// a payload/provenance value that may carry colons -- the userId is
+// the canonical `v1:identity:user:<uuid>` shape -- so it goes through
+// dslStringLiteral, which JSON-quotes the value. That's the same
+// canonical pattern the automations step-store uses for colon-bearing
+// id comparisons (see component/automations/steps/steps.go's
+// jsonString). Quoting is what keeps a colon-bearing id from being
+// parsed as a bare expression that trips the expression parser with
+// "unexpected token after expression: \":\"" (issue #420): the embedded
+// `:` is only legal unquoted inside the concept-filter RHS, not in an
+// arbitrary comparison value.
+//
+// Pure (no engine / no IO) so the regression test can assert the built
+// query parses without standing up an engine.
+func buildPerUserDedupQuery(def *SeedDefinition, userId string) string {
+	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
+	return fmt.Sprintf(
+		`concept==%s; payload.ownerUserId==%s; provenance.name==%s`,
+		conceptId, dslStringLiteral(userId), dslStringLiteral(def.Name),
+	)
+}
+
+// dslStringLiteral renders a value as a DSL string literal safe to drop
+// into any comparison RHS. JSON encoding gives correct escaping of
+// quotes, backslashes, and control characters, and -- crucially for
+// #420 -- wraps colon-bearing ids in double quotes so the embedded `:`
+// is part of the string literal rather than a stray token the
+// expression parser chokes on.
+func dslStringLiteral(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // deterministicPerUserSeedId computes `<seedName>-<userShortId>` --

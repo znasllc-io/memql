@@ -224,6 +224,62 @@ func TestBuildArgsFromBody_GlobalUsesBodyIdNotOwner(t *testing.T) {
 	}
 }
 
+// TestBuildPerUserDedupQuery_ParsesWithColonBearingUserId is the #420
+// regression test. The dedup-lookup query is built with the userId
+// value (`v1:identity:user:<uuid>`, which carries colons) on a
+// comparison RHS. Before the fix the id was dropped onto the RHS
+// unquoted, so the expression parser tripped on the embedded `:` with
+// "unexpected token after expression: \":\"" -- the dedup lookup
+// always errored and the materializer fell back to the deterministic
+// id while logging a WARN on every user creation. This pins that the
+// built query (a) quotes the colon-bearing id literal and (b) actually
+// parses through the engine's parse path with no error and no fallback.
+func TestBuildPerUserDedupQuery_ParsesWithColonBearingUserId(t *testing.T) {
+	cases := []struct {
+		name string
+		def  *SeedDefinition
+		user string
+	}{
+		{
+			name: "assistant seed, canonical v1:identity:user:<uuid>",
+			def:  &SeedDefinition{Name: "assistant", UseNamespace: "agents", UseConcept: "agent"},
+			user: "v1:identity:user:807f4b13-1234-5678-9abc-def012345678",
+		},
+		{
+			name: "trainerAgent seed, canonical v1:identity:user:<uuid>",
+			def:  &SeedDefinition{Name: "trainerAgent", UseNamespace: "agents", UseConcept: "agent"},
+			user: "v1:identity:user:395e4e72-3097-4371-b9be-18da56eb8d5a",
+		},
+		{
+			name: "plannerAgent seed, canonical v1:identity:user:<uuid>",
+			def:  &SeedDefinition{Name: "plannerAgent", UseNamespace: "agents", UseConcept: "agent"},
+			user: "v1:identity:user:00000000-0000-0000-0000-000000000001",
+		},
+		{
+			name: "extra-colon-bearing id stays robust",
+			def:  &SeedDefinition{Name: "assistant", UseNamespace: "agents", UseConcept: "agent"},
+			user: "v1:identity:user:a:b:c:weird-but-colon-heavy",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := buildPerUserDedupQuery(tc.def, tc.user)
+
+			// (a) The colon-bearing id literal is quoted, not bare.
+			mustContain(t, q, `payload.ownerUserId=="`+tc.user+`"`)
+			// The concept filter stays the canonical bare form.
+			mustContain(t, q, "concept==v1:agents:agent")
+
+			// (b) It parses through the engine's parse path with no
+			// error -- i.e. the dedup lookup will not fall back.
+			if _, err := parseViaLangparser(q); err != nil {
+				t.Fatalf("dedup query failed to parse (would trigger fallback WARN): %v\nquery: %s", err, q)
+			}
+		})
+	}
+}
+
 func mustContain(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
