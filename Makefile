@@ -98,32 +98,14 @@ healthcheck:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/healthcheck ./cmd/healthcheck
 
 # ---------------------------------------------------------------------------
-# Realtime voice + video (Python voice-agent, LiveKit Agents 1.5)
-# The legacy Go Bridge Agent was retired in Initiative C Phase 11.
+# Realtime voice + video (Go voice-agent, integrations/voice/agent)
+# The voice-agent is the `voice-agent` subcommand of the memql-voice
+# binary (`memql-voice voice-agent`); build it with `make voice`. The
+# Python voice-agent (LiveKit Agents 1.5) and the legacy Go Bridge Agent
+# have both been retired.
 # ---------------------------------------------------------------------------
 
-.PHONY: voice-agent voice-agent-run voice-agent-test voice-agent-docker voice-loop-test-livekit voice-agent-token
-
-## Install Python deps + regenerate proto stubs for the voice-agent process.
-## Idempotent. Re-run after editing pyproject.toml or memql.proto.
-voice-agent:
-	bash scripts/voice-agent/install.sh
-
-## Run the voice-agent worker locally. Reads voice-agent/.env if present.
-voice-agent-run:
-	bash scripts/voice-agent/run.sh start
-
-## Run the voice-agent's pytest suite.
-voice-agent-test:
-	bash scripts/voice-agent/test.sh
-
-## Build the voice-agent Docker image (LiveKit Agents 1.5 + Deepgram + memql gRPC).
-## Override avatar vendor: AVATAR=simli make voice-agent-docker
-voice-agent-docker:
-	docker build \
-		--build-arg AVATAR=$${AVATAR:-anam} \
-		-f voice-agent/Dockerfile \
-		-t memql-voice-agent:dev .
+.PHONY: voice-agent-token
 
 ## Mint a class="voice_agent" JWT for the running local cluster's
 ## voice-agent process. Execs the identity binary inside the
@@ -167,16 +149,6 @@ node-token:
 ## same flow automatically via scripts/dev/refresh.sh. memql#338.
 dev-node-tokens-bootstrap:
 	@bash scripts/dev/mint-node-tokens.sh
-
-## End-to-end voice-loop test against the LiveKit Agents path
-## (replaces voice-loop-test-deepgram once Phase 10 cutover lands).
-## Requires MEMQL_DEEPGRAM_API_KEY in the calling shell.
-voice-loop-test-livekit:
-	@if [ -n "$(CSV)" ]; then \
-		bash scripts/voice/loop-test-livekit.sh --csv "$(CSV)"; \
-	else \
-		bash scripts/voice/loop-test-livekit.sh; \
-	fi
 
 # ---------------------------------------------------------------------------
 # Run targets
@@ -286,7 +258,7 @@ dev-ps:
 ##   bridge.utterance.posted   -- BFF accepted the row (postMs)
 ##   cognition.agent.start     -- agent LLM call begins (routeMs)
 ##   cognition.agent.complete  -- reply text in hand (agentLlmMs)
-## Tail voice-path log lines emitted by the voice-agent + memql
+## Tail voice-path log lines emitted by the Go voice-agent + memql
 ## cluster. Pre-Initiative-C this targeted bridge-agent containers;
 ## the voice-agent process now emits the same `voice trace` markers
 ## from its own logs.
