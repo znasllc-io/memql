@@ -49,6 +49,33 @@ class Config:
     # snapshot without a code change.
     realtime_model: str
 
+    # Realtime session lifecycle + cost guardrails (Hybrid Realtime Voice
+    # epic #440, issue #439). These bound a realtime session so an
+    # always-on speech-to-speech model listening to a multi-human polyphon
+    # room cannot burn audio tokens unbounded. All four are ceilings: a
+    # session that trips any of them is torn down and the voice path
+    # degrades to the cascade. Only consulted on the realtime path; the
+    # cascade ignores them. See voice_agent.realtime_lifecycle.
+    #
+    # Idle timeout: how long the warm-but-muted realtime session may sit
+    # without the conductor engaging it (no response.create) before it is
+    # torn down. The chosen lifecycle is "warm but input-muted until the
+    # conductor engages" (#432 option A turn_detection=None), so an idle
+    # session is pure standing cost -- this bound caps it. <= 0 disables
+    # the idle teardown.
+    realtime_idle_timeout_sec: int
+    # Hard cap on total realtime session wall-clock duration regardless of
+    # activity. Backstop against a session that stays nominally "engaged"
+    # forever. <= 0 disables the duration cap.
+    realtime_max_session_sec: int
+    # Per-session audio-token budget. The realtime model reports usage
+    # (input + output audio tokens) per response; once the running total
+    # crosses this ceiling the session is torn down and the voice path
+    # degrades to the cascade. This is the cost guardrail the issue asks
+    # for, surfaced like the existing plan token-budget caps. <= 0
+    # disables the budget cap.
+    realtime_max_audio_tokens: int
+
     # memql gRPC
     memql_grpc_addr: str
     # Identity-issued class="voice_agent" JWT bearer presented on
@@ -246,6 +273,15 @@ def load_config() -> Config:
         voice_executor=_get("MEMQL_VOICE_EXECUTOR", "cascade").lower(),
         openai_api_key=_get("OPENAI_API_KEY") or None,
         realtime_model=_get("MEMQL_REALTIME_MODEL", "gpt-realtime"),
+        # Realtime lifecycle + cost guardrails (#439). Defaults are
+        # deliberately conservative so a misconfigured realtime room
+        # cannot run unbounded: a 5-minute idle teardown, a 30-minute
+        # hard duration cap, and a 1,000,000 audio-token per-session
+        # budget. Operators dial these per deployment; <= 0 on any one
+        # disables that specific guardrail (the others still apply).
+        realtime_idle_timeout_sec=_get_int("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300),
+        realtime_max_session_sec=_get_int("MEMQL_REALTIME_MAX_SESSION_SEC", 1800),
+        realtime_max_audio_tokens=_get_int("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000),
         memql_grpc_addr=_get_required("MEMQL_GRPC_ADDR"),
         voice_agent_token=_resolve_voice_agent_token(),
         avatar_vendor=_get("MEMQL_AVATAR_VENDOR", "anam").lower(),
