@@ -2174,7 +2174,6 @@ type MutationCreateGreetingUtteranceArgs struct {
 	SpaceId       string
 	ParticipantId string
 	AgentId       string
-	DisplayName   string
 	Text          string
 	GreetingKind  string
 }
@@ -2200,11 +2199,6 @@ func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceAr
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("displayName: ")
-	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
