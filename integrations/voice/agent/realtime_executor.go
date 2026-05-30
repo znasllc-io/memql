@@ -110,14 +110,20 @@ type RealtimeExecutor struct {
 
 	seq atomic.Int64
 
-	// nativeMode is the #478 1-on-1 gate: when true, gpt-realtime owns the turn
-	// (turn_detection: semantic_vad set by the room layer), authors natively,
-	// and barge-in is the model's job -- so the executor does NOT round-trip the
-	// conductor (runTurn) and the human transcript comes from the model's native
-	// input-transcription events, not Deepgram. When false (the default) the
-	// executor runs the conductor gate exactly as before (multi-party path).
-	// Switchable at runtime by the room layer as the human count crosses 1<->2.
-	nativeMode atomic.Bool
+	// turnMode is the realtime turn-detection / gating mode, switchable at
+	// runtime by the room layer. One pipeline, one optional gate (#475):
+	//   - turnModeGatedCascade: turn_detection:null, Deepgram drives the turn
+	//     machine, the conductor gate runs via runTurn (the pre-#481 multi-party
+	//     path, still the default when the multi-party semantic_vad flag is off).
+	//   - turnModeNative (#478): semantic_vad + create_response:true, gpt-realtime
+	//     owns the turn, no conductor; the human transcript comes from the model's
+	//     native input transcription, not Deepgram. 1-on-1.
+	//   - turnModeGatedSemanticVad (#481): semantic_vad + create_response:false,
+	//     the model detects turn-end + transcribes the active speaker but does NOT
+	//     auto-generate; the gate decides (runTurn) and the executor fires
+	//     CreateResponse on engage. Deepgram is used ONLY for per-speaker
+	//     attribution (labeled-item injection), not to drive turns. Multi-party.
+	turnMode atomic.Int32
 
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
 	// flag so barge-in can stop playout without racing a new response.
@@ -223,21 +229,37 @@ func (e *RealtimeExecutor) SetToolBridge(b *McpToolBridge) {
 	e.toolBridge = b
 }
 
-// SetNativeMode toggles the #478 1-on-1 native gate. true = gpt-realtime owns
-// the turn (no conductor round-trip, native input transcript, model-driven
-// barge-in); false = the conductor gate (multi-party path). The room layer
-// drives this from the live human count and pairs it with a session.update that
-// flips turn_detection. Safe for concurrent use.
-func (e *RealtimeExecutor) SetNativeMode(native bool) {
-	e.nativeMode.Store(native)
+// Turn-mode values for SetTurnMode (see the turnMode field doc).
+const (
+	turnModeGatedCascade     int32 = iota // null + Deepgram + conductor gate (default multi-party)
+	turnModeNative                        // semantic_vad + create_response:true (1-on-1, #478)
+	turnModeGatedSemanticVad              // semantic_vad + create_response:false + gate (multi-party, #481)
+)
+
+// SetTurnMode sets the realtime turn-detection / gating mode. The room layer
+// drives this from the live human count + the deploy flags and pairs it with a
+// session.update that flips turn_detection / create_response. Safe for
+// concurrent use.
+func (e *RealtimeExecutor) SetTurnMode(mode int32) {
+	e.turnMode.Store(mode)
 	if e.logger != nil {
-		e.logger.Info("voice-agent realtime: gate mode set",
-			"mode", map[bool]string{true: "native (model-owns-turn)", false: "conductor-gated"}[native])
+		names := map[int32]string{
+			turnModeGatedCascade:     "gated-cascade (null + Deepgram + conductor)",
+			turnModeNative:           "native (model-owns-turn)",
+			turnModeGatedSemanticVad: "gated-semantic_vad (model turn-end + conductor gate)",
+		}
+		e.logger.Info("voice-agent realtime: turn mode set", "mode", names[mode])
 	}
 }
 
-// isNativeMode reports whether the 1-on-1 native gate is active.
-func (e *RealtimeExecutor) isNativeMode() bool { return e.nativeMode.Load() }
+// isNativeMode reports whether the 1-on-1 native gate (#478) is active.
+func (e *RealtimeExecutor) isNativeMode() bool { return e.turnMode.Load() == turnModeNative }
+
+// isGatedSemanticVad reports whether the multi-party semantic_vad gate (#481)
+// is active.
+func (e *RealtimeExecutor) isGatedSemanticVad() bool {
+	return e.turnMode.Load() == turnModeGatedSemanticVad
+}
 
 // ConsumeASR drives the machine from one human track's Deepgram ASR result
 // stream (one goroutine per human track -- the multi-party fan-out, #433). It
@@ -279,6 +301,21 @@ func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.AS
 	// consumed at all (Deepgram stays warm only for the cascade fallback). The
 	// only executor input on the native path is StreamAudio (PCM -> model).
 	if e.isNativeMode() {
+		return
+	}
+	// Multi-party semantic_vad gate (#481): the model detects turn-end and
+	// transcribes the active speaker, so Deepgram does NOT drive the turn here.
+	// But Deepgram per-track ASR is still the attribution source -- inject each
+	// speaker's labeled final as context ("[name . role] text") so the model can
+	// attribute ("as Maria said..."), and track the last speaker for the turn's
+	// speaker id. We do not touch the turn machine in this mode.
+	if e.isGatedSemanticVad() {
+		if r.IsFinal {
+			if text := strings.TrimSpace(r.Text); text != "" {
+				e.injectLabeledTranscript(speakerIdentity, text)
+				e.setLastSpeaker(speakerIdentity)
+			}
+		}
 		return
 	}
 	if r.Kind == polyphon.ASRKindSpeechStarted {
@@ -353,7 +390,9 @@ func (e *RealtimeExecutor) onCommittedTurn(text string) {
 	// native path inserts the user utterance, stamped transcript-only) nor
 	// round-trip the conductor. Guarded defensively even though the room layer
 	// also stops feeding Deepgram finals into the machine in native mode.
-	if e.isNativeMode() {
+	// turnModeGatedSemanticVad (#481) likewise drives the turn from the model's
+	// turn-end (EventInputTranscriptDone), not this Deepgram commit.
+	if e.isNativeMode() || e.isGatedSemanticVad() {
 		return
 	}
 	speaker := e.getLastSpeaker()
@@ -668,7 +707,23 @@ func (e *RealtimeExecutor) drainEvents() {
 				inputTranscript.Reset()
 				e.seq.Store(0)
 				if final != "" {
-					e.forwardFinal("", final, true)
+					if e.isGatedSemanticVad() {
+						// Multi-party gate (#481): the model detected turn-end +
+						// transcribed the active speaker but did NOT auto-generate
+						// (create_response:false). Forward as a normal (stt) final
+						// so cognition runs the gate and publishes the directive,
+						// then drive runTurn -- the relay returns the directive and
+						// the executor fires CreateResponse on engage. The model
+						// authors; cognition never authors the words.
+						speaker := e.getLastSpeaker()
+						e.forwardFinal(speaker, final, false)
+						go e.runTurn(speaker, final)
+					} else {
+						// Native 1-on-1 (#478): the model already authored + spoke,
+						// so mark the final native (transcript-only) -- cognition
+						// does not author a second reply.
+						e.forwardFinal("", final, true)
+					}
 				}
 			case openai.EventFunctionArgsDone:
 				// #458 MCP tool bridge: dispatch the model's function call on a

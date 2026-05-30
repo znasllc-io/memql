@@ -419,7 +419,7 @@ func TestRealtimeExecutor_NativeMode_NoConductorRoundTrip(t *testing.T) {
 	replyToTurn(fs, "should not be requested")
 	rt := newFakeRealtimeSession()
 	e := newRealtimeExecutorForTest(t, fs, rt)
-	e.SetNativeMode(true)
+	e.SetTurnMode(turnModeNative)
 
 	e.handleASRResult("user-1", polyphon.ASRResult{Text: "what's the plan", IsFinal: true})
 
@@ -436,7 +436,7 @@ func TestRealtimeExecutor_NativeMode_InputTranscriptForwarded(t *testing.T) {
 	fs := newFakeStream()
 	rt := newFakeRealtimeSession()
 	e := newRealtimeExecutorForTest(t, fs, rt)
-	e.SetNativeMode(true)
+	e.SetTurnMode(turnModeNative)
 
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDelta, Text: "cut the "}
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "cut the cloud spend"}
@@ -514,4 +514,51 @@ func TestRealtimeExecutor_GateDirective_DeferSuppresses(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 0, rt.responseCount(), "defer directive must not call response.create")
+}
+
+// TestRealtimeExecutor_GatedSemanticVad_AttributionNoTurn verifies the #481
+// multi-party mode: a Deepgram final injects the labeled transcript for
+// attribution but does NOT drive a turn (semantic_vad owns turn detection).
+func TestRealtimeExecutor_GatedSemanticVad_AttributionNoTurn(t *testing.T) {
+	fs := newFakeStream()
+	replyToTurnWithDirective(fs, "primary", "short")
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	e.SetParticipant("user-1", "Maria", "Finance")
+	e.SetTurnMode(turnModeGatedSemanticVad)
+
+	e.handleASRResult("user-1", polyphon.ASRResult{Text: "cut cloud spend", IsFinal: true})
+
+	time.Sleep(60 * time.Millisecond)
+	// Attribution: the labeled transcript was injected as context.
+	items := rt.injectedItems()
+	require.NotEmpty(t, items, "the labeled transcript must be injected for attribution")
+	assert.Contains(t, items[len(items)-1].Text, "cut cloud spend")
+	// But Deepgram did NOT drive a turn (the model's turn-end does).
+	assert.False(t, hasTurnRequest(fs), "Deepgram finals must not drive the turn in semantic_vad mode")
+	assert.Equal(t, 0, rt.responseCount())
+}
+
+// TestRealtimeExecutor_GatedSemanticVad_InputTranscriptDrivesGate verifies that
+// in #481 mode the model's turn-end (input transcript done) drives the conductor
+// gate: a non-native final is forwarded and runTurn fires, so cognition runs the
+// gate and the model authors on engage.
+func TestRealtimeExecutor_GatedSemanticVad_InputTranscriptDrivesGate(t *testing.T) {
+	fs := newFakeStream()
+	replyToTurnWithDirective(fs, "primary", "short")
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	e.SetTurnMode(turnModeGatedSemanticVad)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "what's our cloud spend"}
+
+	require.Eventually(t, func() bool { return hasTurnRequest(fs) }, 2*time.Second, 10*time.Millisecond,
+		"the model's turn-end must drive the conductor gate (runTurn)")
+	final := findFinalTranscript(fs)
+	require.NotNil(t, final)
+	assert.Equal(t, "what's our cloud spend", final.GetFinalText())
+	assert.False(t, final.GetNativeAuthored(), "the gate path forwards a normal (stt) final so cognition runs the gate")
+	// On the directive the model authors (one response.create).
+	require.Eventually(t, func() bool { return rt.responseCount() == 1 }, 2*time.Second, 10*time.Millisecond)
+	assert.Contains(t, rt.lastResponse(), "Generate your own reply")
 }
