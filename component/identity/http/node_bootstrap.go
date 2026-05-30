@@ -76,7 +76,7 @@ const envAllowInsecureBootstrap = "MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP"
 // the minted JWT binds to them via the standard NodeIssueInput.
 //
 // memql#342 extends the endpoint with optional TokenClass +
-// InstanceId so the Python voice-agent can self-bootstrap its
+// InstanceId so the Go voice-agent can self-bootstrap its
 // class="voice_agent" JWT through the same surface + bootstrap
 // secret. Backward-compatible: an empty TokenClass falls back to
 // the original class="node" mint path.
@@ -395,7 +395,7 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 }
 
 // mintVoiceAgentBootstrapToken is the class="voice_agent" mint path
-// added by memql#342. Lets the Python voice-agent process self-
+// added by memql#342. Lets the Go voice-agent process self-
 // bootstrap its JWT through the same endpoint + bootstrap secret
 // the node binaries use, eliminating the docker-compose crash-loop
 // when `make dev-refresh`'s out-of-band mint step was skipped.

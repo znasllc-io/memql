@@ -17,7 +17,7 @@ import (
 // VoiceAgent* contract, same SpeakSink registration -- but drives the OpenAI
 // gpt-realtime speech-to-speech model instead of the Deepgram STT->cognition->
 // Deepgram TTS pipeline. It is the Go analog of
-// voice-agent/voice_agent/realtime_executor.py + the realtime branch of
+// the Python voice-agent's realtime_executor.py + the realtime branch of
 // main.py, and implements the merged designs in
 // docs/voice/432-conductor-response-gate.md (conductor gate) and
 // docs/voice/433-multiparty-audio-routing.md (multi-party routing).

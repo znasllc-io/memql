@@ -144,7 +144,7 @@ Single-node dev (the default BFF-only run) doesn't open inter-node streams; the 
 
 ### 5.2 Voice-agent service-account (F4)
 
-The Python voice-agent authenticates via an identity-issued `class="voice_agent"` JWT (#109). The interceptor on `MemqlService.Stream` admits the class and pins the call to `VoiceAgent*` payload types -- a leaked credential can't drive other RPCs. Provisioning + rotation: see [`docs/auth/voice-agent-jwt.md`](voice-agent-jwt.md).
+The Go voice-agent (`integrations/voice/agent/`) authenticates via an identity-issued `class="voice_agent"` JWT (#109). The interceptor on `MemqlService.Stream` admits the class and pins the call to `VoiceAgent*` payload types -- a leaked credential can't drive other RPCs. Provisioning + rotation: see [`docs/auth/voice-agent-jwt.md`](voice-agent-jwt.md).
 
 **Trust assumption:** voice-agent is a single-tenant, single-instance, internal service. Multi-tenant voice-agent deployments would need a tenant-scoped claim (out of scope for #109).
 

@@ -5,6 +5,12 @@ validation requires live infrastructure (>=3-human LiveKit room +
 OpenAI gpt-realtime + Deepgram with real credentials) and is a flagged
 follow-up -- see the Validation plan.
 
+> **Historical note (epic #449 complete).** This spike predates the Go
+> voice-agent cutover. The Python implementation it cites has been
+> deleted; the equivalent routing lives in the Go
+> voice-agent at `integrations/voice/agent/` (room + STT pipeline files).
+> The Python file references below describe the design's starting point.
+
 Docs location note: this epic's docs already live under `docs/voice/`
 (`eou-tuning.md`, `bringup-verification.md`), so this spike doc is
 placed alongside them rather than in a new `docs/realtime-voice/`
@@ -27,9 +33,8 @@ conversation: it consumes **one** input audio stream and emits one
 output audio stream. A polyphon space (`architecture: "polyphon"`)
 allows **up to 5 human participants** plus one assistant. LiveKit
 delivers each human as a separate participant with a separate audio
-track (see `entrypoint` in
-`voice-agent/voice_agent/main.py`, the `track_subscribed` /
-`track_published` listeners).
+track (see `entrypoint` in the Python voice-agent's `main.py`, the
+`track_subscribed` / `track_published` listeners).
 
 Two naive options, both wrong:
 
@@ -57,7 +62,7 @@ The current code is explicitly single-human-per-room. See
 # Phase 6 follow-up.
 ```
 
-and `_sync_speaker_user_id` in `voice-agent/voice_agent/stt_plugin.py`:
+and `_sync_speaker_user_id` in the Python voice-agent's `stt_plugin.py`:
 
 ```python
 # Wider design: the LiveKit room can have multiple human participants;
@@ -110,8 +115,8 @@ in its conversation context.
 
 This path reuses the existing finalized-transcript producer. Today the
 final goes to memql as `VoiceAgentFinalTranscript` (see
-`TranscriptForwarder.forward_final` in
-`voice-agent/voice_agent/transcript_forwarder.py`). In the Realtime
+`TranscriptForwarder.forward_final` in the Python voice-agent's
+`transcript_forwarder.py`). In the Realtime
 executor, the same final additionally becomes a
 `conversation.item.create`. memql ingestion is unchanged -- the
 transcript still lands as `v1:cognition:utterance` via

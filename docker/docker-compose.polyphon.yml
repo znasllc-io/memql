@@ -1,16 +1,17 @@
 # Polyphon Development Stack
 #
-# Adds LiveKit, Redis, and Bridge Agent to the standard memQL development
-# stack. The Bridge Agent talks to OpenAI Realtime + /v1/audio/speech for
-# ASR/TTS in Stage 1; Stage 2 of the Deepgram migration switches the default
-# to Deepgram Nova-3 + Aura-2.
+# Adds LiveKit, Redis, and the Go voice-agent to the standard memQL
+# development stack. The voice-agent joins LiveKit rooms as the General
+# Assistant's media participant and runs the STT -> cognition -> TTS
+# cascade (or the gpt-realtime speech-to-speech executor) over Deepgram
+# Nova-3 + Aura-2.
 #
 # Usage:
 #   docker-compose -f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml up -d
 #
 # Architecture:
-#   LOCAL (Docker):  PostgreSQL, memQL, LiveKit, Redis, Bridge Agent
-#   Cloud (API):     OpenAI Realtime (ASR) + OpenAI /v1/audio/speech (TTS)
+#   LOCAL (Docker):  PostgreSQL, memQL, LiveKit, Redis, Go voice-agent
+#   Cloud (API):     Deepgram (ASR + TTS), optional OpenAI gpt-realtime
 
 services:
   # LiveKit Server
@@ -57,17 +58,18 @@ services:
       - memql
     restart: unless-stopped
 
-  # Bridge Agent has been retired (Initiative C, Phase 11). The Python
-  # voice-agent (under voice-agent/, defined below) is now the sole
-  # voice participant for the General Assistant in LiveKit rooms.
-  # See docs/voice/ for the architecture.
+  # Bridge Agent has been retired (Initiative C, Phase 11) and the Python
+  # voice-agent (LiveKit Agents 1.5) has been cut over to the Go
+  # voice-agent (epic #449; the `voice-agent` service below). The Go
+  # voice-agent is now the sole voice + video participant for the General
+  # Assistant in LiveKit rooms. See docs/voice/ for the architecture.
 
   # Stamp LiveKit env on every memQL node that
   # touches the voice path. The BFF mints LiveKit room tokens for
   # browsers (PolyphonRoomTokenMsg gRPC) and dispatches a join
-  # request to the Bridge Agent; the voice node forwards
+  # request to the voice-agent; the voice node forwards
   # transcription work; the cognition node forwards agent responses
-  # to the Bridge Agent for TTS publication. The legacy `memql:`
+  # to the voice-agent for TTS publication. The legacy `memql:`
   # override block targeted a single-binary service that no longer
   # exists in docker-compose.full.yml -- the cluster split moved
   # the voice surface to bff + voice + cognition.
@@ -118,31 +120,43 @@ services:
     depends_on:
       - livekit
 
-  # voice-agent (Initiative C). Python process running LiveKit Agents
-  # 1.5. The sole voice + video participant for the General Assistant
-  # in every LiveKit room. Speaks the VoiceAgent* gRPC contract on
-  # MemqlService.Stream with a shared-secret bearer token; the
-  # voice_agent_stream_interceptor pins this identity-type to the
-  # voice-agent message surface only.
+  # voice-agent (epic #449). The Go voice-agent media participant: the
+  # `voice-agent` subcommand of the memql-voice binary
+  # (`memql-voice voice-agent`). It joins a LiveKit room as the General
+  # Assistant, opens a MemqlService.Stream gRPC session, and runs the
+  # STT -> cognition -> TTS cascade (or the gpt-realtime executor) for
+  # the room's voice turns. Built from the same voice-runtime CGO stage
+  # as the `voice` node above (libopus/opusfile/soxr). Speaks the
+  # VoiceAgent* gRPC contract on MemqlService.Stream with a
+  # class="voice_agent" bearer token; the voice_agent_stream_interceptor
+  # pins this identity-type to the voice-agent message surface only.
   voice-agent:
     build:
       context: ..
-      dockerfile: voice-agent/Dockerfile
+      dockerfile: docker/memql.Dockerfile
+      target: voice-runtime
       args:
-        AVATAR: "${MEMQL_AVATAR_VENDOR:-anam}"
+        BUILD_TAGS: voice
+        CGO_ENABLED: "1"
     container_name: polyphon-voice-agent
     hostname: voice-agent
+    # The voice-runtime image's ENTRYPOINT is /app/memql; `voice-agent`
+    # selects the subcommand (subcommand_voice_agent.go, build-tagged
+    # `voice`). RoomName falls back to MEMQL_VOICE_ROOM_NAME when no
+    # --room flag is passed.
+    command: ["voice-agent"]
     # env_file is the source of truth for vendor secrets sourced
-    # from .env.local (Deepgram key, Anam / Simli keys, vendor API
-    # keys). DO NOT re-declare those keys under `environment:` --
-    # compose treats the `environment:` block as overriding
-    # env_file, and `${VAR:-}` evaluates against the
-    # docker-compose-invoking SHELL (where vendor keys are not
-    # exported), which shadows the .env.local value with empty.
+    # from .env.local (Deepgram key, Anam / Simli keys, OpenAI key).
+    # DO NOT re-declare those keys under `environment:` -- compose
+    # treats the `environment:` block as overriding env_file, and
+    # `${VAR:-}` evaluates against the docker-compose-invoking SHELL
+    # (where vendor keys are not exported), which shadows the
+    # .env.local value with empty.
     #
     # VOICE_AGENT_TOKEN is the runtime credential authenticating
     # the voice-agent on MemqlService.Stream. Two provisioning paths
-    # are supported:
+    # are supported (see integrations/voice/agent/bootstrap.go,
+    # ResolveVoiceAgentToken):
     #
     #   1. Out-of-band mint (production): the deploy pipeline mints
     #      a class="voice_agent" JWT via the identity admin CLI and
@@ -150,8 +164,8 @@ services:
     #      same shape (see scripts/dev/refresh.sh + #184).
     #
     #   2. Self-bootstrap (dev, memql#342): when VOICE_AGENT_TOKEN
-    #      is empty AND MEMQL_NODE_BOOTSTRAP_TOKEN is set, the
-    #      Python voice-agent's load_config calls identity's
+    #      is empty AND MEMQL_NODE_BOOTSTRAP_TOKEN is set, the Go
+    #      voice-agent's ResolveVoiceAgentToken calls identity's
     #      /node/bootstrap with tokenClass="voice_agent" and mints
     #      its own token. This is the path that makes a stock
     #      `docker compose up` work without dev-refresh's
@@ -168,6 +182,14 @@ services:
       LIVEKIT_API_KEY: "devkey"
       LIVEKIT_API_SECRET: "secret"
       MEMQL_GRPC_ADDR: "bff:50051"
+      # Voice executor: "cascade" (Deepgram STT -> cognition ->
+      # Deepgram TTS, the default) or "realtime" (OpenAI gpt-realtime
+      # speech-to-speech, needs OPENAI_API_KEY from .env.local).
+      MEMQL_VOICE_EXECUTOR: "${MEMQL_VOICE_EXECUTOR:-cascade}"
+      # Room to join. The memQL convention is polyphon-<spaceId>; the
+      # voice node assigns concrete rooms at runtime, so this is the
+      # bring-up default for a stock `docker compose up`.
+      MEMQL_VOICE_ROOM_NAME: "${MEMQL_VOICE_ROOM_NAME:-}"
       VOICE_AGENT_LOG_LEVEL: "${VOICE_AGENT_LOG_LEVEL:-INFO}"
       # Path 1 (out-of-band): operator-provisioned JWT wins when set.
       VOICE_AGENT_TOKEN: "${VOICE_AGENT_TOKEN:-}"

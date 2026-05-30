@@ -150,89 +150,56 @@ again:
 
 ## Voice pipeline
 
-### Replace Python voice-agent with a revived Go voice agent
+### Replace Python voice-agent with a Go voice agent -- DONE (epic #449)
 
-The realtime voice + video channel is currently owned by the Python
-`voice-agent/` process (LiveKit Agents 1.5). This is a deliberate
-short-term choice; the long-term plan is to replace it with a Go
-implementation owned by memQL core, eliminating the only non-Go
-runtime in the tree and pulling the voice path back behind the same
-build-tag model the other node types use.
+**Status: DONE.** The realtime voice + video channel is now owned by
+the **Go voice-agent** in `integrations/voice/agent/`, shipped as the
+`voice-agent` subcommand of the `memql-voice` binary
+(`memql-voice voice-agent`). It joins LiveKit rooms as the General
+Assistant's media participant, opens a `MemqlService.Stream` gRPC
+session, and runs the STT -> cognition -> TTS cascade (or the
+gpt-realtime speech-to-speech executor). The Python voice-agent
+process (LiveKit Agents 1.5) has been deleted in full and the only
+non-Go runtime in the tree is gone -- the voice path now lives behind
+the same `//go:build voice` tag model the other node types use.
 
-**Revival source (spec only -- code is NOT recoverable from this
-repo).** The previous Go voice agent (then called the Polyphon
-Bridge Agent) was retired when the Python voice-agent shipped as
-the sole voice participant for the General Assistant. The retirement
-was historically attributed to commit `1af0c60` -- "voice: Phase 11
--- retire the Go Bridge Agent (Initiative C)" -- but **that commit
-no longer exists in this repository, and neither does the bridge
-code it removed.** The repo history was squashed at the repo split:
-the root commit here is "Initial commit: memQL core (post-split
-residual)", `1af0c60` is not a valid git object in current clones
-(`git cat-file -t 1af0c60` reports "Not a valid object name"), and
-`cmd/bridge-agent/` / `component/polyphon/bridge/` appear nowhere in
-this history (`git log --all -- cmd/bridge-agent/` is empty). The
-pre-split history that held the implementation was discarded.
+The cutover landed across epic #449:
 
-The inventory below is therefore a **specification of what the agent
-covered, not a checkout-able commit.** It is the surviving record of
-the retired component's surface and remains the authoritative guide
-for a from-scratch reimplementation. Recovering the actual source
-would require a pre-split archive or clone of the repository taken
-before the split (if one exists outside this clone); absent that, the
-revival is a reconstruction against this spec plus the current voice
-path, not a `git revert` / checkout.
+- #454 skeleton (config + env loading, gRPC client, session
+  lifecycle, LiveKit room join).
+- #455 STT/TTS cascade + turn-taking / barge-in.
+- #456 persona / grounding parity.
+- #457 realtime (gpt-realtime) executor.
+- #458 MCP tool bridge + output.
+- #459 lifecycle + cost guardrails.
+- #460 avatar (Anam / Simli) participant.
+- #461 cutover + DELETE the Python voice-agent (this step): removed
+  the Python `voice-agent` package + `scripts/voice-agent`, the Python
+  Makefile targets, and rewired the compose `voice-agent` service to
+  the Go binary (the `voice-runtime` CGO stage, `command: voice-agent`).
 
-The retired surface comprised:
+The Go agent reuses the env-var family the Python config defined
+verbatim (`LIVEKIT_*`, `MEMQL_DEEPGRAM_API_KEY`, `MEMQL_VOICE_EXECUTOR`
+[default `cascade`], `OPENAI_API_KEY` / `MEMQL_REALTIME_*` on the
+realtime path, `MEMQL_AVATAR_VENDOR` / `ANAM_*` / `SIMLI_*`,
+`MEMQL_VOICE_ROOM_NAME`), authenticates with a class="voice_agent" JWT
+(`VOICE_AGENT_TOKEN`, or self-bootstrap via `/node/bootstrap`), and
+consumes the canonical voice catalog (`integrations/voice/voices.go`)
+plus the `respondToUser` envelope (`integrations/agent/envelope.go`)
+as the source of truth.
 
-- `cmd/bridge-agent/` -- the binary entry point + internal latency
-  harness.
-- `component/polyphon/bridge/` -- the `bridge.Bridge` implementation
-  (room join, STT/TTS dispatch, sentence streaming).
-- `docker/bridge-agent.Dockerfile` + bridge-agent service in
-  `docker-compose.polyphon.yml`.
-- `infra/polyphon/k8s/bridge-agent/` k8s manifests.
-- Makefile targets `bridge-agent`, `voice-latency-harness`,
-  `voice-loop-test-deepgram`, `voice-loop-test-openai`.
-- `scripts/voice/{harness-run,loop-test-deepgram,loop-test-openai}.sh`.
-- `POLYPHON_BRIDGE_AGENT_URL` env wiring + `MEMQL_VOICE_TRANSPORT`
-  toggle in every binary that previously cared.
-- `SetBridgeAgentURL` / `SetVoiceTransport` on the gRPC Server +
-  `bridgeAgentURL` / `voiceTransport` fields.
-- `notifyBridgeAgent` helper in `polyphon_handlers.go`.
-- `CognitionIntegration.bridgeAgentURL` + `WithBridgeAgentURL` ctor
-  option + `notifyBridgeAgentResponse` / `Sentence` cluster
-  (`capabilities.go` `forwardToBridgeAgent` capability +
-  `cognition_handler.go` TTS dispatch path +
-  `voice_streaming.go` sentence-stream dispatch path).
-- `queries/v1/common/builtin/builtinConductorForwardBridgeAgent.memql`.
+**Repo split implication (now realized):** the voice node folds into
+the same module boundary as the other node types (bff / cognition /
+agent / planner) -- no separate Python repo, no separate Dockerfile
+family. The voice-agent rides the `memql-voice` CGO binary built by
+`make voice`.
 
-**What changed since retirement that the revival must absorb:**
-
-- LiveKit Agents 1.5 patterns the Python agent introduced (STT
-  endpointing, token-streamed TTS, avatar gating via
-  `audioControl` / `videoControl` overrides). The revived Go agent
-  must match the avatar gating behavior and per-(space, agent)
-  override resolution that ships today.
-- The canonical voice catalog (`integrations/voice/voices.go`)
-  and the `respondToUser` envelope (`integrations/agent/envelope.go`)
-  -- both already in core, both consumed by the current voice path,
-  both must continue to be the source of truth.
-- Per-agent audio + video control + avatar persona fields on
-  `v1:agents:agent` -- the revived Go agent reads these the
-  same way the Python agent does today.
-
-**Why we're not doing it now:** Python's LiveKit Agents 1.5 SDK
-landed faster than rewriting the equivalent in Go, and the voice
-path is product-critical. Defer until the surface stabilizes and
-the Anam / Simli avatar plugin behavior is well-understood;
-reconstruct from the spec above (or from a pre-split archive if one
-is located), port forward, delete `voice-agent/` in the same commit.
-
-**Repo split implication:** once the Go voice agent is back, the
-voice node folds into the same module boundary as the other node
-types (bff / cognition / agent / planner) -- no separate Python
-repo, no separate Dockerfile family.
+> Historical note: a still-earlier Go voice agent (the Polyphon Bridge
+> Agent) preceded the Python implementation and was retired before the
+> repo split; its source is not recoverable from this repository's
+> squashed history. The current Go voice-agent is a fresh
+> implementation in `integrations/voice/agent/`, not a revival of that
+> code.
 
 ---
 

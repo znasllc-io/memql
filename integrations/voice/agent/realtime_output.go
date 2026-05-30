@@ -3,7 +3,7 @@ package agent
 // realtime_output.go captures the gpt-realtime model's final spoken output for
 // one turn and forwards it to memQL as a v1:cognition:utterance with full
 // chat/canvas/audit parity (#458, the Go analog of
-// voice-agent/voice_agent/realtime_output.py).
+// the Python voice-agent's realtime_output.py).
 //
 // Why this exists. In the cascade path cognition owns the assistant turn end
 // to end: a VoiceAgentTurnRequest runs the agent loop and inserts the SI reply

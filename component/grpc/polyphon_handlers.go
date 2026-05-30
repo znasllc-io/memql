@@ -64,9 +64,9 @@ func (s *streamSession) handlePolyphonRoomToken(envelope *memqlv1.MemqlClientMes
 		})
 
 		// (Initiative C, Phase 11): the legacy bridge-agent HTTP
-		// notify was deleted here. The Python voice-agent's LiveKit
-		// Agents worker self-dispatches into rooms via its own
-		// job-routing config; memql no longer fan-outs on token mint.
+		// notify was deleted here. The Go voice-agent
+		// (integrations/voice/agent) self-dispatches into rooms via its
+		// own join config; memql no longer fan-outs on token mint.
 	}()
 	return nil
 }

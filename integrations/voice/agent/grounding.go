@@ -1,7 +1,7 @@
 package agent
 
 // grounding.go is the Go port of the graph-grounding half of
-// voice-agent/voice_agent/realtime_instructions.py: it renders topic-relevant
+// the Python voice-agent's realtime_instructions.py: it renders topic-relevant
 // graph facts / retrieved knowledge chunks into the labeled context block and
 // the conversation.item payloads the realtime executor (#457) injects before
 // triggering a response, so grounded answers do not depend solely on a tool

@@ -17,6 +17,13 @@ validation (an actual LiveKit server + browser participant + STT/TTS
 credentials) is a flagged follow-up -- see
 [Open questions](#7-open-questions-that-need-live-validation).
 
+> **Historical note (epic #449 complete).** The feasibility question this
+> spike posed has been answered in the affirmative and shipped: the Go
+> voice-agent now joins rooms as a media participant from
+> `integrations/voice/agent/` (room files), and the Python LiveKit Agents
+> worker it replaced has been deleted. References below to the Python
+> implementation describe the spike's starting point, not the current tree.
+
 Docs location note: the voice epic's docs already live under
 `docs/voice/` (`eou-tuning.md`, `bringup-verification.md`,
 `432-conductor-response-gate.md`, `433-multiparty-audio-routing.md`),
@@ -92,8 +99,8 @@ token, _ := at.ToJWT()
 `go.mod` imports only `github.com/livekit/protocol v1.46.4` (JWT +
 generated protos). It does **not** import the Go server SDK and never
 joins a room -- a browser uses the minted token; the Python
-voice-agent (`voice-agent/voice_agent/main.py`) is the thing that
-actually joins as a media participant today, via
+voice-agent (its `main.py`) was the thing that
+actually joined as a media participant at spike time, via
 `livekit.agents.AgentSession`.
 
 This spike is the bridge: replace that Python media participant with a
@@ -159,8 +166,8 @@ type RoomCallback struct {
 ```
 
 `OnTrackSubscribed` is the Go analogue of the Python
-`ctx.room.on("track_subscribed", ...)` listener that
-`voice-agent/voice_agent/main.py` already wires for diagnostics. The
+`ctx.room.on("track_subscribed", ...)` listener that the Python
+voice-agent's `main.py` wired for diagnostics. The
 raw track is a `*webrtc.TrackRemote` carrying Opus RTP. To get PCM16
 out of it, wrap it in a remote PCM track from the media package:
 
@@ -289,7 +296,7 @@ the build image -- see [Caveat 1](#caveat-1-cgo--libopus-build-dependency).
 ### 3b. New package: `component/polyphon/roomagent` (proposed)
 
 A `RoomAgent` that owns the media-participant lifecycle, mirroring what
-`voice-agent/voice_agent/main.py::entrypoint` does today but in Go:
+the Python voice-agent's `main.py::entrypoint` did, but in Go:
 
 - `Join(ctx, spaceId)` -- mints a token via the existing
   `LocalRoomProvider.GenerateToken` path (reuse `localroom.go`; the

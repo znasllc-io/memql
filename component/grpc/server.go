@@ -1058,8 +1058,8 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCreateWorkerToken(envelope, payload.CreateWorkerToken)
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
 		return s.handleRevokeWorkerToken(envelope, payload.RevokeWorkerToken)
-	// Realtime voice + video (Initiative C). The Python voice-agent
-	// (LiveKit Agents 1.5) speaks these messages while authenticated
+	// Realtime voice + video (Initiative C). The Go voice-agent
+	// (integrations/voice/agent) speaks these messages while authenticated
 	// as a service account. See voice_agent_handlers.go.
 	case *memqlv1.MemqlClientMessage_VoiceAgentSessionStart:
 		return s.handleVoiceAgentSessionStart(envelope, payload.VoiceAgentSessionStart)

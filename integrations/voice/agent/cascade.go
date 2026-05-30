@@ -14,7 +14,7 @@ import (
 // cascade.go is the Go cascade voice loop: human audio -> Deepgram STT ->
 // memQL cognition -> Deepgram TTS -> room audio, with turn-taking and
 // barge-in. It is the Go analog of the Python cascade
-// (voice-agent/voice_agent/main.py + memql_llm_plugin.py +
+// (the Python voice-agent's main.py + memql_llm_plugin.py +
 // transcript_forwarder.py + tts_plugin.py), at parity with that baseline.
 //
 // It is pure Go and depends only on small interfaces (ASRStream from

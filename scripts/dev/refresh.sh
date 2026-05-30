@@ -76,7 +76,7 @@ function step3_wipe_and_restart() {
     free_memql_host_ports
 
     # Refresh the ngrok tunnel BEFORE compose up so bff +
-    # voice-agent read the fresh LIVEKIT_PUBLIC_URL from
+    # the Go voice-agent read the fresh LIVEKIT_PUBLIC_URL from
     # .env.local at first boot. Tearing down + re-creating keeps
     # the tunnel in lockstep with the docker stack; the free-tier
     # URL rotates per process so we'd have to re-publish it
@@ -92,13 +92,15 @@ function step3_wipe_and_restart() {
 }
 
 function step4_mint_voice_agent_token() {
-    # The voice-agent crash-loops on bring-up because
+    # The Go voice-agent crash-loops on bring-up because
     # VOICE_AGENT_TOKEN is empty -- the compose env-interpolation
     # has no shell value to pull yet. Mint one against the
     # freshly-up identity service and recreate the voice-agent
-    # container so the new shell-env value lands. Production
-    # injects this from the deploy pipeline's secret store the same
-    # way (see docs/auth/voice-agent-jwt.md).
+    # container so the new shell-env value lands. The Go agent reads
+    # this exact env var first in integrations/voice/agent/bootstrap.go
+    # (ResolveVoiceAgentToken). Production injects it from the deploy
+    # pipeline's secret store the same way (see
+    # docs/auth/voice-agent-jwt.md).
     echo "[4/7] Waiting for identity service to be healthy..."
     if ! wait_for_identity 90 2; then
         cat <<'EOF'

@@ -10,34 +10,35 @@ end-of-utterance tuning.
 
 - Right after `make dev-refresh` to confirm the freshly-minted
   `VOICE_AGENT_TOKEN` actually landed in `polyphon-voice-agent`.
-- After editing anything in `voice-agent/` or the LiveKit transport.
+- After editing anything in `integrations/voice/agent/` or the
+  LiveKit transport.
 - After a deploy to staging / prod, before declaring voice
   available.
 
-## The smoke check (automated)
+## The smoke check (manual)
+
+The fast "is the agent alive + authenticated" check:
 
 ```bash
-make voice-loop-test-livekit
+# 1. Confirm the container is running (not restarting -- the symptom
+#    of a missing VOICE_AGENT_TOKEN).
+docker ps --filter name=polyphon-voice-agent
+
+# 2. Confirm VOICE_AGENT_TOKEN is populated inside the container.
+docker exec polyphon-voice-agent sh -c 'test -n "$VOICE_AGENT_TOKEN" && echo OK'
+
+# 3. Scan the recent log tail for auth failures or gRPC
+#    UNAUTHENTICATED responses.
+docker logs --tail 200 polyphon-voice-agent
 ```
 
-Drives `scripts/voice/loop-test-livekit.sh` end-to-end:
-
-1. Confirms `polyphon-voice-agent` is in `running` state (not
-   `restarting`, the symptom of a missing `VOICE_AGENT_TOKEN`).
-2. Confirms `VOICE_AGENT_TOKEN` is populated inside the container
-   (`docker exec polyphon-voice-agent sh -c 'test -n
-   "$VOICE_AGENT_TOKEN"'`).
-3. Scans the recent log tail for tracebacks, auth failures, or
-   gRPC `UNAUTHENTICATED` responses.
-4. Prints the manual round-trip runbook below.
-
-When it fails, the script prints the specific recovery command
-inline.
+If step 2 fails, the mint-and-inject step in dev-refresh didn't land
+-- see the recovery in the failure-modes table below.
 
 ## The dev env contract
 
 The voice-agent reads the following at startup
-(`voice-agent/voice_agent/config.py::load_config`). Each one's
+(`integrations/voice/agent/config.go`, `LoadConfig`). Each one's
 source is locked in dev:
 
 | Var | Source in dev | Required? |
@@ -53,9 +54,9 @@ source is locked in dev:
 | `SIMLI_API_KEY` | `.env.local` via `env_file:` | required when `MEMQL_AVATAR_VENDOR=simli` |
 | `LIVEKIT_PUBLIC_URL` | `.env.local`, rewritten by `lib_refresh_ngrok` to a fresh ngrok tunnel | required for the avatar; audio-only works without it |
 
-If `make voice-loop-test-livekit` fails on the token check, the
-mint-and-inject step in dev-refresh didn't land. The script's
-inline error includes the manual recovery command.
+If the token check (step 2 above) fails, the mint-and-inject step in
+dev-refresh didn't land. Recover with the manual mint-and-recreate in
+the failure-modes table below.
 
 If the avatar fails to render but audio works, `LIVEKIT_PUBLIC_URL`
 is the usual cause -- check `ngrok` is installed and authed
@@ -91,7 +92,7 @@ loop:
 
 | Symptom | Cause | Recovery |
 | --- | --- | --- |
-| `polyphon-voice-agent` restarting forever | `VOICE_AGENT_TOKEN` empty | re-run `make dev-refresh`, or run [the manual mint-and-recreate](../auth/voice-agent-jwt.md#bring-up-injection-dev--prod) printed by the smoke check |
+| `polyphon-voice-agent` restarting forever | `VOICE_AGENT_TOKEN` empty | re-run `make dev-refresh`, or run [the manual mint-and-recreate](../auth/voice-agent-jwt.md#bring-up-injection-dev--prod) |
 | Auth works but no TTS | Deepgram key missing in `.env.local` | seal the key into `~/.memql/genesis.znas` via `memql-cockpit genesis init` |
 | Audio works but no avatar | `ngrok` missing or `LIVEKIT_PUBLIC_URL` stale | install ngrok (`make install-deps` surfaces the hint), re-run `make dev-refresh` |
 | `UNAUTHENTICATED` in voice-agent logs | Token expired or identity row soft-deleted | re-mint with `make voice-agent-token INSTANCE=voice-agent-local` and recreate the service |

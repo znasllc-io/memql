@@ -1132,7 +1132,7 @@ mutation identity mutationRevokeNodeTokenIdentity {
 // =============================
 //
 // Creates a v1:identity:identity row of identityType="voice_agent_token"
-// for a Python voice-agent process. Stores only the SHA-256 hex hash
+// for the Go voice-agent process. Stores only the SHA-256 hex hash
 // of the random bearer used as the credential's keyHash; the actual
 // auth token handed to the voice-agent is a class="voice_agent" JWT
 // signed by the identity service's Ed25519 key (see
@@ -1149,7 +1149,7 @@ mutation identity mutationRevokeNodeTokenIdentity {
 // identity binary; see docs/auth/voice-agent-jwt.md.
 
 @enabled
-@description("Create a voice_agent_token identity (credential row for a Python voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.")
+@description("Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.")
 mutation identity mutationCreateVoiceAgentTokenIdentity {
   args {
     identityId  string  @required

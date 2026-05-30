@@ -1281,7 +1281,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			resolvedVoiceModel := resolveAgentVoice(agent)
 
 			// Initiative C, Phase 11: Bridge Agent's TTS notify path was
-			// deleted here. The Python voice-agent owns voice synthesis
+			// deleted here. The Go voice-agent owns voice synthesis
 			// now via the VoiceAgent* gRPC contract; cognition's job on
 			// the voice path stops at landing the GA's reply utterance
 			// in chat (which insertSIResponse does below). The voice-agent
@@ -2071,7 +2071,7 @@ func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, space
 // it was produced by a realtime voice channel. Two pipelines tag
 // here today: the legacy /memql/audio WebSocket path (still backing
 // voice-first creation modals) stamps `pipeline=polyphon`, and the
-// LiveKit-Agents-1.5 voice-agent path (the in-session voice channel)
+// Go voice-agent path (the in-session voice channel)
 // stamps `pipeline=voice-agent`. inputMethod is also checked as a
 // belt-and-suspenders catch for STT producers that omit pipeline.
 func isVoiceUtterance(source map[string]string) bool {

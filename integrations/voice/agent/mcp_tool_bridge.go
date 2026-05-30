@@ -4,7 +4,7 @@ package agent
 // gpt-realtime model via async function calling, and mirrors every
 // model-driven tool call back into cognition so cognition is never blind to
 // what the model did (#458, the Go analog of
-// voice-agent/voice_agent/mcp_tool_bridge.py).
+// the Python voice-agent's mcp_tool_bridge.py).
 //
 // Risk-tier split (the heart of #435/#458). memQL already speaks MCP on the
 // bidirectional MemqlService.Stream RPC (ListToolsMsg / CallToolMsg). The full

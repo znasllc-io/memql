@@ -9,7 +9,7 @@ import (
 )
 
 // agent.go is the top-level voice-agent entrypoint, the Go analog of
-// voice-agent/voice_agent/main.py::run + entrypoint. It loads config, resolves
+// the Python voice-agent's main.py::run + entrypoint. It loads config, resolves
 // the class="voice_agent" JWT, builds the gRPC client + room joiner, and runs
 // one Session. It is CGO-free; the room joiner it constructs is build-tag-
 // resolved (room_voice.go under `-tags voice`, room_default.go otherwise), so

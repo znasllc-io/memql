@@ -4056,7 +4056,7 @@ func MutationCreateValidationEventBuild(args MutationCreateValidationEventArgs) 
 	return b.String()
 }
 
-// MutationCreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for a Python voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
+// MutationCreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
 //
 // Bound concept: identity.
 type MutationCreateVoiceAgentTokenIdentityArgs struct {
