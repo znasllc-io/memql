@@ -27,6 +27,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/knowledge"
 	_ "github.com/znasllc-io/memql/integrations/liveavatar"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
+	_ "github.com/znasllc-io/memql/integrations/openairealtime"
 	_ "github.com/znasllc-io/memql/integrations/router"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/timeutil"
