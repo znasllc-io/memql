@@ -339,6 +339,17 @@ builtin liveAvatarStopSession {
   session_token  string  @required
 }
 
+// Mint a short-lived OpenAI Realtime ephemeral client_secret so the browser
+// can open a DIRECT browser<->OpenAI Realtime WebRTC session (v3 voice path)
+// without ever seeing the standing OpenAI key. Backed by the openairealtime
+// integration (Go). Returns { value, expiresAt, config: { model, voice } }.
+@executor("integration.openairealtime.createClientSecret")
+@description("Mint a short-lived OpenAI Realtime ephemeral client_secret for a direct browser<->OpenAI WebRTC session.")
+builtin realtimeCreateClientSecret {
+  model  string
+  voice  string
+}
+
 // ---- queries/v1/common/builtin/builtinMemqlDocs.memql ----
 
 // builtinMemqlDocs - MemQL Documentation
