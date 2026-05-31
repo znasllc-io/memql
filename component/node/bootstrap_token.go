@@ -45,12 +45,41 @@ import (
 // orchestrates peer / event-bus / engine bring-up at process start.
 // This file is auth-token-only.
 
-// nodeBootstrapHTTPTimeout caps how long a node will wait for the
-// identity service to mint a token before giving up. Generous so
-// slow-start identity in compose doesn't trigger a false negative,
-// but bounded so a misconfigured identity endpoint doesn't block
-// node startup forever.
+// nodeBootstrapHTTPTimeout caps how long a node will wait on a SINGLE
+// mint attempt before giving up. Generous so slow-start identity in
+// compose doesn't trigger a false negative, but bounded so a
+// misconfigured identity endpoint doesn't block a single attempt forever.
 const nodeBootstrapHTTPTimeout = 30 * time.Second
+
+// Retry budget for the startup mint (memql#542). The original code minted
+// ONCE at startup with no retry: rolling all node deployments at once meant
+// any worker that restarted while identity was briefly down came up with no
+// token and stayed broken until manually re-rolled. We now retry transient
+// failures (identity unreachable / still starting / 5xx) on an exponential
+// backoff until a token is obtained or the budget is exhausted. Permanent
+// rejections (wrong secret, bad request -- 4xx) are NOT retried.
+//
+// The budget defaults generously enough to cover an identity pod restart
+// during a simultaneous roll, and is overridable via env for ops + tests.
+const (
+	defaultNodeBootstrapRetryBudget = 90 * time.Second
+	nodeBootstrapRetryBaseBackoff   = 2 * time.Second
+	nodeBootstrapRetryMaxBackoff    = 15 * time.Second
+	nodeBootstrapRetryBudgetEnv     = "MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET"
+)
+
+// nodeBootstrapRetryBudget resolves the overall retry window from
+// MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET (a Go duration string, e.g. "90s",
+// "2m"), falling back to the default. A budget of 0 means "single
+// attempt, no retry" (handy for tests + opt-out).
+func nodeBootstrapRetryBudget() time.Duration {
+	if v := strings.TrimSpace(os.Getenv(nodeBootstrapRetryBudgetEnv)); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return defaultNodeBootstrapRetryBudget
+}
 
 // bootstrapTokenResponse mirrors identity/http/node_bootstrap.go's
 // NodeBootstrapResponse. Defined locally to avoid a node ->
@@ -102,8 +131,77 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 		return "", false, fmt.Errorf("node bootstrap requested (MEMQL_NODE_BOOTSTRAP_TOKEN set) but IDENTITY_VERIFIER_BASE_URL is empty -- cannot reach identity service")
 	}
 
+	token, err := bootstrapWithRetry(ctx, logger, identityBase, secret, nodeId, nodeType,
+		nodeBootstrapRetryBudget(), nodeBootstrapRetryBaseBackoff)
+	if err != nil {
+		return "", false, err
+	}
+	return token, true, nil
+}
+
+// bootstrapWithRetry drives attemptBootstrapMint on an exponential backoff
+// until it succeeds, hits a permanent (non-retryable) rejection, the context
+// is cancelled, or the overall budget is exhausted. A budget of 0 collapses
+// to a single attempt. Permanent rejections (wrong secret / bad request)
+// short-circuit immediately so a misconfig surfaces fast instead of
+// spinning for the whole budget.
+func bootstrapWithRetry(ctx context.Context, logger *slog.Logger, identityBase, secret, nodeId, nodeType string, budget, baseBackoff time.Duration) (string, error) {
+	deadline := time.Now().Add(budget)
+	backoff := baseBackoff
+	attempt := 0
+	var lastErr error
+
+	for {
+		attempt++
+		token, retryable, err := attemptBootstrapMint(ctx, logger, identityBase, secret, nodeId, nodeType)
+		if err == nil {
+			if attempt > 1 && logger != nil {
+				logger.Info("node bootstrap: minted node-class JWT after retry",
+					"attempts", attempt, "node_type", nodeType, "node_id", nodeId)
+			}
+			return token, nil
+		}
+		lastErr = err
+		if !retryable {
+			return "", err
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		sleep := backoff
+		if sleep > remaining {
+			sleep = remaining
+		}
+		if logger != nil {
+			logger.Warn("node bootstrap: attempt failed, retrying",
+				"attempt", attempt, "backoff", sleep.String(),
+				"node_type", nodeType, "node_id", nodeId, "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("node bootstrap: context cancelled after %d attempt(s): %w", attempt, ctx.Err())
+		case <-time.After(sleep):
+		}
+		if backoff *= 2; backoff > nodeBootstrapRetryMaxBackoff {
+			backoff = nodeBootstrapRetryMaxBackoff
+		}
+	}
+
+	return "", fmt.Errorf("node bootstrap: giving up after %d attempt(s) over %s: %w", attempt, budget, lastErr)
+}
+
+// attemptBootstrapMint performs ONE POST /node/bootstrap and returns the
+// minted token, a retryable flag, and an error. retryable is true for
+// transient failures worth a retry (identity unreachable, response-read
+// failure, non-JSON proxy body, or a 5xx) and false for permanent
+// rejections (a structured 4xx like wrong-secret/bad-request, or a 200
+// with an empty token -- none of which a retry would fix).
+func attemptBootstrapMint(ctx context.Context, logger *slog.Logger, identityBase, secret, nodeId, nodeType string) (string, bool, error) {
 	endpoint, err := url.Parse(identityBase + "/node/bootstrap")
 	if err != nil {
+		// Misformed base URL won't fix itself -- permanent.
 		return "", false, fmt.Errorf("node bootstrap: parse identity base url %q: %w", identityBase, err)
 	}
 
@@ -143,30 +241,38 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", false, fmt.Errorf("node bootstrap: POST %s: %w", endpoint.String(), err)
+		// Transport-level failure (connection refused, dial timeout,
+		// TLS handshake) -- exactly the "identity briefly down" case
+		// we want to retry through.
+		return "", true, fmt.Errorf("node bootstrap: POST %s: %w", endpoint.String(), err)
 	}
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if readErr != nil {
-		return "", false, fmt.Errorf("node bootstrap: read response (status %d): %w", resp.StatusCode, readErr)
+		return "", true, fmt.Errorf("node bootstrap: read response (status %d): %w", resp.StatusCode, readErr)
 	}
 
 	var decoded bootstrapTokenResponse
 	if jsonErr := json.Unmarshal(body, &decoded); jsonErr != nil {
-		return "", false, fmt.Errorf("node bootstrap: identity returned %d with non-JSON body (%d bytes): %s",
+		// A non-JSON body usually means an LB/proxy 502/503 HTML page
+		// while identity is still coming up -- retryable.
+		return "", true, fmt.Errorf("node bootstrap: identity returned %d with non-JSON body (%d bytes): %s",
 			resp.StatusCode, len(body), strings.TrimSpace(string(body)))
 	}
 
 	if resp.StatusCode != http.StatusOK || !decoded.Success {
 		// Surface the structured error code so operators can
 		// distinguish "endpoint disabled" / "wrong secret" / "bad
-		// request" / etc. without grepping identity logs.
+		// request" / etc. without grepping identity logs. A 5xx is
+		// transient (identity still starting); a 4xx is a permanent
+		// config error a retry won't fix.
 		errCode := decoded.ErrorCode
 		if errCode == "" {
 			errCode = fmt.Sprintf("http_%d", resp.StatusCode)
 		}
-		return "", false, fmt.Errorf("node bootstrap: identity rejected request (status=%d errorCode=%s): %s",
+		retryable := resp.StatusCode >= 500
+		return "", retryable, fmt.Errorf("node bootstrap: identity rejected request (status=%d errorCode=%s): %s",
 			resp.StatusCode, errCode, strings.TrimSpace(decoded.Error))
 	}
 
@@ -183,5 +289,5 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 		)
 	}
 
-	return decoded.PlainToken, true, nil
+	return decoded.PlainToken, false, nil
 }
