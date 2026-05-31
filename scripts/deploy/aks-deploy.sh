@@ -62,6 +62,10 @@ ACR_LOGIN_SERVER="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}"
 # bff (carrier) + copresent (SPA) come from sibling repos -- not built here.
 readonly ENGINE_NODE_TYPES=(identity cognition voice agent planner workbench)
 
+# Every Deployment this script rolls -- the rollback target set when the
+# post-deploy smoke gate fails (engine nodes + the bff carrier + the SPA).
+readonly ALL_DEPLOYMENTS=(identity bff cognition voice agent planner workbench copresent)
+
 # Per-Deployment rollout wait.
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-180s}"
 
@@ -105,7 +109,10 @@ Options:
                       Default: staging.
     --skip-build      Do not build/push images; apply already-pushed tags.
     --skip-tls        Do not (re)generate the internal CA + identity cert.
-    --no-smoke        Skip the post-deploy smoke test.
+    --no-smoke        Skip the post-deploy smoke test (also disables the gate).
+    --no-gate         Run the smoke test but do NOT auto-rollback on failure
+                      (useful when a smoke failure is environmental, e.g.
+                      DNS/cert propagation lag). Default: gate ON.
     --dry-run         Print the full plan and mutate nothing (no Azure calls).
     --help            Show this help.
 
@@ -133,6 +140,7 @@ function parse_arguments() {
     SKIP_BUILD=false
     SKIP_TLS=false
     NO_SMOKE=false
+    GATE=true
     DRY_RUN=false
 
     while [[ $# -gt 0 ]]; do
@@ -142,6 +150,7 @@ function parse_arguments() {
             --skip-build) SKIP_BUILD=true; shift ;;
             --skip-tls)   SKIP_TLS=true; shift ;;
             --no-smoke)   NO_SMOKE=true; shift ;;
+            --no-gate)    GATE=false; shift ;;
             --dry-run)    DRY_RUN=true; shift ;;
             --help)       show_help; exit 0 ;;
             *)
@@ -322,10 +331,46 @@ function smoke_test() {
         warn "smoke script not found at $smoke; skipping."
         return 0
     fi
-    info "running baseline smoke checks (non-fatal -- DNS/cert propagation can lag a fresh apply)..."
+    info "running baseline smoke checks..."
     if ! bash "$smoke"; then
-        warn "smoke test reported failures -- inspect above. This does NOT roll back the apply."
+        warn "smoke test reported failures (see above)."
+        return 1
     fi
+    return 0
+}
+
+#=============================================================================
+# 5. HEALTH GATE + ROLLBACK
+#=============================================================================
+
+# Roll every Deployment we just applied back to its previous ReplicaSet.
+# `kubectl rollout undo` is a no-op for a Deployment with no prior revision
+# (a first-ever deploy), so this is safe to fan across all of them.
+function rollback_all() {
+    warn "rolling back to the previous revision of each Deployment..."
+    local nt
+    for nt in "${ALL_DEPLOYMENTS[@]}"; do
+        run_or_plan kubectl rollout undo "deployment/${nt}" -n "$NAMESPACE"
+    done
+    warn "rollback issued. Watch: kubectl get pods -n $NAMESPACE -w"
+}
+
+# The health gate: run the smoke test; if it fails and the gate is armed,
+# auto-rollback and exit non-zero so the operator (or CI) sees the failure.
+# --no-smoke skips the check entirely; --no-gate runs it but won't revert.
+function health_gate() {
+    if smoke_test; then
+        return 0
+    fi
+    # smoke_test returns 0 for the skipped/dry-run cases, so reaching here
+    # means a real failure.
+    if [ "$GATE" = false ]; then
+        warn "smoke gate is OFF (--no-gate); leaving the new revision in place despite the failure."
+        return 1
+    fi
+    section "5. Health gate FAILED -> rollback"
+    rollback_all
+    return 1
 }
 
 #=============================================================================
@@ -343,9 +388,19 @@ function state_report() {
     else
         echo "  Images:     engine nodes -> :$VERSION (built + rolled out)"
     fi
+    local gate_label
+    if [ "$NO_SMOKE" = true ]; then
+        gate_label="off (--no-smoke)"
+    elif [ "$GATE" = true ]; then
+        gate_label="on (auto-rollback on failure)"
+    else
+        gate_label="report-only (--no-gate)"
+    fi
+    echo "  Smoke gate: $gate_label"
     echo "  Dry run:    $DRY_RUN"
     if [ "$DRY_RUN" = false ]; then
         echo "  Watch:      kubectl get pods -n $NAMESPACE -w"
+        echo "  Rollback:   make deploy-rollback   (or: scripts/deploy/aks-rollback.sh)"
     fi
 }
 
@@ -366,8 +421,16 @@ function main() {
     ensure_tls_secrets
     warn_if_app_secret_missing
     apply_ordered
-    smoke_test
+
+    local gate_rc=0
+    health_gate || gate_rc=$?
+
     state_report
+    if [ "$gate_rc" -ne 0 ]; then
+        echo ""
+        echo "RESULT: deploy FAILED the smoke gate. $([ "$GATE" = true ] && echo 'Previous revision restored (rollback issued).' || echo 'New (failing) revision left in place per --no-gate.')"
+        exit 1
+    fi
 }
 
 main "$@"
