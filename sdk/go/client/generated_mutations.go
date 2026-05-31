@@ -2213,6 +2213,137 @@ func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceAr
 	return b.String()
 }
 
+// MutationCreateGuide -- Create a persisted Guide (the parent row). The generator (copresent#194) calls this once, then mutationCreateScene per Scene with the returned guide id. `slug` should be unique (well-known for templates like 'first-run-walkthrough', generated otherwise). `sceneCount` is stamped here so the client can render progress without a count query.
+//
+// Bound concept: guide.
+type MutationCreateGuideArgs struct {
+	GuideId                string
+	Slug                   string
+	Name                   string
+	Description            string
+	Kind                   string
+	AvatarEnabled          bool
+	AvatarEnabledSet       bool // set true to send avatarEnabled; required because zero-value bool is ambiguous
+	OwnerUserId            string
+	SpaceId                string
+	SceneCount             int
+	GeneratedFromIntake    bool
+	GeneratedFromIntakeSet bool // set true to send generatedFromIntake; required because zero-value bool is ambiguous
+	IntakeSummary          string
+	RequiredScopes         []string
+	Locales                []string
+	Version                int
+	Active                 bool
+	ActiveSet              bool // set true to send active; required because zero-value bool is ambiguous
+}
+
+// MutationCreateGuide calls the engine mutation mutationCreateGuide.
+func (qc *QueryClient) MutationCreateGuide(ctx context.Context, args MutationCreateGuideArgs) (*Result, error) {
+	call := MutationCreateGuideBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateGuide", call)
+}
+
+func MutationCreateGuideBuild(args MutationCreateGuideArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateGuide({")
+	if args.GuideId != "" {
+		b.WriteString("guideId: ")
+		b.WriteString(fmt.Sprintf("%q", args.GuideId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if args.Description != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(fmt.Sprintf("%q", args.Description))
+	}
+	if args.Kind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(fmt.Sprintf("%q", args.Kind))
+	}
+	if args.AvatarEnabledSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("avatarEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.AvatarEnabled))
+	}
+	if args.OwnerUserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerUserId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	}
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.SceneCount != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sceneCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SceneCount))
+	}
+	if args.GeneratedFromIntakeSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("generatedFromIntake: ")
+		b.WriteString(fmt.Sprintf("%v", args.GeneratedFromIntake))
+	}
+	if args.IntakeSummary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intakeSummary: ")
+		b.WriteString(fmt.Sprintf("%q", args.IntakeSummary))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requiredScopes: ")
+	b.WriteString(renderMemQLValue(args.RequiredScopes))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("locales: ")
+	b.WriteString(renderMemQLValue(args.Locales))
+	if args.Version != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%v", args.Version))
+	}
+	if args.ActiveSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("active: ")
+		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateIdentity -- Create a new identity (credential set owned by a user).
 //
 // Bound concept: identity.
@@ -3112,6 +3243,104 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateScene -- Create one Scene under a Guide. Called once per Scene by the generator (copresent#194) after mutationCreateGuide. `order` is the 0-based position; `narrationIntent` is required; `canvasActions` / `avatarDirectives` are JSON strings (see the scene concept). interruptible / allowsQuestions default true (an open Scene).
+//
+// Bound concept: scene.
+type MutationCreateSceneArgs struct {
+	SceneId            string
+	GuideId            string
+	Slug               string
+	Order              int
+	Title              string
+	NarrationIntent    string
+	CanvasActions      string
+	AvatarDirectives   string
+	Interruptible      bool
+	InterruptibleSet   bool // set true to send interruptible; required because zero-value bool is ambiguous
+	AllowsQuestions    bool
+	AllowsQuestionsSet bool // set true to send allowsQuestions; required because zero-value bool is ambiguous
+	SuccessCondition   string
+}
+
+// MutationCreateScene calls the engine mutation mutationCreateScene.
+func (qc *QueryClient) MutationCreateScene(ctx context.Context, args MutationCreateSceneArgs) (*Result, error) {
+	call := MutationCreateSceneBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateScene", call)
+}
+
+func MutationCreateSceneBuild(args MutationCreateSceneArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateScene({")
+	if args.SceneId != "" {
+		b.WriteString("sceneId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SceneId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("guideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.GuideId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("order: ")
+	b.WriteString(fmt.Sprintf("%v", args.Order))
+	if args.Title != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("title: ")
+		b.WriteString(fmt.Sprintf("%q", args.Title))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("narrationIntent: ")
+	b.WriteString(fmt.Sprintf("%q", args.NarrationIntent))
+	if args.CanvasActions != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("canvasActions: ")
+		b.WriteString(fmt.Sprintf("%q", args.CanvasActions))
+	}
+	if args.AvatarDirectives != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("avatarDirectives: ")
+		b.WriteString(fmt.Sprintf("%q", args.AvatarDirectives))
+	}
+	if args.InterruptibleSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("interruptible: ")
+		b.WriteString(fmt.Sprintf("%v", args.Interruptible))
+	}
+	if args.AllowsQuestionsSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("allowsQuestions: ")
+		b.WriteString(fmt.Sprintf("%v", args.AllowsQuestions))
+	}
+	if args.SuccessCondition != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("successCondition: ")
+		b.WriteString(fmt.Sprintf("%q", args.SuccessCondition))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -8331,6 +8560,34 @@ func MutationUpdateDocumentValidationBuild(args MutationUpdateDocumentValidation
 	return b.String()
 }
 
+// MutationUpdateGuide -- Partial update of a v1:guide:guide row. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing a Guide (rename, toggle avatarEnabled, soft-disable via active=false) and the generator stamping sceneCount after authoring all Scenes.
+//
+// Bound concept: guide.
+type MutationUpdateGuideArgs struct {
+	GuideId string
+	Payload map[string]any
+}
+
+// MutationUpdateGuide calls the engine mutation mutationUpdateGuide.
+func (qc *QueryClient) MutationUpdateGuide(ctx context.Context, args MutationUpdateGuideArgs) (*Result, error) {
+	call := MutationUpdateGuideBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateGuide", call)
+}
+
+func MutationUpdateGuideBuild(args MutationUpdateGuideArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateGuide({")
+	b.WriteString("guideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.GuideId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationUpdateIdentity -- Insert a new version of an identity record with the provided payload.
 //
 // Bound concept: identity.
@@ -8790,6 +9047,34 @@ func MutationUpdateRecordBuild(args MutationUpdateRecordArgs) string {
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateScene -- Partial update of a v1:guide:scene row. Only the fields passed in `payload` change. Backs editing a Scene's narration / actions / interruptibility before or between runs.
+//
+// Bound concept: scene.
+type MutationUpdateSceneArgs struct {
+	SceneId string
+	Payload map[string]any
+}
+
+// MutationUpdateScene calls the engine mutation mutationUpdateScene.
+func (qc *QueryClient) MutationUpdateScene(ctx context.Context, args MutationUpdateSceneArgs) (*Result, error) {
+	call := MutationUpdateSceneBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateScene", call)
+}
+
+func MutationUpdateSceneBuild(args MutationUpdateSceneArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateScene({")
+	b.WriteString("sceneId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SceneId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString("})")
 	return b.String()
 }
