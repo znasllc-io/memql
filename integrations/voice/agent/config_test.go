@@ -28,9 +28,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ws://livekit:7880", cfg.LiveKitURL)
 	assert.Equal(t, "realtime", cfg.VoiceExecutor)
-	assert.Equal(t, "gpt-realtime", cfg.RealtimeModel)
+	assert.Equal(t, "gpt-realtime-2", cfg.RealtimeModel)
 	// #478 native 1-on-1 is on by default with a sensible transcription model.
 	assert.True(t, cfg.RealtimeNativeTurn)
+	// Native STT (Deepgram off the realtime critical path) is on by default.
+	assert.True(t, cfg.RealtimeNativeSTT)
 	assert.Equal(t, "gpt-4o-mini-transcribe", cfg.RealtimeTranscriptionModel)
 	assert.Equal(t, 300, cfg.RealtimeIdleTimeoutSec)
 	assert.Equal(t, 1800, cfg.RealtimeMaxSessionSec)

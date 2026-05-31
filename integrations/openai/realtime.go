@@ -66,7 +66,7 @@ func NewRealtimeClient(cfg Config, model string) (*RealtimeClient, error) {
 		return nil, fmt.Errorf("openai realtime: API key is required")
 	}
 	if model == "" {
-		model = "gpt-realtime"
+		model = "gpt-realtime-2"
 	}
 	logger := cfg.logger()
 	logger.Info("openai realtime: initialized", "model", model)
@@ -101,7 +101,12 @@ func (c *RealtimeClient) Connect(ctx context.Context, sess SessionConfig) (*Real
 
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+c.apiKey)
-	headers.Set("OpenAI-Beta", "realtime=v1")
+	// GA Realtime API: NO `OpenAI-Beta: realtime=v1` header. OpenAI retired the
+	// beta surface ("The Realtime Beta API is no longer supported. Please use
+	// /v1/realtime for the GA API." -> close 4000 beta_api_shape_disabled); the
+	// beta header is what flagged the connection as beta and got it rejected. The
+	// GA endpoint (?model=gpt-realtime) authenticates with Bearer alone and reads
+	// the GA session shape (type:"realtime", nested audio.input/output).
 
 	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: headers})
 	if err != nil {

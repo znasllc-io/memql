@@ -182,10 +182,25 @@ services:
       LIVEKIT_API_KEY: "devkey"
       LIVEKIT_API_SECRET: "secret"
       MEMQL_GRPC_ADDR: "bff:50051"
-      # Voice executor: "cascade" (Deepgram STT -> cognition ->
-      # Deepgram TTS, the default) or "realtime" (OpenAI gpt-realtime
-      # speech-to-speech, needs OPENAI_API_KEY from .env.local).
-      MEMQL_VOICE_EXECUTOR: "${MEMQL_VOICE_EXECUTOR:-cascade}"
+      # Voice executor: "realtime" (OpenAI gpt-realtime speech-to-speech,
+      # the converged #475 default -- the model owns the turn and authors
+      # the reply; needs OPENAI_API_KEY from .env.local) or "cascade"
+      # (Deepgram STT -> cognition -> Deepgram TTS). Cascade is retired on
+      # the post-#479 cognition path: cognition no longer authors voice
+      # replies (it publishes a gate directive for the realtime model to
+      # author), so cascade has no reply text to speak. Realtime is the
+      # only working path -- keep cascade only for isolated executor tests.
+      MEMQL_VOICE_EXECUTOR: "${MEMQL_VOICE_EXECUTOR:-realtime}"
+      # Realtime model id (GA Realtime API). gpt-realtime-2 is OpenAI's GA
+      # speech-to-speech model; the older beta surface was retired, so the
+      # client dials /v1/realtime with Bearer auth only (no OpenAI-Beta
+      # header). Note the var name -- the agent reads MEMQL_REALTIME_MODEL,
+      # NOT MEMQL_OPENAI_REALTIME_MODEL.
+      MEMQL_REALTIME_MODEL: "${MEMQL_REALTIME_MODEL:-gpt-realtime-2}"
+      # Native STT: keep Deepgram OFF the realtime critical path so gpt-realtime-2
+      # owns STT + turn detection + voice + tool-calling (snappiest). Set to
+      # "false" to re-enable the Deepgram labeled-transcript read side.
+      MEMQL_VOICE_REALTIME_NATIVE_STT: "${MEMQL_VOICE_REALTIME_NATIVE_STT:-true}"
       # Room to join. The memQL convention is polyphon-<spaceId>; the
       # voice node assigns concrete rooms at runtime, so this is the
       # bring-up default for a stock `docker compose up`.

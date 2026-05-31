@@ -56,6 +56,15 @@ type Config struct {
 	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
 	// native authorship for a single-human standard space). Default true.
 	RealtimeNativeTurn bool
+	// RealtimeNativeSTT takes Deepgram OFF the realtime path: gpt-realtime owns
+	// STT (native input transcription), turn detection (semantic_vad), the voice,
+	// and tool-calling -- nothing routes through Deepgram on the critical path, so
+	// the conversation is as snappy as the model allows. The human's chat
+	// transcript still arrives (from the model's input_audio_transcription) but
+	// asynchronously, off the voice path. Deepgram stays a fully-wired fallback
+	// (the cascade executor + multi-party labeled-transcript read side) -- this
+	// only disables it for the realtime executor. Default true.
+	RealtimeNativeSTT bool
 	// VoiceGrounding enables per-turn knowledge grounding for voice replies
 	// (#490). When on, 1-on-1 routes through the gate (create_response:false) so
 	// the executor can inject the retrieved grounding block before the model
@@ -199,7 +208,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// explicitly via MEMQL_VOICE_EXECUTOR=cascade.
 	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "realtime"))
 	cfg.OpenAIAPIKey = get("OPENAI_API_KEY", "")
-	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime")
+	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime-2")
 	// #478 native 1-on-1: gpt-realtime owns the turn (semantic_vad) when a
 	// standard space has exactly one human. On by default; set
 	// MEMQL_REALTIME_NATIVE_TURN=false to keep the conductor gate on the
@@ -207,6 +216,7 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.VoiceGrounding = get("MEMQL_VOICE_GROUNDING", "false") == "true"
 	cfg.VoiceAutoJoin = get("MEMQL_VOICE_AUTOJOIN", "true") != "false"
 	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
+	cfg.RealtimeNativeSTT = get("MEMQL_VOICE_REALTIME_NATIVE_STT", "true") != "false"
 	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 	// #481 multi-party semantic_vad gate -- opt-in (default false), pending live
 	// validation in a >=2-human room.
