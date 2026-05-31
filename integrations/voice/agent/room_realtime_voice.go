@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/livekit/protocol/livekit"
@@ -94,6 +95,7 @@ type realtimeRoomBridge struct {
 	nativeEnabled         bool
 	multiPartySemanticVad bool // #481: multi-party uses semantic_vad + gate when set
 	grounding             bool // #490: route 1-on-1 through the gate so grounding can inject
+	nativeSTT             bool // Deepgram off the realtime path; gpt-realtime owns STT/VAD
 	transcriptionModel    string
 	language              string
 	sessionBase           openai.SessionConfig
@@ -122,15 +124,25 @@ type realtimeRoomBridge struct {
 // already validated the preconditions (executor_select.go), the live dial can
 // still fail and must not wedge the join.
 func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, client *Client, room *lksdk.Room, logger *slog.Logger) (*realtimeRoomBridge, error) {
-	dgCfg := deepgram.Config{
-		APIKey:   cfg.DeepgramAPIKey,
-		ASRModel: cfg.DGASRModel,
-		Language: cfg.DGLanguage,
-		Logger:   logger,
-	}
-	asr, err := deepgram.NewASRClient(dgCfg)
-	if err != nil {
-		return nil, fmt.Errorf("voice-agent realtime room: deepgram asr: %w", err)
+	// Deepgram is OFF the realtime path by default (cfg.RealtimeNativeSTT):
+	// gpt-realtime owns STT + turn detection + voice, so nothing routes through
+	// Deepgram on the critical path. We only stand up the Deepgram client when
+	// native STT is disabled (the opt-in labeled-transcript read side). The
+	// integration stays fully wired -- this just doesn't dial it for the snappy
+	// realtime path.
+	var asr *deepgram.ASRClient
+	if !cfg.RealtimeNativeSTT {
+		dgCfg := deepgram.Config{
+			APIKey:   cfg.DeepgramAPIKey,
+			ASRModel: cfg.DGASRModel,
+			Language: cfg.DGLanguage,
+			Logger:   logger,
+		}
+		var err error
+		asr, err = deepgram.NewASRClient(dgCfg)
+		if err != nil {
+			return nil, fmt.Errorf("voice-agent realtime room: deepgram asr: %w", err)
+		}
 	}
 
 	rtClient, err := openai.NewRealtimeClient(openai.Config{APIKey: cfg.OpenAIAPIKey, Logger: logger}, cfg.RealtimeModel)
@@ -223,22 +235,48 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	lifecycle.Start(0)
 
 	return &realtimeRoomBridge{
-		cfg:                   cfg,
-		roomReq:               req,
-		logger:                logger,
-		asr:                   asr,
-		session:               session,
-		local:                 local,
-		executor:              executor,
-		lifecycle:             lifecycle,
-		nativeEnabled:         cfg.RealtimeNativeTurn,
-		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad,
+		cfg:           cfg,
+		roomReq:       req,
+		logger:        logger,
+		asr:           asr,
+		session:       session,
+		local:         local,
+		executor:      executor,
+		lifecycle:     lifecycle,
+		nativeEnabled: cfg.RealtimeNativeTurn,
+		// Native STT (Deepgram off) forces semantic_vad for multi-party too --
+		// without a Deepgram read side there is no gated-cascade path to fall back
+		// to, so a second human routes through the gated-semantic_vad mode (the
+		// model still detects + transcribes the turn natively).
+		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad || cfg.RealtimeNativeSTT,
 		grounding:             cfg.VoiceGrounding,
+		nativeSTT:             cfg.RealtimeNativeSTT,
 		transcriptionModel:    cfg.RealtimeTranscriptionModel,
-		language:              cfg.DGLanguage,
-		sessionBase:           sessionBase,
-		streams:               make(map[string]polyphon.ASRStream),
+		// OpenAI's GA realtime input-transcription accepts only the bare
+		// ISO-639-1 primary subtag ("en"), and rejects a region-qualified tag
+		// ("en-US") with an api error that invalidates the whole session.update
+		// (so semantic_vad never applies and the model never owns the turn).
+		// Deepgram wants the full "en-US" and keeps reading cfg.DGLanguage
+		// directly; only this realtime-side copy is narrowed.
+		language:    primarySubtag(cfg.DGLanguage),
+		sessionBase: sessionBase,
+		streams:     make(map[string]polyphon.ASRStream),
 	}, nil
+}
+
+// primarySubtag narrows a BCP-47 language tag to its ISO-639-1 primary subtag
+// ("en-US" -> "en", "zh-Hans" -> "zh"), lowercased. Empty in -> empty out (the
+// transcription config then omits language). This is the form OpenAI's GA
+// realtime input-transcription accepts; a region-qualified tag is rejected.
+func primarySubtag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	for i, r := range tag {
+		if r == '-' || r == '_' {
+			tag = tag[:i]
+			break
+		}
+	}
+	return strings.ToLower(tag)
 }
 
 // nativeSessionConfig returns the base session config with semantic_vad turn
@@ -246,11 +284,19 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 // posture where gpt-realtime owns the turn.
 func (b *realtimeRoomBridge) nativeSessionConfig() openai.SessionConfig {
 	cfg := b.sessionBase
+	// server_vad, NOT semantic_vad: in practice semantic_vad stalled 6-15s before
+	// committing a finished turn (its "is the turn semantically complete?" model
+	// is far too conservative here), which also broke barge-in. server_vad is a
+	// deterministic energy gate -- it commits SilenceDurationMs after the user
+	// drops below Threshold, so end-of-turn is fast and predictable, and
+	// interrupt_response gives clean barge-in.
 	cfg.TurnDetection = &openai.TurnDetectionConfig{
-		Type:              "semantic_vad",
+		Type:              "server_vad",
 		CreateResponse:    true,
 		InterruptResponse: true,
-		Eagerness:         "auto",
+		Threshold:         0.5,
+		PrefixPaddingMs:   300,
+		SilenceDurationMs: 500,
 	}
 	cfg.InputTranscription = &openai.InputTranscriptionConfig{
 		Model:    b.transcriptionModel,
@@ -360,41 +406,70 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 		return
 	}
 
+	// One audio pipeline per participant. The SPA publishes more than one mic
+	// track per participant (and the connect->build replay can re-present a track
+	// the live callback also fires for), so dedupe on identity BEFORE the slow
+	// StartStream. A second track for an already-wired participant would otherwise
+	// open a second Deepgram stream AND a second PCM pump into the model's input
+	// buffer -- doubled audio that garbles transcription, duplicates the chat
+	// utterance, and breaks semantic_vad turn detection. Reserve the slot inside
+	// the lock so a concurrent second track loses the race and returns here.
+	b.mu.Lock()
+	if _, exists := b.streams[identity]; exists {
+		b.mu.Unlock()
+		return
+	}
+	b.streams[identity] = nil // reservation; replaced with the real stream below
+	b.mu.Unlock()
+
 	// Register the participant on the roster for labeled-transcript
 	// attribution (#433 section 3). Display name + role resolution from memQL
 	// is a follow-up; the identity is the stable key in the interim.
 	b.executor.SetParticipant(identity, rp.Name(), "")
+	// Seed the active speaker from the LiveKit identity. With Deepgram off the
+	// path the native input transcript (EventInputTranscriptDone) has no speaker
+	// of its own, so without this the user utterance would forward with an empty
+	// speaker id and the BFF would reject the insert.
+	b.executor.SetActiveSpeaker(identity)
 
-	stream, err := b.asr.StartStream(context.Background(), asrConfigFor(b.cfg))
-	if err != nil {
-		if b.logger != nil {
-			b.logger.Warn("voice-agent realtime room: start STT stream failed",
-				"identity", identity, "err", err)
+	// Deepgram read side is opt-in (cfg.RealtimeNativeSTT off). On the default
+	// snappy path it is nil -- gpt-realtime does STT + turn detection itself and
+	// the only executor input is the PCM pump (StreamAudio).
+	var stream polyphon.ASRStream
+	if !b.nativeSTT && b.asr != nil {
+		s, err := b.asr.StartStream(context.Background(), asrConfigFor(b.cfg))
+		if err != nil {
+			// Release the reservation so a later track for this identity can retry.
+			b.mu.Lock()
+			delete(b.streams, identity)
+			b.mu.Unlock()
+			if b.logger != nil {
+				b.logger.Warn("voice-agent realtime room: start STT stream failed",
+					"identity", identity, "err", err)
+			}
+			return
 		}
-		return
+		stream = s
 	}
 	b.mu.Lock()
-	_, alreadyTracked := b.streams[identity]
-	b.streams[identity] = stream
+	b.streams[identity] = stream // nil under native STT; still counts the human
 	b.mu.Unlock()
 
-	// Feed the lifecycle's empty-room guardrail (#459) the first time we see a
-	// human participant's track. Keyed on the streams map so a participant
-	// publishing multiple tracks counts once. The matching NoteHumanLeft fires
-	// in onParticipantDisconnected.
-	if !alreadyTracked && b.lifecycle != nil {
+	// First (and only) track for this participant: feed the empty-room guardrail
+	// (#459) and resolve the gate mode (#478: exactly one human -> native model-
+	// owns-turn; a second human -> conductor gate). The matching NoteHumanLeft
+	// fires in onParticipantDisconnected.
+	if b.lifecycle != nil {
 		b.lifecycle.NoteHumanJoined()
 	}
-	// Re-resolve the gate mode on a real human-count change (#478): exactly one
-	// human -> native (model owns the turn); a second human -> conductor gate.
-	if !alreadyTracked {
-		b.applyGateMode()
+	b.applyGateMode()
+
+	if stream != nil {
+		go b.executor.ConsumeASR(identity, stream.Results())
 	}
 
-	go b.executor.ConsumeASR(identity, stream.Results())
-
 	if _, err := lkmedia.NewPCMRemoteTrack(track, &realtimeSttSink{
-		stream:   stream,
+		stream:   stream, // nil under native STT -> WriteSample only feeds the model
 		executor: b.executor,
 		logger:   b.logger,
 	},
@@ -442,7 +517,9 @@ func (b *realtimeRoomBridge) close() {
 	b.executor.Close()
 	b.mu.Lock()
 	for _, s := range b.streams {
-		_ = s.Close()
+		if s != nil { // nil under native STT (no Deepgram stream opened)
+			_ = s.Close()
+		}
 	}
 	b.streams = make(map[string]polyphon.ASRStream)
 	b.mu.Unlock()
@@ -466,10 +543,14 @@ func (s *realtimeSttSink) WriteSample(sample mediasdk.PCM16Sample) error {
 		return nil
 	}
 	pcm := pcm16ToBytes(sample)
-	if err := s.stream.SendAudio(pcm); err != nil && s.logger != nil {
-		s.logger.Debug("voice-agent realtime room: STT send failed", "err", err)
+	// Deepgram read side is optional (nil under native STT). When present, fan the
+	// frame out to it for labeled transcripts; always stream to the model, which
+	// owns STT + turn detection on the snappy path.
+	if s.stream != nil {
+		if err := s.stream.SendAudio(pcm); err != nil && s.logger != nil {
+			s.logger.Debug("voice-agent realtime room: STT send failed", "err", err)
+		}
 	}
-	// Stream the same frame to the model for prosody + barge-in (#433 2b).
 	s.executor.StreamAudio(pcm)
 	return nil
 }

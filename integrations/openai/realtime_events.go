@@ -51,6 +51,7 @@ const (
 	serverEventFunctionArgsDelta     = "response.function_call_arguments.delta"
 	serverEventFunctionArgsDone      = "response.function_call_arguments.done"
 	serverEventInputSpeechStarted    = "input_audio_buffer.speech_started"
+	serverEventInputSpeechStopped    = "input_audio_buffer.speech_stopped"
 	serverEventError                 = "error"
 
 	// Native input-transcription events (#478). When the session configures
@@ -102,6 +103,15 @@ type TurnDetectionConfig struct {
 	// Eagerness tunes semantic_vad's turn-end sensitivity ("low" | "medium" |
 	// "high" | "auto"). Omitted when empty.
 	Eagerness string `json:"eagerness,omitempty"`
+	// server_vad knobs (omitted when zero, so they don't leak onto a semantic_vad
+	// config): Threshold is the speech-energy gate (0..1); PrefixPaddingMs is how
+	// much audio before onset to keep; SilenceDurationMs is how long the input
+	// must stay below threshold before the turn is committed -- the snappiness
+	// dial (lower = faster end-of-turn). server_vad is deterministic where
+	// semantic_vad's "is the turn semantically done?" can stall for seconds.
+	Threshold         float64 `json:"threshold,omitempty"`
+	PrefixPaddingMs   int     `json:"prefix_padding_ms,omitempty"`
+	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
 }
 
 // InputTranscriptionConfig enables the model's native transcription of the
@@ -152,6 +162,17 @@ func encodeSessionUpdate(cfg SessionConfig) ([]byte, error) {
 	if cfg.InputTranscription != nil {
 		inputAudio["transcription"] = cfg.InputTranscription
 	}
+	// GA places turn_detection UNDER audio.input (the beta API had it at the
+	// session top level). Encoded explicitly -- key present with a null value
+	// rather than omitted -- so the server does not fall back to its server_vad
+	// default on the conductor-gated path (turn_detection:null is load-bearing:
+	// it disables the model's input VAD, auto-commit, and auto-response). A
+	// non-nil detector switches the session to the #478 native posture.
+	if cfg.TurnDetection != nil {
+		inputAudio["turn_detection"] = cfg.TurnDetection
+	} else {
+		inputAudio["turn_detection"] = nil
+	}
 	session := map[string]any{
 		"type":         "realtime",
 		"instructions": cfg.Instructions,
@@ -159,13 +180,6 @@ func encodeSessionUpdate(cfg SessionConfig) ([]byte, error) {
 			"input":  inputAudio,
 			"output": map[string]any{"format": audioFmt, "voice": cfg.Voice},
 		},
-	}
-	// Encoded explicitly (key present with a null value rather than omitted) so
-	// the server does not fall back to its server_vad default on the gated path.
-	if cfg.TurnDetection != nil {
-		session["turn_detection"] = cfg.TurnDetection
-	} else {
-		session["turn_detection"] = nil
 	}
 	if len(cfg.Tools) > 0 {
 		session["tools"] = cfg.Tools
@@ -290,6 +304,10 @@ const (
 	// emitted when option-B input VAD is configured; under option A the
 	// barge-in trigger comes from the turn machine, not this event).
 	EventInputSpeechStarted
+	// EventInputSpeechStopped fires when server-side VAD (semantic_vad /
+	// server_vad) detects the human stopped speaking -- the turn-boundary marker
+	// used for latency observability (end-of-speech -> first assistant audio).
+	EventInputSpeechStopped
 	// EventInputTranscriptDelta carries a streamed token of the USER's input
 	// transcript (native input transcription, #478). Text holds the token.
 	EventInputTranscriptDelta
@@ -395,6 +413,8 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 		ev.Arguments = raw.Arguments
 	case serverEventInputSpeechStarted:
 		ev.Kind = EventInputSpeechStarted
+	case serverEventInputSpeechStopped:
+		ev.Kind = EventInputSpeechStopped
 	case serverEventInputTranscriptDelta:
 		ev.Kind = EventInputTranscriptDelta
 		ev.Text = raw.Delta

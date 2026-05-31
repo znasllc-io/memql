@@ -38,12 +38,14 @@ func TestEncodeSessionUpdate_TurnDetectionNull(t *testing.T) {
 	session := m["session"].(map[string]any)
 	assert.Equal(t, "realtime", session["type"])
 	assert.Equal(t, "You are Sofia.", session["instructions"])
-	// turn_detection decodes to a literal nil.
-	val, present := session["turn_detection"]
-	assert.True(t, present, "turn_detection key must be present")
-	assert.Nil(t, val, "turn_detection must be null")
 
 	audioCfg := session["audio"].(map[string]any)
+	// GA nests turn_detection under audio.input; it decodes to a literal nil.
+	inputCfg := audioCfg["input"].(map[string]any)
+	val, present := inputCfg["turn_detection"]
+	assert.True(t, present, "audio.input.turn_detection key must be present")
+	assert.Nil(t, val, "turn_detection must be null")
+
 	output := audioCfg["output"].(map[string]any)
 	assert.Equal(t, "marin", output["voice"])
 	format := output["format"].(map[string]any)
@@ -86,15 +88,16 @@ func TestEncodeSessionUpdate_NativeTurnDetection(t *testing.T) {
 	require.NoError(t, err)
 
 	session := decodeJSON(t, data)["session"].(map[string]any)
-	// turn_detection is the configured object, NOT null.
-	td := session["turn_detection"].(map[string]any)
+	// GA nests turn_detection under audio.input; it is the configured object,
+	// NOT null.
+	input := session["audio"].(map[string]any)["input"].(map[string]any)
+	td := input["turn_detection"].(map[string]any)
 	assert.Equal(t, "semantic_vad", td["type"])
 	assert.Equal(t, true, td["create_response"])
 	assert.Equal(t, true, td["interrupt_response"])
 	assert.Equal(t, "auto", td["eagerness"])
 
 	// Input transcription nested under audio.input.
-	input := session["audio"].(map[string]any)["input"].(map[string]any)
 	transcription := input["transcription"].(map[string]any)
 	assert.Equal(t, "gpt-4o-mini-transcribe", transcription["model"])
 	// Language omitted when empty.

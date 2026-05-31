@@ -175,6 +175,17 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 		req.RegisterSpeakSink(speakSink)
 	}
 
+	// Catch-up for the connect->build race. ConnectToRoomWithToken auto-subscribes
+	// the tracks participants already published, firing OnTrackSubscribed BEFORE
+	// the bridge exists -- those callbacks hit getBridge()==nil and are dropped.
+	// The realtime bridge build dials OpenAI + fetches the tool registry (~1s), so
+	// a human already in the room loses their mic-track wiring and the session sits
+	// warm-but-muted (humans=0, no audio, no turns -- the "voice connects but never
+	// responds" symptom). LiveKit does NOT re-fire for already-subscribed tracks,
+	// so replay them into the freshly-built bridge now. onTrackSubscribed dedups
+	// per identity, so a track that races in after setBridge is not double-counted.
+	j.replaySubscribedTracks(room, b)
+
 	// Block until the room disconnects or the caller cancels.
 	select {
 	case <-disconnected:
@@ -184,6 +195,37 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 		return normalizeDisconnectReason(reason), nil
 	case <-ctx.Done():
 		return "normal", nil
+	}
+}
+
+// replaySubscribedTracks feeds every already-subscribed remote audio track into
+// the bridge's onTrackSubscribed, covering tracks that auto-subscribed during the
+// connect->build window (before the bridge pointer was set, so the live callback
+// dropped them). Idempotent against the live callback: onTrackSubscribed dedups
+// per participant identity.
+func (j *liveKitRoomJoiner) replaySubscribedTracks(room *lksdk.Room, b mediaBridge) {
+	if room == nil || b == nil {
+		return
+	}
+	for _, rp := range room.GetRemoteParticipants() {
+		if rp == nil || rp.Identity() == "" {
+			continue
+		}
+		for _, pub := range rp.TrackPublications() {
+			rpub, ok := pub.(*lksdk.RemoteTrackPublication)
+			if !ok || rpub.Kind() != lksdk.TrackKindAudio || !rpub.IsSubscribed() {
+				continue
+			}
+			tr := rpub.TrackRemote()
+			if tr == nil {
+				continue
+			}
+			if j.logger != nil {
+				j.logger.Info("voice-agent track replay (connect-before-bridge race)",
+					"identity", rp.Identity())
+			}
+			b.onTrackSubscribed(tr, rpub, rp)
+		}
 	}
 }
 

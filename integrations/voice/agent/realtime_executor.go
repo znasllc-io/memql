@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/polyphon"
@@ -131,6 +132,12 @@ type RealtimeExecutor struct {
 	// measurement, #484).
 	firstAudioPending atomic.Bool
 
+	// turnSpeechStopNanos is the wall-clock (UnixNano) of the model's most recent
+	// input_audio_buffer.speech_stopped -- when server-side VAD decided the human
+	// finished. drainAudioOut reads it to log the end-of-speech -> first-assistant-
+	// audio latency (the snappiness metric) on the next response's first frame.
+	turnSpeechStopNanos atomic.Int64
+
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
 	// flag so barge-in can stop playout without racing a new response.
 	respMu     sync.Mutex
@@ -145,6 +152,11 @@ type RealtimeExecutor struct {
 	// goroutine reads it.
 	speakerMu   sync.Mutex
 	lastSpeaker string
+
+	// transcriptCh carries human-transcript forwards (partials + finals) to the
+	// dedicated forwardTranscriptLoop goroutine, so the realtime event loop never
+	// blocks on a gRPC send to insert the chat utterance. Buffered + drop-on-full.
+	transcriptCh chan transcriptJob
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -165,15 +177,16 @@ func NewRealtimeExecutor(
 ) *RealtimeExecutor {
 	ctx, cancel := context.WithCancel(parent)
 	e := &RealtimeExecutor{
-		cfg:     cfg,
-		client:  client,
-		session: session,
-		sink:    sink,
-		persona: persona,
-		roster:  newParticipantRoster(),
-		logger:  logger,
-		ctx:     ctx,
-		cancel:  cancel,
+		cfg:          cfg,
+		client:       client,
+		session:      session,
+		sink:         sink,
+		persona:      persona,
+		roster:       newParticipantRoster(),
+		logger:       logger,
+		ctx:          ctx,
+		cancel:       cancel,
+		transcriptCh: make(chan transcriptJob, transcriptQueueDepth),
 	}
 	e.machine = NewTurnMachine(TurnCallbacks{
 		OnFinalTranscript: e.onCommittedTurn,
@@ -190,6 +203,59 @@ func (e *RealtimeExecutor) Start() {
 	e.machine.Start()
 	go e.drainAudioOut()
 	go e.drainEvents()
+	go e.forwardTranscriptLoop()
+}
+
+// transcriptQueueDepth bounds the human-transcript forward queue. Sized for a
+// full turn's burst of input-transcription tokens so a final is never dropped
+// in practice; on overflow enqueueTranscript drops rather than stalling the
+// conversation loop.
+const transcriptQueueDepth = 256
+
+// transcriptJob is one human-transcript forward (a streamed partial or a
+// committed final), carried off the realtime event loop to the dedicated
+// forward goroutine so a slow gRPC send can never delay audio / barge-in /
+// response lifecycle.
+type transcriptJob struct {
+	speaker string
+	text    string
+	final   bool
+	native  bool
+}
+
+// forwardTranscriptLoop is the parallel goroutine that actually sends the human
+// transcript to memQL. It owns ALL forwardPartial/forwardFinal blocking, so the
+// realtime conversation path (drainEvents) never waits on the chat-utterance
+// insert -- the human transcript is a best-effort, parallel concern (exactly the
+// "utterances run in their own goroutine, added to chat later" contract).
+func (e *RealtimeExecutor) forwardTranscriptLoop() {
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case j := <-e.transcriptCh:
+			if j.final {
+				e.forwardFinal(j.speaker, j.text, j.native)
+			} else {
+				e.forwardPartial(j.speaker, j.text)
+			}
+		}
+	}
+}
+
+// enqueueTranscript hands a transcript forward to the parallel loop without ever
+// blocking the caller. On a full queue (sustained gRPC backpressure) it drops
+// the update: a dropped partial is invisible (cosmetic ghost-text) and a dropped
+// final only delays the chat row, never the voice conversation.
+func (e *RealtimeExecutor) enqueueTranscript(j transcriptJob) {
+	select {
+	case e.transcriptCh <- j:
+	default:
+		if e.logger != nil {
+			e.logger.Debug("voice-agent realtime: transcript forward dropped (backpressure)",
+				"final", j.final, "chars", len(j.text))
+		}
+	}
 }
 
 // Close tears down the executor: cancels any in-flight playout, stops the
@@ -302,10 +368,21 @@ func (e *RealtimeExecutor) StreamAudio(pcm16k []byte) {
 // handleASRResult routes one ASR result for a given speaker. Split out for
 // direct unit testing.
 func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
+	// Track the active speaker on EVERY result, before any mode-specific return.
+	// Native mode does not consume Deepgram for turn-taking, but the native input
+	// transcript (EventInputTranscriptDone) carries no speaker of its own -- it
+	// reads getLastSpeaker() to attribute the user utterance. Without this the
+	// forwarded VoiceAgentFinalTranscript has an empty speaker id, the BFF rejects
+	// the insert (InvalidArgument), and the human's turn never reaches chat (the
+	// "assistant replies but my utterances don't show" symptom).
+	if id := strings.TrimSpace(speakerIdentity); id != "" {
+		e.setLastSpeaker(id)
+	}
 	// Native 1-on-1 mode: gpt-realtime transcribes the human, detects the turn,
 	// authors + speaks, and handles barge-in -- so Deepgram results are not
-	// consumed at all (Deepgram stays warm only for the cascade fallback). The
-	// only executor input on the native path is StreamAudio (PCM -> model).
+	// consumed for turn-taking (Deepgram stays warm only for the cascade fallback
+	// and to seed the speaker id above). The only executor turn input on the
+	// native path is StreamAudio (PCM -> model) + the native transcript events.
 	if e.isNativeMode() {
 		return
 	}
@@ -404,6 +481,15 @@ func (e *RealtimeExecutor) onCommittedTurn(text string) {
 	speaker := e.getLastSpeaker()
 	e.forwardFinal(speaker, text, false)
 	go e.runTurn(speaker, text)
+}
+
+// SetActiveSpeaker seeds the active speaker id from the room layer (the LiveKit
+// participant identity), used when Deepgram is off the path so the native input
+// transcript still attributes the user utterance. Public seam for the room glue.
+func (e *RealtimeExecutor) SetActiveSpeaker(identity string) {
+	if id := strings.TrimSpace(identity); id != "" {
+		e.setLastSpeaker(id)
+	}
 }
 
 func (e *RealtimeExecutor) setLastSpeaker(identity string) {
@@ -659,10 +745,18 @@ func (e *RealtimeExecutor) drainAudioOut() {
 				continue
 			}
 			// T3 (#484): first audio frame of a response -- the assistant is
-			// audible. T3 - T1 is the headline decision->first-audio latency.
+			// audible. Log the end-of-speech -> first-audio latency (the snappiness
+			// metric) using the most recent speech_stopped stamp, then clear it so a
+			// multi-frame response only measures once.
 			if e.firstAudioPending.CompareAndSwap(true, false) && e.logger != nil {
-				e.logger.Info("voice trace: turntaking event",
-					"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
+				if stop := e.turnSpeechStopNanos.Swap(0); stop > 0 {
+					e.logger.Info("voice trace: turntaking event",
+						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID,
+						"speech_stop_to_audio_ms", (time.Now().UnixNano()-stop)/1e6)
+				} else {
+					e.logger.Info("voice trace: turntaking event",
+						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
+				}
 			}
 			if err := e.sink.WriteFrame(frame); err != nil {
 				if e.logger != nil {
@@ -693,12 +787,40 @@ func (e *RealtimeExecutor) drainEvents() {
 				return
 			}
 			switch ev.Kind {
+			case openai.EventInputSpeechStarted:
+				// Observability: server-side VAD heard speech onset. Stamp nothing
+				// yet (the snappiness window opens at speech_stopped); just trace it.
+				if e.logger != nil {
+					e.logger.Info("voice trace: turntaking event",
+						"stage", "model.speech_started", "executor", "realtime", "space_id", e.cfg.SpaceID)
+				}
+			case openai.EventInputSpeechStopped:
+				// Observability: server-side VAD decided the human finished. This
+				// opens the end-of-speech -> first-assistant-audio window that
+				// drainAudioOut closes on the next response's first frame. This delta
+				// is the headline "snappiness" number with Deepgram off the path.
+				e.turnSpeechStopNanos.Store(time.Now().UnixNano())
+				if e.logger != nil {
+					e.logger.Info("voice trace: turntaking event",
+						"stage", "model.speech_stopped", "executor", "realtime", "space_id", e.cfg.SpaceID)
+				}
 			case openai.EventResponseCreated:
 				e.respMu.Lock()
 				e.inFlight = true
 				e.respMu.Unlock()
 				// Arm the T3 first-audio stamp for this response (#484).
 				e.firstAudioPending.Store(true)
+				if e.logger != nil {
+					stage := "model.response_created"
+					if stop := e.turnSpeechStopNanos.Load(); stop > 0 {
+						e.logger.Info("voice trace: turntaking event",
+							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID,
+							"speech_stop_to_response_ms", (time.Now().UnixNano()-stop)/1e6)
+					} else {
+						e.logger.Info("voice trace: turntaking event",
+							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID)
+					}
+				}
 			case openai.EventResponseDone:
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
@@ -722,11 +844,11 @@ func (e *RealtimeExecutor) drainEvents() {
 				e.captureOutput(final)
 			case openai.EventInputTranscriptDelta:
 				// Native human transcript (#478): stream the running text as a
-				// partial so chat ghost-texts the in-progress user utterance,
-				// exactly as the Deepgram interim path does -- but sourced from
-				// the model, with Deepgram off the 1-on-1 critical path.
+				// partial so chat ghost-texts the in-progress user utterance. Handed
+				// to the parallel forward loop (never sent inline) so a slow gRPC
+				// insert can't stall audio / barge-in / response lifecycle.
 				inputTranscript.WriteString(ev.Text)
-				e.forwardPartial("", inputTranscript.String())
+				e.enqueueTranscript(transcriptJob{speaker: e.getLastSpeaker(), text: inputTranscript.String()})
 			case openai.EventInputTranscriptDone:
 				// The human's final utterance, native-authored: the model has
 				// already authored + spoken its reply, so forward the final
@@ -748,13 +870,15 @@ func (e *RealtimeExecutor) drainEvents() {
 						// the executor fires CreateResponse on engage. The model
 						// authors; cognition never authors the words.
 						speaker := e.getLastSpeaker()
-						e.forwardFinal(speaker, final, false)
+						e.enqueueTranscript(transcriptJob{speaker: speaker, text: final, final: true, native: false})
 						go e.runTurn(speaker, final)
 					} else {
 						// Native 1-on-1 (#478): the model already authored + spoke,
 						// so mark the final native (transcript-only) -- cognition
-						// does not author a second reply.
-						e.forwardFinal("", final, true)
+						// does not author a second reply. Attribute it to the active
+						// speaker so the BFF accepts the insert. Handed to the parallel
+						// loop so the chat insert never delays the next turn / barge-in.
+						e.enqueueTranscript(transcriptJob{speaker: e.getLastSpeaker(), text: final, final: true, native: true})
 					}
 				}
 			case openai.EventFunctionArgsDone:

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 )
@@ -184,4 +185,36 @@ func TestVoiceAgentInterceptor_NilVerifierFallsThrough(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, base.ran)
+}
+
+// TestIsVoiceAgentPayload_Allowlist pins the client->server payload
+// surface the voice-agent token may use. The realtime executor's MCP
+// tool bridge (ListTools at bring-up + CallTool per model-driven call)
+// MUST be admitted -- omitting them tore down the stream with
+// PermissionDenied before any audio could flow. Data-plane writes
+// (Query/Mutation/Subscribe) must still be rejected.
+func TestIsVoiceAgentPayload_Allowlist(t *testing.T) {
+	allowed := []any{
+		&memqlv1.MemqlClientMessage_ClientHello{},
+		&memqlv1.MemqlClientMessage_Ack{},
+		&memqlv1.MemqlClientMessage_VoiceAgentSessionStart{},
+		&memqlv1.MemqlClientMessage_VoiceAgentSessionEnd{},
+		&memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{},
+		&memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{},
+		&memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{},
+		&memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput{},
+		&memqlv1.MemqlClientMessage_ListTools{},
+		&memqlv1.MemqlClientMessage_CallTool{},
+	}
+	for _, p := range allowed {
+		assert.Truef(t, isVoiceAgentPayload(p), "%T must be admitted", p)
+	}
+	rejected := []any{
+		&memqlv1.MemqlClientMessage_ExecuteQuery{},
+		&memqlv1.MemqlClientMessage_Subscribe{},
+		&memqlv1.MemqlClientMessage_ConceptsSubscribe{},
+	}
+	for _, p := range rejected {
+		assert.Falsef(t, isVoiceAgentPayload(p), "%T must be rejected", p)
+	}
 }
