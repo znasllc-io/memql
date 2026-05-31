@@ -1,0 +1,68 @@
+# CoPresent frontend (the actual app UI). An Express server that serves
+# the Vite bundle + a few /api/* endpoints on :8080. The same-origin auth
+# (/auth/*, /oauth/token, /.well-known/jwks.json) and WS (/memql/ws) routing
+# is done at the ingress (see public-entry.yaml), not here.
+#
+# Image is built from the `copresent` repo (visionarys-io/copresent) with
+# staging VITE_* build args:
+#   VITE_IDENTITY_BASE_URL=https://identity.staging.copresent.ai
+#   VITE_IDENTITY_CLIENT_ID=app
+#   VITE_MEMQL_WS_URL=wss://app.staging.copresent.ai/memql/ws
+# and the private @visionarys-io/@znasllc-io SDKs (NODE_AUTH_TOKEN via
+# --secret-build-arg). See copresent/Dockerfile + visionarys-io/copresent#174.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: copresent
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: copresent
+    app.kubernetes.io/part-of: memql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: copresent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: copresent
+        app.kubernetes.io/part-of: memql
+    spec:
+      containers:
+        - name: copresent
+          image: acrmemql.azurecr.io/copresent:0.9.0
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: NODE_ENV, value: "production" }
+            - { name: APP_PORT, value: "8080" }
+            - { name: FRONTEND_PORT, value: "8080" }
+            - { name: CORS_ALLOWED_ORIGIN, value: "*" }
+            # Server-side memQL URL for the Express /api/* endpoints (internal BFF).
+            - { name: VITE_MEMQL_API_URL, value: "http://bff:8085" }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: copresent
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: copresent
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: copresent
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

@@ -1,0 +1,96 @@
+# Public HTTPS entry for staging. Requires the cluster add-ons installed
+# out-of-band (see deploy/k8s/README-public-entry.md):
+#   - ingress-nginx controller (provides the LoadBalancer + a pinned static IP)
+#   - cert-manager (issues the Let's Encrypt certs referenced below)
+#
+# Hosts:
+#   app.staging.copresent.ai       -> copresent SPA (+ same-origin proxy to BFF/identity)
+#   identity.staging.copresent.ai  -> identity service (login UI, /setup, /admin)
+# Both A records point at the ingress controller's static public IP.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: znas@znas.io
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+# identity.staging.copresent.ai -> identity (HTTPS backend; identity serves TLS
+# with the internal self-signed cert, so skip backend cert verification).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: staging-identity
+  namespace: memql
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [identity.staging.copresent.ai]
+      secretName: identity-staging-copresent-tls
+  rules:
+    - host: identity.staging.copresent.ai
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+---
+# app.staging.copresent.ai main routes: SPA (/) -> copresent, WS (/memql) -> bff.
+# This Ingress owns the host's TLS cert (cert-manager).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-main
+  namespace: memql
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [app.staging.copresent.ai]
+      secretName: app-staging-copresent-tls
+  rules:
+    - host: app.staging.copresent.ai
+      http:
+        paths:
+          - { path: /memql, pathType: Prefix, backend: { service: { name: bff, port: { number: 8085 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: copresent, port: { number: 8080 } } } }
+---
+# app.staging.copresent.ai same-origin auth proxy: the token-management XHRs
+# the SPA makes (relative paths) must reach identity, NOT the SPA. Separate
+# Ingress because these need the HTTPS-backend annotation (identity serves TLS).
+# Longest-prefix match means these win over "/" above; /auth/callback (an SPA
+# route) falls through to copresent since it doesn't match these prefixes.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-identity-proxy
+  namespace: memql
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [app.staging.copresent.ai]
+      secretName: app-staging-copresent-tls
+  rules:
+    - host: app.staging.copresent.ai
+      http:
+        paths:
+          - { path: /auth/refresh, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /auth/logout, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /oauth/token, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+          - { path: /.well-known/jwks.json, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
