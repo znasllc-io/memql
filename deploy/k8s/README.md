@@ -35,6 +35,32 @@ Every ClusterIP Service exposes the node's NodeService port (5005x) + `8085`
 (`bff-external`) on 8085 -- the external entry point (maps to
 `app.copresent.ai` later).
 
+## Multi-replica HA ([#551](https://github.com/znasllc-io/memql/issues/551))
+
+**`copresent` (the frontend) runs 2 replicas + a PodDisruptionBudget.** It's
+a stateless SPA/proxy server — no memQL engine, no automation scheduler, no
+mesh — so it scales freely, and the PDB keeps ≥1 serving through node drains
+/ upgrades / rollouts. (`identity` HA is handled separately via its
+env-provided signing key, [#550](https://github.com/znasllc-io/memql/issues/550).)
+
+**The memQL node-types (`bff`, `cognition`, `voice`, `agent`, `planner`,
+`workbench`) stay single-replica for now.** The mesh implicitly assumes one
+pod per type — two blockers must be resolved before scaling them:
+
+1. **Cron/scheduled automations double-fire.** Every memQL node runs the
+   automation scheduler (`app/engine.go`), and its execution dedup is
+   in-process. Two replicas of a type would each run the same timer-driven
+   automations (e.g. the daily archive purge). Needs a cross-replica
+   singleton / leader election (or a single designated automation runner).
+2. **No load distribution to extra worker replicas.** The BFF's
+   `WorkerDialer` opens one NodeService stream per worker *type* to the
+   Service VIP, so a 2nd replica gets no forwarded traffic (it's a warm
+   standby the BFF fails over to, not a load-shared peer). Real horizontal
+   scaling needs a headless Service + dial-all (or per-pod streams).
+
+Until both land, scaling a memQL node-type past 1 is unsafe. Tracked in
+[#561](https://github.com/znasllc-io/memql/issues/561).
+
 ## Migrations run once
 
 The shared Tiger DB must not be migrated by 7 racing nodes. Only the

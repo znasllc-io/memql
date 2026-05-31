@@ -19,7 +19,12 @@ metadata:
     app.kubernetes.io/name: copresent
     app.kubernetes.io/part-of: memql
 spec:
-  replicas: 1
+  # HA (#551): copresent is a stateless SPA/proxy server (no memQL engine,
+  # no automation scheduler, no mesh) -- it scales freely. 2 replicas + the
+  # PodDisruptionBudget below keep the frontend serving through deploys, pod
+  # crashes, and node drains. (The memQL node-types stay single-replica for
+  # now -- see deploy/k8s/README.md "Multi-replica HA".)
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: copresent
@@ -70,3 +75,19 @@ spec:
     app.kubernetes.io/name: copresent
   ports:
     - { name: http, port: 8080, targetPort: 8080 }
+---
+# Keep at least one copresent (frontend) pod serving through voluntary
+# disruptions -- node drains, cluster upgrades, rollouts (#551).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: copresent
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: copresent
+    app.kubernetes.io/part-of: memql
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: copresent
