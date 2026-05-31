@@ -1348,6 +1348,89 @@ func QueryGroupGAForSpaceBuild(args QueryGroupGAForSpaceArgs) string {
 	return b.String()
 }
 
+// QueryGuideById -- Get a single Guide by node id with its full definition. Scenes are fetched separately via queryScenesForGuide.
+//
+// Bound concept: guide.
+type QueryGuideByIdArgs struct {
+	GuideId string
+}
+
+// QueryGuideById calls the engine query queryGuideById.
+func (qc *QueryClient) QueryGuideById(ctx context.Context, args QueryGuideByIdArgs) (*Result, error) {
+	call := QueryGuideByIdBuild(args)
+	return qc.executeNamed(ctx, "queryGuideById", call)
+}
+
+func QueryGuideByIdBuild(args QueryGuideByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGuideById({")
+	b.WriteString("guideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.GuideId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryGuideBySlug -- Resolve a Guide by its stable slug (e.g. 'first-run-walkthrough'). Used by the client to run a well-known Guide irrespective of node id, and to detect 'this slug already exists, replay instead of regenerate' (copresent#196). Returns active Guides only.
+//
+// Bound concept: guide.
+type QueryGuideBySlugArgs struct {
+	Slug string
+}
+
+// QueryGuideBySlug calls the engine query queryGuideBySlug.
+func (qc *QueryClient) QueryGuideBySlug(ctx context.Context, args QueryGuideBySlugArgs) (*Result, error) {
+	call := QueryGuideBySlugBuild(args)
+	return qc.executeNamed(ctx, "queryGuideBySlug", call)
+}
+
+func QueryGuideBySlugBuild(args QueryGuideBySlugArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGuideBySlug({")
+	b.WriteString("slug: ")
+	b.WriteString(fmt.Sprintf("%q", args.Slug))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryGuidesForSpace -- List every active Guide scoped to a space. Backs space-local Guide replay.
+//
+// Bound concept: guide.
+type QueryGuidesForSpaceArgs struct {
+	SpaceId string
+}
+
+// QueryGuidesForSpace calls the engine query queryGuidesForSpace.
+func (qc *QueryClient) QueryGuidesForSpace(ctx context.Context, args QueryGuidesForSpaceArgs) (*Result, error) {
+	call := QueryGuidesForSpaceBuild(args)
+	return qc.executeNamed(ctx, "queryGuidesForSpace", call)
+}
+
+func QueryGuidesForSpaceBuild(args QueryGuidesForSpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGuidesForSpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryGuidesForUser -- List every active Guide owned by the authenticated caller, across spaces. Self-scoped via actor.userId (no args) -- a caller cannot list another user's Guides. Backs the replay picker (copresent#196 -- 'run one of your saved Guides') and first-run detection.
+//
+// Bound concept: guide.
+type QueryGuidesForUserArgs struct {
+}
+
+// QueryGuidesForUser calls the engine query queryGuidesForUser.
+func (qc *QueryClient) QueryGuidesForUser(ctx context.Context, args QueryGuidesForUserArgs) (*Result, error) {
+	call := QueryGuidesForUserBuild(args)
+	return qc.executeNamed(ctx, "queryGuidesForUser", call)
+}
+
+func QueryGuidesForUserBuild(args QueryGuidesForUserArgs) string {
+	_ = args
+	return "queryGuidesForUser({})"
+}
+
 // QueryHasSIResponseForReply -- Check if an SI response already exists for a given utterance (idempotency check).
 //
 // Bound concept: utterance.
@@ -2207,6 +2290,28 @@ func QuerySavedSpacesBuild(args QuerySavedSpacesArgs) string {
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryScenesForGuide -- All Scenes belonging to a Guide. The client sorts by payload.order to play them in sequence (gaps tolerated). Returns the full Scene definition each.
+//
+// Bound concept: scene.
+type QueryScenesForGuideArgs struct {
+	GuideId string
+}
+
+// QueryScenesForGuide calls the engine query queryScenesForGuide.
+func (qc *QueryClient) QueryScenesForGuide(ctx context.Context, args QueryScenesForGuideArgs) (*Result, error) {
+	call := QueryScenesForGuideBuild(args)
+	return qc.executeNamed(ctx, "queryScenesForGuide", call)
+}
+
+func QueryScenesForGuideBuild(args QueryScenesForGuideArgs) string {
+	var b strings.Builder
+	b.WriteString("queryScenesForGuide({")
+	b.WriteString("guideId: ")
+	b.WriteString(fmt.Sprintf("%q", args.GuideId))
 	b.WriteString("})")
 	return b.String()
 }

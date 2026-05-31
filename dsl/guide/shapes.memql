@@ -1,0 +1,42 @@
+// shapes.memql
+//
+// Row projections for the guide namespace, consumed by the generated
+// SDK queries below + the copresent Guide runtime (copresent#190).
+
+@row
+@description("Full Guide projection: every definition field the client Guide runtime + the replay/authoring surfaces need. Scenes are fetched separately via queryScenesForGuide (ordered) rather than embedded, mirroring curriculum/segment.")
+shape guide guideFull {
+  row.id
+  payload.slug
+  payload.name
+  payload.description
+  payload.kind
+  payload.avatarEnabled
+  payload.ownerUserId
+  payload.spaceId
+  payload.sceneCount
+  payload.generatedFromIntake
+  payload.intakeSummary
+  payload.requiredScopes
+  payload.locales
+  payload.version
+  payload.active
+  row.createdAt
+}
+
+@row
+@description("Full Scene projection: narration intent, Canvas action directives, avatar directives, and the interruptibility contract. Ordered client-side by payload.order.")
+shape scene sceneFull {
+  row.id
+  payload.guideId
+  payload.slug
+  payload.order
+  payload.title
+  payload.narrationIntent
+  payload.canvasActions
+  payload.avatarDirectives
+  payload.interruptible
+  payload.allowsQuestions
+  payload.successCondition
+  row.createdAt
+}

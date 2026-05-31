@@ -1,0 +1,54 @@
+// queries.memql
+//
+// Read surface for the guide namespace -- the canonical way copresent
+// fetches Guides + Scenes to run / replay them (copresent#190, #195, #196).
+// Exposed as typed SDK methods on `conn.query`.
+
+use guide.concepts.{ guide, scene }
+
+@enabled
+@description("Get a single Guide by node id with its full definition. Scenes are fetched separately via queryScenesForGuide.")
+query guide queryGuideById {
+  args {
+    guideId  string  @required
+  }
+  filter  id==args.guideId
+  shape   guideFull
+}
+
+@enabled
+@description("Resolve a Guide by its stable slug (e.g. 'first-run-walkthrough'). Used by the client to run a well-known Guide irrespective of node id, and to detect 'this slug already exists, replay instead of regenerate' (copresent#196). Returns active Guides only.")
+query guide queryGuideBySlug {
+  args {
+    slug  string  @required
+  }
+  filter  payload.slug==args.slug; traitIsActiveRecord
+  shape   guideFull
+}
+
+@enabled
+@description("List every active Guide owned by the authenticated caller, across spaces. Self-scoped via actor.userId (no args) -- a caller cannot list another user's Guides. Backs the replay picker (copresent#196 -- 'run one of your saved Guides') and first-run detection.")
+query guide queryGuidesForUser {
+  filter  payload.ownerUserId==actor.userId; traitIsActiveRecord
+  shape   guideFull
+}
+
+@enabled
+@description("List every active Guide scoped to a space. Backs space-local Guide replay.")
+query guide queryGuidesForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId; traitIsActiveRecord
+  shape   guideFull
+}
+
+@enabled
+@description("All Scenes belonging to a Guide. The client sorts by payload.order to play them in sequence (gaps tolerated). Returns the full Scene definition each.")
+query scene queryScenesForGuide {
+  args {
+    guideId  string  @required
+  }
+  filter  payload.guideId==args.guideId
+  shape   sceneFull
+}

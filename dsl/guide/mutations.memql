@@ -1,0 +1,104 @@
+// mutations.memql
+//
+// Write surface for the guide namespace. The on-the-fly generator
+// (copresent#194) creates one Guide + N Scenes; the client edits via the
+// partial-update mutations. All exposed to copresent as typed SDK methods
+// on `conn.query` through the generated SDK.
+
+use guide.concepts.{ guide, scene }
+
+@enabled
+@description("Create a persisted Guide (the parent row). The generator (copresent#194) calls this once, then mutationCreateScene per Scene with the returned guide id. `slug` should be unique (well-known for templates like 'first-run-walkthrough', generated otherwise). `sceneCount` is stamped here so the client can render progress without a count query.")
+mutation guide mutationCreateGuide {
+  args {
+    guideId              string
+    slug                 string  @required
+    name                 string  @required
+    description          string
+    kind                 string
+    avatarEnabled        bool
+    ownerUserId          string
+    spaceId              string
+    sceneCount           int
+    generatedFromIntake  bool
+    intakeSummary        string
+    requiredScopes       []string
+    locales              []string
+    version              int
+    active               bool
+  }
+  insert guide {
+    id: args.guideId
+    args.slug
+    args.name
+    args.description
+    kind: coalesce(args.kind, "walkthrough")
+    args.avatarEnabled
+    args.ownerUserId
+    args.spaceId
+    args.sceneCount
+    args.generatedFromIntake
+    args.intakeSummary
+    args.requiredScopes
+    args.locales
+    version: coalesce(args.version, 1)
+    active: coalesce(args.active, true)
+  }
+}
+
+@enabled
+@description("Partial update of a v1:guide:guide row. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing a Guide (rename, toggle avatarEnabled, soft-disable via active=false) and the generator stamping sceneCount after authoring all Scenes.")
+mutation guide mutationUpdateGuide {
+  args {
+    guideId  string  @required
+    payload  object  @required
+  }
+  update guide {
+    id: args.guideId
+    args.payload
+  }
+}
+
+@enabled
+@description("Create one Scene under a Guide. Called once per Scene by the generator (copresent#194) after mutationCreateGuide. `order` is the 0-based position; `narrationIntent` is required; `canvasActions` / `avatarDirectives` are JSON strings (see the scene concept). interruptible / allowsQuestions default true (an open Scene).")
+mutation scene mutationCreateScene {
+  args {
+    sceneId           string
+    guideId           string  @required
+    slug              string  @required
+    order             int     @required
+    title             string
+    narrationIntent   string  @required
+    canvasActions     string
+    avatarDirectives  string
+    interruptible     bool
+    allowsQuestions   bool
+    successCondition  string
+  }
+  insert scene {
+    id: args.sceneId
+    args.guideId
+    args.slug
+    args.order
+    args.title
+    args.narrationIntent
+    args.canvasActions
+    args.avatarDirectives
+    interruptible: coalesce(args.interruptible, true)
+    allowsQuestions: coalesce(args.allowsQuestions, true)
+    args.successCondition
+  }
+}
+
+@enabled
+@description("Partial update of a v1:guide:scene row. Only the fields passed in `payload` change. Backs editing a Scene's narration / actions / interruptibility before or between runs.")
+mutation scene mutationUpdateScene {
+  args {
+    sceneId  string  @required
+    payload  object  @required
+  }
+  update scene {
+    id: args.sceneId
+    args.payload
+  }
+}
