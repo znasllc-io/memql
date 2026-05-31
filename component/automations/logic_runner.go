@@ -131,6 +131,32 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 				continue
 			}
 		}
+		// Positional-builtin step ASSIGNMENTS (`getGA := coalesce(a, b)`)
+		// are compiled as StepTypeFunction, not StepTypeQuery, so the
+		// short-circuit above misses them and they fall through to
+		// FunctionExecutor -- which serializes positional args in named
+		// form (`coalesce(0="a", 1="b")`), a string the MemQL parser
+		// rejects with `parse error ... expected ')', got "="`. Route
+		// them through the same local Evaluator by reconstructing the
+		// positional call string. See #362 (autoJoinSI getGA / worker /
+		// workbench all use standalone `name := coalesce(...)` steps).
+		if step.Type == StepTypeFunction && step.Function != nil {
+			if callStr, ok := reconstructPositionalBuiltinCall(step.Function); ok {
+				if val, handled, err := r.tryEvaluateBuiltinLocally(callStr, evaluator); err != nil {
+					return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
+				} else if handled {
+					now := time.Now()
+					evaluator.SetStepResult(step.ID, &StepResult{
+						StepId:      step.ID,
+						Status:      "success",
+						StartedAt:   now,
+						CompletedAt: now,
+						Result:      val,
+					})
+					continue
+				}
+			}
+		}
 		if err := r.runOneStep(ctx, step, stepCtx, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 		}
@@ -305,6 +331,30 @@ func isPositionalBuiltinName(name string) bool {
 		return true
 	}
 	return false
+}
+
+// reconstructPositionalBuiltinCall rebuilds the source call string for a
+// StepTypeFunction step whose target is a positional builtin (e.g.
+// `coalesce(a, b)`), from the compiler's FunctionStepConfig (Name +
+// positional Args keyed "0","1",...). Returns ("", false) when Name is
+// not a locally-evaluable positional builtin. The reconstructed string
+// is fed back through tryEvaluateBuiltinLocally so the same arg parsing
+// + evaluation path the StepTypeQuery short-circuit uses applies --
+// bypassing FunctionExecutor's invalid named-arg serialization for
+// positional builtins.
+func reconstructPositionalBuiltinCall(fn *FunctionStepConfig) (string, bool) {
+	if fn == nil || !isPositionalBuiltinName(fn.Name) {
+		return "", false
+	}
+	var args []string
+	for i := 0; ; i++ {
+		v, ok := fn.Args[strconv.Itoa(i)]
+		if !ok {
+			break
+		}
+		args = append(args, fmt.Sprintf("%v", v))
+	}
+	return fn.Name + "(" + strings.Join(args, ", ") + ")", true
 }
 
 // splitTopLevelArgs splits the inside of a function call (`a, b,

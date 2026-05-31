@@ -527,6 +527,60 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 	})
 }
 
+// TestReconstructPositionalBuiltinCall pins the fix for the
+// `getGA := coalesce(a, b)` step-ASSIGNMENT bug (#362 / autoJoinSI
+// missing greeting). Positional-builtin assignments compile to
+// StepTypeFunction; without reconstruction they fall to
+// FunctionExecutor's named-arg serialization (`coalesce(0="a", 1="b")`)
+// which the MemQL parser rejects with `expected ')', got "="`.
+// reconstructPositionalBuiltinCall rebuilds the positional call string
+// so the local Evaluator handles it instead of engine.Execute.
+func TestReconstructPositionalBuiltinCall(t *testing.T) {
+	t.Run("coalesce positional args reconstruct in order, literals preserved", func(t *testing.T) {
+		fn := &FunctionStepConfig{
+			Name: "coalesce",
+			Args: map[string]any{"0": "getActiveGA", "1": `""`},
+		}
+		got, ok := reconstructPositionalBuiltinCall(fn)
+		if !ok {
+			t.Fatalf("expected ok=true for coalesce")
+		}
+		if got != `coalesce(getActiveGA, "")` {
+			t.Errorf("got %q, want %q", got, `coalesce(getActiveGA, "")`)
+		}
+	})
+
+	t.Run("non-positional-builtin name is not handled", func(t *testing.T) {
+		fn := &FunctionStepConfig{Name: "queryUserById", Args: map[string]any{"0": "x"}}
+		if _, ok := reconstructPositionalBuiltinCall(fn); ok {
+			t.Errorf("expected ok=false for non-positional-builtin %q", fn.Name)
+		}
+	})
+
+	t.Run("reconstructed coalesce evaluates locally (the bug repro)", func(t *testing.T) {
+		r := NewLogicRunner(nil, nil, nil)
+		evaluator := NewEvaluator()
+		fn := &FunctionStepConfig{
+			Name: "coalesce",
+			Args: map[string]any{"0": `""`, "1": `"fallback"`},
+		}
+		callStr, ok := reconstructPositionalBuiltinCall(fn)
+		if !ok {
+			t.Fatalf("expected ok=true")
+		}
+		val, handled, err := r.tryEvaluateBuiltinLocally(callStr, evaluator)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if !handled {
+			t.Fatalf("expected handled=true for reconstructed %q", callStr)
+		}
+		if val != "fallback" {
+			t.Errorf("val = %#v, want %q", val, "fallback")
+		}
+	})
+}
+
 // TestSplitTopLevelArgs pins the arg splitter -- the helper has to
 // keep nested parens (`x.method()`, `inner(a, b)`), brackets, braces,
 // and quoted strings as a single arg even when they contain commas.
