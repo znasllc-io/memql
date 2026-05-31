@@ -584,6 +584,30 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 				sihttp.PostProcessKnowledgeSuggestion(suggestion)
 			}
 
+		case "guide":
+			// Author an immersive voice-driven Guide (ordered Scenes) from
+			// the summary of a voice intake (copresent#194). The structured
+			// result is returned to copresent, which persists it via the
+			// v1:guide mutations (copresent#556) and runs it via the client
+			// Guide runtime (copresent#190). `intake` is the gathered
+			// conversation summary (industry / role / interests / goals);
+			// falls back to `description` for callers that reuse that key.
+			intake := stringFromMap(payload, "intake")
+			if strings.TrimSpace(intake) == "" {
+				intake = description
+			}
+			input := sihttp.GuideSuggestInput{
+				Intake:   intake,
+				Kind:     stringFromMap(payload, "kind"),
+				UserName: stringFromMap(payload, "userName"),
+			}
+			messages = sihttp.BuildGuideSuggestMessages(input)
+			schema = sihttp.GuideSuggestSchemaJSON
+			schemaName = "guideSuggest"
+			postProcess = func(suggestion map[string]any) {
+				sihttp.PostProcessGuideSuggestion(suggestion)
+			}
+
 		default:
 			s.sendQueryError(requestId, correlate, codes.InvalidArgument, fmt.Sprintf("unsupported suggest domain: %q", domain))
 			return
