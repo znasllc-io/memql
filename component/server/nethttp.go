@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/httptls"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
@@ -438,12 +439,30 @@ func (s *NetHTTP) run(ctx context.Context, markStarted func()) error {
 		return errors.New("server not configured")
 	}
 
-	s.logInfo("http server listening", "network", cfg.network, "address", listener.Addr().String(), "base_url", s.activeBaseURL)
+	// Optional TLS: when MEMQL_HTTP_TLS_CERT_FILE/_KEY_FILE are set
+	// (e.g. on the identity node so /node/bootstrap + JWKS are served
+	// over https), serve TLS on the same listener. Unset == plaintext
+	// (the legacy default, fine behind a TLS-terminating proxy / LB).
+	certFile, keyFile, tlsEnabled, tlsErr := httptls.ServerCertFiles()
+	if tlsErr != nil {
+		_ = listener.Close()
+		s.mu.Lock()
+		s.listener = nil
+		s.mu.Unlock()
+		s.logError("http server tls misconfigured", tlsErr)
+		return tlsErr
+	}
+
+	s.logInfo("http server listening", "network", cfg.network, "address", listener.Addr().String(), "base_url", s.activeBaseURL, "tls", tlsEnabled)
 	markStarted()
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.Serve(listener)
+		if tlsEnabled {
+			errCh <- server.ServeTLS(listener, certFile, keyFile)
+		} else {
+			errCh <- server.Serve(listener)
+		}
 	}()
 
 	var serveErr error
