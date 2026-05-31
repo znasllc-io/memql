@@ -652,6 +652,22 @@ deploy-aks:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: smoke-staging
+
+## Repeatable end-to-end smoke test against the LIVE staging front door
+## (znasllc-io/memql#535): TLS+DNS, identity health + JWKS (direct and via
+## the app same-origin proxy), the magic-link login surface, the BFF
+## /memql/ws upgrade, and the /memql/audio voice route. Baseline is
+## read-only (no email, no auth). Opt-in DEEP checks: SMOKE_EMAIL issues a
+## real magic link; MEMQL_SMOKE_TOKEN runs an authenticated query + the
+## cross-node AI forward. Impl in scripts/deploy/staging-smoke-test.sh.
+##   make smoke-staging                                  # baseline
+##   make smoke-staging APP_HOST=app.copresent.ai        # smoke prod
+##   make smoke-staging SMOKE_EMAIL=me@example.com        # + magic link
+##   make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx     # + live query
+smoke-staging:
+	@bash scripts/deploy/staging-smoke-test.sh $(ARGS)
+
 # ---------------------------------------------------------------------------
 # Utility targets
 # ---------------------------------------------------------------------------

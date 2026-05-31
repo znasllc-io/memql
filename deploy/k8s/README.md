@@ -77,3 +77,26 @@ nodes' verifiers retry JWKS non-fatally until it is ready.
 ```bash
 kubectl kustomize deploy/k8s/ | kubeconform -strict -summary -kubernetes-version 1.30.0
 ```
+
+## Smoke test (live front door)
+
+After a deploy, exercise the real product path through the public HTTPS
+entry (not just pod health) with the repeatable smoke test
+([#535](https://github.com/znasllc-io/memql/issues/535)):
+
+```bash
+make smoke-staging                                # baseline, read-only
+make smoke-staging SMOKE_EMAIL=me@example.com     # + issue a real magic link
+make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx  # + run a live authenticated query
+make smoke-staging APP_HOST=app.copresent.ai IDENTITY_HOST=auth.copresent.ai  # smoke prod
+```
+
+It checks, in order: TLS + DNS for both public hosts (valid Let's Encrypt
+cert), identity `/healthz` + JWKS (directly **and** through the app's
+same-origin `/.well-known/jwks.json` proxy), the magic-link login page,
+the BFF `/memql/ws` upgrade, and the `/memql/audio` voice route. The
+baseline is read-only (sends no email, needs no auth); the **deep** checks
+(full magic-link round trip, authenticated query, cross-node AI forward)
+run only when `SMOKE_EMAIL` / `MEMQL_SMOKE_TOKEN` are supplied, and every
+skipped check is reported explicitly. Exit code is non-zero iff a check
+**failed**. Impl: `scripts/deploy/staging-smoke-test.sh`.
