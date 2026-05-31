@@ -13,10 +13,15 @@ package memql
 // the tool-calling loop — otherwise the LLM sees a "tool" it can't
 // actually call.
 //
-// Two capability-slug expansions live here today:
+// Capability-slug expansions that live here today:
 //
-//   - copresent-control       -- expands into uiClick / uiType / etc.,
-//                                the tools that drive the CoPresent SPA.
+//   - copresent-takeover      -- expands into uiClick / uiType / etc.,
+//                                the tools that drive the CoPresent SPA on
+//                                autopilot (the AI does it FOR the user).
+//   - copresent-guide         -- same operator primitives, but the immersive
+//                                voice-driven Scene experience (the AI does it
+//                                WITH the user). Both replaced the retired
+//                                single `copresent-control` slug (copresent#187).
 //   - computer-use-headless   -- expands into workerHost + the cross-
 //                                cutting trio (workerStatus,
 //                                requestComputerUseScope, canvasPublish).
@@ -46,8 +51,9 @@ package memql
 // their names here and the expansion picks them up automatically.
 
 // OperatorPrimitiveNames is the canonical list of tool names
-// registered by the operator subsystem. An agent with the
-// `copresent-control` capability slug can call every one of these.
+// registered by the operator subsystem. An agent holding either the
+// `copresent-takeover` or `copresent-guide` capability slug can call
+// every one of these.
 //
 // Keep this list in sync with the tool JSON files in
 // tools/v1/copresent/operator/. Missing an entry here means the
@@ -74,8 +80,8 @@ var OperatorPrimitiveNames = []string{
 	// similarTo lets the agent pull top-K nodes of a given concept
 	// ranked by cosine similarity to a free-form query -- typically
 	// app-knowledge chunks from its own declared knowledge domains,
-	// mid-takeover. The delegateTakeover handler already seeds the
-	// prompt with an up-front top-5 for the goal; this tool is for
+	// mid-takeover. The replier seeds the prompt with an up-front
+	// top-5 (copresent-ui) for operator turns; this tool is for
 	// follow-up depth when the agent hits a widget or flow it
 	// doesn't recognise from the initial block. Generalised over the
 	// target concept so any vector-indexed concept is reachable.
@@ -146,6 +152,18 @@ var WorkbenchCapabilityNames = []string{
 // edge case we don't currently use but the expander handles
 // gracefully.
 var capabilitySlugs = map[string][]string{
+	// CoPresent Control v2 (copresent#187): the single `copresent-control`
+	// slug was split into two purpose-built bundles -- `copresent-takeover`
+	// (autopilot) and `copresent-guide` (immersive voice-driven Scenes).
+	// Both expand to the SAME operator primitives; the EXPERIENCE differs
+	// (gated by which skill/tool the agent holds), not the primitive set.
+	"copresent-takeover": OperatorPrimitiveNames,
+	"copresent-guide":    OperatorPrimitiveNames,
+	// Legacy alias retained for migration: GA agent rows materialized
+	// before the split still carry skillId/toolSlug `copresent-control`
+	// (the per-user assistant seed is insert-if-missing, so existing rows
+	// are not rewritten). Keep expanding it so those GAs keep driving the
+	// UI until they are re-provisioned with the new skills.
 	"copresent-control":     OperatorPrimitiveNames,
 	"computer-use-headless": WorkerHeadlessCapabilityNames,
 	"computer-use-embodied": WorkerEmbodiedCapabilityNames,

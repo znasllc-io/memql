@@ -1618,7 +1618,7 @@ func QueryLatestSpaceContextSnapshotBuild(args QueryLatestSpaceContextSnapshotAr
 	return b.String()
 }
 
-// QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.
+// QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by operator-turn retrieval to resolve domain metadata.
 //
 // Bound concept: knowledgeDomain.
 type QueryListKnowledgeDomainsArgs struct {

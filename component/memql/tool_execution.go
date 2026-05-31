@@ -442,15 +442,6 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	case "webhook":
 		return e.executeWebhook(ctx, tool.Name, handler, args)
 
-	case "delegate":
-		// Cross-agent delegation: the calling agent pauses and asks
-		// another agent (named by args.targetAgentId) to execute a
-		// task on the user's behalf. The delegated turn inherits the
-		// parent's ClientToolInvoker so its operator-tool calls land
-		// in the same user's browser. See delegate_takeover.go for
-		// invariants.
-		return e.executeDelegateTakeover(ctx, args)
-
 	default:
 		return nil, fmt.Errorf("unknown handler type %q", handler.Type)
 	}

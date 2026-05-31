@@ -41,7 +41,7 @@ shape documentChunk documentChunkFull {
 // the leading comment block above the function.
 
 @row
-@description("Knowledge domain projection for the agent builder picker, delegateTakeover retrieval, the citation registry's domain lookup (replier.go), the training pipeline's domain freshness check (training.go's domainNeedsRefresh), and the Knowledge panel's row + modal renderers (cadence badge, last-updated, next-refresh).")
+@description("Knowledge domain projection for the agent builder picker, operator-turn retrieval, the citation registry's domain lookup (replier.go), the training pipeline's domain freshness check (training.go's domainNeedsRefresh), and the Knowledge panel's row + modal renderers (cadence badge, last-updated, next-refresh).")
 shape knowledgeDomain knowledgeDomainFull {
   row.id
   payload.name

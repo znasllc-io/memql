@@ -360,12 +360,12 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 
 	// RAG: retrieve top-K knowledge chunks for the agent's declared
 	// domains, keyed on the user's most recent message as the query.
-	// Mirrors delegate_takeover.go's up-front retrieval so direct
-	// takeovers (the user's assistant driving UI without
-	// going through delegation) also see app-knowledge in their prompt.
+	// The user's assistant drives UI directly (takeover / guide), so this
+	// up-front retrieval puts app-knowledge in its prompt.
 	//
-	// Server-side contract: if the agent has copresent-control (i.e.
-	// operatorEnabled==true), ALWAYS include `copresent-ui` in the
+	// Server-side contract: if the agent has an operator capability
+	// (copresent-takeover / copresent-guide, i.e. operatorEnabled==true),
+	// ALWAYS include `copresent-ui` in the
 	// retrieval domain set -- regardless of what's in the agent's
 	// stored capabilities.domains. The agent can't drive the UI
 	// competently without app knowledge, and forgetting to tick the
@@ -1600,16 +1600,16 @@ func extractReplyText(result any) string {
 
 // toolNamesFromAssistant extracts the flat list of tool names from the
 // prompt data's "assistant.tools" array, expanding capability slugs
-// (like "copresent-control") into concrete tool names before returning.
-// Returns nil when absent.
+// (like "copresent-takeover" / "copresent-guide") into concrete tool
+// names before returning. Returns nil when absent.
 //
 // Architecture note (2026-04-22): the System-agent-as-singleton-callback
-// pattern was retired. Any agent whose capabilities include the
-// copresent-control slug now drives the UI directly via the operator
-// primitives -- no delegation hop through a special "System" role.
-// delegateTakeover stays registered as a general-purpose
-// "delegate to another agent" tool for future use but is NO LONGER
-// auto-injected on every non-system turn.
+// pattern was retired. Any agent whose capabilities include an operator
+// slug (copresent-takeover / copresent-guide) drives the UI directly via
+// the operator primitives -- no delegation hop through a special "System"
+// role. The `delegateTakeover` hand-off tool + handler were removed with
+// the CoPresent Control v2 split (copresent#187): the GA holds both
+// operator bundles directly, so there is nothing to delegate.
 //
 // Also stamps `operatorEnabled: true` on the prompt data map when the
 // expanded tool list contains at least one operator primitive, so the
@@ -1633,8 +1633,9 @@ func toolNamesFromAssistant(data map[string]any) []string {
 		}
 	}
 
-	// Expand capability slugs (copresent-control -> uiClick / uiType / …)
-	// into concrete tool names the dispatcher can resolve. Concrete
+	// Expand capability slugs (copresent-takeover / copresent-guide ->
+	// uiClick / uiType / …) into concrete tool names the dispatcher can
+	// resolve. Concrete
 	// names passed through unchanged; unknown slugs pass through so the
 	// tool-loop's own filter can produce a clear "unknown tool" error.
 	expanded := memql.ExpandCapabilitySlugs(raw)
