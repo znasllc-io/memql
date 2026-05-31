@@ -379,40 +379,18 @@ func (i *Integration) resolvePartition(ctx context.Context) string {
 // keeps both as time-series versions under their own ids instead of
 // silently overwriting.
 func chunkIdFor(domainId, sourceRef string, seq int, text string) string {
-	hash := string(id.New().MustFromMap(map[string]any{
+	// Bare deterministic hash -- NO colon-composed prefix. validateShortId
+	// rejects shortIds containing colons unless concept-prefixed; the hash
+	// map already carries every uniqueness factor (kind/domainId/sourceRef/
+	// seq/text), so determinism + idempotent re-ingest are preserved.
+	// Mirrors seedChunkId in seed_domain_content.go.
+	return string(id.New().MustFromMap(map[string]any{
 		"kind":      "knowledge-chunk",
 		"domainId":  domainId,
 		"sourceRef": sourceRef,
 		"seq":       seq,
 		"text":      text,
 	}))
-	return fmt.Sprintf("%s:%s:%d:%s", sanitizeSegment(domainId), sanitizeSegment(sourceRef), seq, hash)
-}
-
-func sanitizeSegment(s string) string {
-	if s == "" {
-		return "unknown"
-	}
-	// Strip characters that conflict with id shape; keep alnum + dash.
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r + 32)
-		case r == '-' || r == '_' || r == '.':
-			b.WriteRune('-')
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		return "seg"
-	}
-	if len(out) > 40 {
-		out = out[:40]
-	}
-	return out
 }
 
 // approxTokens is a rough tokens-per-4-chars heuristic. Good enough for
