@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/httptls"
 )
 
 // bootstrap_token.go implements the node-side companion to the
@@ -131,7 +133,15 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 		)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// Trust the system roots plus the internal CA (MEMQL_HTTP_TLS_CA_FILE)
+	// when set, so the bootstrap POST works against an identity service
+	// that serves https with a self-signed cluster CA. The request
+	// context (dialCtx) bounds the call; the client itself is unbounded.
+	client, err := httptls.Client(0, logger)
+	if err != nil {
+		return "", false, fmt.Errorf("node bootstrap: build http client: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", false, fmt.Errorf("node bootstrap: POST %s: %w", endpoint.String(), err)
 	}

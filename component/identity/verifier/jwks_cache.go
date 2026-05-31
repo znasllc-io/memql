@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/znasllc-io/memql/core/httptls"
 )
 
 // JWK is the on-the-wire representation of a single key in the JWKS
@@ -62,9 +64,16 @@ func NewJWKSCache(cfg Config, logger *slog.Logger) (*JWKSCache, error) {
 	if url == "" {
 		return nil, errors.New("verifier.NewJWKSCache: empty JWKS URL (IDENTITY_VERIFIER_BASE_URL not set?)")
 	}
+	// Trust the system roots plus the internal CA (MEMQL_HTTP_TLS_CA_FILE)
+	// when set, so the JWKS fetch works against an identity service that
+	// serves https with a self-signed cluster CA.
+	httpClient, err := httptls.Client(cfg.JWKSFetchTimeout, logger)
+	if err != nil {
+		return nil, fmt.Errorf("verifier.NewJWKSCache: build http client: %w", err)
+	}
 	c := &JWKSCache{
 		url:        url,
-		httpClient: &http.Client{Timeout: cfg.JWKSFetchTimeout},
+		httpClient: httpClient,
 		logger:     logger,
 		refreshIv:  cfg.JWKSRefreshInterval,
 		keys:       make(map[string]ed25519.PublicKey),
