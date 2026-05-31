@@ -20,9 +20,13 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/node-type: planner
     spec:
+      volumes:
+        - name: memql-ca
+          secret:
+            secretName: memql-ca
       containers:
         - name: planner
-          image: acrmemql.azurecr.io/memql:0.9.0
+          image: acrmemql.azurecr.io/memql-planner:0.9.0
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
@@ -39,11 +43,19 @@ spec:
             - { name: MEMQL_PARENT_ADDRESS, value: "bff:50058" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
-            - { name: IDENTITY_VERIFIER_BASE_URL, value: "http://identity:8085" }
+            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://auth.staging.copresent.ai" }
+            - { name: IDENTITY_ENABLED, value: "false" }
+            # Internal TLS: trust the cluster CA when calling https://identity:8085.
+            # SSL_CERT_DIR covers 0.9.0 images; MEMQL_HTTP_TLS_CA_FILE the explicit path at 0.9.1+.
+            - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
+            - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
             - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
+          volumeMounts:
+            - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           readinessProbe:
             httpGet: { path: /healthz, port: 8085 }
             initialDelaySeconds: 5
