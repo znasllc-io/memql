@@ -112,13 +112,24 @@ func TestDeployDryRunStagingPlan(t *testing.T) {
 		"--ingress external",
 		"MEMQL_NODE_TYPE=bff",
 		"acrmemql.azurecr.io/memql-bff-copresent:0.9.0",
-		// secrets via Key Vault managed-identity ref
-		"keyvaultref:https://kv-memql-staging.vault.azure.net/secrets/memory-nodes-database-dsn",
-		"secretref:memory-nodes-database-dsn",
-		// env wired from service.yaml
+		// A2 genesis-envelope model: all three secrets via Key Vault
+		// managed-identity refs, surfaced as secretref env vars.
+		"keyvaultref:https://kv-memql-staging.vault.azure.net/secrets/memory-nodes-database-dsn,identityref:system",
+		"keyvaultref:https://kv-memql-staging.vault.azure.net/secrets/memql-master-key,identityref:system",
+		"keyvaultref:https://kv-memql-staging.vault.azure.net/secrets/memql-genesis-b64,identityref:system",
+		"MEMORY_NODES_DATABASE_DSN=secretref:memory-nodes-database-dsn",
+		"MEMQL_MASTER_KEY=secretref:memql-master-key",
+		"MEMQL_GENESIS_B64=secretref:memql-genesis-b64",
+		// in-process envelope auto-load turned on
+		"MEMQL_GENESIS_AUTOLOAD=true",
+		// per-node overrides from service.yaml that WIN set-if-absent
 		"SERVER_ADDRESS=0.0.0.0:8085",
+		"SERVER_ALLOWED_ORIGINS=*",
+		"IDENTITY_VERIFIER_AUDIENCE=memql",
 		"--target-port 8085",
 		"cae-memql-staging",
+		// each app's managed identity gets read access to the vault
+		`az role assignment create --role "Key Vault Secrets User"`,
 		"DRY RUN complete",
 		"State report",
 	}

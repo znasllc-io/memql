@@ -58,35 +58,48 @@ to the script.
      envs; anchored to the staging resource group)
    - `kv-memql-<env>` — Key Vault
    - `cae-memql-<env>` — Container Apps environment
-3. **Secrets → Key Vault** — refreshes the deployment secrets
-   (`MEMORY_NODES_DATABASE_DSN`, content-ID salt,
-   `MEMQL_SI_OPENAI_API_KEY`, `MEMQL_SI_OPENAI_PROJECT_ID`, and the
-   Discord webhook URLs). The secret **names** are authoritative from
-   [`service.yaml`](service.yaml); the **values** are pulled from a
-   gitignored env file (`--secrets-file`, default `.env.deploy.<env>`)
-   or prompted interactively — **never** hardcoded in the repo. A
-   value is only written when it differs from what's already stored,
+3. **Secrets → Key Vault (A2 genesis-envelope model, issue #519)** —
+   stores exactly **three** bootstrap secrets in `kv-memql-<env>`; the
+   cluster's ~150 config vars all live inside the sealed genesis
+   envelope and are decrypted in-process at boot (see
+   [Genesis envelope in cloud](#genesis-envelope-in-cloud--the-a2-secrets-model)),
+   so they are **not** stored as individual Key Vault secrets:
+
+   | Secret | Value source | Notes |
+   |--------|--------------|-------|
+   | `memory-nodes-database-dsn` | `$MEMORY_NODES_DATABASE_DSN` or the gitignored secrets file | Tiger Cloud DSN. **Kept**; often already written by `make db-provision` — only rewritten when it actually changed, so it's never clobbered. |
+   | `memql-master-key` | `$MEMQL_MASTER_KEY` (operator env **only**) | 32-byte / 64-hex key that decrypts the envelope. Never read from the repo or the secrets file; warn + skip if unset. |
+   | `memql-genesis-b64` | `base64` of the sealed envelope file (`$MEMQL_GENESIS_PATH`, default `~/.memql/genesis.znas`) | The envelope is **encrypted**, so the ciphertext is safe to store. Warn + skip if the file is missing. |
+
+   The old **"6 individual secrets"** model (`MEMQL_SI_OPENAI_API_KEY`,
+   `MEMQL_SI_OPENAI_PROJECT_ID`, the content-ID salt, the Discord
+   webhooks) is **removed** — those values live inside the envelope now.
+   A value is only written when it differs from what's already stored,
    so re-runs are a true no-op.
 4. **State report** — prints what already existed, what was created,
    what was reconciled, and what was skipped (missing tool / auth /
    value).
 
-### Secret values file
+### Providing the three secret values
 
-Provide secret values via a gitignored file (matched by the repo's
-`.env.*` ignore rules), one `KEY=VALUE` per line, using the env-var
-names from `service.yaml`. Example `.env.deploy.staging`:
+- **DSN** — export `MEMORY_NODES_DATABASE_DSN`, or put it in a gitignored
+  file (matched by the repo's `.env.*` ignore rules), one `KEY=VALUE` per
+  line, passed via `--secrets-file` (default `.env.deploy.<env>`). Example
+  `.env.deploy.staging`:
 
-```
-MEMORY_NODES_DATABASE_DSN=postgres://...
-MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT=...
-MEMQL_SI_OPENAI_API_KEY=sk-...
-MEMQL_SI_OPENAI_PROJECT_ID=proj_...
-MEMQL_SECRET_VARIABLE_DISCORD_DEVAUTO_WEBHOOK_URL=https://discord.com/api/webhooks/...
-MEMQL_SECRET_VARIABLE_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-```
+  ```
+  MEMORY_NODES_DATABASE_DSN=postgres://...
+  ```
 
-Already-exported environment variables take precedence over the file.
+  Already-exported environment variables take precedence over the file.
+  (`make db-provision` usually writes this secret first, so the file is
+  optional.)
+- **Master key** — export `MEMQL_MASTER_KEY` (32-byte / 64-hex) in the
+  operator shell. It is **never** read from the repo or the secrets file.
+- **Sealed envelope** — place the encrypted envelope at
+  `~/.memql/genesis.znas` (or point `MEMQL_GENESIS_PATH` at it). The
+  script `base64`-encodes the ciphertext and stores it as
+  `memql-genesis-b64`.
 
 ### Status / remaining work
 
@@ -243,17 +256,39 @@ rebuilding. `DRY_RUN=1` forwards `--dry-run`.
    existence check (`az containerapp show`) picks `create` vs `update`,
    so re-running converges with no duplicates. Ingress is converged
    separately so a flip (internal ↔ external) is reconciled on re-run.
-   Each app gets `--min-replicas 1` and `--system-assigned` managed
-   identity.
-3. **Secrets + env** — the DSN rides a **Key Vault secret reference**
-   (`keyvaultref:…/secrets/memory-nodes-database-dsn` +
-   `identityref:system`) resolved at runtime by the app's managed
-   identity, exposed to the container as
-   `MEMORY_NODES_DATABASE_DSN=secretref:…`. Non-secret env mirrors
-   [`service.yaml`](service.yaml) (`SERVER_ADDRESS=0.0.0.0:8085`,
-   `MEMQL_GRPC_ADDRESS=:50051`, the auto-migrate flags).
-4. **State report** — prints which apps were created vs updated, with
-   which image tags + ingress, and what was skipped.
+   Each app gets `--min-replicas 1` and a `--system-assigned` managed
+   identity (re-asserted via `az containerapp identity assign` on the
+   update path).
+3. **Secrets + env (A2 genesis-envelope model, issue #519)** — all
+   **three** Key Vault secrets ride **Key Vault secret references**
+   (`keyvaultref:…/secrets/<name>,identityref:system`) resolved at
+   runtime by the app's system-assigned managed identity, surfaced to
+   the binary as `secretref:` env vars:
+
+   | Env var | Key Vault secret |
+   |---------|------------------|
+   | `MEMORY_NODES_DATABASE_DSN` | `memory-nodes-database-dsn` |
+   | `MEMQL_MASTER_KEY` | `memql-master-key` |
+   | `MEMQL_GENESIS_B64` | `memql-genesis-b64` |
+
+   The app also gets `MEMQL_GENESIS_AUTOLOAD=true` (turn on the
+   in-process envelope decrypt at boot) plus the **per-node overrides**
+   that must WIN over the envelope's local-dev defaults — and because
+   the binary's autoload is **set-if-absent**, anything set in the
+   container env before the process starts wins. These mirror
+   [`service.yaml`](service.yaml): `MEMQL_NODE_TYPE=<role>`,
+   `SERVER_ADDRESS=0.0.0.0:8085`, `SERVER_ALLOWED_ORIGINS`,
+   `IDENTITY_VERIFIER_BASE_URL` / `IDENTITY_VERIFIER_AUDIENCE`,
+   `MEMQL_GRPC_ADDRESS=:50051`, and the auto-migrate flags.
+4. **Managed-identity Key Vault grant** — each app's system-assigned
+   managed identity is granted the **`Key Vault Secrets User`** role at
+   the `kv-memql-<env>` scope (`az role assignment create`), so it can
+   read the three secret references at boot. Idempotent (a re-run is a
+   no-op when the assignment already exists). This resolves the TODO
+   that `make deploy-setup` left for the deploy step.
+5. **State report** — prints which apps were created vs updated, with
+   which image tags + ingress, the managed-identity grants, and what was
+   skipped.
 
 ### Status / remaining work
 
@@ -331,13 +366,23 @@ it does not silently come up mis-configured:
 - Bad base64, truncated/tampered ciphertext, or wrong master key →
   fatal.
 
-### Deploy wiring (next step)
+### Deploy wiring (shipped, issue #519)
 
-The deploy script passes the sealed envelope as `MEMQL_GENESIS_B64`
-and `MEMQL_MASTER_KEY` (the latter as a Key Vault secret reference,
-like the DSN) to each Container App, alongside the per-node overrides.
-That deploy-script rework is tracked as the follow-up to #518 and
-replaces the earlier "6 individual secrets" approach.
+The deploy scripts now deliver config the A2 way and the earlier
+"6 individual secrets" approach is gone:
+
+- `make deploy-setup` stores exactly three Key Vault secrets —
+  `memory-nodes-database-dsn`, `memql-master-key`, `memql-genesis-b64`
+  (base64 of the sealed envelope) — and nothing else.
+- `make deploy` wires all three into each Container App as **Key Vault
+  secret references** via the app's system-assigned managed identity,
+  exposes them as `MEMQL_MASTER_KEY` / `MEMQL_GENESIS_B64` /
+  `MEMORY_NODES_DATABASE_DSN` `secretref` env vars, sets
+  `MEMQL_GENESIS_AUTOLOAD=true`, layers the per-node overrides
+  (`MEMQL_NODE_TYPE`, `SERVER_ADDRESS`, `SERVER_ALLOWED_ORIGINS`,
+  identity URLs, …) that win set-if-absent, and grants each managed
+  identity the `Key Vault Secrets User` role so it can read the
+  secrets at boot.
 
 ---
 

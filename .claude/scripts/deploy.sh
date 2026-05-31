@@ -38,8 +38,11 @@
 #      `az containerapp create` vs `update` is chosen by an existence
 #      check, so re-running converges with no duplicates.
 #
-#   3. Wire Key Vault secret refs (via the env's managed identity) and
-#      env from service.yaml.
+#   3. Wire the THREE Key Vault secret refs (DSN + master key + sealed
+#      genesis envelope base64) via each app's system-assigned managed
+#      identity, set MEMQL_GENESIS_AUTOLOAD=true + the per-node overrides
+#      from service.yaml, and grant each managed identity "Key Vault
+#      Secrets User" so it can read the secrets at boot (A2 model, #519).
 #
 # A final STATE REPORT prints which apps were created/updated, with
 # which image tags + ingress.
@@ -90,6 +93,28 @@ readonly CARRIER_IMAGE_NAME="memql-bff-copresent"  # built by ../memql-bff-copre
 # Cluster ports (docker-compose.cluster.yml): HTTP/WS on 8085, gRPC on
 # 50051. Container Apps targets the HTTP/WS port for ingress.
 readonly NODE_HTTP_PORT="8085"
+
+# Key Vault secret names (A2 genesis-envelope model -- issue #519). These
+# match exactly what deploy-setup.sh stores in kv-memql-<env>. Each is
+# wired into the Container App as a Key Vault secret reference resolved by
+# the app's system-assigned managed identity, then surfaced to the binary
+# as a secretref env var.
+readonly KV_SECRET_DSN="memory-nodes-database-dsn"
+readonly KV_SECRET_MASTER_KEY="memql-master-key"
+readonly KV_SECRET_GENESIS_B64="memql-genesis-b64"
+
+# Identity host the verifier points at (every non-identity binary fetches
+# JWKS from the identity service's public origin). The identity node is
+# the EXTERNAL-facing identity app; mirrors service.yaml's
+# IDENTITY_VERIFIER_BASE_URL. Left as the internal cluster FQDN until the
+# public identity host is mapped; the envelope can also carry it (and the
+# override here, being set, wins set-if-absent).
+readonly IDENTITY_VERIFIER_AUDIENCE="memql"
+
+# Per-node SERVER_ALLOWED_ORIGINS. Mirrors service.yaml ("*" until the
+# CoPresent origins are locked down). The carrier is the public node, so
+# it carries the same permissive value for now.
+readonly SERVER_ALLOWED_ORIGINS="*"
 
 # Where the sibling carrier repo lives, relative to this repo's root.
 # The carrier's `make release` build context spans both repos (its
@@ -413,17 +438,25 @@ function containerapp_exists() {
     az containerapp show --name "${app}" --resource-group "${RG_NAME}" >/dev/null 2>&1
 }
 
-# Deploy (create-or-update) one Container App. Args:
+# Deploy (create-or-update) one Container App under the A2 genesis-envelope
+# model (issue #519). Args:
 #   $1 app name, $2 image ref, $3 node-type (MEMQL_NODE_TYPE),
 #   $4 ingress ("internal"|"external").
 #
-# Secrets ride Key Vault references via the env's managed identity; the
-# DSN secret name matches what tiger-provision.sh / deploy-setup.sh store
-# (memory-nodes-database-dsn). Non-secret env mirrors service.yaml
-# (SERVER_ADDRESS, MEMQL_GRPC_ADDRESS, auto-migrate flags).
+# Secrets: the THREE Key Vault secrets (DSN, master key, sealed envelope
+# base64) ride Key Vault references resolved at runtime by the app's
+# system-assigned managed identity. They surface to the binary as
+# secretref env vars.
+#
+# Env: MEMQL_GENESIS_AUTOLOAD=true turns on the in-process envelope
+# decrypt at boot; the binary applies the envelope's ~150 vars
+# set-if-absent. The per-node OVERRIDES below (MEMQL_NODE_TYPE, the cloud
+# SERVER_ADDRESS / origins / identity URLs, the auto-migrate flags) are
+# set in the container env BEFORE the process starts, so they WIN over the
+# envelope's local-dev defaults (set-if-absent guarantees it). Non-secret
+# values mirror service.yaml.
 function deploy_container_app() {
     local app="$1" image="$2" node_type="$3" ingress="$4"
-    local kv_uri="https://${KV_NAME}.vault.azure.net/secrets/memory-nodes-database-dsn"
 
     if ! az_ready; then
         warn "az not ready -- skipping ${app}."
@@ -431,24 +464,57 @@ function deploy_container_app() {
         return 0
     fi
 
-    # Common env + secret wiring shared by create + update. Secret refs
-    # are resolved at runtime by the app's managed identity against the
-    # per-env Key Vault.
-    local -a common_args=(
-        --resource-group "${RG_NAME}"
-        --image "${image}"
-        --secrets "memory-nodes-database-dsn=keyvaultref:${kv_uri},identityref:system"
+    local kv_base="https://${KV_NAME}.vault.azure.net/secrets"
+
+    # The three Key Vault secret references, resolved by the app's
+    # system-assigned managed identity (identityref:system).
+    local -a secret_args=(
+        --secrets
+            "${KV_SECRET_DSN}=keyvaultref:${kv_base}/${KV_SECRET_DSN},identityref:system"
+            "${KV_SECRET_MASTER_KEY}=keyvaultref:${kv_base}/${KV_SECRET_MASTER_KEY},identityref:system"
+            "${KV_SECRET_GENESIS_B64}=keyvaultref:${kv_base}/${KV_SECRET_GENESIS_B64},identityref:system"
+    )
+
+    # The identity verifier base URL points every non-identity node at the
+    # identity node's origin. The identity node itself doesn't verify
+    # against a peer, so it gets IDENTITY_BASE_URL instead; both are
+    # overrides that win over the envelope.
+    local identity_internal="https://ca-memql-identity-${ENV}.internal.${CAE_NAME}.azurecontainerapps.io"
+
+    # Common env shared by create + update: the genesis-autoload trio
+    # (secretref'd secrets + the master switch) plus the per-node
+    # overrides from service.yaml that must win set-if-absent.
+    local -a env_args=(
         --env-vars
+            "MEMQL_GENESIS_AUTOLOAD=true"
+            "MEMQL_MASTER_KEY=secretref:${KV_SECRET_MASTER_KEY}"
+            "MEMQL_GENESIS_B64=secretref:${KV_SECRET_GENESIS_B64}"
+            "MEMORY_NODES_DATABASE_DSN=secretref:${KV_SECRET_DSN}"
             "MEMQL_NODE_TYPE=${node_type}"
-            "MEMORY_NODES_DATABASE_DSN=secretref:memory-nodes-database-dsn"
             "SERVER_ADDRESS=0.0.0.0:${NODE_HTTP_PORT}"
             "MEMQL_GRPC_ADDRESS=:50051"
+            "SERVER_ALLOWED_ORIGINS=${SERVER_ALLOWED_ORIGINS}"
+            "IDENTITY_VERIFIER_BASE_URL=${identity_internal}"
+            "IDENTITY_VERIFIER_AUDIENCE=${IDENTITY_VERIFIER_AUDIENCE}"
             "MEMORY_NODES_DATABASE_AUTO_MIGRATE=true"
             "MEMORY_NODES_DATABASE_MIGRATE_ON_START=true"
     )
 
+    local -a common_args=(
+        --resource-group "${RG_NAME}"
+        --image "${image}"
+        "${secret_args[@]}"
+        "${env_args[@]}"
+    )
+
     if containerapp_exists "${app}"; then
         info "updating ${app} (${node_type}, ${ingress}) -> ${image}..."
+        # Ensure the system-assigned managed identity is present on an
+        # already-existing app (create wires it with --system-assigned;
+        # update doesn't carry that flag, so assign it explicitly).
+        run_or_plan az containerapp identity assign \
+            --name "${app}" --resource-group "${RG_NAME}" \
+            --system-assigned --only-show-errors
         run_or_plan az containerapp update \
             --name "${app}" \
             "${common_args[@]}" \
@@ -474,6 +540,57 @@ function deploy_container_app() {
             --min-replicas 1 \
             --only-show-errors
         record_created "containerapp: ${app} (${node_type}, ${ingress}) -> ${image}"
+    fi
+
+    # Grant the app's system-assigned managed identity READ access to the
+    # three Key Vault secrets (resolves the TODO left in deploy-setup).
+    grant_kv_secrets_user "${app}"
+}
+
+# grant_kv_secrets_user grants the Container App's system-assigned managed
+# identity the "Key Vault Secrets User" role at the per-env Key Vault
+# scope, so the app can resolve the three Key Vault secret references at
+# boot. Idempotent: az role assignment create is a no-op when the
+# assignment already exists. Routed through run_or_plan so --dry-run stays
+# side-effect-free.
+function grant_kv_secrets_user() {
+    local app="$1"
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] az containerapp identity show --name ${app} --resource-group ${RG_NAME} --query principalId -o tsv"
+        echo "  [plan] az keyvault show --name ${KV_NAME} --query id -o tsv"
+        echo "  [plan] az role assignment create --role \"Key Vault Secrets User\" --assignee <principalId> --scope <vaultId>"
+        return 0
+    fi
+
+    local pid vault_id
+    pid="$(az containerapp identity show --name "${app}" --resource-group "${RG_NAME}" --query principalId -o tsv 2>/dev/null || echo '')"
+    if [ -z "${pid}" ]; then
+        warn "could not resolve managed-identity principalId for ${app} -- skipping Key Vault Secrets User grant."
+        warn "  The app will fail to resolve the Key Vault secret refs until it has this role."
+        record_skipped "kv-role: Key Vault Secrets User (${app} -> ${KV_NAME})"
+        return 0
+    fi
+
+    vault_id="$(az keyvault show --name "${KV_NAME}" --query id -o tsv 2>/dev/null || echo '')"
+    if [ -z "${vault_id}" ]; then
+        warn "could not resolve vault id for ${KV_NAME} -- skipping ${app} role grant."
+        record_skipped "kv-role: Key Vault Secrets User (${app} -> ${KV_NAME})"
+        return 0
+    fi
+
+    info "granting 'Key Vault Secrets User' on ${KV_NAME} to ${app}'s managed identity..."
+    if az role assignment create \
+        --role "Key Vault Secrets User" \
+        --assignee "${pid}" \
+        --scope "${vault_id}" \
+        --only-show-errors >/dev/null 2>&1; then
+        record_changed "kv-role: Key Vault Secrets User (${app} -> ${KV_NAME})"
+    else
+        # Already-assigned is the common idempotent case; az returns
+        # non-zero. Treat as already-correct rather than a hard failure.
+        log "[ok] 'Key Vault Secrets User' already granted to ${app} (or grant unchanged)"
+        record_skipped "kv-role: Key Vault Secrets User (${app} -> ${KV_NAME}) [already present]"
     fi
 }
 
