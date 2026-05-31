@@ -80,8 +80,9 @@ func TestHelp(t *testing.T) {
 
 // TestDryRunStagingPlan asserts the staging dry-run exits 0, mutates
 // nothing (every Azure call is a [plan] line, never an executed az
-// command), and names the four core resources with the right per-env
-// suffixes + shared ACR.
+// command), names the four core resources with the right per-env
+// suffixes + shared ACR, and plans exactly the THREE A2 genesis-envelope
+// Key Vault secrets (DSN + master key + sealed envelope base64).
 func TestDryRunStagingPlan(t *testing.T) {
 	out, err := run(t, "--env=staging", "--dry-run")
 	if err != nil {
@@ -103,13 +104,30 @@ func TestDryRunStagingPlan(t *testing.T) {
 		"rg-memql-staging",
 		"kv-memql-staging",
 		"cae-memql-staging",
-		"acrmemql",       // shared registry, env-independent name
+		"acrmemql", // shared registry, env-independent name
+		// A2 genesis-envelope model: exactly three Key Vault secrets.
+		"memory-nodes-database-dsn",
+		"memql-master-key",
+		"memql-genesis-b64",
 		"DRY RUN complete",
 		"State report",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(out, want) {
 			t.Errorf("staging dry-run output missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// The old "6 individual secrets" model is gone: none of the stale
+	// per-secret names should appear anywhere in the plan now (they live
+	// inside the sealed genesis envelope).
+	for _, gone := range []string{
+		"memql-si-openai",
+		"contentid-salt",
+		"discord",
+	} {
+		if strings.Contains(out, gone) {
+			t.Errorf("staging dry-run still references retired secret %q (should be inside the envelope now)\n---\n%s", gone, out)
 		}
 	}
 }

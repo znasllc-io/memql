@@ -56,23 +56,43 @@ readonly ACR_SKU="Basic"
 # Default environment. Overridable via --env / ENV / first positional.
 DEFAULT_ENV="staging"
 
-# Secret NAMES are authoritative from service.yaml (the deployed env
-# contract). VALUES are pulled at runtime from a gitignored env file
-# or prompted -- never stored here. Key Vault secret names may only
-# contain alphanumerics + dashes, so the env-var names below are
-# mapped to KV-safe names by kv_secret_name().
+# A2 genesis-envelope model (issue #519, epic #491). The cloud cluster's
+# ~150 config vars all live INSIDE the sealed genesis envelope, decrypted
+# in-process at boot by component/genesis/autoload.go. So the Key Vault
+# holds exactly THREE secrets -- the bootstrap layer the binary needs to
+# unseal + reach the database -- not the old "6 individual secrets" that
+# came from a stale GCP service.yaml:
 #
-# Format: "ENV_VAR_NAME" -- the source env var we read the value from.
-readonly SECRET_ENV_VARS=(
-    "MEMORY_NODES_DATABASE_DSN"
-    "MEMORY_NODES_ZNASLLC_LAB_CONTENTID_SALT"
-    "MEMQL_SI_OPENAI_API_KEY"
-    "MEMQL_SI_OPENAI_PROJECT_ID"
-    "MEMQL_SECRET_VARIABLE_DISCORD_DEVAUTO_WEBHOOK_URL"
-    "MEMQL_SECRET_VARIABLE_DISCORD_WEBHOOK_URL"
-)
+#   memory-nodes-database-dsn  -- the Tiger Cloud DSN. KEPT. Often already
+#                                 written by tiger-provision.sh; we only
+#                                 rewrite it when it actually changed.
+#   memql-master-key           -- the 32-byte master key (MEMQL_MASTER_KEY)
+#                                 that decrypts the envelope. Operator-
+#                                 supplied via env var only; NEVER read
+#                                 from the repo. Warn + skip if unset.
+#   memql-genesis-b64          -- base64 of the operator's SEALED envelope
+#                                 file (default ~/.memql/genesis.znas). The
+#                                 envelope is ENCRYPTED, so storing it in
+#                                 Key Vault is safe. Warn + skip if missing.
+#
+# Everything that used to be its own secret (OpenAI keys, content-ID salt,
+# Discord webhooks) is inside the envelope now.
 
-# Where we look for secret VALUES when not already in the environment.
+# Source env var carrying the master key value. Operator-supplied only.
+readonly MASTER_KEY_ENV_VAR="MEMQL_MASTER_KEY"
+
+# Key Vault secret names (KV names allow only [A-Za-z0-9-]).
+readonly KV_SECRET_DSN="memory-nodes-database-dsn"
+readonly KV_SECRET_MASTER_KEY="memql-master-key"
+readonly KV_SECRET_GENESIS_B64="memql-genesis-b64"
+
+# Where the sealed envelope file lives. Overridable via MEMQL_GENESIS_PATH
+# (the same env var the binary's autoload honors); defaults to
+# ~/.memql/genesis.znas. The file is ENCRYPTED; we base64 it and store the
+# ciphertext.
+DEFAULT_GENESIS_PATH="${HOME}/.memql/genesis.znas"
+
+# Where we look for the DSN value when not already in the environment.
 # Gitignored (.env.* is ignored repo-wide; see .gitignore). Override
 # with --secrets-file. Default is per-env so staging + prod don't
 # collide.
@@ -123,7 +143,7 @@ the second consecutive run is a no-op.
 Options:
     --env=ENV            Target environment: staging (default) or production.
                          May also be passed positionally or via ENV=.
-    --secrets-file=PATH  Env file to read secret VALUES from
+    --secrets-file=PATH  Env file to read the DSN value from
                          (default: .env.deploy.<env>, gitignored).
     --skip-toolchain     Skip the toolchain install/verify phase.
     --skip-secrets       Skip loading secrets into Key Vault.
@@ -144,7 +164,12 @@ Azure resources (create-or-converge, region: ${REGION_DISPLAY}):
     ${ACR_NAME}      container registry (${ACR_SKU}, shared across envs)
     kv-memql-<env>   key vault
     cae-memql-<env>  container apps environment
-    + refresh secrets into the key vault
+
+Key Vault secrets (A2 genesis-envelope model -- issue #519):
+    ${KV_SECRET_DSN}   Tiger Cloud DSN (kept; from MEMORY_NODES_DATABASE_DSN)
+    ${KV_SECRET_MASTER_KEY}            32-byte key from \$${MASTER_KEY_ENV_VAR} (operator env only)
+    ${KV_SECRET_GENESIS_B64}           base64 of the sealed envelope
+                              (\$MEMQL_GENESIS_PATH, default ~/.memql/genesis.znas)
 EOF
 }
 
@@ -542,10 +567,12 @@ function ensure_key_vault() {
 # exists. The secrets phase depends on this, so it runs before
 # load_secrets. Routed through run_or_plan so --dry-run stays clean.
 #
-# TODO(deploy): `make deploy` must additionally grant each Container
-# App's managed identity the "Key Vault Secrets User" role at this vault
-# scope so the apps can READ these secrets at runtime. Not implemented
-# here (the Container Apps don't exist yet at bootstrap time).
+# Runtime READ access for the Container Apps is granted by `make deploy`
+# (.claude/scripts/deploy.sh): each app's system-assigned managed
+# identity gets the "Key Vault Secrets User" role at this vault scope so
+# it can resolve the three Key Vault secret references at boot. That
+# can't happen here -- the Container Apps don't exist yet at bootstrap
+# time -- so it lives in the deploy step that creates them.
 function grant_kv_secrets_officer() {
     local oid vault_id
     if [ "$DRY_RUN" = true ]; then
@@ -610,21 +637,16 @@ function ensure_container_apps_env() {
 }
 
 #=============================================================================
-# SECRETS -- load/refresh into Key Vault (values never hardcoded)
+# SECRETS -- the A2 genesis-envelope model: exactly THREE Key Vault secrets
 #=============================================================================
 
-# Map a source env-var name to a Key Vault secret name. KV names allow
-# only [A-Za-z0-9-]; we lowercase + replace underscores with dashes so
-# the names stay stable + valid across runs.
-function kv_secret_name() {
-    echo "$1" | tr '[:upper:]_' '[:lower:]-'
-}
-
-# Resolve a secret VALUE: prefer an already-exported env var; else read
-# KEY=VALUE from the gitignored secrets file; else (interactive only)
-# prompt. Returns empty + non-zero if we can't resolve one.
-function resolve_secret_value() {
-    local var="$1"
+# Resolve the DSN value: prefer an already-exported MEMORY_NODES_DATABASE_DSN;
+# else read it from the gitignored secrets file; else (interactive only)
+# prompt. Returns empty + non-zero if we can't resolve one. The DSN may
+# already have been written by tiger-provision.sh, so a missing value here
+# is a non-fatal skip rather than an error.
+function resolve_dsn_value() {
+    local var="MEMORY_NODES_DATABASE_DSN"
     local val="${!var:-}"
 
     if [ -n "${val}" ]; then
@@ -654,8 +676,106 @@ function resolve_secret_value() {
     return 1
 }
 
+# set_kv_secret writes one Key Vault secret idempotently: it only rewrites
+# when the stored value differs from the new one, so re-runs are a true
+# no-op and we don't spam new secret versions. Records exists/created/
+# changed/skipped into the state report. Routed past run_or_plan manually
+# because we need the read-compare-write logic.
+#   $1 KV secret name, $2 new value
+function set_kv_secret() {
+    local kvname="$1" value="$2"
+
+    local current
+    current="$(az keyvault secret show --vault-name "${KV_NAME}" --name "${kvname}" --query value -o tsv 2>/dev/null || echo '')"
+    if [ -n "${current}" ] && [ "${current}" = "${value}" ]; then
+        log "[ok] ${kvname} already up to date"
+        record_exists "secret: ${kvname}"
+        return 0
+    fi
+
+    info "setting ${kvname}..."
+    if az keyvault secret set --vault-name "${KV_NAME}" --name "${kvname}" --value "${value}" --only-show-errors >/dev/null 2>&1; then
+        if [ -n "${current}" ]; then
+            record_changed "secret: ${kvname} (updated)"
+        else
+            record_created "secret: ${kvname}"
+        fi
+    else
+        warn "failed to set ${kvname}"
+        record_skipped "secret: ${kvname}"
+    fi
+}
+
+# memory-nodes-database-dsn -- the Tiger Cloud DSN. KEPT from the old model.
+# Often already written by tiger-provision.sh; we only rewrite on change so
+# we never clobber an unchanged value.
+function load_dsn_secret() {
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${KV_SECRET_DSN} --value <MEMORY_NODES_DATABASE_DSN>"
+        return 0
+    fi
+
+    local value
+    if ! value="$(resolve_dsn_value)"; then
+        warn "no value for MEMORY_NODES_DATABASE_DSN -- leaving ${KV_SECRET_DSN} unchanged."
+        warn "  (tiger-provision.sh may already have stored it; that's fine.)"
+        record_skipped "secret: ${KV_SECRET_DSN}"
+        return 0
+    fi
+    set_kv_secret "${KV_SECRET_DSN}" "${value}"
+    unset value
+}
+
+# memql-master-key -- the 32-byte master key that decrypts the genesis
+# envelope. Operator-supplied via $MEMQL_MASTER_KEY ONLY; never read from
+# the repo or the secrets file. Warn + skip if unset.
+function load_master_key_secret() {
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${KV_SECRET_MASTER_KEY} --value <\$${MASTER_KEY_ENV_VAR}>"
+        return 0
+    fi
+
+    local value="${!MASTER_KEY_ENV_VAR:-}"
+    if [ -z "${value}" ]; then
+        warn "\$${MASTER_KEY_ENV_VAR} is not set -- leaving ${KV_SECRET_MASTER_KEY} unchanged."
+        warn "  Export it (32-byte / 64 hex) before running so the cluster can unseal the envelope."
+        record_skipped "secret: ${KV_SECRET_MASTER_KEY}"
+        return 0
+    fi
+    set_kv_secret "${KV_SECRET_MASTER_KEY}" "${value}"
+}
+
+# memql-genesis-b64 -- base64 of the operator's SEALED envelope file. The
+# envelope is ENCRYPTED, so the ciphertext is safe to store in Key Vault.
+# The binary's autoload decodes + decrypts it in-process at boot. Warn +
+# skip if the envelope file is missing.
+function load_genesis_b64_secret() {
+    local path="${MEMQL_GENESIS_PATH:-$DEFAULT_GENESIS_PATH}"
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${KV_SECRET_GENESIS_B64} --value <base64 of ${path}>"
+        return 0
+    fi
+
+    if [ ! -f "${path}" ]; then
+        warn "sealed envelope not found at ${path} -- leaving ${KV_SECRET_GENESIS_B64} unchanged."
+        warn "  Set \$MEMQL_GENESIS_PATH or place the envelope at ${DEFAULT_GENESIS_PATH}."
+        record_skipped "secret: ${KV_SECRET_GENESIS_B64}"
+        return 0
+    fi
+
+    local value
+    if ! value="$(base64 < "${path}" | tr -d '\n')"; then
+        warn "could not base64 the envelope at ${path}."
+        record_skipped "secret: ${KV_SECRET_GENESIS_B64}"
+        return 0
+    fi
+    set_kv_secret "${KV_SECRET_GENESIS_B64}" "${value}"
+    unset value
+}
+
 function load_secrets() {
-    section "Secrets -> Key Vault (${KV_NAME})"
+    section "Secrets -> Key Vault (${KV_NAME}) -- A2 genesis-envelope model"
 
     if [ "$SKIP_SECRETS" = true ]; then
         log "--skip-secrets set; not touching key vault secrets."
@@ -667,54 +787,15 @@ function load_secrets() {
         return 0
     fi
 
-    if [ -f "${SECRETS_FILE}" ]; then
-        log "reading secret values from ${SECRETS_FILE} (gitignored)"
-    else
-        warn "secrets file ${SECRETS_FILE} not found."
-        warn "  Provide values via that file (KEY=VALUE per line) or export the"
-        warn "  vars before running. Values are NEVER read from this repo."
+    log "storing 3 bootstrap secrets (envelope holds the rest, decrypted at boot):"
+    log "  ${KV_SECRET_DSN}, ${KV_SECRET_MASTER_KEY}, ${KV_SECRET_GENESIS_B64}"
+    if [ "$DRY_RUN" = false ] && [ -f "${SECRETS_FILE}" ]; then
+        log "reading the DSN value from ${SECRETS_FILE} (gitignored) if not already exported"
     fi
 
-    local var kvname
-    for var in "${SECRET_ENV_VARS[@]}"; do
-        kvname="$(kv_secret_name "${var}")"
-
-        if [ "$DRY_RUN" = true ]; then
-            echo "  [plan] az keyvault secret set --vault-name ${KV_NAME} --name ${kvname} --value <${var}>"
-            continue
-        fi
-
-        local value
-        if ! value="$(resolve_secret_value "${var}")"; then
-            warn "no value for ${var} -- leaving ${kvname} unchanged."
-            record_skipped "secret: ${kvname}"
-            continue
-        fi
-
-        # Idempotent convergence: only write when the value differs from
-        # what's already stored. Keeps re-runs a true no-op + avoids
-        # spamming new secret versions.
-        local current
-        current="$(az keyvault secret show --vault-name "${KV_NAME}" --name "${kvname}" --query value -o tsv 2>/dev/null || echo '')"
-        if [ -n "${current}" ] && [ "${current}" = "${value}" ]; then
-            log "[ok] ${kvname} already up to date"
-            record_exists "secret: ${kvname}"
-            continue
-        fi
-
-        info "setting ${kvname}..."
-        if az keyvault secret set --vault-name "${KV_NAME}" --name "${kvname}" --value "${value}" --only-show-errors >/dev/null 2>&1; then
-            if [ -n "${current}" ]; then
-                record_changed "secret: ${kvname} (updated)"
-            else
-                record_created "secret: ${kvname}"
-            fi
-        else
-            warn "failed to set ${kvname}"
-            record_skipped "secret: ${kvname}"
-        fi
-        unset value
-    done
+    load_dsn_secret
+    load_master_key_secret
+    load_genesis_b64_secret
 }
 
 #=============================================================================
