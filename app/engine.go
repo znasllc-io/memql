@@ -112,6 +112,15 @@ func (a *App) engineAndBus() {
 		Registry: a.registry,
 	})
 	a.stepRegistry = automationSteps.NewRegistry()
+
+	// #561: elect one cluster-wide owner of SCHEDULED (cron) automations via
+	// a Postgres advisory lock, so the daily purges + the */5min feedback
+	// sweep run once across the whole cluster instead of once per node-type
+	// (and once per replica once the node-types scale). Started BEFORE the
+	// scheduler so the lock is held by the time the first cron can fire.
+	cronLeader := automations.NewCronLeader(a.db.BunDB, a.Logger)
+	a.Dependencies = append(a.Dependencies, cronLeader)
+
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:              nil,
 		Loader:              a.automationLoader,
@@ -120,6 +129,7 @@ func (a *App) engineAndBus() {
 		StepRegistry:        a.stepRegistry,
 		StepCacheEnabled:    os.Getenv("MEMQL_STEP_CACHE_ENABLED") == "true",
 		StepCacheDefaultTTL: 5 * time.Minute,
+		LeaderGate:          cronLeader.IsLeader,
 	})
 	if err != nil {
 		a.fatal("failed to create automation scheduler", "error", err, "component", automations.ComponentName)

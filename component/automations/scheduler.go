@@ -39,6 +39,13 @@ type Scheduler struct {
 	done        chan struct{}
 	readyCh     chan struct{}
 	wiring      *bus.Wiring
+
+	// leaderGate, when set, gates SCHEDULED (cron) automations: a firing
+	// only executes when it returns true (#561). It elects one cluster-wide
+	// runner so crons don't fire once-per-node-type / once-per-replica.
+	// nil = ungated (every node runs crons -- the pre-#561 behaviour, and
+	// the dev/single-node default).
+	leaderGate func() bool
 }
 
 // SchedulerOptions configures the automation scheduler.
@@ -53,6 +60,11 @@ type SchedulerOptions struct {
 	StepCacheEnabled    bool
 	StepCacheMaxBytes   int64
 	StepCacheDefaultTTL time.Duration
+
+	// LeaderGate, when set, restricts SCHEDULED (cron) automation execution
+	// to the one cluster-wide leader node (#561). nil = every node runs
+	// crons (pre-#561 / single-node default). Typically CronLeader.IsLeader.
+	LeaderGate func() bool
 }
 
 // NewScheduler creates a new automation scheduler.
@@ -85,6 +97,7 @@ func NewScheduler(opts SchedulerOptions) (*Scheduler, error) {
 		entryIds:     make(map[string]cron.EntryID),
 		eventUnsubs:  make([]func(), 0),
 		readyCh:      make(chan struct{}),
+		leaderGate:   opts.LeaderGate,
 	}
 
 	// Create executor for event-triggered automations
@@ -401,6 +414,13 @@ func (s *Scheduler) run(ctx context.Context) {
 	s.logInfo("scheduler stopped")
 }
 
+// scheduleLeaderOK reports whether this node may execute a SCHEDULED
+// automation firing right now: true when no leader gate is configured
+// (single-node / dev) or when this node is the elected cron leader (#561).
+func (s *Scheduler) scheduleLeaderOK() bool {
+	return s.leaderGate == nil || s.leaderGate()
+}
+
 func (s *Scheduler) scheduleAutomation(automation *Automation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -408,6 +428,15 @@ func (s *Scheduler) scheduleAutomation(automation *Automation) error {
 	// Capture automation in closure
 	a := automation
 	entryId, err := s.cron.AddFunc(automation.Schedule, func() {
+		// #561: only the elected cron leader runs scheduled automations, so
+		// they fire once cluster-wide instead of once per node-type/replica.
+		// Event-triggered automations are unaffected (each event reaches one
+		// pod via the mesh). nil gate = ungated (single-node/dev).
+		if !s.scheduleLeaderOK() {
+			s.logDebug("skipping scheduled automation -- not the cron leader",
+				"automation", a.Name, "schedule", a.Schedule)
+			return
+		}
 		s.executeAutomation(a, "schedule", nil)
 	})
 	if err != nil {
