@@ -150,6 +150,17 @@ node-token:
 dev-node-tokens-bootstrap:
 	@bash scripts/dev/mint-node-tokens.sh
 
+.PHONY: identity-signing-key
+
+## Generate a fresh base64 Ed25519 signing seed for IDENTITY_SIGNING_KEY_B64
+## (znasllc-io/memql#550). Seal the printed value into the genesis envelope
+## so every identity replica derives the same key + JWKS (enables identity
+## HA / multi-replica without an RWO key PVC). Rotate by re-generating,
+## re-sealing, and rolling the deployment.
+##   make identity-signing-key
+identity-signing-key:
+	@head -c 32 /dev/urandom | base64
+
 # ---------------------------------------------------------------------------
 # Run targets
 # ---------------------------------------------------------------------------

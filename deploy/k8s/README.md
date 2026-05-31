@@ -69,6 +69,22 @@ set-if-absent; the per-pod overrides (node type, mesh addresses, DSN) win.
 See `secret.example.yaml` for the imperative `kubectl create secret`
 recipe and the Azure Key Vault CSI alternative.
 
+## Identity HA — env-provided signing key ([#550](https://github.com/znasllc-io/memql/issues/550))
+
+Identity runs **2 replicas** on a RollingUpdate (with a PodDisruptionBudget
+keeping ≥1 up), instead of a single pod with `strategy: Recreate`. That
+used to be forced by a ReadWriteOnce key PVC — only one pod could mount the
+signing key — so every deploy had an auth-down window.
+
+Now the Ed25519 signing key comes from the sealed envelope as
+`IDENTITY_SIGNING_KEY_B64` (a base64 32-byte seed). Every replica derives
+the **same** key + `kid` + JWKS from it, so there's no single-writer volume.
+Generate one with `make identity-signing-key` and seal it into the genesis
+envelope. **Rotate** by generating a new seed, re-sealing, and rolling the
+deployment (automatic rotation is disabled in this mode). Without
+`IDENTITY_SIGNING_KEY_B64`, identity falls back to the on-disk `IDENTITY_KEY_DIR`
+(dev) — which is single-replica only.
+
 ## Apply order
 
 ```bash
