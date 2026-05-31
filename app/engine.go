@@ -121,6 +121,14 @@ func (a *App) engineAndBus() {
 	cronLeader := automations.NewCronLeader(a.db.BunDB, a.Logger)
 	a.Dependencies = append(a.Dependencies, cronLeader)
 
+	// #561: cross-replica idempotency for EVENT-triggered automations. When a
+	// node-type runs >=2 replicas an event can reach more than one (the
+	// EventBridge dedup is per-process); the guard claims each execution in
+	// the DB so exactly one replica runs it, and logs/counts any prevented
+	// duplicate so a double-fire is always observable.
+	clusterGuard := automations.NewClusterExecutionGuard(a.db.BunDB, a.Logger)
+	a.Dependencies = append(a.Dependencies, clusterGuard)
+
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:              nil,
 		Loader:              a.automationLoader,
@@ -130,6 +138,7 @@ func (a *App) engineAndBus() {
 		StepCacheEnabled:    os.Getenv("MEMQL_STEP_CACHE_ENABLED") == "true",
 		StepCacheDefaultTTL: 5 * time.Minute,
 		LeaderGate:          cronLeader.IsLeader,
+		ClusterGuard:        clusterGuard,
 	})
 	if err != nil {
 		a.fatal("failed to create automation scheduler", "error", err, "component", automations.ComponentName)

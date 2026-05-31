@@ -43,25 +43,41 @@ mesh — so it scales freely, and the PDB keeps ≥1 serving through node drains
 / upgrades / rollouts. (`identity` HA is handled separately via its
 env-provided signing key, [#550](https://github.com/znasllc-io/memql/issues/550).)
 
-**The memQL node-types (`bff`, `cognition`, `voice`, `agent`, `planner`,
-`workbench`) stay single-replica for now.** The mesh implicitly assumes one
-pod per type — two blockers must be resolved before scaling them:
+**The engine node-types `cognition`, `voice`, `agent`, `planner`,
+`workbench` run 2 replicas + PDBs (#561).** Multi-replica was unsafe because
+automations could double-fire; both paths are now cluster-singleton:
 
-1. ~~**Cron/scheduled automations double-fire.**~~ **Fixed (#561).** A
-   `CronLeader` (`component/automations/cron_leader.go`) holds a Postgres
-   advisory lock so exactly one node cluster-wide runs scheduled automations
-   (the scheduler gates cron firings on `LeaderGate`). The lease is
-   session-scoped, so it fails over automatically if the leader pod dies.
-   This also fixes the pre-existing once-per-node-type firing.
-2. **No load distribution to extra worker replicas.** The BFF's
-   `WorkerDialer` opens one NodeService stream per worker *type* to the
-   Service VIP, so a 2nd replica gets no forwarded traffic (it's a warm
-   standby the BFF fails over to, not a load-shared peer). Real horizontal
-   scaling needs a headless Service + dial-all (or per-pod streams).
+1. **Scheduled (cron) automations** — a `CronLeader`
+   (`component/automations/cron_leader.go`) holds a Postgres advisory lock so
+   exactly one node cluster-wide runs them; the scheduler gates cron firings
+   on `LeaderGate`. Session-scoped → automatic failover. (Also fixed the
+   pre-existing once-per-node-type firing.)
+2. **Event-triggered automations** — a `ClusterExecutionGuard`
+   (`component/automations/cluster_guard.go`) claims each `(automation,
+   InitialChainHead)` in `automation_execution_claims` before the event
+   executor runs it, so an event reaching several replicas executes exactly
+   once. Fail-open (never drops work) and **observable**: every prevented
+   duplicate is WARN-logged + counted (`duplicatesPrevented`), and the claim
+   rows are an audit trail. **Watch that counter** — a rising
+   `duplicatesPrevented` means events do reach multiple replicas (and we're
+   correctly collapsing them); `claimErrors > 0` flags any unguarded window.
 
-Blocker 1 is fixed; blocker 2 (worker load-distribution) remains before the
-memQL node-types scale past 1. Tracked in
-[#561](https://github.com/znasllc-io/memql/issues/561).
+**`bff` stays single-replica** until the CoPresent **carrier**
+(`memql-bff-copresent`, sibling repo) re-pins memQL ≥ the version carrying
+these guards — its image doesn't include them yet. **`identity`** HA is
+[#550](https://github.com/znasllc-io/memql/issues/550); **`copresent`** (the
+stateless SPA) is in [#551](https://github.com/znasllc-io/memql/issues/551).
+
+> **Deploy note:** the `replicas: 2` bump is only safe with an image that
+> contains the guards (≥ the #561 version) and after the
+> `automation_execution_claims` migration. `make deploy VERSION=…` builds +
+> migrates + applies together, so the normal path is consistent; don't
+> `kubectl apply` `replicas: 2` against an older image.
+
+Remaining (optional, [#561](https://github.com/znasllc-io/memql/issues/561)):
+worker **load distribution** (headless Service + dial-all) so extra replicas
+share load instead of standing by — failover HA already works via Service-VIP
+reconnect.
 
 ## Migrations run once
 

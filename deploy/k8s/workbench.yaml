@@ -10,7 +10,10 @@ metadata:
     app.kubernetes.io/part-of: memql
     memql/node-type: workbench
 spec:
-  replicas: 1
+  # HA (#561): safe to run >=2 replicas now that automations are cluster-
+  # singleton -- cron leader + the event-execution guard collapse any
+  # cross-replica double-fire (watch the guard's duplicatesPrevented metric).
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: workbench
@@ -92,3 +95,19 @@ spec:
     - { name: node, port: 50060, targetPort: 50060 }
     - { name: http, port: 8085, targetPort: 8085 }
     - { name: grpc, port: 50051, targetPort: 50051 }
+---
+# Keep >=1 workbench pod serving through voluntary disruptions (node drain,
+# upgrade, rollout) now that it runs 2 replicas (#561).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: workbench
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: workbench
+    app.kubernetes.io/part-of: memql
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: workbench
