@@ -185,15 +185,22 @@ CLI and may need a small adjustment once exercised live. The
 
 ---
 
-## Cluster deploy to Container Apps (`make deploy`)
+## Cluster deploy to Container Apps (SUPERSEDED — see AKS below)
 
-`make deploy ENV=staging|production` builds + pushes the cluster images
-and deploys the **cluster of worker nodes** to Azure Container Apps
-(epic #491, issue #495). The backend is **not** a single binary: it is a
-set of node-type workers sharing the one Tiger Cloud DB. The
-implementation is function-based bash at
-[`.claude/scripts/deploy.sh`](.claude/scripts/deploy.sh), per the
-Skills+Scripts architecture, mirroring `deploy-setup.sh`.
+> **Superseded by the AKS pivot (issue #532, epic #522).** `make deploy`
+> now runs the **AKS** orchestrator
+> ([`scripts/deploy/aks-deploy.sh`](scripts/deploy/aks-deploy.sh)) — see
+> [Backend cluster on AKS](#backend-cluster-on-aks-make-deploy) below.
+> Azure Container Apps exposes one ingress port per app and cannot host
+> the per-node multi-port mesh, so the ACA `make deploy` (issue #495) and
+> its script `.claude/scripts/deploy.sh` were retired. The cluster-shape
+> tables below are kept only as a record of the pre-pivot design; the live
+> deploy is the AKS one.
+
+The original ACA design (historical): `make deploy ENV=staging|production`
+built + pushed the cluster images and deployed the **cluster of worker
+nodes** to Azure Container Apps. The backend is **not** a single binary: it
+is a set of node-type workers sharing the one Tiger Cloud DB.
 
 ### Cluster shape (what gets deployed)
 
@@ -305,7 +312,7 @@ path is wired and parameterized but stubbed.
 
 ---
 
-## Backend cluster on AKS (`make deploy-aks`)
+## Backend cluster on AKS (`make deploy` / `make deploy-aks`)
 
 The memQL node mesh is node-to-node gRPC over **per-node ports**
 (`MEMQL_NODE_ADDRESS`, `MEMQL_PARENT_ADDRESS`, `MEMQL_WORKER_PEERS` on
@@ -315,6 +322,22 @@ cannot host that multi-port mesh, so the backend cluster runs on **AKS**
 full pod networking + multi-port Services. This replaces the ACA
 `make deploy` compute path; the rest of the foundation (Tiger Cloud DB,
 Key Vault, ACR images, the genesis A2 model below) carries over unchanged.
+
+Two entry points (issue #532):
+
+- **`make deploy VERSION=X.Y.Z`** — the full end-to-end flow in
+  [`scripts/deploy/aks-deploy.sh`](scripts/deploy/aks-deploy.sh): build +
+  push the six engine node images via `az acr build` (voice with CGO +
+  the `voice-runtime` stage), ensure the internal TLS secrets, apply the
+  manifests **identity-first** (it owns the one-time migration + JWKS) and
+  wait for each Deployment to roll out, then smoke-test the live front
+  door. `--skip-build` applies the manifests' pinned tags; `--dry-run`
+  prints the plan and touches nothing. The bff carrier
+  (`memql-bff-copresent`) + copresent SPA are built + version-pinned from
+  their own repos, not here.
+- **`make deploy-aks`** — the lower-level apply-only primitive
+  ([`scripts/deploy/aks-apply.sh`](scripts/deploy/aks-apply.sh)): namespace
+  + kustomize apply, no build, no rollout wait, no smoke.
 
 Manifests live under [`deploy/k8s/`](deploy/k8s/) (see
 [`deploy/k8s/README.md`](deploy/k8s/README.md)).

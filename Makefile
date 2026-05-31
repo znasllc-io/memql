@@ -611,25 +611,27 @@ db-provision:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-## Build + push the memQL engine + CoPresent BFF carrier images to the
-## shared ACR, then create-or-update the cluster of Container Apps in
-## cae-memql-<ENV>: one INTERNAL-ingress app per engine node-type
-## (cognition/voice/agent/planner/identity/workbench) from the memql
-## image, plus the EXTERNAL-ingress CoPresent BFF carrier
-## (znasllc-io/memql#495, epic #491). Idempotent. The carrier deploys at
-## a pinnable version copresent fixes later (CARRIER_VERSION). Impl lives
-## in .claude/scripts/deploy.sh per the Skills+Scripts architecture.
-##   make deploy                                          # staging, VERSION from file
-##   make deploy DRY_RUN=1                                # staging, plan only
-##   make deploy ENV=staging CARRIER_VERSION=0.9.0        # pin the carrier tag
-##   make deploy SKIP_BUILD=1 VERSION=0.9.0 CARRIER_VERSION=0.9.0  # deploy pushed tags
-##   make deploy ENV=production DRY_RUN=1
+## End-to-end AKS deploy for the memQL node mesh (znasllc-io/memql#532,
+## epic #522 -- SUPERSEDES the ACA make deploy #495): build + push the six
+## engine node images to ACR (voice with CGO + the voice-runtime stage),
+## ensure the internal TLS secrets, apply the manifests IDENTITY-FIRST
+## (one-time migration + JWKS), wait for rollout, then smoke-test the live
+## front door. Idempotent. memql-secrets (genesis b64 + master key + DSN)
+## is a one-time out-of-band prerequisite. The bff carrier + copresent SPA
+## are built + pinned from their own repos. Impl in
+## scripts/deploy/aks-deploy.sh per the function-based shell convention.
+## (Lower-level apply-only primitive: `make deploy-aks`.)
+##   make deploy VERSION=0.9.6                 # build + push + roll out 0.9.6
+##   make deploy VERSION=0.9.6 DRY_RUN=1       # full plan, no changes
+##   make deploy SKIP_BUILD=1                  # apply the manifests' pinned tags
+##   make deploy VERSION=0.9.6 NO_SMOKE=1      # skip the post-deploy smoke test
 deploy:
-	@bash .claude/scripts/deploy.sh \
+	@bash scripts/deploy/aks-deploy.sh \
 		--env=$${ENV:-staging} \
 		$${VERSION:+--version=$$VERSION} \
-		$${CARRIER_VERSION:+--carrier-version=$$CARRIER_VERSION} \
 		$${SKIP_BUILD:+--skip-build} \
+		$${SKIP_TLS:+--skip-tls} \
+		$${NO_SMOKE:+--no-smoke} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
