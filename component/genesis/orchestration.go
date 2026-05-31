@@ -348,11 +348,36 @@ func OpenFile(path string) ([]EnvEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("genesis: read %s: %w", path, err)
 	}
-	plaintext, err := secret.OpenBlob(raw)
+	entries, err := openBytes(raw, path)
 	if err != nil {
-		return nil, fmt.Errorf("genesis: open %s: %w", path, err)
+		return nil, err
 	}
-	return parseEnv(strings.NewReader(string(plaintext)), path)
+	return entries, nil
+}
+
+// OpenBytes decrypts a sealed genesis envelope held in memory and
+// parses the inner .env content into EnvEntry rows in source order.
+// It is the in-memory twin of OpenFile: same decrypt + parse core,
+// but the ciphertext never touches disk. Used by the cloud auto-load
+// path where the envelope arrives base64-encoded in an env var and
+// must be decrypted in-process (writing it to a temp file would
+// defeat the at-rest goal).
+//
+// The master key must be available in the process env via
+// secret.EnvMasterKey before calling. Returns a typed error if the
+// key is wrong or the payload doesn't parse as a .env.
+func OpenBytes(data []byte) ([]EnvEntry, error) {
+	return openBytes(data, "<genesis-envelope>")
+}
+
+// openBytes is the shared decrypt+parse core behind OpenFile and
+// OpenBytes. label is used in error messages and parse diagnostics.
+func openBytes(data []byte, label string) ([]EnvEntry, error) {
+	plaintext, err := secret.OpenBlob(data)
+	if err != nil {
+		return nil, fmt.Errorf("genesis: open %s: %w", label, err)
+	}
+	return parseEnv(strings.NewReader(string(plaintext)), label)
 }
 
 // LookupEnv returns the value of an entry by name, with ok=false
