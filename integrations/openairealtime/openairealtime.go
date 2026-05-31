@@ -1,7 +1,7 @@
 // Package openairealtime exposes OpenAI Realtime ephemeral client-secret
 // minting to the MemQL DSL, so the browser can open a DIRECT
-// browser<->OpenAI Realtime WebRTC session (the v3 voice path; see
-// copresent docs/openai_agents_sdk/realtime-v3-direct-webrtc-handoff.md)
+// browser<->OpenAI Realtime WebRTC session (the v2 voice path; see
+// copresent docs/openai_agents_sdk/realtime-v2-direct-webrtc-handoff.md)
 // WITHOUT ever seeing the standing OpenAI API key.
 //
 // Capability (callable as a builtin from .memql files / executeNamed):

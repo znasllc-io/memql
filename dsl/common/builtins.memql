@@ -340,7 +340,7 @@ builtin liveAvatarStopSession {
 }
 
 // Mint a short-lived OpenAI Realtime ephemeral client_secret so the browser
-// can open a DIRECT browser<->OpenAI Realtime WebRTC session (v3 voice path)
+// can open a DIRECT browser<->OpenAI Realtime WebRTC session (v2 voice path)
 // without ever seeing the standing OpenAI key. Backed by the openairealtime
 // integration (Go). Returns { value, expiresAt, config: { model, voice } }.
 @executor("integration.openairealtime.createClientSecret")
