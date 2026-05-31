@@ -14,8 +14,13 @@
 --
 -- Rows are short-lived (a dedup window of minutes); the guard prunes rows
 -- older than its retention. The claimed_at index keeps that prune cheap.
-
---bun:split
+--
+-- NOTE: no `--bun:split` between this header comment and the first
+-- statement. A leading comment-only segment makes bun emit an empty
+-- query ("pgdriver: query is empty"), which aborts the migration -- so
+-- this very table was never created, producing repeated
+-- 'relation "automation_execution_claims" does not exist' at runtime.
+-- memql#570. The header rides in the first statement's segment.
 
 CREATE TABLE IF NOT EXISTS automation_execution_claims (
   automation_name text        NOT NULL,

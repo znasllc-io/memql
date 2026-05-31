@@ -31,8 +31,13 @@
 -- The down migration (.down.sql) reverses by mapping `-` -> `_`
 -- in the same positions. Symmetric because both forms are
 -- distinguishable from `: ` separators and free-form prose.
-
---bun:split
+--
+-- NOTE: no `--bun:split` between this header comment and the first
+-- statement. A leading comment-only segment makes bun emit an empty
+-- query ("pgdriver: query is empty"), which aborts the migration and
+-- leaves later tables (e.g. automation_execution_claims) uncreated.
+-- memql#570. The header therefore rides in the first statement's
+-- segment (SQL ignores leading comments).
 
 CREATE OR REPLACE FUNCTION kebab_slug(s text) RETURNS text AS $$
   SELECT CASE
