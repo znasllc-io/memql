@@ -305,6 +305,108 @@ path is wired and parameterized but stubbed.
 
 ---
 
+## Backend cluster on AKS (`make deploy-aks`)
+
+The memQL node mesh is node-to-node gRPC over **per-node ports**
+(`MEMQL_NODE_ADDRESS`, `MEMQL_PARENT_ADDRESS`, `MEMQL_WORKER_PEERS` on
+`5005x`). Azure Container Apps exposes a single ingress port per app and
+cannot host that multi-port mesh, so the backend cluster runs on **AKS**
+(architect decision 2026-05-31; epic znasllc-io/memql#522). AKS gives
+full pod networking + multi-port Services. This replaces the ACA
+`make deploy` compute path; the rest of the foundation (Tiger Cloud DB,
+Key Vault, ACR images, the genesis A2 model below) carries over unchanged.
+
+Manifests live under [`deploy/k8s/`](deploy/k8s/) (see
+[`deploy/k8s/README.md`](deploy/k8s/README.md)).
+
+### NO database pod — managed Tiger Cloud
+
+`docker/docker-compose.cluster.yml` ships a `postgres` service; that is
+**dev-only**. Staging/prod use the managed **Tiger Cloud** instance
+(`xahn9ru4v6`, Azure East US 2). There is **no** postgres / pgadmin /
+nginx / livekit in `deploy/k8s/` — only the 7 memQL node-types. Every
+node reaches Tiger via the `MEMORY_NODES_DATABASE_DSN` key in the
+`memql-secrets` Secret.
+
+### Mesh maps 1:1 to k8s via cluster DNS
+
+Each node's `Service` is named after its node-type short name (`bff`,
+`cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in
+the `memql` namespace. Same-namespace cluster DNS then resolves the
+existing compose mesh values (`bff:50058`, `agent:50055`, …)
+**unchanged** — so `MEMQL_NODE_ADDRESS` / `MEMQL_PARENT_ADDRESS` /
+`MEMQL_WORKER_PEERS` are the exact same strings as
+`docker-compose.cluster.yml`. Each ClusterIP Service exposes the node's
+NodeService port (`5005x`) + `8085` (http) + `50051` (grpc). `bff` also
+gets a `LoadBalancer` Service (`bff-external`) on `8085` — the external
+entry point (maps to `app.copresent.ai` later).
+
+| Node | Image | NodeService port | Parent | Worker peers |
+|------|-------|------------------|--------|--------------|
+| bff | `memql-bff-copresent:0.9.0` | 50058 | — | voice/agent/cognition/planner/workbench |
+| cognition | `memql:0.9.0` | 50054 | bff:50058 | agent=agent:50055 |
+| voice | `memql:0.9.0` | 50059 | bff:50058 | — |
+| agent | `memql:0.9.0` | 50055 | bff:50058 | workbench=workbench:50060 |
+| planner | `memql:0.9.0` | 50056 | bff:50058 | — |
+| workbench | `memql:0.9.0` | 50060 | bff:50058 | — |
+| identity | `memql:0.9.0` | 50061 | — | — |
+
+### Migrations run once (identity only)
+
+The shared Tiger DB must not be migrated by seven racing nodes. Only the
+**identity** Deployment sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`
++ `MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`; every other node has both
+`false`. identity is also the JWKS authority every other node's verifier
+points at (`IDENTITY_VERIFIER_BASE_URL=http://identity:8085`), so it
+comes up first; the verifier's non-fatal + eager-retry JWKS path lets the
+other nodes start before identity is ready.
+
+### Secrets — genesis A2 (same model as below)
+
+Three keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
+`MEMORY_NODES_DATABASE_DSN`. Every Deployment sets
+`MEMQL_GENESIS_AUTOLOAD=true`, so each pod decrypts the sealed envelope
+in-process at boot and applies the ~150 vars set-if-absent; the per-pod
+overrides (node type, mesh addresses, DSN) win. The Secret carries real
+values and is created out-of-band — it is **not** part of the
+kustomization. Create it imperatively (or sync it from Key Vault via the
+Secrets Store CSI `SecretProviderClass` alternative documented in
+[`deploy/k8s/secret.example.yaml`](deploy/k8s/secret.example.yaml)).
+
+### Usage
+
+```bash
+# One-time prerequisite: the memql-secrets Secret (real values).
+kubectl apply -f deploy/k8s/namespace.yaml
+kubectl create secret generic memql-secrets -n memql \
+  --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
+  --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
+  --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+
+# Apply the 7-node mesh (idempotent).
+make deploy-aks ENV=staging
+# or directly:  kubectl apply -k deploy/k8s/
+```
+
+`make deploy-aks` runs `scripts/deploy/aks-apply.sh`: pre-flights kubectl
++ cluster reachability, renders the kustomization, warns if
+`memql-secrets` is absent, applies the namespace, then kustomize-applies
+the 7 Deployments + Services. `--dry-run` does a server-side dry-run that
+mutates nothing.
+
+### Status / remaining work
+
+The manifests render cleanly (`kubectl kustomize deploy/k8s/`) and pass
+`kubeconform -strict` (16 resources valid). The AKS cluster itself is
+still provisioning (`rg-memql-staging`, `az aks update --attach-acr
+acrmemql`), so the apply has not yet run against a live cluster —
+`make deploy-aks` correctly fails its pre-flight ("no reachable cluster")
+until `az aks get-credentials` points kubectl at the new cluster. The
+external `bff-external` LoadBalancer's public IP and the
+`app.copresent.ai` mapping land once the cluster is up.
+
+---
+
 ## Genesis envelope in cloud — the A2 secrets model
 
 The cloud cluster's config is the **genesis envelope**: ~150 vars

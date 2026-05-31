@@ -633,6 +633,25 @@ deploy:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: deploy-aks
+
+## Apply the AKS Kubernetes manifests for the memQL node mesh
+## (deploy/k8s/) to the current kubectl context (epic
+## znasllc-io/memql#522 -- pivot from ACA). Applies the namespace then
+## kustomize-applies the 7 node Deployments + Services. Idempotent. The
+## `memql-secrets` Secret is a one-time prerequisite (real values, created
+## out-of-band -- see deploy/k8s/secret.example.yaml); this target warns if
+## it is absent. NO database is deployed -- nodes use managed Tiger Cloud.
+## Impl lives in scripts/deploy/aks-apply.sh per the function-based
+## shell-script convention (CLAUDE.md).
+##   make deploy-aks                    # ENV=staging, apply to current context
+##   make deploy-aks ENV=staging DRY_RUN=1   # server-side dry-run, no changes
+deploy-aks:
+	@bash scripts/deploy/aks-apply.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
 # ---------------------------------------------------------------------------
 # Utility targets
 # ---------------------------------------------------------------------------
