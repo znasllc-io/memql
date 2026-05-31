@@ -594,7 +594,7 @@ deploy-setup:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-.PHONY: db-provision deploy
+.PHONY: db-provision deploy deploy-rollback
 
 ## Provision the managed Tiger Cloud DB (Timescale Community + pgvector)
 ## for ENV in Azure East US and wire its DSN into the per-env Key Vault
@@ -632,6 +632,23 @@ deploy:
 		$${SKIP_BUILD:+--skip-build} \
 		$${SKIP_TLS:+--skip-tls} \
 		$${NO_SMOKE:+--no-smoke} \
+		$${NO_GATE:+--no-gate} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Roll the memQL node mesh back to its previous (or a specific) revision
+## (znasllc-io/memql#554). The companion to `make deploy` -- when a deploy
+## goes bad, revert every node Deployment via `kubectl rollout undo`. Does
+## NOT touch the managed Tiger Cloud DB. `make deploy`'s smoke gate calls the
+## same revert automatically on failure; this is the manual/targeted entry.
+## Impl in scripts/deploy/aks-rollback.sh.
+##   make deploy-rollback                          # revert every node
+##   make deploy-rollback ARGS=--only=bff,cognition  # just these
+##   make deploy-rollback ARGS=--to-revision=7     # pin every node to rev 7
+##   make deploy-rollback DRY_RUN=1                 # plan only
+deploy-rollback:
+	@bash scripts/deploy/aks-rollback.sh \
+		--env=$${ENV:-staging} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
