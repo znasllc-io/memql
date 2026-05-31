@@ -1,0 +1,77 @@
+# Identity node -- in-house auth provider (magic-link, JWT issuance, JWKS).
+# Every other node's verifier points at http://identity:8085. This is the
+# ONLY node that runs DB migrations against the shared Tiger Cloud instance --
+# all others set MIGRATE/AUTO_MIGRATE=false to avoid a 7-way migration race.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: identity
+    app.kubernetes.io/part-of: memql
+    memql/node-type: identity
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: identity
+        app.kubernetes.io/part-of: memql
+        memql/node-type: identity
+    spec:
+      containers:
+        - name: identity
+          image: acrmemql.azurecr.io/memql:0.9.0
+          ports:
+            - { name: http, containerPort: 8085 }
+            - { name: grpc, containerPort: 50051 }
+            - { name: node, containerPort: 50061 }
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_NODE_TYPE, value: "identity" }
+            - { name: MEMQL_NODE_ADDRESS, value: "identity:50061" }
+            - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50061" }
+            - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
+            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: IDENTITY_VERIFIER_BASE_URL, value: "http://identity:8085" }
+            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: IDENTITY_ENABLED, value: "true" }
+            # Migrations run ONCE, here. Every other node has these false.
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }
+            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "true" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: identity
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: identity
+  ports:
+    - { name: node, port: 50061, targetPort: 50061 }
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }

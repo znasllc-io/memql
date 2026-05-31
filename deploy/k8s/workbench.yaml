@@ -1,0 +1,80 @@
+# Workbench node -- per-Plan sandboxed Linux execution environment. Receives
+# WorkbenchForwardRequest envelopes from agent peers. Dials BFF (parent).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workbench
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: workbench
+    app.kubernetes.io/part-of: memql
+    memql/node-type: workbench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: workbench
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: workbench
+        app.kubernetes.io/part-of: memql
+        memql/node-type: workbench
+    spec:
+      containers:
+        - name: workbench
+          image: acrmemql.azurecr.io/memql:0.9.0
+          ports:
+            - { name: http, containerPort: 8085 }
+            - { name: grpc, containerPort: 50051 }
+            - { name: node, containerPort: 50060 }
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_NODE_TYPE, value: "workbench" }
+            - { name: MEMQL_NODE_ADDRESS, value: "workbench:50060" }
+            - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50060" }
+            - { name: MEMQL_PARENT_ADDRESS, value: "bff:50058" }
+            - { name: MEMQL_WORKBENCH_ROOT, value: "/var/lib/memql/workbenches" }
+            - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
+            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: IDENTITY_VERIFIER_BASE_URL, value: "http://identity:8085" }
+            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
+            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+          volumeMounts:
+            - { name: workbench-workspaces, mountPath: /var/lib/memql/workbenches }
+      volumes:
+        - name: workbench-workspaces
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workbench
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: workbench
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: workbench
+  ports:
+    - { name: node, port: 50060, targetPort: 50060 }
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }

@@ -1,0 +1,37 @@
+# memQL backend cluster on AKS (epic znasllc-io/memql#522).
+#
+# NO database resource: staging/prod use the managed Tiger Cloud DB
+# (xahn9ru4v6) via the MEMORY_NODES_DATABASE_DSN key in memql-secrets.
+#
+# The `memql-secrets` Secret is intentionally NOT listed here -- it carries
+# real values and is created out-of-band (see secret.example.yaml). Create it
+# BEFORE applying this kustomization so the pods can mount it.
+#
+#   kubectl apply -f deploy/k8s/namespace.yaml
+#   kubectl create secret generic memql-secrets -n memql \
+#     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
+#     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
+#     --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+#   kubectl apply -k deploy/k8s/
+#
+# identity comes up first (runs the one-time migration + serves JWKS); the
+# other nodes' verifiers retry JWKS non-fatally until it is ready.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+resources:
+  - namespace.yaml
+  - identity.yaml
+  - bff.yaml
+  - cognition.yaml
+  - voice.yaml
+  - agent.yaml
+  - planner.yaml
+  - workbench.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: memql
+    includeSelectors: false
