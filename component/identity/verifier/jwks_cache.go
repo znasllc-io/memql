@@ -72,7 +72,15 @@ func NewJWKSCache(cfg Config, logger *slog.Logger) (*JWKSCache, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.JWKSFetchTimeout)
 	defer cancel()
 	if err := c.refresh(ctx); err != nil {
-		return nil, fmt.Errorf("verifier.NewJWKSCache: initial fetch from %s: %w", url, err)
+		// Non-fatal: a split cluster has no startup ordering, and the
+		// identity node fetches its OWN JWKS before its server is
+		// listening. Continue with an empty cache -- Start()'s background
+		// loop retries on a short cadence until first populated, and
+		// PublicKey/ForceRefresh handle the not-yet-cached case on demand.
+		if logger != nil {
+			logger.Warn("verifier.NewJWKSCache: initial JWKS fetch failed; continuing, background refresh will retry",
+				"url", url, "error", err)
+		}
 	}
 	return c, nil
 }
@@ -138,6 +146,25 @@ func (c *JWKSCache) KeyCount() int {
 }
 
 func (c *JWKSCache) runBackground(ctx context.Context) {
+	// Eager startup retry: until the cache is first populated, retry on a
+	// short cadence rather than waiting a full refresh interval. Handles
+	// split-cluster startup ordering -- the issuer node (or this node's
+	// own server, for the identity binary) may not be reachable yet at
+	// boot. Once populated, fall through to the normal interval ticker.
+	const bootRetryIv = 3 * time.Second
+	for c.KeyCount() == 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootRetryIv):
+			rctx, cancel := context.WithTimeout(ctx, c.httpClient.Timeout)
+			if err := c.refresh(rctx); err != nil {
+				c.warn("jwks_cache: startup population retry failed", "error", err, "url", c.url)
+			}
+			cancel()
+		}
+	}
+
 	t := time.NewTicker(c.refreshIv)
 	defer t.Stop()
 	for {

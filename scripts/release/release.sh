@@ -216,6 +216,7 @@ function ensure_tag_immutable() {
 function build_image() {
     local -a build_args=(
         docker build
+        --platform "${BUILD_PLATFORM:-linux/amd64}"
         -f "${REPO_ROOT}/${DOCKERFILE}"
         -t "$IMAGE_REF"
         --label "org.opencontainers.image.version=${VERSION}"
