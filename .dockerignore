@@ -1,0 +1,14 @@
+.git
+.github
+bin
+dist
+*.test
+*.out
+coverage*
+.claude
+*.md
+.env*
+node_modules
+**/node_modules
+.DS_Store
+deploy/k8s

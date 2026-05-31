@@ -658,8 +658,27 @@ func AuthPaths() []string {
 	return paths
 }
 
+// JWKSPaths returns the public JWKS endpoint(s). The keyset MUST be
+// fetchable WITHOUT auth: every node's verifier fetches it to validate
+// tokens, and in cluster mode it does so over HTTP (e.g.
+// http://identity:8085/.well-known/jwks.json) before it holds any token
+// of its own. Gating this path deadlocks cross-node auth.
+func JWKSPaths() []string {
+	base := sanitizeBaseURLFromEnv()
+	jwks := "/.well-known/jwks.json"
+	paths := []string{jwks}
+	if base != "" {
+		p := base + jwks
+		if p != jwks {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 func PublicPaths() []string {
 	paths := HealthzPaths()
+	paths = append(paths, JWKSPaths()...)  // public keyset (cross-node verifier fetch)
 	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
 	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)
 	paths = append(paths, PolyphonUtterancePaths()...)

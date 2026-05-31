@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -122,9 +123,15 @@ func (s *NodeServer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRespon
 
 // NewNodeServer constructs a NodeService gRPC server.
 func NewNodeServer(identity *Identity, peerManager *PeerManager, logger *slog.Logger) *NodeServer {
-	addr := strings.TrimSpace(identity.Address)
+	// Bind the NodeService listener to MEMQL_NODE_SERVICE_ADDRESS (e.g.
+	// ":50061" = all interfaces). The advertised address
+	// (identity.Address / MEMQL_NODE_ADDRESS) is how PEERS reach this node;
+	// in k8s that's a Service DNS name resolving to a Service VIP, which is
+	// NOT bindable -- listening must use the explicit bind address. (In
+	// docker the service name resolved to the container's own IP, so the
+	// old identity.Address bind happened to work there.)
+	addr := strings.TrimSpace(os.Getenv("MEMQL_NODE_SERVICE_ADDRESS"))
 	if addr == "" {
-		// Fall back to MEMQL_NODE_SERVICE_ADDRESS env or default
 		addr = defaultNodeAddress
 	}
 
