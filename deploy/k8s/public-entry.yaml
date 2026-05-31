@@ -45,7 +45,9 @@ spec:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
 ---
-# app.staging.copresent.ai main routes: SPA (/) -> copresent, WS (/memql) -> bff.
+# app.staging.copresent.ai main routes: SPA (/) -> copresent, WS (/memql) -> bff,
+# audio WS (/memql/audio) -> voice. The audio path needs the voice node's STT
+# provider, not the BFF, so it gets its own longer-prefix rule (wins over /memql).
 # This Ingress owns the host's TLS cert (cert-manager).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -65,6 +67,7 @@ spec:
     - host: app.staging.copresent.ai
       http:
         paths:
+          - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
           - { path: /memql, pathType: Prefix, backend: { service: { name: bff, port: { number: 8085 } } } }
           - { path: /, pathType: Prefix, backend: { service: { name: copresent, port: { number: 8080 } } } }
 ---
