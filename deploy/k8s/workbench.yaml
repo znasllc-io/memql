@@ -27,6 +27,10 @@ spec:
             secretName: memql-ca
         - name: workbench-workspaces
           emptyDir: {}
+      # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
+      # default) + the app Stop budget (30s) so drain + GracefulStop finish.
+      terminationGracePeriodSeconds: 45
+
       containers:
         - name: workbench
           image: acrmemql.azurecr.io/memql-workbench:0.9.4

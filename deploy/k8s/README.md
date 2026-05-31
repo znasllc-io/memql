@@ -72,6 +72,26 @@ kustomize apply; the Secret step is a one-time prerequisite). `identity`
 comes up first to run the one-time migration and serve JWKS; the other
 nodes' verifiers retry JWKS non-fatally until it is ready.
 
+## Graceful shutdown (zero-downtime rollout)
+
+On a rollout / scale-down / node drain, each pod drains before it exits
+([#552](https://github.com/znasllc-io/memql/issues/552)) so in-flight
+requests (incl. WebSocket chat + `/memql/audio`, and gRPC mesh streams)
+aren't cut:
+
+1. On `SIGTERM` the process flips `/healthz` to **503 `draining`**, so the
+   readiness probe / LB stops routing **new** traffic to it.
+2. It keeps serving for `MEMQL_SHUTDOWN_DRAIN_DELAY` (default **5s**) while
+   the endpoint removal propagates, then runs the dependency Stop sweep —
+   the gRPC servers `GracefulStop` (drain in-flight RPCs/streams).
+3. `terminationGracePeriodSeconds: 45` on every pod gives that whole
+   sequence (5s drain + ≤30s Stop budget + buffer) room to finish before
+   the kubelet force-kills.
+
+So a rolling deploy surges a new Ready pod in, then drains the old one out
+instead of cutting it. (The distroless runtime has no shell, so this is done
+in-process rather than via a `preStop` sleep.)
+
 ## Validate
 
 ```bash

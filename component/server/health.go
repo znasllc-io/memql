@@ -2,6 +2,7 @@ package server
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -26,7 +27,23 @@ var (
 
 	identityLock sync.RWMutex
 	nodeIdentity *nodeIdentityInfo
+
+	// draining flips true when the process has received a shutdown
+	// signal and entered its drain window (graceful shutdown, #552).
+	// While draining, /healthz reports 503 so a load balancer / k8s
+	// readiness probe stops routing NEW traffic to this pod BEFORE the
+	// servers tear down -- closing the SIGTERM-vs-endpoint-removal race
+	// that otherwise drops in-flight connections on every rollout.
+	draining atomic.Bool
 )
+
+// SetDraining marks the node as draining (or clears it). Called from the
+// shutdown path (app.Run's BeginDrain hook) the moment a SIGTERM/SIGINT
+// arrives, before the dependency Stop sweep. Idempotent + concurrency-safe.
+func SetDraining(d bool) { draining.Store(d) }
+
+// IsDraining reports whether the node is in its shutdown drain window.
+func IsDraining() bool { return draining.Load() }
 
 // SetNodeIdentity stores the node identity so /healthz can include it.
 // Called from app/cluster.go after the node identity is created.
@@ -101,10 +118,16 @@ func buildHealthResponse() GetHealthzResponseObject {
 
 	id := getNodeIdentity()
 
-	// Return 503 when any dependency is unhealthy
-	if !allRunning {
+	// Return 503 while draining (shutdown signal received) OR when any
+	// dependency is unhealthy. Draining wins the status label so an
+	// operator can tell "rolling out" apart from a genuine fault.
+	if IsDraining() || !allRunning {
+		status := "degraded"
+		if IsDraining() {
+			status = "draining"
+		}
 		resp := GetHealthz503JSONResponse{
-			Status:       "degraded",
+			Status:       status,
 			Dependencies: statuses,
 		}
 		if id != nil {

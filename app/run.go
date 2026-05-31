@@ -19,6 +19,16 @@ import (
 // unless they want to override.
 const DefaultRunShutdownTimeout = 30 * time.Second
 
+// DefaultShutdownDrainDelay is how long Run keeps serving AFTER a shutdown
+// signal before it begins the dependency Stop sweep (#552, graceful
+// shutdown). The window lets k8s notice the pod is Terminating + the
+// readiness probe flip to 503 (via BeginDrain) and remove this pod from the
+// Service endpoints, so NEW traffic stops arriving while in-flight requests
+// finish -- instead of new connections racing onto a pod that's tearing
+// down. terminationGracePeriodSeconds in the manifests must exceed this plus
+// the Stop budget. Override via the carrier binary (MEMQL_SHUTDOWN_DRAIN_DELAY).
+const DefaultShutdownDrainDelay = 5 * time.Second
+
 // RunConfig configures Run. Every field has a sensible default the
 // app package supplies when omitted -- the only required fields in
 // practice are Logger, Version, and Overrides.
@@ -47,6 +57,20 @@ type RunConfig struct {
 	// have to complete. Zero falls back to DefaultRunShutdownTimeout.
 	// Tests pass a shorter value to keep the suite snappy.
 	ShutdownTimeout time.Duration
+
+	// BeginDrain is invoked the instant a shutdown signal arrives,
+	// BEFORE the drain delay + Stop sweep (#552). The carrier binary
+	// wires it to component/server.SetDraining(true) so /healthz starts
+	// returning 503 and k8s/LB de-routes the pod. Zero = no-op (the
+	// drain delay still applies). Kept as a hook so the app package
+	// doesn't import component/server.
+	BeginDrain func()
+
+	// DrainDelay is how long to keep serving after the signal before
+	// the Stop sweep, giving endpoint removal time to propagate. Zero
+	// falls back to DefaultShutdownDrainDelay; negative disables the
+	// delay (tests pass a negative or tiny value).
+	DrainDelay time.Duration
 
 	// Start is the per-dependency start hook. Zero falls back to
 	// the package default, which calls dep.Start(context.Background())
@@ -133,6 +157,12 @@ func Run(cfg RunConfig) {
 	sig := wait()
 	cfg.Logger.Info("shutdown signal received", "signal", sig.String())
 
+	// Graceful drain (#552): flip readiness to 503 + keep serving for
+	// DrainDelay so k8s removes this pod from the Service endpoints
+	// before we tear down -- new traffic stops arriving while in-flight
+	// requests finish. Runs BEFORE EmitSystemShutdown/Stop.
+	applyShutdownDrain(cfg.Logger, cfg.BeginDrain, cfg.DrainDelay, time.Sleep)
+
 	// Emit system.shutdown BEFORE the dependency Stop sweep so the
 	// node-deregistration automation has a chance to run while the
 	// engine is still up.
@@ -143,6 +173,28 @@ func Run(cfg RunConfig) {
 	stop(shutdownCtx, application.Dependencies...)
 
 	cfg.Logger.Info("shutdown complete")
+}
+
+// applyShutdownDrain runs the graceful-drain step (#552): mark the node
+// draining (beginDrain, typically server.SetDraining(true) so /healthz ->
+// 503), then keep serving for `delay` via the injected sleep so endpoint
+// removal propagates before the Stop sweep. A zero delay falls back to
+// DefaultShutdownDrainDelay; a negative delay skips the wait entirely.
+// `sleep` is injected so tests don't park on the wall clock.
+func applyShutdownDrain(logger *slog.Logger, beginDrain func(), delay time.Duration, sleep func(time.Duration)) {
+	if beginDrain != nil {
+		beginDrain()
+	}
+	if delay == 0 {
+		delay = DefaultShutdownDrainDelay
+	}
+	if delay <= 0 {
+		return
+	}
+	if logger != nil {
+		logger.Info("draining before shutdown", "delay", delay.String())
+	}
+	sleep(delay)
 }
 
 // DefaultStartDependencies is the package default for RunConfig.Start.

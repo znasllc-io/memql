@@ -24,6 +24,10 @@ spec:
         - name: memql-ca
           secret:
             secretName: memql-ca
+      # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
+      # default) + the app Stop budget (30s) so drain + GracefulStop finish.
+      terminationGracePeriodSeconds: 45
+
       containers:
         - name: voice
           image: acrmemql.azurecr.io/memql-voice:0.9.4

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/app"
 	"github.com/znasllc-io/memql/component/genesis"
@@ -80,7 +81,32 @@ func main() {
 		SetHealth: func(deps []common.Dependency) {
 			server.SetHealthDependencies(deps)
 		},
+		// Graceful shutdown (#552): on SIGTERM, flip /healthz to 503 so
+		// k8s/LB de-route this pod, then app.Run keeps serving for the
+		// drain delay before stopping. terminationGracePeriodSeconds in
+		// deploy/k8s must exceed DrainDelay + the Stop budget.
+		BeginDrain: func() { server.SetDraining(true) },
+		DrainDelay: resolveShutdownDrainDelay(serviceLogger),
 	})
+}
+
+// resolveShutdownDrainDelay reads MEMQL_SHUTDOWN_DRAIN_DELAY (a Go duration
+// string, e.g. "5s") and falls back to app.DefaultShutdownDrainDelay. An
+// unparseable value logs a warning and uses the default.
+func resolveShutdownDrainDelay(logger *slog.Logger) time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEMQL_SHUTDOWN_DRAIN_DELAY"))
+	if raw == "" {
+		return app.DefaultShutdownDrainDelay
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("invalid MEMQL_SHUTDOWN_DRAIN_DELAY; using default",
+				"value", raw, "default", app.DefaultShutdownDrainDelay.String())
+		}
+		return app.DefaultShutdownDrainDelay
+	}
+	return d
 }
 
 func resolveServiceVersion() string {

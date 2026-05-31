@@ -29,6 +29,10 @@ spec:
         app.kubernetes.io/name: copresent
         app.kubernetes.io/part-of: memql
     spec:
+      # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
+      # default) + the app Stop budget (30s) so drain + GracefulStop finish.
+      terminationGracePeriodSeconds: 45
+
       containers:
         - name: copresent
           image: acrmemql.azurecr.io/copresent:0.9.3
