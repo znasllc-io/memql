@@ -42,6 +42,24 @@ The shared Tiger DB must not be migrated by 7 racing nodes. Only the
 `MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`; every other node has both
 `false`.
 
+### Gated pre-deploy migration ([#553](https://github.com/znasllc-io/memql/issues/553))
+
+So a schema change never races the worker rollout, `make deploy` /
+`make deploy-aks` apply `migrate-job.yaml` (a one-shot `memql migrate` Job)
+and **wait for it to complete before any Deployment rolls** — a failed
+migration aborts the deploy. The Job is idempotent (bun advisory lock +
+mark-applied), and identity's boot migration is retained as a no-op
+fallback. The Job is **not** in the kustomization (one-shot); a bare
+`kubectl apply -k deploy/k8s` does not run it — precede it with
+`kubectl apply -f deploy/k8s/migrate-job.yaml`, or just use `make deploy`.
+
+**Author migrations expand/contract** so old- and new-version pods can both
+run against the schema during a rollout: additive only (add columns/tables
+nullable-or-defaulted; never drop/rename/tighten a column the currently
+deployed code reads in the same release). Split a destructive change across
+releases: (1) add the new shape + write both, (2) backfill + switch reads,
+(3) a later release drops the old shape once nothing reads it.
+
 ## Secrets (genesis A2)
 
 Three keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,

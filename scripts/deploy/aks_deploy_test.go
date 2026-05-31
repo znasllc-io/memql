@@ -67,7 +67,7 @@ func TestAksDeployHelpHasGateFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("--help exited non-zero: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Usage:", "--no-gate", "--no-smoke"} {
+	for _, want := range []string{"Usage:", "--no-gate", "--no-smoke", "--skip-migrate"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("deploy --help missing %q:\n%s", want, out)
 		}

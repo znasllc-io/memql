@@ -1,0 +1,50 @@
+# Gated pre-deploy DB migration (znasllc-io/memql#553, epic #549).
+#
+# Runs `memql migrate` ONCE, up front, BEFORE the node mesh rolls -- so a
+# schema change is applied before any old- or new-version worker serves
+# against it, instead of racing the rollout. Idempotent: the bun migrator
+# takes a Postgres advisory lock + marks-applied-on-success, so re-running
+# (or identity's retained boot-migration fallback) is a no-op when current.
+#
+# `make deploy` / `make deploy-aks` apply this Job and wait for completion
+# before rolling the Deployments. A bare `kubectl apply -k deploy/k8s` does
+# NOT run it (Jobs don't belong in the kustomization -- they're one-shot);
+# precede a raw apply with `kubectl apply -f deploy/k8s/migrate-job.yaml`.
+#
+# The image tag is the identity image (it carries the full schema). The
+# deploy script overrides it to the deploy's --version when one is given.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memql-migrate
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-migrate
+    app.kubernetes.io/part-of: memql
+spec:
+  backoffLimit: 2
+  # Reap the Job 10 min after it finishes so a re-deploy can recreate it.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memql-migrate
+        app.kubernetes.io/part-of: memql
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: acrmemql.azurecr.io/memql-identity:0.9.5
+          command: ["./memql", "migrate"]
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            # This Job is the one that migrates -- force it on regardless of
+            # any envelope value.
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }
+            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "true" }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
