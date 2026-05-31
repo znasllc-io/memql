@@ -27,6 +27,8 @@
 package identity
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -309,6 +311,18 @@ type Config struct {
 	// Env: IDENTITY_KEY_ENCRYPTION_KEY (any string >= 16 bytes)
 	KeyEncryptionKey string
 
+	// SigningKeyB64 is a base64 (std) 32-byte Ed25519 seed that, when
+	// set, becomes THE signing key for this process -- loaded from the
+	// environment instead of generated onto a ReadWriteOnce PVC. Every
+	// identity replica handed the same seed derives the same keypair +
+	// kid + JWKS, so identity can run >=2 replicas on RollingUpdate (no
+	// single-writer key volume -> no strategy:Recreate downtime). Rides
+	// the sealed genesis envelope like the other secrets. Automatic
+	// rotation is disabled in this mode (re-seal + roll to rotate).
+	// Empty = legacy on-disk KeyDir behaviour (dev).
+	// Env: IDENTITY_SIGNING_KEY_B64 (#550)
+	SigningKeyB64 string
+
 	// AccessTokenTTL is the lifetime of issued access tokens.
 	// Env: IDENTITY_ACCESS_TOKEN_TTL_SECONDS (default 900)
 	AccessTokenTTL time.Duration
@@ -554,6 +568,7 @@ func LoadConfigFromEnv() (Config, error) {
 		JWTAudience:      envString("IDENTITY_JWT_AUDIENCE", "memql"),
 		KeyDir:           envString("IDENTITY_KEY_DIR", DefaultKeyDir),
 		KeyEncryptionKey: os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
+		SigningKeyB64:    strings.TrimSpace(os.Getenv("IDENTITY_SIGNING_KEY_B64")),
 		Bootstrap: BootstrapConfig{
 			Domain:              strings.TrimRight(os.Getenv("IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
 			OwnerEmail:          os.Getenv("IDENTITY_BOOTSTRAP_OWNER_EMAIL"),
@@ -653,17 +668,30 @@ func (c Config) Validate() error {
 		return fmt.Errorf("IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, writer, reader", c.InternalDefaultRole)
 	}
 
-	// Production posture requires the master key. We approximate
-	// "production" as "BaseURL is not localhost / 127.0.0.1 /
-	// memql-internal." Operators running staging on a real domain
-	// will hit this and configure the secret. Local dev hitting
-	// localhost passes through with plaintext keys.
-	if c.KeyEncryptionKey == "" && !isLocalHost(parsed.Host) {
-		return errors.New("IDENTITY_KEY_ENCRYPTION_KEY is required when IDENTITY_BASE_URL is not a localhost origin (production deployments must encrypt the signing key at rest)")
-	}
+	// An env-provided signing key (#550) lives in the sealed genesis
+	// envelope, not on disk, so the at-rest IDENTITY_KEY_ENCRYPTION_KEY
+	// requirement does not apply -- but it MUST be a valid 32-byte seed.
+	if c.SigningKeyB64 != "" {
+		seed, err := base64.StdEncoding.DecodeString(c.SigningKeyB64)
+		if err != nil {
+			return fmt.Errorf("IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
+		}
+		if len(seed) != ed25519.SeedSize {
+			return fmt.Errorf("IDENTITY_SIGNING_KEY_B64 must decode to %d bytes (an Ed25519 seed), got %d", ed25519.SeedSize, len(seed))
+		}
+	} else {
+		// Production posture requires the master key. We approximate
+		// "production" as "BaseURL is not localhost / 127.0.0.1 /
+		// memql-internal." Operators running staging on a real domain
+		// will hit this and configure the secret. Local dev hitting
+		// localhost passes through with plaintext keys.
+		if c.KeyEncryptionKey == "" && !isLocalHost(parsed.Host) {
+			return errors.New("IDENTITY_KEY_ENCRYPTION_KEY is required when IDENTITY_BASE_URL is not a localhost origin (production deployments must encrypt the signing key at rest, or set IDENTITY_SIGNING_KEY_B64)")
+		}
 
-	if c.KeyEncryptionKey != "" && len(c.KeyEncryptionKey) < 16 {
-		return errors.New("IDENTITY_KEY_ENCRYPTION_KEY must be at least 16 bytes")
+		if c.KeyEncryptionKey != "" && len(c.KeyEncryptionKey) < 16 {
+			return errors.New("IDENTITY_KEY_ENCRYPTION_KEY must be at least 16 bytes")
+		}
 	}
 
 	if c.RiskThreshold < 0 || c.RiskThreshold > 100 {

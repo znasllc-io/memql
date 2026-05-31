@@ -89,7 +89,19 @@ func NewService(cfg Config, logger *slog.Logger, audit AuditLogger) (*Service, e
 		return nil, fmt.Errorf("identity: config validation failed: %w", err)
 	}
 
-	km, err := NewKeyManager(cfg.KeyDir, cfg.KeyEncryptionKey)
+	// #550: when a signing key is provided via the sealed envelope
+	// (IDENTITY_SIGNING_KEY_B64), every replica derives the same key from
+	// it -- no ReadWriteOnce key PVC, so identity can run >=2 replicas on
+	// RollingUpdate. Otherwise fall back to the on-disk KeyDir (dev).
+	var (
+		km  *KeyManager
+		err error
+	)
+	if cfg.SigningKeyB64 != "" {
+		km, err = NewKeyManagerFromSeed(cfg.SigningKeyB64)
+	} else {
+		km, err = NewKeyManager(cfg.KeyDir, cfg.KeyEncryptionKey)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +288,12 @@ func (s *Service) rotationLoop(parent context.Context) {
 // maybeRotate checks the current key's age and rotates if older than
 // the configured interval.
 func (s *Service) maybeRotate(ctx context.Context) {
+	// #550: an env-provided signing key can't be auto-rotated (it's
+	// sealed in the envelope + shared across replicas); rotate by
+	// re-sealing + rolling instead.
+	if !s.keys.RotationSupported() {
+		return
+	}
 	cur := s.keys.Current()
 	if cur == nil {
 		return

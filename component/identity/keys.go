@@ -75,14 +75,47 @@ const keyEnvelopeVersion = 1
 
 // KeyManager owns the on-disk keypair files and the in-memory cache
 // of the current + previous key material. Concurrent-safe.
+//
+// In envMode (NewKeyManagerFromSeed, #550) the current key is derived
+// from an env-provided seed and there is no disk: Load is a no-op,
+// Rotate is refused, and there is never a previous key. This is what
+// lets identity run >=2 replicas -- every replica handed the same seed
+// derives the same key + kid + JWKS, so there's no single-writer PVC.
 type KeyManager struct {
 	dir              string
 	encryptionSecret string
+	envMode          bool
 
 	mu       sync.RWMutex
 	current  *KeyMaterial
 	previous *KeyMaterial
 }
+
+// NewKeyManagerFromSeed builds a KeyManager whose signing key is the
+// Ed25519 keypair derived from a base64 (std) 32-byte seed, loaded from
+// the environment rather than a PVC. Deterministic: the same seed always
+// yields the same keypair + kid, so multiple identity replicas agree on
+// JWKS. Rotation is disabled in this mode.
+func NewKeyManagerFromSeed(seedB64 string) (*KeyManager, error) {
+	seed, err := base64.StdEncoding.DecodeString(seedB64)
+	if err != nil {
+		return nil, fmt.Errorf("identity: IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("identity: IDENTITY_SIGNING_KEY_B64 must decode to %d bytes, got %d", ed25519.SeedSize, len(seed))
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	return &KeyManager{
+		envMode: true,
+		current: materializeKey(pub, priv, time.Now().UTC()),
+	}, nil
+}
+
+// RotationSupported reports whether automatic key rotation is available.
+// False in envMode (the key is sealed in the envelope; rotate by
+// re-sealing + rolling).
+func (km *KeyManager) RotationSupported() bool { return !km.envMode }
 
 // NewKeyManager prepares a KeyManager rooted at dir. dir is created
 // if it doesn't exist. The encryptionSecret must be either empty
@@ -109,6 +142,12 @@ func NewKeyManager(dir, encryptionSecret string) (*KeyManager, error) {
 func (km *KeyManager) Load() error {
 	km.mu.Lock()
 	defer km.mu.Unlock()
+
+	// envMode: the key was derived from the env seed at construction;
+	// there is no disk to read and nothing to generate.
+	if km.envMode {
+		return nil
+	}
 
 	cur, err := km.loadKeyFile(currentKeyFilename)
 	switch {
@@ -188,6 +227,10 @@ func (km *KeyManager) Rotate(overlapWindow time.Duration) (*KeyMaterial, error) 
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
+	if km.envMode {
+		return nil, errors.New("identity: key rotation is disabled when the signing key is env-provided (IDENTITY_SIGNING_KEY_B64); re-seal the envelope with a new seed and roll the deployment to rotate")
+	}
+
 	now := time.Now().UTC()
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -221,7 +264,7 @@ func (km *KeyManager) Rotate(overlapWindow time.Duration) (*KeyMaterial, error) 
 func (km *KeyManager) SweepRetiredPrevious(now time.Time) (bool, error) {
 	km.mu.Lock()
 	defer km.mu.Unlock()
-	if km.previous == nil {
+	if km.envMode || km.previous == nil {
 		return false, nil
 	}
 	if !km.previous.RetiresAt.IsZero() && now.Before(km.previous.RetiresAt) {
