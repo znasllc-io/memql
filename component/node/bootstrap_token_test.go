@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,6 +163,10 @@ func TestMaybeBootstrapNodeToken_NoIdentityURL(t *testing.T) {
 func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 	t.Setenv("MEMQL_NODE_TOKEN", "")
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
+	// Connection-refused is retryable, so opt out of the retry budget
+	// to keep this a single-shot assertion (otherwise it'd spin for the
+	// default 90s window before giving up).
+	t.Setenv("MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET", "0")
 	// 127.0.0.1:1 is a port no server listens on; connection
 	// refused expected.
 	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
@@ -174,6 +180,107 @@ func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 	assert.True(t,
 		strings.Contains(err.Error(), "127.0.0.1:1") || strings.Contains(err.Error(), "POST"),
 		"error should reference target URL or POST verb: %v", err)
+}
+
+// flakyBootstrapServer mints a token only after `failFirst` calls have
+// returned `failStatus` (e.g. 503). Mirrors identity being briefly down
+// mid-roll, then coming back Ready. Reports the total hit count so a test
+// can assert how many attempts the client made.
+func flakyBootstrapServer(t *testing.T, secret string, failFirst int, failStatus int, hits *int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(hits, 1)
+		if int(n) <= failFirst {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(failStatus)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":   false,
+				"error":     "identity not ready",
+				"errorCode": "starting",
+			})
+			return
+		}
+		var body struct {
+			NodeId   string `json:"nodeId"`
+			NodeType string `json:"nodeType"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = secret // secret validation covered elsewhere; this server focuses on transience
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"plainToken": "stub.jwt.token-for-" + body.NodeType + "-" + body.NodeId,
+			"identityId": "v1:identity:identity:node:" + body.NodeType + ":" + body.NodeId,
+			"nodeType":   body.NodeType,
+			"nodeId":     body.NodeId,
+			"expiresAt":  "2099-01-01T00:00:00Z",
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestBootstrapWithRetry_TransientThenSucceeds asserts the core #542 fix:
+// when identity returns a 5xx for the first couple of attempts (briefly
+// down mid-roll) and then succeeds, the client retries on backoff and
+// captures the token rather than coming up tokenless.
+func TestBootstrapWithRetry_TransientThenSucceeds(t *testing.T) {
+	var hits int32
+	srv := flakyBootstrapServer(t, "secret", 2 /*fail first 2*/, http.StatusServiceUnavailable, &hits)
+
+	tok, err := bootstrapWithRetry(context.Background(), nil, srv.URL, "secret",
+		"v1:cluster:node:agent-x", "agent",
+		5*time.Second /*budget*/, time.Millisecond /*fast backoff*/)
+	require.NoError(t, err)
+	assert.Equal(t, "stub.jwt.token-for-agent-v1:cluster:node:agent-x", tok)
+	assert.EqualValues(t, 3, atomic.LoadInt32(&hits), "should have taken 2 failed + 1 successful attempt")
+}
+
+// TestBootstrapWithRetry_GivesUpAfterBudget asserts that when identity
+// stays down for the whole window the client eventually gives up with a
+// clear error (and the caller's logs-and-proceeds path preserves the old
+// tokenless behaviour -- no regression vs the single-attempt original).
+func TestBootstrapWithRetry_GivesUpAfterBudget(t *testing.T) {
+	var hits int32
+	srv := flakyBootstrapServer(t, "secret", 1<<30 /*always fail*/, http.StatusServiceUnavailable, &hits)
+
+	tok, err := bootstrapWithRetry(context.Background(), nil, srv.URL, "secret",
+		"x", "bff", 30*time.Millisecond /*budget*/, time.Millisecond)
+	require.Error(t, err)
+	assert.Empty(t, tok)
+	assert.Contains(t, err.Error(), "giving up")
+	assert.Greater(t, atomic.LoadInt32(&hits), int32(1), "should have retried more than once within the budget")
+}
+
+// TestBootstrapWithRetry_PermanentNotRetried asserts a 4xx rejection
+// (wrong secret / bad request) short-circuits immediately -- a retry
+// won't fix a misconfig, so we must not spin for the whole budget.
+func TestBootstrapWithRetry_PermanentNotRetried(t *testing.T) {
+	var hits int32
+	srv := flakyBootstrapServer(t, "secret", 1<<30, http.StatusUnauthorized, &hits)
+
+	tok, err := bootstrapWithRetry(context.Background(), nil, srv.URL, "secret",
+		"x", "bff", 10*time.Second /*generous budget*/, time.Millisecond)
+	require.Error(t, err)
+	assert.Empty(t, tok)
+	assert.EqualValues(t, 1, atomic.LoadInt32(&hits), "a 4xx is permanent; must not retry")
+	assert.Contains(t, err.Error(), "status=401")
+}
+
+// TestBootstrapWithRetry_ContextCancelCutsRetry asserts an already-cancelled
+// context stops the retry loop promptly instead of waiting out the budget.
+func TestBootstrapWithRetry_ContextCancelCutsRetry(t *testing.T) {
+	var hits int32
+	srv := flakyBootstrapServer(t, "secret", 1<<30, http.StatusServiceUnavailable, &hits)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before we start
+
+	tok, err := bootstrapWithRetry(ctx, nil, srv.URL, "secret",
+		"x", "bff", 10*time.Second, 50*time.Millisecond)
+	require.Error(t, err)
+	assert.Empty(t, tok)
+	assert.Contains(t, err.Error(), "context cancelled")
 }
 
 // TestIdentity_EnsureBearerToken_DoesNothingWhenTokenPresent
