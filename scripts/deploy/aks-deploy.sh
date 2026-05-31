@@ -109,6 +109,7 @@ Options:
                       Default: staging.
     --skip-build      Do not build/push images; apply already-pushed tags.
     --skip-tls        Do not (re)generate the internal CA + identity cert.
+    --skip-migrate    Do not run the gated pre-deploy DB migration Job.
     --no-smoke        Skip the post-deploy smoke test (also disables the gate).
     --no-gate         Run the smoke test but do NOT auto-rollback on failure
                       (useful when a smoke failure is environmental, e.g.
@@ -139,6 +140,7 @@ function parse_arguments() {
     ENV="staging"
     SKIP_BUILD=false
     SKIP_TLS=false
+    SKIP_MIGRATE=false
     NO_SMOKE=false
     GATE=true
     DRY_RUN=false
@@ -149,6 +151,7 @@ function parse_arguments() {
             --env=*)     ENV="${1#*=}"; shift ;;
             --skip-build) SKIP_BUILD=true; shift ;;
             --skip-tls)   SKIP_TLS=true; shift ;;
+            --skip-migrate) SKIP_MIGRATE=true; shift ;;
             --no-smoke)   NO_SMOKE=true; shift ;;
             --no-gate)    GATE=false; shift ;;
             --dry-run)    DRY_RUN=true; shift ;;
@@ -257,6 +260,74 @@ function warn_if_app_secret_missing() {
     else
         info "Secret '$SECRET_NAME' present."
     fi
+}
+
+#=============================================================================
+# 2c. GATED DB MIGRATION (pre-rollout)
+#=============================================================================
+
+# Run `memql migrate` as a one-shot Job and WAIT for it to complete BEFORE
+# any Deployment rolls (#553). Applying schema up front -- not racing it
+# against the worker roll -- is the migration-safety win. Idempotent (bun
+# advisory lock + mark-applied); identity's boot migration stays as a
+# no-op fallback. A failed migration FAILS the deploy (we don't roll onto
+# an unmigrated/half-migrated schema).
+function run_migration_gate() {
+    section "2c. Gated DB migration (memql migrate Job)"
+    if [ "$SKIP_MIGRATE" = true ]; then
+        info "--skip-migrate set; skipping the pre-deploy migration Job."
+        return 0
+    fi
+    local job="$K8S_DIR/migrate-job.yaml"
+    if [ ! -f "$job" ]; then
+        warn "migrate Job manifest not found at $job; skipping."
+        return 0
+    fi
+
+    # The Job runs the identity image; pin it to the deploy's --version when
+    # we built one, else use the tag pinned in the manifest.
+    local img=""
+    if [ -n "$VERSION" ] && [ "$SKIP_BUILD" = false ]; then
+        img="${ACR_LOGIN_SERVER}/memql-identity:${VERSION}"
+    fi
+
+    # The namespace must exist for the Job; apply it idempotently first.
+    run_or_plan kubectl apply -f "$K8S_DIR/namespace.yaml"
+    # Jobs are immutable -- delete any prior run before re-creating.
+    run_or_plan kubectl delete job memql-migrate -n "$NAMESPACE" --ignore-not-found
+
+    if [ "$DRY_RUN" = true ]; then
+        if [ -n "$img" ]; then
+            plan "sed 's#memql-identity:<tag>#memql-identity:${VERSION}#' $job | kubectl apply -f -"
+        else
+            plan "kubectl apply -f $job"
+        fi
+        plan "kubectl wait --for=condition=complete --timeout=300s job/memql-migrate -n $NAMESPACE"
+        return 0
+    fi
+
+    if [ -n "$img" ]; then
+        info "applying migrate Job (image ${img})..."
+        if ! sed -E "s#image: .*/memql-identity:.*#image: ${img}#" "$job" | kubectl apply -f -; then
+            warn "failed to apply the migrate Job."
+            return 1
+        fi
+    else
+        info "applying migrate Job (manifest-pinned image)..."
+        if ! kubectl apply -f "$job"; then
+            warn "failed to apply the migrate Job."
+            return 1
+        fi
+    fi
+
+    info "waiting for migrations to complete..."
+    if ! kubectl wait --for=condition=complete --timeout=300s job/memql-migrate -n "$NAMESPACE"; then
+        warn "migration Job did not complete successfully -- aborting BEFORE rolling the mesh."
+        kubectl logs -n "$NAMESPACE" job/memql-migrate --tail=50 2>/dev/null || true
+        return 1
+    fi
+    info "migrations complete."
+    return 0
 }
 
 #=============================================================================
@@ -420,6 +491,16 @@ function main() {
     build_and_push
     ensure_tls_secrets
     warn_if_app_secret_missing
+
+    # Migrate up front and abort the deploy if it fails -- never roll the
+    # mesh onto an unmigrated/half-migrated schema (#553).
+    if ! run_migration_gate; then
+        state_report
+        echo ""
+        echo "RESULT: deploy ABORTED -- pre-deploy migration failed. The mesh was NOT rolled."
+        exit 1
+    fi
+
     apply_ordered
 
     local gate_rc=0

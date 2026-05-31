@@ -24,6 +24,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return false, 0
 	}
 	switch args[0] {
+	case "migrate":
+		return true, runMigrateSubcommand(args[1:])
 	case "voice-agent-token":
 		fmt.Fprintln(os.Stderr, "voice-agent-token requires the identity binary (build with -tags identity).")
 		return true, 2
