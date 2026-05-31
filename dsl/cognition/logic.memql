@@ -455,7 +455,12 @@ logic logicEnsureDailySpaceOnAuthSession {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.userId })
+    // authSession.userId is OPTIONAL (token issuance can race ahead of the
+    // user-row insert; see the concept). subject -- the JWT sub claim
+    // (v1:identity:user:<uuid>) -- is the canonical, always-present key, so
+    // fall back to it; otherwise login provisions no daily space and the SPA
+    // lands the user in an empty app.
+    return ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
   }
 }
 
