@@ -125,10 +125,43 @@ func TestCreateClientSecret_APIErrorSurfaces(t *testing.T) {
 }
 
 func TestCreateClientSecret_MissingKey(t *testing.T) {
+	// Ensure the env fallback can't find a key either (a real OPENAI_API_KEY
+	// in the test env would otherwise satisfy apiKey()).
+	t.Setenv(secretAPIKeyPrimary, "")
+	t.Setenv(secretAPIKeyFallback, "")
 	i := New(func(_ context.Context, _ string) (string, error) {
 		return "", http.ErrNoLocation
 	}, nil)
 	if _, err := i.handleCreateClientSecret(context.Background(), map[string]any{}, 0); err == nil {
 		t.Fatal("expected error when no API key resolves, got nil")
+	}
+}
+
+func TestCreateClientSecret_EnvKeyFallback(t *testing.T) {
+	// Dev path: the global-secret store misses, but the OpenAI key is present
+	// as an env var -> apiKey() must fall back to it and the mint succeeds.
+	t.Setenv(secretAPIKeyPrimary, "")
+	t.Setenv(secretAPIKeyFallback, "sk-env-fallback-key")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-env-fallback-key" {
+			t.Errorf("Authorization = %q, want the env-fallback key", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ek_env", "expires_at": float64(1)})
+	}))
+	t.Cleanup(srv.Close)
+
+	// resolveSecret always misses (store empty) -> forces the env fallback.
+	i := New(func(_ context.Context, _ string) (string, error) {
+		return "", http.ErrNoLocation
+	}, nil)
+	i.apiBase = srv.URL
+
+	nodes, err := i.handleCreateClientSecret(context.Background(), map[string]any{}, 0)
+	if err != nil {
+		t.Fatalf("handleCreateClientSecret with env key: %v", err)
+	}
+	if out := decodeNode(t, nodes); out["value"] != "ek_env" {
+		t.Errorf("value = %v, want ek_env", out["value"])
 	}
 }
