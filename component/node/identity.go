@@ -36,6 +36,13 @@ const (
 	// NodeService.Stream and dispatches to the local workbench
 	// integration. Agent nodes are the typical client.
 	NodeTypeWorkbench NodeType = "workbench"
+
+	// NodeTypeIdentity is the identity / auth service -- the node-token
+	// ISSUER, not a mesh worker (so it is intentionally absent from
+	// ValidNodeTypes). It runs the `/node/bootstrap` endpoint that every
+	// other node calls to mint its class="node" JWT; it must never call
+	// that endpoint on itself (see EnsureBearerToken). memql#570.
+	NodeTypeIdentity NodeType = "identity"
 )
 
 // ValidNodeTypes is the set of recognized node types.
@@ -177,6 +184,19 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 		return nil
 	}
 	if strings.TrimSpace(id.BearerToken) != "" {
+		return nil
+	}
+	// The identity service is the node-token ISSUER -- it hosts the
+	// `/node/bootstrap` endpoint other nodes call. It must NEVER
+	// self-bootstrap: the bootstrap POST would target this node's own
+	// `/node/bootstrap` (IDENTITY_VERIFIER_BASE_URL defaults to the
+	// identity service) BEFORE its HTTP listener is up, so it retries
+	// the full ~90s budget and blocks the listener from starting --
+	// tripping the container healthcheck and, transitively, every other
+	// node's bootstrap (which also targets identity). The identity node
+	// runs as the mesh root with no outbound NodeService.Stream dials
+	// that need a bearer token, so leaving it empty is correct. memql#570.
+	if id.Type == NodeTypeIdentity {
 		return nil
 	}
 	token, ok, err := maybeBootstrapNodeToken(ctx, logger, id.ID, string(id.Type))

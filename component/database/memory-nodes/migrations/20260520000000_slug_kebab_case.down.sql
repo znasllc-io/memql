@@ -2,8 +2,10 @@
 -- catalog slug fields from kebab-case back to snake_case. Symmetric
 -- because both forms are distinguishable from `:` separators and
 -- free-form prose.
-
---bun:split
+--
+-- NOTE: no `--bun:split` before the first statement -- a leading
+-- comment-only segment makes bun emit an empty query. See the .up.sql
+-- header + memql#570.
 
 CREATE OR REPLACE FUNCTION snake_slug(s text) RETURNS text AS $$
   SELECT CASE
