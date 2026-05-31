@@ -50,6 +50,12 @@ type Executor struct {
 	dedupEnabled bool
 	dedup        *executionDedup
 
+	// clusterGuard, when set, extends dedup ACROSS replicas (#561): after the
+	// per-process dedup passes, it claims the (automation, dedup-key) in the
+	// DB so only one replica executes when an event reaches several. nil =
+	// single-replica behaviour (no cross-replica claim).
+	clusterGuard executionClaimer
+
 	// Step-level caching (enabled via ExecutorOptions.StepCacheEnabled)
 	stepCacheEnabled    bool
 	stepCache           *StepCache
@@ -159,6 +165,19 @@ type ExecutorOptions struct {
 	// Prevents database connection exhaustion during event storms.
 	// Defaults to 10 if not set (0 means use default, not unlimited).
 	MaxConcurrentExecutions int
+
+	// ClusterGuard extends dedup across replicas (#561): after the per-process
+	// dedup passes, the executor claims the (automation, dedup-key) in the DB
+	// so an event reaching multiple replicas executes once cluster-wide. nil =
+	// single-replica behaviour. Only set on the EVENT executor.
+	ClusterGuard executionClaimer
+}
+
+// executionClaimer is the cross-replica execution gate (#561). Claim returns
+// true when THIS node should run the automation, false when another replica
+// already owns this (automation, event). Satisfied by *ClusterExecutionGuard.
+type executionClaimer interface {
+	Claim(ctx context.Context, automationName, dedupKey string) bool
 }
 
 // NewExecutor creates a new automation executor.
@@ -171,6 +190,7 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 		automationTrigger:    opts.AutomationTrigger,
 		chainTrackingEnabled: opts.ChainTrackingEnabled,
 		dedupEnabled:         opts.DedupEnabled,
+		clusterGuard:         opts.ClusterGuard,
 		stepCacheEnabled:     opts.StepCacheEnabled,
 		stepCacheDefaultTTL:  opts.StepCacheDefaultTTL,
 	}
@@ -400,6 +420,21 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 			exec.CompletedAt = time.Now()
 			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
 			return exec, nil
+		}
+
+		// Cross-replica dedup (#561): the per-process check above only covers
+		// THIS pod. When a node-type runs >=2 replicas an event can reach more
+		// than one; the cluster guard claims the (automation, chain-head) in
+		// the DB so exactly one replica executes. Only the event path carries
+		// a guard (scheduled runs are gated by the cron leader instead).
+		if e.clusterGuard != nil && exec.InitialChainHead != "" {
+			if !e.clusterGuard.Claim(ctx, automation.Name, exec.InitialChainHead) {
+				exec.Status = "skipped"
+				exec.Error = "duplicate execution (cluster guard -- claimed by another replica)"
+				exec.CompletedAt = time.Now()
+				exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+				return exec, nil
+			}
 		}
 	}
 

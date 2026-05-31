@@ -65,6 +65,12 @@ type SchedulerOptions struct {
 	// to the one cluster-wide leader node (#561). nil = every node runs
 	// crons (pre-#561 / single-node default). Typically CronLeader.IsLeader.
 	LeaderGate func() bool
+
+	// ClusterGuard, when set, makes EVENT-triggered automations exactly-once
+	// across replicas (#561) -- the event executor claims each (automation,
+	// event) in the DB so only one replica runs it. nil = single-replica
+	// behaviour. Typically a *ClusterExecutionGuard.
+	ClusterGuard executionClaimer
 }
 
 // NewScheduler creates a new automation scheduler.
@@ -110,7 +116,8 @@ func NewScheduler(opts SchedulerOptions) (*Scheduler, error) {
 		StepRegistry:            opts.StepRegistry,
 		AutomationTrigger:       s,
 		ChainTrackingEnabled:    true,
-		DedupEnabled:            true, // Idempotency for event-triggered runs
+		DedupEnabled:            true,              // Idempotency for event-triggered runs
+		ClusterGuard:            opts.ClusterGuard, // cross-replica idempotency (#561)
 		StepCacheEnabled:        opts.StepCacheEnabled,
 		StepCacheMaxBytes:       opts.StepCacheMaxBytes,
 		StepCacheDefaultTTL:     opts.StepCacheDefaultTTL,

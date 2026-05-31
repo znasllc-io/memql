@@ -72,7 +72,7 @@ func NewCronLeader(dbGetter func() *bun.DB, logger *slog.Logger) *CronLeader {
 func (cl *CronLeader) IsLeader() bool { return cl.leader.Load() }
 
 func (cl *CronLeader) run(ctx context.Context, markStarted func()) error {
-	cl.poll(ctx) // first attempt before signalling Ready so a single-node
+	cl.poll(ctx)  // first attempt before signalling Ready so a single-node
 	markStarted() // cluster is already leader by the time crons can fire
 	t := time.NewTicker(cronLeaderPollInterval)
 	defer t.Stop()
