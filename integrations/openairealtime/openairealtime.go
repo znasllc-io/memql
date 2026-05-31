@@ -29,6 +29,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -108,6 +109,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 func (i *Integration) handleCreateClientSecret(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	apiKey, err := i.apiKey(ctx)
 	if err != nil {
+		i.logger.Error("openairealtime.createClientSecret: api key unavailable", "error", err)
 		return nil, err
 	}
 
@@ -122,8 +124,10 @@ func (i *Integration) handleCreateClientSecret(ctx context.Context, args map[str
 
 	secret, err := i.mint(ctx, apiKey, model)
 	if err != nil {
+		i.logger.Error("openairealtime.createClientSecret: mint failed", "model", model, "error", err)
 		return nil, fmt.Errorf("openairealtime.createClientSecret: %w", err)
 	}
+	i.logger.Info("openairealtime.createClientSecret: minted ephemeral key", "model", model, "valueLen", len(secret.value))
 
 	// Shape matches the browser hook's MemqlRealtimeSessionResponse
 	// (copresent src/hooks/useAgentsSdk.ts): { value, expiresAt, config }.
@@ -184,20 +188,35 @@ func (i *Integration) mint(ctx context.Context, apiKey, model string) (*clientSe
 // -----------------------------------------------------------------
 
 func (i *Integration) apiKey(ctx context.Context) (string, error) {
-	if i.resolveSecret == nil {
-		return "", fmt.Errorf("openairealtime: no secret resolver configured")
-	}
-	for _, name := range []string{secretAPIKeyPrimary, secretAPIKeyFallback} {
-		v, err := i.resolveSecret(ctx, name)
-		if err != nil {
-			continue
+	names := []string{secretAPIKeyPrimary, secretAPIKeyFallback}
+
+	// 1) Encrypted global-secret store (production / seeded installs).
+	if i.resolveSecret != nil {
+		for _, name := range names {
+			v, err := i.resolveSecret(ctx, name)
+			if err != nil {
+				continue
+			}
+			if v = strings.TrimSpace(v); v != "" {
+				return v, nil
+			}
 		}
-		if v = strings.TrimSpace(v); v != "" {
+	}
+
+	// 2) OS env fallback (dev): the OpenAI key is commonly provided as an env
+	// var (OPENAI_API_KEY / MEMQL_SI_OPENAI_API_KEY) via the genesis envelope
+	// rather than seeded into globalSecret. This mirrors the SI-provider /
+	// bridge-agent resolution chain (see component/memql/si_providers.go
+	// authConceptLookupNames) so the builtin works wherever those do, without
+	// requiring a separate `make secret-set`.
+	for _, name := range names {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			return v, nil
 		}
 	}
+
 	return "", fmt.Errorf(
-		"openairealtime: OpenAI API key not found in v1:platform:globalSecret (looked for %s then %s) -- run `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration`",
+		"openairealtime: OpenAI API key not found in v1:platform:globalSecret or env (looked for %s then %s) -- seed it with `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration` or set the env var on the node",
 		secretAPIKeyPrimary, secretAPIKeyFallback, secretAPIKeyPrimary)
 }
 
