@@ -1406,9 +1406,14 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	}
 	result, execErr := s.executeTool(ctx, s.service.engine, tool, args)
 	if execErr != nil {
+		// Mirror the failed call too, matching the relay bridge (copresent#158).
+		s.mirrorRealtimeToolCall(callerRole, tool.Name, args, execErr.Error(), true)
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
 	}
 
+	// Awareness breadcrumb for the direct browser path's low-risk read tools
+	// (copresent#158). No-op for voice-agent streams + non-allowlisted tools.
+	s.mirrorRealtimeToolCall(callerRole, tool.Name, args, flattenToolResultContent(result), false)
 	return s.sendCallToolResult(envelope.GetMessageId(), requestId, result, false, "")
 }
 
