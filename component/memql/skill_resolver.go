@@ -49,12 +49,12 @@ func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (Ski
 	// Dedupe + sort the input so the cache key (when we add one) is
 	// stable and the DB query's IN clause is deterministic.
 	//
-	// Callers pass bare slugs (`copresent-control`) by convention --
+	// Callers pass bare slugs (`copresent-takeover`) by convention --
 	// matches what role catalog rows store in lockedSkillIds /
 	// defaultSkillIds / availableSkillIds / forbiddenSkillIds and what
 	// the agent seeds write into capabilities.skillIds. The catalog
 	// rows themselves are keyed on the canonical id form
-	// (`v1:agents:skill:copresent-control`), so we prepend the concept
+	// (`v1:agents:skill:copresent-takeover`), so we prepend the concept
 	// prefix here when an input doesn't already carry one. Without this
 	// normalization the `id IN (?)` query never matches and every
 	// resolver call returns an empty bundle. memql#376.

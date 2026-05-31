@@ -111,7 +111,7 @@ query knowledgeDomain queryKnowledgeDomainById {
 }
 
 @enabled
-@description("List all active knowledge domains. Used by the agent builder's knowledge picker and by delegateTakeover to resolve domain metadata.")
+@description("List all active knowledge domains. Used by the agent builder's knowledge picker and by operator-turn retrieval to resolve domain metadata.")
 query knowledgeDomain queryListKnowledgeDomains {
   filter  traitIsActiveRecord
   shape   knowledgeDomainFull

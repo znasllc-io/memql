@@ -51,10 +51,14 @@ seed agent assistant {
     // operator suite + the supporting knowledge baselines + the
     // headless / embodied execution surfaces:
     //
-    //   - copresent-control      drives the SPA (uiClick / uiNavigate /
-    //                            uiType / ... -- the operator primitives;
-    //                            slug expands at dispatch via
-    //                            component/memql/operator_caps.go).
+    //   - copresent-takeover     autopilot UI drive -- the AI does it FOR
+    //                            the user (uiClick / uiNavigate / uiType /
+    //                            ... operator primitives; slug expands at
+    //                            dispatch via component/memql/operator_caps.go).
+    //   - copresent-guide        immersive, voice-driven Scenes over the same
+    //                            operator primitives -- the AI does it WITH
+    //                            the user. Both replaced the retired single
+    //                            copresent-control skill (copresent#187).
     //   - copresent-ui           knowledge baseline behind UI walkthroughs
     //                            (panels, routing, create-modal flows,
     //                            presence + chat + canvas).
@@ -73,7 +77,8 @@ seed agent assistant {
     // the last two ship in dsl/agents/skills/foundational.memql in core.
     // memql#376.
     skillIds: [
-      "copresent-control",
+      "copresent-takeover",
+      "copresent-guide",
       "copresent-ui",
       "copresent-canvas",
       "workbench-baseline",

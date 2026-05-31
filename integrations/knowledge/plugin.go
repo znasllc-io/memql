@@ -10,7 +10,7 @@ import (
 // init self-registers the knowledge integration as an always-on plug-in.
 // The DSL capabilities (ingest, lookup) are used by the agent builder's
 // domain picker, by seed automations that populate copresent-ui docs on
-// startup, and by the delegateTakeover handler's up-front retrieval step.
+// startup, and by the agent replier's up-front operator-turn retrieval step.
 //
 // Like the embedding integration, DB access is wired via a lazy getter
 // because MemoryNodesDatabase.BunDB() only returns a live handle after

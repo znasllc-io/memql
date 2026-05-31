@@ -109,8 +109,9 @@ func wikipediaArticlesFor(domainId string) []string {
 // will surface in role X's picker.
 //
 // copresent-ui (bottom of this list) is new -- it's the app-knowledge
-// domain required by the copresent-control tool so agents given that
-// tool automatically pick up CoPresent UI knowledge for walkthroughs.
+// domain required by the operator tools (copresent-takeover /
+// copresent-guide) so agents given either automatically pick up
+// CoPresent UI knowledge for walkthroughs.
 var standardDomains = []StandardDomain{
 	// --- Core --------------------------------------------------------------
 	// business-administration was previously called general_business AND
@@ -191,13 +192,13 @@ var standardDomains = []StandardDomain{
 	// --- CoPresent UI (NEW) -----------------------------------------------
 	// Visible for every role so any agent (GA or specialist) can opt in to
 	// app-knowledge. Auto-attached to any agent whose tool list includes
-	// the copresent-control bundle (see RequiredByToolSlugs) so picking
-	// the tool implies the domain. Document chunks for this domain are
-	// seeded below from copresentUISeedCorpus.
+	// an operator bundle (copresent-takeover / copresent-guide -- see
+	// RequiredByToolSlugs) so picking the tool implies the domain. Document
+	// chunks for this domain are seeded below from copresentUISeedCorpus.
 	{ID: "copresent-ui", Name: "CoPresent UI", Category: "internal",
-		Description:         "Knowledge of the CoPresent application layout, panels, modals, and interactive op-id targets. Auto-attached to any agent given the CoPresent Control tool so walkthroughs and explanations are anchored to the real UI rather than guessed from training data.",
+		Description:         "Knowledge of the CoPresent application layout, panels, modals, and interactive op-id targets. Auto-attached to any agent given a CoPresent operator tool (Takeover or Guide) so walkthroughs and explanations are anchored to the real UI rather than guessed from training data.",
 		RelevantForRoles:    []string{"assistant", "accounting-finance", "human-resources", "customer-service", "quality-assurance", "sales-marketing", "it-support", "legal-compliance", "operations", "project-management", "research-development", "training-education", "personal-finance-advisor", "household-manager", "parenting-coach", "health-wellness-coach", "meal-planning-chef", "travel-planner", "creative-companion", "learning-companion", "relationships-social", "pet-care-specialist", "home-improvement-diy", "personal-legal-advisor", "mindfulness-coach", "entertainment-curator", "senior-care-advisor", "real-estate-advisor"},
-		RequiredByToolSlugs: []string{"copresent-control"},
+		RequiredByToolSlugs: []string{"copresent-takeover", "copresent-guide"},
 	},
 
 	// --- Computer Use -----------------------------------------------------
@@ -214,7 +215,7 @@ var standardDomains = []StandardDomain{
 	// Visibility: every role -- a knowledge specialist (e.g. a
 	// research agent) might want to be able to TALK about Computer
 	// Use even without holding the capability themselves, just like
-	// copresent-ui is attachable without copresent-control.
+	// copresent-ui is attachable without an operator tool.
 	{ID: "computer-use", Name: "Computer Use", Category: "internal",
 		Description:         "Operational manual for the Computer Use capability: tool surfaces (workerHost / workerComputer), scope tiers (observe / full), per-task approval flow (requestComputerUseScope -> canvas card -> Allow / Deny), post-approval execution semantics, and the planner's success-vs-failure detection. Auto-attached to any agent given the Computer Use capability so the generic prompt template stays agnostic.",
 		RelevantForRoles:    []string{"assistant", "accounting-finance", "human-resources", "customer-service", "quality-assurance", "sales-marketing", "it-support", "legal-compliance", "operations", "project-management", "research-development", "training-education", "personal-finance-advisor", "household-manager", "parenting-coach", "health-wellness-coach", "meal-planning-chef", "travel-planner", "creative-companion", "learning-companion", "relationships-social", "pet-care-specialist", "home-improvement-diy", "personal-legal-advisor", "mindfulness-coach", "entertainment-curator", "senior-care-advisor", "real-estate-advisor"},

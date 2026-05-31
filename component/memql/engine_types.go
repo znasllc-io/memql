@@ -173,9 +173,9 @@ type SIInvocation struct {
 	// one Call; all other invocations continue to use the provider's
 	// registry-time cfg.Model.
 	//
-	// Introduced to let delegateTakeover route a delegated turn to a
-	// stronger reasoning model without forcing the same tier on
-	// every other agent in the app.
+	// Introduced to let a delegated/nested turn route to a stronger
+	// reasoning model without forcing the same tier on every other
+	// agent in the app.
 	ModelOverride *string
 	// EnablePromptCache toggles provider-side prompt caching for this
 	// one invocation. Currently honoured by the Anthropic provider:
