@@ -1,0 +1,84 @@
+// concepts.memql
+//
+// Concepts in the harness namespace -- the MemQL-native agent
+// harness working-state spine (epic #590, foundational issue #582).
+//
+// Three first-class concepts model the harness's working state so
+// that all agent execution state is durable, queryable, and
+// event-emitting:
+//
+//   v1:harness:plan        -- the desired state (a unit of work)
+//   v1:harness:step        -- a unit of work inside a plan (DAG node)
+//   v1:harness:observation -- what actually happened (recall-able)
+//
+// Because these are MemoryNodes we get for free: time-ordered
+// history (hypertable), provenance on every transition (the engine
+// stamps createdBy from the actor on every insert), event emission
+// on insert (graph.node.created.*.v1:harness:step -- note the `.*.`
+// partition-segment wildcard caveat in CLAUDE.md), and partition
+// isolation per workspace. No separate task table, no separate state
+// store, no separate audit log.
+
+@version("1.0.0")
+@namespace("harness")
+@description("The desired state of a unit of agent work -- the spine the reconciler (#583) drives and everything else reads. A Plan is the user/agent mental anchor (the goal); Steps are the executable decomposition that hang off it via step.plan. Lifecycle: open -> running -> done/failed/cancelled. ownerUserId is the per-row authorization key (owned tier): stamped from actor.userId at create time so only the owner reaches the plan's reads/writes. Provenance is automatic -- the engine stamps createdBy from the authenticated actor on every inserted version; provenanceMutation records WHICH mutation produced this version so the audit trail names the transition, not just the actor.")
+@displayCard(primary="goal", secondary="status", tertiary="ownerUserId", status="status")
+concept plan {
+  ownerUserId  string  @required  @description("v1:identity:user.id of the plan owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Only the owner reaches this plan's reads/writes.")
+  goal         string  @required  @description("Human-readable description of what the plan is trying to accomplish.")
+  status       enum("open", "running", "done", "failed", "cancelled")  @required  @default("open")  @description("Plan lifecycle. open = created, not yet started; running = steps executing; done / failed / cancelled = terminal. The step state machine drives plan-level progress; the reconciler (#583) promotes the plan as its steps complete.")
+  rootStepId   string  @description("v1:harness:step.id of the entry step (the DAG root). Optional -- set by addStep when the first step lands, or left empty for a plan whose steps are all independent.")
+  input        object  @description("Free-form input payload the plan was created with (the request that kicked it off). Discriminated by the consuming reconciler; opaque to the engine.")
+  result       object  @description("Rolled-up plan result, populated at terminal status from the steps' results.")
+  errorMessage string  @description("Populated when status transitions to failed.")
+  startedAt    datetime  @description("When the plan first transitioned to running.")
+  completedAt  datetime  @description("When the plan reached a terminal status.")
+  provenanceMutation  string  @description("Name of the mutation that produced this plan version (createPlan / startPlan / completePlan / ...). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="owns", field="rootStepId", target="v1:harness:step", direction="outgoing")
+}
+
+@version("1.0.0")
+@namespace("harness")
+@description("A unit of work inside a Plan -- one DAG node. Steps form a DAG via dependsOn (not a flat list), enabling parallel specialists. The status state machine is: pending -> ready (dependsOn satisfied) -> running (controller claims) -> done (result recorded) / failed (error, attempts exhausted) / blocked (needs another step); blocked -> ready (blocker done); failed -> ready (retry, attempt++); done is terminal. Invalid transitions (e.g. done -> running) are rejected by the engine pre-insert guard (component/memql/harness_step_validation.go) since the append-only model cannot express a state machine in the DSL alone. idempotencyKey makes step execution safe to retry / replay (critical for the event-sourced loop in #583). ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time. Provenance: the engine stamps createdBy automatically; provenanceMutation names the transition.")
+@displayCard(primary="title", secondary="status", tertiary="planId", status="status")
+concept step {
+  ownerUserId    string  @required  @description("v1:identity:user.id of the step owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Inherited from the parent plan's owner.")
+  planId         string  @required  @description("v1:harness:plan.id this step belongs to. Every step hangs off exactly one plan.")
+  title          string  @required  @description("Human-readable description of the unit of work.")
+  status         enum("pending", "ready", "running", "blocked", "done", "failed")  @required  @default("pending")  @description("Step lifecycle. pending = created, dependencies not yet satisfied; ready = dependsOn satisfied, claimable by a controller; running = controller claimed and is executing; blocked = execution paused, needs another step to finish; done = result recorded (terminal); failed = error and attempts exhausted. Transitions are validated by the engine pre-insert guard; invalid ones (e.g. done -> running) are rejected.")
+  assignedAgent  string  @description("v1:agents:agent.id of the agent claiming this step. Set when status transitions ready -> running; null while pending / ready.")
+  dependsOn      []string  @description("v1:harness:step.id list of steps this step depends on -- the DAG in-edges. A step becomes ready once every id in dependsOn is done. Empty = no dependencies (immediately ready).")
+  idempotencyKey string  @required  @description("Stable key that dedupes re-runs of the same logical step. Makes step execution safe to retry / replay in the event-sourced loop (#583); a re-emit with the same key collapses onto the same logical step.")
+  input          object  @description("Per-step input payload, carried from the plan input + any prior step's result.")
+  result         object  @description("Per-step result, populated when status reaches done.")
+  attempt        int     @required  @default("0")  @description("Retry counter. Starts at 0; the failed -> ready retry transition increments it. The reconciler caps retries; the engine guard only enforces that a retry actually bumps attempt.")
+  errorMessage   string  @description("Populated when status transitions to failed.")
+  startedAt      datetime  @description("When the step first transitioned to running.")
+  completedAt    datetime  @description("When the step reached a terminal status (done / failed).")
+  provenanceMutation  string  @description("Name of the mutation that produced this step version (addStep / startStep / completeStep / failStep / ...). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="planId", target="v1:harness:plan", direction="outgoing")
+  @relationship(type="dependsOn", field="dependsOn", target="v1:harness:step", direction="outgoing")
+  @relationship(type="interactsWith", field="assignedAgent", target="v1:agents:agent", direction="outgoing")
+}
+
+@version("1.0.0")
+@namespace("harness")
+@description("What actually happened during a step -- the agent's own actions made durable and recall-able. One observation per meaningful event (a tool result, an error, a note, a decision). The `content` field is the embedding text: the harness's embedding loop stores it into node_vectors keyed by this observation's id (via integration.embedding.store with vectorField='content'), so observations become recall-able memory feeding the recall path in #585 -- the agent can semantically search its own history ('what did I try last time I hit this error?'). The `embedding` field carries the vector once computed; until then recall reads node_vectors directly. ownerUserId is the per-row authz key (owned tier), stamped from actor.userId at create time. Provenance is automatic via the engine-stamped createdBy intrinsic.")
+@displayCard(primary="kind", secondary="stepId", tertiary="ownerUserId")
+concept observation {
+  ownerUserId  string  @required  @description("v1:identity:user.id of the observation owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Inherited from the parent step's owner.")
+  stepId       string  @required  @description("v1:harness:step.id this observation belongs to.")
+  planId       string  @description("v1:harness:plan.id the step belongs to, denormalized so plan-level recall doesn't have to join through step.")
+  kind         enum("tool_result", "error", "note", "decision")  @required  @description("What kind of event this observation records. tool_result = the result of a tool call; error = something went wrong; note = free-form agent annotation; decision = a choice the agent made (with rationale in payload).")
+  data         object  @description("Structured per-kind data (named `data`, not `payload`, since payload is a reserved row intrinsic -- same gotcha as v1:copresent:canvasState). tool_result: {toolName, args, result}. error: {message, stack?}. decision: {choice, rationale, alternatives?}. note: {text}.")
+  content      string  @required  @description("The text rendering of this observation -- the embedding source, so observations are recall-able. The harness embedding loop stores this into node_vectors keyed by the observation id (integration.embedding.store, vectorField='content') so the observation is semantically recall-able (#585): the agent can search its own history. Mirrors the v1:common:documentChunk content-as-embedding pattern -- the vector lives in node_vectors keyed by node id, not inline on the row.")
+  embedding    []float  @description("The semantic embedding vector for `content`, populated lazily by the harness embedding loop when an inline copy is wanted alongside the canonical node_vectors entry. Until set, recall reads the node_vectors row keyed by this observation's id directly. Carried on the concept so observations are recall-able (per the #582 sketch's embedding field).")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="stepId", target="v1:harness:step", direction="outgoing")
+  @relationship(type="parent", field="planId", target="v1:harness:plan", direction="outgoing")
+}

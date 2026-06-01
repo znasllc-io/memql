@@ -323,6 +323,17 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 			return nil, err
 		}
 	}
+	// Harness step guard: enforces the v1:harness:step status state
+	// machine (pending -> ready -> running -> done/failed/blocked,
+	// blocked -> ready, failed -> ready retry). The append-only DSL
+	// cannot reject an invalid transition (e.g. done -> running) on its
+	// own, so the rule lives in Go. Runs on inserts and on update()
+	// (which read-merges then routes here). See harness_step_validation.go.
+	if conceptMeta.Name == memorynodes.ConceptHarnessStep {
+		if err := e.validateHarnessStepTransition(ctx, payload, mutation.ID); err != nil {
+			return nil, err
+		}
+	}
 
 	createParams := memorynodes.CreateParams{
 		Actor:   actor,

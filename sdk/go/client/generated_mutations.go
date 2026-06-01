@@ -54,6 +54,60 @@ func MutationAddAgentToSpaceBuild(args MutationAddAgentToSpaceArgs) string {
 	return b.String()
 }
 
+// MutationAddHarnessStep -- Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.
+//
+// Bound concept: step.
+type MutationAddHarnessStepArgs struct {
+	StepId         string
+	PlanId         string
+	Title          string
+	IdempotencyKey string
+	DependsOn      []string
+	Input          map[string]any
+}
+
+// MutationAddHarnessStep calls the engine mutation mutationAddHarnessStep.
+func (qc *QueryClient) MutationAddHarnessStep(ctx context.Context, args MutationAddHarnessStepArgs) (*Result, error) {
+	call := MutationAddHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "mutationAddHarnessStep", call)
+}
+
+func MutationAddHarnessStepBuild(args MutationAddHarnessStepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAddHarnessStep({")
+	if args.StepId != "" {
+		b.WriteString("stepId: ")
+		b.WriteString(fmt.Sprintf("%q", args.StepId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("idempotencyKey: ")
+	b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dependsOn: ")
+	b.WriteString(renderMemQLValue(args.DependsOn))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("input: ")
+	b.WriteString(renderMemQLValue(args.Input))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
 //
 // Bound concept: accessRequest.
@@ -355,6 +409,34 @@ func MutationCheckRecordBuild(args MutationCheckRecordArgs) string {
 	}
 	b.WriteString("newState: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewState))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
+//
+// Bound concept: step.
+type MutationCompleteHarnessStepArgs struct {
+	StepId string
+	Result map[string]any
+}
+
+// MutationCompleteHarnessStep calls the engine mutation mutationCompleteHarnessStep.
+func (qc *QueryClient) MutationCompleteHarnessStep(ctx context.Context, args MutationCompleteHarnessStepArgs) (*Result, error) {
+	call := MutationCompleteHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "mutationCompleteHarnessStep", call)
+}
+
+func MutationCompleteHarnessStepBuild(args MutationCompleteHarnessStepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCompleteHarnessStep({")
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("result: ")
+	b.WriteString(renderMemQLValue(args.Result))
 	b.WriteString("})")
 	return b.String()
 }
@@ -2340,6 +2422,42 @@ func MutationCreateGuideBuild(args MutationCreateGuideArgs) string {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateHarnessPlan -- Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.
+//
+// Bound concept: plan.
+type MutationCreateHarnessPlanArgs struct {
+	PlanId string
+	Goal   string
+	Input  map[string]any
+}
+
+// MutationCreateHarnessPlan calls the engine mutation mutationCreateHarnessPlan.
+func (qc *QueryClient) MutationCreateHarnessPlan(ctx context.Context, args MutationCreateHarnessPlanArgs) (*Result, error) {
+	call := MutationCreateHarnessPlanBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateHarnessPlan", call)
+}
+
+func MutationCreateHarnessPlanBuild(args MutationCreateHarnessPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateHarnessPlan({")
+	if args.PlanId != "" {
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("goal: ")
+	b.WriteString(fmt.Sprintf("%q", args.Goal))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("input: ")
+	b.WriteString(renderMemQLValue(args.Input))
 	b.WriteString("})")
 	return b.String()
 }
@@ -5100,6 +5218,36 @@ func MutationExpireAccessRequestBuild(args MutationExpireAccessRequestArgs) stri
 	return b.String()
 }
 
+// MutationFailHarnessStep -- Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.
+//
+// Bound concept: step.
+type MutationFailHarnessStepArgs struct {
+	StepId       string
+	ErrorMessage string
+}
+
+// MutationFailHarnessStep calls the engine mutation mutationFailHarnessStep.
+func (qc *QueryClient) MutationFailHarnessStep(ctx context.Context, args MutationFailHarnessStepArgs) (*Result, error) {
+	call := MutationFailHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "mutationFailHarnessStep", call)
+}
+
+func MutationFailHarnessStepBuild(args MutationFailHarnessStepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationFailHarnessStep({")
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	if args.ErrorMessage != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("errorMessage: ")
+		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationInsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
 //
 // Bound concept: outputScreening.
@@ -6051,6 +6199,63 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	}
 	b.WriteString("storageRoot: ")
 	b.WriteString(fmt.Sprintf("%q", args.StorageRoot))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
+//
+// Bound concept: observation.
+type MutationRecordHarnessObservationArgs struct {
+	ObservationId string
+	StepId        string
+	PlanId        string
+	// Enum: tool_result | error | note | decision
+	Kind    string
+	Content string
+	Data    map[string]any
+}
+
+// MutationRecordHarnessObservation calls the engine mutation mutationRecordHarnessObservation.
+func (qc *QueryClient) MutationRecordHarnessObservation(ctx context.Context, args MutationRecordHarnessObservationArgs) (*Result, error) {
+	call := MutationRecordHarnessObservationBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordHarnessObservation", call)
+}
+
+func MutationRecordHarnessObservationBuild(args MutationRecordHarnessObservationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordHarnessObservation({")
+	if args.ObservationId != "" {
+		b.WriteString("observationId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ObservationId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	if args.PlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("planId: ")
+		b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(fmt.Sprintf("%q", args.Content))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("data: ")
+	b.WriteString(renderMemQLValue(args.Data))
 	b.WriteString("})")
 	return b.String()
 }
@@ -8110,6 +8315,36 @@ func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapAr
 	}
 	b.WriteString("bootstrappedFrom: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedFrom))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationStartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
+//
+// Bound concept: step.
+type MutationStartHarnessStepArgs struct {
+	StepId        string
+	AssignedAgent string
+}
+
+// MutationStartHarnessStep calls the engine mutation mutationStartHarnessStep.
+func (qc *QueryClient) MutationStartHarnessStep(ctx context.Context, args MutationStartHarnessStepArgs) (*Result, error) {
+	call := MutationStartHarnessStepBuild(args)
+	return qc.executeNamed(ctx, "mutationStartHarnessStep", call)
+}
+
+func MutationStartHarnessStepBuild(args MutationStartHarnessStepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationStartHarnessStep({")
+	b.WriteString("stepId: ")
+	b.WriteString(fmt.Sprintf("%q", args.StepId))
+	if args.AssignedAgent != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedAgent: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedAgent))
+	}
 	b.WriteString("})")
 	return b.String()
 }
