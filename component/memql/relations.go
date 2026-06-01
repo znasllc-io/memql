@@ -30,6 +30,13 @@ const (
 	// is intentionally not wired here (no query needs it yet -- the DAG is read
 	// from the step's dependsOn field directly by the controller, #583).
 	relationshipTypeDependsOn = "dependsOn"
+	// formedFrom models a derivation in-edge: a row was synthesised from a set
+	// of source rows (a semanticMemory formed from sourceEpisodes observations).
+	// Outgoing, field is a []string of target ids. Used by the harness
+	// consolidation / semantic-memory model (v1:harness:semanticMemory, #586).
+	// Same treatment as dependsOn -- registered for concept load; graph-expansion
+	// traversal not wired (the source list is read from the field directly).
+	relationshipTypeFormedFrom = "formedFrom"
 )
 
 type relationshipRegistry struct {
@@ -66,6 +73,8 @@ func canonicalRelationshipType(value string) (string, bool) {
 		return relationshipTypeCreatedBy, true
 	case "dependson":
 		return relationshipTypeDependsOn, true
+	case "formedfrom":
+		return relationshipTypeFormedFrom, true
 	default:
 		return "", false
 	}
