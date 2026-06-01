@@ -374,6 +374,19 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 
 	e.invalidateCache()
 
+	// Observation embedding write-path (#585): when a
+	// v1:harness:observation lands, embed its `content` into
+	// node_vectors keyed by the observation id (vector_field='content',
+	// the documentChunk pattern) so the observation becomes recallable
+	// by recall()'s hybrid recency x relevance query. Best-effort: a
+	// failed embed must not fail the insert -- the row is durable
+	// regardless and a later re-embed can backfill. Dispatched through
+	// the already-registered integration.embedding.store capability so
+	// there is no second write-path to keep in sync.
+	if conceptMeta.Name == memorynodes.ConceptHarnessObservation {
+		e.embedHarnessObservation(ctx, result.ID, result.Payload)
+	}
+
 	// Emit node created event
 	// Flatten node payload fields into event for easier filter access
 	// This allows filters to use "participantType==\"human\"" instead of "payload.participantType==\"human\""
@@ -602,4 +615,52 @@ func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id strin
 		Count(ctx)
 
 	return err == nil && count > 0
+}
+
+// embedHarnessObservation embeds a freshly-inserted
+// v1:harness:observation's `content` field into node_vectors so the
+// observation is recallable by recall() (#585). It dispatches the
+// already-registered integration.embedding.store capability (the same
+// write-path knowledge/documentChunk use) rather than reaching into
+// pgvector here, so there is one embedding write-path, not two.
+//
+// Best-effort by contract: any failure (no embedding integration on
+// this node-type binary, empty content, embed error) is logged and
+// swallowed. The observation row is already durable; recall simply
+// won't surface this row until a vector exists, and a re-embed can
+// backfill.
+func (e *MemQLEngine) embedHarnessObservation(ctx context.Context, id string, payload []byte) {
+	if e.integrations == nil || strings.TrimSpace(id) == "" || len(payload) == 0 {
+		return
+	}
+	handler, ok := e.integrations.Get("integration.embedding.store")
+	if !ok {
+		// No embedding integration on this binary (e.g. a node-type
+		// build without it). Nothing to do.
+		return
+	}
+	var p map[string]any
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+	content, _ := p["content"].(string)
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	args := map[string]any{
+		"nodeId":      id,
+		"text":        content,
+		"concept":     memorynodes.ConceptHarnessObservation,
+		"vectorField": "content",
+	}
+	if _, err := handler(ctx, args, 1); err != nil {
+		if e.Logger != nil {
+			e.Logger.Warn("harness observation embed failed (recall will skip this row until backfilled)",
+				"id", id, "error", err)
+		}
+		return
+	}
+	if e.Logger != nil {
+		e.Logger.Debug("harness observation embedded for recall", "id", id, "content_len", len(content))
+	}
 }

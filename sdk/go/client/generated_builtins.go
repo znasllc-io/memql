@@ -106,6 +106,50 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	return b.String()
 }
 
+// Recall -- Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
+type RecallArgs struct {
+	Text     string
+	Concept  string
+	K        int
+	Provider string
+}
+
+// Recall calls the engine builtin recall.
+func (qc *QueryClient) Recall(ctx context.Context, args RecallArgs) (*Result, error) {
+	call := RecallBuild(args)
+	return qc.executeNamed(ctx, "recall", call)
+}
+
+func RecallBuild(args RecallArgs) string {
+	var b strings.Builder
+	b.WriteString("recall({")
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if args.Concept != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("concept: ")
+		b.WriteString(fmt.Sprintf("%q", args.Concept))
+	}
+	if args.K != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("k: ")
+		b.WriteString(fmt.Sprintf("%v", args.K))
+	}
+	if args.Provider != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(fmt.Sprintf("%q", args.Provider))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // TrainAgent -- Train an agent: replace capabilities.domains + .tools, eager-embed chunks, refresh identity vector, distill system prompt. Bracketed by a Plan + 3 Tasks for canvas + Tasks-page visibility.
 type TrainAgentArgs struct {
 	AgentId     string

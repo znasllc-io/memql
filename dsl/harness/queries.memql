@@ -1,0 +1,71 @@
+// queries.memql
+//
+// Read paths in the harness namespace (epic #590). This file's
+// headline construct is recall() -- the MemQL-native hybrid
+// recency x relevance memory query (#585).
+//
+// Why recall lives here as a BUILTIN, not a struct-form `query`:
+// a struct-form query is filter + shape over one concept; it cannot
+// express pgvector cosine similarity, an exponential time-decay over
+// createdAt, or a weighted-sum ORDER BY. recall needs all three in a
+// SINGLE statement (no app-side merge), so it is a Go-backed builtin
+// dispatching integrations/harnessrecall, which issues exactly one
+// SQL statement against the MemoryNodes hypertable + node_vectors.
+//
+// The MemQL advantage in one query: because embeddings (node_vectors,
+// keyed by node id) and createdAt (the hypertable partition key) live
+// on the same table family, recall scores recency x relevance in ONE
+// round-trip. A bolt-on stack queries a vector store, separately
+// queries a recency store, merges, and re-ranks in app code -- recall
+// does it server-side, scored, ordered, and top-k'd in the database.
+//
+// Authorization (owned tier): recall is owner-scoped INSIDE the SQL --
+// the handler stamps the WHERE on payload.ownerUserId from the
+// authenticated actor's userId (the same key the harness mutations
+// stamp at create time), so an agent only ever recalls its own
+// workspace's memory (partition isolation). The per-row-authz
+// conformance classifier scans query/mutation headers; builtins carry
+// their owner-scope in Go, so this is documented here for the audit
+// trail rather than expressed as a filter clause.
+
+// recall -- hybrid recency x relevance memory retrieval
+// =====================================================
+//
+//   recall({
+//     text:     "what did I try last time I hit this error?",
+//     concept:  "v1:harness:observation",  // default; the recall source
+//     window:   86400,    // seconds; createdAt >= now()-window (hypertable prune). 0 = all history
+//     k:        10,        // top-k (default 10)
+//     halfLife: 3600,      // recency half-life in seconds (default 3600)
+//     wSem:     0.7,        // semantic (cosine) weight (default 0.7)
+//     wRec:     0.3,        // recency (decay) weight (default 0.3)
+//     provider: "embedding3Small"   // default
+//   })
+//
+// Scoring (the SQL implements this exactly):
+//
+//   score = wSem * cosine(embedding, queryEmbedding)
+//         + wRec * exp(-ln2 * ageSeconds / halfLife)
+//
+// Returns the top-k rows in score order, each carrying its full
+// payload (provenance: createdBy, stepId, planId, kind, content)
+// plus the computed _similarity / _recency / _score components for
+// auditability + citation ranking. PreserveOrder keeps the score
+// order intact through the engine's default sort.
+//
+// Tunable weights + half-life let different agent roles favour
+// recency vs. relevance: a debugging agent wanting "what just
+// happened" raises wRec / lowers halfLife; a research agent wanting
+// "everything relevant ever" raises wSem and widens/omits the window.
+
+@enabled
+@sdk
+@executor("integration.harnessRecall.recall")
+@args(profile="object", additionalProperties="true")
+@description("Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.")
+builtin recall {
+  text      string  @required
+  concept   string
+  k         int
+  provider  string
+}
