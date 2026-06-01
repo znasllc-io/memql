@@ -186,6 +186,19 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// capability-slug abstraction.
 	toolNames := toolNamesFromAssistant(data)
 
+	// Context isolation / subagent boundary (#588). The per-turn role
+	// decides whether this turn may emit a human-facing reply. Legacy /
+	// undeclared turns resolve to RoleAssistant (the single-agent chat
+	// path); only a turn that EXPLICITLY declares itself a specialist
+	// enters the constrained worker path. A specialist's tool set is
+	// scoped to exclude respondToUser at the gating level, so it
+	// physically cannot produce a human-facing turn.
+	harnessRole := RoleAssistant
+	if msg.Hints != nil {
+		harnessRole = ResolveHarnessRole(msg.Hints[HarnessRoleHintKey])
+	}
+	toolNames = ScopeToolsForRole(harnessRole, toolNames)
+
 	// Provider selection runs through the memQL SI Router. The replier
 	// still owns the default policy (operator-capable agents get
 	// strongReasoning because the prompt is long and tool-calling
@@ -555,7 +568,17 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// structured surface to deliver its user-facing reply + citations.
 	// Streaming.go intercepts calls to this tool name; the engine has
 	// no executor for it.
-	tools = append(tools, RespondToUserToolDefinition())
+	//
+	// Boundary (#588): ONLY the assistant may emit a human-facing turn,
+	// so respondToUser is injected for the assistant role only. A
+	// specialist never receives it.
+	if RoleAllowsTool(harnessRole, RespondToUserToolName) {
+		tools = append(tools, RespondToUserToolDefinition())
+	}
+	// Defense in depth: scope the concrete tool schemas to the role so a
+	// specialist's WIRE tool set physically cannot carry respondToUser
+	// even if some upstream path appended it unconditionally.
+	tools = ScopeToolDefinitionsForRole(harnessRole, tools)
 	r.logger.Info("agentReply: stage",
 		"stage", "toolDefs",
 		"elapsed_ms", time.Since(toolDefsStart).Milliseconds(),
