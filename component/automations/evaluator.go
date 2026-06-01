@@ -179,6 +179,17 @@ func (e *Evaluator) SetLogger(logger *slog.Logger) {
 	e.logger = logger
 }
 
+// Warnf logs a warning via the configured logger (no-op when unset). Exposed
+// so sibling packages (the arg-time builtin evaluator) can surface a
+// resolution that silently fell back to a raw literal -- e.g. an unevaluated
+// `coalesce(...)` about to reach a mutation arg (memql#574).
+func (e *Evaluator) Warnf(msg string, args ...any) {
+	if e == nil || e.logger == nil {
+		return
+	}
+	e.logger.Warn(msg, append([]any{"component", ComponentName}, args...)...)
+}
+
 // GetStepNodes returns the nodes array from a step result if it exists.
 // This is used by the mutation evaluator to resolve bare step names like "getProgress"
 // to the step's result nodes (equivalent to $steps.getProgress.result.Bundle.nodes).
@@ -225,6 +236,20 @@ func (e *Evaluator) GetStepNodes(stepId string) ([]any, bool) {
 func (e *Evaluator) HasStep(stepId string) bool {
 	_, ok := e.steps[stepId]
 	return ok
+}
+
+// StepResultValue returns a step's raw Result value (and whether the step
+// exists). Used by the arg-time builtin evaluator to resolve a BARE step
+// identifier (`getActiveGA`, no dot/call) to the step's result -- so
+// selector builtins like coalesce(stepA, stepB) can pick the first step
+// that produced rows instead of rendering the identifier as its own name.
+// See memql#574.
+func (e *Evaluator) StepResultValue(stepId string) (any, bool) {
+	sr, ok := e.steps[stepId]
+	if !ok || sr == nil {
+		return nil, false
+	}
+	return sr.Result, true
 }
 
 // ContextFingerprint returns a map of all evaluator state for cache key computation.

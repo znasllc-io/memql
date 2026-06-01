@@ -336,6 +336,19 @@ func (e *MutationExecutor) evaluateValue(evaluator *automations.Evaluator, value
 				return resolved, nil
 			}
 		}
+		// Bare known-step identifier (no dot, no call): resolve to the step's
+		// result. A selector builtin like `coalesce(getActiveGA, getFallbackGA)`
+		// passes its step args here as bare identifiers; without this they fall
+		// through to EvaluateString below and render as their OWN NAME (a literal
+		// string), which is non-nil/non-empty -- so coalesce returns the string
+		// "getActiveGA" and the chained `getGA.First().id` read finds no nodes,
+		// silently defeating autoJoinSI -> ghost SI (memql#574). Guarded on a
+		// real step id so non-step bare literals keep their prior behaviour.
+		if isBareStepIdentifier(v) {
+			if result, ok := evaluator.StepResultValue(v); ok {
+				return result, nil
+			}
+		}
 		// Resolve embedded $ references (e.g. "lead-$event.payload.id").
 		// This intentionally does not attempt to type-coerce; it returns a string.
 		evaluated, err := evaluator.EvaluateString(v)
@@ -1630,6 +1643,31 @@ func buildMutationResultQuery(concept string, execResult any) string {
 	return ""
 }
 
+// isBareStepIdentifier reports whether expr is a single bare identifier --
+// no dot, no parens, no '$', no spaces -- that could name a step (e.g.
+// `getActiveGA`). Used to decide whether to resolve it against the step
+// table rather than treat it as a literal string. A leading digit is
+// rejected so numeric literals stay literals. See memql#574.
+func isBareStepIdentifier(expr string) bool {
+	if expr == "" {
+		return false
+	}
+	for i, r := range expr {
+		isAlpha := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+		isDigit := r >= '0' && r <= '9'
+		if i == 0 {
+			if !isAlpha {
+				return false
+			}
+			continue
+		}
+		if !isAlpha && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
 // splitFuncCallAndPath splits an expression like "first(getFirstStep).payload.targetData"
 // into the function call portion ("first(getFirstStep)") and the chained property path
 // ("payload.targetData"). Returns ok=true only when a chained path exists after the
@@ -1640,6 +1678,7 @@ func buildMutationResultQuery(concept string, execResult any) string {
 //	"index(concat(a,b), 0).payload.field" → ("index(concat(a,b), 0)", "payload.field", true)
 //	"first(step)"                         → ("", "", false)  — no chained path
 //	"hello.world"                         → ("", "", false)  — not a function call
+
 func splitFuncCallAndPath(expr string) (funcCall, chainedPath string, ok bool) {
 	openIdx := strings.Index(expr, "(")
 	if openIdx <= 0 {
