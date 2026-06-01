@@ -217,10 +217,9 @@ concept space {
   purpose  string  @description("Short one-liner describing what the space is for (e.g. \"Plan Q3 roadmap\"). Set by the Configure-manually path in CreateSpaceModal; the display name is auto-derived from it via aiSuggest(domain=spaceTitle). Optional at the concept level because the AI-describe path produces a name directly without a purpose.")
   name  string  @required  @description("Display name of the space.")
   participantIds  []string  @description("IDs of participants in this space.")
-  maxHumans  int  @default("5")  @description("Maximum number of human participants allowed in this space. Enforced at join time.")
-  maxAgents  int  @default("3")  @description("Maximum number of AI agent participants allowed in this space, inclusive of the owner's auto-joined assistant. Enforced at join time.")
+  maxHumans  int  @default("5")  @description("Maximum number of human participants allowed in this space (default 5). Enforced at join time by the participant pre-insert guard.")
+  maxAgents  int  @default("1")  @description("Maximum number of AI assistant participants allowed in this space. Always 1 under the one-assistant model (copresent #124): a space carries EXACTLY ONE assistant -- the owner's currently-active one, auto-joined by the autoJoinSI automation. Specialists and system agents never participate in spaces.")
   scheduledAt  datetime  @description("When the space is scheduled to start (if status is 'scheduled').")
-  selectedAgentIds  []string  @description("Specialist agent IDs the creator picked at creation time, joined in addition to the creator's assistant by the autoJoinSI automation.")
   settings {
     autoTranscribe  bool  @default("true")  @description("Whether to automatically transcribe audio.")
     defaultAITier  enum("text", "speechToText", "voiceToVoice", "voiceAvatar", "voiceVision")  @default("text")  @description("Default interaction tier for AI participants.")
