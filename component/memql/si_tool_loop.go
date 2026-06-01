@@ -141,24 +141,23 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 			// the server has no default.
 			tool, err := e.tools.Get(toolName)
 			args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
-			var toolResult *ToolCallResult
+			var toolResultStr string
 			if err != nil {
-				toolResult = &ToolCallResult{
-					IsError: true,
-					Content: []ToolResultContent{{Type: "text", Text: fmt.Sprintf("tool %q not found", toolName)}},
-				}
+				// Structured not_found error (#584) -- the model can reason
+				// about the type rather than parsing a raw string.
+				toolResultStr = newStructuredToolError(ToolErrorNotFound,
+					fmt.Sprintf("tool %q not found", toolName), nil).JSON()
 			} else {
-				toolResult, err = e.ExecuteTool(ctx, tool, args)
-				if err != nil {
-					toolResult = &ToolCallResult{
-						IsError: true,
-						Content: []ToolResultContent{{Type: "text", Text: err.Error()}},
-					}
+				toolResult, execErr := e.ExecuteTool(ctx, tool, args)
+				if execErr != nil {
+					se := ClassifyToolError(execErr)
+					toolResultStr = se.JSON()
+				} else {
+					b, _ := json.Marshal(toolResult)
+					toolResultStr = string(b)
 				}
 			}
 
-			toolResultJSON, _ := json.Marshal(toolResult)
-			toolResultStr := string(toolResultJSON)
 			toolResultCache[cacheKey] = toolResultStr
 			messages = append(messages, common.ChatMessage{
 				Role:       "tool",
@@ -174,12 +173,38 @@ func (e *MemQLEngine) InvokeSIChatWithTools(ctx context.Context, templateId stri
 
 // InvokeSIChatWithFilteredTools is like InvokeSIChatWithTools but only includes
 // the named tools. If toolNames is nil/empty, includes no tools (text-only).
+//
+// This is the back-compat entry point; it delegates to
+// InvokeSIChatWithFilteredToolsOpts with the loop's default hardening
+// options (issue #584). Existing callers are unaffected: nil options yields
+// built-in defaults so single-turn latency is unchanged.
 func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error) {
+	return e.InvokeSIChatWithFilteredToolsOpts(ctx, templateId, data, toolNames, nil)
+}
+
+// InvokeSIChatWithFilteredToolsOpts runs the hardened bounded tool loop
+// (issue #584). Beyond the filtered-tools behavior it adds:
+//   - structured, typed tool errors fed back to the model;
+//   - tool-set scoping (opts.ScopedTools -- the #588 hook);
+//   - per-tool timeout + retry-with-backoff (attempts surfaced as state);
+//   - deterministic stopping (loop detection on repeated identical calls);
+//   - context-budget trimming of oldest turns (opts.ContextBudget);
+//   - step-level idempotency (opts.IdempotencyKey -- the #582/#583 hook).
+//
+// opts may be nil for built-in defaults.
+func (e *MemQLEngine) InvokeSIChatWithFilteredToolsOpts(ctx context.Context, templateId string, data map[string]any, toolNames []string, opts *ToolLoopOptions) (string, error) {
 	if e == nil {
 		return "", fmt.Errorf("engine is nil")
 	}
 	if e.siRuntime == nil || e.prompts == nil || e.providers == nil {
 		return "", fmt.Errorf("SI runtime is not configured")
+	}
+
+	// Tool-set scoping hook (#588): when opts.ScopedTools is non-empty,
+	// restrict this call's tool set to that subset. Out-of-scope tools are
+	// ignored. No-op when no scope is supplied.
+	if opts != nil && len(opts.ScopedTools) > 0 {
+		toolNames = ScopeToolNames(toolNames, opts.ScopedTools)
 	}
 
 	// Extract conversation history from data BEFORE template rendering.
@@ -292,7 +317,59 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 	earlyTextCb := common.EarlyTextCallbackFromContext(ctx)
 	earlyTextEmitted := false
 
+	// Hardening state (#584).
+	//   - loopDetector trips deterministic stopping on repeated identical
+	//     tool calls so a model stuck on one failing call can't spin forever.
+	//   - idemStore honors step idempotency so a re-dispatched call reuses
+	//     the first result instead of repeating an external side effect.
+	//   - retryPolicy governs per-tool timeout + retry-with-backoff.
+	//   - budget, when enabled, trims the oldest turns when the window grows
+	//     past the token ceiling instead of erroring.
+	loopDetector := NewLoopDetector(0)
+	idemStore := newLoopIdempotencyStore()
+	retryPolicy := opts.resolvedRetryPolicy()
+	var budget ContextBudget
+	if opts != nil && opts.ContextBudget != nil {
+		budget = *opts.ContextBudget
+	}
+	stepIdempotencyKey := ""
+	if opts != nil {
+		stepIdempotencyKey = opts.IdempotencyKey
+	}
+
 	for iter := 0; iter < maxIterations; iter++ {
+		// Context-budget management: before each model call, if the window
+		// (system + history + accumulated tool turns) exceeds the budget,
+		// trim the oldest non-pinned turns and drop a summary note in their
+		// place. Pinned head = the system message (index 0); we keep the
+		// most-recent turns intact so the live thread is preserved.
+		if budget.MaxTokens > 0 {
+			sizes := make([]int, len(messages))
+			for i, m := range messages {
+				sizes[i] = budget.EstimateTokens(m.Content)
+			}
+			const keepTail = 6
+			if plan := PlanContextTrim(sizes, budget.MaxTokens, 1, keepTail); plan.DropCount > 0 {
+				summaryMsg := common.ChatMessage{Role: "system", Content: plan.Summary}
+				trimmed := make([]common.ChatMessage, 0, len(messages)-plan.DropCount+2)
+				trimmed = append(trimmed, messages[0]) // pinned system prompt
+				trimmed = append(trimmed, summaryMsg)  // trim note
+				trimmed = append(trimmed, messages[1+plan.DropCount:]...)
+				messages = trimmed
+				if e.Logger != nil {
+					e.Logger.Info("tool loop: context trimmed",
+						"template", templateId,
+						"iteration", iter,
+						"dropped", plan.DropCount,
+						"maxTokens", budget.MaxTokens,
+					)
+				}
+				opts.recordObservation(ctx, "note", plan.Summary, map[string]any{
+					"dropped":   plan.DropCount,
+					"maxTokens": budget.MaxTokens,
+				})
+			}
+		}
 		step, err := toolCaller.CallChatWithTools(ctx, messages, tools)
 		if err != nil {
 			if e.Logger != nil {
@@ -352,6 +429,31 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 			calls = calls[:maxToolCallsPerIt]
 		}
 
+		// Deterministic stopping: loop detection. If the model repeats an
+		// identical tool call (same name + canonical args) beyond the
+		// detector's threshold, stop with a recorded reason rather than
+		// spinning forever. A single repeated signature in a multi-call
+		// iteration is enough to trip -- the model is stuck.
+		for _, c := range calls {
+			sig := ToolCallSignature(c.Name, c.Arguments)
+			if loopDetector.Observe(sig) {
+				reason := fmt.Sprintf("repeated identical tool call %q -- stopping (loop detected)", strings.TrimSpace(c.Name))
+				if e.Logger != nil {
+					e.Logger.Warn("tool loop: "+string(StopLoopDetected),
+						"template", templateId,
+						"iteration", iter,
+						"tool", strings.TrimSpace(c.Name),
+						"toolsExecuted", toolsExecuted,
+					)
+				}
+				opts.recordObservation(ctx, "stop", reason, map[string]any{
+					"reason": string(StopLoopDetected),
+					"tool":   strings.TrimSpace(c.Name),
+				})
+				return assistantText, nil
+			}
+		}
+
 		// Log the tool calls for this iteration.
 		if e.Logger != nil {
 			logToolNames := make([]string, 0, len(calls))
@@ -373,6 +475,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 			name    string
 			rawArgs string
 			args    map[string]any
+			idemKey string
 		}
 		var pending []pendingCall
 		// Pre-allocated result slots (indexed by position in calls).
@@ -395,6 +498,23 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 				continue
 			}
 
+			// Idempotency: if a re-dispatched step (same step key + call
+			// signature) already produced a result, reuse it so we don't
+			// repeat an external side effect. The loop-local store covers
+			// within-turn re-dispatch; cross-turn persistence lands with
+			// #582/#583 behind the IdempotencyStore interface.
+			idemKey := IdempotencyKeyFor(stepIdempotencyKey, tn, rawArgs)
+			if prior, ok := idemStore.Get(idemKey); ok && strings.TrimSpace(prior) != "" {
+				resultMessages[i] = common.ChatMessage{
+					Role:       "tool",
+					Name:       tn,
+					ToolCallId: callId,
+					Content:    prior,
+				}
+				toolResultCache[cacheKey] = prior
+				continue
+			}
+
 			var args map[string]any
 			if rawArgs != "" {
 				_ = json.Unmarshal([]byte(rawArgs), &args)
@@ -414,6 +534,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 				name:    tn,
 				rawArgs: rawArgs,
 				args:    args,
+				idemKey: idemKey,
 			})
 			resultCacheKeys[i] = cacheKey
 		}
@@ -423,6 +544,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 			type execResult struct {
 				index     int
 				cacheKey  string
+				idemKey   string
 				resultStr string
 				msg       common.ChatMessage
 				isError   bool
@@ -439,26 +561,57 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 						activityCb(common.ToolActivityEvent{ToolName: p.name, Phase: "start", Label: p.rawArgs})
 					}
 
+					var toolResultStr string
+					isError := false
+
 					tool, toolErr := e.tools.Get(p.name)
-					var toolResult *ToolCallResult
 					if toolErr != nil {
+						// Unknown tool -- structured not_found error (model
+						// can recover by choosing a different tool).
 						if e.Logger != nil {
 							e.Logger.Warn("tool loop: tool not found", "tool", p.name, "error", toolErr)
 						}
-						toolResult = &ToolCallResult{
-							IsError: true,
-							Content: []ToolResultContent{{Type: "text", Text: fmt.Sprintf("tool %q not found", p.name)}},
-						}
+						se := newStructuredToolError(ToolErrorNotFound,
+							fmt.Sprintf("tool %q not found", p.name), nil)
+						toolResultStr = se.JSON()
+						isError = true
 					} else {
-						toolResult, toolErr = e.ExecuteTool(ctx, tool, p.args)
-						if toolErr != nil {
+						// Per-tool timeout + retry-with-backoff (#584). The
+						// retry policy wraps each attempt in a deadline,
+						// backs off transient/system failures, and surfaces
+						// the attempt count on the structured error.
+						result, se, attempts := retryPolicy.ExecuteWithRetry(ctx,
+							func(callCtx context.Context) (string, error) {
+								tr, err := e.ExecuteTool(callCtx, tool, p.args)
+								if err != nil {
+									return "", err
+								}
+								if tr != nil && tr.IsError {
+									// Tool reported a domain error in-band.
+									// Surface it as an error so it is
+									// classified + fed back structured, but
+									// do NOT mechanically retry an in-band
+									// error -- return the marshalled result.
+									b, _ := json.Marshal(tr)
+									return string(b), nil
+								}
+								b, _ := json.Marshal(tr)
+								return string(b), nil
+							})
+						if se != nil {
 							if e.Logger != nil {
-								e.Logger.Warn("tool loop: tool execution error", "tool", p.name, "error", toolErr)
+								e.Logger.Warn("tool loop: tool execution error",
+									"tool", p.name, "type", string(se.Type),
+									"attempts", attempts, "error", se.Message)
 							}
-							toolResult = &ToolCallResult{
-								IsError: true,
-								Content: []ToolResultContent{{Type: "text", Text: toolErr.Error()}},
-							}
+							toolResultStr = se.JSON()
+							isError = true
+						} else {
+							toolResultStr = result
+							// An in-band tool error still counts as an error
+							// for loop accounting + idempotency (don't cache
+							// a failed side effect as "done").
+							isError = strings.Contains(result, `"isError":true`)
 						}
 					}
 
@@ -466,16 +619,15 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 						activityCb(common.ToolActivityEvent{
 							ToolName: p.name,
 							Phase:    "end",
-							IsError:  toolResult != nil && toolResult.IsError,
+							IsError:  isError,
 							Label:    p.rawArgs,
 						})
 					}
 
-					toolResultJSON, _ := json.Marshal(toolResult)
-					toolResultStr := string(toolResultJSON)
 					results[resultIdx] = execResult{
 						index:     p.index,
 						cacheKey:  resultCacheKeys[p.index],
+						idemKey:   p.idemKey,
 						resultStr: toolResultStr,
 						msg: common.ChatMessage{
 							Role:       "tool",
@@ -483,7 +635,7 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 							ToolCallId: p.callId,
 							Content:    toolResultStr,
 						},
-						isError: toolResult != nil && toolResult.IsError,
+						isError: isError,
 					}
 				}(ri, pc)
 			}
@@ -495,6 +647,12 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 				resultMessages[r.index] = r.msg
 				if r.cacheKey != "" {
 					toolResultCache[r.cacheKey] = r.resultStr
+				}
+				// Record only SUCCESSFUL results in the idempotency store so
+				// a re-dispatch of a previously-failed call is retried, not
+				// short-circuited with the failure.
+				if !r.isError && r.idemKey != "" && strings.TrimSpace(r.resultStr) != "" {
+					idemStore.Put(r.idemKey, r.resultStr)
 				}
 				if !r.isError {
 					toolsExecuted++
@@ -511,12 +669,15 @@ func (e *MemQLEngine) InvokeSIChatWithFilteredTools(ctx context.Context, templat
 	}
 
 	if e.Logger != nil {
-		e.Logger.Warn("tool loop: exceeded max iterations",
+		e.Logger.Warn("tool loop: "+string(StopMaxIterations),
 			"template", templateId,
 			"maxIterations", maxIterations,
 			"toolsExecuted", toolsExecuted,
 		)
 	}
+	opts.recordObservation(ctx, "stop",
+		fmt.Sprintf("tool-calling exceeded max iterations (%d)", maxIterations),
+		map[string]any{"reason": string(StopMaxIterations), "maxIterations": maxIterations})
 	return "", fmt.Errorf("tool-calling exceeded max iterations (%d)", maxIterations)
 }
 

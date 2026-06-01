@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
@@ -520,9 +521,16 @@ StreamLoop:
 			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)
 			var content string
 			if execErr != nil {
+				// Structured, typed tool error (#584): classify the raw
+				// error into {type, message, retryable, userFixable} so the
+				// model can reason about whether to retry-with-corrected-args
+				// (validation/not_found) vs. give up (permission/system).
+				se := memql.ClassifyToolError(execErr)
 				r.logger.Warn("agent streaming: tool execution failed",
-					"tool", tc.Name, "error", execErr)
-				content = fmt.Sprintf(`{"error":%q}`, execErr.Error())
+					"tool", tc.Name, "type", string(se.Type),
+					"retryable", se.Retryable, "userFixable", se.UserFixable,
+					"error", execErr)
+				content = se.JSON()
 				sink.ToolResult(tc.ID, "", execErr.Error())
 				if strings.Contains(execErr.Error(), wheelContestedMarker) {
 					wheelContested = true
