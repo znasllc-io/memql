@@ -383,21 +383,21 @@ func (s *streamSession) handleAiSuggest(envelope *memqlv1.MemqlClientMessage, ms
 
 		switch domain {
 		case "spaces":
+			// Title-only suggestion for the CreateSpaceModal AI-describe
+			// path. Under the one-assistant space model (copresent #124)
+			// a space has 1+ humans plus EXACTLY ONE assistant
+			// (auto-joined by the backend autoJoinSI automation); there
+			// is no agent picker and no architecture choice. The client
+			// sends an empty `agents` array and consumes only `title`,
+			// so we neither require nor read agents here. No postProcess
+			// -- there are no agentIds / architecture fields to validate.
 			if strings.TrimSpace(description) == "" {
 				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "description is required in payload")
 				return
 			}
-			agents := extractSpaceAgents(payload)
-			if len(agents) == 0 {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "agents array is required for space suggestions")
-				return
-			}
-			messages = sihttp.BuildSpaceSuggestMessages(description, agents)
+			messages = sihttp.BuildSpaceSuggestMessages(description)
 			schema = sihttp.SpaceSuggestSchemaJSON
 			schemaName = "spaceConfigSuggest"
-			postProcess = func(suggestion map[string]any) {
-				sihttp.PostProcessSpaceSuggestion(suggestion, agents)
-			}
 
 		case "spaceTitle":
 			// Lightweight title-from-purpose path used by the
@@ -701,27 +701,6 @@ func callSuggestWithSchema(
 		return "", fmt.Errorf("no non-streaming chat provider available")
 	}
 	return provider.CallChat(ctx, messages)
-}
-
-// extractSpaceAgents extracts spaceAgent structs from a suggest payload map.
-func extractSpaceAgents(payload map[string]any) []sihttp.SpaceAgent {
-	agentsRaw, ok := payload["agents"].([]any)
-	if !ok {
-		return nil
-	}
-	var agents []sihttp.SpaceAgent
-	for _, a := range agentsRaw {
-		m, ok := a.(map[string]any)
-		if !ok {
-			continue
-		}
-		agents = append(agents, sihttp.SpaceAgent{
-			ID:          stringFromMap(m, "id"),
-			Name:        stringFromMap(m, "name"),
-			Description: stringFromMap(m, "description"),
-		})
-	}
-	return agents
 }
 
 // extractExistingAgents extracts existingAgent structs from a suggest payload map.
