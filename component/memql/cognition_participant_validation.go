@@ -13,11 +13,17 @@ import (
 )
 
 // participantPerUserAgentCap is the per-(user, space) maximum number of
-// active SI participants. Mirrors the existing per-space 3-agent UX rule
-// the polyphon path used to enforce, reinterpreted per-user as part of
-// the activity-model architectural correction (humans are 1-active-space,
-// agents are unbounded across spaces but capped per-team-per-space).
-const participantPerUserAgentCap = 3
+// active SI participants. Under the one-assistant space model
+// (copresent #124) a space carries EXACTLY ONE assistant -- the owner's
+// active one, auto-joined by autoJoinSI. Specialists and system agents
+// never participate in spaces, so the per-user SI cap is 1. This is the
+// Go-side enforcement of the declarative space.maxAgents=1 default.
+const participantPerUserAgentCap = 1
+
+// defaultMaxHumansPerSpace is the fallback human cap applied when a space
+// row carries no explicit (or a non-positive) maxHumans. Mirrors the
+// v1:cognition:space.maxHumans default.
+const defaultMaxHumansPerSpace = 5
 
 // validateAndStampParticipantPayload runs the engine pre-insert guard for
 // v1:cognition:participant rows that target SI participants. Phase 1.4 of
@@ -58,6 +64,12 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 
 	participantType := strings.TrimSpace(stringFromAny(payload["participantType"]))
 	if participantType != "si" {
+		// Human participants are capped per-space by the space's
+		// maxHumans (default 5). Other non-SI types (if any) pass
+		// through untouched.
+		if participantType == "human" {
+			return e.validateHumanParticipantCap(ctx, payload, mutationId)
+		}
 		return nil
 	}
 
@@ -190,6 +202,150 @@ func (e *MemQLEngine) countActiveSIParticipantsForUser(ctx context.Context, spac
 		}
 		rowForUser := strings.TrimSpace(stringFromAny(payload["forUserId"]))
 		if rowForUser != forUserId {
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// validateHumanParticipantCap enforces the space's maxHumans cap at
+// human-join time. Under the one-assistant model (copresent #124) a
+// space holds 1+ humans (max 5 by default) plus exactly one assistant;
+// this is the human side of that invariant. Only active inserts grow
+// the count (a 'left'/'idle' insert never does). Idempotent re-joins
+// land on the same content-addressed participant id, which is excluded
+// from the count, so re-joining an existing member never trips the cap.
+func (e *MemQLEngine) validateHumanParticipantCap(ctx context.Context, payload map[string]any, mutationId string) error {
+	newStatus := strings.TrimSpace(stringFromAny(payload["status"]))
+	if !humanInsertIsActive(newStatus) {
+		return nil
+	}
+
+	spaceId := strings.TrimSpace(stringFromAny(payload["spaceId"]))
+	if spaceId == "" {
+		return fmt.Errorf("v1:cognition:participant: spaceId required")
+	}
+
+	maxHumans, err := e.spaceMaxHumans(ctx, spaceId)
+	if err != nil {
+		return fmt.Errorf("v1:cognition:participant: human cap check failed: %w", err)
+	}
+
+	activeCount, err := e.countActiveHumanParticipants(ctx, spaceId, strings.TrimSpace(mutationId))
+	if err != nil {
+		return fmt.Errorf("v1:cognition:participant: human cap check failed: %w", err)
+	}
+
+	if humanCapExceeded(activeCount, maxHumans) {
+		return fmt.Errorf(
+			"v1:cognition:participant: space is full (max %d humans)", maxHumans)
+	}
+	return nil
+}
+
+// humanInsertIsActive reports whether an insert with the given status
+// grows the active human count. An empty status defaults to active
+// (mirrors mutationJoinSpaceAsHuman's coalesce(status, "active")).
+func humanInsertIsActive(status string) bool {
+	return status == "" || strings.EqualFold(status, "active")
+}
+
+// humanCapExceeded reports whether adding one more active human to a
+// space that already has activeCount active humans would exceed the
+// cap. Pure arithmetic, split out so the cap rule is unit-testable
+// without a database.
+func humanCapExceeded(activeCount, maxHumans int) bool {
+	return activeCount+1 > maxHumans
+}
+
+// spaceMaxHumans reads the latest version of the space row and returns
+// its maxHumans, falling back to defaultMaxHumansPerSpace when the row
+// is missing the field or carries a non-positive value.
+func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, spaceId string) (int, error) {
+	if e == nil {
+		return 0, fmt.Errorf("engine is nil")
+	}
+	db := e.database()
+	if db == nil {
+		return 0, fmt.Errorf("memory engine database not configured")
+	}
+
+	var nodes []memorynodes.MemoryNode
+	err := db.NewSelect().
+		Model(&nodes).
+		Where("concept = ?", memorynodes.ConceptCognitionSpace).
+		Where("id = ?", spaceId).
+		OrderExpr(`"createdAt" DESC`).
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return defaultMaxHumansPerSpace, nil
+		}
+		return 0, fmt.Errorf("scan space %q: %w", spaceId, err)
+	}
+	if len(nodes) == 0 {
+		return defaultMaxHumansPerSpace, nil
+	}
+
+	var payload map[string]any
+	if jerr := json.Unmarshal(nodes[0].Payload, &payload); jerr != nil {
+		return defaultMaxHumansPerSpace, nil
+	}
+	if n := intFromAny(payload["maxHumans"]); n > 0 {
+		return n, nil
+	}
+	return defaultMaxHumansPerSpace, nil
+}
+
+// countActiveHumanParticipants counts distinct human participant ids in
+// the given space whose latest version is status='active'. Excludes
+// excludeId (the participant id about to be inserted) so an idempotent
+// re-join of the same member is not counted twice. Mirrors the scan +
+// Go-side dedup approach of countActiveSIParticipantsForUser.
+func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, spaceId, excludeId string) (int, error) {
+	if e == nil {
+		return 0, fmt.Errorf("engine is nil")
+	}
+	db := e.database()
+	if db == nil {
+		return 0, fmt.Errorf("memory engine database not configured")
+	}
+
+	var nodes []memorynodes.MemoryNode
+	err := db.NewSelect().
+		Model(&nodes).
+		Where("concept = ?", memorynodes.ConceptCognitionParticipant).
+		Where("payload->>'spaceId' = ?", spaceId).
+		Where("payload->>'participantType' = ?", "human").
+		OrderExpr(`"createdAt" DESC`).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("scan human participants for space %q: %w", spaceId, err)
+	}
+
+	seen := make(map[string]struct{})
+	count := 0
+	for _, node := range nodes {
+		if node.ID == excludeId {
+			continue
+		}
+		if _, dup := seen[node.ID]; dup {
+			continue
+		}
+		seen[node.ID] = struct{}{}
+
+		var payload map[string]any
+		if jerr := json.Unmarshal(node.Payload, &payload); jerr != nil {
+			continue
+		}
+		status := strings.TrimSpace(stringFromAny(payload["status"]))
+		if !strings.EqualFold(status, "active") {
 			continue
 		}
 		count++

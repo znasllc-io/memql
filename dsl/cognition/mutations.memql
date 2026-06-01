@@ -127,7 +127,6 @@ mutation space mutationCreateDailySpace {
     private: true
     status: "active"
     active: true
-    selectedAgentIds: []
   }
 }
 
@@ -247,7 +246,6 @@ mutation space mutationCreateSpace {
     active            bool
     maxHumans         int
     maxAgents         int
-    selectedAgentIds  array
   }
   insert space {
     id: args.spaceId
@@ -264,8 +262,7 @@ mutation space mutationCreateSpace {
     args.utteranceIds
     active: coalesce(args.active, true)
     maxHumans: coalesce(args.maxHumans, 5)
-    maxAgents: coalesce(args.maxAgents, 3)
-    args.selectedAgentIds
+    maxAgents: coalesce(args.maxAgents, 1)
   }
 }
 

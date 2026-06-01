@@ -94,7 +94,6 @@ shape space spaceFull {
   payload.dailyDateKey
   payload.maxHumans
   payload.maxAgents
-  payload.selectedAgentIds
   row.createdAt
   row.createdBy
 }

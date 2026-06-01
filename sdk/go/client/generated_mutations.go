@@ -3712,22 +3712,21 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 //
 // Bound concept: space.
 type MutationCreateSpaceArgs struct {
-	SpaceId          string
-	Name             string
-	Description      string
-	Purpose          string
-	Settings         map[string]any
-	Status           string
-	SpaceType        string
-	ScheduledAt      string
-	TurnStateId      string
-	ParticipantIds   []any
-	UtteranceIds     []any
-	Active           bool
-	ActiveSet        bool // set true to send active; required because zero-value bool is ambiguous
-	MaxHumans        int
-	MaxAgents        int
-	SelectedAgentIds []any
+	SpaceId        string
+	Name           string
+	Description    string
+	Purpose        string
+	Settings       map[string]any
+	Status         string
+	SpaceType      string
+	ScheduledAt    string
+	TurnStateId    string
+	ParticipantIds []any
+	UtteranceIds   []any
+	Active         bool
+	ActiveSet      bool // set true to send active; required because zero-value bool is ambiguous
+	MaxHumans      int
+	MaxAgents      int
 }
 
 // MutationCreateSpace calls the engine mutation mutationCreateSpace.
@@ -3826,11 +3825,6 @@ func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
 		b.WriteString("maxAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxAgents))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
-	}
-	b.WriteString("selectedAgentIds: ")
-	b.WriteString(renderMemQLValue(args.SelectedAgentIds))
 	b.WriteString("})")
 	return b.String()
 }

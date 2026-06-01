@@ -114,7 +114,7 @@ func LogicAuditEventRetentionSweepBuild(args LogicAuditEventRetentionSweepArgs) 
 	return b.String()
 }
 
-// LogicAutoJoinSI -- Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's General Assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). Idempotent. Emits 'si.auto-joined' for observability. Specialist auto-join is deferred until the runtime can iterate selectedAgentIds.
+// LogicAutoJoinSI -- Triggered when a v1:cognition:space is created with status='active'. Auto-joins the creator's currently-active assistant as a v1:cognition:participant on the new space, with forUserId=creator and isGroupGA=true (so the participant guard prevents non-elevated callers from removing it via the Roster tab). This is the ONLY AI participant a space carries (maxAgents=1, one-assistant model copresent #124). Idempotent. Emits 'si.auto-joined' for observability.
 type LogicAutoJoinSIArgs struct {
 	Event map[string]any
 }
