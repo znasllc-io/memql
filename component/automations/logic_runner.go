@@ -91,6 +91,18 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		Logger:    r.logger,
 		Engine:    r.engine,
 		Evaluator: evaluator,
+		// Wire the engine's event bus so `emit` / publishEvent steps INSIDE a
+		// logic body can publish. Without this the StepContext.EventBus is nil
+		// and any logic that emits (e.g. logicAutoJoinSI's emitAutoJoinComplete,
+		// logicBootstrapSession's session.created) fails its emit step with
+		// "event bus not configured" -- and because the compiler topologically
+		// orders steps with no inter-dependency arbitrarily, that abort can land
+		// BEFORE the load-bearing mutation step (the SI join / session insert),
+		// so the side effect never runs at all. The engine's bus is wired at app
+		// bootstrap (SetEventBus) before this runner is constructed, so it's
+		// non-nil at runtime; stripped binaries with no bus keep the prior
+		// graceful "event bus not configured" error on the emit step. memql#572.
+		EventBus:  r.engine.EventBus(),
 		Execution: &AutomationExecution{
 			ID:             fmt.Sprintf("logic-%s-%d", fnName, time.Now().UnixNano()),
 			AutomationName: "logic:" + fnName,
