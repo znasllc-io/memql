@@ -1,0 +1,177 @@
+// mutations.memql
+//
+// Mutations in the harness namespace -- the write paths that
+// create and advance the harness working state (epic #590, #582).
+//
+// Plan lifecycle:   mutationCreateHarnessPlan
+// Step lifecycle:   mutationAddHarnessStep, mutationStartHarnessStep,
+//                   mutationCompleteHarnessStep, mutationFailHarnessStep
+// Observation:      mutationRecordHarnessObservation
+//
+// State-machine enforcement: the step status transitions (pending ->
+// ready -> running -> done/failed/blocked, blocked -> ready, failed ->
+// ready retry) cannot be expressed in the append-only DSL alone, so a
+// Go pre-insert guard (component/memql/harness_step_validation.go)
+// rejects invalid transitions (e.g. done -> running). The guard runs
+// on every step insert AND on every update() (which read-merges then
+// routes through executeInsert), so these mutations stay declarative.
+//
+// Provenance: the engine stamps createdBy from the authenticated
+// actor on every inserted version automatically; each mutation also
+// stamps provenanceMutation with its own name so the audit trail
+// names the transition, not just the actor.
+//
+// Authorization (owned tier): create paths stamp ownerUserId from
+// actor.userId; update paths read-merge the prior row so ownerUserId
+// is preserved. The conformance classifier reads actor.userId in the
+// insert bodies and buckets these as owned.
+
+use harness.concepts.{ plan, step, observation }
+
+// mutationCreateHarnessPlan
+// ==========
+// Create a v1:harness:plan in status='open'. ownerUserId is
+// server-stamped from actor.userId so the caller cannot land a plan
+// owned by someone else.
+@enabled
+@description("Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.")
+mutation plan mutationCreateHarnessPlan {
+  args {
+    planId  string
+    goal    string  @required
+    input   object
+  }
+  insert plan {
+    id: args.planId
+    ownerUserId: actor.userId
+    args.goal
+    status: "open"
+    args.input
+    provenanceMutation: "mutationCreateHarnessPlan"
+  }
+}
+
+// mutationAddHarnessStep
+// =======
+// Add a v1:harness:step to a plan in status='pending'. The engine
+// emits graph.node.created.*.v1:harness:step on the insert (the
+// `.*.` partition-segment wildcard caveat applies -- see CLAUDE.md).
+// attempt starts at 0; status starts at pending and walks the state
+// machine via the transition mutations below.
+@enabled
+@description("Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.")
+mutation step mutationAddHarnessStep {
+  args {
+    stepId          string
+    planId          string  @required
+    title           string  @required
+    idempotencyKey  string  @required
+    dependsOn       []string
+    input           object
+  }
+  insert step {
+    id: args.stepId
+    ownerUserId: actor.userId
+    args.planId
+    args.title
+    status: "pending"
+    args.idempotencyKey
+    args.dependsOn
+    args.input
+    attempt: 0
+    provenanceMutation: "mutationAddHarnessStep"
+  }
+}
+
+// mutationStartHarnessStep
+// =========
+// Claim a ready step: ready -> running. assignedAgent records which
+// agent claimed it; startedAt stamps the claim time. The engine
+// guard rejects this when the prior status is not 'ready' (e.g.
+// done -> running is invalid).
+@enabled
+@description("Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.")
+mutation step mutationStartHarnessStep {
+  args {
+    stepId         string  @required
+    assignedAgent  string
+  }
+  update step {
+    id: args.stepId
+    status: "running"
+    args.assignedAgent
+    startedAt: now()
+    provenanceMutation: "mutationStartHarnessStep"
+  }
+}
+
+// mutationCompleteHarnessStep
+// ============
+// Record a running step's result: running -> done (terminal). The
+// engine guard rejects this when the prior status is not 'running'.
+@enabled
+@description("Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.")
+mutation step mutationCompleteHarnessStep {
+  args {
+    stepId  string  @required
+    result  object
+  }
+  update step {
+    id: args.stepId
+    status: "done"
+    args.result
+    completedAt: now()
+    provenanceMutation: "mutationCompleteHarnessStep"
+  }
+}
+
+// mutationFailHarnessStep
+// ========
+// Mark a running step failed: running -> failed. errorMessage
+// carries the reason. A subsequent retry (failed -> ready) is a
+// separate write that bumps attempt; the engine guard enforces that
+// failStep only fires from 'running'.
+@enabled
+@description("Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.")
+mutation step mutationFailHarnessStep {
+  args {
+    stepId        string  @required
+    errorMessage  string
+  }
+  update step {
+    id: args.stepId
+    status: "failed"
+    args.errorMessage
+    completedAt: now()
+    provenanceMutation: "mutationFailHarnessStep"
+  }
+}
+
+// mutationRecordHarnessObservation
+// =================
+// Append a v1:harness:observation for a step -- what actually
+// happened. ownerUserId is stamped from actor.userId. content is the
+// embedding source; the harness embedding loop stores it into
+// node_vectors keyed by this observation's id so it becomes
+// semantically recall-able (#585).
+@enabled
+@description("Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).")
+mutation observation mutationRecordHarnessObservation {
+  args {
+    observationId  string
+    stepId         string  @required
+    planId         string
+    kind           string  @required  @enum("tool_result", "error", "note", "decision")
+    content        string  @required
+    data           object
+  }
+  insert observation {
+    id: args.observationId
+    ownerUserId: actor.userId
+    args.stepId
+    args.planId
+    args.kind
+    args.content
+    args.data
+  }
+}

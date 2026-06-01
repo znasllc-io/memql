@@ -27,6 +27,14 @@ const (
 	ConceptDataLog    = "v1:data:log"
 )
 
+// Harness domain concepts (v1:harness:*) -- the MemQL-native agent
+// harness working-state spine (epic #590, foundational issue #582).
+const (
+	ConceptHarnessPlan        = "v1:harness:plan"
+	ConceptHarnessStep        = "v1:harness:step"
+	ConceptHarnessObservation = "v1:harness:observation"
+)
+
 // Platform domain concepts (v1:platform:*)
 const (
 	ConceptPlatformGlobalSecret      = "v1:platform:globalSecret"
