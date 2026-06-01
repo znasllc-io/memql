@@ -23,6 +23,13 @@ const (
 	relationshipTypeContains  = "contains"
 	relationshipTypeOwns      = "owns"
 	relationshipTypeCreatedBy = "createdBy"
+	// dependsOn models a DAG in-edge between rows (a step depends on other
+	// steps): an outgoing edge whose field is a []string of target ids. Used
+	// by the harness state model (v1:harness:step, #582). Registered so the
+	// engine accepts the concept; graph-expansion traversal of dependsOn edges
+	// is intentionally not wired here (no query needs it yet -- the DAG is read
+	// from the step's dependsOn field directly by the controller, #583).
+	relationshipTypeDependsOn = "dependsOn"
 )
 
 type relationshipRegistry struct {
@@ -57,6 +64,8 @@ func canonicalRelationshipType(value string) (string, bool) {
 		return relationshipTypeOwns, true
 	case "createdby":
 		return relationshipTypeCreatedBy, true
+	case "dependson":
+		return relationshipTypeDependsOn, true
 	default:
 		return "", false
 	}
