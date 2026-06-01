@@ -1,0 +1,22 @@
+// prompts.memql -- harness namespace (#586).
+//
+// The distill prompt for memory consolidation: given a similarity-
+// grouped cluster of episodic nodes (observations / steps / plans),
+// extract at most one stable, durable belief -- a fact, preference, or
+// learned outcome worth keeping across plans. Structured-output path
+// (the consolidation handler calls si("consolidateMemory", ...) and
+// parses the JSON), so the prompt instructs JSON-only output.
+//
+// The distilled belief feeds the dedup step: its `content` is run
+// through similarTo against existing v1:harness:semanticMemory rows,
+// then either reinforces a match or is written as a new belief with
+// the cluster's episode ids as sourceEpisodes provenance.
+
+@defaultProvider("chat54Mini")
+@templateFile("prompts/consolidateMemory.tmpl")
+@description("Distill at most one durable belief (fact / preference / outcome) from a similarity-grouped cluster of episodic harness nodes (#586). Structured-output: returns {distilled, kind, content, confidence}. distilled=false when the cluster holds nothing stable enough to keep (transient chatter, one-off tool noise). content is a single self-contained natural-language statement -- the embedding source for similarTo dedup + recall (#585). Conservative by design: it is better to NOT distill than to mint a low-value belief, because every belief costs recall budget and must be decayed back out later.")
+prompt consolidateMemory {
+  episodes      []object  @required  @description("The similarity-grouped cluster of episodic nodes to distill from. Each entry carries {id, kind, content, createdAt} -- the embedding-source text plus enough metadata for the model to judge recurrence and recency.")
+  existingHints []object  @description("Optional: the top existing semantic memories near this cluster (from a similarTo pre-pass), so the model can phrase a reinforcement consistently with how the belief is already worded -- improves dedup hit rate. Each entry: {content, kind}.")
+  ownerContext  object    @description("Optional lightweight owner context (e.g. display name / role) so first-person preferences distill naturally ('the user prefers X'). Opaque; never required.")
+}
