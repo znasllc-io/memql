@@ -329,9 +329,17 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 		if looksLikeNestedBuiltin(val) {
 			resolved, err := sharedArgEvaluator.evaluateValue(evaluator, val)
 			if err != nil {
+				// Surface the silent fallback: a builtin literal that fails to
+				// resolve is passed through verbatim and would land in the
+				// outgoing mutation arg as raw expression text (the memql#574
+				// ghost-SI failure mode). Log so it is never silent again.
+				evaluator.Warnf("builtin arg resolution failed; passing literal through",
+					"expression", val, "error", err.Error())
 				return v, nil
 			}
 			if resolved == nil {
+				evaluator.Warnf("builtin arg resolved to nil; passing literal through",
+					"expression", val)
 				return v, nil
 			}
 			return resolved, nil
