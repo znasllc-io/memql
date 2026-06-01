@@ -17,9 +17,11 @@ func TestCanonicalRelationshipType(t *testing.T) {
 		"owns":          relationshipTypeOwns,
 		"createdBy":     relationshipTypeCreatedBy,
 		"dependsOn":     relationshipTypeDependsOn,
+		"formedFrom":    relationshipTypeFormedFrom,
 		// case / underscore insensitivity (normalized lower + strip "_").
-		"DEPENDS_ON": relationshipTypeDependsOn,
-		"dependson":  relationshipTypeDependsOn,
+		"DEPENDS_ON":  relationshipTypeDependsOn,
+		"dependson":   relationshipTypeDependsOn,
+		"formed_from": relationshipTypeFormedFrom,
 	}
 	for input, want := range valid {
 		got, ok := canonicalRelationshipType(input)
