@@ -476,6 +476,24 @@ func (e *Evaluator) EvaluateValue(expr string) (any, error) {
 		}
 	}
 
+	// Bare known-step identifier (no '$', no dot, no call): resolve to the
+	// step's result. Mirrors the arg-time evaluator (MutationExecutor.evaluateValue,
+	// memql#575) so a selector builtin like coalesce(getActiveGA, getFallbackGA)
+	// in a LOGIC body picks the first step that produced rows instead of
+	// rendering the identifier as its OWN NAME (a literal string). That literal
+	// then defeats the downstream `getGA.First().id` read and feeds an
+	// unevaluated coalesce(...) expression into a mutation arg -- the memql#580
+	// ghost-SI root cause. The logic-runner path bottoms out here (via
+	// EvaluateStepReference / evaluateScalarArg), and #575 only patched the
+	// arg-time evaluator, leaving this one literalising bare steps. Guarded on a
+	// real step id so non-step bare literals keep prior behaviour (a bare
+	// identifier that is NOT a known step still renders as itself below).
+	if isBareIdentifier(expr) {
+		if result, ok := e.StepResultValue(expr); ok {
+			return result, nil
+		}
+	}
+
 	// Otherwise treat as string with possible embedded expressions
 	resolved, err := e.EvaluateString(expr)
 	return resolved, err
