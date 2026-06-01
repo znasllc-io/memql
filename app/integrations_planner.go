@@ -15,5 +15,6 @@ package app
 func (a *App) integrationsPlanner() {
 	a.integrationsCore()
 	a.setupPlannerIntegration()
+	a.setupHarnessReconciler()
 	a.Logger.Info("planner integration providers registered")
 }

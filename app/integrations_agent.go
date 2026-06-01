@@ -20,6 +20,7 @@ import (
 func (a *App) integrationsAgent() {
 	a.integrationsCore()
 	a.selectSTTProvider()
+	a.setupHarnessReconciler()
 	a.Logger.Info("agent integration providers registered")
 }
 
