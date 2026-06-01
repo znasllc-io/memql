@@ -26,7 +26,7 @@
 // is preserved. The conformance classifier reads actor.userId in the
 // insert bodies and buckets these as owned.
 
-use harness.concepts.{ plan, step, observation }
+use harness.concepts.{ plan, step, observation, semanticMemory, consolidationCursor }
 
 // mutationCreateHarnessPlan
 // ==========
@@ -173,5 +173,176 @@ mutation observation mutationRecordHarnessObservation {
     args.kind
     args.content
     args.data
+  }
+}
+
+// =====================================================================
+// Memory consolidation (#586) -- semanticMemory + watermark writes.
+//
+// These are the write paths for the scheduled consolidation automation
+// (dsl/harness/automations.memql): it distills episodic memory into
+// durable beliefs, reinforces beliefs it has seen before instead of
+// duplicating them, decays + prunes beliefs that go unreinforced, and
+// advances the per-owner watermark so the next run is incremental.
+//
+// Appended for #586 -- the #582 mutation blocks above are untouched.
+//
+// Arithmetic gotcha: the MemQL parser has no arithmetic on number /
+// datetime fields (the same limitation that killed the planner's
+// tokenBudgetSoftWarning automation -- see root CLAUDE.md). So the
+// reinforce / decay / advance mutations take the already-computed
+// confidence / reinforceCount / episodesSeen VALUES as args; the Go
+// consolidation loop does the bump + decay math and hands the result
+// in. The mutation stays declarative; the math lives where the engine
+// can do it.
+//
+// Authorization (owned tier): mutationCreateHarnessSemanticMemory +
+// mutationAdvanceHarnessConsolidationCursor stamp ownerUserId from
+// actor.userId, so the conformance classifier buckets them as owned.
+// The reinforce / decay / prune update paths also re-stamp
+// ownerUserId: actor.userId so they classify owned too -- consolidation
+// only ever rewrites the calling owner's own beliefs. The
+// semanticMemory + consolidationCursor concepts are pulled into scope
+// by the file-top `use harness.concepts` import (extended for #586).
+
+// mutationCreateHarnessSemanticMemory
+// ===========================
+// Write a brand-new distilled belief. confidence + reinforceCount +
+// lastReinforced seed the decay clock; sourceEpisodes carries the
+// provenance back to the episodic nodes this belief was distilled
+// from. The consolidation loop calls this only after similarTo found
+// NO matching existing belief (otherwise it reinforces instead).
+//
+// content is the embedding source -- after this insert, the embedding
+// loop stores it into node_vectors keyed by this memory's id so the
+// belief is itself similarTo-recall-able (for #585 recall AND for the
+// next run's own dedup step).
+@enabled
+@description("Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).")
+mutation semanticMemory mutationCreateHarnessSemanticMemory {
+  args {
+    memoryId        string
+    kind            string    @required  @enum("fact", "preference", "outcome")
+    content         string    @required
+    sourceEpisodes  []string  @required
+    confidence      float
+    lastReinforced  datetime
+  }
+  insert semanticMemory {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    args.kind
+    args.content
+    args.sourceEpisodes
+    confidence: coalesce(args.confidence, 0.5)
+    reinforceCount: 1
+    lastReinforced: coalesce(args.lastReinforced, now())
+    status: "active"
+    provenanceMutation: "mutationCreateHarnessSemanticMemory"
+  }
+}
+
+// mutationReinforceHarnessSemanticMemory
+// ==============================
+// Dedup path: a later run distilled a belief that similarTo matched an
+// existing one. Instead of writing a duplicate, bump confidence +
+// reinforceCount and reset the decay clock (lastReinforced = now). This
+// is what makes re-running over the same episodes idempotent at the
+// belief level -- no new rows, just a stronger, fresher belief.
+//
+// confidence + reinforceCount are passed in already-computed (the Go
+// loop does the bump math; the parser can't). sourceEpisodes is the
+// MERGED, deduped provenance list (prior + this run's contributors),
+// so the audit trail grows as evidence accumulates.
+@enabled
+@description("Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).")
+mutation semanticMemory mutationReinforceHarnessSemanticMemory {
+  args {
+    memoryId        string    @required
+    confidence      float     @required
+    reinforceCount  int       @required
+    sourceEpisodes  []string  @required
+  }
+  update semanticMemory {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    args.confidence
+    args.reinforceCount
+    args.sourceEpisodes
+    lastReinforced: now()
+    provenanceMutation: "mutationReinforceHarnessSemanticMemory"
+  }
+}
+
+// mutationDecayHarnessSemanticMemory
+// ==========================
+// Forgetting: a belief that has gone unreinforced past
+// MEMQL_HARNESS_CONSOLIDATION_DECAY_DAYS loses confidence. The decayed
+// confidence is computed engine-side (from now - lastReinforced) and
+// passed in. lastReinforced is NOT reset here -- decay must keep
+// measuring age from the last real reinforcement, otherwise a belief
+// could never age out.
+@enabled
+@description("Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via mutationPruneHarnessSemanticMemory.")
+mutation semanticMemory mutationDecayHarnessSemanticMemory {
+  args {
+    memoryId    string  @required
+    confidence  float   @required
+  }
+  update semanticMemory {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    args.confidence
+    provenanceMutation: "mutationDecayHarnessSemanticMemory"
+  }
+}
+
+// mutationPruneHarnessSemanticMemory
+// ==========================
+// A belief that decayed below MEMQL_HARNESS_CONSOLIDATION_PRUNE_CONFIDENCE
+// is retired: status -> pruned. Soft-delete (the row stays, append-only
+// model has no row-removal mutation) -- recall (#585) and the next run's
+// dedup step filter status=='active', so a pruned belief is invisible
+// without being lost from the audit trail. Mirrors the safety / platform
+// retention crons' observation-only pattern.
+@enabled
+@description("Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).")
+mutation semanticMemory mutationPruneHarnessSemanticMemory {
+  args {
+    memoryId  string  @required
+  }
+  update semanticMemory {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    status: "pruned"
+    provenanceMutation: "mutationPruneHarnessSemanticMemory"
+  }
+}
+
+// mutationAdvanceHarnessConsolidationCursor
+// =================================
+// Move the per-owner watermark forward after a run. watermark is set to
+// the engine-computed max(createdAt) over the batch just processed, so
+// the next run reads only episodes newer than this -- the mechanism that
+// keeps consolidation INCREMENTAL (cost bounded by the new-episode
+// delta, not total history). One cursor row per owner, content-addressed
+// on ownerUserId, updated in place: the insert {} path with a stable id
+// upserts via the engine's ON CONFLICT, so the same call both creates
+// the cursor on first run and advances it on every later run.
+@enabled
+@description("Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).")
+mutation consolidationCursor mutationAdvanceHarnessConsolidationCursor {
+  args {
+    cursorId      string
+    watermark     datetime  @required
+    episodesSeen  int
+  }
+  insert consolidationCursor {
+    id: args.cursorId
+    ownerUserId: actor.userId
+    args.watermark
+    lastRunAt: now()
+    args.episodesSeen
+    provenanceMutation: "mutationAdvanceHarnessConsolidationCursor"
   }
 }

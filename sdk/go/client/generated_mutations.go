@@ -108,6 +108,44 @@ func MutationAddHarnessStepBuild(args MutationAddHarnessStepArgs) string {
 	return b.String()
 }
 
+// MutationAdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
+//
+// Bound concept: consolidationCursor.
+type MutationAdvanceHarnessConsolidationCursorArgs struct {
+	CursorId     string
+	Watermark    string
+	EpisodesSeen int
+}
+
+// MutationAdvanceHarnessConsolidationCursor calls the engine mutation mutationAdvanceHarnessConsolidationCursor.
+func (qc *QueryClient) MutationAdvanceHarnessConsolidationCursor(ctx context.Context, args MutationAdvanceHarnessConsolidationCursorArgs) (*Result, error) {
+	call := MutationAdvanceHarnessConsolidationCursorBuild(args)
+	return qc.executeNamed(ctx, "mutationAdvanceHarnessConsolidationCursor", call)
+}
+
+func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessConsolidationCursorArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAdvanceHarnessConsolidationCursor({")
+	if args.CursorId != "" {
+		b.WriteString("cursorId: ")
+		b.WriteString(fmt.Sprintf("%q", args.CursorId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("watermark: ")
+	b.WriteString(fmt.Sprintf("%q", args.Watermark))
+	if args.EpisodesSeen != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("episodesSeen: ")
+		b.WriteString(fmt.Sprintf("%v", args.EpisodesSeen))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
 //
 // Bound concept: accessRequest.
@@ -2458,6 +2496,61 @@ func MutationCreateHarnessPlanBuild(args MutationCreateHarnessPlanArgs) string {
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateHarnessSemanticMemory -- Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
+//
+// Bound concept: semanticMemory.
+type MutationCreateHarnessSemanticMemoryArgs struct {
+	MemoryId string
+	// Enum: fact | preference | outcome
+	Kind           string
+	Content        string
+	SourceEpisodes []string
+	Confidence     any
+	LastReinforced string
+}
+
+// MutationCreateHarnessSemanticMemory calls the engine mutation mutationCreateHarnessSemanticMemory.
+func (qc *QueryClient) MutationCreateHarnessSemanticMemory(ctx context.Context, args MutationCreateHarnessSemanticMemoryArgs) (*Result, error) {
+	call := MutationCreateHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateHarnessSemanticMemory", call)
+}
+
+func MutationCreateHarnessSemanticMemoryBuild(args MutationCreateHarnessSemanticMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateHarnessSemanticMemory({")
+	if args.MemoryId != "" {
+		b.WriteString("memoryId: ")
+		b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(fmt.Sprintf("%q", args.Content))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceEpisodes: ")
+	b.WriteString(renderMemQLValue(args.SourceEpisodes))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastReinforced: ")
+	b.WriteString(fmt.Sprintf("%q", args.LastReinforced))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4853,6 +4946,34 @@ func MutationCreateWorkerTokenIdentityBuild(args MutationCreateWorkerTokenIdenti
 	return b.String()
 }
 
+// MutationDecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via mutationPruneHarnessSemanticMemory.
+//
+// Bound concept: semanticMemory.
+type MutationDecayHarnessSemanticMemoryArgs struct {
+	MemoryId   string
+	Confidence any
+}
+
+// MutationDecayHarnessSemanticMemory calls the engine mutation mutationDecayHarnessSemanticMemory.
+func (qc *QueryClient) MutationDecayHarnessSemanticMemory(ctx context.Context, args MutationDecayHarnessSemanticMemoryArgs) (*Result, error) {
+	call := MutationDecayHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "mutationDecayHarnessSemanticMemory", call)
+}
+
+func MutationDecayHarnessSemanticMemoryBuild(args MutationDecayHarnessSemanticMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationDecayHarnessSemanticMemory({")
+	b.WriteString("memoryId: ")
+	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationDeleteAgent -- Soft-delete an agent (active:false, deleted:true).
 //
 // Bound concept: agent.
@@ -6203,6 +6324,28 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	return b.String()
 }
 
+// MutationPruneHarnessSemanticMemory -- Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
+//
+// Bound concept: semanticMemory.
+type MutationPruneHarnessSemanticMemoryArgs struct {
+	MemoryId string
+}
+
+// MutationPruneHarnessSemanticMemory calls the engine mutation mutationPruneHarnessSemanticMemory.
+func (qc *QueryClient) MutationPruneHarnessSemanticMemory(ctx context.Context, args MutationPruneHarnessSemanticMemoryArgs) (*Result, error) {
+	call := MutationPruneHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "mutationPruneHarnessSemanticMemory", call)
+}
+
+func MutationPruneHarnessSemanticMemoryBuild(args MutationPruneHarnessSemanticMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationPruneHarnessSemanticMemory({")
+	b.WriteString("memoryId: ")
+	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
 //
 // Bound concept: observation.
@@ -6615,6 +6758,46 @@ func MutationRedeemWorkerPairingCodeBuild(args MutationRedeemWorkerPairingCodeAr
 		b.WriteString("redeemedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedeemedFromIP))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
+//
+// Bound concept: semanticMemory.
+type MutationReinforceHarnessSemanticMemoryArgs struct {
+	MemoryId       string
+	Confidence     any
+	ReinforceCount int
+	SourceEpisodes []string
+}
+
+// MutationReinforceHarnessSemanticMemory calls the engine mutation mutationReinforceHarnessSemanticMemory.
+func (qc *QueryClient) MutationReinforceHarnessSemanticMemory(ctx context.Context, args MutationReinforceHarnessSemanticMemoryArgs) (*Result, error) {
+	call := MutationReinforceHarnessSemanticMemoryBuild(args)
+	return qc.executeNamed(ctx, "mutationReinforceHarnessSemanticMemory", call)
+}
+
+func MutationReinforceHarnessSemanticMemoryBuild(args MutationReinforceHarnessSemanticMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationReinforceHarnessSemanticMemory({")
+	b.WriteString("memoryId: ")
+	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(fmt.Sprintf("%q", args.Confidence))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reinforceCount: ")
+	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceEpisodes: ")
+	b.WriteString(renderMemQLValue(args.SourceEpisodes))
 	b.WriteString("})")
 	return b.String()
 }

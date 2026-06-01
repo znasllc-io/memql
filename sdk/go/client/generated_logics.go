@@ -194,6 +194,26 @@ func LogicConflictDetectionBuild(args LogicConflictDetectionArgs) string {
 	return b.String()
 }
 
+// LogicConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors logicRefreshDueKnowledgeDomains).
+type LogicConsolidateMemoryArgs struct {
+	Event map[string]any
+}
+
+// LogicConsolidateMemory calls the engine logic logicConsolidateMemory.
+func (qc *QueryClient) LogicConsolidateMemory(ctx context.Context, args LogicConsolidateMemoryArgs) (*Result, error) {
+	call := LogicConsolidateMemoryBuild(args)
+	return qc.executeNamed(ctx, "logicConsolidateMemory", call)
+}
+
+func LogicConsolidateMemoryBuild(args LogicConsolidateMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("logicConsolidateMemory({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicDeregisterNode -- Records node shutdown by creating a v1:cluster:spawnEvent with action='stopped' and reason='system.shutdown'. Fires when the node is going down.
 type LogicDeregisterNodeArgs struct {
 	Event map[string]any

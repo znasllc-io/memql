@@ -1,0 +1,44 @@
+// automations.memql -- harness namespace (#586, epic #590).
+//
+// Memory consolidation: the scheduled pass that distills raw EPISODIC
+// memory (plans / steps / observations from #582) into durable
+// SEMANTIC memory (v1:harness:semanticMemory). This is what makes the
+// harness feel cognitive rather than merely durable -- analogous to
+// memory consolidation during sleep.
+//
+// The whole point is that this is a scheduled DSL automation that reads
+// and writes the SAME graph. Provenance is the killer feature: every
+// distilled belief (semanticMemory.sourceEpisodes) traces back to the
+// episodic nodes that formed it, so a belief is always auditable. No
+// external job system, no separate belief store, no separate watermark
+// file -- it is all MemoryNodes.
+//
+//   scheduled tick
+//     -> read recent episodic nodes since the per-owner watermark
+//     -> group by similarity
+//     -> LLM distill: extract stable facts / preferences / outcomes
+//     -> dedup via similarTo against existing semanticMemory rows
+//          match    -> reinforce (bump confidence, reset decay clock,
+//                      merge provenance) -- NO duplicate row
+//          no match -> write a new semanticMemory with sourceEpisodes
+//     -> decay + prune stale, unreinforced beliefs
+//     -> advance the per-owner watermark (incremental: next run reads
+//        only newer episodes, so cost is bounded as history grows)
+//
+// SCHEDULE: daily 02:45 UTC. Offset 5 minutes past the safety crons
+// (02:35 / 02:40) and 15 past the knowledge / platform crons (02:30)
+// so the nightly maintenance crons don't contend on the same DB
+// window. Daily cadence matches the "consolidation during sleep"
+// framing -- beliefs are durable, so distilling once a day is plenty;
+// the watermark guarantees nothing is missed between runs.
+
+use harness.logic.{ logicConsolidateMemory }
+
+@enabled
+@trigger(schedule="0 45 2 * * *")
+@description("Daily 02:45 UTC memory consolidation (#586). Per owner: reads episodic nodes (plans / steps / observations) created since that owner's v1:harness:consolidationCursor watermark, groups them by similarity, LLM-distills stable facts / preferences / outcomes, dedups each candidate via similarTo against existing v1:harness:semanticMemory rows (reinforce on match -- bump confidence + reset the decay clock + merge provenance, no duplicate; write a new belief with sourceEpisodes provenance on no match), decays + prunes stale unreinforced beliefs, then advances the watermark so the next run is incremental (cost bounded by the new-episode delta, not total history). Schedule offset past the other nightly crons to avoid DB-window contention.")
+automation consolidateMemory {
+  step run {
+    logic consolidateMemory { event: event }
+  }
+}
