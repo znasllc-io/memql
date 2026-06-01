@@ -107,6 +107,28 @@ jobs:
       - name: test sdk/ts
         run: make sdk-ts-test
 
+  # Harness eval gate (#589). Runs the agent-harness eval scaffold over a
+  # fixed task-fixture set, scoring each fixture on task success / step count
+  # / tool-call count / token cost / wall-clock, then failing on a configured
+  # regression threshold (component/harness DefaultThreshold). This is the
+  # fast lane: the fixtures are driven through the harness reconciler over an
+  # in-memory graph -- NO Postgres, NO LLM -- so it runs on every PR in
+  # milliseconds and catches a harness change that reorders dispatch,
+  # mis-fails a plan, or makes the loop chattier. The heavier DB/LLM-backed
+  # eval (real plans against a live engine) is gated out of CI for now; this
+  # fixture-based check is the regression tripwire. See cmd/harness-eval.
+  harness-eval:
+    name: harness eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: run harness eval (regression gate)
+        run: go run ./cmd/harness-eval
+
   # DSL-lint gate. Runs `memqllint` over the embedded DSL tree on
   # every PR + main push, catching the class of issues the runtime
   # loader's WARN+ skip paths would surface at boot (parse failures,
