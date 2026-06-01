@@ -114,3 +114,26 @@ func TestBareIdentifier_NonStep_StaysLiteral(t *testing.T) {
 		t.Fatalf("non-step bare identifier = %#v, want literal %q", got, "writer")
 	}
 }
+
+// Fail-closed regression for memql#580: a builtin expression arg that does not
+// resolve must NOT pass its raw source text through into the mutation arg.
+// Previously `coalesce(getGA.First().id, "")` over a missing/garbage getGA
+// returned the literal string `coalesce(getGA.First().id, "")`, which became
+// the ghost SI agentId. resolveArgValueRef must now return nil instead.
+func TestResolveArgValueRef_UnresolvedBuiltin_DropsToNil(t *testing.T) {
+	eval := automations.NewEvaluator()
+	// Reproduce the exact production pre-fix state: getGA is PRESENT but holds a
+	// non-navigable value (the literal step name "getActiveGA" the broken
+	// logic-runner coalesce produced before memql#580 item 1). getGA.First().id
+	// then resolves to nil, coalesce's "" arm is empty (skipped), so the whole
+	// expression is nil -- and must NOT pass the raw literal through.
+	eval.SetStepResult("getGA", &automations.StepResult{StepId: "getGA", Status: "success", Result: "getActiveGA"})
+
+	got, err := resolveArgValueRef(`coalesce(getGA.First().id, "")`, eval)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("unresolved builtin arg = %#v, want nil (never the raw expression literal)", got)
+	}
+}

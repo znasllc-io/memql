@@ -77,12 +77,14 @@ logic logicAutoJoinSI {
   // (ownerUserId, roleSlug="assistant").
   //
   // Both queries return 0 or 1 rows in the steady state; the actual
-  // canonical id is pulled out via coalesce(..., "") -- the
-  // function-step arg evaluator's path resolver navigates
-  // getGA.First().id only when the expression is wrapped in a
-  // recognised builtin like coalesce/first/cond (sharedArgEvaluator
-  // path); a naked `getGA.First().id` would render as a literal
-  // string into the outgoing mutation.
+  // canonical id is pulled out via coalesce(getGA.First().id, "").
+  // memql#580: bare step identifiers (getActiveGA / getFallbackGA) now
+  // resolve to their step result in BOTH the logic-runner evaluator and
+  // the arg-time evaluator (#575 fixed only the latter, which is why this
+  // automation kept inserting a ghost SI whose agentId was the unevaluated
+  // literal `coalesce(getGA.First().id, "")`). A builtin arg that still
+  // fails to resolve now drops to nil instead of passing its raw source
+  // text through, so an unevaluated expression can never reach a mutation.
   getUser := queryUserById({ userId: args.event.payload.ownerUserId })
   activeAssistantId := coalesce(getUser.First().payload.preferences.activeAssistantId, "")
 
@@ -97,10 +99,10 @@ logic logicAutoJoinSI {
     queryAssistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
   }
 
-  // coalesce(activeGA, fallbackGA) picks whichever query produced
-  // a row. Both .First() accessors are wrapped so the path
-  // resolver evaluates them rather than rendering as literal
-  // strings (same caveat as the original getGA.First().id read).
+  // coalesce(getActiveGA, getFallbackGA) picks whichever query produced
+  // a row -- the bare step identifiers resolve to their step results
+  // (memql#580), so getGA holds the ExecuteResult and getGA.First().id
+  // navigates it, rather than getGA collapsing to a literal step name.
   getGA := coalesce(getActiveGA, getFallbackGA)
 
   // Existence check on the participant uses the SAME agent id the

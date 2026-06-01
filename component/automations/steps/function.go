@@ -329,18 +329,20 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 		if looksLikeNestedBuiltin(val) {
 			resolved, err := sharedArgEvaluator.evaluateValue(evaluator, val)
 			if err != nil {
-				// Surface the silent fallback: a builtin literal that fails to
-				// resolve is passed through verbatim and would land in the
-				// outgoing mutation arg as raw expression text (the memql#574
-				// ghost-SI failure mode). Log so it is never silent again.
-				evaluator.Warnf("builtin arg resolution failed; passing literal through",
+				// Fail closed: `val` IS a recognised builtin expression here, so
+				// its raw source text is never a valid value. Passing it through
+				// verbatim is exactly how an unevaluated `coalesce(...)` literal
+				// landed in a mutation arg and became the ghost-SI agentId
+				// (memql#574/#580). Return nil so the literal can never reach the
+				// graph as data; the caller's guards decide what nil means.
+				evaluator.Warnf("builtin arg resolution failed; dropping to nil",
 					"expression", val, "error", err.Error())
-				return v, nil
+				return nil, nil
 			}
 			if resolved == nil {
-				evaluator.Warnf("builtin arg resolved to nil; passing literal through",
+				evaluator.Warnf("builtin arg resolved to nil",
 					"expression", val)
-				return v, nil
+				return nil, nil
 			}
 			return resolved, nil
 		}
