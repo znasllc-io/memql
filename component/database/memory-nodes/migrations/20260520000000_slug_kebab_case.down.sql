@@ -25,10 +25,12 @@ $$ LANGUAGE SQL IMMUTABLE;
 CREATE OR REPLACE FUNCTION snake_slug_array(arr jsonb) RETURNS jsonb AS $$
   SELECT CASE
     WHEN arr IS NULL OR jsonb_typeof(arr) <> 'array' THEN arr
-    ELSE (
+    -- COALESCE to '[]' so an EMPTY array doesn't become SQL NULL (jsonb_agg
+    -- over zero rows) and null the NOT-NULL payload via strict jsonb_set. memql#624.
+    ELSE COALESCE((
       SELECT jsonb_agg(snake_slug(elem #>> '{}'))
       FROM jsonb_array_elements(arr) AS elem
-    )
+    ), '[]'::jsonb)
   END;
 $$ LANGUAGE SQL IMMUTABLE;
 

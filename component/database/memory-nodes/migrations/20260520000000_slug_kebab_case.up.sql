@@ -60,10 +60,15 @@ $$ LANGUAGE SQL IMMUTABLE;
 CREATE OR REPLACE FUNCTION kebab_slug_array(arr jsonb) RETURNS jsonb AS $$
   SELECT CASE
     WHEN arr IS NULL OR jsonb_typeof(arr) <> 'array' THEN arr
-    ELSE (
+    -- COALESCE to '[]' because jsonb_agg over zero rows returns NULL: an
+    -- EMPTY input array would otherwise map to SQL NULL, and feeding that to
+    -- the strict jsonb_set in kebab_set_array nulls the NOT-NULL payload
+    -- column (SQLSTATE 23502) -- the live crash that blocked all migrations
+    -- after this one (claims table never created). memql#624.
+    ELSE COALESCE((
       SELECT jsonb_agg(kebab_slug(elem #>> '{}'))
       FROM jsonb_array_elements(arr) AS elem
-    )
+    ), '[]'::jsonb)
   END;
 $$ LANGUAGE SQL IMMUTABLE;
 
