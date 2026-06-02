@@ -60,6 +60,7 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: bff
+      MEMQL_DEV_DEFAULT_AVATAR_PERSONA: ${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-}
       MEMQL_NODE_ID: bff-local
       MEMQL_NODE_ADDRESS: bff:50058
       MEMQL_NODE_SERVICE_ADDRESS: ":50058"
@@ -239,6 +240,7 @@ services:
     environment:
       # Node identity
       MEMQL_NODE_TYPE: cognition
+      MEMQL_DEV_DEFAULT_AVATAR_PERSONA: ${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-}
       MEMQL_NODE_ID: cognition-local
       MEMQL_NODE_ADDRESS: cognition:50054
       MEMQL_NODE_SERVICE_ADDRESS: ":50054"
@@ -316,6 +318,7 @@ services:
       MEMQL_NODE_TOKEN: ${MEMQL_PLANNER_NODE_TOKEN:-}
       # Node identity
       MEMQL_NODE_TYPE: planner
+      MEMQL_DEV_DEFAULT_AVATAR_PERSONA: ${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-}
       MEMQL_NODE_ID: planner-local
       MEMQL_NODE_ADDRESS: planner:50056
       MEMQL_NODE_SERVICE_ADDRESS: ":50056"
@@ -385,6 +388,7 @@ services:
     environment:
       # Node identity
       MEMQL_NODE_TYPE: voice
+      MEMQL_DEV_DEFAULT_AVATAR_PERSONA: ${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-}
       MEMQL_NODE_ID: voice-local
       MEMQL_NODE_ADDRESS: voice:50059
       MEMQL_NODE_SERVICE_ADDRESS: ":50059"
@@ -484,6 +488,7 @@ services:
     environment:
       # Node identity
       MEMQL_NODE_TYPE: agent
+      MEMQL_DEV_DEFAULT_AVATAR_PERSONA: ${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-}
       MEMQL_NODE_ID: agent-local
       MEMQL_NODE_ADDRESS: agent:50055
       MEMQL_NODE_SERVICE_ADDRESS: ":50055"

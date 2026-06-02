@@ -1,9 +1,72 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+// applyDevDefaultAvatarPersona is the dev-only hook that stamps a default
+// avatar persona onto the per-user Assistant at first materialization
+// (copresent#237). These pin the gating: only the `assistant` seed, only when
+// the env is set, never overriding an explicit persona, and a graceful no-op
+// when the catalog can't be reached (nil engine).
+
+func TestApplyDevDefaultAvatarPersona_NoOpWhenEnvUnset(t *testing.T) {
+	t.Setenv(devDefaultAvatarPersonaEnv, "")
+	m := &SeedMaterializer{}
+	args := map[string]any{"agentId": "assistant-x"}
+	m.applyDevDefaultAvatarPersona(context.Background(), &SeedDefinition{Name: "assistant"}, args)
+	if _, ok := args["avatarPersonaId"]; ok {
+		t.Fatalf("expected no avatar stamp when env unset, got %v", args)
+	}
+}
+
+func TestApplyDevDefaultAvatarPersona_NoOpForNonAssistantSeed(t *testing.T) {
+	t.Setenv(devDefaultAvatarPersonaEnv, "Ava")
+	m := &SeedMaterializer{}
+	args := map[string]any{"agentRoleId": "role-x"}
+	m.applyDevDefaultAvatarPersona(context.Background(), &SeedDefinition{Name: "agentRole"}, args)
+	if _, ok := args["avatarPersonaId"]; ok {
+		t.Fatalf("expected no avatar stamp for a non-assistant seed, got %v", args)
+	}
+}
+
+func TestApplyDevDefaultAvatarPersona_RespectsExistingPersona(t *testing.T) {
+	t.Setenv(devDefaultAvatarPersonaEnv, "Ava")
+	m := &SeedMaterializer{}
+	args := map[string]any{"avatarPersonaId": "explicit-id", "avatarVendor": "anam"}
+	m.applyDevDefaultAvatarPersona(context.Background(), &SeedDefinition{Name: "assistant"}, args)
+	if args["avatarPersonaId"] != "explicit-id" {
+		t.Fatalf("expected explicit persona preserved, got %v", args["avatarPersonaId"])
+	}
+}
+
+func TestApplyDevDefaultAvatarPersona_GracefulWhenCatalogUnreachable(t *testing.T) {
+	// env set + assistant + no existing persona, but nil engine -> catalog
+	// lookup fails -> no stamp, no panic.
+	t.Setenv(devDefaultAvatarPersonaEnv, "Ava")
+	m := &SeedMaterializer{}
+	args := map[string]any{"agentId": "assistant-x"}
+	m.applyDevDefaultAvatarPersona(context.Background(), &SeedDefinition{Name: "assistant"}, args)
+	if _, ok := args["avatarPersonaId"]; ok {
+		t.Fatalf("expected no stamp when catalog unreachable, got %v", args)
+	}
+}
+
+func TestRowStringField_BareAndNested(t *testing.T) {
+	bare := map[string]any{"name": "Ava"}
+	if rowStringField(bare, "name") != "Ava" {
+		t.Fatalf("bare key lookup failed")
+	}
+	nested := map[string]any{"payload": map[string]any{"vendor": "anam"}}
+	if rowStringField(nested, "vendor") != "anam" {
+		t.Fatalf("nested payload lookup failed")
+	}
+	if rowStringField(bare, "missing") != "" {
+		t.Fatalf("missing field should be empty")
+	}
+}
 
 // renderArgsObject is the materializer's mutation-arg renderer.
 // MemQL mutation calls require bare-identifier keys, not JSON-style
