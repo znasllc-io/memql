@@ -27,6 +27,12 @@ import (
 // the verifier's job downstream.
 func fakeBootstrapServer(t *testing.T, expectedSecret string) *httptest.Server {
 	t.Helper()
+	// httptest.NewServer is plaintext (http://127.0.0.1:port); the
+	// https-only guard (memql#626) would short-circuit before any
+	// request reaches the fake. These tests assert request/response
+	// behaviour, not transport security, so opt into the dev escape
+	// hatch. The dedicated https-enforcement test sets it to "" itself.
+	t.Setenv(envAllowInsecureNodeBootstrap, "1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Endpoint surface.
 		if r.URL.Path != "/node/bootstrap" {
@@ -167,6 +173,10 @@ func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 	// to keep this a single-shot assertion (otherwise it'd spin for the
 	// default 90s window before giving up).
 	t.Setenv("MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET", "0")
+	// This test exercises the transport-failure path against a plaintext
+	// URL, so opt into the dev escape hatch -- otherwise the https-only
+	// guard (memql#626) would short-circuit before the dial is attempted.
+	t.Setenv("MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP", "1")
 	// 127.0.0.1:1 is a port no server listens on; connection
 	// refused expected.
 	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
@@ -182,12 +192,65 @@ func TestMaybeBootstrapNodeToken_UnreachableIdentity(t *testing.T) {
 		"error should reference target URL or POST verb: %v", err)
 }
 
+// TestMaybeBootstrapNodeToken_RefusesInsecureHTTP is the memql#626
+// regression guard: with the dev escape hatch UNSET (the staging/prod
+// state), a plaintext http:// IDENTITY_VERIFIER_BASE_URL must be
+// refused before any request is dialed, so an accidental
+// http://identity:8085 in a deploy manifest fails fast and loud at the
+// node instead of firing a POST identity bounces with `403
+// insecure_transport`. Catches a transport regression in CI.
+func TestMaybeBootstrapNodeToken_RefusesInsecureHTTP(t *testing.T) {
+	t.Setenv("MEMQL_NODE_TOKEN", "")
+	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
+	// Explicitly clear the escape hatch to model the staging/prod state.
+	t.Setenv(envAllowInsecureNodeBootstrap, "")
+	// A reachable plaintext host -- the point is that the scheme guard
+	// fires BEFORE any dial, so the token is never minted even though the
+	// host would answer.
+	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://identity:8085")
+
+	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "v1:cluster:node:bff-x", "bff")
+	require.Error(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, tok)
+	assert.Contains(t, err.Error(), "https end-to-end")
+	assert.Contains(t, err.Error(), "refusing insecure")
+}
+
+// TestMaybeBootstrapNodeToken_AcceptsInsecureHTTPWithEscapeHatch
+// confirms the dev escape hatch still works: with
+// MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP=1 the plaintext URL is
+// accepted (the docker-compose dev stack relies on this), so the guard
+// is opt-out-able for local development without weakening the secure
+// default. Uses an unreachable host + zero retry budget so the call
+// gets past the scheme guard and fails at the transport layer, proving
+// the scheme check did not short-circuit.
+func TestMaybeBootstrapNodeToken_AcceptsInsecureHTTPWithEscapeHatch(t *testing.T) {
+	t.Setenv("MEMQL_NODE_TOKEN", "")
+	t.Setenv("MEMQL_NODE_BOOTSTRAP_TOKEN", "secret")
+	t.Setenv(envAllowInsecureNodeBootstrap, "1")
+	t.Setenv("MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET", "0")
+	t.Setenv("IDENTITY_VERIFIER_BASE_URL", "http://127.0.0.1:1")
+
+	tok, ok, err := maybeBootstrapNodeToken(context.Background(), nil, "x", "bff")
+	require.Error(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, tok)
+	// A transport error (not the scheme refusal) proves the guard let
+	// the plaintext call through under the escape hatch.
+	assert.NotContains(t, err.Error(), "refusing insecure")
+}
+
 // flakyBootstrapServer mints a token only after `failFirst` calls have
 // returned `failStatus` (e.g. 503). Mirrors identity being briefly down
 // mid-roll, then coming back Ready. Reports the total hit count so a test
 // can assert how many attempts the client made.
 func flakyBootstrapServer(t *testing.T, secret string, failFirst int, failStatus int, hits *int32) *httptest.Server {
 	t.Helper()
+	// Plaintext httptest server -- opt into the dev escape hatch so the
+	// https-only guard (memql#626) doesn't short-circuit the retry path
+	// these tests exercise.
+	t.Setenv(envAllowInsecureNodeBootstrap, "1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(hits, 1)
 		if int(n) <= failFirst {
