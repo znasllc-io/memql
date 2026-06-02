@@ -1,0 +1,65 @@
+// tools.memql
+//
+// The app-native `calendar` capability surface (#642). The issue's
+// "calendar tool (actions list/create/update/delete/find)" maps to
+// five narrowly-typed tools here -- one per action -- because a memQL
+// tool binds to exactly one handler. The `calendar` skill
+// (skills/calendar.memql) bundles all five slugs so an agent that
+// carries the skill gets the whole surface as a unit.
+//
+// Each tool's handler runs a named query / mutation through the engine
+// (the `query` handler type executes any MemQL statement, including a
+// mutation call -- same mechanism dsl/memql/tools.memql's
+// describeFunction uses). Per-row authz is enforced inside the bound
+// query / mutation: reads self-scope on actor.userId; create stamps
+// ownerUserId from actor.userId; update / delete are reached only after
+// the agent has read the row through the owner-scoped
+// queryCalendarEventById, so cross-user writes are impossible.
+
+@enabled
+@handler(type="query", query="queryUpcomingEvents({\"windowStart\": \"$args.windowStart\", \"windowEnd\": \"$args.windowEnd\"})")
+@executionTime("fast")
+@description("List the caller's upcoming calendar events whose start falls in [windowStart, windowEnd]. Use this for 'what's coming up' and as the source for day-before reminders. Returns the caller's own events only.")
+tool calendarList {
+  windowStart  string  @required @description("Inclusive RFC3339 lower bound on event start (e.g. now).")
+  windowEnd    string  @required @description("Inclusive RFC3339 upper bound on event start (e.g. now + 48h).")
+}
+
+@enabled
+@handler(type="query", query="queryFindEvents({\"title\": \"$args.title\"})")
+@executionTime("fast")
+@description("Find the caller's calendar events by exact title (e.g. 'Karate class'). Returns the caller's own events only. For time-window browsing use calendarList instead.")
+tool calendarFind {
+  title  string  @required @description("Exact event title to look up.")
+}
+
+@enabled
+@handler(type="query", query="mutationCreateCalendarEvent({\"title\": \"$args.title\", \"startsAt\": \"$args.startsAt\", \"endsAt\": \"$args.endsAt\", \"allDay\": \"$args.allDay\", \"location\": \"$args.location\", \"notes\": \"$args.notes\", \"recurrence\": \"$args.recurrence\"})")
+@executionTime("fast")
+@description("Create a native calendar event for the caller. The event is owned by the caller (ownerUserId is stamped server-side from the auth context); source is 'native'. Returns the created event. Use ISO-8601 / RFC3339 timestamps for startsAt / endsAt.")
+tool calendarCreate {
+  title       string  @required @description("Event title, e.g. 'Karate class'.")
+  startsAt    string  @required @description("Event start as an RFC3339 timestamp.")
+  endsAt      string  @description("Event end as an RFC3339 timestamp. Omit for a point-in-time reminder.")
+  allDay      boolean @default("false") @description("True for a date-scoped all-day event (no meaningful clock time).")
+  location    string  @description("Free-form location text.")
+  notes       string  @description("Free-form notes / description.")
+  recurrence  string  @description("Optional RFC-5545 RRULE recurrence rule (e.g. 'FREQ=WEEKLY;BYDAY=TU,TH').")
+}
+
+@enabled
+@handler(type="query", query="mutationUpdateCalendarEvent({\"eventId\": \"$args.eventId\", \"payload\": \"$args.payload\"})")
+@executionTime("fast")
+@description("Update an existing calendar event the caller owns (reschedule, rename, change location / notes / recurrence). Look the event up first via calendarList or calendarFind to get its id. Only the fields in `payload` change.")
+tool calendarUpdate {
+  eventId  string  @required @description("Node id of the event to update (from a prior list/find).")
+  payload  object  @required @description("Partial event payload -- only the fields to change, e.g. {\"startsAt\": \"...\", \"location\": \"...\"}.")
+}
+
+@enabled
+@handler(type="query", query="mutationDeleteCalendarEvent({\"eventId\": \"$args.eventId\"})")
+@executionTime("fast")
+@description("Delete a calendar event the caller owns (soft-delete; recoverable in history). Look the event up first via calendarList or calendarFind to get its id.")
+tool calendarDelete {
+  eventId  string  @required @description("Node id of the event to delete (from a prior list/find).")
+}

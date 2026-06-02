@@ -1,0 +1,33 @@
+// skills/calendar.memql
+//
+// The app-native calendar skill (#642, Epic #633 / Program #629).
+// Bundles the five calendar tool slugs (defined in dsl/calendar/
+// tools.memql) into one named capability so an agent that carries this
+// skill can read + write the user's first-party calendar events. The
+// events themselves are the source of truth (v1:calendar:calendarEvent);
+// external Google / CalDAV sync lands later via the knowledge:liveSource
+// / liveConnector mechanism and is out of scope for this skill -- native
+// is canonical.
+//
+// Like every skill seed, this lives under dsl/agents/skills/ (the skill
+// concept is agents-namespaced and the SeedMaterializer loads all skill
+// seeds from here); the bundled tool slugs resolve to the tools in the
+// calendar domain at attach time. No knowledge domain is bundled in v1:
+// the calendar surface is operational (CRUD over the user's events), not
+// a corpus of facts to retrieve.
+
+use agents.concepts.{ skill }
+
+@description("App-native calendar: create, list, find, reschedule, and delete the user's own events. Backs the 'remind me the day before X' flow -- the reactive harness reads the same calendarEvent rows. First-party source of truth; external Google Calendar can sync in later via the liveSource mechanism (not part of this skill). Bundles the calendarList / calendarFind / calendarCreate / calendarUpdate / calendarDelete tools.")
+seed skill calendar {
+  slug:          "calendar"
+  name:          "Calendar"
+  description:   "Read and write the user's app-native calendar: list upcoming events, find an event, create / reschedule / delete events. The events are the source of truth for day-before reminders."
+  category:      "personal"
+  tags:          ["calendar", "scheduling", "reminders"]
+  domainIds:     []
+  toolSlugs:     ["calendarList", "calendarFind", "calendarCreate", "calendarUpdate", "calendarDelete"]
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}

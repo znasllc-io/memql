@@ -801,6 +801,28 @@ func QueryAwaitingFeedbackPlansPastTimeoutBuild(args QueryAwaitingFeedbackPlansP
 	return "queryAwaitingFeedbackPlansPastTimeout({})"
 }
 
+// QueryCalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
+//
+// Bound concept: calendarEvent.
+type QueryCalendarEventByIdArgs struct {
+	EventId string
+}
+
+// QueryCalendarEventById calls the engine query queryCalendarEventById.
+func (qc *QueryClient) QueryCalendarEventById(ctx context.Context, args QueryCalendarEventByIdArgs) (*Result, error) {
+	call := QueryCalendarEventByIdBuild(args)
+	return qc.executeNamed(ctx, "queryCalendarEventById", call)
+}
+
+func QueryCalendarEventByIdBuild(args QueryCalendarEventByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryCalendarEventById({")
+	b.WriteString("eventId: ")
+	b.WriteString(fmt.Sprintf("%q", args.EventId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
 //
 // Bound concept: nodeType.
@@ -1098,6 +1120,36 @@ func QueryEntitySchemaForDomainBuild(args QueryEntitySchemaForDomainArgs) string
 	return b.String()
 }
 
+// QueryEventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
+//
+// Bound concept: calendarEvent.
+type QueryEventsByDayArgs struct {
+	// Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).
+	DayStart string
+	// Exclusive end-of-day instant (next midnight) in the user's timezone.
+	DayEnd string
+}
+
+// QueryEventsByDay calls the engine query queryEventsByDay.
+func (qc *QueryClient) QueryEventsByDay(ctx context.Context, args QueryEventsByDayArgs) (*Result, error) {
+	call := QueryEventsByDayBuild(args)
+	return qc.executeNamed(ctx, "queryEventsByDay", call)
+}
+
+func QueryEventsByDayBuild(args QueryEventsByDayArgs) string {
+	var b strings.Builder
+	b.WriteString("queryEventsByDay({")
+	b.WriteString("dayStart: ")
+	b.WriteString(fmt.Sprintf("%q", args.DayStart))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dayEnd: ")
+	b.WriteString(fmt.Sprintf("%q", args.DayEnd))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryExistingCluster -- Returns the existing cluster record, if any
 //
 // Bound concept: cluster.
@@ -1252,6 +1304,29 @@ func (qc *QueryClient) QueryExpiredWorkerInvocations(ctx context.Context, args Q
 func QueryExpiredWorkerInvocationsBuild(args QueryExpiredWorkerInvocationsArgs) string {
 	_ = args
 	return "queryExpiredWorkerInvocations({})"
+}
+
+// QueryFindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via queryUpcomingEvents and filter conversationally).
+//
+// Bound concept: calendarEvent.
+type QueryFindEventsArgs struct {
+	// Exact event title to match against payload.title.
+	Title string
+}
+
+// QueryFindEvents calls the engine query queryFindEvents.
+func (qc *QueryClient) QueryFindEvents(ctx context.Context, args QueryFindEventsArgs) (*Result, error) {
+	call := QueryFindEventsBuild(args)
+	return qc.executeNamed(ctx, "queryFindEvents", call)
+}
+
+func QueryFindEventsBuild(args QueryFindEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("queryFindEvents({")
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryGlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
@@ -2662,6 +2737,36 @@ func QueryTasksForPlanBuild(args QueryTasksForPlanArgs) string {
 	b.WriteString("queryTasksForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryUpcomingEvents -- List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.
+//
+// Bound concept: calendarEvent.
+type QueryUpcomingEventsArgs struct {
+	// Inclusive lower bound on payload.startsAt (typically `now`).
+	WindowStart string
+	// Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).
+	WindowEnd string
+}
+
+// QueryUpcomingEvents calls the engine query queryUpcomingEvents.
+func (qc *QueryClient) QueryUpcomingEvents(ctx context.Context, args QueryUpcomingEventsArgs) (*Result, error) {
+	call := QueryUpcomingEventsBuild(args)
+	return qc.executeNamed(ctx, "queryUpcomingEvents", call)
+}
+
+func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("queryUpcomingEvents({")
+	b.WriteString("windowStart: ")
+	b.WriteString(fmt.Sprintf("%q", args.WindowStart))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowEnd: ")
+	b.WriteString(fmt.Sprintf("%q", args.WindowEnd))
 	b.WriteString("})")
 	return b.String()
 }
