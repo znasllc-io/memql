@@ -114,6 +114,10 @@ Options:
     --no-gate         Run the smoke test but do NOT auto-rollback on failure
                       (useful when a smoke failure is environmental, e.g.
                       DNS/cert propagation lag). Default: gate ON.
+    --allow-overwrite Permit re-cutting an engine tag that already exists in ACR.
+                      Default OFF: release tags are immutable (the promotion gate
+                      rests on a validated tag never being re-cut in place). Use
+                      only to deliberately rebuild an UNVALIDATED tag.
     --dry-run         Print the full plan and mutate nothing (no Azure calls).
     --help            Show this help.
 
@@ -144,6 +148,7 @@ function parse_arguments() {
     NO_SMOKE=false
     GATE=true
     DRY_RUN=false
+    ALLOW_OVERWRITE=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -154,6 +159,7 @@ function parse_arguments() {
             --skip-migrate) SKIP_MIGRATE=true; shift ;;
             --no-smoke)   NO_SMOKE=true; shift ;;
             --no-gate)    GATE=false; shift ;;
+            --allow-overwrite) ALLOW_OVERWRITE=true; shift ;;
             --dry-run)    DRY_RUN=true; shift ;;
             --help)       show_help; exit 0 ;;
             *)
@@ -198,8 +204,28 @@ function check_prerequisites() {
 # Build + push one engine node image via az acr build. voice is the CGO
 # exception: it needs CGO_ENABLED=1 and the debian-based voice-runtime stage
 # (distroless can't host the libopus shared libs).
+# ensure_tag_immutable -- refuse to overwrite an existing engine tag in ACR.
+# Release tags are immutable so a version is a reproducible, trustworthy
+# artifact: the whole promotion gate (#628) rests on "a validated tag is never
+# re-cut in place." This is exactly what failed for 0.9.6 (identity + copresent
+# images were rebuilt over the same tag during the incident, so :0.9.6 stopped
+# meaning one thing). Mirrors the carrier's release.sh ensure_tag_immutable.
+# Bypass with --allow-overwrite ONLY to deliberately re-cut an unvalidated tag.
+function ensure_tag_immutable() {
+    local nt="$1" tag="$2"
+    [ "$ALLOW_OVERWRITE" = true ] && return 0
+    [ "$DRY_RUN" = true ] && { plan "verify memql-${nt}:${tag} does not already exist in $ACR_NAME (immutability guard)"; return 0; }
+    if az acr repository show --name "$ACR_NAME" --image "memql-${nt}:${tag}" >/dev/null 2>&1; then
+        echo "ERROR: memql-${nt}:${tag} already exists in $ACR_NAME -- release tags are immutable." >&2
+        echo "       Bump --version to cut a new artifact, or pass --allow-overwrite to" >&2
+        echo "       deliberately re-cut an UNVALIDATED tag (never a promoted one)." >&2
+        exit 1
+    fi
+}
+
 function build_one() {
     local nt="$1" tag="$2"
+    ensure_tag_immutable "$nt" "$tag"
     local image="memql-${nt}:${tag}"
     local -a args=(acr build --registry "$ACR_NAME" --image "$image"
         --platform linux/amd64 --build-arg "BUILD_TAGS=${nt}" -f "$REPO_ROOT/Dockerfile")
@@ -535,6 +561,53 @@ function state_report() {
     fi
 }
 
+# record_validated_version -- on a GREEN DEEP gate, append this version + the
+# per-engine running image digests to deploy/validated-versions.json. This is
+# the promotion ledger (#628): a version becomes promotable ONLY after it passes
+# the deep staging smoke, and prod deploys consume ONLY versions recorded here.
+# A baseline (token-less) gate does NOT record -- it proves nothing about the
+# authenticated path, so it is not a basis for promotion.
+function record_validated_version() {
+    [ -z "$VERSION" ] && return 0
+    [ "$DRY_RUN" = true ] && return 0
+    if [ -z "${MEMQL_SMOKE_TOKEN:-}" ] || [ "$NO_SMOKE" = true ]; then
+        warn "deploy is green but the gate was BASELINE (no MEMQL_SMOKE_TOKEN / --no-smoke) -- NOT recording ${VERSION} as validated. A promotable version requires a green DEEP gate."
+        return 0
+    fi
+    section "6. Record validated version (promotion ledger)"
+    local registry="$REPO_ROOT/deploy/validated-versions.json"
+    local ts nt; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    local -a pairs=()
+    for nt in "${ENGINE_NODE_TYPES[@]}"; do
+        pairs+=("${nt}=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="$nt" \
+            -o jsonpath='{.items[0].status.containerStatuses[0].imageID}' 2>/dev/null)")
+    done
+    VV_VERSION="$VERSION" VV_ENV="$ENV" VV_TS="$ts" VV_PAIRS="${pairs[*]}" \
+        python3 - "$registry" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+try:
+    data = json.load(open(path))
+except Exception:
+    data = {"validated": []}
+digests = {}
+for kv in os.environ["VV_PAIRS"].split():
+    k, _, v = kv.partition("=")
+    digests[k] = v
+entry = {"version": os.environ["VV_VERSION"], "env": os.environ["VV_ENV"],
+         "validatedAt": os.environ["VV_TS"], "gate": "deep-smoke", "digests": digests}
+data.setdefault("validated", [])
+data["validated"] = [e for e in data["validated"]
+                     if not (e.get("version") == entry["version"] and e.get("env") == entry["env"])]
+data["validated"].append(entry)
+with open(path, "w") as f:
+    json.dump(data, f, indent=2, sort_keys=True)
+    f.write("\n")
+print("recorded validated version", entry["version"], "for", entry["env"])
+PY
+    info "wrote ${registry} -- COMMIT it so prod promotes only validated versions."
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -565,6 +638,10 @@ function main() {
 
     local gate_rc=0
     health_gate || gate_rc=$?
+
+    if [ "$gate_rc" -eq 0 ]; then
+        record_validated_version
+    fi
 
     state_report
     if [ "$gate_rc" -ne 0 ]; then
