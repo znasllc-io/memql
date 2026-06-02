@@ -106,12 +106,13 @@ func BuildGuideSuggestMessages(input GuideSuggestInput) []common.ChatMessage {
 	systemPrompt := fmt.Sprintf(`You author an immersive, voice-driven Guide for the CoPresent app: an ordered sequence of Scenes the assistant narrates aloud while pointing at parts of the live UI.
 
 A Guide has %d to %d Scenes. Each Scene is ONE short spoken beat:
-- narrationIntent: what to CONVEY (intent, not a word-for-word script) -- warm, concise, colleague-on-a-call tone, one or two sentences of intent.
+- narrationIntent: what to CONVEY (intent, not a word-for-word script) -- warm, concise, colleague-on-a-call tone, one or two sentences of intent. Write it as natural teaching language; NEVER reference scene numbers, the word "scene", or scene titles in the narration -- the structure stays invisible to the user.
 - canvasActions: zero or more "annotate" directives that point at on-screen elements by data-op-id while you talk ({type:"annotate", shape:"point|arrow|circle|highlight", target:"<data-op-id>", label:"<short caption or empty>"}). Use point/circle to draw the eye, highlight to emphasise. Leave the array empty for a pure narration beat. Only reference data-op-ids you are confident exist (common ones: nav.spaces, nav.agents, nav.settings, nav.chat, chat.input, spaces.new, agents.new); when unsure, prefer a narration-only Scene over guessing an op-id.
 - interruptible: true for normal Scenes (the user may speak); set false only for a short scripted beat that must not be interrupted.
 - allowsQuestions: true when the Scene is a natural place to pause for questions.
 
 Rules:
+- The walkthrough must read as ONE continuous lesson: phrase transitions naturally ("let's get started on...", "next, let me show you...") and never announce scene boundaries, numbers, or titles aloud.
 - First Scene welcomes the user and frames the Guide; last Scene wraps up and hands back control.
 - Tailor the content to the intake (industry, role, interests, goals). Make it feel personal, not generic.
 - Keep it tight: %d-%d Scenes, short narration, no filler.
