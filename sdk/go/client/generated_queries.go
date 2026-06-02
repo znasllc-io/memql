@@ -1042,6 +1042,28 @@ func QueryDocumentByIdBuild(args QueryDocumentByIdArgs) string {
 	return b.String()
 }
 
+// QueryDocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
+//
+// Bound concept: documentChunk.
+type QueryDocumentChunksForDomainArgs struct {
+	DomainId string
+}
+
+// QueryDocumentChunksForDomain calls the engine query queryDocumentChunksForDomain.
+func (qc *QueryClient) QueryDocumentChunksForDomain(ctx context.Context, args QueryDocumentChunksForDomainArgs) (*Result, error) {
+	call := QueryDocumentChunksForDomainBuild(args)
+	return qc.executeNamed(ctx, "queryDocumentChunksForDomain", call)
+}
+
+func QueryDocumentChunksForDomainBuild(args QueryDocumentChunksForDomainArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDocumentChunksForDomain({")
+	b.WriteString("domainId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryDocumentsForDomain -- Validated Documents attached to a knowledge domain.
 //
 // Bound concept: document.

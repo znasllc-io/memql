@@ -490,6 +490,43 @@ builtin seedDomainContent {
   recipeVersion  string
 }
 
+// ---- builtins for the Trainer Agent's tool surface (Q3 / Q9) ----
+//
+// The Trainer Agent (dsl/agents/prompts/trainerAgent.tmpl) drives a
+// trainSpecialist Plan by calling a small tool set during its bounded
+// tool loop. Three of those tools -- webSearch, fetchUrl, embedChunk --
+// are Go-backed builtins (the other two -- writeKnowledgeChunk,
+// markChunkSuperseded -- are mutation-backed and route via the tool's
+// @handler directly, no builtin needed).
+//
+// The trainer-tool wiring lives in integrations/planner/train_specialist_dispatch.go;
+// the Go handlers live in integrations/knowledge/trainer_tools.go.
+
+@enabled
+@executor("integration.knowledge.webSearch")
+@args(profile="object", additionalProperties="true")
+@description("Issue a web search for the Trainer Agent. Returns a list of {url, title, snippet}. STUB: no web-search provider is wired in-repo yet (tracked separately); returns an empty result set + a note so the Trainer can fall back to fetchUrl on URLs it already knows. See integrations/knowledge/trainer_tools.go.")
+builtin webSearch {
+  query        string  @required
+  num_results  int
+}
+
+@enabled
+@executor("integration.knowledge.fetchUrl")
+@args(profile="object", additionalProperties="true")
+@description("Fetch + extract readable text from a URL for the Trainer Agent. Backed by a bounded http.Client (dial / response / size caps). Returns {url, status, contentType, text, truncated}.")
+builtin fetchUrl {
+  url  string  @required
+}
+
+@enabled
+@executor("integration.knowledge.embedChunk")
+@args(profile="object", additionalProperties="true")
+@description("Trigger the embedding write so a Trainer-written chunk becomes retrievable. STUB / no-op for now: full embedding deferred to #645 (lazy embedding). Returns {chunkId, embedded:false, note}. The chunk is still persisted + validated; it just isn't vector-indexed until #645 lands.")
+builtin embedChunk {
+  chunkId  string  @required
+}
+
 // ---- queries/v1/common/builtin/builtinServiceVersion.memql ----
 
 // builtinServiceVersion - Service Version

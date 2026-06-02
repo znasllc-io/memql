@@ -182,6 +182,38 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"requestedBy":       "string (required) - user id requesting the augment; Plan ownership + audit.",
 			},
 		},
+		{
+			// Trainer Agent tool (Q3 / Q9). STUB: no web-search
+			// provider wired in-repo; returns an empty result set.
+			// See integrations/knowledge/trainer_tools.go.
+			Name:        capWebSearch,
+			Description: "Issue a web search for the Trainer Agent. Returns []{url, title, snippet}. STUB until a search provider is wired -- returns empty + a note.",
+			Handler:     i.webSearchHandler,
+			ArgsSchema: map[string]string{
+				"query":       "string (required) - the search query.",
+				"num_results": "int (optional) - max results (default 5).",
+			},
+		},
+		{
+			// Trainer Agent tool (Q3 / Q9). Real bounded HTTP GET +
+			// readable-text extraction. The Trainer's grounding primitive.
+			Name:        capFetchURL,
+			Description: "Fetch + extract readable text from a URL for the Trainer Agent. Bounded http.Client (dial/response/size caps). Returns {url, status, contentType, text, truncated}.",
+			Handler:     i.fetchUrlHandler,
+			ArgsSchema: map[string]string{
+				"url": "string (required) - absolute http/https URL to fetch.",
+			},
+		},
+		{
+			// Trainer Agent tool (Q3 / Q9). No-op until #645 (lazy
+			// embedding). The chunk is already persisted + validated.
+			Name:        capEmbedChunk,
+			Description: "Trigger the embedding write for a Trainer-written chunk. NO-OP until #645 (lazy embedding) lands. Returns {chunkId, embedded:false, note}.",
+			Handler:     i.embedChunkHandler,
+			ArgsSchema: map[string]string{
+				"chunkId": "string (required) - the chunk to embed.",
+			},
+		},
 	}
 }
 

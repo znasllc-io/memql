@@ -8,15 +8,21 @@ logic logicRefreshDueKnowledgeDomains {
     event object @required
   }
   body {
-    // Phase 6 scaffolding: the actual elapsed-time + spawn loop lives
-    // in the Go cron-handler (integrations/planner/training_refresh.go,
-    // ships when the Phase 4b re-invoke wiring lands). The DSL body
-    // is the entry point + the candidate-fetch query; everything
-    // downstream of the candidate list runs Go-side.
+    // The actual elapsed-time + per-domain spawn loop runs Go-side in
+    // the planner integration's RefreshCron
+    // (integrations/planner/refresh_cron.go, wired in #644). That cron
+    // polls queryDueRefreshDomains, does the elapsed-since-lastSeededAt
+    // math (the MemQL parser has no datetime arithmetic), and inserts a
+    // trainSpecialist Plan (mode='refresh') per due domain -- which the
+    // trainSpecialist dispatcher then picks up.
     //
-    // Phase 4b will fill this in with the actual per-domain spawn
-    // (build a Plan with kind='trainSpecialist', mode='refresh',
-    // input.domainId, then insert via mutationCreatePlan).
+    // This DSL automation remains the schema-side declaration of the
+    // cadence backstop + the candidate-fetch entry point. It does NOT
+    // itself spawn Plans (it can't -- no datetime arithmetic, and the
+    // planner-node poller is the authoritative runtime path so the work
+    // lands on the planner binary regardless of which node runs the
+    // automation scheduler). Returns the candidate count for
+    // observability.
     candidates := queryDueRefreshDomains({})
     return candidates.Len()
   }

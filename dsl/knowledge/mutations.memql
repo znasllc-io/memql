@@ -403,3 +403,66 @@ mutation knowledgeDomain mutationResetStaleAfterRefresh {
     staleSignalCount: 0
   }
 }
+
+// ---- mutations/v1/knowledge/writeKnowledgeChunk.memql ----
+
+// mutationWriteKnowledgeChunk -- the Trainer Agent's chunk-write path
+// (Q3 / Q9). Backs the writeKnowledgeChunk tool the Trainer Agent calls
+// during a trainSpecialist Plan. Distinct from mutationCreateDocumentChunk
+// (the general chunk-write path used by the seeder / bridge / CoPresent
+// ingest) only in that it hard-stamps source="trainerAgent",
+// validationStatus="validated" (Trainer output ships as canonical, the
+// same way seeded content does), and requires sourceRef -- the Trainer's
+// invariant is that every chunk it emits cites a real consulted source.
+
+@enabled
+@description("Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.")
+mutation documentChunk mutationWriteKnowledgeChunk {
+  args {
+    chunkId      string  @required
+    domainId     string  @required
+    text         string  @required
+    sourceRef    string  @required
+    seq          int
+    tokenCount   int
+    sourceTopic  string
+  }
+  insert documentChunk {
+    id: args.chunkId
+    args.domainId
+    args.text
+    args.sourceRef
+    seq: coalesce(args.seq, 0)
+    tokenCount: coalesce(args.tokenCount, 0)
+    args.sourceTopic
+    source: "trainerAgent"
+    validationStatus: "validated"
+    superseded: false
+  }
+}
+
+// ---- mutations/v1/knowledge/markChunkSuperseded.memql ----
+
+// mutationMarkChunkSuperseded -- the Trainer Agent's refresh-mode
+// deprecation path (Q9). Backs the markChunkSuperseded tool. When a
+// trainSpecialist Plan runs with mode='refresh', the Trainer reads the
+// existing corpus, web-searches for updates, and flags outdated chunks
+// here so retrieval stops surfacing them. Partial update via update() --
+// only the supersession fields change; the chunk stays in the table for
+// audit + provenance.
+
+@enabled
+@description("Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.")
+mutation documentChunk mutationMarkChunkSuperseded {
+  args {
+    chunkId           string  @required
+    supersededAt      string  @required
+    supersededReason  string
+  }
+  update documentChunk {
+    id: args.chunkId
+    superseded: true
+    args.supersededAt
+    args.supersededReason
+  }
+}
