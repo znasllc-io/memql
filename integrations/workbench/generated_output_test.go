@@ -212,11 +212,12 @@ func TestReadWorkspaceFile(t *testing.T) {
 	}
 }
 
-func TestUploadWorkbenchAttachment_HappyPath(t *testing.T) {
+func TestUploadAttachmentBytes_HappyPath(t *testing.T) {
 	up := &fakeUploader{url: "gs://test-bucket/obj"}
 	i, ce := newTestIntegration(t, up, "report.pdf", "%PDF-1.4 body")
 
-	attID, mime := i.uploadWorkbenchAttachment(context.Background(), "plan-1", "report.pdf", "report.pdf", "space-1", "user-1")
+	data := []byte("%PDF-1.4 body")
+	attID, mime := i.uploadAttachmentBytes(context.Background(), "plan-1", "report.pdf", "report.pdf", "space-1", "user-1", data)
 	if attID == "" {
 		t.Fatal("expected a non-empty attachmentId")
 	}
@@ -226,8 +227,8 @@ func TestUploadWorkbenchAttachment_HappyPath(t *testing.T) {
 	if !strings.HasPrefix(mime, "application/pdf") {
 		t.Errorf("mimeType: got %q", mime)
 	}
-	if up.calls != 1 || up.lastBytes == 0 {
-		t.Errorf("uploader not invoked with bytes: calls=%d bytes=%d", up.calls, up.lastBytes)
+	if up.calls != 1 || up.lastBytes != len(data) {
+		t.Errorf("uploader not invoked with the bytes: calls=%d bytes=%d", up.calls, up.lastBytes)
 	}
 	// A mutationCreateAttachment must have been issued carrying the id + URL.
 	if len(ce.queries) != 1 || !strings.HasPrefix(ce.queries[0], "mutationCreateAttachment(") {
@@ -240,17 +241,17 @@ func TestUploadWorkbenchAttachment_HappyPath(t *testing.T) {
 	// Idempotent: the same (planId, path) yields the same deterministic id.
 	up2 := &fakeUploader{url: "gs://test-bucket/obj"}
 	i2, _ := newTestIntegration(t, up2, "report.pdf", "%PDF-1.4 body")
-	attID2, _ := i2.uploadWorkbenchAttachment(context.Background(), "plan-1", "report.pdf", "report.pdf", "space-1", "user-1")
+	attID2, _ := i2.uploadAttachmentBytes(context.Background(), "plan-1", "report.pdf", "report.pdf", "space-1", "user-1", data)
 	if attID2 != attID {
 		t.Errorf("non-deterministic attachmentId: %q != %q", attID2, attID)
 	}
 }
 
-func TestUploadWorkbenchAttachment_UploaderError(t *testing.T) {
+func TestUploadAttachmentBytes_UploaderError(t *testing.T) {
 	up := &fakeUploader{err: errors.New("gcs down")}
 	i, ce := newTestIntegration(t, up, "out.txt", "data")
 
-	attID, mime := i.uploadWorkbenchAttachment(context.Background(), "plan-1", "out.txt", "out.txt", "space-1", "user-1")
+	attID, mime := i.uploadAttachmentBytes(context.Background(), "plan-1", "out.txt", "out.txt", "space-1", "user-1", []byte("data"))
 	if attID != "" || mime != "" {
 		t.Errorf("upload failure must yield empty id/mime, got %q/%q", attID, mime)
 	}
@@ -260,14 +261,38 @@ func TestUploadWorkbenchAttachment_UploaderError(t *testing.T) {
 	}
 }
 
-func TestUploadWorkbenchAttachment_MissingFile(t *testing.T) {
+func TestUploadAttachmentBytes_EmptySkips(t *testing.T) {
 	up := &fakeUploader{url: "gs://x/y"}
-	i, _ := newTestIntegration(t, up, "exists.txt", "data")
-	attID, _ := i.uploadWorkbenchAttachment(context.Background(), "plan-1", "ghost.txt", "ghost.txt", "space-1", "user-1")
-	if attID != "" {
-		t.Errorf("missing file must skip upload, got id %q", attID)
+	i, _ := newTestIntegration(t, up, "out.txt", "data")
+	if attID, _ := i.uploadAttachmentBytes(context.Background(), "plan-1", "out.txt", "out.txt", "space-1", "user-1", nil); attID != "" {
+		t.Errorf("empty data must skip upload, got id %q", attID)
 	}
 	if up.calls != 0 {
-		t.Errorf("uploader must not be called when bytes are unreadable, calls=%d", up.calls)
+		t.Errorf("uploader must not be called for empty data, calls=%d", up.calls)
+	}
+}
+
+// TestWorkbenchOutputBytes covers the #742 byte-source selector: local
+// reads off disk; cluster reuses the forwarded `content` (no disk, no
+// cross-node transfer).
+func TestWorkbenchOutputBytes(t *testing.T) {
+	i, _ := newTestIntegration(t, &fakeUploader{}, "out.txt", "disk bytes")
+
+	// Local + existing file -> disk bytes.
+	if got := i.workbenchOutputBytes("plan-1", "out.txt", map[string]any{}, true); string(got) != "disk bytes" {
+		t.Errorf("local existing: got %q", got)
+	}
+	// Local + missing file -> nil (caller records a pointer row).
+	if got := i.workbenchOutputBytes("plan-1", "ghost.txt", map[string]any{}, true); got != nil {
+		t.Errorf("local missing: expected nil, got %q", got)
+	}
+	// Cluster -> the forwarded content IS the bytes; no disk access.
+	clusterArgs := map[string]any{"path": "remote.txt", "content": "forwarded bytes"}
+	if got := i.workbenchOutputBytes("plan-1", "remote.txt", clusterArgs, false); string(got) != "forwarded bytes" {
+		t.Errorf("cluster content: got %q", got)
+	}
+	// Cluster + no content -> nil.
+	if got := i.workbenchOutputBytes("plan-1", "remote.txt", map[string]any{}, false); got != nil {
+		t.Errorf("cluster no-content: expected nil, got %q", got)
 	}
 }

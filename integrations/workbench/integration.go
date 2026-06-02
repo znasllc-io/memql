@@ -360,11 +360,13 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 	if resp.ErrorCode != "" {
 		return errorResultNode(planId, action, resp.ErrorCode, resp.ErrorMessage, started), true
 	}
-	// Library promotion (memql#722) for the cluster-mode path: a remote
-	// workbench fs_write is just as much a deliverable as a local one.
-	// The bytes live on the remote workbench node (local=false), so this
-	// records the inline pointer row; the memql#733 GCS byte-upload only
-	// runs for local writes. Best-effort.
+	// Library promotion for the cluster-mode path: a remote workbench
+	// fs_write is just as much a deliverable as a local one. The remote
+	// wrote the bytes, but the `content` we forwarded IS those bytes
+	// (handleFSWrite persists them verbatim), so promoteWorkbenchOutput
+	// uploads them here on the agent node -- no cross-node byte transfer
+	// (memql#742). local=false selects that forwarded-content source.
+	// Best-effort.
 	if action == "fs_write" {
 		i.promoteWorkbenchOutput(ctx, planId, stringArg(allArgs["agentId"], ""), innerArgs, false)
 	}
@@ -401,28 +403,29 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 }
 
 // promoteWorkbenchOutput records a v1:library:generatedOutput row for a
-// file just written into the per-Plan workspace (memql#722). The bytes
-// live in the workspace (and, for cluster mode, on a remote node), so
-// this records the artifact INLINE: a pointer row with the workspace
-// path in the body and the file extension mapped to a Library format.
-// The GCS attachment-byte upload (reading workspace bytes ->
-// v1:common:attachment -> attachmentId) is deferred to a follow-up;
-// this row carries NO attachmentId.
+// file just written into the per-Plan workspace (memql#722), uploading
+// the written bytes to v1:common:attachment so the Library renders /
+// downloads the real file (memql#733 local, memql#742 cluster).
 //
 // ownerUserId / spaceId are resolved from the producing Plan
 // (queryPlanById -> createdBy / spaceId): the workbench dispatch args
 // don't carry the user id, but the Plan's createdBy is server-stamped
 // from actor.userId so it is the authoritative owner. Idempotent: the
 // outputId is derived deterministically from (ownerUserId, planId,
-// path). Best-effort: any failure (engine nil, owner unresolved,
-// insert error) is logged and swallowed so it can't break fs_write.
-// local reports whether the fs_write landed on THIS node's disk
-// (single-node, or the agent-node fallback when no remote peer is
-// available) -- only then are the bytes readable here for the memql#733
-// GCS upload. For the forwarded cluster path the bytes live on the
-// remote workbench node, so local is false and the row stays an inline
-// pointer (binary-safe cross-node byte transfer is a separate effort --
-// fs_read coerces bytes to a string that JSON-mangles non-UTF-8).
+// path). Best-effort: any failure (engine nil, owner unresolved, byte
+// read/upload error, insert error) is logged and swallowed so it can't
+// break fs_write; on a byte-upload miss the row falls back to an inline
+// pointer (path in the body, no attachmentId).
+//
+// local selects the byte SOURCE, not whether to upload: for a local
+// fs_write the bytes are read back off this node's disk (#733); for the
+// forwarded cluster path the bytes are NOT on this node's disk, but the
+// `content` we just forwarded to the remote IS exactly what it wrote
+// (handleFSWrite persists []byte(content) verbatim), so we still hold
+// them here and upload them on THIS node (which owns the GCS uploader +
+// engine) -- no bytes cross the wire and the remote needs no changes
+// (#742). This sidesteps the binary-unsafe forwarded-fs_read route
+// (fs_read coerces bytes to a string that JSON-mangles non-UTF-8).
 func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentId string, innerArgs map[string]any, local bool) {
 	if i.engine == nil {
 		return
@@ -453,14 +456,18 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	format := formatForExtension(path)
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
-	// memql#733: when the bytes are LOCAL and a GCS uploader + a target
-	// space are available, upload them to v1:common:attachment and carry
-	// the attachmentId + mimeType so the Library renders / downloads the
-	// real file. Any failure (or the cluster path) falls back to the
-	// inline pointer row below; it never breaks the producing fs_write.
+	// When a GCS uploader + a target space are available, upload the
+	// written bytes to v1:common:attachment and carry the attachmentId +
+	// mimeType so the Library renders / downloads the real file. The byte
+	// source depends on the dispatch path (see the doc comment): local =
+	// read back off disk (#733); cluster = the `content` we forwarded to
+	// the remote, which is exactly what it wrote (#742). Any miss falls
+	// back to the inline pointer row below; it never breaks the fs_write.
 	attachmentId, mimeType := "", ""
-	if local && i.uploader != nil && i.bucket != "" && spaceId != "" {
-		attachmentId, mimeType = i.uploadWorkbenchAttachment(mutationCtx, planId, path, title, spaceId, ownerUserId)
+	if i.uploader != nil && i.bucket != "" && spaceId != "" {
+		if data := i.workbenchOutputBytes(planId, path, innerArgs, local); len(data) > 0 {
+			attachmentId, mimeType = i.uploadAttachmentBytes(mutationCtx, planId, path, title, spaceId, ownerUserId, data)
+		}
 	}
 
 	var b strings.Builder
@@ -496,23 +503,44 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 }
 
-// uploadWorkbenchAttachment reads the just-written workspace file, pushes
-// the bytes to GCS, and creates a v1:common:attachment row, returning the
-// attachmentId + detected mimeType. Returns ("", "") on any failure, so
-// the caller falls back to the inline pointer row. Idempotent: the
-// attachmentId and the GCS object name are derived deterministically from
-// (planId, path) so a re-promoted fs_write re-versions / overwrites
-// instead of leaking duplicates. Bytes are read straight off local disk
-// (binary-safe -- no JSON round-trip), capped at the fs_write ceiling.
-func (i *Integration) uploadWorkbenchAttachment(ctx context.Context, planId, relPath, fileName, spaceId, ownerUserId string) (attachmentId, mimeType string) {
-	data, err := i.readWorkspaceFile(planId, relPath)
-	if err != nil {
-		if i.logger != nil {
-			i.logger.Warn("workbench: attachment byte read failed -- using pointer row",
-				slog.String("planId", planId), slog.String("path", relPath), slog.Any("error", err))
+// workbenchOutputBytes returns the bytes just written by an fs_write,
+// from this node's disk for a local dispatch (#733) or from the `content`
+// the agent forwarded to the remote node for the cluster path (#742) --
+// handleFSWrite persists []byte(content) verbatim, so the forwarded
+// content equals what the remote wrote and is available here without any
+// cross-node transfer. Returns nil when the bytes can't be sourced (the
+// caller then records an inline pointer row). Best-effort: a disk-read
+// failure is logged, not fatal.
+func (i *Integration) workbenchOutputBytes(planId, relPath string, innerArgs map[string]any, local bool) []byte {
+	if local {
+		data, err := i.readWorkspaceFile(planId, relPath)
+		if err != nil {
+			if i.logger != nil {
+				i.logger.Warn("workbench: attachment byte read failed -- using pointer row",
+					slog.String("planId", planId), slog.String("path", relPath), slog.Any("error", err))
+			}
+			return nil
 		}
-		return "", ""
+		return data
 	}
+	// Cluster path: reuse the content we forwarded to the remote node.
+	if innerArgs != nil {
+		if content, ok := innerArgs["content"].(string); ok && content != "" {
+			return []byte(content)
+		}
+	}
+	return nil
+}
+
+// uploadAttachmentBytes pushes the given bytes to GCS and creates a
+// v1:common:attachment row, returning the attachmentId + detected
+// mimeType. Returns ("", "") on any failure, so the caller falls back to
+// the inline pointer row. Idempotent: the attachmentId and the GCS object
+// name are derived deterministically from (planId, path) so a re-promoted
+// fs_write re-versions / overwrites instead of leaking duplicates. Bytes
+// are passed in (never JSON-round-tripped), so binary content stays
+// intact on both the local and cluster paths.
+func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath, fileName, spaceId, ownerUserId string, data []byte) (attachmentId, mimeType string) {
 	if len(data) == 0 {
 		return "", ""
 	}
