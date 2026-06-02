@@ -57,18 +57,30 @@ func runMigrateSubcommand(args []string) int {
 		}
 	}()
 
-	foundDB := false
+	var dbDep common.Dependency
 	for _, d := range application.Dependencies {
 		d.Start(context.Background())
 		started = append(started, d)
 		if d.ComponentName() == memoryNodesDatabase.ComponentName {
-			foundDB = true
+			dbDep = d
 			break
 		}
 	}
-	if !foundDB {
+	if dbDep == nil {
 		fmt.Fprintln(os.Stderr, "migrate: database dependency not present in this build -- nothing to migrate")
 		return 1
+	}
+
+	// The database logs migrate failures but does not abort startup, so a
+	// failed migration would otherwise leave this Job exiting 0 and the deploy
+	// proceeding onto a broken schema behind a green gate (#671). Consult the
+	// recorded error and exit non-zero so make deploy's gate aborts (and
+	// auto-rolls-back) instead.
+	if errChecker, ok := dbDep.(interface{ MigrationError() error }); ok {
+		if err := errChecker.MigrationError(); err != nil {
+			fmt.Fprintf(os.Stderr, "migrate: migration failed: %v\n", err)
+			return 1
+		}
 	}
 
 	logger.Info("migrate: database migrations applied (or already current)")
