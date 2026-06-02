@@ -2,6 +2,7 @@ package memql
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -53,7 +54,7 @@ func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.
 		if _, dup := symbols[bareName]; dup {
 			continue
 		}
-		resolvedId, err := r.resolveBareConceptName(bareName)
+		resolvedId, err := r.resolveBareConceptNameWithNamespace(bareName, namespaceHintForName(file.Uses, bareName))
 		if err != nil {
 			return fmt.Errorf("signature concept %q: %w", bareName, err)
 		}
@@ -81,11 +82,26 @@ func (r *ConceptResolver) ResolveFileWithSignatureConcepts(file *languageParser.
 // resolveBareConceptName looks up a bare concept name (e.g. "space")
 // in the registry and returns the canonical id (e.g.
 // "v1:cognition:space"). Match rule: the canonical id's trailing
-// segment (after the last ':') equals the bare name. Concept names
-// are globally unique by trailing segment in this codebase, so
-// ambiguity is a genuine collision the caller must resolve by
-// renaming or qualifying.
+// segment (after the last ':') equals the bare name. When the
+// trailing segment is ambiguous across namespaces it is a genuine
+// collision the caller must resolve -- use
+// resolveBareConceptNameWithNamespace to pass the disambiguating
+// namespace hint from the importing `use` path.
 func (r *ConceptResolver) resolveBareConceptName(name string) (string, error) {
+	return r.resolveBareConceptNameWithNamespace(name, "")
+}
+
+// resolveBareConceptNameWithNamespace resolves a bare concept name to
+// its canonical id by trailing-segment match, disambiguating an
+// ambiguous trailing segment with nsHint -- the namespace segment of
+// the importing `use` path (e.g. "planner" from
+// `use planner.concepts.{ plan }`). This is what lets two concepts
+// that share a trailing segment across namespaces coexist:
+// v1:planner:plan and v1:harness:plan both end in ":plan", and a
+// `query plan ...` in dsl/planner/ binds to the planner one because
+// its file imports `planner.concepts.{ plan }`. An empty nsHint keeps
+// the strict behaviour: an ambiguous trailing segment is an error.
+func (r *ConceptResolver) resolveBareConceptNameWithNamespace(name, nsHint string) (string, error) {
 	if r.registry == nil {
 		return "", fmt.Errorf("concept registry not available")
 	}
@@ -108,9 +124,40 @@ func (r *ConceptResolver) resolveBareConceptName(name string) (string, error) {
 		return "", fmt.Errorf("no registered concept has trailing segment %q", name)
 	case 1:
 		return matches[0], nil
-	default:
-		return "", fmt.Errorf("ambiguous concept name %q matches %d concepts: %s", name, len(matches), strings.Join(matches, ", "))
 	}
+	// Ambiguous trailing segment. Disambiguate by the namespace hint
+	// from the importing `use` path when one is available: keep only
+	// matches that carry the hint as an interior segment (`:planner:`).
+	if nsHint != "" {
+		needle := ":" + nsHint + ":"
+		var nsMatches []string
+		for _, m := range matches {
+			if strings.Contains(m, needle) {
+				nsMatches = append(nsMatches, m)
+			}
+		}
+		if len(nsMatches) == 1 {
+			return nsMatches[0], nil
+		}
+	}
+	return "", fmt.Errorf("ambiguous concept name %q matches %d concepts: %s", name, len(matches), strings.Join(matches, ", "))
+}
+
+// namespaceHintForName returns the namespace segment of the file-top
+// `use` import that brings <name> into scope (e.g. "planner" for
+// `use planner.concepts.{ plan }`), or "" when no Form B import names
+// it. Used to disambiguate a signature-bound concept whose bare
+// trailing segment collides across namespaces.
+func namespaceHintForName(uses []*languageParser.UseDeclaration, name string) string {
+	for _, u := range uses {
+		if u == nil || len(u.Parts) == 0 {
+			continue
+		}
+		if slices.Contains(u.Names, name) {
+			return u.Parts[0]
+		}
+	}
+	return ""
 }
 
 // symbolEntry maps a short name to a resolved concept ID.
@@ -141,12 +188,19 @@ func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDecla
 	for _, u := range uses {
 		if len(u.Names) > 0 {
 			// Form B: resolve each Name via trailing-segment match.
-			// The path is a module hint -- not a concept id.
+			// The path is a module hint -- not a concept id -- but its
+			// leading segment (e.g. "planner" in "planner.concepts")
+			// disambiguates a trailing segment that collides across
+			// namespaces (v1:planner:plan vs v1:harness:plan).
+			nsHint := ""
+			if len(u.Parts) > 0 {
+				nsHint = u.Parts[0]
+			}
 			for _, name := range u.Names {
 				if _, dup := symbols[name]; dup {
 					continue
 				}
-				resolvedId, err := r.resolveBareConceptName(name)
+				resolvedId, err := r.resolveBareConceptNameWithNamespace(name, nsHint)
 				if err != nil {
 					// Many Form B imports name non-concept constructs
 					// (shapes / traits / specs / mutations / queries
