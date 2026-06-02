@@ -217,7 +217,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// this when the file imports exactly one concept.
 	if boundConcept == "" && registry != nil && len(file.Uses) == 1 && len(file.Uses[0].Names) == 1 {
 		resolver := NewConceptResolver(registry)
-		if id, err := resolver.resolveBareConceptName(file.Uses[0].Names[0]); err == nil {
+		nsHint := ""
+		if len(file.Uses[0].Parts) > 0 {
+			nsHint = file.Uses[0].Parts[0]
+		}
+		if id, err := resolver.resolveBareConceptNameWithNamespace(file.Uses[0].Names[0], nsHint); err == nil {
 			boundConcept = id
 		}
 	}
@@ -227,7 +231,8 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// the registry's trailing-segment match.
 	if boundConcept == "" && registry != nil && len(signatureConcepts) == 1 {
 		resolver := NewConceptResolver(registry)
-		if id, err := resolver.resolveBareConceptName(signatureConcepts[0]); err == nil {
+		nsHint := namespaceHintForName(file.Uses, signatureConcepts[0])
+		if id, err := resolver.resolveBareConceptNameWithNamespace(signatureConcepts[0], nsHint); err == nil {
 			boundConcept = id
 		}
 	}
