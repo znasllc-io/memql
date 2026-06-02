@@ -1,0 +1,67 @@
+// requestUserFeedback -- ask the user for missing detail mid-task
+// ================================================================
+//
+// First-class, agent-facing way to pause the active Plan and ask the
+// user a question when the agent (or a specialist it is fronting for)
+// is missing the information needed to continue. Before this tool the
+// awaitingFeedback / feedback_required path was PLANNER-decided only:
+// the planner agent loop's escalateAwaitingFeedback transitioned the
+// Plan when it ran out of road. The agent itself had no way to raise
+// its hand mid-turn.
+//
+// The handler:
+//
+//   1. Transitions the active Plan (planId is auto-stamped from the
+//      turn context -- the agent never has to know its own Plan id)
+//      to status=awaitingFeedback / feedbackReason=feedback_required.
+//
+//   2. Writes the feedbackRequest object the canvas card renders:
+//
+//        {
+//          question:   string,                   -- what to ask the user
+//          kind:       "choice"|"text"|"multi",  -- response widget
+//          options?:   [{label, value}],         -- for choice / multi
+//          askedAt:    <now>,
+//          askedByTaskId?: <task id when known>,
+//          timeoutAt?: <RFC3339>                 -- optional auto-pause
+//        }
+//
+//   3. Returns a small ack payload {status:"awaiting_user", planId,
+//      kind}. The agent reads it, emits a short respondToUser
+//      acknowledgement, and ENDS ITS TURN. The agent's process exits
+//      cleanly; the user's answer is the gate.
+//
+// Resume path (existing mechanism, unchanged): the user answers via
+// the canvas card's per-kind response widget, which stamps
+// Plan.feedbackResponse {response, respondedBy, respondedAt} and
+// bumps status back to running. The planner integration's Plan-
+// transition subscriber (awaitingFeedback -> running) re-invokes the
+// owning agent with the persisted TaskState + feedbackResponse in
+// bootstrap context.
+//
+// The GENERIC plan.awaitingFeedback canvas-card producer that renders
+// the feedback_required variant lives in the BFF
+// (memql-bff-copresent/dsl/copresent/) and is delivered in the
+// follow-up BFF wave; only the scope_elevation_required variant has a
+// producer today. This tool is the memql-side half.
+//
+// allowedRoles: assistant. Specialists never speak to humans, so they
+// surface a "needsMore" via askSpecialist and the assistant raises the
+// feedback request on their behalf -- the assistant is the sole agent
+// that converses with the user.
+
+@enabled
+@handler(type="function", name="requestUserFeedback")
+@allowedRoles("assistant")
+@executionTime("fast")
+@description("Pause the active Plan and ask the user for missing detail mid-task. Transitions the Plan to awaitingFeedback (feedbackReason=feedback_required) and lands a feedback card on the canvas. Use this -- not a guess -- when you (or a specialist you are fronting for) need information, a decision, or a file the user has not provided. After calling it, emit a short acknowledgement and END YOUR TURN; the user's answer resumes the Plan.")
+tool requestUserFeedback {
+  question     string  @required @description("The question to put to the user. Be specific and self-contained -- the user sees only this text on the card, not the chat history. State exactly what you need and why.")
+  kind         string  @required @enum("choice", "text", "multi") @description("Response widget. choice = pick exactly one of `options`. multi = pick one or more of `options`. text = free-form (also the path for a file the user drops in chat/canvas). Pick choice/multi whenever the answer space is bounded -- it is faster and less error-prone for the user.")
+  options      array   @description("For kind=choice / multi: the selectable answers, each an object {label, value}. label is shown to the user; value is what comes back in feedbackResponse. Omit for kind=text.")
+  timeoutAt    string  @description("Optional RFC3339 deadline. When set and passed, the feedbackTimeoutAutoPause cron moves the Plan from awaitingFeedback to paused so it does not hang forever. Omit to wait indefinitely.")
+  planId       string  @autoInjected @description("The active Plan to park. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value before dispatch (memql#107).")
+  agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch.")
+  ownerUserId  string  @autoInjected @description("Session-owner user id. Server-stamped; scopes the parked Plan's owner attribution. The central validator drops any LLM-supplied value.")
+  spaceId      string  @autoInjected @description("Target space for the canvas card. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value.")
+}
