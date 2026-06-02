@@ -22,7 +22,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/bus"
-	"github.com/znasllc-io/memql/core/grpctls"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -32,9 +31,10 @@ import (
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/polyphon"
-	healthsrv "github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/provenance"
+	healthsrv "github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/grpctls"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
