@@ -1,0 +1,23 @@
+// notes domain -- the `notes` skill catalog row.
+//
+// Bundles the four notes tools into a named capability the agent
+// factory + Planner Agent can attach to an agent so it can manage
+// the user's standalone notes. Materialized by the SeedMaterializer
+// at engine startup; idempotent. predefined=true locks the row in
+// the cockpit Skills admin view.
+
+use agents.concepts.{ skill }
+
+@description("Note-taking: list, create, update, and tag-search the user's standalone notes. Every operation is per-row-authz owned -- the agent acts only on the calling user's notes. Distinct from copresent's canvasState.note caption; this is the standalone notebook surface.")
+seed skill notes {
+  slug:          "notes"
+  name:          "Notes"
+  description:   "List, create, update, and tag-search the user's standalone notes. The notebook surface; ownership is server-stamped so the agent only ever touches the user's own notes."
+  category:      "foundational"
+  tags:          ["productivity", "notes"]
+  domainIds:     []
+  toolSlugs:     ["notesList", "notesCreate", "notesUpdate", "notesSearch"]
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}

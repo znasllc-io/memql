@@ -4,10 +4,10 @@ Output ONLY a JSON object -- no markdown fences, no prose.
 
 **CRITICAL CONSISTENCY RULE:** The `agentId` and `agentName` fields you return MUST refer to the SAME agent your `reason` text justifies. If your reason says "X should respond" or "greeted X directly" or "X is the best fit", then `agentName` MUST be X (and `agentId` MUST be X's ID from the agents list). Do not write a reason about one agent and then fill agentName with a different one. Before emitting the JSON, re-read your own reason: if it names agent X, your agentName is X. If you find yourself wanting to pick the assistant despite a reason pointing elsewhere, rewrite the reason.
 
-{{if or .space.purpose .space.description}}## SPACE PURPOSE
-{{if .space.purpose}}{{.space.purpose}}{{else}}{{.space.description}}{{end}}
+{{if or .space.goal.statement .space.description}}## SPACE GOAL
+{{if .space.goal.statement}}{{.space.goal.statement}}{{if .space.goal.timeframe}} (timeframe: {{.space.goal.timeframe}}){{end}}{{else}}{{.space.description}}{{end}}
 
-Use the purpose to disambiguate when two agents look equally qualified: prefer the one whose specialty matches the space's stated purpose.
+Use the goal to disambiguate when two agents look equally qualified: prefer the one whose specialty matches the space's stated goal.
 {{end}}## AGENTS IN THIS SPACE
 {{range .agents}}- ID: {{.id}} | {{.name}}{{if .role}} ({{.role}}){{end}}{{if .description}} -- {{.description}}{{end}}{{if .domains}}
     Domains: {{range $i, $d := .domains}}{{if $i}}, {{end}}{{$d}}{{end}}{{end}}{{if .keywords}}

@@ -365,20 +365,28 @@ function apply_ordered() {
 
     # identity FIRST: it owns the one-time migration + JWKS. Workers' verifiers
     # need it Ready (they retry JWKS non-fatally, but Ready-first avoids churn).
+    # We apply the manifest and wait for Ready here, but DO NOT pin its image to
+    # $VERSION yet: the `kubectl apply -k` below re-applies identity.yaml from the
+    # kustomization and would revert any pre-set image back to the manifest tag,
+    # leaving identity version-skewed (#613). identity is re-pinned to $VERSION
+    # in the post-kustomize loop along with the other engine nodes, so the final
+    # state is consistent and the version-skew guard passes.
     info "applying identity and waiting for it to be Ready..."
     run_or_plan kubectl apply -f "$K8S_DIR/identity.yaml"
-    set_engine_image identity
     rollout_wait identity
 
     # The rest of the mesh + public entry.
     info "applying the full mesh (kustomize)..."
     run_or_plan kubectl apply -k "$K8S_DIR"
 
+    # Pin EVERY engine node (identity included) to the built $VERSION AFTER the
+    # kustomize apply, so nothing the kustomization re-applied is left on its
+    # manifest-pinned tag. ENGINE_NODE_TYPES already leads with identity.
     local nt
-    for nt in cognition voice agent planner workbench; do
+    for nt in "${ENGINE_NODE_TYPES[@]}"; do
         set_engine_image "$nt"
     done
-    for nt in cognition voice agent planner workbench bff; do
+    for nt in "${ENGINE_NODE_TYPES[@]}" bff; do
         rollout_wait "$nt"
     done
 }
@@ -387,14 +395,24 @@ function apply_ordered() {
 # 4. SMOKE
 #=============================================================================
 
+# The post-deploy smoke. Runs the DEEP promotion-gate profile (#627) when a
+# MEMQL_SMOKE_TOKEN is available -- a real authenticated WS query + cross-node
+# AI forward, so the gate proves the authenticated app path, not just front-door
+# 200s (the 0.9.6 incident went front-door-green while the app was broken). With
+# no token it falls back to baseline and LOUDLY flags the deploy as NOT
+# promotable -- a validated promotion REQUIRES a green deep run.
 function smoke_test() {
     section "4. Smoke test (live front door)"
     if [ "$NO_SMOKE" = true ]; then
         info "--no-smoke set; skipping."
         return 0
     fi
+
+    local profile="baseline"
+    [ -n "${MEMQL_SMOKE_TOKEN:-}" ] && profile="deep"
+
     if [ "$DRY_RUN" = true ]; then
-        plan "bash scripts/deploy/staging-smoke-test.sh   (baseline checks)"
+        plan "SMOKE_PROFILE=$profile bash scripts/deploy/staging-smoke-test.sh"
         return 0
     fi
     local smoke="$SCRIPT_DIR/staging-smoke-test.sh"
@@ -402,8 +420,12 @@ function smoke_test() {
         warn "smoke script not found at $smoke; skipping."
         return 0
     fi
-    info "running baseline smoke checks..."
-    if ! bash "$smoke"; then
+    if [ "$profile" = "deep" ]; then
+        info "running DEEP smoke checks (promotion gate: authenticated WS + AI forward + SPA/identity assets)..."
+    else
+        warn "no MEMQL_SMOKE_TOKEN in the environment -- running BASELINE smoke only. This deploy is NOT promotable; a validated promotion requires a green deep run (SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=...)."
+    fi
+    if ! SMOKE_PROFILE="$profile" bash "$smoke"; then
         warn "smoke test reported failures (see above)."
         return 1
     fi
@@ -426,10 +448,48 @@ function rollback_all() {
     warn "rollback issued. Watch: kubectl get pods -n $NAMESPACE -w"
 }
 
-# The health gate: run the smoke test; if it fails and the gate is armed,
-# auto-rollback and exit non-zero so the operator (or CI) sees the failure.
-# --no-smoke skips the check entirely; --no-gate runs it but won't revert.
+# Post-rollout version-skew guard (#613/#611). Every engine Deployment must be
+# running exactly the image tag we just built + deployed. Catches the class of
+# bug where a kustomize apply silently reverts a node to its manifest-pinned tag
+# (the #613 identity revert), which front-door smoke would not detect. A no-op
+# when we didn't build a versioned image (--skip-build / no --version).
+function assert_engine_versions() {
+    [ "$SKIP_BUILD" = true ] && return 0
+    [ -z "$VERSION" ] && return 0
+    if [ "$DRY_RUN" = true ]; then
+        plan "verify every engine Deployment runs :$VERSION (version-skew guard)"
+        return 0
+    fi
+    section "5a. Version-skew guard"
+    local nt want got skew=0
+    for nt in "${ENGINE_NODE_TYPES[@]}"; do
+        want="${ACR_LOGIN_SERVER}/memql-${nt}:${VERSION}"
+        got="$(kubectl get "deployment/${nt}" -n "$NAMESPACE" \
+            -o "jsonpath={.spec.template.spec.containers[?(@.name=='${nt}')].image}" 2>/dev/null)"
+        if [ "$got" = "$want" ]; then
+            info "deployment/${nt} -> :${VERSION} OK"
+        else
+            warn "version skew: deployment/${nt} runs '${got}', expected '${want}'"
+            skew=1
+        fi
+    done
+    return "$skew"
+}
+
+# The health gate: assert no version skew, then run the smoke test; if either
+# fails and the gate is armed, auto-rollback and exit non-zero so the operator
+# (or CI) sees the failure. --no-smoke skips the smoke check (the version-skew
+# guard still runs); --no-gate runs the checks but won't revert.
 function health_gate() {
+    if ! assert_engine_versions; then
+        if [ "$GATE" = false ]; then
+            warn "version skew detected; gate is OFF (--no-gate), leaving the revision in place."
+            return 1
+        fi
+        section "5. Version skew -> rollback"
+        rollback_all
+        return 1
+    fi
     if smoke_test; then
         return 0
     fi

@@ -311,12 +311,27 @@ func convertHistoryToProto(history []conversationMessage) []*memqlv1.AgentTurnMe
 // agents on the cluster forwarder path had no idea what the space
 // was for ("Q3 roadmap planning") and replied with generic "what
 // are you working on?" prompts even when the user had explicitly
-// set a purpose at create time. Description + purpose now ride
+// set a goal at create time. Description + goal now ride
 // every forward.
 //
 // User identity: currentUserDisplayName carries the human speaker's
 // display name into the prompt so agents can address the user by
 // name without needing a separate tool call. Empty when unavailable.
+
+// buildSpaceGoalProto builds the structured space-goal proto for the
+// agent turn, returning nil when the space has no goal statement so
+// the wire carries an absent goal rather than an empty message.
+func buildSpaceGoalProto(si spaceInfo) *memqlv1.AgentTurnSpaceGoal {
+	statement := strings.TrimSpace(si.goalStatement)
+	if statement == "" {
+		return nil
+	}
+	return &memqlv1.AgentTurnSpaceGoal{
+		Statement: statement,
+		Timeframe: strings.TrimSpace(si.goalTimeframe),
+	}
+}
+
 func buildRoutingContext(ctx context.Context, trigger, spaceId string, si spaceInfo, peerAgents []*agentPayload, humans []*participantPayload, currentSpeakerParticipantId string) *memqlv1.AgentTurnRoutingContext {
 	routing := &memqlv1.AgentTurnRoutingContext{
 		Trigger:         strings.TrimSpace(trigger),
@@ -326,7 +341,7 @@ func buildRoutingContext(ctx context.Context, trigger, spaceId string, si spaceI
 			Id:                     strings.TrimSpace(spaceId),
 			Type:                   strings.TrimSpace(si.spaceType),
 			Description:            strings.TrimSpace(si.description),
-			Purpose:                strings.TrimSpace(si.purpose),
+			Goal:                   buildSpaceGoalProto(si),
 			CurrentUserDisplayName: currentUserDisplayNameFromContext(ctx),
 		},
 		TurnMode:          turnModeFromContext(ctx),

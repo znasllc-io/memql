@@ -460,7 +460,7 @@ func (c *CognitionIntegration) routeWithSI(
 		}
 	}
 
-	// Fetch the space's purpose / description so the router can
+	// Fetch the space's goal / description so the router can
 	// disambiguate between equally-qualified agents by leaning on
 	// what the space is actually for ("Plan Q3 roadmap" -> PM-leaning
 	// agent preferred over generic responder). Uses the cached

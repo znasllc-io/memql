@@ -14,7 +14,7 @@ Output ONLY a JSON object -- no markdown fences, no prose. Keep instructions sho
 {{end}}{{end}}
 {{if .space}}### Space
 {{if .space.name}}Title: "{{.space.name}}"
-{{end}}{{if .space.purpose}}Purpose: {{.space.purpose}}
+{{end}}{{if .space.goal.statement}}Goal: {{.space.goal.statement}}{{if .space.goal.timeframe}} (timeframe: {{.space.goal.timeframe}}){{end}}
 {{else if .space.description}}Description: {{.space.description}}
 {{end}}{{end}}
 {{if .sessionSummary}}### Session summary so far

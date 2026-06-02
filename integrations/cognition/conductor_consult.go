@@ -403,7 +403,7 @@ const conductorPlanSchemaJSON = `{
 //   - candidates: the AI agents present (from Polyphon scoring)
 //   - agentConfigs: per-participant agent payloads (id, name, role, etc.)
 //   - recentUtterances: the conversation transcript
-//   - sInfo: space metadata (name, purpose, description)
+//   - sInfo: space metadata (name, goal, description)
 //   - participants: full participant list (to find human names)
 func (c *CognitionIntegration) consultConductor(
 	ctx context.Context,

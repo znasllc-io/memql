@@ -270,7 +270,7 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 			"Do NOT introduce yourself by name. Do NOT say 'I'm X' or 'this is X' or 'as your assistant'. " +
 			"Two sentences max, in your own voice -- familiar, not a help-desk script. " +
 			"Do NOT call any tools. Do NOT ask 'how can I assist you today'. Do NOT recite your capabilities or domains. " +
-			"If the space has a title or stated purpose, you can reference it briefly. Otherwise just open the door for the user.",
+			"If the space has a title or stated goal, you can reference it briefly. Otherwise just open the door for the user.",
 		SkipRoomAnnounce:  true,
 		SkipHandoffOpener: true,
 	}
