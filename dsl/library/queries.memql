@@ -1,0 +1,74 @@
+// library domain -- Library reads.
+//
+// Authz tier: owned. Every filter gates on
+// payload.ownerUserId==actor.userId so a caller can only ever read
+// their own Library; no arg widens the row set beyond their ownership.
+//
+// memQL query filters are equality / membership predicates with no OR
+// and no in-filter substring match, so the surface here mirrors the
+// notes / calendar pattern: a small set of server-side-narrowed reads
+// (all / by lens / by kind / by space / by id) over the owner-scoped
+// row set, with free-text SEARCH layered client-side over the returned
+// page (the Library list panel, #298). The lens / kind / space facets
+// ARE server-side -- they're the high-cardinality narrowing that
+// matters; search is the cheap client-side refinement on top.
+
+use library.concepts.{ artifact, generatedOutput }
+use library.shapes.{ artifactFull, generatedOutputFull }
+
+@enabled
+@description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
+query artifact queryLibraryArtifacts {
+  filter  payload.ownerUserId==actor.userId
+  shape   artifactFull
+}
+
+@enabled
+@description("List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.")
+query artifact queryLibraryArtifactsByLens {
+  args {
+    lens  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.lens==args.lens
+  shape   artifactFull
+}
+
+@enabled
+@description("List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.")
+query artifact queryLibraryArtifactsByKind {
+  args {
+    kind  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.kind==args.kind
+  shape   artifactFull
+}
+
+@enabled
+@description("List the caller's Library rows scoped to one space -- backs the per-space facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.spaceId narrows to the given space.")
+query artifact queryLibraryArtifactsBySpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.spaceId==args.spaceId
+  shape   artifactFull
+}
+
+@enabled
+@description("Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.")
+query artifact queryLibraryArtifactById {
+  args {
+    artifactId  string  @required
+  }
+  filter  ?.id==args.artifactId; payload.ownerUserId==actor.userId
+  shape   artifactFull
+}
+
+@enabled
+@description("Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.")
+query generatedOutput queryGeneratedOutputById {
+  args {
+    outputId  string  @required
+  }
+  filter  ?.id==args.outputId; payload.ownerUserId==actor.userId
+  shape   generatedOutputFull
+}
