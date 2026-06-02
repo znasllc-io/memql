@@ -1,0 +1,145 @@
+# In-cluster deploy gate (deployment-v2 Phase 3, znasllc-io/memql#701).
+#
+# Replaces the bespoke public-host shell smoke (staging-smoke-test.sh) with an
+# Argo Rollouts AnalysisTemplate that runs CONVERGENCE-SAFE, IN-CLUSTER checks
+# against the new ReplicaSet's preview/canary service -- NOT a public host. This
+# structurally eliminates the #680 (wrong host) and #682 (mixed-version
+# convergence race) failure modes and needs no firewall exception, because the
+# checks dial in-cluster service DNS and the Rollout only runs them once the
+# analysed pods are Ready.
+#
+# Three checks (a failure on any aborts the Rollout -> automatic rollback to the
+# stable ReplicaSet -- no `rollout undo`, no script):
+#   1. readiness  -- GET /readyz on the analysed service; asserts the critical
+#                    schema is present (#657). Proves a migration actually
+#                    applied, credential-free.
+#   2. auth-query -- an AUTHENTICATED query via the class="service_account" JWT
+#                    (#691), fanning BFF -> cognition/agent. Proves the
+#                    authenticated app path, not just front-door 200s (the 0.9.6
+#                    incident went front-door-green while the app was broken).
+#   3. slo        -- optional Prometheus gate: error-rate / p95 / active-stream
+#                    drop. Enabled when a Prometheus address is provided.
+#
+# Args are passed by the Rollout (the analysed service name + the namespace).
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: deploy-gate
+  namespace: memql
+spec:
+  args:
+    - name: service          # the analysed (preview/canary) Service name
+    - name: namespace
+      value: memql
+  metrics:
+    # ---- 1 + 2: readiness + authenticated query, in one Job ------------------
+    - name: readyz-and-auth-query
+      # One shot; the Job either exits 0 (pass) or non-zero (fail -> abort).
+      count: 1
+      failureLimit: 0
+      provider:
+        job:
+          spec:
+            backoffLimit: 2
+            activeDeadlineSeconds: 120
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: gate
+                    # Gate client image: bundles curl + the WS/gRPC client and
+                    # the in-cluster check script (migrated from the useful
+                    # logic in scripts/deploy/staging-smoke-test.sh). Built +
+                    # digest-pinned in CI like every other artifact; see
+                    # ../README.md "Gate client image".
+                    image: acrmemql.azurecr.io/deploy-gate:latest
+                    env:
+                      - name: GATE_SERVICE
+                        value: "{{args.service}}"
+                      - name: GATE_NAMESPACE
+                        value: "{{args.namespace}}"
+                      # The machine identity (#691). Short-lived class=
+                      # service_account JWT, surface-pinned to the read/query
+                      # path. Minted by the identity-side CronJob into this
+                      # Secret (see ../README.md "Provisioning the gate JWT").
+                      - name: MEMQL_SVC_JWT
+                        valueFrom:
+                          secretKeyRef:
+                            name: deploy-gate-jwt
+                            key: MEMQL_SVC_JWT
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -eu
+                        svc="$GATE_SERVICE"
+                        echo "== 1. readiness (/readyz schema assertion, #657) =="
+                        # In-cluster, plaintext http on the node's 8085; assert
+                        # 200 + ready (a non-200 or pre-/readyz 404 is a FAIL).
+                        body="$(curl -fsS "http://$svc:8085/readyz")"
+                        echo "$body" | grep -q '"status":"ready"' \
+                          || { echo "FAIL: /readyz not ready: $body"; exit 1; }
+                        echo "PASS: /readyz ready"
+
+                        echo "== 2. authenticated query (service_account JWT, #691) =="
+                        # The gate client opens MemqlService.Stream to the node's
+                        # gRPC (50051) with Authorization: Bearer $MEMQL_SVC_JWT,
+                        # runs the synthetic ExecuteQuery (+ a single agent turn),
+                        # and asserts a well-formed result. Exits non-zero on any
+                        # auth/transport/result failure. (deploy-gate-check is the
+                        # entrypoint baked into the gate image.)
+                        deploy-gate-check \
+                          --addr "$svc:50051" \
+                          --jwt "$MEMQL_SVC_JWT" \
+                          --query 'count v1:cognition:space' \
+                          --fan-agent
+                        echo "PASS: authenticated query"
+---
+# ---- 3: optional SLO gate (Prometheus) --------------------------------------
+# Enabled by referencing this template too in the Rollout's analysis block and
+# providing `prometheus-addr`. Kept separate so the readiness+auth gate works
+# even before Prometheus is wired. Thresholds are conservative starting points;
+# tune against observed staging baselines.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: deploy-gate-slo
+  namespace: memql
+spec:
+  args:
+    - name: service
+    - name: prometheus-addr
+      value: http://prometheus-operated.monitoring:9090
+  metrics:
+    - name: error-rate
+      interval: 30s
+      count: 4
+      successCondition: result[0] <= 0.02   # <=2% 5xx
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: "{{args.prometheus-addr}}"
+          query: |
+            sum(rate(grpc_server_handled_total{grpc_code=~"Internal|Unknown|Unavailable",service="{{args.service}}"}[2m]))
+            / clamp_min(sum(rate(grpc_server_handled_total{service="{{args.service}}"}[2m])), 1)
+    - name: p95-latency-ms
+      interval: 30s
+      count: 4
+      successCondition: result[0] <= 1500   # p95 <= 1.5s
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: "{{args.prometheus-addr}}"
+          query: |
+            histogram_quantile(0.95, sum(rate(grpc_server_handling_seconds_bucket{service="{{args.service}}"}[2m])) by (le)) * 1000
+    - name: active-stream-drop
+      # The #616 activeStreams primitive: a healthy promotion must not drop
+      # live user streams. Alert if active streams fall sharply during analysis.
+      interval: 30s
+      count: 4
+      successCondition: result[0] >= 0
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: "{{args.prometheus-addr}}"
+          query: |
+            min_over_time(memql_active_streams{service="{{args.service}}"}[2m])
