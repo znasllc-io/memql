@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.26 AS builder
+FROM golang:1.26.4 AS builder
 
 # BUILD_TAGS controls which node type binary is compiled.
 # Defaults to empty (BFF -- the default node type).
