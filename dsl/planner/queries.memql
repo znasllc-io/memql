@@ -278,6 +278,62 @@ query responsibility queryDueResponsibilities {
   shape   responsibilityFull
 }
 
+// queryActiveResponsibilitiesAcrossUsers
+// ======================================
+//
+// The cross-user sweep the reactive-loop heartbeat (epic #632, C1)
+// walks each tick. Returns EVERY active + enabled responsibility in
+// the partition, regardless of owner -- the planner-node poller has no
+// single user context, so it can't lean on the owned-tier
+// queryActiveResponsibilities (which binds ownerUserId to actor.userId).
+//
+// This is the same cron-sweep-helper shape as
+// queryAllArchivedSpacesAcrossUsers: no owner filter on purpose. The
+// per-row-authz conformance classifier buckets it as 'other' (the
+// header body references no payload.ownerUserId/userId literal -- the
+// owner field is projected through the responsibilityFull shape, not
+// compared in the filter), so it needs no caller-check.
+//
+// Cross-user isolation is preserved one layer up: the poller reads the
+// sweep under the system actor, then re-enters each row UNDER THAT
+// ROW'S OWNER (impersonating ownerUserId in the AccessContext) for the
+// owned-tier per-user writes (record-evaluation, assignment). A row's
+// owner can never write another owner's responsibility because the
+// sweep is read-only and every downstream write goes back through the
+// owned-tier mutations gated on actor.userId.
+@enabled
+@description("Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.")
+query responsibility queryActiveResponsibilitiesAcrossUsers {
+  filter  traitStatusIsActive; payload.enabled==true
+  shape   responsibilityFull
+}
+
+// queryPlansForResponsibility
+// ===========================
+//
+// Every Plan the reactive loop spawned for a given responsibility,
+// matched on the input.responsibilityId back-pointer the loop stamps at
+// Plan-creation time. Backs the C1 dedup guard: before honoring a
+// reactive responsibility (epic #632, C3) the loop checks whether a
+// non-terminal Plan already exists for it and skips if so (continuity).
+// Terminal-vs-live filtering happens Go-side -- MemQL has no NOT/OR to
+// express "status not in {succeeded, failed, cancelled}" in one filter.
+//
+// input.responsibilityId is a synthetic field the planner stamps on the
+// Plan's input object (the Plan concept has no first-class
+// responsibility relationship); the filter reaches into the nested
+// payload object the same way queryAwaitingFeedbackPlansPastTimeout
+// reaches payload.feedbackRequest.timeoutAt.
+@enabled
+@description("Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).")
+query plan queryPlansForResponsibility {
+  args {
+    responsibilityId  string  @required
+  }
+  filter  payload.input.responsibilityId==args.responsibilityId
+  shape   planFull
+}
+
 // queryResponsibilityById
 // =======================
 //

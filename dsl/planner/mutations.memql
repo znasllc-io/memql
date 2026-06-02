@@ -576,6 +576,24 @@ mutation responsibility mutationRecordResponsibilityEvaluation {
   }
 }
 
+@enabled
+@description("Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.")
+mutation responsibility mutationAssignResponsibility {
+  args {
+    responsibilityId  string  @required
+    targetKind        string  @required  @enum("assistant", "specialist")
+    assignedAgentId   string
+    assignedRoleSlug  string
+  }
+  update responsibility {
+    id: args.responsibilityId
+    ownerUserId: actor.userId
+    args.targetKind
+    args.assignedAgentId
+    args.assignedRoleSlug
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Responsibility intake (issue #637 -- epic #631 / program #629).
 //

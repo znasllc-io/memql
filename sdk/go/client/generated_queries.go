@@ -204,6 +204,23 @@ func QueryActiveResponsibilitiesBuild(args QueryActiveResponsibilitiesArgs) stri
 	return "queryActiveResponsibilities({})"
 }
 
+// QueryActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
+//
+// Bound concept: responsibility.
+type QueryActiveResponsibilitiesAcrossUsersArgs struct {
+}
+
+// QueryActiveResponsibilitiesAcrossUsers calls the engine query queryActiveResponsibilitiesAcrossUsers.
+func (qc *QueryClient) QueryActiveResponsibilitiesAcrossUsers(ctx context.Context, args QueryActiveResponsibilitiesAcrossUsersArgs) (*Result, error) {
+	call := QueryActiveResponsibilitiesAcrossUsersBuild(args)
+	return qc.executeNamed(ctx, "queryActiveResponsibilitiesAcrossUsers", call)
+}
+
+func QueryActiveResponsibilitiesAcrossUsersBuild(args QueryActiveResponsibilitiesAcrossUsersArgs) string {
+	_ = args
+	return "queryActiveResponsibilitiesAcrossUsers({})"
+}
+
 // QueryActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: skill.
@@ -2277,6 +2294,28 @@ func QueryPlanByIdBuild(args QueryPlanByIdArgs) string {
 	b.WriteString("queryPlanById({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryPlansForResponsibility -- Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
+//
+// Bound concept: plan.
+type QueryPlansForResponsibilityArgs struct {
+	ResponsibilityId string
+}
+
+// QueryPlansForResponsibility calls the engine query queryPlansForResponsibility.
+func (qc *QueryClient) QueryPlansForResponsibility(ctx context.Context, args QueryPlansForResponsibilityArgs) (*Result, error) {
+	call := QueryPlansForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "queryPlansForResponsibility", call)
+}
+
+func QueryPlansForResponsibilityBuild(args QueryPlansForResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("queryPlansForResponsibility({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }

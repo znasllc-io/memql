@@ -105,6 +105,7 @@ type PlannerIntegration struct {
 	trainDispatch  *TrainSpecialistDispatcher
 	intakeDispatch *ResponsibilityIntakeDispatcher
 	refreshCron    *RefreshCron
+	reactiveLoop   *ReactiveLoop
 	logger         *slog.Logger
 	unsubscribes   []func()
 	started        atomic.Bool
@@ -156,6 +157,7 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
 	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
+	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
 	return p, nil
 }
 
@@ -266,6 +268,14 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		if p.refreshCron != nil {
 			p.refreshCron.Start(ctx)
 		}
+		// Start the reactive planner loop (#638-#641). Polls
+		// queryActiveResponsibilitiesAcrossUsers, does the cron / condition
+		// due-check Go-side, routes each due responsibility to an agent,
+		// honors it per archetype (Plan vs context injection), and runs the
+		// per-user goals x responsibilities convergence step.
+		if p.reactiveLoop != nil {
+			p.reactiveLoop.Start(ctx)
+		}
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
 	// readyCh close, IsRunning bookkeeping) to the base
@@ -292,6 +302,9 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	p.mu.Unlock()
 	if p.refreshCron != nil {
 		p.refreshCron.Stop()
+	}
+	if p.reactiveLoop != nil {
+		p.reactiveLoop.Stop()
 	}
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)
