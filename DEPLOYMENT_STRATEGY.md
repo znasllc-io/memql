@@ -201,10 +201,14 @@ and a validated artifact is **immutable**.
   This is what makes the gate conclusive (the 0.9.6 incident went
   8-PASS/0-FAIL/2-SKIP green while the authenticated app was broken).
 
-**Server-side readiness (`/readyz`, #657).** The app exposes an unauthenticated
-`GET /readyz` that asserts critical schema presence via `to_regclass` (the core
-`"MemoryNodes"` table + `automation_execution_claims`) and returns 503 when an
-invariant is missing. The smoke `check_readiness` hits it in every profile (no
+**Server-side readiness (`/readyz`, #657).** Every memql binary exposes an
+unauthenticated `GET /readyz` that asserts critical schema presence via
+`to_regclass` (the core `"MemoryNodes"` table + `automation_execution_claims`)
+and returns 503 when an invariant is missing. The smoke `check_readiness` probes
+it on the **identity host** (`identity.<env>.copresent.ai/readyz`) — identity
+routes `/` to the identity pod, which is built from this repo and connects to
+the shared memory-nodes DB; the app host only proxies `/memql*`+`/.well-known`,
+so `/readyz` there hits the SPA catch-all (#680). It runs in every profile (no
 token needed); in the deep gate a non-200 — or a 404 from a version that
 predates the probe — is a hard FAIL. This proves a migration actually applied
 WITHOUT DB credentials (the DB is firewalled to AKS egress) and is the runtime

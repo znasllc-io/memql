@@ -200,16 +200,22 @@ function check_identity() {
 # Needs no token, so it runs in every profile; a missing endpoint (404) is a
 # hard FAIL in the deep promotion gate (a version that predates #657 is not
 # promotable) and a SKIP in baseline.
+#
+# Targets the IDENTITY host, NOT the app host (#680): identity.<env> routes "/"
+# -> identity (Ingress staging-identity), and the identity binary registers the
+# critical-schema readiness check against the shared memory-nodes DB. The app
+# host only proxies /memql* -> bff and /.well-known -> identity; /readyz there
+# falls to the copresent SPA catch-all and returns index.html (200 doctype).
 function check_readiness() {
     section "2b. Server-side readiness (/readyz schema invariants)"
 
     local code body
-    code="$(http_status GET "https://$APP_HOST/readyz")"
+    code="$(http_status GET "https://$IDENTITY_HOST/readyz")"
     case "$code" in
         200)
-            body="$(http_body "https://$APP_HOST/readyz")"
+            body="$(http_body "https://$IDENTITY_HOST/readyz")"
             if echo "$body" | grep -q '"status":"ready"'; then
-                pass "/readyz is ready -- critical schema present"
+                pass "/readyz is ready -- critical schema present (identity host)"
             else
                 fail "/readyz returned 200 but status is not \"ready\": $body"
             fi
