@@ -24,8 +24,8 @@ func TestIntegrationName(t *testing.T) {
 func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	caps := i.Capabilities()
-	if len(caps) != 3 {
-		t.Fatalf("Capabilities count: got %d want 3 (invoke + ensureForGoal + askSpecialist)", len(caps))
+	if len(caps) != 4 {
+		t.Fatalf("Capabilities count: got %d want 4 (invoke + ensureForGoal + askSpecialist + requestUserFeedback)", len(caps))
 	}
 	byName := make(map[string]bool, len(caps))
 	for _, c := range caps {
@@ -58,6 +58,13 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 				}
 			}
 		}
+		if c.Name == "requestUserFeedback" {
+			for _, key := range []string{"question", "kind", "planId"} {
+				if _, ok := c.ArgsSchema[key]; !ok {
+					t.Errorf("requestUserFeedback ArgsSchema missing %q", key)
+				}
+			}
+		}
 	}
 	if !byName["invoke"] {
 		t.Error("missing 'invoke' capability")
@@ -67,6 +74,50 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	}
 	if !byName["askSpecialist"] {
 		t.Error("missing 'askSpecialist' capability")
+	}
+	if !byName["requestUserFeedback"] {
+		t.Error("missing 'requestUserFeedback' capability")
+	}
+}
+
+// handleRequestUserFeedback's early validation paths are testable
+// without a wired engine: missing question, missing/invalid kind, and
+// missing planId all fail before the engine.Execute call. The success
+// path (which transitions a Plan via mutationRequestPlanFeedback) needs
+// a wired engine + database and is exercised by the planner
+// integration tests, not here.
+
+func TestHandleRequestUserFeedback_RequiresQuestion(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleRequestUserFeedback(context.Background(), map[string]any{
+		"kind":   "text",
+		"planId": "plan-1",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "'question' is required") {
+		t.Fatalf("expected 'question' is required error, got: %v", err)
+	}
+}
+
+func TestHandleRequestUserFeedback_RejectsBadKind(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleRequestUserFeedback(context.Background(), map[string]any{
+		"question": "Which quarter?",
+		"kind":     "freeform",
+		"planId":   "plan-1",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "must be choice / text / multi") {
+		t.Fatalf("expected bad-kind error, got: %v", err)
+	}
+}
+
+func TestHandleRequestUserFeedback_RequiresPlanId(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleRequestUserFeedback(context.Background(), map[string]any{
+		"question": "Which quarter?",
+		"kind":     "text",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "'planId' required") {
+		t.Fatalf("expected missing-planId error, got: %v", err)
 	}
 }
 

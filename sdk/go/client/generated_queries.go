@@ -204,6 +204,23 @@ func QueryActiveResponsibilitiesBuild(args QueryActiveResponsibilitiesArgs) stri
 	return "queryActiveResponsibilities({})"
 }
 
+// QueryActiveResponsibilitiesAcrossUsers -- Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.
+//
+// Bound concept: responsibility.
+type QueryActiveResponsibilitiesAcrossUsersArgs struct {
+}
+
+// QueryActiveResponsibilitiesAcrossUsers calls the engine query queryActiveResponsibilitiesAcrossUsers.
+func (qc *QueryClient) QueryActiveResponsibilitiesAcrossUsers(ctx context.Context, args QueryActiveResponsibilitiesAcrossUsersArgs) (*Result, error) {
+	call := QueryActiveResponsibilitiesAcrossUsersBuild(args)
+	return qc.executeNamed(ctx, "queryActiveResponsibilitiesAcrossUsers", call)
+}
+
+func QueryActiveResponsibilitiesAcrossUsersBuild(args QueryActiveResponsibilitiesAcrossUsersArgs) string {
+	_ = args
+	return "queryActiveResponsibilitiesAcrossUsers({})"
+}
+
 // QueryActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: skill.
@@ -2281,6 +2298,28 @@ func QueryPlanByIdBuild(args QueryPlanByIdArgs) string {
 	return b.String()
 }
 
+// QueryPlansForResponsibility -- Every Plan the reactive loop spawned for a responsibility, matched on the input.responsibilityId back-pointer. Backs the C1 dedup guard (one live Plan per continuous responsibility). Terminal-vs-live filtering happens Go-side (no NOT/OR in MemQL filters).
+//
+// Bound concept: plan.
+type QueryPlansForResponsibilityArgs struct {
+	ResponsibilityId string
+}
+
+// QueryPlansForResponsibility calls the engine query queryPlansForResponsibility.
+func (qc *QueryClient) QueryPlansForResponsibility(ctx context.Context, args QueryPlansForResponsibilityArgs) (*Result, error) {
+	call := QueryPlansForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "queryPlansForResponsibility", call)
+}
+
+func QueryPlansForResponsibilityBuild(args QueryPlansForResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("queryPlansForResponsibility({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryPlansForSpace -- All Plans in a space (Tasks page list). Frontend groups by status and applies the Done-window visual filter.
 //
 // Bound concept: plan.
@@ -2459,6 +2498,28 @@ func (qc *QueryClient) QueryResponsibilitiesForUser(ctx context.Context, args Qu
 func QueryResponsibilitiesForUserBuild(args QueryResponsibilitiesForUserArgs) string {
 	_ = args
 	return "queryResponsibilitiesForUser({})"
+}
+
+// QueryResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors queryPlanById; the owner-scoped list reads stay on queryResponsibilitiesForUser.
+//
+// Bound concept: responsibility.
+type QueryResponsibilityByIdArgs struct {
+	ResponsibilityId string
+}
+
+// QueryResponsibilityById calls the engine query queryResponsibilityById.
+func (qc *QueryClient) QueryResponsibilityById(ctx context.Context, args QueryResponsibilityByIdArgs) (*Result, error) {
+	call := QueryResponsibilityByIdBuild(args)
+	return qc.executeNamed(ctx, "queryResponsibilityById", call)
+}
+
+func QueryResponsibilityByIdBuild(args QueryResponsibilityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryResponsibilityById({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryRouterBudgets -- Returns all active budget rows for the current partition.

@@ -104,7 +104,9 @@ type PlannerIntegration struct {
 	agentLoop      *PlannerAgentLoop
 	trainDispatch  *TrainSpecialistDispatcher
 	embedDispatch  *EmbedDomainItemsDispatcher
+	intakeDispatch *ResponsibilityIntakeDispatcher
 	refreshCron    *RefreshCron
+	reactiveLoop   *ReactiveLoop
 	logger         *slog.Logger
 	unsubscribes   []func()
 	started        atomic.Bool
@@ -155,7 +157,9 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
 	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
+	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
+	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
 	return p, nil
 }
 
@@ -247,6 +251,22 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.refreshCron.HandleDomainUpdated,
 			events.WithSubscriberName("planner:knowledge-stale-signal"),
 		))
+		// Responsibility intake (#637). A freshly-authored
+		// v1:planner:responsibility (status=draft, intakeStatus='')
+		// triggers a lightweight reasoning pass that infers the
+		// structured field set and surfaces 0-2 clarifying questions;
+		// the updated subscription picks up an answers-folded row to
+		// finalize + activate.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.created.v1:planner:responsibility",
+			p.intakeDispatch.HandleResponsibilityCreated,
+			events.WithSubscriberName("planner:responsibility-intake-created"),
+		))
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:responsibility",
+			p.intakeDispatch.HandleResponsibilityUpdated,
+			events.WithSubscriberName("planner:responsibility-intake-updated"),
+		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: subscriptions registered",
 			"patterns", []string{
@@ -257,6 +277,8 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 				"graph.node.updated.v1:planner:plan (trainSpecialist)",
 				"graph.node.created.v1:planner:plan (embedDomainItems)",
 				"graph.node.updated.v1:planner:plan (embedDomainItems)",
+				"graph.node.created.v1:planner:responsibility (intake)",
+				"graph.node.updated.v1:planner:responsibility (intake)",
 			},
 		)
 		// Start the daily-refresh cron poller (#644). Polls
@@ -265,6 +287,14 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// dispatcher above then picks up.
 		if p.refreshCron != nil {
 			p.refreshCron.Start(ctx)
+		}
+		// Start the reactive planner loop (#638-#641). Polls
+		// queryActiveResponsibilitiesAcrossUsers, does the cron / condition
+		// due-check Go-side, routes each due responsibility to an agent,
+		// honors it per archetype (Plan vs context injection), and runs the
+		// per-user goals x responsibilities convergence step.
+		if p.reactiveLoop != nil {
+			p.reactiveLoop.Start(ctx)
 		}
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
@@ -292,6 +322,9 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	p.mu.Unlock()
 	if p.refreshCron != nil {
 		p.refreshCron.Stop()
+	}
+	if p.reactiveLoop != nil {
+		p.reactiveLoop.Stop()
 	}
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)

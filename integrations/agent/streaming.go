@@ -953,6 +953,11 @@ var agentContextStamps = map[string]agentContextStamp{
 	"workerComputer":          {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
 	"workerStatus":            {StampAgentId: true, StampOwnerUserId: true},
 	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
+	// requestUserFeedback parks the ACTIVE Plan, so it needs the
+	// turn-context planId stamped (the LLM never knows its own Plan id);
+	// agentId / ownerUserId scope the mutation's owner attribution and
+	// spaceId targets the canvas card.
+	"requestUserFeedback": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true, SpaceField: "spaceId"},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
 	// agentId rides inside `actor`. Space is `space`, not `spaceId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance

@@ -61,7 +61,7 @@ C4 + UML, mapped 1:1 onto Kind / EdgeKind in `model/model.go`:
 | **Activity diagram / flowchart (CFG)** | (Planned) `golang.org/x/tools/go/cfg` per-function |
 | **State diagram** | (Planned) annotation-driven, via doc-comment hints |
 | **ERD** | (Planned) parse the `.memql` concept tree |
-| **Deployment diagram** | (Planned) `infra/`, `cloudbuild.*.yaml`, k8s manifests |
+| **Deployment diagram** | (Planned) `deploy/k8s/` manifests + `scripts/deploy/` |
 
 The model is **renderer-agnostic** -- exporters (PlantUML, D2, Mermaid) can write a model -> text translation any time, but the production consumer (cockpit) renders directly from the Go model into the tcell canvas.
 

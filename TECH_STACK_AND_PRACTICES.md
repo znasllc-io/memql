@@ -84,22 +84,22 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 
 | Component | Technology | Location |
 |-----------|-----------|----------|
-| **Database** | TimescaleDB Cloud (Tiger Cloud) | rt1dn6vj9g.wb2g0uu9oq.tsdb.cloud.timescale.com |
-| **Service** | memQL | Google Cloud Run (us-central1) |
-| **URL** | HTTPS | https://anequim-memql-staging-439288787761.us-central1.run.app |
+| **Database** | TimescaleDB Cloud (Tiger Cloud) | Managed Tiger Cloud instance |
+| **Service** | memQL | Azure Kubernetes Service (cluster `aks-memql-staging`, namespace `memql`) |
+| **URL** | HTTPS | https://app.staging.copresent.ai, https://identity.staging.copresent.ai |
 | **Data** | Persistent | Managed by Tiger Cloud |
 
 **Commands:**
 ```bash
-# Deploy to staging (Google Cloud Run)
-gcloud run deploy
+# Deploy to staging (Azure AKS)
+make deploy VERSION=X
 
 # View logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=memql-anequim" --limit 50
-
-# Check status
-gcloud run services describe memql-anequim --region us-central1
+kubectl logs -n memql deployment/bff -f
 ```
+
+See [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) for the full deploy
+flow and topology.
 
 **Developer Access:** [x] All developers
 
@@ -112,7 +112,7 @@ gcloud run services describe memql-anequim --region us-central1
 | Component | Technology | Location |
 |-----------|-----------|----------|
 | **Database** | TimescaleDB Cloud (Tiger Cloud) | Production instance (separate from staging) |
-| **Service** | memQL | Google Cloud Run (production) |
+| **Service** | memQL | Azure Kubernetes Service (production) |
 | **URL** | HTTPS | Production domain |
 | **Data** | Persistent | Managed by Tiger Cloud (with backups) |
 
@@ -151,8 +151,9 @@ for the operator-side narrative.
 
 ### Service Accounts
 
-- Google Cloud Run uses service accounts for database access
-- Secrets managed via Google Cloud Secret Manager
+- AKS pulls images from ACR (`acrmemql.azurecr.io`)
+- Secrets managed via the genesis A2 sealed envelope + Azure Key Vault
+  (`kv-memql-<env>`); see DEPLOYMENT_STRATEGY.md
 - Environment variables injected at runtime
 
 ---
@@ -183,7 +184,7 @@ for the operator-side narrative.
 **Workflow:**
 1. Ensure all tests pass: `go test ./...`
 2. Push feature branch to GitHub
-3. Deploy to staging: `gcloud run deploy`
+3. Deploy to staging: `make deploy VERSION=X`
 4. Verify deployment via logs and health endpoint
 5. Test integration with frontend (if applicable)
 6. Create pull request when ready
@@ -243,7 +244,8 @@ for the operator-side narrative.
 | **Go 1.26.1+** | Backend development | https://go.dev/dl/ (ARM64 build) |
 | **Docker Desktop** | Local environment | https://docker.com/products/docker-desktop (Apple Silicon) |
 | **Docker Compose** | Local container orchestration | Pre-installed with Docker Desktop |
-| **gcloud CLI** | Cloud deployments | https://cloud.google.com/sdk/docs/install |
+| **Azure CLI (`az`)** | Cloud deployments (AKS, ACR) | https://learn.microsoft.com/cli/azure/install-azure-cli |
+| **kubectl** | AKS cluster management | https://kubernetes.io/docs/tasks/tools/ |
 | **git** | Version control | Pre-installed on macOS |
 
 ### Optional Tools
@@ -298,8 +300,8 @@ psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL she
 # Testing
 go test ./...                    # Run Go test suite
 
-# Deployment (Google Cloud Run)
-gcloud run deploy                # Deploy to staging or production
+# Deployment (Azure AKS) -- see DEPLOYMENT_STRATEGY.md
+make deploy VERSION=X            # Deploy to staging (scripts/deploy/aks-deploy.sh)
 
 # Dev secrets workflow
 make bootstrap                                   # Generate .env.local with master key + bootstrap envelope
@@ -307,10 +309,10 @@ make secrets-init                                # Interactively populate ~/.mem
 make secrets-seed                                # Push the yaml into running memQL (encrypts secrets first)
 make secrets-list                                # Diff manifest vs yaml vs running memQL
 
-# Google Cloud
-gcloud run services list                                    # List services
-gcloud logging read "..." --limit 50                       # View logs
-gcloud run services describe memql-anequim --region us-central1  # Service details (staging)
+# AKS
+kubectl get pods -n memql                                   # List pods
+kubectl logs -n memql deployment/bff -f                     # View logs
+kubectl get deployments -n memql                            # Deployment status (staging)
 ```
 
 ### Environment Variables
@@ -334,16 +336,15 @@ for the full design.
 - The CLI manages partitions interactively in the Clusters tab and persists
   the per-cluster selection in `~/.memql/clusters.yaml`.
 
-**Staging/Production (Cloud Run):**
-- Bootstrap envelope (DSN, master key, identity service signing-key
-  encryption secret) lives in Google Secret Manager, mounted via
-  `secretKeyRef` in service.yaml
+**Staging/Production (AKS):**
+- Shared secrets (DSN, master key, identity signing seed) ride the
+  genesis A2 sealed envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
+  Secret), backed up in Azure Key Vault (`kv-memql-<env>`). Per-node,
+  non-secret config lives in the k8s manifest env. See
+  DEPLOYMENT_STRATEGY.md for the canonical add/rotate flow.
 - Everything else lives in memQL's `v1:platform:globalSecret` /
-  `v1:platform:globalVariable` concepts, populated post-deploy by an
-  operator running `make prod-seed-secrets ENV=...` against the live
-  cluster
+  `v1:platform:globalVariable` concepts
 - Never commit secrets to git
-- Use service tokens for the seed step in CI/CD
 
 ---
 
