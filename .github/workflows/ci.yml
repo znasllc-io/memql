@@ -148,3 +148,24 @@ jobs:
           cache: true
       - name: lint dsl tree
         run: go run ./cmd/memqllint dsl/
+
+  # Engine-bootstrap smoke gate. dsl-lint above runs the parse/diagnostic
+  # pipeline, but the engine's concept + relationship validation (and the
+  # spec/shape/function/builtin/tool/prompt/provider/policy loaders) run
+  # ONLY at engine Init -- which no other lane exercises without Postgres.
+  # That gap let #597 (an unregistered `dependsOn` relationship type) merge
+  # green and crash every node at boot. This lane loads the full embedded
+  # DSL tree and runs engine.Init against it (DB-free; provider secret
+  # resolution is lazy with OS-env fallback), turning that class of
+  # bootstrap regression into a fast CI failure. See #599.
+  engine-load-check:
+    name: engine load check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: engine init over full DSL tree
+        run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
