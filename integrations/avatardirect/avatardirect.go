@@ -251,16 +251,16 @@ func (i *Integration) handleStopSession(ctx context.Context, args map[string]any
 // Agent resolution
 // -----------------------------------------------------------------
 
-// resolveAgentAvatar reads the agent's avatarVendor + avatarPersonaId from the
-// graph. Uses a raw `from(...) select` lookup (the same precedent the
-// voice-agent session handler uses for the channel-mode lookup), since the
-// shared agentFull shape does not project the avatar fields.
+// resolveAgentAvatar reads the agent's avatarVendor + avatarPersonaId via the
+// named queryAgentById (the agentFull shape now projects both fields, memql
+// #692/#721). Using the named query honors the no-raw-DSL contract and avoids
+// the parser choking on a `?.`-prefixed colon-bearing id literal.
 func (i *Integration) resolveAgentAvatar(ctx context.Context, agentId string) (vendor, personaId string, err error) {
 	if i.engine == nil {
 		return "", "", fmt.Errorf("avatardirect: no engine configured")
 	}
 	agentIdJSON, _ := json.Marshal(agentId)
-	q := fmt.Sprintf(`from(v1:agents:agent) ?.id==%s select id, payload.avatarVendor, payload.avatarPersonaId`, string(agentIdJSON))
+	q := fmt.Sprintf(`queryAgentById({agentId: %s})`, string(agentIdJSON))
 	raw, err := i.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return "", "", fmt.Errorf("avatardirect: resolve agent %s: %w", agentId, err)

@@ -121,9 +121,9 @@ func TestStartSession_AnamHappyPath(t *testing.T) {
 	assert.NotEqual(t, out["livekit_client_token"], client.startedTok, "avatar token differs from browser token")
 	assert.Equal(t, out["room_name"], client.startedRoom)
 
-	// The lookup queried the agent's avatar fields.
-	assert.Contains(t, eng.gotQuery, "payload.avatarVendor")
-	assert.Contains(t, eng.gotQuery, "payload.avatarPersonaId")
+	// The lookup used the named queryAgentById (no raw DSL).
+	assert.Contains(t, eng.gotQuery, "queryAgentById")
+	assert.Contains(t, eng.gotQuery, "v1:agents:agent:abc")
 }
 
 func TestStartSession_NonAnamVendorRejected(t *testing.T) {
