@@ -1,0 +1,29 @@
+# App-of-apps root (deployment-v2 Phase 2, #700). This single Application renders
+# every Application/AppProject manifest under deploy/argocd/apps, so ADDING a new
+# app to the cluster is a PR that drops a manifest here -- no manual `kubectl`.
+# Bootstrap applies this once; thereafter it self-manages (incl. itself).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/argocd/apps
+    directory:
+      recurse: true
+      include: '{project.yaml,memql.yaml,root.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

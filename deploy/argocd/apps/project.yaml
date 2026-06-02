@@ -1,0 +1,28 @@
+# AppProject scoping the memql GitOps surface (deployment-v2 Phase 2, #700).
+# Restricts what the reconciler may deploy: only THIS repo, only the memql (and
+# argocd, for the app-of-apps) namespaces, on the in-cluster API. A tighter blast
+# radius than the default project.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: memql
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: memQL mesh + CoPresent on AKS (digest-pinned overlays)
+  sourceRepos:
+    - https://github.com/znasllc-io/memql.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: memql
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  # Cluster-scoped resources the mesh legitimately needs (none today beyond the
+  # namespace, which is created by the overlay). Keep empty-ish; widen on need.
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

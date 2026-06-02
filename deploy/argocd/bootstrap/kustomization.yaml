@@ -1,0 +1,23 @@
+# Argo CD install (deployment-v2 Phase 2, znasllc-io/memql#700).
+#
+# Pins the upstream Argo CD stable manifests by tag so the reconciler itself is
+# reproducible + auditable (no "latest"). Installs into the `argocd` namespace.
+# This is the ONE bootstrap apply that is NOT itself GitOps-managed (chicken/egg);
+# everything in the memql namespace is reconciled by the Application this brings
+# up (see ../apps/). Bump the ?ref= to upgrade Argo CD (then re-apply once).
+#
+# Bootstrap:
+#   kubectl create namespace argocd        # (or let this create it)
+#   kubectl apply -k deploy/argocd/bootstrap
+#   kubectl -n argocd rollout status deploy/argocd-server
+# Then register the repo credential + apply the app-of-apps (see ../README.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - namespace.yaml
+  # Upstream Argo CD v2.13.3 stable install (pinned). Cluster-scoped + namespaced
+  # resources for a self-contained install.
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.3/manifests/install.yaml
