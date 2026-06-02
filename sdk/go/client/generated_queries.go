@@ -2461,6 +2461,28 @@ func QueryResponsibilitiesForUserBuild(args QueryResponsibilitiesForUserArgs) st
 	return "queryResponsibilitiesForUser({})"
 }
 
+// QueryResponsibilityById -- Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors queryPlanById; the owner-scoped list reads stay on queryResponsibilitiesForUser.
+//
+// Bound concept: responsibility.
+type QueryResponsibilityByIdArgs struct {
+	ResponsibilityId string
+}
+
+// QueryResponsibilityById calls the engine query queryResponsibilityById.
+func (qc *QueryClient) QueryResponsibilityById(ctx context.Context, args QueryResponsibilityByIdArgs) (*Result, error) {
+	call := QueryResponsibilityByIdBuild(args)
+	return qc.executeNamed(ctx, "queryResponsibilityById", call)
+}
+
+func QueryResponsibilityByIdBuild(args QueryResponsibilityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryResponsibilityById({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryRouterBudgets -- Returns all active budget rows for the current partition.
 //
 // Bound concept: budget.

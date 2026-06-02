@@ -103,6 +103,7 @@ type PlannerIntegration struct {
 	agentForwarder AgentForwarder
 	agentLoop      *PlannerAgentLoop
 	trainDispatch  *TrainSpecialistDispatcher
+	intakeDispatch *ResponsibilityIntakeDispatcher
 	refreshCron    *RefreshCron
 	logger         *slog.Logger
 	unsubscribes   []func()
@@ -153,6 +154,7 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	}
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
+	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
 	return p, nil
 }
@@ -229,6 +231,22 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.refreshCron.HandleDomainUpdated,
 			events.WithSubscriberName("planner:knowledge-stale-signal"),
 		))
+		// Responsibility intake (#637). A freshly-authored
+		// v1:planner:responsibility (status=draft, intakeStatus='')
+		// triggers a lightweight reasoning pass that infers the
+		// structured field set and surfaces 0-2 clarifying questions;
+		// the updated subscription picks up an answers-folded row to
+		// finalize + activate.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.created.v1:planner:responsibility",
+			p.intakeDispatch.HandleResponsibilityCreated,
+			events.WithSubscriberName("planner:responsibility-intake-created"),
+		))
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:responsibility",
+			p.intakeDispatch.HandleResponsibilityUpdated,
+			events.WithSubscriberName("planner:responsibility-intake-updated"),
+		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: subscriptions registered",
 			"patterns", []string{
@@ -237,6 +255,8 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 				"graph.node.updated.v1:planner:plan (agent loop)",
 				"graph.node.created.v1:planner:plan (trainSpecialist)",
 				"graph.node.updated.v1:planner:plan (trainSpecialist)",
+				"graph.node.created.v1:planner:responsibility (intake)",
+				"graph.node.updated.v1:planner:responsibility (intake)",
 			},
 		)
 		// Start the daily-refresh cron poller (#644). Polls
