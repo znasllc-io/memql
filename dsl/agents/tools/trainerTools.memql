@@ -21,7 +21,7 @@
 //   fetchUrl           -> builtin fetchUrl           (integration.knowledge.fetchUrl; real http.Client)
 //   writeKnowledgeChunk-> mutationWriteKnowledgeChunk (source='trainerAgent')
 //   markChunkSuperseded-> mutationMarkChunkSuperseded (refresh-mode deprecation)
-//   embedChunk         -> builtin embedChunk         (integration.knowledge.embedChunk; no-op, deferred to #645)
+//   embedChunk         -> builtin embedChunk         (integration.knowledge.embedChunk; real embed-and-store, #645)
 
 @enabled
 @handler(type="function", name="webSearch")
@@ -72,7 +72,7 @@ tool markChunkSuperseded {
 @handler(type="function", name="embedChunk")
 @allowedRoles("specialist")
 @executionTime("fast")
-@description("Trigger the embedding write so a chunk you just wrote becomes retrievable. STUB / no-op for now -- full embedding is deferred to #645 (lazy embedding). Calling it is harmless; the chunk is already persisted + validated and will be embedded when #645 lands.")
+@description("Embed a chunk you just wrote so it becomes semantically retrievable (#645). Resolves the chunk text, computes a vector, and writes it to the vector index. Idempotent -- calling it twice on the same chunk is harmless. Call it after each writeKnowledgeChunk so the corpus is immediately searchable.")
 tool embedChunk {
   chunkId  string  @required @description("Id of the chunk to embed (from a prior writeKnowledgeChunk call).")
 }

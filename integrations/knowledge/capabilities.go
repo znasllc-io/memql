@@ -205,13 +205,32 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
-			// Trainer Agent tool (Q3 / Q9). No-op until #645 (lazy
-			// embedding). The chunk is already persisted + validated.
+			// Trainer Agent tool (Q3 / Q9). Real embed-and-store path
+			// (#645): resolves the chunk text, embeds it, writes the
+			// vector to node_vectors so the chunk becomes retrievable.
+			// Idempotent -- a chunk that already has a vector is skipped.
 			Name:        capEmbedChunk,
-			Description: "Trigger the embedding write for a Trainer-written chunk. NO-OP until #645 (lazy embedding) lands. Returns {chunkId, embedded:false, note}.",
+			Description: "Embed one knowledge chunk so it becomes retrievable via similarTo. Resolves the chunk text, computes a vector, writes it to node_vectors keyed by the chunk id. Idempotent: returns {chunkId, embedded, alreadyEmbedded}.",
 			Handler:     i.embedChunkHandler,
 			ArgsSchema: map[string]string{
-				"chunkId": "string (required) - the chunk to embed.",
+				"chunkId":  "string (required) - the chunk to embed.",
+				"provider": "string (optional) - embedding provider name (default embedding3Small).",
+			},
+		},
+		{
+			// Bulk domain-warm path (#645). Embeds every unembedded
+			// retrievable chunk in a domain (optionally scoped to one
+			// Document) and drives the parent Document's embeddingStatus
+			// none -> partial -> complete. Driven by the planner's
+			// EmbedDomainItemsDispatcher on a kind='embedDomainItems' Plan
+			// (after a domain is seeded or a user uploads a file).
+			Name:        capEmbedDomainItems,
+			Description: "Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus (none -> partial -> complete). Idempotent. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.",
+			Handler:     i.embedDomainItemsHandler,
+			ArgsSchema: map[string]string{
+				"domainId":   "string (required) - the knowledge domain whose chunks to embed.",
+				"documentId": "string (optional) - scope the run to one Document's chunks. Empty = the whole domain.",
+				"provider":   "string (optional) - embedding provider name (default embedding3Small).",
 			},
 		},
 	}

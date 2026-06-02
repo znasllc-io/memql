@@ -82,6 +82,15 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		// from racing the dispatcher on the same Plan.
 		return
 	}
+	if kind == "embedDomainItems" {
+		// embedDomainItems Plans are NOT decomposed by the Planner
+		// Agent -- they're claimed by the EmbedDomainItemsDispatcher
+		// (embed_domain_items_dispatch.go), which embeds a domain's
+		// chunks via the knowledge integration's builtin and completes
+		// the Plan directly. Returning here keeps the loop from racing
+		// the dispatcher on the same Plan (#645).
+		return
+	}
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.
