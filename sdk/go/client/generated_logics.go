@@ -289,6 +289,46 @@ func LogicGenerateResponseBuild(args LogicGenerateResponseArgs) string {
 	return b.String()
 }
 
+// LogicIndexDocument -- On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.
+type LogicIndexDocumentArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexDocument calls the engine logic logicIndexDocument.
+func (qc *QueryClient) LogicIndexDocument(ctx context.Context, args LogicIndexDocumentArgs) (*Result, error) {
+	call := LogicIndexDocumentBuild(args)
+	return qc.executeNamed(ctx, "logicIndexDocument", call)
+}
+
+func LogicIndexDocumentBuild(args LogicIndexDocumentArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexDocument({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// LogicIndexGeneratedOutput -- On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.
+type LogicIndexGeneratedOutputArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexGeneratedOutput calls the engine logic logicIndexGeneratedOutput.
+func (qc *QueryClient) LogicIndexGeneratedOutput(ctx context.Context, args LogicIndexGeneratedOutputArgs) (*Result, error) {
+	call := LogicIndexGeneratedOutputBuild(args)
+	return qc.executeNamed(ctx, "logicIndexGeneratedOutput", call)
+}
+
+func LogicIndexGeneratedOutputBuild(args LogicIndexGeneratedOutputArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexGeneratedOutput({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicKillSwitchSuspendsRunningPlans -- Triggered on v1:identity:user update. When preferences.computerUseEnabled flips true->false, transitions every running plan owned by that user (with computerUseScope set) to awaitingFeedback with feedbackReason='kill_switch_engaged'. Re-enable flips the flag back; resume is per-plan-explicit (no auto-resume on flag flip).
 type LogicKillSwitchSuspendsRunningPlansArgs struct {
 	Event map[string]any

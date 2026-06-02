@@ -1,0 +1,90 @@
+// library domain -- Library index + generated-output writes.
+//
+// The Library index is populated by SERVER-SIDE promotion, not by a
+// user "save" action: when a backing row is created (a document, a
+// generated output, later a note / todo / calendar event / live
+// source), an automation folds it into a v1:library:artifact index
+// row via mutationCreateArtifact. Because promotion runs on the
+// owner's behalf (not as the owner), ownerUserId is threaded from the
+// backing row's owner rather than stamped from actor.userId -- the
+// same shape v1:knowledge:document uses with its uploadedBy field.
+// Reads stay owner-gated (ownerUserId==actor.userId, see #695).
+//
+// The artifact id is derived deterministically from sourceConceptRef
+// (concat("artifact-", hash(ref))) so re-promoting the same source
+// re-versions the same logical row instead of creating duplicates --
+// the idempotency guarantee #694 calls for.
+
+use library.concepts.{ artifact, generatedOutput }
+
+@enabled
+@description("Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.")
+mutation artifact mutationCreateArtifact {
+  args {
+    sourceConceptRef  string  @required
+    ownerUserId       string  @required
+    lens              string  @required @enum("artifact", "record")
+    kind              string  @required @enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")
+    source            string  @required @enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live")
+    title             string  @required
+    summary           string
+    format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    mimeType          string
+    live              bool
+    spaceId           string
+    agentId           string
+    producedByPlanId  string
+    validationStatus  string  @enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
+  }
+  insert artifact {
+    id: concat("artifact-", hash(args.sourceConceptRef))
+    args.sourceConceptRef
+    args.ownerUserId
+    args.lens
+    args.kind
+    args.source
+    args.title
+    args.summary
+    args.format
+    args.mimeType
+    live: coalesce(args.live, false)
+    args.spaceId
+    args.agentId
+    args.producedByPlanId
+    validationStatus: coalesce(args.validationStatus, "none")
+    updatedAt: now
+  }
+}
+
+@enabled
+@description("Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. logicIndexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.")
+mutation generatedOutput mutationCreateGeneratedOutput {
+  args {
+    outputId          string  @required
+    ownerUserId       string  @required
+    title             string  @required
+    summary           string
+    body              string
+    attachmentId      string
+    format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")
+    mimeType          string
+    source            string  @required @enum("workbench_generated", "computer_use", "agent_generated", "derived")
+    spaceId           string
+    producedByPlanId  string
+    producedByAgentId string
+  }
+  insert generatedOutput {
+    id: args.outputId
+    args.ownerUserId
+    args.title
+    args.summary
+    args.body
+    args.attachmentId
+    format: coalesce(args.format, "markdown")
+    args.mimeType
+    args.source
+    args.spaceId
+    args.producedByPlanId
+    args.producedByAgentId
+  }
+}

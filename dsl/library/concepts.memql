@@ -59,3 +59,39 @@ concept artifact {
 
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
 }
+
+// ---- generatedOutput: the home concept for app-produced deliverables ----
+//
+// Documents (v1:knowledge:document) cover user-UPLOADED files. The
+// Library also surfaces things the system PRODUCES -- a result computed
+// on the workbench ("list the 10 most beautiful birds"), a file written
+// at the computer-use level, or a standalone deliverable an agent emits.
+// Those had no home concept; generatedOutput is it. Like document, the
+// raw bytes (when file-backed) live on a v1:common:attachment row; the
+// inline-text case keeps the body here directly. Each generatedOutput is
+// auto-promoted to an artifact index row by logicIndexGeneratedOutput.
+//
+// NOTE: the Go producers that emit these rows (workbench / computer-use /
+// agent integrations promoting their terminal outputs) are the remaining
+// integration step tracked on #694 -- the DSL surface here is complete and
+// the document path already has a live producer (the attachment handler).
+
+@version("1.0.0")
+@namespace("library")
+@displayCard(primary="title", secondary="summary", tertiary="createdAt")
+@description("A deliverable PRODUCED through the app (as opposed to an uploaded document): a workbench result, a computer-use output, or a standalone agent output. Carries either inline text (body) or a reference to file bytes (attachmentId -> v1:common:attachment). Auto-promoted into the Library by logicIndexGeneratedOutput on creation. Per-row authz: owned -- ownerUserId is the producing user; reads gate on ownerUserId==actor.userId.")
+concept generatedOutput {
+  ownerUserId       string  @required  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). The per-row authz key for Library reads.")
+  title             string  @required  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
+  summary           string  @description("Optional short description / preview of the output.")
+  body              string  @description("Inline text content for text-style outputs (markdown / plain text) produced directly without a file. File-backed outputs leave this empty and carry bytes on the attachment.")
+  attachmentId      string  @description("Back-reference to v1:common:attachment when the output is file-backed (a generated .docx / .pdf / .xlsx). The bytes live on the attachment row in GCS; this concept carries the metadata projection.")
+  format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")  @required @default("markdown")  @description("Content classification -- picks the Library viewer. Mirrors the artifact.format vocabulary.")
+  mimeType          string  @description("MIME type of the backing bytes when attachment-backed.")
+  source            enum("workbench_generated", "computer_use", "agent_generated", "derived")  @required  @description("Provenance -- where the output was produced. Copied onto the artifact index row's source field.")
+  spaceId           string  @description("v1:cognition:space.id this output was produced in, when space-scoped.")
+  producedByPlanId  string  @description("v1:planner:plan.id that produced this output, when it came from a plan.")
+  producedByAgentId string  @description("v1:agents:agent.id that produced this output, when an agent emitted it.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}
