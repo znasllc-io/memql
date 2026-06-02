@@ -11,7 +11,7 @@ prompt cognitionCompaction {}
 prompt cognitionDiscussionDispatch {
   activityLevel    string    @required @description("'low' | 'medium' | 'high' -- shapes the prompt's eagerness to dispatch (low = mentions only; high = also distress / questions).")
   forUserDisplayName string  @required @description("User whose Team thread the dispatch would land in.")
-  spaceContext     object    @description("Title, purpose, status -- for grounding.")
+  spaceContext     object    @description("Title, goal, status -- for grounding.")
   recentGroup      []object            @description("Last several group utterances (most recent last), {speakerName, content, timestamp}.")
   recentPrivate    []object            @description("Last several utterances in this user's private thread (most recent last).")
   userAgents       []object  @required @description("This user's roster of agents in the space, {agentId, displayName, role, domains, keywords}.")
@@ -85,7 +85,7 @@ prompt cognitionRouting {
   phase             string              @description("Conversation phase (opening, active, closing, etc.)")
   prediction        object              @description("Anticipated next agent / topics from the prediction goroutine")
   previousResponder object              @description("Previous AI responder {id, name, role, lastTopic} -- empty on first turn")
-  space             object              @description("Space context {id, spaceType, description?, purpose?} -- helps disambiguate equally-qualified agents using what the space is for")
+  space             object              @description("Space context {id, spaceType, description?, goal?} -- helps disambiguate equally-qualified agents using what the space is for")
 }
 
 @defaultProvider("chat54Mini")
@@ -109,9 +109,9 @@ prompt conductorTurn {
   mentions     []object            @description("Agent names mentioned in the utterance, with role: addressee or reference")
 
   // Space metadata so the conductor can ground answers in what the
-  // room is actually for (purpose / description / title), instead of
+  // room is actually for (goal / description / title), instead of
   // generic 'what are we working on?'
-  space        object              @description("Space context {id, name, spaceType, purpose, description}")
+  space        object              @description("Space context {id, name, spaceType, goal, description}")
 
   // Humans present so the conductor can reason about who's in the
   // room and address them by first name when natural.

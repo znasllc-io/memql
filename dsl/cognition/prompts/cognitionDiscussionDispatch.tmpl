@@ -7,7 +7,7 @@ user's agents should chime in proactively in their private "Team" tab.
 User: **{{.forUserDisplayName}}**
 Activity level: **{{.activityLevel}}**
 {{if .spaceContext}}
-Space: {{.spaceContext.title}} -- {{.spaceContext.purpose}}
+Space: {{.spaceContext.title}}{{if .spaceContext.goal.statement}} -- {{.spaceContext.goal.statement}}{{if .spaceContext.goal.timeframe}} ({{.spaceContext.goal.timeframe}}){{end}}{{end}}
 {{end}}
 
 In-flight inter-agent turns this iteration: {{.inFlightTurnCount}} (hard cap is 3)
