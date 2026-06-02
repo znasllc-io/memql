@@ -34,7 +34,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          image: acrmemql.azurecr.io/memql-identity:0.9.6
+          image: acrmemql.azurecr.io/memql-identity:0.9.9
           command: ["./memql", "migrate"]
           envFrom:
             - secretRef:
