@@ -11,7 +11,15 @@ metadata:
     app.kubernetes.io/part-of: memql
     memql/node-type: bff
 spec:
-  replicas: 1
+  # 2 replicas so the external LB always has a serving pod during a roll
+  # (the BFF is the user connection anchor). With maxUnavailable=0 +
+  # maxSurge=1 a ready new pod always exists before an old one is removed.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: bff
@@ -26,13 +34,22 @@ spec:
         - name: memql-ca
           secret:
             secretName: memql-ca
-      # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
-      # default) + the app Stop budget (30s) so drain + GracefulStop finish.
-      terminationGracePeriodSeconds: 45
+      # Graceful shutdown (#552 + zero-downtime #615): grace period must
+      # exceed preStop (5s) + MEMQL_SHUTDOWN_DRAIN_DELAY (5s) + the app Stop
+      # budget (30s) so endpoint-deregistration + drain + GracefulStop finish.
+      terminationGracePeriodSeconds: 60
 
       containers:
         - name: bff
           image: acrmemql.azurecr.io/memql-bff-copresent:0.9.6
+          # preStop (#615): pause before SIGTERM so the EndpointSlice
+          # controller removes this pod from the bff / bff-external
+          # Services first -- new connections stop landing here while the
+          # app's graceful drain (#552) finishes the in-flight streams.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }

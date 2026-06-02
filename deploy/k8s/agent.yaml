@@ -14,6 +14,11 @@ spec:
   # singleton -- cron leader + the event-execution guard collapse any
   # cross-replica double-fire (watch the guard's duplicatesPrevented metric).
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: agent

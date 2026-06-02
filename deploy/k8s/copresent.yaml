@@ -25,6 +25,11 @@ spec:
   # crashes, and node drains. (The memQL node-types stay single-replica for
   # now -- see deploy/k8s/README.md "Multi-replica HA".)
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: copresent
