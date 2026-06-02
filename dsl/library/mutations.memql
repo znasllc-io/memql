@@ -31,6 +31,7 @@ mutation artifact mutationCreateArtifact {
     format            string  @enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
     mimeType          string
     live              bool
+    scope             string  @enum("workspace", "private")
     spaceId           string
     agentId           string
     producedByPlanId  string
@@ -48,6 +49,7 @@ mutation artifact mutationCreateArtifact {
     args.format
     args.mimeType
     live: coalesce(args.live, false)
+    args.scope
     args.spaceId
     args.agentId
     args.producedByPlanId

@@ -17,6 +17,7 @@ shape artifact artifactFull {
   payload.format
   payload.mimeType
   payload.live
+  payload.scope
   payload.spaceId
   payload.agentId
   payload.producedByPlanId

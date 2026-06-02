@@ -18,10 +18,12 @@ use library.mutations.{ mutationCreateArtifact }
 // Library renders freshness from the latest liveSnapshot
 // (queryLatestLiveSnapshotForSource).
 //
-// NOTE on live sources: workspace-scoped liveSources carry no ownerId,
-// so this owned index can't fan them out per-user yet -- private
-// sources (ownerId set) surface end-to-end; workspace-source
-// visibility is a follow-up needing a non-owned visibility tier.
+// NOTE on live sources: liveSource.scope is threaded onto the index
+// row. Private sources (ownerId set, scope=private) surface through the
+// owned reads. Workspace sources carry no ownerId, so the owned index
+// can't fan them out per-user -- they instead surface through the
+// non-owned queryLibraryWorkspaceLiveSources path (filter scope=workspace,
+// no owner gate), which every partition member can read (#723).
 
 @enabled
 @description("On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.")
@@ -90,12 +92,12 @@ logic logicIndexMemory {
 }
 
 @enabled
-@description("On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (private sources); workspace-scoped visibility is a follow-up.")
+@description("On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (empty for workspace-scoped sources); scope is threaded from liveSource.scope so workspace sources surface through the non-owned queryLibraryWorkspaceLiveSources path while private sources stay owner-gated (#723).")
 logic logicIndexLiveSource {
   args {
     event  object  @required
   }
   body {
-    return mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:liveSource:", args.event.payload.id), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true })
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:liveSource:", args.event.payload.id), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true, scope: args.event.payload.scope })
   }
 }
