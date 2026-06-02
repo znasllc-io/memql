@@ -21,18 +21,18 @@ resources:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:fb4b37e6ff43dff62afde47d1ed95d9ca68c80abf7d5df8603727b1fc903a47b
+    digest: sha256:0b1dd335c8c5d99c93ff7d20ef8f95caa9719ebd38eb137fff83334785e02445
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:4c0210b828d5ddd12b7660dbea500c9473537274e2015929b64731e28f03a94d
+    digest: sha256:bee3010c6908eec574cc3b897154eaf99d1307b9c3818a996ff5f9614412ca4c
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:56b7a3309b46a66db721cb9ccf237e1e23fb3e86e48072546f0357103e5c3c23
+    digest: sha256:b4cd25d03a5a2855ba68f224a55fe4759f1f7d0559b4ce69589e6b44238950d0
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:8aa7d108655cb6dc66a0f63a6b7ae1d96c0d4e84c17078e427f9441be251c2a1
+    digest: sha256:b0dad353e6557c02e79aecb9eed7e0b41a6915d60706fecdfe12aae656f66ed8
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:e947b849e72c4fb17563bb13d4b4aecdb59ba4f022a0fd37101aa3321f3cb712
+    digest: sha256:2dd3c6d44ddb49b7d46df08b540aa2250ea38fdcb1df1152594273227068e856
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:44674006747278969f812c138d65fea8824f3b827f2c0f7dfdae80cc7dd61830
+    digest: sha256:f5e8c1dea1405abd9b7236c4a4cfcbb03fb863ab0fda3a6e498f66180a91fc84
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:4d2f91e61e4ef19beabf48c322c001a4ccff5a1810e504e5c0a4768438228b5c
+    digest: sha256:16e6308bf9aec548ff66cd7b0ff8b8a19d9f737d1ab151bd7e36f2af1d6ff4d1
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
