@@ -28,7 +28,8 @@ func TestUnifiedTreeCoversAllDomains(t *testing.T) {
 	want := []string{
 		"agents", "cluster", "cognition", "common", "curriculum",
 		"data", "guide", "harness", "identity", "knowledge", "memql",
-		"planner", "platform", "policies", "providers", "router", "worker",
+		"notes", "planner", "platform", "policies", "providers", "router",
+		"todos", "worker",
 	}
 	paths, err := dslfs.WalkMemqlFiles(Tree())
 	if err != nil {

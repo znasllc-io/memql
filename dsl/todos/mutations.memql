@@ -1,0 +1,61 @@
+// todos domain -- caller-scoped writes.
+//
+// Authz tier: owned. Every mutation stamps ownerUserId from
+// actor.userId server-side (never from a caller-supplied arg) so a
+// caller can neither create a to-do owned by someone else nor
+// reassign an existing to-do's owner. The update / complete paths
+// re-insert a new version of the row (memQL's insert-versioning
+// model -- there is no in-place update block); ownerUserId is
+// re-stamped on every version so ownership is immutable across the
+// row's history.
+
+use todos.concepts.{ todo }
+
+@enabled
+@description("Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.")
+mutation todo mutationCreateTodo {
+  args {
+    todoId                  string  @required
+    title                   string  @required
+    dueAt                   datetime
+    priority                string  @enum("low", "medium", "high")
+    sourceResponsibilityId  string
+  }
+  insert todo {
+    id: args.todoId
+    ownerUserId: actor.userId
+    args.title
+    args.dueAt
+    args.priority
+    args.sourceResponsibilityId
+    done: false
+  }
+}
+
+@enabled
+@description("Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.")
+mutation todo mutationCompleteTodo {
+  args {
+    todoId   string  @required
+    payload  object  @required
+  }
+  insert todo {
+    id: args.todoId
+    ownerUserId: actor.userId
+    args.payload
+  }
+}
+
+@enabled
+@description("Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.")
+mutation todo mutationUpdateTodo {
+  args {
+    todoId   string  @required
+    payload  object  @required
+  }
+  insert todo {
+    id: args.todoId
+    ownerUserId: actor.userId
+    args.payload
+  }
+}

@@ -1,0 +1,28 @@
+// todos domain -- caller-scoped reads.
+//
+// Authz tier: owned. Every filter gates on
+// payload.ownerUserId==actor.userId so a caller can only ever read
+// their own to-dos; there is no arg that lets a caller widen the
+// row set beyond their own ownership.
+
+use todos.concepts.{ todo }
+
+@enabled
+@description("List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.")
+query todo queryTodos {
+  args {
+    done  bool
+  }
+  filter  payload.ownerUserId==actor.userId; ?.payload.done==args.done
+  shape   todoFull
+}
+
+@enabled
+@description("Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.")
+query todo queryTodoById {
+  args {
+    todoId  string  @required
+  }
+  filter  ?.id==args.todoId; payload.ownerUserId==actor.userId
+  shape   todoFull
+}
