@@ -355,19 +355,27 @@ func intField(m map[string]any, key string, def int) int {
 	case int:
 		return v
 	case int64:
-		// Bound against the 32-bit range (worst-case int width) so the
-		// narrowing conversion is provably safe on every platform.
-		if v > math.MaxInt32 || v < math.MinInt32 {
-			return def
-		}
-		return int(v)
+		return clampInt64ToInt(v, def)
 	case float64:
+		// Bound the float before narrowing so the int64() conversion
+		// can't overflow, then funnel through the single guarded sink.
 		if v > math.MaxInt32 || v < math.MinInt32 {
 			return def
 		}
-		return int(v)
+		return clampInt64ToInt(int64(v), def)
 	}
 	return def
+}
+
+// clampInt64ToInt narrows an int64 to int, returning def when the value
+// falls outside the 32-bit range (the worst-case int width) so the
+// conversion is provably safe on every platform. This is the single
+// narrowing sink intField funnels through.
+func clampInt64ToInt(v int64, def int) int {
+	if v > math.MaxInt32 || v < math.MinInt32 {
+		return def
+	}
+	return int(v)
 }
 
 // domainNameOrId returns the human name when present, else the id.
