@@ -326,15 +326,27 @@ builtin knowledgeSeedStandardDomains {
   forceIngest  bool
 }
 
+// LiveAvatar session builtins (copresent#226). These were defined WITHOUT an
+// @executor, so the engine never wired them to the `liveavatar` integration --
+// the browser's `liveAvatarCreateSessionToken` call failed with `function ...
+// not found` and the Guide avatar rendered "Avatar unavailable". Wire each to
+// its integration capability (integration.liveavatar.<capability>), matching the
+// realtimeCreateClientSecret pattern below.
+@executor("integration.liveavatar.createSessionToken")
+@description("Create a LiveAvatar session token (FULL mode). Returns { session_id, session_token }.")
 builtin liveAvatarCreateSessionToken {
   is_sandbox  bool
   avatar_id   string
 }
 
+@executor("integration.liveavatar.startSession")
+@description("Start a LiveAvatar session. Returns LiveKit room credentials (livekit_url, livekit_client_token).")
 builtin liveAvatarStartSession {
   session_token  string  @required
 }
 
+@executor("integration.liveavatar.stopSession")
+@description("Stop a LiveAvatar session.")
 builtin liveAvatarStopSession {
   session_token  string  @required
 }
