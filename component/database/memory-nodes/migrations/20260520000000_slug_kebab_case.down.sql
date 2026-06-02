@@ -3,6 +3,12 @@
 -- because both forms are distinguishable from `:` separators and
 -- free-form prose.
 --
+-- NULL-SAFETY (memql#624): like the up migration, the set helpers
+-- (`snake_set_scalar` / `snake_set_array`) no-op when the target key /
+-- path is absent or not the expected json type. jsonb_set is strict, so
+-- feeding it a NULL new-value would null the NOT-NULL payload column for
+-- any row missing a rewritten key.
+--
 -- NOTE: no `--bun:split` before the first statement -- a leading
 -- comment-only segment makes bun emit an empty query. See the .up.sql
 -- header + memql#570.
@@ -28,27 +34,45 @@ $$ LANGUAGE SQL IMMUTABLE;
 
 --bun:split
 
+CREATE OR REPLACE FUNCTION snake_set_scalar(p jsonb, key text) RETURNS jsonb AS $$
+  SELECT CASE
+    WHEN p ? key AND jsonb_typeof(p -> key) = 'string'
+      THEN jsonb_set(p, ARRAY[key], to_jsonb(snake_slug(p ->> key)))
+    ELSE p
+  END;
+$$ LANGUAGE SQL IMMUTABLE;
+
+--bun:split
+
+CREATE OR REPLACE FUNCTION snake_set_array(p jsonb, path text[]) RETURNS jsonb AS $$
+  SELECT CASE
+    WHEN p #> path IS NOT NULL AND jsonb_typeof(p #> path) = 'array'
+      THEN jsonb_set(p, path, snake_slug_array(p #> path))
+    ELSE p
+  END;
+$$ LANGUAGE SQL IMMUTABLE;
+
+--bun:split
+
 UPDATE "MemoryNodes" SET
   id = snake_slug(id),
-  payload = jsonb_set(
-    jsonb_set(
-      jsonb_set(
-        jsonb_set(payload,
-          '{slug}', to_jsonb(snake_slug(payload->>'slug'))),
-        '{lockedDomainIds}', snake_slug_array(payload->'lockedDomainIds')),
-      '{defaultDomainIds}', snake_slug_array(payload->'defaultDomainIds')),
-    '{lockedToolSlugs}', snake_slug_array(payload->'lockedToolSlugs'))
+  payload = snake_set_array(
+              snake_set_array(
+                snake_set_array(
+                  snake_set_scalar(payload, 'slug'),
+                  '{lockedDomainIds}'),
+                '{defaultDomainIds}'),
+              '{lockedToolSlugs}')
 WHERE concept = 'v1:agents:agentRole';
 
 --bun:split
 
 UPDATE "MemoryNodes" SET
-  payload = jsonb_set(
-    jsonb_set(
-      jsonb_set(payload,
-        '{roleSlug}', to_jsonb(snake_slug(payload->>'roleSlug'))),
-      '{capabilities, tools}', snake_slug_array(payload#>'{capabilities, tools}')),
-    '{capabilities, domains}', snake_slug_array(payload#>'{capabilities, domains}'))
+  payload = snake_set_array(
+              snake_set_array(
+                snake_set_scalar(payload, 'roleSlug'),
+                '{capabilities, tools}'),
+              '{capabilities, domains}')
 WHERE concept = 'v1:agents:agent';
 
 --bun:split
@@ -56,28 +80,25 @@ WHERE concept = 'v1:agents:agent';
 UPDATE "MemoryNodes" SET
   id = regexp_replace(id, '^(.*:v1:common:knowledgeDomain:)(.*)$',
                       '\1' || snake_slug(substring(id from '[^:]+$'))),
-  payload = jsonb_set(
-    jsonb_set(
-      jsonb_set(
-        jsonb_set(payload,
-          '{id}', to_jsonb(snake_slug(payload->>'id'))),
-        '{relevantForRoles}', snake_slug_array(payload->'relevantForRoles')),
-      '{requiredByToolSlugs}', snake_slug_array(payload->'requiredByToolSlugs')),
-    '{lockedForRoles}', snake_slug_array(payload->'lockedForRoles'))
+  payload = snake_set_array(
+              snake_set_array(
+                snake_set_array(
+                  snake_set_scalar(payload, 'id'),
+                  '{relevantForRoles}'),
+                '{requiredByToolSlugs}'),
+              '{lockedForRoles}')
 WHERE concept = 'v1:common:knowledgeDomain';
 
 --bun:split
 
 UPDATE "MemoryNodes" SET
-  payload = jsonb_set(
-    jsonb_set(payload,
-      '{lockedDomainIds}', snake_slug_array(payload->'lockedDomainIds')),
-    '{lockedToolSlugs}', snake_slug_array(payload->'lockedToolSlugs'))
+  payload = snake_set_array(
+              snake_set_array(payload, '{lockedDomainIds}'),
+              '{lockedToolSlugs}')
 WHERE concept = 'v1:agents:agentAuthorization';
 
 --bun:split
 
 UPDATE "MemoryNodes" SET
-  payload = jsonb_set(payload, '{domainId}',
-                      to_jsonb(snake_slug(payload->>'domainId')))
+  payload = snake_set_scalar(payload, 'domainId')
 WHERE concept = 'v1:common:documentChunk';
