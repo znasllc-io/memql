@@ -8,7 +8,7 @@
 #   # or: az acr build --registry acrmemql --image deploy-gate:<tag> \
 #   #        -f cmd/deploy-gate-check/Dockerfile .
 # CI emits the resulting @sha256 digest for the release lockfile (releases/).
-FROM golang:1.26 AS build
+FROM golang:1.26.4 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
