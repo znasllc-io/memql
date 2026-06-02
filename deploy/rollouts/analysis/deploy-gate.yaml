@@ -52,7 +52,7 @@ spec:
                     # logic in scripts/deploy/staging-smoke-test.sh). Built +
                     # digest-pinned in CI like every other artifact; see
                     # ../README.md "Gate client image".
-                    image: acrmemql.azurecr.io/deploy-gate:latest
+                    image: acrmemql.azurecr.io/deploy-gate@sha256:4a65bd3dcf9e2f25092617e76667b5f40bf1a122e8dd58a6973322de241189c7
                     env:
                       - name: GATE_SERVICE
                         value: "{{args.service}}"

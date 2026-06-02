@@ -74,3 +74,26 @@ spec:
   ports:
     - { name: http, port: 8085, targetPort: 8085 }
     - { name: grpc, port: 50051, targetPort: 50051 }
+---
+# Active Service the Rollout flips user traffic to. The public /memql Ingress
+# points HERE (not the color-agnostic `bff` Service), so new logins land only on
+# the active color. The Rollout controller manages the rollouts-pod-template-hash
+# selector; on promote it repoints this Service to the new color. Established
+# WS/gRPC streams stay bound to their old-color pods (the TCP connection is to a
+# specific pod), so only NEW connections steer -- the zero-dropped-stream design.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-active
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    memql/node-type: bff
+    memql/role: user-entry
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff
+  ports:
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }
