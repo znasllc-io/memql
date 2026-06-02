@@ -29,7 +29,7 @@ NAMESPACE="${NAMESPACE:-memql}"
 CA_DAYS="${CA_DAYS:-3650}"
 CERT_DAYS="${CERT_DAYS:-825}"
 # SANs the identity cert must answer to: in-cluster DNS + the public issuer.
-IDENTITY_SANS="${IDENTITY_SANS:-DNS:identity,DNS:identity.${NAMESPACE},DNS:identity.${NAMESPACE}.svc,DNS:identity.${NAMESPACE}.svc.cluster.local,DNS:auth.staging.copresent.ai}"
+IDENTITY_SANS="${IDENTITY_SANS:-DNS:identity,DNS:identity.${NAMESPACE},DNS:identity.${NAMESPACE}.svc,DNS:identity.${NAMESPACE}.svc.cluster.local,DNS:identity.staging.copresent.ai}"
 
 #=============================================================================
 # FUNCTIONS
