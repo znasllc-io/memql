@@ -50,6 +50,16 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 # 3. put the client id on the SA annotation (externalsecret-memql.yaml).
 ```
 
+> **KNOWN ISSUE on Kubernetes 1.34 (memql#738):** ESO's *bundled* cert-controller
+> does not populate the `external-secrets-webhook` TLS cert on this cluster (both
+> v0.10.4 and v2.5.0), so the webhook crashloops and CRs can't be admitted. The
+> fix is to issue the webhook cert via **cert-manager** (already installed here) —
+> install ESO via its **Helm chart** with `webhook.certManager.enabled=true`
+> rather than the raw `install.yaml` below. Track + resolve in #738 before this
+> install step works. The Azure-side identity/role + the Key Vault reconcile
+> (#734) are already done, so once the webhook is healthy the ExternalSecret
+> applies as a verified no-op.
+
 ## Install + migrate (SUPERVISED — touches the live Secret)
 
 ```bash
