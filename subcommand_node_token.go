@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/app"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/identity"
 )
 
@@ -108,13 +107,13 @@ func runNodeTokenMint(args []string) int {
 		return 2
 	}
 
-	// Apply the same local /.env override the server bootstrap does
-	// so the CLI sees the same IDENTITY_KEY_DIR / DSN as the running
-	// identity service (the operator typically execs into the
-	// container, where /.env is absent and this is a no-op).
-	if _, err := genesis.ApplyLocalOverride("."); err != nil {
-		fmt.Fprintf(os.Stderr, "node-token mint: local .env override failed: %v\n", err)
-		// Non-fatal -- envelope/container env may already cover everything.
+	// Decrypt the genesis envelope then overlay /.env, exactly as the server
+	// boot does, so the CLI sees the same signing key / DSN as the running
+	// identity service when the operator execs into the container (#751 --
+	// subcommands run before main()'s autoload).
+	if err := applySubcommandEnv("node-token mint"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 
 	// CLI subcommand: logs to stderr so stdout stays clean for the

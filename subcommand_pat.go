@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/app"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/memql"
@@ -219,10 +218,12 @@ func runPATRevoke(args []string) int {
 // (IDENTITY_KEY_ENCRYPTION_KEY required ...) and abort the mint on the identity
 // binary -- the only binary the `pat` subcommand is dispatched on.
 func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine, *slog.Logger, int) {
-	// Mirror the server bootstrap's local /.env overlay so a dev run sees the
-	// same DSN as the cluster (a no-op in the container, where /.env is absent).
-	if _, err := genesis.ApplyLocalOverride("."); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: local .env override failed: %v\n", prefix, err)
+	// Mirror the server bootstrap: decrypt the genesis envelope (sealed DSN /
+	// signing key) then overlay /.env, so the mint sees the same config the
+	// running identity does (#751 -- subcommands run before main()'s autoload).
+	if err := applySubcommandEnv(prefix); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil, nil, nil, 1
 	}
 
 	logger := mustCreateCLILogger()

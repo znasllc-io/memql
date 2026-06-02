@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/app"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/identity"
 )
 
@@ -71,8 +70,11 @@ func runServiceAccountTokenMint(args []string) int {
 		return 2
 	}
 
-	if _, err := genesis.ApplyLocalOverride("."); err != nil {
-		fmt.Fprintf(os.Stderr, "service-account-token mint: local .env override failed: %v\n", err)
+	// Layer the genesis envelope (sealed signing key etc.) then /.env, exactly
+	// as the server boot does -- subcommands run before main()'s autoload (#751).
+	if err := applySubcommandEnv("service-account-token mint"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 
 	// Keep stdout clean for the JWT (scripts capture it via $(...)); component

@@ -7,7 +7,6 @@ import (
 
 	"github.com/znasllc-io/memql/app"
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -38,11 +37,12 @@ func runMigrateSubcommand(args []string) int {
 		}
 	}
 
-	// Mirror the server bootstrap's local /.env overlay so a dev run sees
-	// the same DSN as the cluster (a no-op in the container, where /.env
-	// is absent and the envelope/Job env already cover everything).
-	if _, err := genesis.ApplyLocalOverride("."); err != nil {
-		fmt.Fprintf(os.Stderr, "migrate: local .env override failed: %v\n", err)
+	// Mirror the server bootstrap: decrypt the genesis envelope (sealed DSN)
+	// then overlay /.env, so a migrate run sees the same DSN as the cluster
+	// (#751 -- subcommands run before main()'s autoload).
+	if err := applySubcommandEnv("migrate"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 
 	logger := mustCreateCLILogger()
