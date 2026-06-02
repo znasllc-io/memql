@@ -14,6 +14,72 @@ var (
 	_ = strings.Builder{}
 )
 
+// AvatarDirectStartSession -- Start a direct/Guide avatar session for an anam-vendor agent. Mints a LiveKit room + browser join token and brings Anam up (audio-driven). Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.
+type AvatarDirectStartSessionArgs struct {
+	AgentId string
+	SpaceId string
+}
+
+// AvatarDirectStartSession calls the engine builtin avatarDirectStartSession.
+func (qc *QueryClient) AvatarDirectStartSession(ctx context.Context, args AvatarDirectStartSessionArgs) (*Result, error) {
+	call := AvatarDirectStartSessionBuild(args)
+	return qc.executeNamed(ctx, "avatarDirectStartSession", call)
+}
+
+func AvatarDirectStartSessionBuild(args AvatarDirectStartSessionArgs) string {
+	var b strings.Builder
+	b.WriteString("avatarDirectStartSession({")
+	b.WriteString("agentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// AvatarDirectStopSession -- Stop a direct/Guide avatar session. Best-effort (Anam sessions self-expire, the LiveKit room is ephemeral); always returns { ok: true }.
+type AvatarDirectStopSessionArgs struct {
+	SessionId string
+	Vendor    string
+	RoomName  string
+}
+
+// AvatarDirectStopSession calls the engine builtin avatarDirectStopSession.
+func (qc *QueryClient) AvatarDirectStopSession(ctx context.Context, args AvatarDirectStopSessionArgs) (*Result, error) {
+	call := AvatarDirectStopSessionBuild(args)
+	return qc.executeNamed(ctx, "avatarDirectStopSession", call)
+}
+
+func AvatarDirectStopSessionBuild(args AvatarDirectStopSessionArgs) string {
+	var b strings.Builder
+	b.WriteString("avatarDirectStopSession({")
+	if args.SessionId != "" {
+		b.WriteString("session_id: ")
+		b.WriteString(fmt.Sprintf("%q", args.SessionId))
+	}
+	if args.Vendor != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("vendor: ")
+		b.WriteString(fmt.Sprintf("%q", args.Vendor))
+	}
+	if args.RoomName != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("room_name: ")
+		b.WriteString(fmt.Sprintf("%q", args.RoomName))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // HarnessTrace -- Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142).
 type HarnessTraceArgs struct {
 	PlanId string

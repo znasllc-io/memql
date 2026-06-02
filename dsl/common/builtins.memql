@@ -351,6 +351,32 @@ builtin liveAvatarStopSession {
   session_token  string  @required
 }
 
+// Direct/Guide avatar on the Anam vendor path (copresent#237 step 2 / #291).
+// Unlike liveavatar.com (which owns the LiveKit room + does its own TTS), Anam
+// DIALS INTO a room memQL mints and lip-syncs audio published into it. For an
+// anam-vendor agent, avatarDirectStartSession mints a fresh LiveKit room +
+// browser join token and brings Anam up; copresent connects with the returned
+// creds and (step 3 / #292) publishes the assistant audio for lip-sync. Returns
+// the same { livekit_url, livekit_client_token } shape useLiveAvatar consumes,
+// plus session_id + vendor + room_name. Non-anam agents keep the liveavatar
+// builtins above (retired separately in #294).
+@executor("integration.avatardirect.startSession")
+@sdk
+@description("Start a direct/Guide avatar session for an anam-vendor agent. Mints a LiveKit room + browser join token and brings Anam up (audio-driven). Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.")
+builtin avatarDirectStartSession {
+  agentId  string  @required
+  spaceId  string
+}
+
+@executor("integration.avatardirect.stopSession")
+@sdk
+@description("Stop a direct/Guide avatar session. Best-effort (Anam sessions self-expire, the LiveKit room is ephemeral); always returns { ok: true }.")
+builtin avatarDirectStopSession {
+  session_id  string
+  vendor      string
+  room_name   string
+}
+
 // Mint a short-lived OpenAI Realtime ephemeral client_secret so the browser
 // can open a DIRECT browser<->OpenAI Realtime WebRTC session (v2 voice path)
 // without ever seeing the standing OpenAI key. Backed by the openairealtime
