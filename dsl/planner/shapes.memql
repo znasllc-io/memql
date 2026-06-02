@@ -93,9 +93,13 @@ shape responsibility responsibilityFull {
   payload.assignedAgentId
   payload.assignedRoleSlug
   payload.successCriteria
+  payload.notifyHow
   payload.scopeSpaceId
   payload.enabled
   payload.status
+  payload.intakeStatus
+  payload.intakeRequest
+  payload.intakeResponse
   payload.lastEvaluatedAt
   payload.lastResult
   row.createdAt
