@@ -177,12 +177,28 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("avatardirect.startSession: mint avatar token: %w", err)
 	}
 
-	// Anam's cloud engine dials INTO LiveKit from outside, so it needs the
-	// browser-reachable public URL (the internal ws://livekit:7880 the cluster
-	// uses is unreachable from Anam's cloud).
-	publicURL := i.lk.LiveKitPublicURL
-	if publicURL == "" {
-		publicURL = i.lk.LiveKitURL
+	// Two DIFFERENT LiveKit URLs are needed:
+	//   - browserURL: what copresent connects with. The browser reaches LiveKit
+	//     on POLYPHON_LIVEKIT_PUBLIC_URL (e.g. wss://livekit.local.znas.io), or
+	//     the internal URL as a fallback.
+	//   - anamURL: where Anam's CLOUD engine dials in from the public internet.
+	//     A browser-local URL (livekit.local / 192.168.x / ws://livekit:7880) is
+	//     unreachable from Anam's cloud, so this MUST be an externally-reachable
+	//     tunnel -- LIVEKIT_PUBLIC_URL (the same env the voice-agent avatar uses
+	//     for its Anam dial-in; set by `make dev-refresh`'s ngrok step). Without
+	//     it Anam can't join the room and never publishes video (the avatar stays
+	//     the idle orb), so fall back to browserURL but log a warning.
+	browserURL := i.lk.LiveKitPublicURL
+	if browserURL == "" {
+		browserURL = i.lk.LiveKitURL
+	}
+	anamURL := strings.TrimSpace(os.Getenv("LIVEKIT_PUBLIC_URL"))
+	if anamURL == "" {
+		anamURL = browserURL
+		if i.logger != nil {
+			i.logger.Warn("avatardirect: LIVEKIT_PUBLIC_URL unset; Anam will get the browser-local URL and likely cannot dial in (avatar won't render). Set LIVEKIT_PUBLIC_URL to a publicly-reachable LiveKit tunnel.",
+				"anamURL", anamURL)
+		}
 	}
 
 	ac := avatarvendor.AvatarConfig{
@@ -200,7 +216,7 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 
 	res, started, err := avatarvendor.StartAvatarSession(ctx, ac, persona, avatarvendor.AvatarStartParams{
 		RoomName:     roomName,
-		LiveKitURL:   publicURL,
+		LiveKitURL:   anamURL,
 		LiveKitToken: avatarToken,
 	}, i.newClient)
 	if err != nil {
@@ -224,7 +240,7 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 	}
 
 	out := map[string]any{
-		"livekit_url":          publicURL,
+		"livekit_url":          browserURL,
 		"livekit_client_token": browserToken,
 		"session_id":           res.SessionID,
 		"vendor":               vendor,
