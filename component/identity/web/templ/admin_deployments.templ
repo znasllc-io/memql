@@ -108,15 +108,16 @@ templ AdminDeployments(data AdminDeploymentsData) {
 			</nav>
 		</div>
 		if data.Status.Present {
-			@deploymentOverviewPanel(data.Status)
+			@deploymentOverviewPanel(data)
 			@deploymentArgoPanel(data.Status.Argo)
-			@deploymentRolloutsPanel(data.Status.Rollouts)
+			@deploymentRolloutsPanel(data)
 			@deploymentGatePanel(data.Status.GateResult)
 		}
 	}
 }
 
-templ deploymentOverviewPanel(st AdminDeploymentStatus) {
+templ deploymentOverviewPanel(data AdminDeploymentsData) {
+	{{ st := data.Status }}
 	<div class="card card-full">
 		<h2 class="card-title">Overview — { orDash(st.Env) }</h2>
 		<table class="data">
@@ -140,7 +141,84 @@ templ deploymentOverviewPanel(st AdminDeploymentStatus) {
 		} else {
 			<p class="text-muted"><em>No component digests recorded for this overlay.</em></p>
 		}
+		@deploymentActionsPanel(data)
 	</div>
+}
+
+// deploymentActionsPanel renders the deploy-staging + promote-to-prod
+// write controls (memql#727). Deploy-staging is the non-destructive
+// lane; promote is type-to-confirm (operator must type the exact
+// version into the confirm field). Both POST to gated CSRF-protected
+// routes and redirect back here with a SUCCESS / ERROR flash carrying
+// the audit-event id.
+templ deploymentActionsPanel(data AdminDeploymentsData) {
+	<h3>Actions</h3>
+	<div class="deploy-actions">
+		<form method="POST" action="/admin/deployments/deploy-staging" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			<h4>Deploy to staging</h4>
+			<p class="text-small text-muted">
+				Assemble + apply a release into the staging overlay via the
+				sanctioned promote script. Non-destructive lane.
+			</p>
+			<div class="form-row">
+				<label for="deploy-staging-version">Version</label>
+				<input id="deploy-staging-version" type="text" name="version" placeholder="0.9.10" required/>
+			</div>
+			<button type="submit" class="btn btn-primary" data-pending-label="Deploying...">Deploy to staging</button>
+		</form>
+		<form method="POST" action="/admin/deployments/promote" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			<h4>Promote to prod</h4>
+			<p class="text-small text-muted">
+				Copy a validated staging release into the prod overlay (digest
+				copy, no rebuild). <strong>Destructive:</strong> type the exact
+				version below to confirm.
+			</p>
+			<div class="form-row">
+				<label for="promote-version">Version</label>
+				<input id="promote-version" type="text" name="version" placeholder="0.9.10" required/>
+			</div>
+			<div class="form-row">
+				<label for="promote-confirm">Type the version to confirm</label>
+				<input id="promote-confirm" type="text" name="confirm" placeholder="0.9.10" required/>
+			</div>
+			<button type="submit" class="btn btn-danger" data-pending-label="Promoting...">Promote to prod</button>
+		</form>
+		@deploymentRollbackForm(data)
+	</div>
+}
+
+// deploymentRollbackForm renders the rollback control (memql#727).
+// Destructive: the operator must type the commit SHA or the literal
+// word "rollback" into the confirm field. Defaults the env to the
+// currently-selected environment.
+templ deploymentRollbackForm(data AdminDeploymentsData) {
+	<form method="POST" action="/admin/deployments/rollback" data-submit-once>
+		@CSRFField(data.Layout.CSRFToken)
+		<h4>Rollback</h4>
+		<p class="text-small text-muted">
+			Revert the overlay commit for the given environment via
+			<code>git revert</code>. <strong>Destructive:</strong> type the
+			commit SHA or the word <code>rollback</code> to confirm.
+		</p>
+		<div class="form-row">
+			<label for="rollback-env">Environment</label>
+			<select id="rollback-env" name="env">
+				<option value="staging" selected?={ data.Env == "staging" }>staging</option>
+				<option value="prod" selected?={ data.Env == "prod" }>prod</option>
+			</select>
+		</div>
+		<div class="form-row">
+			<label for="rollback-sha">Commit SHA</label>
+			<input id="rollback-sha" type="text" name="commitSha" placeholder="a1b2c3d" required/>
+		</div>
+		<div class="form-row">
+			<label for="rollback-confirm">Type the commit SHA or "rollback" to confirm</label>
+			<input id="rollback-confirm" type="text" name="confirm" placeholder="rollback" required/>
+		</div>
+		<button type="submit" class="btn btn-danger" data-pending-label="Rolling back...">Rollback</button>
+	</form>
 }
 
 templ deploymentArgoPanel(argo *AdminDeployArgo) {
@@ -169,7 +247,8 @@ templ deploymentArgoPanel(argo *AdminDeployArgo) {
 	</div>
 }
 
-templ deploymentRolloutsPanel(rollouts []AdminDeployRollout) {
+templ deploymentRolloutsPanel(data AdminDeploymentsData) {
+	{{ rollouts := data.Status.Rollouts }}
 	<div class="card card-full">
 		<h2 class="card-title">Rollouts</h2>
 		if len(rollouts) > 0 {
@@ -183,6 +262,7 @@ templ deploymentRolloutsPanel(rollouts []AdminDeployRollout) {
 					<th>Canary weight</th>
 					<th>Step</th>
 					<th>Latest analysis</th>
+					<th>Actions</th>
 				</tr>
 				for _, ro := range rollouts {
 					<tr>
@@ -194,6 +274,9 @@ templ deploymentRolloutsPanel(rollouts []AdminDeployRollout) {
 						<td>{ formatInt(ro.CanaryWeight) }%</td>
 						<td>{ formatInt(ro.CurrentStep) }</td>
 						<td>{ orDash(ro.LatestAnalysisResult) }</td>
+						<td>
+							@deploymentRolloutActions(data, ro.Name)
+						</td>
 					</tr>
 				}
 			</table>
@@ -201,6 +284,30 @@ templ deploymentRolloutsPanel(rollouts []AdminDeployRollout) {
 			<p class="text-muted"><em>No rollouts found in the cluster.</em></p>
 		}
 	</div>
+}
+
+// deploymentRolloutActions renders the per-rollout promote / abort
+// controls (memql#727). Promote advances the rollout (no confirm);
+// abort is destructive (drops the new revision) so it requires the
+// operator to type the literal word "abort" into the confirm field.
+// Both POST to the gated CSRF-protected /admin/deployments/rollout
+// route with the rollout name + current env stamped.
+templ deploymentRolloutActions(data AdminDeploymentsData, rolloutName string) {
+	<form method="POST" action="/admin/deployments/rollout" style="display:inline;" data-submit-once>
+		@CSRFField(data.Layout.CSRFToken)
+		<input type="hidden" name="env" value={ data.Env }/>
+		<input type="hidden" name="rollout" value={ rolloutName }/>
+		<input type="hidden" name="action" value="promote"/>
+		<button type="submit" class="btn btn-secondary btn-small" data-pending-label="Promoting...">Promote</button>
+	</form>
+	<form method="POST" action="/admin/deployments/rollout" style="display:inline;" data-submit-once>
+		@CSRFField(data.Layout.CSRFToken)
+		<input type="hidden" name="env" value={ data.Env }/>
+		<input type="hidden" name="rollout" value={ rolloutName }/>
+		<input type="hidden" name="action" value="abort"/>
+		<input type="text" name="confirm" placeholder="type abort" size="10" required/>
+		<button type="submit" class="btn btn-danger btn-small" data-pending-label="Aborting...">Abort</button>
+	</form>
 }
 
 templ deploymentGatePanel(gate *AdminDeployGate) {

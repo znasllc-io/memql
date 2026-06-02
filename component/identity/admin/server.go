@@ -69,6 +69,14 @@ type AdminServer struct {
 	// unwired (e.g. an identity binary without the deploy-control
 	// surface).
 	deployReader DeployControlReader
+
+	// memql#727: deployment write-action port backing the
+	// POST /admin/deployments/* handlers (deploy-staging, promote,
+	// rollback, rollout). Wired by SetDeployControlActions from
+	// app/integrations_deploy_control.go after the deploy-control
+	// service is up. Nil-safe: the handlers reject with an error flash
+	// when unwired.
+	deployActions DeployControlActions
 }
 
 // Built-in nav links rendered in the layout header on every admin
@@ -156,6 +164,10 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/audit", gated(s.handleAuditList))
 
 	mux.HandleFunc("GET /admin/deployments", gated(s.handleDeploymentsGet))
+	mux.HandleFunc("POST /admin/deployments/deploy-staging", gated(s.handleDeployStagingPost))
+	mux.HandleFunc("POST /admin/deployments/promote", gated(s.handleDeployPromotePost))
+	mux.HandleFunc("POST /admin/deployments/rollback", gated(s.handleDeployRollbackPost))
+	mux.HandleFunc("POST /admin/deployments/rollout", gated(s.handleDeployRolloutPost))
 
 	mux.HandleFunc("GET /admin/tokens", gated(s.handleTokensList))
 	mux.HandleFunc("POST /admin/tokens/revoke", gated(s.handleTokensRevoke))
@@ -181,7 +193,7 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 
 	s.Logger.Info("admin web routes mounted",
 		slog.String("base_url", s.Cfg.BaseURL),
-		slog.Int("routes", 15),
+		slog.Int("routes", 19),
 	)
 }
 

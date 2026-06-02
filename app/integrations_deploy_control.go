@@ -72,21 +72,42 @@ func (a *App) setupDeployControlService() {
 	// read RPC's owner/admin gate (#728) admits it because the handler
 	// stamps an auth.AccessContext from the verified admin claims.
 	if adminSrv, ok := a.adminServer.(*admin.AdminServer); ok && adminSrv != nil {
-		adminSrv.SetDeployControlReader(&deployControlReaderAdapter{svc: svc})
-		a.Logger.Info("deploy-control reader wired into admin portal",
+		adapter := &deployControlAdapter{svc: svc}
+		adminSrv.SetDeployControlReader(adapter)
+		adminSrv.SetDeployControlActions(adapter)
+		a.Logger.Info("deploy-control reader + actions wired into admin portal",
 			"component", identity.ComponentName)
 	}
 }
 
-// deployControlReaderAdapter satisfies admin.DeployControlReader via
-// the in-process *deploycontrol.Service (memql#726). Lives here
-// rather than in the admin package so the admin layer stays decoupled
-// from the concrete deploy-control type -- the package depends on the
-// narrow port shape, the wiring layer satisfies it.
-type deployControlReaderAdapter struct {
+// deployControlAdapter satisfies both admin.DeployControlReader
+// (memql#726) and admin.DeployControlActions (memql#727) via the
+// in-process *deploycontrol.Service. Lives here rather than in the
+// admin package so the admin layer stays decoupled from the concrete
+// deploy-control type -- the package depends on the narrow port
+// shapes, the wiring layer satisfies them. Each method maps the
+// admin handler's (actor-context-stamped) call onto the matching
+// owner/admin-gated + server-side-audited RPC.
+type deployControlAdapter struct {
 	svc *deploycontrol.Service
 }
 
-func (a *deployControlReaderAdapter) DeploymentStatus(ctx context.Context, env string) (*memqlv1.DeploymentStatus, error) {
+func (a *deployControlAdapter) DeploymentStatus(ctx context.Context, env string) (*memqlv1.DeploymentStatus, error) {
 	return a.svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: env})
+}
+
+func (a *deployControlAdapter) DeployStaging(ctx context.Context, version string) (*memqlv1.ActionResult, error) {
+	return a.svc.DeployStaging(ctx, &memqlv1.DeployStagingRequest{Version: version})
+}
+
+func (a *deployControlAdapter) Promote(ctx context.Context, version string) (*memqlv1.ActionResult, error) {
+	return a.svc.Promote(ctx, &memqlv1.PromoteRequest{Version: version})
+}
+
+func (a *deployControlAdapter) Rollback(ctx context.Context, env, commitSha string) (*memqlv1.ActionResult, error) {
+	return a.svc.Rollback(ctx, &memqlv1.RollbackRequest{Env: env, CommitSha: commitSha})
+}
+
+func (a *deployControlAdapter) RolloutAction(ctx context.Context, env, rollout, action string) (*memqlv1.ActionResult, error) {
+	return a.svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: env, Rollout: rollout, Action: action})
 }
