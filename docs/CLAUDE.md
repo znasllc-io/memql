@@ -11,7 +11,6 @@
 docs/
 ├── CLAUDE.md          This file
 ├── ROADMAP.md         Future-work tracker (deferred items, not abandonment list)
-├── SERVICE_ACCOUNT_SETUP.md  GCP service account for Cloud Run deploys
 ├── polyphon-architecture.md  Voice + video architecture (Go voice-agent, integrations/voice/agent)
 ├── PLANNER_TODO.md    Planner integration: remaining v1 build-out work
 ├── dsl-import-model-refactor.md  In-flight DSL import-model design + migration plan

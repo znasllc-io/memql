@@ -93,6 +93,36 @@ builtin askSpecialist {
 // the write before returning so the GA can immediately invoke the
 // resulting agent via `agent("name", "prompt", spaceId)`.
 
+// ---- builtin requestUserFeedback -------------------------------------
+//
+// Bridges the requestUserFeedback tool (dsl/agents/tools/
+// requestUserFeedback.memql) to the agents Go integration's
+// `requestUserFeedback` capability. The integration transitions the
+// active Plan (planId is auto-stamped by the agent streaming loop's
+// agentContextStamps, so the LLM never has to supply it) to
+// status=awaitingFeedback / feedbackReason=feedback_required via
+// mutationRequestPlanFeedback, and returns a small ack payload
+// {status:"awaiting_user", planId, kind}.
+//
+// Mirrors the worker integration's requestComputerUseScope /
+// agentworkerRequestScope pair (the scope_elevation_required
+// variant); this is the generic feedback_required variant.
+
+@enabled
+@executor("integration.agents.requestUserFeedback")
+@args(profile="object")
+@description("Transition the active Plan to awaitingFeedback (feedbackReason=feedback_required) with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the user's answer (stamped via Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.")
+builtin requestUserFeedback {
+  question     string    @required
+  kind         string    @required
+  options      []object
+  timeoutAt    string
+  agentId      string    @required
+  ownerUserId  string    @required
+  planId       string    @required
+  spaceId      string
+}
+
 @enabled
 @executor("integration.agents.ensureForGoal")
 @args(profile="object")

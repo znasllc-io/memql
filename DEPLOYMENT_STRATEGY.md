@@ -1,991 +1,259 @@
-# memQL Deployment Strategy
+# memQL + CoPresent Deployment Strategy (AKS)
 
-**Last Updated**: May 30, 2026
+Authoritative deploy + operations reference for the memQL node mesh and the
+CoPresent product on **Azure Kubernetes Service**. This supersedes the former
+Google Cloud Run and Azure Container Apps strategies, which are retired and
+removed.
 
-## Overview
-
-memQL uses **manual deployments** with automatic database migrations. The automatic deployment trigger has been **disabled** to ensure controlled, coordinated deployments of both code and database changes.
-
-> **Platform migration in progress (epic #491).** The staging/production
-> sections below describe the current **Google Cloud Run** deployment.
-> A migration to **Azure Container Apps + Tiger Cloud** is underway; the
-> first piece — an idempotent `make deploy-setup` bootstrap — has landed
-> (see [Azure deploy bootstrap](#azure-deploy-bootstrap-make-deploy-setup)).
-> The GCP docs are retained until the migration completes (later issues
-> in the epic handle the cutover); do not treat them as removed yet.
+- Staging: cluster `aks-memql-staging` (rg `rg-memql-staging`), namespace
+  `memql`. Hosts `app.staging.copresent.ai`, `identity.staging.copresent.ai`.
+- Registry: `acrmemql.azurecr.io` (ACR). Database: managed **Tiger Cloud**
+  (Timescale). Secrets: **genesis A2** sealed envelope. Per-env config in
+  **Key Vault** (`kv-memql-<env>`).
 
 ---
 
-## Azure deploy bootstrap (`make deploy-setup`)
+## 1. Topology (live)
 
-`make deploy-setup` is the re-runnable foundation for the Azure
-deployment (epic #491, issue #492). It is **idempotent**: it installs/
-verifies + authenticates the toolchain and creates-or-converges the
-core Azure resources, so re-running converges to correct state with no
-duplicates and no drift. The implementation is function-based bash at
-[`.claude/scripts/deploy-setup.sh`](.claude/scripts/deploy-setup.sh),
-per the Skills+Scripts architecture.
+Namespace `memql` runs **8 Deployments** (engine mesh + carrier + SPA):
 
-### Usage
+| Deployment | Image | Replicas | Role |
+|---|---|---|---|
+| `identity` | `memql-identity` | 2 (HA, envMode) | magic-link auth, JWT issuance, JWKS, admin UI. Owns the one-time DB migration. |
+| `bff` | `memql-bff-copresent` (carrier) | 2 | backend-for-frontend; mesh hub; `/memql/ws`. |
+| `cognition` | `memql-cognition` | 2 | routing + conductor + Polyphon. |
+| `voice` | `memql-voice` | 2 | voice transport; `/memql/audio`. |
+| `agent` | `memql-agent` | 2 | task execution, SI work, tool calling. |
+| `planner` | `memql-planner` | 2 | plan orchestration. |
+| `workbench` | `memql-workbench` | 2 | sandboxed headless work surface. |
+| `copresent` | `copresent` (SPA) | 2 | the web app (static SPA served by nginx). |
 
-```bash
-make deploy-setup                          # bootstrap staging (default)
-make deploy-setup DRY_RUN=1                # print the plan, mutate nothing
-make deploy-setup ENV=production DRY_RUN=1 # production path (parameterized stub)
-make deploy-setup ARGS=--secrets-file=~/.memql/deploy.staging.env
-make deploy-setup ARGS=--help              # full flag reference
+Networking: a single `bff-external` LoadBalancer plus **3 Ingress** objects on
+the ingress-nginx controller (cert-manager-issued certs):
+
+- `app-main` + `app-identity-proxy` → `app.staging.copresent.ai` (SPA, `/memql/ws`,
+  `/memql/audio`, and the same-origin `/.well-known/jwks.json` proxy).
+- `staging-identity` → `identity.staging.copresent.ai` (identity service over TLS).
+
+Internal mesh: each node verifies identity-issued JWTs via its per-node verifier
+against `https://identity:8085` (internal cluster CA, `deploy/k8s/tls/`).
+**Convention: the issuer/host is `identity.<env>.copresent.ai`. There is no
+`auth.*` host or issuer anywhere.**
+
+Engine images are built from the memQL repo (root `Dockerfile`, per-node build
+tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
++ version-pinned from their own repos and referenced in
+`deploy/k8s/{bff,copresent}.yaml`.
+
+```
+                          Internet
+                             |
+              ingress-nginx (cert-manager TLS)
+            /            |                     \
+ app.staging.*      app.staging.*         identity.staging.*
+ (app-main)     (app-identity-proxy)     (staging-identity)
+      |                  |                      |
+   copresent SPA    bff (/memql/ws,        identity (2, HA)
+      |             /memql/audio,            |  JWKS @ :8085
+      |              jwks proxy)             |
+      \-------- bff-external LB -------------/
+                       |
+   bff <-> cognition / voice / agent / planner / workbench   (NodeService mesh, mTLS)
+                       |
+              managed Tiger Cloud (Postgres + TimescaleDB)
 ```
 
-`ENV` selects the environment (`staging` default, or `production`).
-`DRY_RUN=1` forwards `--dry-run`, which prints the full plan and a
-state report without touching Azure. `ARGS=...` forwards extra flags
-to the script.
+---
 
-### What it does
+## 2. Deploy: `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`)
 
-1. **Toolchain** — install-if-missing-else-verify + authenticate:
-   `az` (+ the `containerapp` extension), `gh`, the **Tiger Data CLI**
-   `tiger`, `docker`, `jq`, `psql`. On macOS, installs go through
-   Homebrew; on other platforms the script verifies and prints an
-   install hint rather than running `sudo` from a make target. It
-   never triggers an interactive login automatically — it detects
-   whether `az` / `gh` / `tiger` sessions exist and tells you exactly
-   which `… login` command to run if not.
-2. **Azure resources** (create-or-converge, region **East US**), with
-   an existence check before every create so nothing is duplicated:
-   - `rg-memql-<env>` — resource group
-   - `acrmemql` — container registry (Basic SKU, **shared** across
-     envs; anchored to the staging resource group)
-   - `kv-memql-<env>` — Key Vault
-   - `cae-memql-<env>` — Container Apps environment
-3. **Secrets → Key Vault (A2 genesis-envelope model, issue #519)** —
-   stores exactly **three** bootstrap secrets in `kv-memql-<env>`; the
-   cluster's ~150 config vars all live inside the sealed genesis
-   envelope and are decrypted in-process at boot (see
-   [Genesis envelope in cloud](#genesis-envelope-in-cloud--the-a2-secrets-model)),
-   so they are **not** stored as individual Key Vault secrets:
+One command takes the cluster from source to a rolled-out, gated deploy:
 
-   | Secret | Value source | Notes |
-   |--------|--------------|-------|
-   | `memory-nodes-database-dsn` | `$MEMORY_NODES_DATABASE_DSN` or the gitignored secrets file | Tiger Cloud DSN. **Kept**; often already written by `make db-provision` — only rewritten when it actually changed, so it's never clobbered. |
-   | `memql-master-key` | `$MEMQL_MASTER_KEY` (operator env **only**) | 32-byte / 64-hex key that decrypts the envelope. Never read from the repo or the secrets file; warn + skip if unset. |
-   | `memql-genesis-b64` | `base64` of the sealed envelope file (`$MEMQL_GENESIS_PATH`, default `~/.memql/genesis.znas`) | The envelope is **encrypted**, so the ciphertext is safe to store. Warn + skip if the file is missing. |
+1. **Build + push** the 6 engine images via `az acr build` (root `Dockerfile`,
+   one per build tag; `voice` is the CGO exception). Engine tags are
+   **immutable** — a build that would overwrite an existing
+   `memql-<nt>:<tag>` is refused (see §6). `--skip-build` deploys already-pushed
+   tags.
+2. **Ensure secrets**: internal TLS CA + identity cert
+   (`deploy/k8s/tls/gen-internal-ca.sh`); warns if `memql-secrets` is absent.
+3. **Migration gate** (pre-rollout): a Job pinned to `VERSION` runs the DB
+   migrations once and **aborts the deploy on failure** — the mesh never rolls
+   onto a half-migrated schema.
+4. **Apply (ordered)**: namespace → `identity` first (serves JWKS before the
+   workers' verifiers need it) → `kubectl apply -k deploy/k8s` (full mesh +
+   public entry) → pin **every** engine node (identity included) to `VERSION`
+   *after* the kustomize apply (so the apply can't revert a node to a manifest
+   tag — the #613 fix).
+5. **Health gate**: a **version-skew assertion** (every engine Deployment must
+   run exactly `:VERSION`) followed by the **smoke gate** (§7). On failure with
+   the gate armed (default), **auto-rollback**.
+6. **Record validated version** (§6) on a green *deep* gate.
 
-   The old **"6 individual secrets"** model (`MEMQL_SI_OPENAI_API_KEY`,
-   `MEMQL_SI_OPENAI_PROJECT_ID`, the content-ID salt, the Discord
-   webhooks) is **removed** — those values live inside the envelope now.
-   A value is only written when it differs from what's already stored,
-   so re-runs are a true no-op.
-4. **State report** — prints what already existed, what was created,
-   what was reconciled, and what was skipped (missing tool / auth /
-   value).
+Carrier + SPA are built/pinned from their own repos (`memql-bff-copresent
+make release`; copresent `docker buildx` with the `node_auth_token` BuildKit
+secret + `VITE_*` build-args) — not by this script.
 
-### Providing the three secret values
-
-- **DSN** — export `MEMORY_NODES_DATABASE_DSN`, or put it in a gitignored
-  file (matched by the repo's `.env.*` ignore rules), one `KEY=VALUE` per
-  line, passed via `--secrets-file` (default `.env.deploy.<env>`). Example
-  `.env.deploy.staging`:
-
-  ```
-  MEMORY_NODES_DATABASE_DSN=postgres://...
-  ```
-
-  Already-exported environment variables take precedence over the file.
-  (`make db-provision` usually writes this secret first, so the file is
-  optional.)
-- **Master key** — export `MEMQL_MASTER_KEY` (32-byte / 64-hex) in the
-  operator shell. It is **never** read from the repo or the secrets file.
-- **Sealed envelope** — place the encrypted envelope at
-  `~/.memql/genesis.znas` (or point `MEMQL_GENESIS_PATH` at it). The
-  script `base64`-encodes the ciphertext and stores it as
-  `memql-genesis-b64`.
-
-### Status / remaining work
-
-The script is correct, `shellcheck`-clean, and fully dry-run-able, and
-is covered by Go tests under [`scripts/deploy/`](scripts/deploy/) that
-run in CI (`go test ./...`). It has **not** yet been run against a live
-Azure subscription — that validation is the remaining step and is
-gated on the operator's `az login` access (epic #491 external
-prerequisite). The `production` path is wired and parameterized but
-stubbed pending that same validation.
+Flags: `--version`, `--env`, `--skip-build`, `--skip-tls`, `--skip-migrate`,
+`--no-smoke`, `--no-gate`, `--allow-overwrite`, `--dry-run`. `--dry-run` prints
+the full plan and mutates nothing.
 
 ---
 
-## Tiger Cloud DB provisioning (`make db-provision`)
+## 3. Configuration precedence
 
-`make db-provision` provisions the managed **Tiger Cloud** (Timescale
-Community + pgvector) database for the environment and wires its
-connection DSN into the per-env Key Vault (epic #491, issue #494). It is
-**idempotent**: a re-run detects the existing service and only rewrites
-the DSN secret when it actually rotated. The implementation is
-function-based bash at
-[`scripts/deploy/tiger-provision.sh`](scripts/deploy/tiger-provision.sh),
-per the Skills+Scripts architecture.
+Two layers, lowest to highest:
 
-### Usage
+1. **Genesis envelope (base layer, set-if-absent)** — shared secrets + config
+   sealed in the A2 envelope (`MEMQL_GENESIS_B64` in `memql-secrets`), autoloaded
+   at boot when `MEMQL_GENESIS_AUTOLOAD=true`. Applied only for keys not already
+   in the environment.
+2. **Per-pod env / envFrom (override)** — values set explicitly in the k8s
+   manifests (node type, mesh addresses, `IDENTITY_*` hosts, feature flags) win
+   over the envelope.
+
+Rule of thumb: **shared secrets/config → genesis envelope** (via the re-seal
+flow in §4); **per-node, non-secret config → k8s manifest env**. Never set
+shared secrets with ad-hoc `kubectl set env`.
+
+---
+
+## 4. Secrets: genesis A2 envelope
+
+Shared secrets live in a single encrypted envelope sealed under
+`MEMQL_MASTER_KEY` (NaCl secretbox; see `component/secret/`). The cluster carries
+three keys in the `memql-secrets` Secret: `MEMQL_MASTER_KEY`,
+`MEMQL_GENESIS_B64` (the sealed envelope), and `MEMORY_NODES_DATABASE_DSN`.
+The manifest of expected keys is `scripts/secrets/manifest.yaml` (entries may be
+`optional: true` — documented + sealed-when-present but not required, e.g. the
+identity signing seed).
+
+**To add/rotate a shared secret (the canonical flow — do NOT `kubectl set env`):**
 
 ```bash
-make db-provision                          # provision staging DB (default)
-make db-provision DRY_RUN=1                # print the plan, mutate nothing
-make db-provision ENV=production DRY_RUN=1 # production path (parameterized stub)
-make db-provision ARGS=--help              # full flag reference
+# 1. Edit the per-env source of truth (real values, gitignored, NEVER committed):
+#    ~/Downloads/staging.genesis.env   (staging)   |   prod equivalent
+# 2. Re-seal it (reuses MEMQL_MASTER_KEY from env; must match the cluster's):
+go run ./cmd/genesis-seal --env-file=~/Downloads/staging.genesis.env \
+    --out=/tmp/staging.genesis.znas --sync-shell=false
+# 3. Push the new sealed blob to Key Vault (DR) and the cluster Secret:
+NEW="$(base64 < /tmp/staging.genesis.znas | tr -d '\n')"
+az keyvault secret set --vault-name kv-memql-staging --name memql-genesis-b64 --value "$NEW"
+kubectl patch secret memql-secrets -n memql --type merge \
+    -p "{\"stringData\":{\"MEMQL_GENESIS_B64\":\"$NEW\"}}"
+# 4. Roll the pods that consume it (envFrom is injected at pod start):
+kubectl rollout restart deployment/<name> -n memql
 ```
 
-`ENV` selects the environment (`staging` default, or `production`).
-`DRY_RUN=1` forwards `--dry-run`, which prints the full plan and a
-state report without touching Tiger Cloud or Azure.
+---
 
-### What it does
+## 5. Identity HA + signing key
 
-1. **Tiger Cloud service** — via the **Tiger Data CLI** (`tiger`),
-   create-or-verify the `memql-<env>` service in **Azure East US**
-   (region slug `azure-eastus`). The service is existence-checked
-   before create (matched on the service name in `tiger service list`),
-   so it is never duplicated.
-2. **Extensions** — confirm the two extensions memQL needs:
-   `timescaledb` (Timescale Community, pre-enabled on Tiger Cloud) and
-   `vector` (pgvector). The check runs an idempotent
-   `CREATE EXTENSION IF NOT EXISTS` against the service, which is a
-   no-op when the extension is already enabled.
-3. **DSN → Key Vault** — read the service's libpq connection DSN from
-   the `tiger` CLI and store it as the Key Vault secret
-   `memory-nodes-database-dsn` in `kv-memql-<env>`. The secret name is
-   the **same** one [`deploy-setup.sh`](.claude/scripts/deploy-setup.sh)
-   uses for `MEMORY_NODES_DATABASE_DSN`, so the two scripts converge on
-   one secret. The value is only written when it differs from what's
-   already stored — so a re-run that didn't rotate the DSN is a true
-   no-op. An exported `MEMORY_NODES_DATABASE_DSN` overrides the read
-   (lets an operator wire a manually-rotated DSN).
-4. **Auto-migrations** — memQL runs migrations on backend start
-   (`MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`,
-   `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true` from
-   [`service.yaml`](service.yaml)), so the schema converges against
-   this DB on the first deploy. No separate migration step is needed.
-5. **State report** — prints what already existed, what was created,
-   what was rotated, and what was skipped (missing tool / auth / value).
+Identity runs **2 replicas in envMode**: the Ed25519 signing seed
+(`IDENTITY_SIGNING_KEY_B64`, std-base64 of 32 bytes) rides the genesis envelope,
+so every replica derives the **same** key + `kid` + JWKS. There is **no RWO key
+PVC** (which would force a single writer), the strategy is RollingUpdate, and a
+PodDisruptionBudget keeps ≥1 pod serving auth through disruptions.
 
-On a host without the `tiger` CLI (or where it isn't authenticated),
-the script verifies-and-instructs rather than auto-installing — it
-prints the exact `tiger auth login` / install commands and points at
-`make deploy-setup` for the full toolchain bootstrap.
-
-### Status / remaining work
-
-The script is `shellcheck`-clean and fully dry-run-able, and is covered
-by Go tests under [`scripts/deploy/`](scripts/deploy/) that run in CI
-(`go test ./...`). It has **not** yet been run against a live Tiger
-Cloud account — that validation is the remaining step, gated on the
-operator's Tiger Cloud account (epic #491 external prerequisite). The
-exact `tiger` subcommand surface (`service create`,
-`get-connection-string`, `service exec`) is pinned to the documented
-CLI and may need a small adjustment once exercised live. The
-`production` path is wired and parameterized but stubbed.
+- **Rotate the signing key**: re-seal a new seed into the envelope (§4) and roll
+  identity. In envMode there is no previous-key overlap, so a rotation
+  invalidates JWTs signed by the old key → clients re-authenticate (and mesh
+  nodes re-bootstrap on restart). The signing key is **JWT-only**; it does **not**
+  encrypt stored secrets (those use `MEMQL_MASTER_KEY`), so rotating it never
+  risks stored data.
+- **Disk-key mode (local dev only)**: when `IDENTITY_SIGNING_KEY_B64` is unset,
+  identity falls back to an on-disk keypair under `IDENTITY_KEY_DIR`
+  (single-writer; not for HA).
 
 ---
 
-## Cluster deploy to Container Apps (SUPERSEDED — see AKS below)
+## 6. Promotion gate (staging → prod)
 
-> **Superseded by the AKS pivot (issue #532, epic #522).** `make deploy`
-> now runs the **AKS** orchestrator
-> ([`scripts/deploy/aks-deploy.sh`](scripts/deploy/aks-deploy.sh)) — see
-> [Backend cluster on AKS](#backend-cluster-on-aks-make-deploy) below.
-> Azure Container Apps exposes one ingress port per app and cannot host
-> the per-node multi-port mesh, so the ACA `make deploy` (issue #495) and
-> its script `.claude/scripts/deploy.sh` were retired. The cluster-shape
-> tables below are kept only as a record of the pre-pivot design; the live
-> deploy is the AKS one.
+A version is promotable to prod **only after it passes the deep staging smoke**,
+and a validated artifact is **immutable**.
 
-The original ACA design (historical): `make deploy ENV=staging|production`
-built + pushed the cluster images and deployed the **cluster of worker
-nodes** to Azure Container Apps. The backend is **not** a single binary: it
-is a set of node-type workers sharing the one Tiger Cloud DB.
+1. **Immutable tags** — `aks-deploy.sh` refuses to overwrite an existing engine
+   tag in ACR (`ensure_tag_immutable`). `--allow-overwrite` exists only to
+   re-cut an *unvalidated* tag. (ACR Basic enforces this at the script layer; an
+   ACR **Premium** upgrade adds a registry-level immutability policy — recommended
+   before prod.)
+2. **Deep gate** — `SMOKE_PROFILE=deep` (§7) must pass; a token-less baseline
+   gate is not a basis for promotion.
+3. **Validated ledger** — on a green deep gate, `record_validated_version` appends
+   `{version, env, validatedAt, gate, per-engine digests}` to
+   `deploy/validated-versions.json`. Commit it.
+4. **Prod promotes only validated versions** — a prod deploy takes a version that
+   appears in the ledger and pins it by the recorded digests. `0.9.6` is
+   intentionally absent (it was rebuilt in-place and never deep-gated).
 
-### Cluster shape (what gets deployed)
+---
 
-Two image families land in the one ACA environment
-(`cae-memql-<env>`):
+## 7. Deep smoke gate (`scripts/deploy/staging-smoke-test.sh`)
 
-| App | Image | `MEMQL_NODE_TYPE` | Ingress | Port |
-|-----|-------|-------------------|---------|------|
-| `ca-memql-cognition-<env>` | `acrmemql.azurecr.io/memql:<ver>` | `cognition` | internal | 8085 |
-| `ca-memql-voice-<env>`     | `…/memql:<ver>` | `voice`     | internal | 8085 |
-| `ca-memql-agent-<env>`     | `…/memql:<ver>` | `agent`     | internal | 8085 |
-| `ca-memql-planner-<env>`   | `…/memql:<ver>` | `planner`   | internal | 8085 |
-| `ca-memql-identity-<env>`  | `…/memql:<ver>` | `identity`  | internal | 8085 |
-| `ca-memql-workbench-<env>` | `…/memql:<ver>` | `workbench` | internal | 8085 |
-| `ca-copresent-bff-<env>`   | `…/memql-bff-copresent:<carrier-ver>` | `bff` | **external** | 8085 |
+`SMOKE_PROFILE`:
 
-- The **engine node-types** run the `memql` image, selected by
-  `MEMQL_NODE_TYPE`, and take **internal** ingress — they are workers
-  inside the ACA environment and never face the public internet.
-  (Node-type list + ports match
-  [`docker/docker-compose.cluster.yml`](docker/docker-compose.cluster.yml).)
-- The **CoPresent BFF carrier** runs the `memql-bff-copresent` carrier
-  image (`MEMQL_NODE_TYPE=bff`) and takes **external** ingress — it is
-  the node the frontend hits, mapping to `api.<env>.copresent.ai`
-  later. Its image is built from the **sibling**
-  [`../memql-bff-copresent`](../memql-bff-copresent) repo, whose
-  `make release` build context spans both repos (its `go.mod` has
-  `replace ../memql`). CoPresent **pins** this carrier at a specific
-  version; `--carrier-version` / `CARRIER_VERSION` targets that pinned
-  tag.
-
-### Usage
+- **baseline** (default): front-door reachability — TLS+DNS, identity health +
+  JWKS (direct + app proxy), login page, `/memql/ws` + `/memql/audio` wiring,
+  SPA boot assets, identity styling. A SKIP never fails the run.
+- **deep** (the gate): all baseline checks **plus** a real authenticated WS query
+  that fans BFF → cognition/agent. Every deep check **must run and PASS** — a
+  missing input (no `MEMQL_SMOKE_TOKEN` / ws client) is a **FAIL, not a SKIP**.
+  This is what makes the gate conclusive (the 0.9.6 incident went
+  8-PASS/0-FAIL/2-SKIP green while the authenticated app was broken).
 
 ```bash
-make deploy                                          # staging, VERSION from the VERSION file
-make deploy DRY_RUN=1                                # print the full plan, mutate nothing
-make deploy ENV=staging CARRIER_VERSION=0.9.0        # pin the BFF carrier tag
-make deploy SKIP_BUILD=1 VERSION=0.9.0 CARRIER_VERSION=0.9.0  # deploy already-pushed tags
-make deploy ENV=production DRY_RUN=1                 # production path (parameterized stub)
-make deploy ARGS=--help                              # full flag reference
+SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=<pat-or-jwt> bash scripts/deploy/staging-smoke-test.sh
 ```
 
-`ENV` selects the environment. `VERSION` is the engine (`memql`) image
-tag (default: the [`VERSION`](VERSION) file's semver). `CARRIER_VERSION`
-is the BFF carrier tag (default: the sibling repo's `VERSION`, else
-`VERSION`). `SKIP_BUILD=1` deploys already-pushed tags without
-rebuilding. `DRY_RUN=1` forwards `--dry-run`.
+`aks-deploy.sh` runs the deep profile automatically when `MEMQL_SMOKE_TOKEN` is
+in the deploy environment, and flags a token-less deploy as not promotable.
 
-### What it does
-
-1. **Build + push** the two images to the shared ACR (`acrmemql`):
-   the engine image via this repo's
-   [`scripts/release/release.sh`](scripts/release/release.sh)
-   (`make release` equivalent), and the carrier image via the sibling
-   repo's `make release` (so the cross-repo build context is owned by
-   the repo that defines it). Skippable with `SKIP_BUILD=1`. A pre-step
-   runs `az acr login` so the release scripts' `docker push` can
-   publish.
-2. **Deploy** each Container App, **create-or-update** (idempotent): an
-   existence check (`az containerapp show`) picks `create` vs `update`,
-   so re-running converges with no duplicates. Ingress is converged
-   separately so a flip (internal ↔ external) is reconciled on re-run.
-   Each app gets `--min-replicas 1` and a `--system-assigned` managed
-   identity (re-asserted via `az containerapp identity assign` on the
-   update path).
-3. **Secrets + env (A2 genesis-envelope model, issue #519)** — all
-   **three** Key Vault secrets ride **Key Vault secret references**
-   (`keyvaultref:…/secrets/<name>,identityref:system`) resolved at
-   runtime by the app's system-assigned managed identity, surfaced to
-   the binary as `secretref:` env vars:
-
-   | Env var | Key Vault secret |
-   |---------|------------------|
-   | `MEMORY_NODES_DATABASE_DSN` | `memory-nodes-database-dsn` |
-   | `MEMQL_MASTER_KEY` | `memql-master-key` |
-   | `MEMQL_GENESIS_B64` | `memql-genesis-b64` |
-
-   The app also gets `MEMQL_GENESIS_AUTOLOAD=true` (turn on the
-   in-process envelope decrypt at boot) plus the **per-node overrides**
-   that must WIN over the envelope's local-dev defaults — and because
-   the binary's autoload is **set-if-absent**, anything set in the
-   container env before the process starts wins. These mirror
-   [`service.yaml`](service.yaml): `MEMQL_NODE_TYPE=<role>`,
-   `SERVER_ADDRESS=0.0.0.0:8085`, `SERVER_ALLOWED_ORIGINS`,
-   `IDENTITY_VERIFIER_BASE_URL` / `IDENTITY_VERIFIER_AUDIENCE`,
-   `MEMQL_GRPC_ADDRESS=:50051`, and the auto-migrate flags.
-4. **Managed-identity Key Vault grant** — each app's system-assigned
-   managed identity is granted the **`Key Vault Secrets User`** role at
-   the `kv-memql-<env>` scope (`az role assignment create`), so it can
-   read the three secret references at boot. Idempotent (a re-run is a
-   no-op when the assignment already exists). This resolves the TODO
-   that `make deploy-setup` left for the deploy step.
-5. **State report** — prints which apps were created vs updated, with
-   which image tags + ingress, the managed-identity grants, and what was
-   skipped.
-
-### Status / remaining work
-
-The script is `shellcheck`-clean and fully dry-run-able, and is covered
-by Go tests under [`scripts/deploy/`](scripts/deploy/) that run in CI
-(`go test ./...`). It has **not** yet been run against a live Azure
-subscription — that validation (plus the live image build/push, which
-needs Docker + the sibling carrier checkout) is the remaining step,
-gated on the same `az login` access and on `make deploy-setup` +
-`make db-provision` having created the resources. The exact
-`az containerapp` flag surface (secret/Key-Vault-ref syntax, ingress
-flip) may need a small adjustment once exercised live. The `production`
-path is wired and parameterized but stubbed.
+Deeper tiers tracked as follow-ups: a server-side readiness endpoint asserting
+the `automation_execution_claims` table (the DB is firewalled to AKS egress), and
+a headless-browser walkthrough + console-error tier.
 
 ---
 
-## Backend cluster on AKS (`make deploy` / `make deploy-aks`)
+## 8. Zero-downtime + recovery
 
-The memQL node mesh is node-to-node gRPC over **per-node ports**
-(`MEMQL_NODE_ADDRESS`, `MEMQL_PARENT_ADDRESS`, `MEMQL_WORKER_PEERS` on
-`5005x`). Azure Container Apps exposes a single ingress port per app and
-cannot host that multi-port mesh, so the backend cluster runs on **AKS**
-(architect decision 2026-05-31; epic znasllc-io/memql#522). AKS gives
-full pod networking + multi-port Services. This replaces the ACA
-`make deploy` compute path; the rest of the foundation (Tiger Cloud DB,
-Key Vault, ACR images, the genesis A2 model below) carries over unchanged.
+- **Rollout**: stateless nodes roll with RollingUpdate + graceful gRPC drain;
+  identity is HA (§5) so auth stays up across a roll.
+- **Rollback**: `make deploy-rollback` (`scripts/deploy/aks-rollback.sh`) rolls
+  every Deployment back to its previous ReplicaSet (`--only=`, `--to-revision=`
+  supported). The health gate auto-rolls-back on a failed deploy.
+- **Secret recovery**: the sealed envelope is in Key Vault (`kv-memql-<env>/
+  memql-genesis-b64`); re-store it into `memql-secrets` and roll (§4).
+- **DB**: managed Tiger Cloud (point-in-time recovery via Tiger). The DSN lives
+  in `memql-secrets` / Key Vault.
 
-Two entry points (issue #532):
+---
 
-- **`make deploy VERSION=X.Y.Z`** — the full end-to-end flow in
-  [`scripts/deploy/aks-deploy.sh`](scripts/deploy/aks-deploy.sh): build +
-  push the six engine node images via `az acr build` (voice with CGO +
-  the `voice-runtime` stage), ensure the internal TLS secrets, apply the
-  manifests **identity-first** (it owns the one-time migration + JWKS) and
-  wait for each Deployment to roll out, then smoke-test the live front
-  door. `--skip-build` applies the manifests' pinned tags; `--dry-run`
-  prints the plan and touches nothing. The bff carrier
-  (`memql-bff-copresent`) + copresent SPA are built + version-pinned from
-  their own repos, not here.
-- **`make deploy-aks`** — the lower-level apply-only primitive
-  ([`scripts/deploy/aks-apply.sh`](scripts/deploy/aks-apply.sh)): namespace
-  + kustomize apply, no build, no rollout wait, no smoke.
+## 9. Capacity (#614)
 
-Manifests live under [`deploy/k8s/`](deploy/k8s/) (see
-[`deploy/k8s/README.md`](deploy/k8s/README.md)).
-
-### NO database pod — managed Tiger Cloud
-
-`docker/docker-compose.cluster.yml` ships a `postgres` service; that is
-**dev-only**. Staging/prod use the managed **Tiger Cloud** instance
-(`xahn9ru4v6`, Azure East US 2). There is **no** postgres / pgadmin /
-nginx / livekit in `deploy/k8s/` — only the 7 memQL node-types. Every
-node reaches Tiger via the `MEMORY_NODES_DATABASE_DSN` key in the
-`memql-secrets` Secret.
-
-### Mesh maps 1:1 to k8s via cluster DNS
-
-Each node's `Service` is named after its node-type short name (`bff`,
-`cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in
-the `memql` namespace. Same-namespace cluster DNS then resolves the
-existing compose mesh values (`bff:50058`, `agent:50055`, …)
-**unchanged** — so `MEMQL_NODE_ADDRESS` / `MEMQL_PARENT_ADDRESS` /
-`MEMQL_WORKER_PEERS` are the exact same strings as
-`docker-compose.cluster.yml`. Each ClusterIP Service exposes the node's
-NodeService port (`5005x`) + `8085` (http) + `50051` (grpc). `bff` also
-gets a `LoadBalancer` Service (`bff-external`) on `8085` — the external
-entry point (maps to `app.copresent.ai` later).
-
-| Node | Image | NodeService port | Parent | Worker peers |
-|------|-------|------------------|--------|--------------|
-| bff | `memql-bff-copresent:0.9.0` | 50058 | — | voice/agent/cognition/planner/workbench |
-| cognition | `memql:0.9.0` | 50054 | bff:50058 | agent=agent:50055 |
-| voice | `memql:0.9.0` | 50059 | bff:50058 | — |
-| agent | `memql:0.9.0` | 50055 | bff:50058 | workbench=workbench:50060 |
-| planner | `memql:0.9.0` | 50056 | bff:50058 | — |
-| workbench | `memql:0.9.0` | 50060 | bff:50058 | — |
-| identity | `memql:0.9.0` | 50061 | — | — |
-
-### Migrations run once (identity only)
-
-The shared Tiger DB must not be migrated by seven racing nodes. Only the
-**identity** Deployment sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`
-+ `MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`; every other node has both
-`false`. identity is also the JWKS authority every other node's verifier
-points at (`IDENTITY_VERIFIER_BASE_URL=http://identity:8085`), so it
-comes up first; the verifier's non-fatal + eager-retry JWKS path lets the
-other nodes start before identity is ready.
-
-### Secrets — genesis A2 (same model as below)
-
-Three keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
-`MEMORY_NODES_DATABASE_DSN`. Every Deployment sets
-`MEMQL_GENESIS_AUTOLOAD=true`, so each pod decrypts the sealed envelope
-in-process at boot and applies the ~150 vars set-if-absent; the per-pod
-overrides (node type, mesh addresses, DSN) win. The Secret carries real
-values and is created out-of-band — it is **not** part of the
-kustomization. Create it imperatively (or sync it from Key Vault via the
-Secrets Store CSI `SecretProviderClass` alternative documented in
-[`deploy/k8s/secret.example.yaml`](deploy/k8s/secret.example.yaml)).
-
-### Usage
+Staging runs nodepool `nodepool1` = 4× `Standard_B2s`. The pool handles the
+current mesh (16 pods) but has thin headroom for rolling-update surge. Enable the
+cluster autoscaler so a roll can surge without a scheduling deadlock:
 
 ```bash
-# One-time prerequisite: the memql-secrets Secret (real values).
-kubectl apply -f deploy/k8s/namespace.yaml
+az aks nodepool update -g rg-memql-staging --cluster-name aks-memql-staging \
+    -n nodepool1 --enable-cluster-autoscaler --min-count 2 --max-count 5
+```
+
+> Sizing (min/max, SKU) is a cost decision — confirm before enabling on shared
+> infra, and codify the chosen values in IaC. Recommended staging floor: min 2,
+> max 5 on B2s.
+
+---
+
+## 10. Prerequisite (one-time, out-of-band)
+
+`memql-secrets` carries real values and is created out of band — never committed:
+
+```bash
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
-  --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
-  --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
-
-# Apply the 7-node mesh (idempotent).
-make deploy-aks ENV=staging
-# or directly:  kubectl apply -k deploy/k8s/
+  --from-literal=MEMQL_GENESIS_B64="$(base64 < /tmp/<env>.genesis.znas)" \
+  --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string <id> --with-password)"
 ```
 
-`make deploy-aks` runs `scripts/deploy/aks-apply.sh`: pre-flights kubectl
-+ cluster reachability, renders the kustomization, warns if
-`memql-secrets` is absent, applies the namespace, then kustomize-applies
-the 7 Deployments + Services. `--dry-run` does a server-side dry-run that
-mutates nothing.
-
-### Status / remaining work
-
-The manifests render cleanly (`kubectl kustomize deploy/k8s/`) and pass
-`kubeconform -strict` (16 resources valid). The AKS cluster itself is
-still provisioning (`rg-memql-staging`, `az aks update --attach-acr
-acrmemql`), so the apply has not yet run against a live cluster —
-`make deploy-aks` correctly fails its pre-flight ("no reachable cluster")
-until `az aks get-credentials` points kubectl at the new cluster. The
-external `bff-external` LoadBalancer's public IP and the
-`app.copresent.ai` mapping land once the cluster is up.
-
----
-
-## Genesis envelope in cloud — the A2 secrets model
-
-The cloud cluster's config is the **genesis envelope**: ~150 vars
-(OpenAI / Anthropic / Deepgram / JumpCloud / avatar keys, identity
-URLs, …). Locally, `make dev-refresh` decrypts `genesis.znas`
-host-side into a plaintext `env_file` that docker-compose mounts. For
-cloud we keep the envelope **sealed** and decrypt it **in-process at
-boot** — it never lands on disk decrypted in Azure. This is the
-architect-chosen **A2** model (issue #518, epic #491).
-
-### How it works
-
-A boot hook in `component/genesis` (`AutoloadFromEnv`, called from
-`main.go` before any config is read) is gated by one env var:
-
-| Env var | Role |
-|---------|------|
-| `MEMQL_GENESIS_AUTOLOAD` | Master switch. Set to `true` to enable in-process decrypt. **Unset/anything else = no-op** — local dev's `env_file` path is completely untouched. |
-| `MEMQL_GENESIS_B64` | The **encrypted** envelope, base64-encoded, carried directly in an env var. **Preferred for cloud**: decoded and decrypted in memory, never written to disk. |
-| `MEMQL_GENESIS_PATH` | Path to a sealed envelope file (default `~/.memql/genesis.znas`). Used when `MEMQL_GENESIS_B64` is empty. |
-| `MEMQL_MASTER_KEY` | The 32-byte (64 hex chars) key that decrypts the envelope. Already read from the process env by the `secret`/`genesis` packages. |
-
-When `MEMQL_GENESIS_AUTOLOAD=true`, boot:
-
-1. Sources the encrypted envelope bytes from `MEMQL_GENESIS_B64`
-   (preferred) or, if absent, from the `MEMQL_GENESIS_PATH` file.
-2. Decrypts in-process under `MEMQL_MASTER_KEY` via the existing
-   `secret.OpenBlob` path (`genesis.OpenBytes` for the B64 case —
-   the in-memory twin of `OpenFile`, so the ciphertext never touches
-   a temp file).
-3. Applies each entry to the process environment **set-if-absent** —
-   it never overwrites a var that is already set.
-
-### Overrides win (set-if-absent)
-
-The set-if-absent rule is the crux of the model. Container App
-overrides — the Tiger `MEMORY_NODES_DATABASE_DSN` (a Key Vault secret
-reference), `MEMQL_NODE_TYPE`, identity host URLs,
-`SERVER_ALLOWED_ORIGINS` — are set in the container's environment
-**before** the process starts. Because auto-load only fills in vars
-that are *absent*, those per-deploy overrides always win over the
-envelope's local-dev defaults. The envelope is the **base layer**;
-the Container App env is the override layer on top.
-
-(Locally the layering is the same shape: genesis envelope = base, the
-repo-root `.env` override = top. The difference is local dev decrypts
-host-side into `env_file` and does not set `MEMQL_GENESIS_AUTOLOAD`,
-so this in-process path is dormant.)
-
-### Fail-closed
-
-If `MEMQL_GENESIS_AUTOLOAD=true` but the envelope or master key is
-missing or undecryptable, boot **fails with a clear fatal error** —
-it does not silently come up mis-configured:
-
-- `MEMQL_MASTER_KEY` unset → fatal.
-- No envelope source (`MEMQL_GENESIS_B64` empty **and** the path
-  doesn't exist) → fatal.
-- Bad base64, truncated/tampered ciphertext, or wrong master key →
-  fatal.
-
-### Deploy wiring (shipped, issue #519)
-
-The deploy scripts now deliver config the A2 way and the earlier
-"6 individual secrets" approach is gone:
-
-- `make deploy-setup` stores exactly three Key Vault secrets —
-  `memory-nodes-database-dsn`, `memql-master-key`, `memql-genesis-b64`
-  (base64 of the sealed envelope) — and nothing else.
-- `make deploy` wires all three into each Container App as **Key Vault
-  secret references** via the app's system-assigned managed identity,
-  exposes them as `MEMQL_MASTER_KEY` / `MEMQL_GENESIS_B64` /
-  `MEMORY_NODES_DATABASE_DSN` `secretref` env vars, sets
-  `MEMQL_GENESIS_AUTOLOAD=true`, layers the per-node overrides
-  (`MEMQL_NODE_TYPE`, `SERVER_ADDRESS`, `SERVER_ALLOWED_ORIGINS`,
-  identity URLs, …) that win set-if-absent, and grants each managed
-  identity the `Key Vault Secrets User` role so it can read the
-  secrets at boot.
-
----
-
-## Release & versioning (semver tag -> immutable image)
-
-This section establishes memQL's release convention for the Azure
-deployment foundation (znasllc-io/memql#493, epic #491): a memQL
-**semver tag** maps to a single **immutable container image**, and
-that image tag is the one number CoPresent pins.
-
-### Dependency direction (why memQL carries no BFF require)
-
-memQL is the **upstream** module. The CoPresent BFF
-(`github.com/visionarys-io/memql-bff-copresent`) imports memQL's Go
-packages (`app`, `server`, `genesis`, `core/...`) and mounts its own
-`copresent/` DSL subtree into memQL's engine at boot via
-`dsl.RegisterTree` (see [`dsl/embed.go`](dsl/embed.go)). The import
-graph therefore points **BFF -> memQL**, not the other way:
-
-```
-  memql-bff-copresent  (require memql + replace ../memql for dev)
-            │  imports app/server/genesis, calls dsl.RegisterTree
-            ▼
-        memql            (no source import of the BFF)
-```
-
-Because memQL imports **zero** BFF packages, a `require
-github.com/visionarys-io/memql-bff-copresent` line in memQL's
-`go.mod` does not survive `go mod tidy` — Go strips any required
-module that nothing in the build graph imports. (Verified: a manual
-`go get ...@v0.2.0` adds an `// indirect` line that the next
-`go mod tidy` removes, and `GOWORK=off go build ./...` still
-succeeds because there was nothing BFF-shaped to resolve.) Forcing
-the require via a blank import is impossible anyway — the BFF imports
-memQL, so memQL importing the BFF would be a compile-time import
-cycle.
-
-The pin that actually matters flows the other way and is an **image
-tag**, not a module version: memQL releases `memql:X.Y.Z`, and
-CoPresent's `deploy/backend-version` file pins that tag
-(visionarys-io/copresent#140). The `go.work` workspace at the repo
-parent (`use ./memql ./memql-bff-copresent ./memql-cockpit`) is what
-gives local cross-repo dev its edit-and-rebuild loop; it is unchanged
-by this convention. CI / release builds run with `GOWORK=off` so they
-resolve purely from `go.mod` + `go.sum`.
-
-A CI-style guard for this lives in
-[`scripts/release/release_test.go`](scripts/release/release_test.go)
-(`TestStandaloneBuildResolves`): it runs `GOWORK=off go mod verify`
-so a regression that made the standalone build need the workspace
-fails `go test ./...`.
-
-### `make release` — cut an immutable image
-
-```bash
-# Local image, version = the VERSION file's semver (0.9.0):
-make release
-
-# Explicit version, build + push the pinnable tag to the shared ACR:
-make release VERSION=0.9.0 ACR=acrmemql PUSH=1
-
-# Plan only (build/push nothing):
-make release VERSION=0.9.0 ACR=acrmemql PUSH=1 DRY_RUN=1
-```
-
-The target is a one-liner over
-[`scripts/release/release.sh`](scripts/release/release.sh) (per the
-function-based shell-script convention in CLAUDE.md). It:
-
-- Resolves the version from `--version` or the `VERSION` file (now a
-  plain `X.Y.Z` with no suffix; the script still strips any legacy
-  `-<epoch>` dev stamp before the first `-` for safety). The version
-  must be strict `X.Y.Z`.
-- Resolves the short git SHA and stamps it onto the image as
-  `org.opencontainers.image.revision` (plus
-  `org.opencontainers.image.version`), so the immutable `X.Y.Z` tag
-  is always traceable back to an exact commit. A dirty tree marks the
-  revision `<sha>-dirty`.
-- Builds from [`docker/memql.Dockerfile`](docker/memql.Dockerfile)
-  and tags `<registry/>memql:X.Y.Z` (registry derived from `ACR`
-  -> `<acr>.azurecr.io`, or set directly via `REGISTRY`; empty =
-  local-only).
-- Treats the tag as **write-once**: with `PUSH=1` it refuses to
-  overwrite an existing `X.Y.Z` tag in the registry unless
-  `ALLOW_OVERWRITE=1` is passed. That immutability is what makes the
-  tag a trustworthy pin for CoPresent.
-
-### Promotion flow (memQL tag -> image -> CoPresent pin)
-
-```
-   git tag vX.Y.Z on memql main        (architect cuts the tag)
-            │
-            ▼
-   make release VERSION=X.Y.Z ACR=acrmemql PUSH=1
-            │   builds + pushes acrmemql.azurecr.io/memql:X.Y.Z (immutable)
-            ▼
-   CoPresent deploy/backend-version = X.Y.Z      (reviewed PR; copresent#140)
-            │   make check-backend-pin verifies the image exists in ACR
-            ▼
-   CoPresent staging/prod deploy runs against the pinned backend image
-```
-
-The backend lane (`ca-memql-*` tracking memQL `main`) moves
-continuously; the **pinned** lane (`ca-memql-pinned` behind
-`api.staging.copresent.ai`) only moves when someone bumps
-CoPresent's `backend-version` to a new `memql:X.Y.Z` in a reviewed
-PR. One memQL tag transitively fixes one BFF-compatible engine build.
-
-### Versioning lineage
-
-As of the 2026-05-30 platform versioning reset (epic
-[znasllc-io/memql#501](https://github.com/znasllc-io/memql/issues/501)),
-memQL is on a clean **`0.9.0`** baseline. The old `2.3.0-<epoch>` dev
-stamp and the orphaned `v0.1.0` tag are both retired; **git tag is the
-single source of truth** and there are no epoch suffixes. The first
-clean release tag is `v0.9.0`, cut on `main`.
-
-See [VERSIONING.md](VERSIONING.md) for the full policy (semver,
-pre-1.0 rules, `1.0.0` cut at the invite-only beta) and
-[COMPATIBILITY.md](COMPATIBILITY.md) for the platform pin chain
-(copresent → memql-bff-copresent carrier → memQL; memql-cockpit
-declares a minimum memQL/protocol).
-
----
-
-## Environments
-
-| Environment | Region | Database | Purpose | Access |
-|-------------|--------|----------|---------|--------|
-| **Development** | Docker | Local PostgreSQL + TimescaleDB | Development | All developers |
-| **Staging** | us-central1 | Tiger Cloud (staging instance) | QA & Testing | All developers |
-| **Production** | us-west1 | Tiger Cloud (production instance) | Live system | Senior/Lead only |
-
----
-
-## START Deployment Flow
-
-```
-┌─────────────────┐
-│ 1. DEVELOPMENT  │  docker compose up --build
-│                 │  - Docker PostgreSQL
-│                 │  - Isolated database
-└────────┬────────┘
-         │
-         │ Test locally, run tests
-         │
-         ▼
-┌─────────────────┐
-│ 2. STAGING ENV  │  gcloud run deploy
-│ (us-central1)   │  - Cloud Run
-│                 │  - Tiger Cloud (staging)
-│                 │  - Auto migrations
-└────────┬────────┘
-         │
-         │ QA, integration testing
-         │
-         ▼
-┌─────────────────┐
-│ 3. PRODUCTION   │  gcloud run deploy (production)
-│ (us-west1)      │  - Cloud Run
-│                 │  - Tiger Cloud (production)
-│                 │  - Auto migrations
-│                 │  - [WARNING] Requires confirmation
-└─────────────────┘
-```
-
----
-
-## [LIST] Available Commands
-
-### Development
-
-```bash
-# Start local environment
-docker compose -f docker/docker-compose.full.yml up --build
-
-# Run tests
-go test ./...
-
-# View logs
-docker compose -f docker/docker-compose.full.yml logs -f
-
-# Database shell
-psql postgres://memql:memql_dev@localhost:5432/memql
-
-# Stop services
-docker compose -f docker/docker-compose.full.yml down
-```
-
-### Staging Deployment
-
-```bash
-# Deploy to staging (Google Cloud Run)
-gcloud run deploy
-
-# Check logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-staging AND resource.labels.location=us-central1" --limit 50
-
-# Rollback if needed
-gcloud run services update-traffic anequim-memql-staging \
-  --region us-central1 \
-  --to-revisions [PREVIOUS-REVISION]=100
-```
-
-### Production Deployment
-
-```bash
-# Deploy to production (Google Cloud Run, requires confirmation)
-gcloud run deploy
-
-# Check logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-production AND resource.labels.location=us-west1" --limit 50
-
-# Rollback (DANGEROUS - use with caution)
-gcloud run services update-traffic anequim-memql-production \
-  --region us-west1 \
-  --to-revisions [PREVIOUS-REVISION]=100
-```
-
----
-
-## Database Migrations
-
-### How It Works
-
-**Automatic on deployment:**
-- Environment variables enable auto-migrations:
-  - `MEMORY_NODES_DATABASE_AUTO_MIGRATE=true`
-  - `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`
-- Migration files: `component/database/memory-nodes/migrations/`
-- Format: `YYYYMMDDHHMMSS_description.{up,down}.sql`
-
-### Creating Migrations
-
-1. **Create migration files:**
-   ```bash
-   # Create new migration
-   touch component/database/memory-nodes/migrations/20260209120000_add_feature.up.sql
-   touch component/database/memory-nodes/migrations/20260209120000_add_feature.down.sql
-   ```
-
-2. **Write SQL:**
-   ```sql
-   -- .up.sql (forward migration)
-   ALTER TABLE memory_nodes ADD COLUMN new_field TEXT;
-
-   -- .down.sql (rollback migration)
-   ALTER TABLE memory_nodes DROP COLUMN new_field;
-   ```
-
-3. **Test locally:**
-   ```bash
-   docker compose -f docker/docker-compose.full.yml up --build
-   # Check logs for migration success
-   ```
-
-4. **Deploy to staging:**
-   ```bash
-   gcloud run deploy
-   # Verify migration in staging database
-   ```
-
-5. **Deploy to production:**
-   ```bash
-   gcloud run deploy  # production
-   # Monitor migration logs carefully
-   ```
-
-### Rollback Migrations
-
-**Code rollback** (automatic via Cloud Run):
-```bash
-gcloud run services update-traffic anequim-memql-staging --region us-central1 --to-revisions [PREVIOUS-REVISION]=100  # or rollback production revision
-```
-
-**Database rollback** (manual):
-```bash
-# Connect to database
-psql "$(gcloud secrets versions access latest --secret='MEMORY_NODES_DATABASE_DSN')"
-
-# Check current migrations
-SELECT * FROM bun_migrations ORDER BY group_id DESC LIMIT 10;
-
-# Apply .down.sql file manually
-psql "CONNECTION_STRING" < component/database/memory-nodes/migrations/[MIGRATION].down.sql
-```
-
----
-
-## Configuration
-
-### Staging Environment (us-central1)
-
-- **Service**: anequim-memql-staging
-- **Region**: us-central1
-- **URL**: https://anequim-memql-staging-439288787761.us-central1.run.app
-- **Resources**: 2Gi RAM, 2 CPU
-- **Scaling**: 0-10 instances (scale to zero)
-- **Database**: Tiger Cloud (staging instance)
-- **Secrets**: Staging-specific secrets
-- **Cost**: ~$5-20/month
-
-### Production Environment (us-west1)
-
-- **Service**: anequim-memql-production
-- **Region**: us-west1
-- **URL**: https://anequim-memql-production-439288787761.us-west1.run.app
-- **Resources**: 4Gi RAM, 4 CPU
-- **Scaling**: 1-20 instances (always running)
-- **Database**: Tiger Cloud (production instance)
-- **Secrets**: Production-specific secrets
-- **Cost**: ~$50-200/month
-
----
-
-## Security & Secrets
-
-All secrets stored in **Google Cloud Secret Manager**:
-
-**Note:** Development environment variables follow the bootstrap-envelope-plus-concept-storage model: a tiny set of bootstrap vars in `.env.local` (generated by `make bootstrap`), with everything else in memQL's `v1:platform:globalVariable` and `v1:platform:globalSecret` concepts populated via `make secrets-init` + `make secrets-seed`. See [docs/guides/env-vars.md](docs/guides/env-vars.md).
-
-```bash
-# List secrets
-gcloud secrets list
-
-# View secret value (requires permission)
-gcloud secrets versions access latest --secret="SECRET_NAME"
-
-# Update secret
-echo -n "new-value" | gcloud secrets versions add SECRET_NAME --data-file=-
-
-# Trigger redeployment to pick up new secret
-gcloud run services update anequim-memql-staging --region us-central1  # or anequim-memql-production --region us-west1
-```
-
-### Required Secrets
-
-| Secret | Staging | Production | Purpose |
-|--------|---------|------------|---------|
-| `MEMORY_NODES_DATABASE_DSN` | [OK] | [OK] (separate) | Database connection |
-| `MEMQL_SI_OPENAI_API_KEY` | [OK] | [OK] | OpenAI API |
-| `JUMPCLOUD_CLIENT_ID` | [OK] | [OK] | Auth |
-| `JUMPCLOUD_CLIENT_SECRET` | [OK] | [OK] | Auth |
-| `BFF_ANEQUIM_*_CLIENT_ID` | Staging | Prod | Client config |
-| `BFF_ANEQUIM_*_CLIENT_SECRET` | Staging | Prod | Client config |
-
----
-
-## Emergency Procedures
-
-### Staging Deployment Failed
-
-1. **Check build logs**:
-   ```bash
-   gcloud builds list --limit 5
-   gcloud builds log [BUILD_ID]
-   ```
-
-2. **Check service logs**:
-   ```bash
-   gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-staging AND resource.labels.location=us-central1 AND severity>=ERROR" --limit 50
-   ```
-
-3. **Rollback if needed**:
-   ```bash
-   gcloud run services update-traffic anequim-memql-staging --region us-central1 --to-revisions [PREVIOUS-REVISION]=100
-   ```
-
-### Production Deployment Failed
-
-[WARNING] **CRITICAL - Follow these steps immediately:**
-
-1. **Rollback code immediately**:
-   ```bash
-   # List revisions
-   gcloud run revisions list --service anequim-memql-production --region us-west1
-
-   # Rollback to previous
-   gcloud run services update-traffic anequim-memql-production \
-     --region us-west1 \
-     --to-revisions [PREVIOUS-REVISION]=100
-   ```
-
-2. **Check if migration failed**:
-   ```bash
-   gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-production AND resource.labels.location=us-west1 AND jsonPayload.msg:migration" --limit 50
-   ```
-
-3. **Rollback database if needed** (get DBA help):
-   ```bash
-   # Connect to production database
-   psql "$(gcloud secrets versions access latest --secret='MEMORY_NODES_DATABASE_DSN_PROD')"
-
-   # Apply .down.sql migration
-   ```
-
-4. **Notify team** and escalate to Senior/Lead developer
-
----
-
-## INFO Monitoring
-
-### Check Service Health
-
-```bash
-# Staging
-gcloud run services describe anequim-memql-staging --region us-central1
-
-# Production
-gcloud run services describe anequim-memql-production --region us-west1
-```
-
-### View Logs
-
-```bash
-# Staging - recent logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-staging AND resource.labels.location=us-central1" --limit 100
-
-# Production - errors only
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-production AND resource.labels.location=us-west1 AND severity>=ERROR" --freshness=1h
-
-# Migration logs (staging)
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=anequim-memql-staging AND jsonPayload.msg:migration" --limit 50
-```
-
----
-
-## [REFRESH] Deployment Checklist
-
-### Staging Deployment
-
-- [ ] Code changes tested locally (`docker compose -f docker/docker-compose.full.yml up --build`)
-- [ ] Tests passing (`go test ./...`)
-- [ ] Code reviewed
-- [ ] Deploy to staging: `gcloud run deploy`
-- [ ] Verify deployment health
-- [ ] Test key functionality
-
-### Production Deployment
-
-- [ ] [OK] All staging deployment checks passed
-- [ ] [OK] Staging deployment tested and verified
-- [ ] [OK] Database migrations tested in staging
-- [ ] [OK] Code review completed
-- [ ] [OK] Senior/Lead developer approval
-- [ ] [OK] Rollback plan prepared
-- [ ] [OK] Team notified of deployment
-- [ ] [OK] Deploy to production: `gcloud run deploy`
-- [ ] [OK] Monitor logs for 15 minutes
-- [ ] [OK] Test critical functionality
-- [ ] [OK] Notify team of completion
-
----
-
-## NOTE Change Log
-
-### February 9, 2026
-- **Disabled automatic deployment trigger** (was deploying on push to `develop`)
-- **Created manual deployment process** for staging and production
-- **Established three-environment strategy** (development → staging → production)
-- **Configured automatic migrations** for all environments
-- **Documented rollback procedures** for both code and database
-
-### Previous State
-- Automatic deployment via Cloud Build trigger on push to `develop`
-- Deployments to us-west1 only
-- No clear separation between staging and production
-- Manual migration management
-
----
-
-## [HELP] Support
-
-- **Staging issues**: All developers can troubleshoot
-- **Production issues**: Escalate to Senior/Lead developers
-- **Database issues**: Check Tiger Cloud dashboard
-- **Secrets issues**: Verify in Google Cloud Secret Manager
-
----
-
-**Remember**: Always test in staging before deploying to production!
+See also `deploy/k8s/README.md` (manifest-level reference) and
+`deploy/k8s/README-public-entry.md` (ingress-nginx + cert-manager + internal TLS).

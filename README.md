@@ -67,8 +67,8 @@ docker compose -f docker/docker-compose.full.yml up --build
 # Run tests
 go test ./...
 
-# Deploy to staging (Google Cloud Run)
-gcloud run deploy
+# Deploy to staging (Azure AKS)
+make deploy VERSION=X
 ```
 
 **Full setup guide:** [QUICKSTART.md](QUICKSTART.md)
@@ -110,15 +110,15 @@ gcloud run deploy
 
 ### Staging (Cloud)
 - **Database:** TimescaleDB Cloud (Tiger Cloud)
-- **Service:** Google Cloud Run (us-central1)
+- **Service:** Azure Kubernetes Service (AKS, cluster `aks-memql-staging`)
 - **Access:** All developers
-- **Command:** `gcloud run deploy`
+- **Command:** `make deploy VERSION=X`
 
 ### Production (Cloud)
 - **Database:** TimescaleDB Cloud (Tiger Cloud) - separate instance
-- **Service:** Google Cloud Run (production)
+- **Service:** Azure Kubernetes Service (AKS)
 - **Access:** Senior/Lead developers only
-- **Deploy:** Automatic via CI/CD on merge to `main`
+- **Deploy:** Promote a validated version (see DEPLOYMENT_STRATEGY.md)
 
 **Full details:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
 
@@ -136,7 +136,7 @@ gcloud run deploy
 **Software:**
 - Go 1.26.1+ (ARM64 build)
 - Docker Desktop for Mac (Apple Silicon)
-- gcloud CLI
+- Azure CLI (`az`) + kubectl
 - git
 
 ### Local Development Workflow
@@ -166,7 +166,7 @@ gcloud run deploy
 
 4. **Deploy to staging for integration testing**
    ```bash
-   gcloud run deploy
+   make deploy VERSION=X
    ```
 
 5. **Commit to `main`** (focused commits) or open a feature branch + PR
@@ -224,7 +224,7 @@ memQL/
 | **Start Docker stack** | `docker compose -f docker/docker-compose.full.yml up --build` |
 | **Stop Docker services** | `docker compose -f docker/docker-compose.full.yml down` |
 | **Run Go test suite** | `go test ./...` |
-| **Deploy to staging** | `gcloud run deploy` |
+| **Deploy to staging** | `make deploy VERSION=X` |
 | **View container logs** | `docker compose -f docker/docker-compose.full.yml logs -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
 
@@ -315,19 +315,13 @@ func (Automation) autoJoinSI() {
 
 ## Deployment
 
-### Staging Environment
-```bash
-# Deploy latest code to staging (Google Cloud Run)
-gcloud run deploy
+memQL runs on Azure Kubernetes Service (AKS). Deploy to staging with
+`make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`); production
+promotes a validated version.
 
-# View logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=memql-anequim" --limit 50
-```
-
-### Production Environment
-- Automatic deployment via CI/CD when code is merged to `main` branch
-- Manual deployment requires production access permissions
-- Always test in staging before deploying to production
+See [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) for deploy/topology
+(cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`, Tiger Cloud DB,
+the migration + smoke gates, and the staging → prod promotion flow).
 
 ---
 

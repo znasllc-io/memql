@@ -333,3 +333,22 @@ query plan queryPlansForResponsibility {
   filter  payload.input.responsibilityId==args.responsibilityId
   shape   planFull
 }
+
+// queryResponsibilityById
+// =======================
+//
+// Single responsibility lookup by id. Used by the intake dispatcher
+// (issue #637 -- integrations/planner/responsibility_intake.go) to load
+// the row it is processing, and by the management UI for a live single-
+// row refresh. Filters on id only (system reads it under system:planner);
+// per-row authz on the human-facing read paths stays on
+// queryResponsibilitiesForUser, which owner-scopes. Mirrors queryPlanById.
+@enabled
+@description("Single v1:planner:responsibility by id. Used by the intake dispatcher (#637) and the management UI's single-row refresh. Filters on id only -- mirrors queryPlanById; the owner-scoped list reads stay on queryResponsibilitiesForUser.")
+query responsibility queryResponsibilityById {
+  args {
+    responsibilityId  string  @required
+  }
+  filter  id==args.responsibilityId
+  shape   responsibilityFull
+}

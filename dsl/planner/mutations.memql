@@ -266,6 +266,58 @@ mutation plan mutationCreateScopeElevationPlan {
   }
 }
 
+// mutationRequestPlanFeedback
+// ===========================
+//
+// Transition an EXISTING, running Plan to awaitingFeedback /
+// feedback_required when the owning agent (via the requestUserFeedback
+// tool) needs the user to supply missing detail mid-task. The generic
+// counterpart to mutationCreateScopeElevationPlan: that one INSERTS a
+// fresh scope-elevation Plan; this one UPDATEs the Plan the agent is
+// already running inside (so the chat anchor, goal, ownership, phases,
+// and accumulated metrics are all preserved).
+//
+// Partial-update via update() -- only status / feedbackReason /
+// feedbackRequest change; every @required field inherits from the
+// prior row.
+//
+// Triggered by:
+//   - integrations/agents/integration.go:handleRequestUserFeedback,
+//     invoked by the agent's `requestUserFeedback` tool.
+//
+// Resulting state:
+//   status          = "awaitingFeedback"
+//   feedbackReason  = "feedback_required"
+//   feedbackRequest = { question, kind: choice|text|multi,
+//                       options?: [{label, value}], askedAt,
+//                       timeoutAt? }
+//
+// Resume (existing mechanism, unchanged): the user's answer stamps
+// Plan.feedbackResponse {response, respondedBy, respondedAt} and bumps
+// status back to running; the planner integration's
+// awaitingFeedback -> running subscriber re-invokes the owning agent
+// with the persisted TaskState + feedbackResponse in context.
+//
+// The plan.awaitingFeedback canvas-card producer for the
+// feedback_required variant lives in the BFF
+// (memql-bff-copresent/dsl/copresent/) and ships in the follow-up BFF
+// wave; only the scope_elevation_required producer exists today.
+
+@enabled
+@description("Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.")
+mutation plan mutationRequestPlanFeedback {
+  args {
+    planId           string  @required
+    feedbackRequest  object  @required
+  }
+  update plan {
+    id: args.planId
+    status: "awaitingFeedback"
+    feedbackReason: "feedback_required"
+    args.feedbackRequest
+  }
+}
+
 @enabled
 @description("Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.")
 mutation task mutationCreateTask {
@@ -439,6 +491,7 @@ mutation responsibility mutationCreateResponsibility {
     assignedAgentId   string
     assignedRoleSlug  string
     successCriteria   string
+    notifyHow         string
     scopeSpaceId      string
     enabled           bool
   }
@@ -453,6 +506,7 @@ mutation responsibility mutationCreateResponsibility {
     args.assignedAgentId
     args.assignedRoleSlug
     args.successCriteria
+    args.notifyHow
     args.scopeSpaceId
     enabled: coalesce(args.enabled, true)
     status: "draft"
@@ -472,6 +526,7 @@ mutation responsibility mutationUpdateResponsibility {
     assignedAgentId   string
     assignedRoleSlug  string
     successCriteria   string
+    notifyHow         string
     scopeSpaceId      string
     enabled           bool
   }
@@ -486,6 +541,7 @@ mutation responsibility mutationUpdateResponsibility {
     args.assignedAgentId
     args.assignedRoleSlug
     args.successCriteria
+    args.notifyHow
     args.scopeSpaceId
     args.enabled
   }
@@ -535,5 +591,92 @@ mutation responsibility mutationAssignResponsibility {
     args.targetKind
     args.assignedAgentId
     args.assignedRoleSlug
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Responsibility intake (issue #637 -- epic #631 / program #629).
+//
+// The intake dispatcher (integrations/planner/responsibility_intake.go)
+// runs the responsibilityIntake prompt on a freshly-created draft and
+// writes the result through these three mutations. They are called by the
+// system:planner actor, NOT the owner, so -- exactly like
+// mutationUpdatePlanStatus -- they DO NOT re-stamp ownerUserId (the
+// partial update() inherits it from the prior row) and never reference a
+// user-scope field, so they classify as system writes rather than the
+// owned tier. Authoring the row stays owned (mutationCreateResponsibility
+// stamps ownerUserId from the human caller); these intake transitions are
+// engine-internal bookkeeping on a row the human already owns.
+// -----------------------------------------------------------------------------
+
+@enabled
+@description("Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips '' -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.")
+mutation responsibility mutationMarkResponsibilityIntakePending {
+  args {
+    responsibilityId  string  @required
+  }
+  update responsibility {
+    id: args.responsibilityId
+    intakeStatus: "pending"
+  }
+}
+
+@enabled
+@description("Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.")
+mutation responsibility mutationApplyResponsibilityIntake {
+  args {
+    responsibilityId  string  @required
+    trigger           string  @enum("reactive", "standing", "recurring")
+    schedule          string
+    condition         object
+    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    assignedRoleSlug  string
+    successCriteria   string
+    notifyHow         string
+    status            string  @enum("draft", "active", "paused", "archived")
+    intakeStatus      string  @enum("", "pending", "awaitingAnswers", "clear", "applied")
+    intakeRequest     object
+  }
+  update responsibility {
+    id: args.responsibilityId
+    args.trigger
+    args.schedule
+    args.condition
+    args.targetKind
+    args.assignedRoleSlug
+    args.successCriteria
+    args.notifyHow
+    args.status
+    args.intakeStatus
+    args.intakeRequest
+  }
+}
+
+@enabled
+@description("Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.")
+mutation responsibility mutationFoldResponsibilityIntakeAnswers {
+  args {
+    responsibilityId  string  @required
+    intakeResponse    object  @required
+    trigger           string  @enum("reactive", "standing", "recurring")
+    schedule          string
+    condition         object
+    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    assignedRoleSlug  string
+    successCriteria   string
+    notifyHow         string
+  }
+  update responsibility {
+    id: args.responsibilityId
+    args.trigger
+    args.schedule
+    args.condition
+    args.targetKind
+    args.assignedRoleSlug
+    args.successCriteria
+    args.notifyHow
+    args.intakeResponse
+    intakeStatus: "applied"
+    status: "active"
   }
 }
