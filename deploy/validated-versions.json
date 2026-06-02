@@ -1,4 +1,4 @@
 {
-  "_schema": "Promotion ledger (memql#628). A version is appended here ONLY after a green DEEP staging smoke gate (SMOKE_PROFILE=deep). Prod deploys promote ONLY versions listed here, pinned by the recorded per-engine digests. Written by scripts/deploy/aks-deploy.sh record_validated_version; commit after each validated staging deploy. 0.9.6 is intentionally absent: it was rebuilt in-place (mutable tag) and never passed a deep gate.",
+  "_schema": "SUPERSEDED by releases/<version>.yaml (deployment-v2 Phase 4, memql#702) -- the digest-pinned release lockfile + scripts/release/ (assemble + coherence-check + promote) are now the promotion authority. Kept only as a historical record of the pre-v2 ledger. Original intent: a version appended ONLY after a green DEEP staging smoke gate; prod promoted only listed versions by recorded per-engine digests.",
   "validated": []
 }
