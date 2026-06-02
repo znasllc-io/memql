@@ -784,6 +784,45 @@ func QueryAuthSessionsForSubjectBuild(args QueryAuthSessionsForSubjectArgs) stri
 	return b.String()
 }
 
+// QueryAvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
+//
+// Bound concept: avatarPersona.
+type QueryAvatarPersonaByIdArgs struct {
+	AvatarPersonaId string
+}
+
+// QueryAvatarPersonaById calls the engine query queryAvatarPersonaById.
+func (qc *QueryClient) QueryAvatarPersonaById(ctx context.Context, args QueryAvatarPersonaByIdArgs) (*Result, error) {
+	call := QueryAvatarPersonaByIdBuild(args)
+	return qc.executeNamed(ctx, "queryAvatarPersonaById", call)
+}
+
+func QueryAvatarPersonaByIdBuild(args QueryAvatarPersonaByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAvatarPersonaById({")
+	b.WriteString("avatarPersonaId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryAvatarPersonas -- List every active avatar persona in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Rows are minted by `make avatar-mint` and seeded from dsl/agents/avatarPersonas.memql, exactly like the agentRole / skill catalogs.
+//
+// Bound concept: avatarPersona.
+type QueryAvatarPersonasArgs struct {
+}
+
+// QueryAvatarPersonas calls the engine query queryAvatarPersonas.
+func (qc *QueryClient) QueryAvatarPersonas(ctx context.Context, args QueryAvatarPersonasArgs) (*Result, error) {
+	call := QueryAvatarPersonasBuild(args)
+	return qc.executeNamed(ctx, "queryAvatarPersonas", call)
+}
+
+func QueryAvatarPersonasBuild(args QueryAvatarPersonasArgs) string {
+	_ = args
+	return "queryAvatarPersonas({})"
+}
+
 // QueryAwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
 //
 // Bound concept: plan.
