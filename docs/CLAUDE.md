@@ -121,6 +121,15 @@ are the authoritative source.
 
 ---
 
+## Operations (`ops/`)
+
+| File | What |
+|------|------|
+| `deployment-console.md` | Operator guide for the **memQL Deployment Console** -- the admin/owner-only UI (identity portal `/admin/deployments` + cockpit Topology) for driving deployment-v2: read versions/digests + Argo CD + Rollouts + gate, and deploy-staging / promote-to-prod / rollback / rollout promote-abort, with confirm + audit. Complements (does not duplicate) the deployment-v2 runbooks. |
+| `dr-runbook.md` | Disaster-recovery runbook (PITR, restore drills). |
+
+---
+
 ## Planning (`planning/`)
 
 Active planning docs only -- removed when work ships. Currently:
