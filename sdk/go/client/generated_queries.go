@@ -1475,6 +1475,28 @@ func QueryFindEventsBuild(args QueryFindEventsArgs) string {
 	return b.String()
 }
 
+// QueryGeneratedOutputById -- Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef.
+//
+// Bound concept: generatedOutput.
+type QueryGeneratedOutputByIdArgs struct {
+	OutputId string
+}
+
+// QueryGeneratedOutputById calls the engine query queryGeneratedOutputById.
+func (qc *QueryClient) QueryGeneratedOutputById(ctx context.Context, args QueryGeneratedOutputByIdArgs) (*Result, error) {
+	call := QueryGeneratedOutputByIdBuild(args)
+	return qc.executeNamed(ctx, "queryGeneratedOutputById", call)
+}
+
+func QueryGeneratedOutputByIdBuild(args QueryGeneratedOutputByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGeneratedOutputById({")
+	b.WriteString("outputId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryGlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
 //
 // Bound concept: globalVariable.
@@ -1916,6 +1938,111 @@ func (qc *QueryClient) QueryLatestSpaceContextSnapshot(ctx context.Context, args
 func QueryLatestSpaceContextSnapshotBuild(args QueryLatestSpaceContextSnapshotArgs) string {
 	var b strings.Builder
 	b.WriteString("queryLatestSpaceContextSnapshot({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryLibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
+//
+// Bound concept: artifact.
+type QueryLibraryArtifactByIdArgs struct {
+	ArtifactId string
+}
+
+// QueryLibraryArtifactById calls the engine query queryLibraryArtifactById.
+func (qc *QueryClient) QueryLibraryArtifactById(ctx context.Context, args QueryLibraryArtifactByIdArgs) (*Result, error) {
+	call := QueryLibraryArtifactByIdBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryArtifactById", call)
+}
+
+func QueryLibraryArtifactByIdBuild(args QueryLibraryArtifactByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLibraryArtifactById({")
+	b.WriteString("artifactId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ArtifactId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryLibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
+//
+// Bound concept: artifact.
+type QueryLibraryArtifactsArgs struct {
+}
+
+// QueryLibraryArtifacts calls the engine query queryLibraryArtifacts.
+func (qc *QueryClient) QueryLibraryArtifacts(ctx context.Context, args QueryLibraryArtifactsArgs) (*Result, error) {
+	call := QueryLibraryArtifactsBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryArtifacts", call)
+}
+
+func QueryLibraryArtifactsBuild(args QueryLibraryArtifactsArgs) string {
+	_ = args
+	return "queryLibraryArtifacts({})"
+}
+
+// QueryLibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
+//
+// Bound concept: artifact.
+type QueryLibraryArtifactsByKindArgs struct {
+	Kind string
+}
+
+// QueryLibraryArtifactsByKind calls the engine query queryLibraryArtifactsByKind.
+func (qc *QueryClient) QueryLibraryArtifactsByKind(ctx context.Context, args QueryLibraryArtifactsByKindArgs) (*Result, error) {
+	call := QueryLibraryArtifactsByKindBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryArtifactsByKind", call)
+}
+
+func QueryLibraryArtifactsByKindBuild(args QueryLibraryArtifactsByKindArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLibraryArtifactsByKind({")
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryLibraryArtifactsByLens -- List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens.
+//
+// Bound concept: artifact.
+type QueryLibraryArtifactsByLensArgs struct {
+	Lens string
+}
+
+// QueryLibraryArtifactsByLens calls the engine query queryLibraryArtifactsByLens.
+func (qc *QueryClient) QueryLibraryArtifactsByLens(ctx context.Context, args QueryLibraryArtifactsByLensArgs) (*Result, error) {
+	call := QueryLibraryArtifactsByLensBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryArtifactsByLens", call)
+}
+
+func QueryLibraryArtifactsByLensBuild(args QueryLibraryArtifactsByLensArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLibraryArtifactsByLens({")
+	b.WriteString("lens: ")
+	b.WriteString(fmt.Sprintf("%q", args.Lens))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryLibraryArtifactsBySpace -- List the caller's Library rows scoped to one space -- backs the per-space facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.spaceId narrows to the given space.
+//
+// Bound concept: artifact.
+type QueryLibraryArtifactsBySpaceArgs struct {
+	SpaceId string
+}
+
+// QueryLibraryArtifactsBySpace calls the engine query queryLibraryArtifactsBySpace.
+func (qc *QueryClient) QueryLibraryArtifactsBySpace(ctx context.Context, args QueryLibraryArtifactsBySpaceArgs) (*Result, error) {
+	call := QueryLibraryArtifactsBySpaceBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryArtifactsBySpace", call)
+}
+
+func QueryLibraryArtifactsBySpaceBuild(args QueryLibraryArtifactsBySpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLibraryArtifactsBySpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
