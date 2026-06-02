@@ -1,0 +1,54 @@
+// queries.memql
+//
+// Read surface for the app-native calendar (#642). Every query
+// self-scopes on actor.userId -- a caller can NEVER read another
+// user's events. The reactive harness's reminder triggers read
+// queryUpcomingEvents ("remind me the day before X"); the calendar
+// tool's `list` / `find` actions and the frontend read the rest.
+// Exposed as typed SDK methods on `conn.query`.
+
+use calendar.concepts.{ calendarEvent }
+use calendar.shapes.{ calendarEventFull }
+use common.traits.{ traitIsNotDeleted }
+
+@enabled
+@description("Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.")
+query calendarEvent queryCalendarEventById {
+  args {
+    eventId  string  @required
+  }
+  filter  id==args.eventId; payload.ownerUserId==actor.userId; traitIsNotDeleted
+  shape   calendarEventFull
+}
+
+@enabled
+@description("List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned.")
+query calendarEvent queryUpcomingEvents {
+  args {
+    windowStart  datetime  @required @description("Inclusive lower bound on payload.startsAt (typically `now`).")
+    windowEnd    datetime  @required @description("Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).")
+  }
+  filter  payload.ownerUserId==actor.userId; payload.startsAt>=args.windowStart; payload.startsAt<=args.windowEnd; traitIsNotDeleted
+  shape   calendarEventFull
+}
+
+@enabled
+@description("List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.")
+query calendarEvent queryEventsByDay {
+  args {
+    dayStart  datetime  @required @description("Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).")
+    dayEnd    datetime  @required @description("Exclusive end-of-day instant (next midnight) in the user's timezone.")
+  }
+  filter  payload.ownerUserId==actor.userId; payload.startsAt>=args.dayStart; payload.startsAt<args.dayEnd; traitIsNotDeleted
+  shape   calendarEventFull
+}
+
+@enabled
+@description("Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via queryUpcomingEvents and filter conversationally).")
+query calendarEvent queryFindEvents {
+  args {
+    title  string  @required @description("Exact event title to match against payload.title.")
+  }
+  filter  payload.ownerUserId==actor.userId; payload.title==args.title; traitIsNotDeleted
+  shape   calendarEventFull
+}

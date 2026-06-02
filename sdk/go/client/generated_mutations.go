@@ -1616,6 +1616,81 @@ func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) stri
 	return b.String()
 }
 
+// MutationCreateCalendarEvent -- Create a native calendar event owned by the authenticated caller. ownerUserId + createdBy are stamped from actor.userId (caller-scoped write); source defaults to 'native'. The reactive harness's reminder triggers pick the row up via queryUpcomingEvents. Pass `eventId` to control the id (idempotent re-create), else the engine assigns one.
+//
+// Bound concept: calendarEvent.
+type MutationCreateCalendarEventArgs struct {
+	EventId    string
+	Title      string
+	StartsAt   string
+	EndsAt     string
+	AllDay     bool
+	AllDaySet  bool // set true to send allDay; required because zero-value bool is ambiguous
+	Location   string
+	Notes      string
+	Recurrence string
+}
+
+// MutationCreateCalendarEvent calls the engine mutation mutationCreateCalendarEvent.
+func (qc *QueryClient) MutationCreateCalendarEvent(ctx context.Context, args MutationCreateCalendarEventArgs) (*Result, error) {
+	call := MutationCreateCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateCalendarEvent", call)
+}
+
+func MutationCreateCalendarEventBuild(args MutationCreateCalendarEventArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateCalendarEvent({")
+	if args.EventId != "" {
+		b.WriteString("eventId: ")
+		b.WriteString(fmt.Sprintf("%q", args.EventId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("startsAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.StartsAt))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("endsAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.EndsAt))
+	if args.AllDaySet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("allDay: ")
+		b.WriteString(fmt.Sprintf("%v", args.AllDay))
+	}
+	if args.Location != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("location: ")
+		b.WriteString(fmt.Sprintf("%q", args.Location))
+	}
+	if args.Notes != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(fmt.Sprintf("%q", args.Notes))
+	}
+	if args.Recurrence != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recurrence: ")
+		b.WriteString(fmt.Sprintf("%q", args.Recurrence))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateCluster -- Create the cluster record
 //
 // Bound concept: cluster.
@@ -5285,6 +5360,28 @@ func MutationDeleteAgentBuild(args MutationDeleteAgentArgs) string {
 	b.WriteString("mutationDeleteAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationDeleteCalendarEvent -- Soft-delete a calendarEvent by stamping deleted=true. The time-series row survives for history + so a future external-sync reconciler can propagate the deletion upstream; queries hide it via traitIsNotDeleted. The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so a caller can only delete their own events.
+//
+// Bound concept: calendarEvent.
+type MutationDeleteCalendarEventArgs struct {
+	EventId string
+}
+
+// MutationDeleteCalendarEvent calls the engine mutation mutationDeleteCalendarEvent.
+func (qc *QueryClient) MutationDeleteCalendarEvent(ctx context.Context, args MutationDeleteCalendarEventArgs) (*Result, error) {
+	call := MutationDeleteCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "mutationDeleteCalendarEvent", call)
+}
+
+func MutationDeleteCalendarEventBuild(args MutationDeleteCalendarEventArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationDeleteCalendarEvent({")
+	b.WriteString("eventId: ")
+	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9085,6 +9182,34 @@ func MutationUpdateAgentAuthorizationBuild(args MutationUpdateAgentAuthorization
 	b.WriteString("mutationUpdateAgentAuthorization({")
 	b.WriteString("authId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateCalendarEvent -- Partial update of a calendarEvent. Only the fields passed in `payload` change; everything else inherits from the prior row. Backs editing an event (reschedule, rename, change location / notes / recurrence). The calendar tool reads the row via the owner-scoped queryCalendarEventById before calling this, so cross-user edits are impossible.
+//
+// Bound concept: calendarEvent.
+type MutationUpdateCalendarEventArgs struct {
+	EventId string
+	Payload map[string]any
+}
+
+// MutationUpdateCalendarEvent calls the engine mutation mutationUpdateCalendarEvent.
+func (qc *QueryClient) MutationUpdateCalendarEvent(ctx context.Context, args MutationUpdateCalendarEventArgs) (*Result, error) {
+	call := MutationUpdateCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateCalendarEvent", call)
+}
+
+func MutationUpdateCalendarEventBuild(args MutationUpdateCalendarEventArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateCalendarEvent({")
+	b.WriteString("eventId: ")
+	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}

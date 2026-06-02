@@ -26,7 +26,7 @@ func TestUnifiedTreeLoadsClean(t *testing.T) {
 // top-level domain folder is present in the embed.
 func TestUnifiedTreeCoversAllDomains(t *testing.T) {
 	want := []string{
-		"agents", "cluster", "cognition", "common", "curriculum",
+		"agents", "calendar", "cluster", "cognition", "common", "curriculum",
 		"data", "guide", "harness", "identity", "knowledge", "memql",
 		"notes", "planner", "platform", "policies", "providers", "router",
 		"todos", "worker",

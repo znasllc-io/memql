@@ -1,0 +1,32 @@
+// concepts.memql
+//
+// App-native calendar -- the first-party source of truth for a user's
+// events (#642, Epic #633 / Program #629). Distinct from external
+// Google Calendar: native events are canonical here; an external sync
+// (Google etc.) lands LATER through the existing knowledge:liveSource /
+// liveConnector mechanism and writes rows carrying source="externalSync"
+// + externalRef. This domain owns only the native side.
+//
+// Per-user authz: every calendarEvent carries ownerUserId; queries
+// self-scope on actor.userId, mutations stamp ownerUserId from
+// actor.userId. A caller can never read or write another user's events.
+
+@version("1.0.0")
+@namespace("calendar")
+@description("A single calendar event owned by one user. The app-native source of truth for that user's schedule (#642): the reactive harness's reminder triggers read queryUpcomingEvents over these rows ('remind me the day before X'), and the calendar tool/skill lets agents create + list + edit them. source discriminates native (first-party, the only writer in v1) from externalSync (a future Google/CalDAV sync via knowledge:liveConnector, which stamps externalRef back to the upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 -- expansion into concrete occurrences is a downstream concern, not stored here.")
+@displayCard(primary="title", secondary="startsAt", tertiary="location", status="source")
+concept calendarEvent {
+  ownerUserId  string  @required @description("v1:identity:user.id who owns this event. Stamped from actor.userId at create time. Every read self-scopes on this field; it is the load-bearing per-row authz guard.")
+  title        string  @required @description("Human-readable event title, e.g. 'Karate class' or 'Dentist'. Shown as the primary line on the event card and in agent-facing listings.")
+  startsAt     datetime @required @description("Event start instant (RFC3339). For allDay events this is midnight at the start of the day in the user's timezone. queryUpcomingEvents + queryEventsByDay range over this field.")
+  endsAt       datetime @description("Event end instant (RFC3339). Optional: a point-in-time reminder ('Call mom') may omit it. For allDay events this is the end-of-day (or the day after's midnight) boundary.")
+  allDay       bool    @default("false") @description("True = a date-scoped event with no meaningful clock time (birthdays, holidays, 'out of office'). The frontend renders these in the all-day band; reminder logic uses the date rather than the instant.")
+  location     string  @description("Free-form location text ('Dojo on 5th', 'Zoom', a street address). Not geocoded in v1.")
+  notes        string  @description("Free-form notes / agenda / description body for the event.")
+  recurrence   string  @description("Optional RFC-5545 RRULE recurrence rule carried verbatim (e.g. 'FREQ=WEEKLY;BYDAY=TU,TH'). Empty = a one-off event. v1 stores the rule but does not expand occurrences server-side; the reminder + listing surfaces treat the row as its next/seed instance.")
+  source       enum("native", "externalSync") @required @default("native") @description("Provenance discriminator. native = created in-app (the only writer in v1; the calendar tool + frontend stamp this). externalSync = mirrored from an external calendar (Google / CalDAV) via the knowledge:liveConnector sync path shipping later; those rows carry externalRef and are owned by the sync, not hand-edited.")
+  externalRef  string  @description("When source=externalSync: the upstream event id (e.g. the Google Calendar event id) this row mirrors. Used by the future sync reconciler for idempotent upsert + deletion-propagation. Empty for native events.")
+  deleted      bool    @default("false") @description("Soft-delete flag. The calendar delete action stamps this true rather than hard-deleting so the time-series history survives and a future external-sync reconciler can propagate the deletion upstream. Queries filter it out via traitIsNotDeleted.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}
