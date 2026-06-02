@@ -88,9 +88,15 @@ func resolveAnamPlan(ac AvatarConfig, persona PersonaInput) (*AvatarPlan, error)
 		DisplayName: name,
 	}
 
-	// 1. Per-agent stamped persona id (treated as an Anam personaId).
+	// 1. Per-agent stamped avatar id. The persona catalog (make avatar-mint)
+	// creates avatars via Anam's POST /v1/avatars and stores the returned
+	// AVATAR (face-model) id -- NOT a persona id. So it rides the bare-avatarId
+	// path: the ephemeral session-token references it directly. Looking it up as
+	// GET /v1/personas/{id} 404s ("Persona not found") because it is an avatar
+	// id. (A real Anam personaId would set base.PersonaID instead, but the
+	// catalog does not mint those.)
 	if id := strings.TrimSpace(persona.AvatarPersonaID); id != "" {
-		base.PersonaID = id
+		base.AvatarID = id
 		return &base, nil
 	}
 	// 2. Platform default: personaId path preferred.
