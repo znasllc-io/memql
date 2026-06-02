@@ -87,6 +87,13 @@ function step3_wipe_and_restart() {
     echo "[3/7] Refreshing ngrok tunnel for LiveKit..."
     lib_refresh_ngrok || true
 
+    # Trim the BuildKit cache + dangling images to a cap BEFORE the
+    # build so an unbounded cache (we have seen it pass 1TB) can't fill
+    # the disk and kill `up` with "no space left on device". Keeps
+    # recent cache for fast incremental rebuilds. Best-effort.
+    echo "[3/7] Pruning stale Docker build cache..."
+    lib_prune_docker_build_cache
+
     echo "[3/7] Rebuilding + starting full identity stack..."
     $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON up -d --build --remove-orphans
 }
