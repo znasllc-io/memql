@@ -1,0 +1,47 @@
+# Release lockfile (deployment-v2 Phase 4, #702). Assembled by
+# scripts/release/assemble-lockfile.sh from per-repo CI digests.
+#
+# 0.9.12 (Stage C, #712) SUPERSEDES 0.9.11. It carries two fixes together:
+#   - #751: token subcommands autoload the genesis envelope (the deploy-gate
+#     service_account JWT mint was broken on the envelope-based staging).
+#   - #757: Go toolchain pinned to 1.26.4 (clears the go1.26.3 stdlib vulns
+#     GO-2026-5039 / GO-2026-5037 that failed govulncheck repo-wide).
+# The 6 engine images + the memql-bff-copresent carrier were rebuilt from main on
+# golang:1.26.4. The `copresent` SPA is CARRIED FORWARD from 0.9.9 (a JS app --
+# unaffected by the Go stdlib vulns; bundle + browser<->BFF wire contract
+# unchanged). A fresh SPA re-cut still needs the canonical staging VITE_* args.
+version: "0.9.12"
+# validatedAt/gate are stamped on assembly; the deep staging validation is the
+# Stage C zero-dropped-stream cutover proof + smoke (not yet run at assembly).
+validatedAt: "2026-06-02T23:34:08Z"
+gate: "assembled-pending-staging-validation"
+engineVersion: "0.9.12"
+components:
+  memql-identity:
+    repo: znasllc-io/memql
+    digest: sha256:0b1dd335c8c5d99c93ff7d20ef8f95caa9719ebd38eb137fff83334785e02445
+  memql-cognition:
+    repo: znasllc-io/memql
+    digest: sha256:b4cd25d03a5a2855ba68f224a55fe4759f1f7d0559b4ce69589e6b44238950d0
+  memql-voice:
+    repo: znasllc-io/memql
+    digest: sha256:b0dad353e6557c02e79aecb9eed7e0b41a6915d60706fecdfe12aae656f66ed8
+  memql-agent:
+    repo: znasllc-io/memql
+    digest: sha256:2dd3c6d44ddb49b7d46df08b540aa2250ea38fdcb1df1152594273227068e856
+  memql-planner:
+    repo: znasllc-io/memql
+    digest: sha256:f5e8c1dea1405abd9b7236c4a4cfcbb03fb863ab0fda3a6e498f66180a91fc84
+  memql-workbench:
+    repo: znasllc-io/memql
+    digest: sha256:16e6308bf9aec548ff66cd7b0ff8b8a19d9f737d1ab151bd7e36f2af1d6ff4d1
+  memql-bff-copresent:
+    repo: visionarys-io/memql-bff-copresent
+    digest: sha256:bee3010c6908eec574cc3b897154eaf99d1307b9c3818a996ff5f9614412ca4c
+    builtAgainstEngine: "0.9.12"
+  copresent:
+    repo: visionarys-io/copresent
+    # CARRIED FORWARD from 0.9.9 (JS app; unaffected by #751/#757; bundle + wire
+    # contract unchanged). Re-cut with the canonical VITE_* args when provided.
+    digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
+    builtAgainstEngine: "0.9.12"
