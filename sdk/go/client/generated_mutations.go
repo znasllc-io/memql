@@ -3459,6 +3459,107 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 	return b.String()
 }
 
+// MutationCreateResponsibility -- Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.
+//
+// Bound concept: responsibility.
+type MutationCreateResponsibilityArgs struct {
+	ResponsibilityId string
+	Statement        string
+	// Enum: reactive | standing | recurring
+	Trigger   string
+	Schedule  string
+	Condition map[string]any
+	// Enum: assistant | specialist | unassigned
+	TargetKind       string
+	AssignedAgentId  string
+	AssignedRoleSlug string
+	SuccessCriteria  string
+	ScopeSpaceId     string
+	Enabled          bool
+	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
+}
+
+// MutationCreateResponsibility calls the engine mutation mutationCreateResponsibility.
+func (qc *QueryClient) MutationCreateResponsibility(ctx context.Context, args MutationCreateResponsibilityArgs) (*Result, error) {
+	call := MutationCreateResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateResponsibility", call)
+}
+
+func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateResponsibility({")
+	if args.ResponsibilityId != "" {
+		b.WriteString("responsibilityId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("statement: ")
+	b.WriteString(fmt.Sprintf("%q", args.Statement))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("trigger: ")
+	b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	if args.Schedule != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("schedule: ")
+		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("condition: ")
+	b.WriteString(renderMemQLValue(args.Condition))
+	if args.TargetKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	}
+	if args.AssignedAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+	}
+	if args.AssignedRoleSlug != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedRoleSlug: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+	}
+	if args.SuccessCriteria != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("successCriteria: ")
+		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.ScopeSpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scopeSpaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
+	}
+	if args.EnabledSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("enabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateScene -- Create one Scene under a Guide. Called once per Scene by the generator (copresent#194) after mutationCreateGuide. `order` is the 0-based position; `narrationIntent` is required; `canvasActions` / `avatarDirectives` are JSON strings (see the scene concept). interruptible / allowsQuestions default true (an open Scene).
 //
 // Bound concept: scene.
@@ -6515,6 +6616,34 @@ func MutationRecordMisrouteFeedbackBuild(args MutationRecordMisrouteFeedbackArgs
 	return b.String()
 }
 
+// MutationRecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
+//
+// Bound concept: responsibility.
+type MutationRecordResponsibilityEvaluationArgs struct {
+	ResponsibilityId string
+	LastResult       string
+}
+
+// MutationRecordResponsibilityEvaluation calls the engine mutation mutationRecordResponsibilityEvaluation.
+func (qc *QueryClient) MutationRecordResponsibilityEvaluation(ctx context.Context, args MutationRecordResponsibilityEvaluationArgs) (*Result, error) {
+	call := MutationRecordResponsibilityEvaluationBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordResponsibilityEvaluation", call)
+}
+
+func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibilityEvaluationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordResponsibilityEvaluation({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastResult: ")
+	b.WriteString(fmt.Sprintf("%q", args.LastResult))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordRouterCall -- Record a single SI call through the memQL SI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
 // Bound concept: call.
@@ -8346,6 +8475,35 @@ func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
 	return b.String()
 }
 
+// MutationSetResponsibilityStatus -- Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
+//
+// Bound concept: responsibility.
+type MutationSetResponsibilityStatusArgs struct {
+	ResponsibilityId string
+	// Enum: draft | active | paused | archived
+	Status string
+}
+
+// MutationSetResponsibilityStatus calls the engine mutation mutationSetResponsibilityStatus.
+func (qc *QueryClient) MutationSetResponsibilityStatus(ctx context.Context, args MutationSetResponsibilityStatusArgs) (*Result, error) {
+	call := MutationSetResponsibilityStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationSetResponsibilityStatus", call)
+}
+
+func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetResponsibilityStatus({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationSetUserActiveSpace -- Set or clear the caller's activeSpaceId. Empty spaceId clears the pointer.
 //
 // Bound concept: user.
@@ -9458,6 +9616,109 @@ func MutationUpdateRecordBuild(args MutationUpdateRecordArgs) string {
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateResponsibility -- Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.
+//
+// Bound concept: responsibility.
+type MutationUpdateResponsibilityArgs struct {
+	ResponsibilityId string
+	Statement        string
+	// Enum: reactive | standing | recurring
+	Trigger   string
+	Schedule  string
+	Condition map[string]any
+	// Enum: assistant | specialist | unassigned
+	TargetKind       string
+	AssignedAgentId  string
+	AssignedRoleSlug string
+	SuccessCriteria  string
+	ScopeSpaceId     string
+	Enabled          bool
+	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
+}
+
+// MutationUpdateResponsibility calls the engine mutation mutationUpdateResponsibility.
+func (qc *QueryClient) MutationUpdateResponsibility(ctx context.Context, args MutationUpdateResponsibilityArgs) (*Result, error) {
+	call := MutationUpdateResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateResponsibility", call)
+}
+
+func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateResponsibility({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if args.Statement != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("statement: ")
+		b.WriteString(fmt.Sprintf("%q", args.Statement))
+	}
+	if args.Trigger != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("trigger: ")
+		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	}
+	if args.Schedule != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("schedule: ")
+		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("condition: ")
+	b.WriteString(renderMemQLValue(args.Condition))
+	if args.TargetKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	}
+	if args.AssignedAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+	}
+	if args.AssignedRoleSlug != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedRoleSlug: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+	}
+	if args.SuccessCriteria != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("successCriteria: ")
+		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.ScopeSpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scopeSpaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
+	}
+	if args.EnabledSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("enabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	}
 	b.WriteString("})")
 	return b.String()

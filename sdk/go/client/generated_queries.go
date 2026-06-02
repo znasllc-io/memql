@@ -187,6 +187,23 @@ func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) st
 	return b.String()
 }
 
+// QueryActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.
+//
+// Bound concept: responsibility.
+type QueryActiveResponsibilitiesArgs struct {
+}
+
+// QueryActiveResponsibilities calls the engine query queryActiveResponsibilities.
+func (qc *QueryClient) QueryActiveResponsibilities(ctx context.Context, args QueryActiveResponsibilitiesArgs) (*Result, error) {
+	call := QueryActiveResponsibilitiesBuild(args)
+	return qc.executeNamed(ctx, "queryActiveResponsibilities", call)
+}
+
+func QueryActiveResponsibilitiesBuild(args QueryActiveResponsibilitiesArgs) string {
+	_ = args
+	return "queryActiveResponsibilities({})"
+}
+
 // QueryActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: skill.
@@ -1023,6 +1040,29 @@ func (qc *QueryClient) QueryDueRefreshDomains(ctx context.Context, args QueryDue
 func QueryDueRefreshDomainsBuild(args QueryDueRefreshDomainsArgs) string {
 	_ = args
 	return "queryDueRefreshDomains({})"
+}
+
+// QueryDueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueTrainAgentRetryPlans.
+//
+// Bound concept: responsibility.
+type QueryDueResponsibilitiesArgs struct {
+	// Enum: reactive | recurring
+	Trigger string
+}
+
+// QueryDueResponsibilities calls the engine query queryDueResponsibilities.
+func (qc *QueryClient) QueryDueResponsibilities(ctx context.Context, args QueryDueResponsibilitiesArgs) (*Result, error) {
+	call := QueryDueResponsibilitiesBuild(args)
+	return qc.executeNamed(ctx, "queryDueResponsibilities", call)
+}
+
+func QueryDueResponsibilitiesBuild(args QueryDueResponsibilitiesArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDueResponsibilities({")
+	b.WriteString("trigger: ")
+	b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	b.WriteString("})")
+	return b.String()
 }
 
 // QueryDueTrainAgentRetryPlans -- All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.
@@ -2205,6 +2245,23 @@ func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
 	}
 	b.WriteString("})")
 	return b.String()
+}
+
+// QueryResponsibilitiesForUser -- Every responsibility owned by the caller (all statuses + triggers). Backs the management surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are impossible.
+//
+// Bound concept: responsibility.
+type QueryResponsibilitiesForUserArgs struct {
+}
+
+// QueryResponsibilitiesForUser calls the engine query queryResponsibilitiesForUser.
+func (qc *QueryClient) QueryResponsibilitiesForUser(ctx context.Context, args QueryResponsibilitiesForUserArgs) (*Result, error) {
+	call := QueryResponsibilitiesForUserBuild(args)
+	return qc.executeNamed(ctx, "queryResponsibilitiesForUser", call)
+}
+
+func QueryResponsibilitiesForUserBuild(args QueryResponsibilitiesForUserArgs) string {
+	_ = args
+	return "queryResponsibilitiesForUser({})"
 }
 
 // QueryRouterBudgets -- Returns all active budget rows for the current partition.

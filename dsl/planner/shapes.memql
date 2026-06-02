@@ -7,7 +7,7 @@
 // and its data shapes have to be uniformly available on every binary
 // that loads concepts, not just on the copresent BFF.
 
-use planner.concepts.{ plan, task, taskState }
+use planner.concepts.{ plan, task, taskState, responsibility }
 
 @row
 @description("Comprehensive plan projection for the Tasks page row, the plan.created / plan.completed canvas cards, and the planner's own routing decisions. Carries every Plan field including lifecycle timestamps, the per-kind input/output blobs, and the token + estimate accounting the Tasks page progress strips read.")
@@ -78,4 +78,26 @@ shape taskState taskStateFull {
   payload.toolCallHistory
   payload.pendingSubPlanIds
   row.createdAt
+}
+
+@row
+@description("Comprehensive responsibility projection (epic #631). Carries every field across the reactive / standing / recurring archetypes -- trigger discriminator, schedule (recurring), condition (reactive), target binding (assistant / specialist / unassigned + assignedAgentId / assignedRoleSlug), scope pin, lifecycle status + enabled flag, and the lastEvaluatedAt / lastResult run bookkeeping the reactive-loop epic #632 consumes.")
+shape responsibility responsibilityFull {
+  row.id
+  payload.ownerUserId
+  payload.statement
+  payload.trigger
+  payload.schedule
+  payload.condition
+  payload.targetKind
+  payload.assignedAgentId
+  payload.assignedRoleSlug
+  payload.successCriteria
+  payload.scopeSpaceId
+  payload.enabled
+  payload.status
+  payload.lastEvaluatedAt
+  payload.lastResult
+  row.createdAt
+  row.createdBy
 }
