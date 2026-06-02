@@ -16,5 +16,7 @@ namespace: external-secrets
 
 resources:
   - namespace.yaml
-  # Upstream External Secrets Operator v0.10.4 (pinned), CRDs included.
-  - https://github.com/external-secrets/external-secrets/releases/download/v0.10.4/external-secrets.yaml
+  # Upstream External Secrets Operator v2.5.0 (pinned), CRDs included.
+  # (v0.10.4 was incompatible with Kubernetes 1.34 -- its cert-controller never
+  # populated the webhook cert, crashlooping the webhook; v2.x supports 1.34.)
+  - https://github.com/external-secrets/external-secrets/releases/download/v2.5.0/external-secrets.yaml
