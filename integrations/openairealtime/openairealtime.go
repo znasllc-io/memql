@@ -122,9 +122,9 @@ func (i *Integration) handleCreateClientSecret(ctx context.Context, args map[str
 		voice = defaultVoice
 	}
 
-	secret, err := i.mint(ctx, apiKey, model)
+	secret, err := i.mint(ctx, apiKey, model, voice)
 	if err != nil {
-		i.logger.Error("openairealtime.createClientSecret: mint failed", "model", model, "error", err)
+		i.logger.Error("openairealtime.createClientSecret: mint failed", "model", model, "voice", voice, "error", err)
 		return nil, fmt.Errorf("openairealtime.createClientSecret: %w", err)
 	}
 	i.logger.Info("openairealtime.createClientSecret: minted ephemeral key", "model", model, "valueLen", len(secret.value))
@@ -155,12 +155,27 @@ type clientSecret struct {
 // returns the short-lived secret. GA returns the secret at top-level
 // `value`; the pre-GA /realtime/sessions endpoint nested it under
 // `client_secret.value`, so we tolerate both.
-func (i *Integration) mint(ctx context.Context, apiKey, model string) (*clientSecret, error) {
+//
+// The requested voice is baked into the ephemeral session here (GA shape:
+// session.audio.output.voice) so the minted session actually speaks in that
+// voice -- the realtime voice can only be set before the first audio output,
+// so a caller that wants a different voice (e.g. CoPresent's intake switching
+// to a male/female voice on the identity answer, copresent#274) re-mints with
+// the new voice and reconnects, rather than trying to mutate a live session.
+func (i *Integration) mint(ctx context.Context, apiKey, model, voice string) (*clientSecret, error) {
+	session := map[string]any{
+		"type":  "realtime",
+		"model": model,
+	}
+	if voice != "" {
+		session["audio"] = map[string]any{
+			"output": map[string]any{
+				"voice": voice,
+			},
+		}
+	}
 	body := map[string]any{
-		"session": map[string]any{
-			"type":  "realtime",
-			"model": model,
-		},
+		"session": session,
 	}
 	resp, err := i.postBearer(ctx, clientSecretPath, apiKey, body)
 	if err != nil {
