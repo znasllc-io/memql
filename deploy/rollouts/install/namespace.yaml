@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-rollouts
+  labels:
+    app.kubernetes.io/part-of: argo-rollouts
+    # deployment-v2 Phase 3 (#701): progressive-delivery controller.

@@ -1,0 +1,76 @@
+# BFF blue/green Rollout (deployment-v2 Phase 3, znasllc-io/memql#701).
+#
+# Converts the single `bff` Deployment to an Argo Rollouts blue/green Rollout,
+# realizing the #616/#675 design as a controller-driven, analysis-gated cutover
+# (instead of the manual bff-bluegreen-cutover.sh script). Behavior preserved:
+# NEW logins land on the new (preview->active) color; the previous color keeps
+# serving its open MemqlService.Stream sessions until they drain (#615), then
+# scales down.
+#
+# WHY workloadRef (not a duplicated pod template): the Rollout ADOPTS the
+# existing `bff` Deployment's pod template (deploy/k8s/base/bff.yaml) by
+# reference, so there is exactly one place the bff pod spec + image digest live
+# (the digest-pinned overlay, Phase 1 #699). At cutover the controller scales
+# the referenced Deployment to 0 and owns the ReplicaSets.
+#
+# GATE: prePromotionAnalysis runs the in-cluster deploy-gate (analysis/
+# deploy-gate.yaml) against the PREVIEW service BEFORE traffic flips. A failed
+# analysis aborts the promotion and keeps the active (stable) color serving --
+# automatic rollback, no `rollout undo`.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: bff
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: bff
+    app.kubernetes.io/part-of: memql
+    memql/node-type: bff
+spec:
+  # Adopt the committed Deployment's pod template (image digest comes from the
+  # Phase 1 overlay). scaleDown=onsuccess keeps the old Deployment definition
+  # around but scaled to 0 once the Rollout owns traffic.
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bff
+    scaleDown: onsuccess
+  replicas: 2
+  strategy:
+    blueGreen:
+      # NEW logins land here once promoted; the mesh-internal `bff` Service
+      # (NodeService :50058) stays color-agnostic and is NOT managed here.
+      activeService: bff-active
+      previewService: bff-preview
+      # Hold the new color as preview, gate it, THEN flip. Manual promote keeps
+      # the operator in the loop for the first cutovers; set to true to make a
+      # green analysis auto-promote.
+      autoPromotionEnabled: false
+      prePromotionAnalysis:
+        templates:
+          - templateName: deploy-gate
+        args:
+          - name: service
+            value: bff-preview
+      # After the flip, keep the old color up to drain its open streams (#615 +
+      # the #616 activeStreams primitive) before the controller scales it down.
+      scaleDownDelaySeconds: 3600
+---
+# Preview Service the Rollout points new (pre-promotion) pods at, so the gate can
+# exercise the new color in-cluster before any user traffic flips to it. The
+# Rollout controller manages the rollouts-pod-template-hash selector.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff-preview
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    memql/node-type: bff
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bff
+  ports:
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }

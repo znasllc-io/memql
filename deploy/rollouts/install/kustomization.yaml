@@ -1,0 +1,20 @@
+# Argo Rollouts controller install (deployment-v2 Phase 3, znasllc-io/memql#701).
+#
+# Pins the upstream Argo Rollouts stable manifests by tag (reproducible, no
+# "latest"). Installs the controller + the Rollout/AnalysisTemplate/
+# AnalysisRun/Experiment CRDs into the `argo-rollouts` namespace. Additive: it
+# does NOT touch the running Deployments. Converting a Deployment to a Rollout
+# is a separate, supervised step (see ../README.md).
+#
+# Bootstrap (or let Argo CD manage it via an app-of-apps entry):
+#   kubectl apply -k deploy/rollouts/install
+#   kubectl -n argo-rollouts rollout status deploy/argo-rollouts
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argo-rollouts
+
+resources:
+  - namespace.yaml
+  # Upstream Argo Rollouts v1.7.2 stable install (pinned).
+  - https://github.com/argoproj/argo-rollouts/releases/download/v1.7.2/install.yaml
