@@ -94,6 +94,17 @@ const (
 	// to VoiceAgent* payload types -- a leaked voice-agent token
 	// can't drive other RPCs.
 	ClassVoiceAgent = "voice_agent"
+	// ClassServiceAccount marks a machine identity for automation /
+	// synthetic checks (#691, deployment-v2 Phase 3). MemqlService.Stream's
+	// service-account interceptor admits this class via the existing JWKS
+	// per-node verifier (NO DB lookup -- unlike a PAT, which only verifies on
+	// the identity node) and pins the call to a read/query surface
+	// (ExecuteQuery / AgentGenerateTurn / Subscribe + control frames). It can
+	// NOT mint credentials, manage identities, create delegations/worker-
+	// tokens, or send invites. This is the credential the in-cluster deploy
+	// gate (AnalysisTemplate) uses for its authenticated query; PATs stay the
+	// human-CLI credential.
+	ClassServiceAccount = "service_account"
 )
 
 // JWTIssuer mints access tokens. Wraps a KeyManager for signing-key
@@ -427,6 +438,76 @@ func (j *JWTIssuer) IssueVoiceAgentAccessToken(in VoiceAgentIssueInput, now time
 	signed, err := tok.SignedString(mat.Private)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("identity: sign voice-agent access token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// ServiceAccountIssueInput is the per-call payload for
+// IssueServiceAccountAccessToken (#691, deployment-v2 Phase 3). The token
+// authenticates a machine identity (the in-cluster deploy gate / automation)
+// on MemqlService.Stream via the existing JWKS verifier; the service-account
+// interceptor pins the surface to a read/query message set.
+type ServiceAccountIssueInput struct {
+	// Subject is the JWT `sub` -- a stable machine-principal id (e.g.
+	// "system:deploy-gate"). Unlike the voice-agent path this is NOT required
+	// to be a persisted v1:identity:identity row: the verify path is DB-free
+	// (JWKS only), and the token is short-lived + rotatable, so revoke = expiry
+	// / signing-key rotation. Audit attributes traffic by this subject + label.
+	Subject string
+	// Label is an operator-chosen instance label (e.g. "deploy-gate-staging")
+	// stamped onto the NodeId claim slot for audit attribution (mirrors the
+	// voice-agent InstanceId convention).
+	Label string
+	// TTLOverride is the per-call lifetime. Zero falls back to
+	// DefaultServiceAccountTokenTTLSeconds (short by design).
+	TTLOverride time.Duration
+}
+
+// IssueServiceAccountAccessToken mints a class="service_account" JWT for a
+// machine principal (#691). The per-node JWKS verifier on the BFF/mesh admits
+// it with no DB lookup; the service-account interceptor pins it to the
+// read/query surface. Short-lived + rotatable; there is no refresh path.
+func (j *JWTIssuer) IssueServiceAccountAccessToken(in ServiceAccountIssueInput, now time.Time) (string, time.Time, error) {
+	if strings.TrimSpace(in.Subject) == "" {
+		return "", time.Time{}, errors.New("identity: ServiceAccountIssueInput.Subject required")
+	}
+	if strings.TrimSpace(in.Label) == "" {
+		return "", time.Time{}, errors.New("identity: ServiceAccountIssueInput.Label required")
+	}
+	mat := j.keys.Current()
+	if mat == nil {
+		return "", time.Time{}, errors.New("identity: no current signing key (was KeyManager.Load() called?)")
+	}
+	ttl := in.TTLOverride
+	if ttl <= 0 {
+		ttl = time.Duration(DefaultServiceAccountTokenTTLSeconds) * time.Second
+	}
+	expiresAt := now.Add(ttl)
+	jti, err := newJTI()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: generate jti: %w", err)
+	}
+	// Reuse the NodeId claim slot for the label (same convention the
+	// voice-agent path uses); the verifier reads it without interpretation and
+	// the interceptor uses it for audit logging.
+	claims := AccessTokenClaims{
+		Class:  ClassServiceAccount,
+		NodeId: in.Label,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    j.issuer,
+			Subject:   in.Subject,
+			Audience:  jwt.ClaimStrings{j.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        jti,
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = mat.KID
+	signed, err := tok.SignedString(mat.Private)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("identity: sign service-account access token: %w", err)
 	}
 	return signed, expiresAt, nil
 }

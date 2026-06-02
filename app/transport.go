@@ -88,12 +88,19 @@ func (a *App) transportBase() {
 		// to VoiceAgent* payload types (#109). See
 		// docs/auth/voice-agent-jwt.md.
 		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
+		// Service-account: class="service_account" identity-issued JWT pinned
+		// to the read/query surface (#691, deployment-v2 Phase 3). Verified via
+		// the same JWKS verifier (no DB lookup), so it works on the BFF/mesh
+		// where a PAT does not. This is what lets the in-cluster deploy gate
+		// run its authenticated query. See component/grpc/
+		// service_account_stream_interceptor.go.
+		serviceAccountChecked := memqlgrpc.NewServiceAccountStreamInterceptor(voiceAgentChecked, a.identityVerifier, a.Logger)
 		// Panic recovery wraps the entire chain. A panic anywhere
 		// downstream is caught here, logged with stack + error id,
 		// and surfaced to the client as codes.Internal with the
 		// safe message "internal server error [ERR-...]" -- never
 		// the raw panic value.
-		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(voiceAgentChecked, a.Logger)
+		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(serviceAccountChecked, a.Logger)
 		a.grpcServer.SetStreamInterceptor(recovered)
 		// Hand the verifier to the gRPC server so the in-stream
 		// rotation handler (RotateAuthMsg) can re-verify a refreshed

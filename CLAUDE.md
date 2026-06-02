@@ -838,6 +838,11 @@ See [docs/auth/](docs/auth/):
   registration modes and magic-link flow.
 - [identity-service.md](docs/auth/identity-service.md) --
   operator-side env vars + key management.
+- [service-account-jwt.md](docs/auth/service-account-jwt.md) --
+  the `class="service_account"` machine identity (#691): the deploy
+  gate / automation credential that verifies on the BFF/mesh via
+  JWKS (where a PAT can't), surface-pinned to the read/query path.
+  Mint -> verify -> gate-usage, with diagrams.
 
 ---
 
