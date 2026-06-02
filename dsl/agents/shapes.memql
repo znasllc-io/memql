@@ -5,7 +5,7 @@
 // agentAuthorizationFull projection for the standing-grants surface,
 // and the dedupe-step shapes the planner uses.
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, skill, skillChangeEvent }
+use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona, skill, skillChangeEvent }
 
 @row
 @description("AgentAuthorization projection. Backs the agent settings 'Standing authorizations' table where the user reviews and revokes grants, plus the agent's prompt-context resolver that needs to read the current standing computer_use scope.")
@@ -150,5 +150,19 @@ shape skillChangeEvent skillChangeEventFull {
   payload.actorAgentId
   payload.actorUserId
   payload.planId
+  row.createdAt
+}
+
+@row
+@description("Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker (copresent#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor + vendor-issued personaId the voice-agent resolves at session start.")
+shape avatarPersona avatarPersonaFull {
+  row.id
+  payload.vendor
+  payload.personaId
+  payload.name
+  payload.gender
+  payload.imageRef
+  payload.previewRef
+  payload.active
   row.createdAt
 }

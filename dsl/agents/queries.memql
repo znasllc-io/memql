@@ -7,7 +7,7 @@
 // "wire it up to call queryAllAgents" -- not "re-implement the agent
 // list query."
 
-use agents.concepts.{ agent, agentAuthorization, agentRole, skill, skillChangeEvent }
+use agents.concepts.{ agent, agentAuthorization, agentRole, avatarPersona, skill, skillChangeEvent }
 
 @enabled
 @description("Returns available AI agent templates. Optional filter: groupId")
@@ -198,4 +198,21 @@ query skillChangeEvent querySkillChangeEventsForAgent {
   }
   filter  payload.targetAgentId==args.targetAgentId
   shape   skillChangeEventFull
+}
+
+@enabled
+@description("List every active avatar persona in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Rows are minted by `make avatar-mint` and seeded from dsl/agents/avatarPersonas.memql, exactly like the agentRole / skill catalogs.")
+query avatarPersona queryAvatarPersonas {
+  filter  traitIsActiveRecord
+  shape   avatarPersonaFull
+}
+
+@enabled
+@description("Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.")
+query avatarPersona queryAvatarPersonaById {
+  args {
+    avatarPersonaId  string  @required
+  }
+  filter  id==args.avatarPersonaId
+  shape   avatarPersonaFull
 }
