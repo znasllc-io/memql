@@ -326,40 +326,14 @@ builtin knowledgeSeedStandardDomains {
   forceIngest  bool
 }
 
-// LiveAvatar session builtins (copresent#226). These were defined WITHOUT an
-// @executor, so the engine never wired them to the `liveavatar` integration --
-// the browser's `liveAvatarCreateSessionToken` call failed with `function ...
-// not found` and the Guide avatar rendered "Avatar unavailable". Wire each to
-// its integration capability (integration.liveavatar.<capability>), matching the
-// realtimeCreateClientSecret pattern below.
-@executor("integration.liveavatar.createSessionToken")
-@description("Create a LiveAvatar session token (FULL mode). Returns { session_id, session_token }.")
-builtin liveAvatarCreateSessionToken {
-  is_sandbox  bool
-  avatar_id   string
-}
-
-@executor("integration.liveavatar.startSession")
-@description("Start a LiveAvatar session. Returns LiveKit room credentials (livekit_url, livekit_client_token).")
-builtin liveAvatarStartSession {
-  session_token  string  @required
-}
-
-@executor("integration.liveavatar.stopSession")
-@description("Stop a LiveAvatar session.")
-builtin liveAvatarStopSession {
-  session_token  string  @required
-}
-
-// Direct/Guide avatar on the Anam vendor path (copresent#237 step 2 / #291).
-// Unlike liveavatar.com (which owns the LiveKit room + does its own TTS), Anam
-// DIALS INTO a room memQL mints and lip-syncs audio published into it. For an
-// anam-vendor agent, avatarDirectStartSession mints a fresh LiveKit room +
-// browser join token and brings Anam up; copresent connects with the returned
-// creds and (step 3 / #292) publishes the assistant audio for lip-sync. Returns
-// the same { livekit_url, livekit_client_token } shape useLiveAvatar consumes,
-// plus session_id + vendor + room_name. Non-anam agents keep the liveavatar
-// builtins above (retired separately in #294).
+// Direct/Guide avatar on the Anam vendor path (copresent#237). This is the SOLE
+// avatar session path -- the retired liveavatar.com integration (which owned the
+// LiveKit room + did its own TTS) is gone (#294). Anam DIALS INTO a room memQL
+// mints and lip-syncs audio published into it. For an anam-vendor agent,
+// avatarDirectStartSession mints a fresh LiveKit room + browser join token and
+// brings Anam up; copresent connects with the returned creds and publishes the
+// assistant audio for lip-sync. Returns { livekit_url, livekit_client_token,
+// session_id, vendor, room_name }. Simli joins as the second vendor in #293.
 @executor("integration.avatardirect.startSession")
 @sdk
 @description("Start a direct/Guide avatar session for an anam-vendor agent. Mints a LiveKit room + browser join token and brings Anam up (audio-driven). Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.")

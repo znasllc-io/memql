@@ -15,7 +15,7 @@
 // the dev-seeded OPENAI_API_KEY), matching the SI-provider key convention
 // documented in component/memql/si_providers.go.
 //
-// This mirrors the integrations/liveavatar pattern -- the established way
+// This mirrors the integrations/avatardirect pattern -- the established way
 // CoPresent mints a third-party browser session credential server-side
 // instead of through a frontend-tier Express route (gRPC-first; see the
 // #147 architecture spike).
