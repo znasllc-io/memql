@@ -657,16 +657,15 @@ deploy:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-## Roll the memQL node mesh back to its previous (or a specific) revision
-## (znasllc-io/memql#554). The companion to `make deploy` -- when a deploy
-## goes bad, revert every node Deployment via `kubectl rollout undo`. Does
-## NOT touch the managed Tiger Cloud DB. `make deploy`'s smoke gate calls the
-## same revert automatically on failure; this is the manual/targeted entry.
-## Impl in scripts/deploy/aks-rollback.sh.
-##   make deploy-rollback                          # revert every node
-##   make deploy-rollback ARGS=--only=bff,cognition  # just these
-##   make deploy-rollback ARGS=--to-revision=7     # pin every node to rev 7
-##   make deploy-rollback DRY_RUN=1                 # plan only
+## Roll the memQL mesh back to a previous good release (deployment-v2 Phase 1,
+## znasllc-io/memql#699). Rollback is a GIT REVERT of the digest-pinned overlay
+## deploy/k8s/overlays/<env>, then reconcile -- NOT `kubectl rollout undo` (which
+## reverted to the manifest tag, #684). Does NOT touch the managed Tiger Cloud
+## DB. Impl in scripts/deploy/aks-rollback.sh.
+##   make deploy-rollback ARGS=--list             # recent overlay changes
+##   make deploy-rollback ARGS=--to=<commit>      # print git revert + reconcile
+##   make deploy-rollback ARGS="--to=<commit> --apply"  # also re-converge
+##   make deploy-rollback DRY_RUN=1               # plan only
 deploy-rollback:
 	@bash scripts/deploy/aks-rollback.sh \
 		--env=$${ENV:-staging} \

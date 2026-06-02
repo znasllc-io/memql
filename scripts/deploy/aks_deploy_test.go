@@ -61,6 +61,53 @@ func requireKubectl(t *testing.T) {
 func TestAksDeploySyntax(t *testing.T)     { aksSyntax(t, "aks-deploy.sh") }
 func TestAksRollbackSyntax(t *testing.T)   { aksSyntax(t, "aks-rollback.sh") }
 func TestAksAutoscalerSyntax(t *testing.T) { aksSyntax(t, "aks-autoscaler.sh") }
+func TestDriftCheckSyntax(t *testing.T)    { aksSyntax(t, "drift-check.sh") }
+
+// deployment-v2 Phase 1 (#699): the staging overlay must render with every
+// image digest-pinned -- the drift detector's CI gate (--rendered) passes.
+func TestDriftCheckRenderedStagingPasses(t *testing.T) {
+	requireKubectl(t) // needs `kubectl kustomize` to render the overlay
+	out, err := runAks(t, "drift-check.sh", "--rendered", "--env=staging")
+	if err != nil {
+		t.Fatalf("drift-check --rendered staging should pass (all digest-pinned):\n%s", out)
+	}
+	if !strings.Contains(out, "every image in staging overlay is digest-pinned") {
+		t.Errorf("expected the all-pinned success line:\n%s", out)
+	}
+}
+
+// A floating :tag in an overlay must FAIL the rendered gate (the #684 root
+// cause). Build a throwaway overlay that re-introduces a tag and assert non-zero.
+func TestDriftCheckRenderedRejectsFloatingTag(t *testing.T) {
+	requireKubectl(t)
+	_, thisFile, _, _ := runtime.Caller(0)
+	overlays := filepath.Join(filepath.Dir(thisFile), "..", "..", "deploy", "k8s", "overlays")
+	dir := filepath.Join(overlays, "drifttest")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	// Pins one image by digest but leaves another on a floating tag.
+	k := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: memql
+resources:
+  - ../../base
+images:
+  - name: acrmemql.azurecr.io/memql-identity
+    newTag: "9.9.9"
+`
+	if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(k), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	out, err := runAks(t, "drift-check.sh", "--rendered", "--env=drifttest")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for a floating tag, got success:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT digest-pinned") {
+		t.Errorf("expected the unpinned-image error:\n%s", out)
+	}
+}
 
 // The deploy --help must advertise the gate knobs added in #554, plus the
 // pre-deploy headroom guard added in #614.
@@ -152,57 +199,42 @@ func TestAksAutoscalerBadRangeRejected(t *testing.T) {
 	}
 }
 
+// deployment-v2 Phase 1 (#699): rollback is `git revert` of the digest overlay,
+// NOT `kubectl rollout undo`. The help reflects the git-revert model.
 func TestAksRollbackHelp(t *testing.T) {
 	out, err := runAks(t, "aks-rollback.sh", "--help")
 	if err != nil {
 		t.Fatalf("--help exited non-zero: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Usage:", "--to-revision=", "--only=", "rollout history"} {
+	for _, want := range []string{"Usage:", "git revert", "--to=", "--apply", "overlay"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rollback --help missing %q:\n%s", want, out)
 		}
 	}
 }
 
-// A dry-run rollback plans `kubectl rollout undo` for every node and mutates
-// nothing.
-func TestAksRollbackDryRunPlansUndo(t *testing.T) {
-	requireKubectl(t)
-	out, err := runAks(t, "aks-rollback.sh", "--dry-run")
+// A default rollback run prints the git-revert procedure and re-converge steps,
+// and NEVER issues `kubectl rollout undo` (the #684 trap this phase removes).
+func TestAksRollbackPrintsGitRevertProcedure(t *testing.T) {
+	out, err := runAks(t, "aks-rollback.sh", "--to=abc123")
 	if err != nil {
-		t.Fatalf("--dry-run exited non-zero: %v\n%s", err, out)
+		t.Fatalf("run exited non-zero: %v\n%s", err, out)
 	}
-	for _, node := range []string{"identity", "bff", "cognition", "voice", "agent", "planner", "workbench", "copresent"} {
-		want := "rollout undo deployment/" + node
+	for _, want := range []string{"git", "revert", "abc123", "kubectl apply -k"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("dry-run plan missing %q:\n%s", want, out)
+			t.Errorf("expected git-revert procedure to mention %q:\n%s", want, out)
 		}
 	}
 }
 
-// --only restricts the target set; --to-revision is threaded through.
-func TestAksRollbackOnlyAndRevision(t *testing.T) {
-	requireKubectl(t)
-	out, err := runAks(t, "aks-rollback.sh", "--only=bff,cognition", "--to-revision=7", "--dry-run")
+// The rollback path must not contain `rollout undo` anywhere -- that semantics
+// reverted to the manifest tag (#684) and is structurally removed in v2.
+func TestAksRollbackHasNoRolloutUndo(t *testing.T) {
+	out, err := runAks(t, "aks-rollback.sh", "--to=deadbeef", "--dry-run")
 	if err != nil {
-		t.Fatalf("exited non-zero: %v\n%s", err, out)
+		t.Fatalf("dry-run exited non-zero: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "rollout undo deployment/bff -n memql --to-revision=7") {
-		t.Errorf("expected bff undo at revision 7:\n%s", out)
-	}
-	if strings.Contains(out, "rollout undo deployment/voice") {
-		t.Errorf("--only=bff,cognition should NOT roll back voice:\n%s", out)
-	}
-}
-
-// An unknown --only node is rejected with a clear error (non-zero exit).
-func TestAksRollbackInvalidNodeRejected(t *testing.T) {
-	requireKubectl(t)
-	out, err := runAks(t, "aks-rollback.sh", "--only=bogus", "--dry-run")
-	if err == nil {
-		t.Fatalf("expected non-zero exit for an unknown node, got success:\n%s", out)
-	}
-	if !strings.Contains(out, "unknown node") {
-		t.Errorf("expected 'unknown node' error:\n%s", out)
+	if strings.Contains(out, "rollout undo") {
+		t.Errorf("rollback output must not issue 'rollout undo' (the #684 trap):\n%s", out)
 	}
 }

@@ -3,19 +3,23 @@
 # scripts/deploy/aks-rollback.sh
 # ==============================
 #
-# Roll the memQL node mesh back to its previous (or a specific) revision
-# (znasllc-io/memql#554, epic #549). The companion to aks-deploy.sh: when a
-# deploy goes bad, this reverts every node Deployment via `kubectl rollout
-# undo`. aks-deploy.sh's smoke GATE calls the same operation automatically;
-# this script is the manual / targeted entry point (`make deploy-rollback`).
+# Roll the memQL mesh back to a previous good release.
 #
-# `kubectl rollout undo` swaps the Deployment back to a prior ReplicaSet --
-# it does NOT touch the database (managed Tiger Cloud, outside the cluster)
-# and is a no-op for a Deployment that has no prior revision.
+# deployment-v2 Phase 1 (znasllc-io/memql#699) REPLACED the old `kubectl rollout
+# undo` rollback. That reverted each Deployment to its previous ReplicaSet, whose
+# pod template carried the MANIFEST tag rather than the actual pre-deploy image
+# -- the #684 trap (a "rollback" could land you on the wrong version). The
+# committed digest overlay deploy/k8s/overlays/<env> is now the single image
+# authority, so a rollback is a GIT operation:
 #
-# Per the repo + global Skills+Scripts convention (CLAUDE.md): function-based,
-# one responsibility per function, main() at the bottom. set -uo pipefail (no
-# -e -- one node's undo failing must not abort the rest). --help + --dry-run.
+#     rollback = `git revert` the bad overlay commit  ->  reconcile.
+#
+# This tool guides + (optionally) performs the reconcile. It NEVER issues
+# `kubectl rollout undo` and never mutates images out-of-band. Once Argo CD is
+# live (Phase 2 #700), the `git revert` push reconciles automatically and the
+# manual re-apply below is unnecessary.
+#
+# Function-based per the Skills+Scripts convention (CLAUDE.md). set -uo pipefail.
 
 set -uo pipefail
 
@@ -23,10 +27,10 @@ set -uo pipefail
 # CONFIGURATION
 #=============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+K8S_DIR="$REPO_ROOT/deploy/k8s"
 NAMESPACE="memql"
-
-# Every Deployment aks-deploy.sh rolls -- the full revert set.
-readonly ALL_DEPLOYMENTS=(identity bff cognition voice agent planner workbench copresent)
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -49,45 +53,50 @@ function show_help() {
     cat << EOF
 Usage: $0 [options]
 
-Roll the memQL node mesh back to its previous (or a specific) revision.
+Roll the memQL mesh back to a previous good release. Rollback is a GIT REVERT of
+the digest-pinned overlay (deploy/k8s/overlays/<env>), then a reconcile -- NOT
+\`kubectl rollout undo\` (which would revert to the manifest tag, #684).
 
 Options:
-    --env=ENV            Environment label for log context (staging|production).
-                         The target cluster is the current kubectl context.
-    --to-revision=N      Roll back to a specific revision number (applied to
-                         every node). Default: the immediately previous one.
-    --only=a,b,c         Comma-separated node names to roll back (default: all).
-                         Names: ${ALL_DEPLOYMENTS[*]}
-    --dry-run            Print what would happen and change nothing.
-    --help               Show this help.
+    --env=ENV     Environment overlay to roll back (default: staging).
+    --to=REF      Git ref/commit whose overlay digests you want to restore.
+                  The tool prints the exact \`git revert\` for it; with --apply
+                  it also re-applies the overlay after you revert.
+    --list        Show recent commits that changed the env overlay, then exit.
+    --apply       After you have reverted in git, re-apply the overlay to the
+                  cluster (re-converge). Omitted by default -- under Argo CD the
+                  push reconciles automatically.
+    --dry-run     Print what would happen and change nothing.
+    --help        Show this help.
 
-Inspect history first with:
-    kubectl rollout history deployment/<node> -n $NAMESPACE
+Inspect overlay history first with:
+    git log --oneline -- deploy/k8s/overlays/$NAMESPACE  (or use --list)
 
 Examples:
-    $0                          # revert every node to its previous revision
-    $0 --only=bff,cognition     # revert just these two
-    $0 --to-revision=7          # pin every node back to revision 7
+    $0 --list                       # recent overlay changes
+    $0 --to=<commit>                # print the git revert + reconcile steps
+    $0 --to=<commit> --apply        # revert in git yourself, then re-converge
 EOF
 }
 
 function parse_arguments() {
     ENV="staging"
-    TO_REVISION=""
-    ONLY=""
+    TO_REF=""
+    DO_APPLY=false
+    DO_LIST=false
     DRY_RUN=false
-
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --env=*)          ENV="${1#*=}"; shift ;;
-            --to-revision=*)  TO_REVISION="${1#*=}"; shift ;;
-            --only=*)         ONLY="${1#*=}"; shift ;;
-            --dry-run)        DRY_RUN=true; shift ;;
-            --help)           show_help; exit 0 ;;
-            *)
-                echo "ERROR: Unknown option: $1"; show_help; exit 1 ;;
+            --env=*)  ENV="${1#*=}"; shift ;;
+            --to=*)   TO_REF="${1#*=}"; shift ;;
+            --list)   DO_LIST=true; shift ;;
+            --apply)  DO_APPLY=true; shift ;;
+            --dry-run) DRY_RUN=true; shift ;;
+            --help)   show_help; exit 0 ;;
+            *) echo "ERROR: Unknown option: $1"; show_help; exit 1 ;;
         esac
     done
+    OVERLAY_DIR="$K8S_DIR/overlays/$ENV"
 }
 
 #=============================================================================
@@ -95,68 +104,64 @@ function parse_arguments() {
 #=============================================================================
 
 function check_prerequisites() {
-    if ! command -v kubectl &> /dev/null; then
-        echo "ERROR: kubectl is not installed"; exit 1
+    if [ ! -f "$OVERLAY_DIR/kustomization.yaml" ]; then
+        echo "ERROR: no overlay at $OVERLAY_DIR"; exit 1
     fi
-    if [ "$DRY_RUN" = false ] && ! kubectl cluster-info &> /dev/null; then
-        echo "ERROR: no reachable Kubernetes cluster in the current context."; exit 1
+    if [ "$DO_APPLY" = true ] && [ "$DRY_RUN" = false ] && ! kubectl cluster-info &> /dev/null; then
+        echo "ERROR: --apply needs a reachable cluster (kubectl context)."; exit 1
     fi
 }
 
-# Resolve the target node list from --only (validated) or the full set.
-function resolve_targets() {
-    if [ -z "$ONLY" ]; then
-        TARGETS=("${ALL_DEPLOYMENTS[@]}")
-        return
-    fi
-    TARGETS=()
-    local name
-    IFS=',' read -ra requested <<< "$ONLY"
-    for name in "${requested[@]}"; do
-        name="$(echo "$name" | tr -d '[:space:]')"
-        [ -z "$name" ] && continue
-        if [[ " ${ALL_DEPLOYMENTS[*]} " == *" $name "* ]]; then
-            TARGETS+=("$name")
-        else
-            echo "ERROR: unknown node '$name' (valid: ${ALL_DEPLOYMENTS[*]})"; exit 1
-        fi
-    done
+function show_history() {
+    info "recent commits changing the $ENV overlay:"
+    git -C "$REPO_ROOT" log --oneline -n 15 -- "$OVERLAY_DIR" 2>/dev/null || warn "git history unavailable"
 }
 
-function rollback_one() {
-    local nt="$1"
-    local -a cmd=(kubectl rollout undo "deployment/${nt}" -n "$NAMESPACE")
-    [ -n "$TO_REVISION" ] && cmd+=(--to-revision="$TO_REVISION")
-    info "rolling back ${nt}${TO_REVISION:+ to revision $TO_REVISION}..."
-    run_or_plan "${cmd[@]}"
-}
-
-function execute() {
+# Print the canonical git-revert rollback procedure for the chosen ref.
+function print_revert_procedure() {
+    local ref="${TO_REF:-<bad-overlay-commit>}"
     echo "========================================="
-    echo "memQL AKS rollback"
-    echo "  Env:        $ENV"
-    echo "  Context:    $([ "$DRY_RUN" = true ] && echo '(dry-run)' || kubectl config current-context 2>/dev/null || echo unknown)"
-    echo "  Namespace:  $NAMESPACE"
-    echo "  Targets:    ${TARGETS[*]}"
-    echo "  To revision:${TO_REVISION:- previous}"
-    echo "  Dry run:    $DRY_RUN"
+    echo "memQL AKS rollback (git revert -- deployment-v2 #699)"
+    echo "  Env:      $ENV"
+    echo "  Overlay:  $OVERLAY_DIR"
+    echo "  Revert:   $ref"
     echo "========================================="
+    cat <<EOF
 
-    local nt
-    for nt in "${TARGETS[@]}"; do
-        rollback_one "$nt"
-    done
+Rollback steps:
+  1. Revert the bad overlay change in git (this restores the prior digests):
+       git -C "$REPO_ROOT" revert --no-edit $ref
+  2. Push:
+       git -C "$REPO_ROOT" push
+     Under Argo CD (Phase 2) the cluster reconciles automatically -- done.
+  3. Until the reconciler is live, re-converge manually (or re-run with --apply):
+       kubectl apply -k "$OVERLAY_DIR"
 
-    echo ""
-    info "rollback issued. Watch: kubectl get pods -n $NAMESPACE -w"
-    info "verify: bash scripts/deploy/staging-smoke-test.sh"
+NOTE: no imperative ReplicaSet revert is issued -- that path lands on the
+manifest tag, not the prior digest (#684). Git is the source of truth.
+EOF
+}
+
+# Optional: re-apply the overlay to re-converge (operator reverts in git first).
+function reapply_overlay() {
+    [ "$DO_APPLY" = false ] && return 0
+    warn "re-applying the CURRENT committed overlay to re-converge the cluster."
+    warn "ensure you have already 'git revert'ed to the good digests, else this re-applies the bad set."
+    run_or_plan kubectl apply -k "$OVERLAY_DIR"
+    [ "$DRY_RUN" = false ] && info "verify: bash scripts/deploy/drift-check.sh --live --env=$ENV"
 }
 
 function main() {
     parse_arguments "$@"
     check_prerequisites
-    resolve_targets
-    execute
+    if [ "$DO_LIST" = true ]; then
+        show_history
+        exit 0
+    fi
+    show_history
+    echo ""
+    print_revert_procedure
+    reapply_overlay
 }
 
 main "$@"

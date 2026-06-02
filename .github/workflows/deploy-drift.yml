@@ -1,0 +1,49 @@
+name: deploy-drift
+
+# deployment-v2 Phase 1 (znasllc-io/memql#699): the committed kustomize overlay
+# deploy/k8s/overlays/<env> is the SINGLE image authority -- every image pinned
+# by @sha256: digest. This gate renders each overlay and FAILS if any image is
+# left on a floating tag (the #684 root cause). It needs no cluster access (the
+# live-vs-cluster drift check runs from aks-deploy.sh / a scheduled job / Argo
+# CD's OutOfSync status). Runs only when deploy manifests or the script change.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/k8s/**'
+      - 'scripts/deploy/drift-check.sh'
+      - '.github/workflows/deploy-drift.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/k8s/**'
+      - 'scripts/deploy/drift-check.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  rendered-digest-gate:
+    name: overlays are digest-pinned
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+        with:
+          version: 'v1.30.0'
+      - name: assert every env overlay pins images by digest
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for overlay in deploy/k8s/overlays/*/; do
+            env="$(basename "$overlay")"
+            echo "::group::drift-check --rendered --env=$env"
+            bash scripts/deploy/drift-check.sh --rendered --env="$env"
+            echo "::endgroup::"
+            found=1
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "ERROR: no overlays found under deploy/k8s/overlays/"; exit 1
+          fi

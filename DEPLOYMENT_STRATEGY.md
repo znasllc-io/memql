@@ -79,14 +79,17 @@ One command takes the cluster from source to a rolled-out, gated deploy:
 3. **Migration gate** (pre-rollout): a Job pinned to `VERSION` runs the DB
    migrations once and **aborts the deploy on failure** — the mesh never rolls
    onto a half-migrated schema.
-4. **Apply (ordered)**: namespace → `identity` first (serves JWKS before the
-   workers' verifiers need it) → `kubectl apply -k deploy/k8s` (full mesh +
-   public entry) → pin **every** engine node (identity included) to `VERSION`
-   *after* the kustomize apply (so the apply can't revert a node to a manifest
-   tag — the #613 fix).
-5. **Health gate**: a **version-skew assertion** (every engine Deployment must
-   run exactly `:VERSION`) followed by the **smoke gate** (§7). On failure with
-   the gate armed (default), **auto-rollback**.
+4. **Apply (digest-pinned overlay)**: `kubectl apply -k deploy/k8s/overlays/<env>`
+   — the committed overlay pins **every** image by `@sha256:` digest, so it is
+   the single image authority. There is **no** runtime `kubectl set image`: the
+   apply cannot leave a node on a stale manifest tag (the #613/#684 class is
+   structurally gone — deployment-v2 Phase 1, #699). `identity` is waited Ready
+   first (JWKS), then the rest.
+5. **Health gate**: a **drift assertion** (`drift-check.sh --live`: every live
+   pod runs the exact digest the overlay pins) followed by the **smoke gate**
+   (§7). On failure with the gate armed (default), the deploy stops and prints
+   the **git-revert** rollback procedure (§8) — it does **not** imperatively
+   revert.
 6. **Record validated version** (§6) on a green *deep* gate.
 
 Carrier + SPA are built/pinned from their own repos (`memql-bff-copresent
@@ -231,9 +234,13 @@ console-error tier (#658).
 
 - **Rollout**: stateless nodes roll with RollingUpdate + graceful gRPC drain;
   identity is HA (§5) so auth stays up across a roll.
-- **Rollback**: `make deploy-rollback` (`scripts/deploy/aks-rollback.sh`) rolls
-  every Deployment back to its previous ReplicaSet (`--only=`, `--to-revision=`
-  supported). The health gate auto-rolls-back on a failed deploy.
+- **Rollback = `git revert`** (deployment-v2 Phase 1, #699). The committed
+  digest overlay is the only image authority, so a rollback reverts the bad
+  overlay commit and reconciles: `make deploy-rollback ARGS=--to=<commit>`
+  (`scripts/deploy/aks-rollback.sh`) prints the exact `git revert` + re-converge
+  steps (`--apply` re-applies the overlay). Under Argo CD (Phase 2, #700) the
+  revert push reconciles automatically. The old `kubectl rollout undo` path is
+  retired — it reverted to the manifest tag, not the prior digest (#684).
 - **Secret recovery**: the sealed envelope is in Key Vault (`kv-memql-<env>/
   memql-genesis-b64`); re-store it into `memql-secrets` and roll (§4).
 - **DB**: managed Tiger Cloud (point-in-time recovery via Tiger). The DSN lives

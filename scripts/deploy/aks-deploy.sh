@@ -30,10 +30,16 @@
 # OWN sibling repos under the BFF->memQL pin model (#491), NOT here. Their
 # tags stay as pinned in deploy/k8s/{bff,copresent}.yaml.
 #
-# When --version is given, all six engine Deployments are pinned to that
-# single tag at apply time (kubectl set image, non-mutating to the tracked
-# manifests) -- the image-version-consistency posture from #534. Without
-# --version (or with --skip-build) the manifests' own pinned tags apply.
+# deployment-v2 Phase 1 (#699): the committed kustomize overlay
+# (deploy/k8s/overlays/<env>) is the SINGLE image authority -- every image is
+# pinned there by @sha256: DIGEST. This script applies that overlay; it no
+# longer mutates the cluster out-of-band. There is NO `kubectl set image` and
+# NO `kubectl rollout undo`: a new version is a digest change in the overlay
+# (committed + applied/reconciled), and ROLLBACK = `git revert` of that change
+# (re-apply the overlay at the prior commit). This makes #684 (manifest tag !=
+# live image; rollback reverts to the wrong tag) structurally impossible.
+# `--version` is retained only for the engine BUILD step (az acr build tag);
+# it no longer pins live images -- the overlay digest does.
 #
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): pure
 # function-based structure, one responsibility per function, main() at the
@@ -50,6 +56,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 K8S_DIR="$REPO_ROOT/deploy/k8s"
+# Phase 1 (#699): base = raw manifests; the per-env overlay pins images by
+# digest and is what gets applied/reconciled. OVERLAY_DIR is resolved from $ENV
+# at apply time (see apply_ordered / check_prerequisites).
+BASE_DIR="$K8S_DIR/base"
 
 NAMESPACE="memql"
 SECRET_NAME="memql-secrets"
@@ -111,10 +121,10 @@ ensure TLS secrets, apply the manifests (identity first), wait for rollout,
 and smoke-test the live front door.
 
 Options:
-    --version=X.Y.Z   Engine image tag to build + roll out. When set, all
-                      six engine Deployments are pinned to this single tag
-                      (image-version consistency, #534). Default: the tags
-                      already pinned in deploy/k8s/.
+    --version=X.Y.Z   Engine image tag to BUILD + push (az acr build). It no
+                      longer pins live images -- the digest-pinned overlay
+                      deploy/k8s/overlays/<env> is the single image authority
+                      (deployment-v2 Phase 1 #699). Default: --skip-build.
     --env=ENV         Environment label for log context (staging|production).
                       The target cluster is the current kubectl context.
                       Default: staging.
@@ -197,8 +207,9 @@ function check_prerequisites() {
     if ! command -v kubectl &> /dev/null; then
         echo "ERROR: kubectl is not installed"; exit 1
     fi
-    if [ ! -f "$K8S_DIR/kustomization.yaml" ]; then
-        echo "ERROR: no kustomization at $K8S_DIR"; exit 1
+    local overlay="$K8S_DIR/overlays/$ENV"
+    if [ ! -f "$overlay/kustomization.yaml" ]; then
+        echo "ERROR: no overlay kustomization at $overlay (deployment-v2 Phase 1 #699). Known overlays:"; ls "$K8S_DIR/overlays" 2>/dev/null; exit 1
     fi
     # Build needs az unless we're skipping it or just planning.
     if [ "$SKIP_BUILD" = false ] && [ "$DRY_RUN" = false ] && ! command -v az &> /dev/null; then
@@ -209,9 +220,9 @@ function check_prerequisites() {
         echo "       Set it, e.g.: az aks get-credentials -g rg-memql-$ENV -n <cluster>"
         exit 1
     fi
-    info "rendering deploy/k8s/ kustomization..."
-    if ! kubectl kustomize "$K8S_DIR" > /dev/null 2>&1; then
-        echo "ERROR: kustomize render failed"; exit 1
+    info "rendering $overlay (digest-pinned overlay)..."
+    if ! kubectl kustomize "$overlay" > /dev/null 2>&1; then
+        echo "ERROR: kustomize render failed for $overlay"; exit 1
     fi
 }
 
@@ -360,7 +371,7 @@ function ensure_tls_secrets() {
         info "--skip-tls set; assuming identity-tls + memql-ca already exist."
         return 0
     fi
-    local gen="$K8S_DIR/tls/gen-internal-ca.sh"
+    local gen="$BASE_DIR/tls/gen-internal-ca.sh"
     if [ ! -x "$gen" ] && [ ! -f "$gen" ]; then
         warn "TLS generator not found at $gen; identity HTTPS will fail without identity-tls/memql-ca."
         return 0
@@ -399,7 +410,7 @@ function run_migration_gate() {
         info "--skip-migrate set; skipping the pre-deploy migration Job."
         return 0
     fi
-    local job="$K8S_DIR/migrate-job.yaml"
+    local job="$BASE_DIR/migrate-job.yaml"
     if [ ! -f "$job" ]; then
         warn "migrate Job manifest not found at $job; skipping."
         return 0
@@ -413,7 +424,7 @@ function run_migration_gate() {
     fi
 
     # The namespace must exist for the Job; apply it idempotently first.
-    run_or_plan kubectl apply -f "$K8S_DIR/namespace.yaml"
+    run_or_plan kubectl apply -f "$BASE_DIR/namespace.yaml"
     # Jobs are immutable -- delete any prior run before re-creating.
     run_or_plan kubectl delete job memql-migrate -n "$NAMESPACE" --ignore-not-found
 
@@ -456,17 +467,7 @@ function run_migration_gate() {
 #=============================================================================
 
 function apply_namespace() {
-    run_or_plan kubectl apply -f "$K8S_DIR/namespace.yaml"
-}
-
-# Override an engine Deployment's image to the built VERSION (no-op unless
-# we built). Deployment + container names both equal the node-type.
-function set_engine_image() {
-    local nt="$1"
-    [ "$SKIP_BUILD" = true ] && return 0
-    [ -z "$VERSION" ] && return 0
-    run_or_plan kubectl set image "deployment/${nt}" \
-        "${nt}=${ACR_LOGIN_SERVER}/memql-${nt}:${VERSION}" -n "$NAMESPACE"
+    run_or_plan kubectl apply -f "$BASE_DIR/namespace.yaml"
 }
 
 function rollout_wait() {
@@ -484,30 +485,22 @@ function apply_ordered() {
     section "3. Apply (identity first, then the mesh)"
     apply_namespace
 
-    # identity FIRST: it owns the one-time migration + JWKS. Workers' verifiers
-    # need it Ready (they retry JWKS non-fatally, but Ready-first avoids churn).
-    # We apply the manifest and wait for Ready here, but DO NOT pin its image to
-    # $VERSION yet: the `kubectl apply -k` below re-applies identity.yaml from the
-    # kustomization and would revert any pre-set image back to the manifest tag,
-    # leaving identity version-skewed (#613). identity is re-pinned to $VERSION
-    # in the post-kustomize loop along with the other engine nodes, so the final
-    # state is consistent and the version-skew guard passes.
-    info "applying identity and waiting for it to be Ready..."
-    run_or_plan kubectl apply -f "$K8S_DIR/identity.yaml"
-    rollout_wait identity
+    local overlay="$K8S_DIR/overlays/$ENV"
 
-    # The rest of the mesh + public entry.
-    info "applying the full mesh (kustomize)..."
-    run_or_plan kubectl apply -k "$K8S_DIR"
+    # Apply the full mesh + public entry from the digest-pinned overlay -- the
+    # ONLY image authority. Because every image is pinned by @sha256: in the
+    # overlay (NOT set at runtime), there is no post-apply `set image` and the
+    # apply cannot leave any node on a stale manifest tag: the #613/#684 skew
+    # class is structurally gone. This is also exactly how the Phase 2 reconciler
+    # (Argo CD) will apply the same overlay.
+    info "applying the full mesh (digest-pinned overlay: $overlay)..."
+    run_or_plan kubectl apply -k "$overlay"
 
-    # Pin EVERY engine node (identity included) to the built $VERSION AFTER the
-    # kustomize apply, so nothing the kustomization re-applied is left on its
-    # manifest-pinned tag. ENGINE_NODE_TYPES already leads with identity.
+    # identity owns the one-time migration + JWKS; the workers' verifiers retry
+    # JWKS non-fatally, so we wait on identity FIRST, then the rest.
     local nt
-    for nt in "${ENGINE_NODE_TYPES[@]}"; do
-        set_engine_image "$nt"
-    done
-    for nt in "${ENGINE_NODE_TYPES[@]}" bff; do
+    rollout_wait identity
+    for nt in cognition voice agent planner workbench bff copresent; do
         rollout_wait "$nt"
     done
 }
@@ -557,44 +550,44 @@ function smoke_test() {
 # 5. HEALTH GATE + ROLLBACK
 #=============================================================================
 
-# Roll every Deployment we just applied back to its previous ReplicaSet.
-# `kubectl rollout undo` is a no-op for a Deployment with no prior revision
-# (a first-ever deploy), so this is safe to fan across all of them.
+# deployment-v2 Phase 1 (#699): ROLLBACK IS `git revert`, not `kubectl rollout
+# undo`. `rollout undo` reverted to the prior ReplicaSet, which carried the
+# MANIFEST tag rather than the pre-deploy image -- the #684 trap. The committed
+# digest overlay is now the only image authority, so a rollback is: revert the
+# overlay commit and re-apply (or let the Phase 2 reconciler converge). This
+# function prints that procedure instead of mutating the cluster imperatively.
 function rollback_all() {
-    warn "rolling back to the previous revision of each Deployment..."
-    local nt
-    for nt in "${ALL_DEPLOYMENTS[@]}"; do
-        run_or_plan kubectl rollout undo "deployment/${nt}" -n "$NAMESPACE"
-    done
-    warn "rollback issued. Watch: kubectl get pods -n $NAMESPACE -w"
+    section "ROLLBACK -- git revert (deployment-v2 #699)"
+    warn "NOT issuing 'kubectl rollout undo' (it would revert to the manifest tag, #684)."
+    cat <<EOF
+  The committed overlay deploy/k8s/overlays/$ENV is the only image authority.
+  To roll back to the previous good digest set:
+
+      git -C "$REPO_ROOT" revert --no-edit <bad-overlay-commit>
+      git -C "$REPO_ROOT" push            # Phase 2: Argo CD reconciles automatically
+      # until the reconciler is live, re-apply manually:
+      kubectl apply -k "$K8S_DIR/overlays/$ENV"
+
+  The prior digests are recoverable from git history of that overlay file.
+EOF
 }
 
-# Post-rollout version-skew guard (#613/#611). Every engine Deployment must be
-# running exactly the image tag we just built + deployed. Catches the class of
-# bug where a kustomize apply silently reverts a node to its manifest-pinned tag
-# (the #613 identity revert), which front-door smoke would not detect. A no-op
-# when we didn't build a versioned image (--skip-build / no --version).
+# Drift guard (replaces the #613 version-skew guard): every live engine pod must
+# be running the EXACT digest the committed overlay pins. Because the overlay is
+# the authority, any divergence means out-of-band mutation -- which v2 forbids.
+# Delegates to the dedicated drift-check.sh (--live) so the same logic gates CI.
 function assert_engine_versions() {
-    [ "$SKIP_BUILD" = true ] && return 0
-    [ -z "$VERSION" ] && return 0
     if [ "$DRY_RUN" = true ]; then
-        plan "verify every engine Deployment runs :$VERSION (version-skew guard)"
+        plan "scripts/deploy/drift-check.sh --live --env=$ENV (assert live digests == committed overlay)"
         return 0
     fi
-    section "5a. Version-skew guard"
-    local nt want got skew=0
-    for nt in "${ENGINE_NODE_TYPES[@]}"; do
-        want="${ACR_LOGIN_SERVER}/memql-${nt}:${VERSION}"
-        got="$(kubectl get "deployment/${nt}" -n "$NAMESPACE" \
-            -o "jsonpath={.spec.template.spec.containers[?(@.name=='${nt}')].image}" 2>/dev/null)"
-        if [ "$got" = "$want" ]; then
-            info "deployment/${nt} -> :${VERSION} OK"
-        else
-            warn "version skew: deployment/${nt} runs '${got}', expected '${want}'"
-            skew=1
-        fi
-    done
-    return "$skew"
+    section "5a. Drift guard (live digests == committed overlay)"
+    local drift="$SCRIPT_DIR/drift-check.sh"
+    if [ ! -x "$drift" ]; then
+        warn "drift-check.sh not found/executable at $drift; skipping drift guard."
+        return 0
+    fi
+    "$drift" --live --env="$ENV"
 }
 
 # The health gate: assert no version skew, then run the smoke test; if either

@@ -100,8 +100,8 @@ function check_prerequisites() {
         echo "ERROR: kubectl is not installed"
         exit 1
     fi
-    if [ ! -f "$K8S_DIR/kustomization.yaml" ]; then
-        echo "ERROR: no kustomization at $K8S_DIR"
+    if [ ! -f "$K8S_DIR/overlays/$ENV/kustomization.yaml" ]; then
+        echo "ERROR: no overlay at $K8S_DIR/overlays/$ENV (deployment-v2 Phase 1 #699)"
         exit 1
     fi
     if ! kubectl cluster-info &> /dev/null; then
@@ -112,8 +112,8 @@ function check_prerequisites() {
 }
 
 function validate_manifests() {
-    echo "INFO: rendering deploy/k8s/ kustomization..."
-    if ! kubectl kustomize "$K8S_DIR" > /dev/null; then
+    echo "INFO: rendering digest-pinned overlay deploy/k8s/overlays/$ENV..."
+    if ! kubectl kustomize "$K8S_DIR/overlays/$ENV" > /dev/null; then
         echo "ERROR: kustomize render failed"
         exit 1
     fi
@@ -131,14 +131,14 @@ function apply_namespace() {
     local dry_flag=""
     [ "$DRY_RUN" = true ] && dry_flag="--dry-run=server"
     echo "INFO: applying namespace '$NAMESPACE'..."
-    kubectl apply -f "$K8S_DIR/namespace.yaml" $dry_flag
+    kubectl apply -f "$K8S_DIR/base/namespace.yaml" $dry_flag
 }
 
 function apply_manifests() {
     local dry_flag=""
     [ "$DRY_RUN" = true ] && dry_flag="--dry-run=server"
-    echo "INFO: applying node Deployments + Services (kustomize)..."
-    kubectl apply -k "$K8S_DIR" $dry_flag
+    echo "INFO: applying node Deployments + Services (digest-pinned overlay)..."
+    kubectl apply -k "$K8S_DIR/overlays/$ENV" $dry_flag
 }
 
 function execute() {
