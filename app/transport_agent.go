@@ -49,6 +49,19 @@ func (a *App) transportAgent() {
 			uploader = gcsClient
 		}
 	}
+	// memql#733: hand the workbench integration the same GCS uploader so a
+	// successful LOCAL fs_write uploads its bytes to v1:common:attachment
+	// and the Library generatedOutput row carries a real attachmentId
+	// (cluster writes stay inline pointers). Only on the agent node, only
+	// when a bucket is configured; the integration was already
+	// materialized (with SetEngine) during integrationsAgent, which runs
+	// before transport. nil-safe inside the setter / promotion path.
+	if uploader != nil {
+		if wb := a.lookupWorkbenchIntegration(); wb != nil {
+			wb.SetAttachmentUploader(uploader, gcsBucket)
+		}
+	}
+
 	processor := fileprocessor.NewDefaultProcessor(a.engine.VisionProvider())
 	engineAdapter := &AttachmentEngineAdapter{Engine: a.engine}
 	store := server.NewEngineAttachmentStore(engineAdapter)
