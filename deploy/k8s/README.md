@@ -186,7 +186,7 @@ entry (not just pod health) with the repeatable smoke test
 make smoke-staging                                # baseline, read-only
 make smoke-staging SMOKE_EMAIL=me@example.com     # + issue a real magic link
 make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx  # + run a live authenticated query
-make smoke-staging APP_HOST=app.copresent.ai IDENTITY_HOST=auth.copresent.ai  # smoke prod
+make smoke-staging APP_HOST=app.copresent.ai IDENTITY_HOST=identity.copresent.ai  # smoke prod
 ```
 
 It checks, in order: TLS + DNS for both public hosts (valid Let's Encrypt
