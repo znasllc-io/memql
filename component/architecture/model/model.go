@@ -83,7 +83,7 @@ const (
 
 	// EdgeRunsOn places a Service onto a deployment target (Cloud Run
 	// service, k8s pod, local container, etc.). Populated by the
-	// deployment extractor reading infra/ + cloudbuild yaml.
+	// deployment extractor reading deploy/k8s/ manifests + scripts/deploy/.
 	EdgeRunsOn EdgeKind = "runs_on"
 )
 

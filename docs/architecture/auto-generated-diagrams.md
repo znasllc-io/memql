@@ -91,7 +91,7 @@ Behavior diagrams ride on top:
 | Activity / flowchart (CFG) | (Planned) `golang.org/x/tools/go/cfg` per-function |
 | State diagram | (Planned) annotation-driven, doc-comment hints |
 | ERD | (Planned) parse the `.memql` concept tree |
-| Deployment | (Planned) `infra/`, `cloudbuild.*.yaml`, k8s manifests |
+| Deployment | (Planned) `deploy/k8s/` manifests + `scripts/deploy/` |
 
 ---
 

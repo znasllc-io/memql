@@ -22,11 +22,8 @@
 
 # Build + deploy
 /Dockerfile              @znas-io
-/cloudbuild.yaml         @znas-io
-/cloudbuild.nemoclaw.yaml @znas-io
-/service.yaml            @znas-io
-/service.nemoclaw.yaml   @znas-io
-/infra/                  @znas-io
+/deploy/k8s/             @znas-io
+/scripts/deploy/         @znas-io
 /docker/                 @znas-io
 
 # Auth-related docs
