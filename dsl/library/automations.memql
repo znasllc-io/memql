@@ -5,7 +5,7 @@
 // matching promotion logic. Records (notes / todos / calendar events /
 // memory) and live sources are wired the same way on #696.
 
-use library.logic.{ logicIndexDocument, logicIndexGeneratedOutput }
+use library.logic.{ logicIndexDocument, logicIndexGeneratedOutput, logicIndexNote, logicIndexTodo, logicIndexCalendarEvent, logicIndexMemory, logicIndexLiveSource }
 
 @enabled
 @trigger(event="node.created", concept="v1:knowledge:document", partition="*")
@@ -22,5 +22,50 @@ automation indexDocumentOnCreate {
 automation indexGeneratedOutputOnCreate {
   step run {
     logic logicIndexGeneratedOutput { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:notes:note", partition="*")
+@description("On note creation, promote it into the Library Records lens.")
+automation indexNoteOnCreate {
+  step run {
+    logic logicIndexNote { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:todos:todo", partition="*")
+@description("On to-do creation, promote it into the Library Records lens.")
+automation indexTodoOnCreate {
+  step run {
+    logic logicIndexTodo { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:calendar:calendarEvent", partition="*")
+@description("On calendar-event creation, promote it into the Library Records lens.")
+automation indexCalendarEventOnCreate {
+  step run {
+    logic logicIndexCalendarEvent { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:library:memory", partition="*")
+@description("On memory creation, promote it into the Library Records lens.")
+automation indexMemoryOnCreate {
+  step run {
+    logic logicIndexMemory { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:knowledge:liveSource", partition="*")
+@description("On live-source creation, promote it into the Library Records lens as a LIVE-flagged record.")
+automation indexLiveSourceOnCreate {
+  step run {
+    logic logicIndexLiveSource { event: event }
   }
 }

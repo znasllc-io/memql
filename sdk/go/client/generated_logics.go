@@ -289,6 +289,26 @@ func LogicGenerateResponseBuild(args LogicGenerateResponseArgs) string {
 	return b.String()
 }
 
+// LogicIndexCalendarEvent -- On v1:calendar:calendarEvent creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated).
+type LogicIndexCalendarEventArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexCalendarEvent calls the engine logic logicIndexCalendarEvent.
+func (qc *QueryClient) LogicIndexCalendarEvent(ctx context.Context, args LogicIndexCalendarEventArgs) (*Result, error) {
+	call := LogicIndexCalendarEventBuild(args)
+	return qc.executeNamed(ctx, "logicIndexCalendarEvent", call)
+}
+
+func LogicIndexCalendarEventBuild(args LogicIndexCalendarEventArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexCalendarEvent({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicIndexDocument -- On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.
 type LogicIndexDocumentArgs struct {
 	Event map[string]any
@@ -323,6 +343,86 @@ func (qc *QueryClient) LogicIndexGeneratedOutput(ctx context.Context, args Logic
 func LogicIndexGeneratedOutputBuild(args LogicIndexGeneratedOutputArgs) string {
 	var b strings.Builder
 	b.WriteString("logicIndexGeneratedOutput({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// LogicIndexLiveSource -- On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (private sources); workspace-scoped visibility is a follow-up.
+type LogicIndexLiveSourceArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexLiveSource calls the engine logic logicIndexLiveSource.
+func (qc *QueryClient) LogicIndexLiveSource(ctx context.Context, args LogicIndexLiveSourceArgs) (*Result, error) {
+	call := LogicIndexLiveSourceBuild(args)
+	return qc.executeNamed(ctx, "logicIndexLiveSource", call)
+}
+
+func LogicIndexLiveSourceBuild(args LogicIndexLiveSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexLiveSource({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// LogicIndexMemory -- On v1:library:memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated).
+type LogicIndexMemoryArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexMemory calls the engine logic logicIndexMemory.
+func (qc *QueryClient) LogicIndexMemory(ctx context.Context, args LogicIndexMemoryArgs) (*Result, error) {
+	call := LogicIndexMemoryBuild(args)
+	return qc.executeNamed(ctx, "logicIndexMemory", call)
+}
+
+func LogicIndexMemoryBuild(args LogicIndexMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexMemory({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// LogicIndexNote -- On v1:notes:note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated).
+type LogicIndexNoteArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexNote calls the engine logic logicIndexNote.
+func (qc *QueryClient) LogicIndexNote(ctx context.Context, args LogicIndexNoteArgs) (*Result, error) {
+	call := LogicIndexNoteBuild(args)
+	return qc.executeNamed(ctx, "logicIndexNote", call)
+}
+
+func LogicIndexNoteBuild(args LogicIndexNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexNote({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
+// LogicIndexTodo -- On v1:todos:todo creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated).
+type LogicIndexTodoArgs struct {
+	Event map[string]any
+}
+
+// LogicIndexTodo calls the engine logic logicIndexTodo.
+func (qc *QueryClient) LogicIndexTodo(ctx context.Context, args LogicIndexTodoArgs) (*Result, error) {
+	call := LogicIndexTodoBuild(args)
+	return qc.executeNamed(ctx, "logicIndexTodo", call)
+}
+
+func LogicIndexTodoBuild(args LogicIndexTodoArgs) string {
+	var b strings.Builder
+	b.WriteString("logicIndexTodo({")
 	b.WriteString("event: ")
 	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString("})")

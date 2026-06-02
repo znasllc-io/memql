@@ -13,8 +13,9 @@
 // ARE server-side -- they're the high-cardinality narrowing that
 // matters; search is the cheap client-side refinement on top.
 
-use library.concepts.{ artifact, generatedOutput }
-use library.shapes.{ artifactFull, generatedOutputFull }
+use library.concepts.{ artifact, generatedOutput, memory }
+use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, liveSnapshotFreshness }
+use knowledge.concepts.{ liveSnapshot }
 
 @enabled
 @description("List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.")
@@ -71,4 +72,24 @@ query generatedOutput queryGeneratedOutputById {
   }
   filter  ?.id==args.outputId; payload.ownerUserId==actor.userId
   shape   generatedOutputFull
+}
+
+@enabled
+@description("Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.")
+query memory queryMemoryById {
+  args {
+    memoryId  string  @required
+  }
+  filter  ?.id==args.memoryId; payload.ownerUserId==actor.userId
+  shape   memoryFull
+}
+
+@enabled
+@description("Live-data freshness drill-in: fetch the cached snapshots for a live source so the Library can render the LIVE badge + 'fetched X ago' indicator (and the latest result on open). Returns every snapshot for the source; the panel picks the most recent by materializedAt. Reads are by liveSourceId -- the live source itself carries the ownership / scope decision (#696).")
+query liveSnapshot queryLatestLiveSnapshotForSource {
+  args {
+    liveSourceId  string  @required
+  }
+  filter  payload.liveSourceId==args.liveSourceId
+  shape   liveSnapshotFreshness
 }
