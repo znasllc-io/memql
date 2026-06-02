@@ -65,8 +65,6 @@ Quick access to all memQL documentation by topic.
 | **Polyphon Architecture** | [docs/polyphon-architecture.md](docs/polyphon-architecture.md) | Multi-agent voice pipeline (LiveKit + ASR/TTS) |
 | **Claw Tools** | [tools/v1/claw/](tools/v1/claw/) | OpenClaw/NemoClaw coding agent tools (.memql) |
 | **Claw Compose** | [docker/docker-compose.nemoclaw.yml](docker/docker-compose.nemoclaw.yml) | OpenClaw (hardened) Docker overlay for development |
-| **Claw Cloud Run** | [service.nemoclaw.yaml](service.nemoclaw.yaml) | Multi-container Cloud Run service (memQL + OpenClaw sidecar) |
-| **Claw Build** | [cloudbuild.nemoclaw.yaml](cloudbuild.nemoclaw.yaml) | Cloud Build pipeline for OpenClaw deployment |
 | **Space Concept** | [concepts/v1/cognition/space/concept.memql](concepts/v1/cognition/space/concept.memql) | Three-state lifecycle (active/saved/archived/scheduled) + daily-space kind |
 | **Audio Streaming** | [docs/api/audio-streaming.md](docs/api/audio-streaming.md) | Audio WebSocket + gRPC streaming transcription |
 | **Cognition (Routing + Conductor)** | `integrations/cognition/cognition_handler.go` | Unified single-LLM-brain text dispatch (router lives only on the voice path) |
@@ -93,7 +91,7 @@ Quick access to all memQL documentation by topic.
 | **Node System** | [component/node/CLAUDE.md](component/node/CLAUDE.md) | Node types, bootstrap strategy, peer mesh, NodeService proto |
 | **Cluster Concepts** | [concepts/v1/cluster/](concepts/v1/cluster/) | Cluster concepts (node, node-type, spawn-event) |
 | **Cluster Docker** | [docker/docker-compose.cluster.yml](docker/docker-compose.cluster.yml) | Multi-node local development |
-| **Cloud Run Configs** | [infra/cluster/](infra/cluster/) | Per-node Cloud Run service configs |
+| **AKS Manifests** | [deploy/k8s/](deploy/k8s/) | Per-node Kubernetes manifests (see DEPLOYMENT_STRATEGY.md) |
 
 ---
 
@@ -117,7 +115,7 @@ Quick access to all memQL documentation by topic.
 | **View logs** | `docker compose -f docker/docker-compose.full.yml logs -f` | Stream container logs |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Open PostgreSQL shell |
 | **Run tests** | `go test ./...` | Run Go test suite |
-| **Deploy to staging** | `gcloud run deploy` | Deploy to Cloud Run |
+| **Deploy to staging** | `make deploy VERSION=X` | Deploy to Azure AKS (see DEPLOYMENT_STRATEGY.md) |
 
 ---
 
@@ -143,7 +141,6 @@ Quick access to directory-level documentation:
 - [Access Model](docs/auth/access-model.md) - Identity / user / partition-access data model + verifier middleware
 - [User Provisioning](docs/auth/user-provisioning.md) - Registration modes, magic-link flow, invitations
 - [Identity Service (Operator Guide)](docs/auth/identity-service.md) - Env vars, key management, anti-abuse tuning
-- [Service Account Setup](docs/SERVICE_ACCOUNT_SETUP.md) - GCP deployment service account
 
 ### Workers (Computer Use)
 - [Workers Runbook](docs/workers/runbook.md) - Operator guide: install, permission model, audit, common ops, failure modes
@@ -162,9 +159,8 @@ Quick access to directory-level documentation:
 - [Troubleshooting](QUICKSTART.md#troubleshooting) - Common issues
 
 ### Deployment & Infrastructure
-- [Deployment Strategy](DEPLOYMENT_STRATEGY.md) - Deploy to Cloud Run
+- [Deployment Strategy](DEPLOYMENT_STRATEGY.md) - Deploy to Azure AKS (topology, gates, promotion)
 - [Infrastructure Overview](INFRASTRUCTURE.md) - All environments
-- [Service Account Setup](docs/SERVICE_ACCOUNT_SETUP.md) - GCP deployment credentials
 - [Docker Setup](docker/README.md) - Local Docker stack
 
 ---

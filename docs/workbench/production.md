@@ -1,9 +1,15 @@
 # Workbench Production Deployment (Future Work)
 
+> **SUPERSEDED (GCP-era):** the cluster now runs on **Azure Kubernetes
+> Service**, not GCP Cloud Run. The Cloud Run / `gcloud` / GCS-FUSE
+> specifics below are stale and retained only as a record of design
+> intent. The remote-workbench node needs an **AKS rewrite** (a
+> `workbench` Deployment + a workspace volume + `NodeService` routing)
+> when production workbench is built. See
+> [DEPLOYMENT_STRATEGY.md](../../DEPLOYMENT_STRATEGY.md) for the live model.
+
 **Status:** Deferred. The code is committed and tested; deployment
-is gated on the broader production rollout. Cross this bridge when
-you're ready to deploy memQL services to GCP Cloud Run in a
-multi-node topology.
+is gated on the broader production rollout.
 
 This doc catalogs what needs to happen to move the workbench from
 the in-process MVP (documented in [runbook.md](runbook.md)) to a

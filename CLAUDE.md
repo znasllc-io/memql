@@ -71,7 +71,7 @@ memQL/
 ├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate, admin-preview)
 ├── scripts/           Database and migration scripts
 ├── infra/             Infrastructure configuration
-│   └── cluster/       Cloud Run service configs per node type
+│   └── cluster/       (legacy GCP configs removed; AKS manifests live in deploy/k8s/)
 ├── docs/              Documentation
 ├── docker/            Full Docker stack + cluster mode
 └── .claude/
@@ -237,8 +237,8 @@ frontend coordination.
 | Environment | Database | Service | Access |
 |-------------|----------|---------|--------|
 | **Development** | Docker PostgreSQL + TimescaleDB | Docker memQL container | All developers |
-| **Staging** | Tiger Cloud (Timescale Cloud) | Google Cloud Run (us-central1) | All developers |
-| **Production** | Tiger Cloud (separate instance) | Google Cloud Run (production) | Senior/Lead only |
+| **Staging** | Tiger Cloud (Timescale Cloud) | Azure Kubernetes Service (`aks-memql-staging`) | All developers |
+| **Production** | Tiger Cloud (separate instance) | Azure Kubernetes Service | Senior/Lead only |
 
 ### Hardware Requirements
 - **Platform:** macOS (Apple Silicon)
@@ -398,7 +398,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
 | **Auth (identity service)** | `/auth/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing |
-| **Health check** | `/healthz` | Docker and Cloud Run health probes expect HTTP GET |
+| **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
 
@@ -658,7 +658,7 @@ the agent used no trained sources, citations is an empty array.
   - SI calls routed through memQL's centralized provider system
 - **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
 - **Development:** Docker Compose overlay (`docker-compose.nemoclaw.yml`, port 18789)
-- **Cloud:** Cloud Run multi-container sidecar (`service.nemoclaw.yaml`)
+- **Cloud:** runs as a sidecar container alongside the agent node on AKS
 - **Agent capability:** `claw` flag on agent concept enables coding tools
 - **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
 
@@ -747,7 +747,7 @@ computer).
 
 See [docs/workbench/runbook.md](docs/workbench/runbook.md) for the
 MVP test path and [docs/workbench/production.md](docs/workbench/production.md)
-for the cluster-mode + Cloud Run deployment plan (deferred until
+for the cluster-mode deployment plan (deferred until
 production cutover).
 
 - **Agent capability:** `workbench_use` slug. Universal --
@@ -1592,8 +1592,8 @@ See [docs/auth/access-model.md](docs/auth/access-model.md) for the full model.
 | Environment | Database | Application | Developer Access | Purpose |
 |-------------|----------|-------------|------------------|---------|
 | **Development** | Docker (localhost) | Docker | All developers | Local development |
-| **Staging** | Tiger Cloud (Timescale) | Google Cloud Run | All developers | Integration testing |
-| **Production** | Tiger Cloud (separate) | Google Cloud Run | Senior/Lead only | Live system |
+| **Staging** | Tiger Cloud (Timescale) | Azure Kubernetes Service | All developers | Integration testing |
+| **Production** | Tiger Cloud (separate) | Azure Kubernetes Service | Senior/Lead only | Live system |
 
 **Key Principle:** Development environment is completely isolated from staging and production databases.
 
