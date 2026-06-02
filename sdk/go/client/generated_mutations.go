@@ -216,6 +216,51 @@ func MutationArchiveSpaceBuild(args MutationArchiveSpaceArgs) string {
 	return b.String()
 }
 
+// MutationAssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
+//
+// Bound concept: responsibility.
+type MutationAssignResponsibilityArgs struct {
+	ResponsibilityId string
+	// Enum: assistant | specialist
+	TargetKind       string
+	AssignedAgentId  string
+	AssignedRoleSlug string
+}
+
+// MutationAssignResponsibility calls the engine mutation mutationAssignResponsibility.
+func (qc *QueryClient) MutationAssignResponsibility(ctx context.Context, args MutationAssignResponsibilityArgs) (*Result, error) {
+	call := MutationAssignResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "mutationAssignResponsibility", call)
+}
+
+func MutationAssignResponsibilityBuild(args MutationAssignResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAssignResponsibility({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetKind: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	if args.AssignedAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
+	}
+	if args.AssignedRoleSlug != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedRoleSlug: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationAttachDocumentToDomain -- Attach a validated Document to a knowledge domain. Triggers lazy embedding of typed items into documentChunk for that domain.
 //
 // Bound concept: document.
