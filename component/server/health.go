@@ -35,6 +35,24 @@ var (
 	// servers tear down -- closing the SIGTERM-vs-endpoint-removal race
 	// that otherwise drops in-flight connections on every rollout.
 	draining atomic.Bool
+
+	// activeStreams counts currently-open MemqlService.Stream sessions
+	// on this pod (browser WS->gRPC and direct gRPC). The gRPC Stream
+	// handler increments on open and decrements on close. Blue/green BFF
+	// (#616) reads this via /healthz so the cutover script can keep an
+	// OLD-color pod alive until it has drained to 0 active streams
+	// (existing users finish on their current version) before tearing the
+	// color down.
+	//
+	// Drain definition (#616, owner-resolved): the BFF color drain counts
+	// ONLY the user-facing MemqlService.Stream -- the browser login anchor.
+	// Node (mesh) and Worker streams ride NodeService / WorkerService and
+	// are infra, not user logins; VoiceAgent lives on voice nodes, not the
+	// BFF. So MemqlService.Stream is the load-bearing count for "have all
+	// the users on this color gone home yet?" and the only one incremented
+	// here. (The same binary runs every node type, so non-BFF pods also
+	// maintain this counter harmlessly; the cutover only polls BFF pods.)
+	activeStreams atomic.Int64
 )
 
 // SetDraining marks the node as draining (or clears it). Called from the
@@ -44,6 +62,21 @@ func SetDraining(d bool) { draining.Store(d) }
 
 // IsDraining reports whether the node is in its shutdown drain window.
 func IsDraining() bool { return draining.Load() }
+
+// StreamOpened records a newly-opened MemqlService.Stream session and
+// returns the new active count. Concurrency-safe. Pair every call with a
+// deferred StreamClosed in the Stream handler. (#616)
+func StreamOpened() int64 { return activeStreams.Add(1) }
+
+// StreamClosed records a closed MemqlService.Stream session and returns the
+// new active count. Concurrency-safe. (#616)
+func StreamClosed() int64 { return activeStreams.Add(-1) }
+
+// ActiveStreams reports the number of currently-open MemqlService.Stream
+// sessions on this pod. The blue/green cutover (#616) polls this (via the
+// activeStreams field of /healthz) to know when an OLD-color pod has
+// drained its existing connections and is safe to remove. (#616)
+func ActiveStreams() int64 { return activeStreams.Load() }
 
 // SetNodeIdentity stores the node identity so /healthz can include it.
 // Called from app/cluster.go after the node identity is created.
@@ -127,8 +160,9 @@ func buildHealthResponse() GetHealthzResponseObject {
 			status = "draining"
 		}
 		resp := GetHealthz503JSONResponse{
-			Status:       status,
-			Dependencies: statuses,
+			Status:        status,
+			ActiveStreams: ActiveStreams(),
+			Dependencies:  statuses,
 		}
 		if id != nil {
 			resp.NodeId = id.NodeId
@@ -140,8 +174,9 @@ func buildHealthResponse() GetHealthzResponseObject {
 	}
 
 	resp := GetHealthz200JSONResponse{
-		Status:       "ok",
-		Dependencies: statuses,
+		Status:        "ok",
+		ActiveStreams: ActiveStreams(),
+		Dependencies:  statuses,
 	}
 	if id != nil {
 		resp.NodeId = id.NodeId

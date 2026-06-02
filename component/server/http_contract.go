@@ -51,20 +51,27 @@ type (
 		VisitGetHealthzResponse(http.ResponseWriter) error
 	}
 	GetHealthz200JSONResponse struct {
-		Status       string                   `json:"status"`
-		NodeId       string                   `json:"nodeId,omitempty"`
-		NodeType     string                   `json:"nodeType,omitempty"`
-		Flavor       string                   `json:"flavor,omitempty"`
-		GRPCAddress  string                   `json:"grpcAddress,omitempty"`
-		Dependencies []dependencyHealthStatus `json:"dependencies"`
+		Status string `json:"status"`
+		NodeId string `json:"nodeId,omitempty"`
+		// ActiveStreams: open MemqlService.Stream sessions on this pod.
+		// Always serialized (including 0) so the blue/green cutover (#616)
+		// can poll it to know when an OLD-color pod has drained.
+		ActiveStreams int64                    `json:"activeStreams"`
+		NodeType      string                   `json:"nodeType,omitempty"`
+		Flavor        string                   `json:"flavor,omitempty"`
+		GRPCAddress   string                   `json:"grpcAddress,omitempty"`
+		Dependencies  []dependencyHealthStatus `json:"dependencies"`
 	}
 	GetHealthz503JSONResponse struct {
-		Status       string                   `json:"status"`
-		NodeId       string                   `json:"nodeId,omitempty"`
-		NodeType     string                   `json:"nodeType,omitempty"`
-		Flavor       string                   `json:"flavor,omitempty"`
-		GRPCAddress  string                   `json:"grpcAddress,omitempty"`
-		Dependencies []dependencyHealthStatus `json:"dependencies"`
+		Status string `json:"status"`
+		NodeId string `json:"nodeId,omitempty"`
+		// ActiveStreams: see GetHealthz200JSONResponse. A draining OLD-color
+		// pod reports 503 here while activeStreams winds down toward 0 (#616).
+		ActiveStreams int64                    `json:"activeStreams"`
+		NodeType      string                   `json:"nodeType,omitempty"`
+		Flavor        string                   `json:"flavor,omitempty"`
+		GRPCAddress   string                   `json:"grpcAddress,omitempty"`
+		Dependencies  []dependencyHealthStatus `json:"dependencies"`
 	}
 	// Automation trigger types
 	PostAutomationTriggerRequestObject struct {

@@ -22,7 +22,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/bus"
-	"github.com/znasllc-io/memql/core/grpctls"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -33,7 +32,9 @@ import (
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/component/provenance"
+	healthsrv "github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/grpctls"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
@@ -503,10 +504,17 @@ func (s *service) Stream(stream memqlv1.MemqlService_StreamServer) error {
 	session := newStreamSession(s, stream, identity)
 	session.requestMeta = requestMeta
 
+	// Blue/green drain accounting (#616): count this open MemqlService.Stream
+	// so /healthz reports it and the cutover script can keep an OLD-color pod
+	// alive until its existing connections drain to 0. Paired decrement in the
+	// defer below.
+	healthsrv.StreamOpened()
+
 	// Emit session opened event with full identity for user provisioning automation
 	s.publishSessionEvent(events.TopicSessionOpened, events.KindSessionOpened, identity)
 
 	defer func() {
+		healthsrv.StreamClosed()
 		session.shutdown()
 		// Emit session closed event
 		s.publishSessionEvent(events.TopicSessionClosed, events.KindSessionClosed, identity)
