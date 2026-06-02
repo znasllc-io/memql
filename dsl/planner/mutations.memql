@@ -266,6 +266,58 @@ mutation plan mutationCreateScopeElevationPlan {
   }
 }
 
+// mutationRequestPlanFeedback
+// ===========================
+//
+// Transition an EXISTING, running Plan to awaitingFeedback /
+// feedback_required when the owning agent (via the requestUserFeedback
+// tool) needs the user to supply missing detail mid-task. The generic
+// counterpart to mutationCreateScopeElevationPlan: that one INSERTS a
+// fresh scope-elevation Plan; this one UPDATEs the Plan the agent is
+// already running inside (so the chat anchor, goal, ownership, phases,
+// and accumulated metrics are all preserved).
+//
+// Partial-update via update() -- only status / feedbackReason /
+// feedbackRequest change; every @required field inherits from the
+// prior row.
+//
+// Triggered by:
+//   - integrations/agents/integration.go:handleRequestUserFeedback,
+//     invoked by the agent's `requestUserFeedback` tool.
+//
+// Resulting state:
+//   status          = "awaitingFeedback"
+//   feedbackReason  = "feedback_required"
+//   feedbackRequest = { question, kind: choice|text|multi,
+//                       options?: [{label, value}], askedAt,
+//                       timeoutAt? }
+//
+// Resume (existing mechanism, unchanged): the user's answer stamps
+// Plan.feedbackResponse {response, respondedBy, respondedAt} and bumps
+// status back to running; the planner integration's
+// awaitingFeedback -> running subscriber re-invokes the owning agent
+// with the persisted TaskState + feedbackResponse in context.
+//
+// The plan.awaitingFeedback canvas-card producer for the
+// feedback_required variant lives in the BFF
+// (memql-bff-copresent/dsl/copresent/) and ships in the follow-up BFF
+// wave; only the scope_elevation_required producer exists today.
+
+@enabled
+@description("Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.")
+mutation plan mutationRequestPlanFeedback {
+  args {
+    planId           string  @required
+    feedbackRequest  object  @required
+  }
+  update plan {
+    id: args.planId
+    status: "awaitingFeedback"
+    feedbackReason: "feedback_required"
+    args.feedbackRequest
+  }
+}
+
 @enabled
 @description("Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.")
 mutation task mutationCreateTask {

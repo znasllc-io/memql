@@ -35,8 +35,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -108,6 +110,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"role":    "string -- specialist roleSlug (e.g. accounting-finance, human-resources)",
 				"query":   "string -- what the assistant wants the specialist to answer",
 				"context": "object (optional) -- conversation context attached by the assistant",
+			},
+		},
+		{
+			Name:        "requestUserFeedback",
+			Description: "Transition the active Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this BEFORE guessing when it (or a specialist it fronts for) needs missing detail from the user. The user's answer (Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.",
+			Handler:     i.handleRequestUserFeedback,
+			ArgsSchema: map[string]string{
+				"question":    "string (required) -- the question to put to the user",
+				"kind":        "string (required) -- choice / text / multi response widget",
+				"options":     "array (optional) -- [{label, value}] for choice / multi",
+				"timeoutAt":   "string (optional) -- RFC3339 auto-pause deadline",
+				"agentId":     "string (required) -- calling agent id (auto-stamped)",
+				"ownerUserId": "string (required) -- session-owner user id (auto-stamped)",
+				"planId":      "string (required) -- the active Plan to park (auto-stamped)",
+				"spaceId":     "string (optional) -- target space (auto-stamped)",
 			},
 		},
 	}
@@ -297,6 +314,139 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 		CreatedBy: systemActorId,
 		Payload:   payloadBytes,
 	}}, nil
+}
+
+// handleRequestUserFeedback transitions the active Plan to
+// awaitingFeedback / feedback_required so the user is asked for the
+// detail the agent is missing. The generic counterpart to the worker
+// integration's handleRequestScope (scope_elevation_required); this is
+// the feedback_required variant, agent-callable mid-turn.
+//
+//	args["question"]    string  required -- what to ask the user
+//	args["kind"]        string  required -- choice / text / multi
+//	args["options"]     array   optional -- [{label, value}] for choice / multi
+//	args["timeoutAt"]   string  optional -- RFC3339 auto-pause deadline
+//	args["agentId"]     string  required -- auto-stamped by the streaming loop
+//	args["ownerUserId"] string  required -- auto-stamped by the streaming loop
+//	args["planId"]      string  required -- the active Plan (auto-stamped)
+//
+// Returns ONE MemoryNode whose payload is a small ack
+// {status:"awaiting_user", planId, kind}. The agent reads it, emits a
+// short respondToUser acknowledgement, and ends its turn; the user's
+// answer is the gate.
+func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil {
+		return nil, fmt.Errorf("requestUserFeedback: agents integration not initialized")
+	}
+
+	question := strings.TrimSpace(asString(args["question"]))
+	if question == "" {
+		return nil, fmt.Errorf("requestUserFeedback: 'question' is required")
+	}
+	kind := strings.TrimSpace(asString(args["kind"]))
+	switch kind {
+	case "choice", "text", "multi":
+		// valid
+	case "":
+		return nil, fmt.Errorf("requestUserFeedback: 'kind' is required (choice / text / multi)")
+	default:
+		return nil, fmt.Errorf("requestUserFeedback: 'kind' must be choice / text / multi (got %q)", kind)
+	}
+
+	planId := strings.TrimSpace(asString(args["planId"]))
+	if planId == "" {
+		return nil, fmt.Errorf("requestUserFeedback: 'planId' required (auto-injection failed -- no active Plan in the turn context)")
+	}
+	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+
+	// Build the feedbackRequest object the canvas card renders. Mirrors
+	// the planner agent loop's escalateAwaitingFeedback shape + the
+	// concept doc on plan.feedbackRequest.
+	fbReq := map[string]any{
+		"question": question,
+		"kind":     kind,
+		"askedAt":  time.Now().UTC().Format(time.RFC3339),
+	}
+	if opts, ok := args["options"].([]any); ok && len(opts) > 0 {
+		fbReq["options"] = opts
+	}
+	if timeoutAt := strings.TrimSpace(asString(args["timeoutAt"])); timeoutAt != "" {
+		fbReq["timeoutAt"] = timeoutAt
+	}
+	fbReqJSON, err := json.Marshal(fbReq)
+	if err != nil {
+		return nil, fmt.Errorf("requestUserFeedback: marshal feedbackRequest: %w", err)
+	}
+
+	if i.engine == nil {
+		return nil, fmt.Errorf("requestUserFeedback: engine handle missing")
+	}
+
+	// The mutation runs as the OWNING USER so the parked Plan's row
+	// createdBy lands as the user (correct for ownership / audit). The
+	// agent-tool dispatch path doesn't carry the user's JWT into the
+	// per-tool context, so without this the update path would fail with
+	// "no actor found in context". Same pattern the worker integration's
+	// handleRequestScope uses for the scope-elevation mutation.
+	mutationCtx := withUserActor(ctx, ownerUserId)
+
+	q := fmt.Sprintf(
+		`mutationRequestPlanFeedback({planId:%q, feedbackRequest:%s})`,
+		planId, string(fbReqJSON),
+	)
+	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
+		return nil, fmt.Errorf("requestUserFeedback: mutationRequestPlanFeedback failed: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"status":  "awaiting_user",
+		"planId":  planId,
+		"kind":    kind,
+		"message": "Feedback request emitted; the Plan is now awaitingFeedback. Reply with a short acknowledgement and end your turn -- the user's answer resumes the Plan.",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("requestUserFeedback: marshal ack: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        fmt.Sprintf("requestUserFeedback-envelope:%s:%d", planId, time.Now().UnixNano()),
+		Concept:   envelopeConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		CreatedBy: systemActorId,
+		Payload:   payload,
+	}}, nil
+}
+
+// withUserActor stamps a synthetic user actor on the context so a
+// mutation invoked from the agent tool-loop (which doesn't carry the
+// user's JWT into the per-tool context) writes rows attributed to the
+// owning user. Mirrors integrations/agent/worker/integration.go's
+// withUserActor; no-op when ownerUserId is empty (the mutation then
+// runs under whatever actor the inbound context already carries).
+func withUserActor(ctx context.Context, ownerUserId string) context.Context {
+	if strings.TrimSpace(ownerUserId) == "" {
+		return ctx
+	}
+	claims := map[string]any{
+		"sub":   ownerUserId,
+		"email": ownerUserId,
+		"role":  "user",
+	}
+	token := auth.BuildTokenInfo(claims)
+	ctx = auth.ContextWithClaims(ctx, claims)
+	return auth.ContextWithToken(ctx, token)
+}
+
+// asString coerces an arg value to a trimmed-friendly string, returning
+// "" for nil / non-string values. Callers TrimSpace as needed.
+func asString(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // createInvocationPlan mints the v1:planner:plan row. The planner

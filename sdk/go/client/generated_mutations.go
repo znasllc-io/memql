@@ -7378,6 +7378,34 @@ func MutationRenameSpaceBuild(args MutationRenameSpaceArgs) string {
 	return b.String()
 }
 
+// MutationRequestPlanFeedback -- Transition an existing running Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. Backs the requestUserFeedback agent tool. Partial-update via update() -- only status / feedbackReason / feedbackRequest change; required fields inherit from the prior row. The user's answer (feedbackResponse + status->running) resumes the Plan via the existing planner re-invocation path.
+//
+// Bound concept: plan.
+type MutationRequestPlanFeedbackArgs struct {
+	PlanId          string
+	FeedbackRequest map[string]any
+}
+
+// MutationRequestPlanFeedback calls the engine mutation mutationRequestPlanFeedback.
+func (qc *QueryClient) MutationRequestPlanFeedback(ctx context.Context, args MutationRequestPlanFeedbackArgs) (*Result, error) {
+	call := MutationRequestPlanFeedbackBuild(args)
+	return qc.executeNamed(ctx, "mutationRequestPlanFeedback", call)
+}
+
+func MutationRequestPlanFeedbackBuild(args MutationRequestPlanFeedbackArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRequestPlanFeedback({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("feedbackRequest: ")
+	b.WriteString(renderMemQLValue(args.FeedbackRequest))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationResetStaleAfterRefresh -- Per Q9 refresh path: zero out the staleSignalCount and stamp lastSeededAt to now() after a trainSpecialist Plan with mode='refresh' completes. Idempotent; safe to re-run.
 //
 // Bound concept: knowledgeDomain.
