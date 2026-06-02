@@ -68,6 +68,20 @@ const (
 	nodeBootstrapRetryBudgetEnv     = "MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET"
 )
 
+// envAllowInsecureNodeBootstrap is the node-side companion to the
+// identity service's MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP escape
+// hatch (component/identity/http/node_bootstrap.go). The bootstrap
+// POST must be https end-to-end (memql#626): the identity handler
+// rejects plaintext with `403 insecure_transport`, so a node pointed
+// at an http:// IDENTITY_VERIFIER_BASE_URL would fire a doomed request
+// the server bounces. We enforce the same invariant client-side so the
+// misconfig fails fast and loud at the node instead. Set to "1" to
+// allow plaintext in dev (the docker-compose stack already sets the
+// matching server-side hatch); staging/prod (k8s) leave both unset, so
+// http there is a hard, non-retryable failure -- which is the
+// regression this guard exists to catch.
+const envAllowInsecureNodeBootstrap = "MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP"
+
 // nodeBootstrapRetryBudget resolves the overall retry window from
 // MEMQL_NODE_BOOTSTRAP_RETRY_BUDGET (a Go duration string, e.g. "90s",
 // "2m"), falling back to the default. A budget of 0 means "single
@@ -203,6 +217,21 @@ func attemptBootstrapMint(ctx context.Context, logger *slog.Logger, identityBase
 	if err != nil {
 		// Misformed base URL won't fix itself -- permanent.
 		return "", false, fmt.Errorf("node bootstrap: parse identity base url %q: %w", identityBase, err)
+	}
+
+	// HTTPS-only by default (memql#626). Refuse a plaintext
+	// IDENTITY_VERIFIER_BASE_URL unless the operator opts into the dev
+	// escape hatch, mirroring the identity service's own `403
+	// insecure_transport` guard. This is a permanent (non-retryable)
+	// failure -- a retry won't turn http into https, and we'd rather
+	// surface the misconfig immediately than burn the retry budget on a
+	// POST identity will bounce.
+	if !strings.EqualFold(endpoint.Scheme, "https") &&
+		strings.TrimSpace(os.Getenv(envAllowInsecureNodeBootstrap)) != "1" {
+		return "", false, fmt.Errorf(
+			"node bootstrap: refusing insecure %q scheme for IDENTITY_VERIFIER_BASE_URL %q -- "+
+				"the bootstrap call must be https end-to-end (set %s=1 to allow plaintext in dev)",
+			endpoint.Scheme, identityBase, envAllowInsecureNodeBootstrap)
 	}
 
 	payload, err := json.Marshal(map[string]string{

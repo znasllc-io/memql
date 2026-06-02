@@ -280,6 +280,41 @@ function deep_authenticated_query() {
     fi
 }
 
+# 5b. DEEP: node bootstrap transport is https end-to-end (memql#626).
+# The node-side bootstrap client (component/node/bootstrap_token.go) and
+# the identity-side handler (component/identity/http/node_bootstrap.go)
+# both enforce https: a plaintext POST to /node/bootstrap must NEVER
+# mint a token -- it gets `403 insecure_transport` (or is redirected to
+# https by the edge), never a 200 success. This asserts the server end
+# of that invariant from the front door so an http regression (a deploy
+# manifest reverting IDENTITY_VERIFIER_BASE_URL to http://, or the edge
+# dropping TLS enforcement) is caught in the promotion gate. The node
+# (client) end is covered by the Go regression test
+# TestMaybeBootstrapNodeToken_RefusesInsecureHTTP.
+function check_bootstrap_transport() {
+    if ! is_deep; then return; fi
+    section "5b. Node bootstrap transport (https end-to-end, #626)"
+
+    # POST over plaintext http (port 80). A correctly-secured edge either
+    # 301/302/308-redirects to https, refuses the connection (000), or --
+    # if the request reaches the identity handler in cleartext -- returns
+    # 403 insecure_transport. The ONLY unacceptable outcome is a 200 that
+    # mints a token over cleartext.
+    local code
+    code="$(http_status POST "http://$IDENTITY_HOST/node/bootstrap" \
+        -H 'Content-Type: application/json' \
+        -H 'Authorization: Bootstrap smoke-probe-not-a-real-secret' \
+        --data '{"nodeId":"v1:cluster:node:smoke-probe","nodeType":"bff"}')"
+    case "$code" in
+        301|302|303|307|308) pass "plaintext /node/bootstrap is redirected to https (HTTP $code) -- no cleartext mint" ;;
+        403) pass "plaintext /node/bootstrap rejected with 403 (insecure_transport enforced)" ;;
+        401|400) pass "plaintext /node/bootstrap reached the handler and was rejected pre-mint (HTTP $code; TLS-terminating edge already secured the hop)" ;;
+        000) pass "plaintext /node/bootstrap refused at the connection level (no port 80 / TLS-only edge)" ;;
+        200) fail "plaintext /node/bootstrap returned 200 -- a token was minted over CLEARTEXT (the #626 regression: https not enforced end-to-end)" ;;
+        *) fail "plaintext /node/bootstrap returned unexpected HTTP $code -- expected a redirect, 403 insecure_transport, or a refused connection" ;;
+    esac
+}
+
 # 6. Voice path: /memql/audio is reachable over https (secure context).
 function check_voice_path() {
     section "6. Voice path (/memql/audio over https)"
@@ -403,7 +438,9 @@ Checks:
               /memql/ws + /memql/audio wiring, SPA boot assets, identity styling.
     deep:     all baseline checks PLUS a real authenticated WS query that fans
               BFF -> cognition/agent (catches the issuer/mesh/auth-WS class that
-              front-door-green hid in the 0.9.6 incident).
+              front-door-green hid in the 0.9.6 incident), PLUS a node-bootstrap
+              transport probe asserting plaintext /node/bootstrap never mints a
+              token over cleartext (the #626 https-end-to-end invariant).
 
 Not yet asserted here (tracked #627 follow-ups -- they need infra beyond the
 front door): automation_execution_claims table presence (needs a server-side
@@ -443,6 +480,7 @@ function main() {
     check_identity
     check_auth_surface
     check_bff_ws
+    check_bootstrap_transport
     check_voice_path
     check_spa_boot
     check_identity_styling
