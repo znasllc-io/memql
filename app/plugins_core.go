@@ -24,6 +24,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"
 	_ "github.com/znasllc-io/memql/integrations/gcs"
 	_ "github.com/znasllc-io/memql/integrations/harnessrecall"
+	_ "github.com/znasllc-io/memql/integrations/harnesstrace"
 	_ "github.com/znasllc-io/memql/integrations/identity"
 	_ "github.com/znasllc-io/memql/integrations/knowledge"
 	_ "github.com/znasllc-io/memql/integrations/liveavatar"
