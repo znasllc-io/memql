@@ -126,6 +126,22 @@ function http_body() {
     curl -sS --max-time "$CURL_TIMEOUT" "$@" "$url" 2>/dev/null || true
 }
 
+# poll_http_status URL WANT [attempts] [nap] -- repeatedly GETs URL until it
+# returns WANT, echoing the final status. Absorbs the rolling-update + ingress
+# endpoint-convergence window after a fresh rollout (the gate runs right after
+# `kubectl rollout status`, when the ingress can still briefly load-balance
+# across mixed-version pods -- e.g. a terminating old-version identity pod).
+# Defaults: 6 attempts, 5s apart (~30s). #682.
+function poll_http_status() {
+    local url="$1" want="$2" attempts="${3:-6}" nap="${4:-5}" code="000" i
+    for ((i = 1; i <= attempts; i++)); do
+        code="$(http_status GET "$url")"
+        if [ "$code" = "$want" ]; then echo "$code"; return 0; fi
+        if [ "$i" -lt "$attempts" ]; then sleep "$nap"; fi
+    done
+    echo "$code"
+}
+
 # ws_key -- a fresh RFC 6455 Sec-WebSocket-Key (base64 of 16 random bytes).
 # Generated per call rather than hardcoded: a real client sends a random
 # nonce, and a static one trips secret scanners as a false positive.
@@ -167,7 +183,7 @@ function check_identity() {
     section "2. Identity health + JWKS"
 
     local code
-    code="$(http_status GET "https://$IDENTITY_HOST/healthz")"
+    code="$(poll_http_status "https://$IDENTITY_HOST/healthz" 200)"
     if [ "$code" = "200" ]; then
         pass "identity /healthz is green (200)"
     else
@@ -210,7 +226,7 @@ function check_readiness() {
     section "2b. Server-side readiness (/readyz schema invariants)"
 
     local code body
-    code="$(http_status GET "https://$IDENTITY_HOST/readyz")"
+    code="$(poll_http_status "https://$IDENTITY_HOST/readyz" 200)"
     case "$code" in
         200)
             body="$(http_body "https://$IDENTITY_HOST/readyz")"
@@ -427,7 +443,7 @@ function check_spa_boot() {
 function check_identity_styling() {
     section "8. Identity web styling (/static/app.css)"
     local url="https://$IDENTITY_HOST/static/app.css" code bytes
-    code="$(http_status GET "$url")"
+    code="$(poll_http_status "$url" 200)"
     bytes="$(http_body "$url" | wc -c | tr -d ' ')"
     if [ "$code" = "200" ] && [ "${bytes:-0}" -gt 100 ]; then
         pass "identity stylesheet served (/static/app.css -> HTTP 200, ${bytes} bytes)"
