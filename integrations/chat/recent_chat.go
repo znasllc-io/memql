@@ -6,7 +6,7 @@
 //	readRecent({count?})                 -- last N utterances
 //	readByKeyword({keyword})             -- recent utterances containing a substring
 //	readByTime({fromTime, toTime})       -- utterances in an ISO-8601 window
-//	getSpaceContext()                    -- title, purpose, status
+//	getSpaceContext()                    -- title, goal, status
 //	listParticipants()                   -- humans + agents currently active
 //
 // Single-chat architecture: every space carries one v1:cognition:utterance
@@ -188,7 +188,7 @@ func (c *Integration) getSpaceContext(ctx context.Context, spaceId string) ([]me
 		"operation":    "getSpaceContext",
 		"spaceId":      spaceId,
 		"title":        payload["title"],
-		"purpose":      payload["purpose"],
+		"goal":         payload["goal"],
 		"status":       payload["status"],
 		"architecture": payload["architecture"],
 	}

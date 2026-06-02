@@ -59,6 +59,18 @@ CURL_TIMEOUT="${CURL_TIMEOUT:-15}"
 SMOKE_EMAIL="${SMOKE_EMAIL:-}"
 MEMQL_SMOKE_TOKEN="${MEMQL_SMOKE_TOKEN:-}"
 
+# SMOKE_PROFILE selects the gate's strictness (znasllc-io/memql#627):
+#   baseline -- front-door reachability. Deep checks that lack their inputs
+#               (token, ws client) SKIP, and a SKIP never fails the run. This
+#               is the developer's "is the front door up?" check.
+#   deep     -- the PROMOTION GATE. Every deep check MUST run and PASS; a
+#               missing input is a FAIL, not a SKIP. A deep run with no
+#               MEMQL_SMOKE_TOKEN fails immediately -- a gate that can't
+#               authenticate proves nothing (this is exactly how the 0.9.6
+#               deploy went 8-PASS/0-FAIL/2-SKIP green while the authenticated
+#               app was broken: issuer mismatch, WS rejection, dead mesh).
+SMOKE_PROFILE="${SMOKE_PROFILE:-baseline}"
+
 # Tallies.
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -72,10 +84,26 @@ function pass() { echo "PASS: $*"; PASS_COUNT=$((PASS_COUNT + 1)); }
 function fail() { echo "FAIL: $*"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 function skip() { echo "SKIP: $*"; SKIP_COUNT=$((SKIP_COUNT + 1)); }
 function info() { echo "INFO: $*"; }
+function warn() { echo "WARNING: $*"; }
 
 function section() {
     echo ""
     echo "----- $* -----"
+}
+
+# is_deep -- true when running the deep promotion-gate profile.
+function is_deep() { [ "$SMOKE_PROFILE" = "deep" ]; }
+
+# deep_gap MSG -- a deep check could not run because an input is missing.
+# In the deep profile this is a hard FAIL (the gate must be conclusive); in
+# baseline it is a SKIP. Centralizes the "a SKIP is never silently a PASS"
+# rule so every deep check reports the gap the same way.
+function deep_gap() {
+    if is_deep; then
+        fail "$* [deep profile requires this check to run]"
+    else
+        skip "$*"
+    fi
 }
 
 # http_status METHOD URL [extra curl args...] -- echoes the HTTP status
@@ -225,14 +253,14 @@ function check_bff_ws() {
 # cognition/agent (AI forward). Needs a token AND a ws/grpc client.
 function deep_authenticated_query() {
     if [ -z "$MEMQL_SMOKE_TOKEN" ]; then
-        skip "authenticated BFF query + cross-node AI forward -- set MEMQL_SMOKE_TOKEN (a PAT/JWT) to run a real query"
+        deep_gap "authenticated BFF query + cross-node AI forward -- set MEMQL_SMOKE_TOKEN (a PAT/JWT) to run a real query"
         return
     fi
     local ws_client=""
     if command -v websocat &> /dev/null; then ws_client="websocat"; fi
 
     if [ -z "$ws_client" ]; then
-        skip "authenticated query -- MEMQL_SMOKE_TOKEN is set but no ws client found (install 'websocat' to run the live query + AI forward)"
+        deep_gap "authenticated query -- MEMQL_SMOKE_TOKEN is set but no ws client found (install 'websocat' to run the live query + AI forward)"
         return
     fi
 
@@ -270,15 +298,85 @@ function check_voice_path() {
     esac
 }
 
+# assert_asset_loads HOST HTML EXT LABEL -- find the first /assets/*.EXT URL
+# referenced by HTML, fetch it from HOST, and assert it is HTTP 200 + non-empty.
+# Vite emits content-hashed bundles under /assets/; a 404 or empty body means
+# the SPA build/serve is broken and the app can never boot.
+function assert_asset_loads() {
+    local host="$1" html="$2" ext="$3" label="$4"
+    local path
+    path="$(echo "$html" | grep -oE '/assets/[A-Za-z0-9._-]+\.'"$ext" | head -1)"
+    if [ -z "$path" ]; then
+        fail "$label: no /assets/*.$ext reference in the $host app shell (broken build?)"
+        return
+    fi
+    local url="https://$host$path" code bytes
+    code="$(http_status GET "$url")"
+    bytes="$(http_body "$url" | wc -c | tr -d ' ')"
+    if [ "$code" = "200" ] && [ "${bytes:-0}" -gt 100 ]; then
+        pass "$label served ($path -> HTTP 200, ${bytes} bytes)"
+    else
+        fail "$label not served ($path -> HTTP $code, ${bytes} bytes) -- SPA asset build/serve broken"
+    fi
+}
+
+# 7. SPA boot assets: the app shell loads and its hashed JS + CSS bundles are
+# served non-empty. A missing/empty stylesheet or bundle is the front-door
+# signature of a broken asset build (app stuck "initializing"). Credential-free.
+# NOTE: this is an HTTP-level asset check -- it does NOT execute the bundle, so
+# it cannot catch a runtime JS error (e.g. the clientProfile.yaml #255 parse
+# class, which is COMPILED INTO the bundle) or console errors. That requires the
+# headless-browser walkthrough tier (tracked #627 follow-up).
+function check_spa_boot() {
+    section "7. SPA boot assets (app shell + hashed JS/CSS)"
+    local html
+    html="$(http_body "https://$APP_HOST/")"
+    if [ -z "$html" ]; then
+        fail "app shell https://$APP_HOST/ served no HTML"
+        return
+    fi
+    if echo "$html" | grep -qiE '<div id="root"|<div id="app"|<script'; then
+        pass "app shell HTML served (mount point + script tag present)"
+    else
+        fail "app shell HTML has no root mount / script tag -- not a valid SPA index"
+    fi
+    assert_asset_loads "$APP_HOST" "$html" "js" "SPA JS bundle"
+    assert_asset_loads "$APP_HOST" "$html" "css" "SPA stylesheet"
+}
+
+# 8. Identity web styling: the server-rendered login page's stylesheet is
+# served non-empty. The identity UI (templ) links /static/app.css, which is
+# generated by the in-image Tailwind build -- if the Dockerfile skips that step
+# the file 404s and the login renders UNSTYLED. This is the exact front-door
+# check for the identity #620 class. Credential-free.
+function check_identity_styling() {
+    section "8. Identity web styling (/static/app.css)"
+    local url="https://$IDENTITY_HOST/static/app.css" code bytes
+    code="$(http_status GET "$url")"
+    bytes="$(http_body "$url" | wc -c | tr -d ' ')"
+    if [ "$code" = "200" ] && [ "${bytes:-0}" -gt 100 ]; then
+        pass "identity stylesheet served (/static/app.css -> HTTP 200, ${bytes} bytes)"
+    else
+        fail "identity /static/app.css missing/empty (HTTP $code, ${bytes} bytes) -- unstyled login, the #620 regression (templ+Tailwind not built into the image)"
+    fi
+}
+
 function summary() {
     section "Summary"
     echo "PASS: $PASS_COUNT   FAIL: $FAIL_COUNT   SKIP: $SKIP_COUNT"
-    echo "Hosts: app=$APP_HOST identity=$IDENTITY_HOST"
+    echo "Profile: $SMOKE_PROFILE   Hosts: app=$APP_HOST identity=$IDENTITY_HOST"
     if [ "$FAIL_COUNT" -gt 0 ]; then
         echo "RESULT: FAILED ($FAIL_COUNT check(s) failed)"
         return 1
     fi
-    echo "RESULT: OK (baseline green; $SKIP_COUNT deep check(s) skipped -- see notes above)"
+    if is_deep; then
+        # In deep, deep_gap converts a missing input to a FAIL, so a zero-FAIL
+        # deep run means every gate check actually ran and passed. SKIP here can
+        # only be a non-gating optional (e.g. magic-link email) -- still report.
+        echo "RESULT: OK -- DEEP gate PASSED (authenticated WS + AI-forward + SPA assets + identity styling all green${SKIP_COUNT:+; $SKIP_COUNT non-gating skip(s)}). PROMOTABLE."
+        return 0
+    fi
+    echo "RESULT: OK (baseline green; $SKIP_COUNT deep check(s) skipped -- NOT promotable, run SMOKE_PROFILE=deep with a token to gate)"
     return 0
 }
 
@@ -292,16 +390,33 @@ Environment overrides:
     APP_HOST            Public app host       (default: app.staging.copresent.ai)
     IDENTITY_HOST       Public identity host  (default: identity.staging.copresent.ai)
     CURL_TIMEOUT        Per-request seconds   (default: 15)
-    SMOKE_EMAIL         Send a real magic link to this address (DEEP, opt-in)
-    MEMQL_SMOKE_TOKEN   PAT/JWT to run an authenticated query + AI forward (DEEP)
+    SMOKE_PROFILE       baseline | deep       (default: baseline)
+                        deep = the promotion gate: every deep check MUST run and
+                        PASS; a missing input (no token / ws client) is a FAIL,
+                        not a SKIP. A deep run with no MEMQL_SMOKE_TOKEN fails.
+    SMOKE_EMAIL         Send a real magic link to this address (opt-in, non-gating)
+    MEMQL_SMOKE_TOKEN   PAT/JWT to run the authenticated WS query + AI forward
+                        (required in the deep profile)
+
+Checks:
+    baseline: TLS+DNS, identity health+JWKS (direct + app proxy), login page,
+              /memql/ws + /memql/audio wiring, SPA boot assets, identity styling.
+    deep:     all baseline checks PLUS a real authenticated WS query that fans
+              BFF -> cognition/agent (catches the issuer/mesh/auth-WS class that
+              front-door-green hid in the 0.9.6 incident).
+
+Not yet asserted here (tracked #627 follow-ups -- they need infra beyond the
+front door): automation_execution_claims table presence (needs a server-side
+readiness endpoint -- DB is firewalled to AKS egress) and the headless-browser
+first-run walkthrough + console-error capture (needs a browser in CI).
 
 Examples:
-    $0                                   # baseline (no email, no auth)
-    APP_HOST=app.copresent.ai $0         # smoke the prod front door
-    SMOKE_EMAIL=me@example.com $0        # + issue a magic link
-    MEMQL_SMOKE_TOKEN=mql_pat_xxx $0     # + run a live authenticated query
+    $0                                                  # baseline (no auth)
+    SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=mql_pat_xxx $0 # the promotion gate
+    APP_HOST=app.copresent.ai SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=... $0  # prod
 
-Exit code is non-zero iff a check FAILED (skips never fail the run).
+Exit code is non-zero iff a check FAILED. In baseline a SKIP never fails the
+run; in deep a missing required input is a FAIL.
 EOF
 }
 
@@ -315,15 +430,22 @@ function main() {
 
     echo "========================================="
     echo "memQL staging smoke test"
+    echo "  profile:  $SMOKE_PROFILE"
     echo "  app:      https://$APP_HOST"
     echo "  identity: https://$IDENTITY_HOST"
     echo "========================================="
+
+    if is_deep && [ -z "$MEMQL_SMOKE_TOKEN" ]; then
+        warn "deep profile selected with no MEMQL_SMOKE_TOKEN -- the authenticated checks will FAIL the gate. Provide a PAT/JWT to make this run conclusive."
+    fi
 
     check_tls
     check_identity
     check_auth_surface
     check_bff_ws
     check_voice_path
+    check_spa_boot
+    check_identity_styling
 
     summary
 }

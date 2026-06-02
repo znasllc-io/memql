@@ -235,7 +235,7 @@ mutation space mutationCreateSpace {
     spaceId           string
     name              string  @required
     description       string
-    purpose           string
+    goal              object
     settings          object
     status            string
     spaceType         string
@@ -252,7 +252,7 @@ mutation space mutationCreateSpace {
     ownerUserId: actor.userId
     args.name
     args.description
-    args.purpose
+    args.goal
     args.settings
     status: coalesce(args.status, "active")
     args.spaceType
@@ -263,6 +263,36 @@ mutation space mutationCreateSpace {
     active: coalesce(args.active, true)
     maxHumans: coalesce(args.maxHumans, 5)
     maxAgents: coalesce(args.maxAgents, 1)
+  }
+}
+
+// ---- mutations/v1/cognition/setSpaceGoal.memql ----
+
+// setSpaceGoal
+// ============
+//
+// Partial update that sets (or replaces) a space's structured goal
+// after creation. Uses update() (read-merge-validate-write) so the
+// caller doesn't have to re-pass the full space payload -- only the
+// goal block changes, everything else inherits from the prior row.
+//
+// `goal` is the structured object {statement, timeframe}; timeframe is
+// one of daily / weekly / monthly and is purely descriptive grounding
+// for cognition (NOT tied to space.kind=daily or status=scheduled).
+// Server-side stamps ownerUserId from actor.userId so the update stays
+// owned-classified for per-row authz.
+
+@enabled
+@description("Set or replace a space's structured goal {statement, timeframe} after creation. Partial update via update() -- only the goal changes; everything else inherits from the prior row.")
+mutation space mutationSetSpaceGoal {
+  args {
+    spaceId  string  @required
+    goal     object  @required
+  }
+  update space {
+    id: args.spaceId
+    ownerUserId: actor.userId
+    args.goal
   }
 }
 

@@ -1,0 +1,26 @@
+// notes domain -- app-native standalone notes.
+//
+// A `note` is a user-owned freeform note: an optional title, a body,
+// and tags. This is the STANDALONE notebook concept -- distinct from
+// copresent's canvasState.note field, which stays a per-card caption.
+// Notes are a source-of-truth productivity primitive the assistant
+// manages on the user's behalf (via the `notes` skill).
+//
+// Per-row authz tier: owned. Every read filters on
+// payload.ownerUserId==actor.userId; every write stamps ownerUserId
+// from actor.userId server-side so a caller can never create or
+// mutate another user's notes.
+
+@version("1.0.0")
+@namespace("notes")
+@displayCard(primary="title", secondary="body", tertiary="updatedAt")
+@description("A user-owned standalone note: an optional title, a body, and tags, plus an updatedAt watermark. The standalone notebook concept -- distinct from copresent's canvasState.note caption field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
+concept note {
+  ownerUserId  string    @required  @description("v1:identity:user.id that owns this note. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
+  title        string    @description("Optional short title / heading for the note. Absence is allowed -- a note can be body-only. The primary display field when present.")
+  body         string    @required  @description("The note's freeform text content. The substring search operation matches against this field.")
+  tags         []string  @description("Optional list of user-supplied tags for grouping / filtering. The frontend renders these as chips; the search tool can narrow by a single tag.")
+  updatedAt    datetime  @description("RFC3339 watermark of the most recent edit. Stamped to `now` on every create / update so the frontend can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for the most-recent version.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}

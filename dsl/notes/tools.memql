@@ -1,0 +1,45 @@
+// notes domain -- the SI-facing `notes` tool surface.
+//
+// Four operations -- list / create / update / search -- each wired to
+// a named owned query or mutation. The assistant invokes these to
+// manage the user's standalone notes on their behalf; per-row authz
+// on the underlying query / mutation gates every call to the caller's
+// own rows (ownerUserId==actor.userId), so the tool surface carries
+// no ownerUserId arg for the LLM to forge -- ownership is
+// server-stamped from the auth context.
+
+@enabled
+@handler(type="query", query="queryNotes({})")
+@executionTime("fast")
+@description("List the caller's notes (id, title, body, tags, updatedAt). Read-only; owned -- only the caller's own notes are returned.")
+tool notesList {
+  limit  integer  @default("50") @description("Advisory cap on how many notes to consider. The query returns the caller's notes; trim to this many in your reasoning.")
+}
+
+@enabled
+@handler(type="query", query="mutationCreateNote({noteId: \"$args.noteId\", title: \"$args.title\", body: \"$args.body\", tags: $args.tags})")
+@executionTime("fast")
+@description("Create a note for the user. Owned: the new note is owned by the caller (server-stamped). Pass a fresh unique noteId. title and tags are optional; body is required.")
+tool notesCreate {
+  noteId  string    @required @description("Fresh unique id for the new note, e.g. a UUID. The caller mints it so it can reference the created row immediately.")
+  title   string    @description("Optional title / heading for the note.")
+  body    string    @required @description("The note's text content.")
+  tags    array     @description("Optional list of string tags for grouping / filtering.")
+}
+
+@enabled
+@handler(type="query", query="mutationUpdateNote({noteId: \"$args.noteId\", payload: $args.payload})")
+@executionTime("fast")
+@description("Update a note's fields (title / body / tags). Pass the full merged payload built from the current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is re-enforced server-side and updatedAt is re-stamped.")
+tool notesUpdate {
+  noteId   string  @required @description("Id of the note to update.")
+  payload  object  @required @description("Full merged note payload with the changed fields applied (title, body, tags).")
+}
+
+@enabled
+@handler(type="query", query="queryNotesByTag({tag: \"$args.tag\"})")
+@executionTime("fast")
+@description("Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first and substring-match the bodies in your reasoning.")
+tool notesSearch {
+  tag  string  @required @description("Tag to search for. Returns the caller's notes that carry this tag.")
+}

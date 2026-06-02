@@ -1228,20 +1228,30 @@ message AgentTurnSpaceContext {
   string architecture = 4;
   // Free-form additional context (survey progress, tour progress, etc.).
   map<string, string> extra = 5;
-  // The short one-liner set by the Configure-manually path in
+  // The structured space goal set by the Configure-manually path in
   // CreateSpaceModal ("Plan Q3 roadmap", "Talk to ops about the
   // Houston facility"). Distinct from `description` (which can be
   // long-form / AI-generated). Agents use this to ground their
   // first turn in a multi-agent space -- without it the agent has
   // no idea what the user is here to discuss and falls back to
-  // generic "what are you working on?" prompting.
-  string purpose = 6;
+  // generic "what are you working on?" prompting. Absent when the
+  // space has no goal.
+  AgentTurnSpaceGoal goal = 6;
   // The current user's display name (the human whose utterance
   // triggered this turn). Lets agents address the user by name
   // and gives the model basic profile awareness without needing
   // a separate tool call. Empty when the user is anonymous or
   // unidentified.
   string current_user_display_name = 7;
+}
+
+// AgentTurnSpaceGoal is the structured space goal threaded into the
+// agent turn for grounding. timeframe is one of daily / weekly /
+// monthly and is purely descriptive -- NOT tied to space.kind=daily
+// or status=scheduled (separate lifecycle concerns).
+message AgentTurnSpaceGoal {
+  string statement = 1;
+  string timeframe = 2;
 }
 
 message AgentTurnAttachment {

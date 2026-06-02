@@ -801,6 +801,45 @@ func QueryAuthSessionsForSubjectBuild(args QueryAuthSessionsForSubjectArgs) stri
 	return b.String()
 }
 
+// QueryAvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
+//
+// Bound concept: avatarPersona.
+type QueryAvatarPersonaByIdArgs struct {
+	AvatarPersonaId string
+}
+
+// QueryAvatarPersonaById calls the engine query queryAvatarPersonaById.
+func (qc *QueryClient) QueryAvatarPersonaById(ctx context.Context, args QueryAvatarPersonaByIdArgs) (*Result, error) {
+	call := QueryAvatarPersonaByIdBuild(args)
+	return qc.executeNamed(ctx, "queryAvatarPersonaById", call)
+}
+
+func QueryAvatarPersonaByIdBuild(args QueryAvatarPersonaByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAvatarPersonaById({")
+	b.WriteString("avatarPersonaId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryAvatarPersonas -- List every active avatar persona in the operator catalog (memql#609). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Rows are minted by `make avatar-mint` and seeded from dsl/agents/avatarPersonas.memql, exactly like the agentRole / skill catalogs.
+//
+// Bound concept: avatarPersona.
+type QueryAvatarPersonasArgs struct {
+}
+
+// QueryAvatarPersonas calls the engine query queryAvatarPersonas.
+func (qc *QueryClient) QueryAvatarPersonas(ctx context.Context, args QueryAvatarPersonasArgs) (*Result, error) {
+	call := QueryAvatarPersonasBuild(args)
+	return qc.executeNamed(ctx, "queryAvatarPersonas", call)
+}
+
+func QueryAvatarPersonasBuild(args QueryAvatarPersonasArgs) string {
+	_ = args
+	return "queryAvatarPersonas({})"
+}
+
 // QueryAwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
 //
 // Bound concept: plan.
@@ -1897,6 +1936,67 @@ func QueryNodeTokenIdentityByIdBuild(args QueryNodeTokenIdentityByIdArgs) string
 	return b.String()
 }
 
+// QueryNoteById -- Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.
+//
+// Bound concept: note.
+type QueryNoteByIdArgs struct {
+	NoteId string
+}
+
+// QueryNoteById calls the engine query queryNoteById.
+func (qc *QueryClient) QueryNoteById(ctx context.Context, args QueryNoteByIdArgs) (*Result, error) {
+	call := QueryNoteByIdBuild(args)
+	return qc.executeNamed(ctx, "queryNoteById", call)
+}
+
+func QueryNoteByIdBuild(args QueryNoteByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNoteById({")
+	b.WriteString("noteId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryNotes -- List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.
+//
+// Bound concept: note.
+type QueryNotesArgs struct {
+}
+
+// QueryNotes calls the engine query queryNotes.
+func (qc *QueryClient) QueryNotes(ctx context.Context, args QueryNotesArgs) (*Result, error) {
+	call := QueryNotesBuild(args)
+	return qc.executeNamed(ctx, "queryNotes", call)
+}
+
+func QueryNotesBuild(args QueryNotesArgs) string {
+	_ = args
+	return "queryNotes({})"
+}
+
+// QueryNotesByTag -- Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.
+//
+// Bound concept: note.
+type QueryNotesByTagArgs struct {
+	Tag string
+}
+
+// QueryNotesByTag calls the engine query queryNotesByTag.
+func (qc *QueryClient) QueryNotesByTag(ctx context.Context, args QueryNotesByTagArgs) (*Result, error) {
+	call := QueryNotesByTagBuild(args)
+	return qc.executeNamed(ctx, "queryNotesByTag", call)
+}
+
+func QueryNotesByTagBuild(args QueryNotesByTagArgs) string {
+	var b strings.Builder
+	b.WriteString("queryNotesByTag({")
+	b.WriteString("tag: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tag))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryOwnedSpaceById -- Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like GCS uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.
 //
 // Bound concept: space.
@@ -2719,6 +2819,53 @@ func QueryTasksForPlanBuild(args QueryTasksForPlanArgs) string {
 	b.WriteString("queryTasksForPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryTodoById -- Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version.
+//
+// Bound concept: todo.
+type QueryTodoByIdArgs struct {
+	TodoId string
+}
+
+// QueryTodoById calls the engine query queryTodoById.
+func (qc *QueryClient) QueryTodoById(ctx context.Context, args QueryTodoByIdArgs) (*Result, error) {
+	call := QueryTodoByIdBuild(args)
+	return qc.executeNamed(ctx, "queryTodoById", call)
+}
+
+func QueryTodoByIdBuild(args QueryTodoByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryTodoById({")
+	b.WriteString("todoId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryTodos -- List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything.
+//
+// Bound concept: todo.
+type QueryTodosArgs struct {
+	Done    bool
+	DoneSet bool // set true to send done; required because zero-value bool is ambiguous
+}
+
+// QueryTodos calls the engine query queryTodos.
+func (qc *QueryClient) QueryTodos(ctx context.Context, args QueryTodosArgs) (*Result, error) {
+	call := QueryTodosBuild(args)
+	return qc.executeNamed(ctx, "queryTodos", call)
+}
+
+func QueryTodosBuild(args QueryTodosArgs) string {
+	var b strings.Builder
+	b.WriteString("queryTodos({")
+	if args.DoneSet {
+		b.WriteString("done: ")
+		b.WriteString(fmt.Sprintf("%v", args.Done))
+	}
 	b.WriteString("})")
 	return b.String()
 }
