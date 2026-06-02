@@ -160,6 +160,7 @@ Quick access to directory-level documentation:
 
 ### Deployment & Infrastructure
 - [Deployment Strategy](DEPLOYMENT_STRATEGY.md) - Deploy to Azure AKS (topology, gates, promotion)
+- [Deployment Console](docs/ops/deployment-console.md) - Operator guide: admin/owner UI (identity portal + cockpit) to read deploy state and deploy/promote/rollback from the UI, with confirm + audit
 - [Infrastructure Overview](INFRASTRUCTURE.md) - All environments
 - [Docker Setup](docker/README.md) - Local Docker stack
 
