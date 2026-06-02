@@ -3,10 +3,13 @@
 package app
 
 import (
+	"context"
 	"os"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/admin"
 )
 
 // setupDeployControlService stands up the DeployControlService gRPC
@@ -60,4 +63,30 @@ func (a *App) setupDeployControlService() {
 	a.deployControlService = svc
 	a.Logger.Info("deploy-control service registered on identity node",
 		"component", identity.ComponentName)
+
+	// Wire the read-only /admin/deployments view (memql#726) to the
+	// in-process service. The admin server is constructed earlier in
+	// integrationsIdentity and stashed on a.adminServer. The reader
+	// is a thin adapter that turns the admin handler's
+	// (admin-context-stamped) call into a GetDeploymentStatus RPC; the
+	// read RPC's owner/admin gate (#728) admits it because the handler
+	// stamps an auth.AccessContext from the verified admin claims.
+	if adminSrv, ok := a.adminServer.(*admin.AdminServer); ok && adminSrv != nil {
+		adminSrv.SetDeployControlReader(&deployControlReaderAdapter{svc: svc})
+		a.Logger.Info("deploy-control reader wired into admin portal",
+			"component", identity.ComponentName)
+	}
+}
+
+// deployControlReaderAdapter satisfies admin.DeployControlReader via
+// the in-process *deploycontrol.Service (memql#726). Lives here
+// rather than in the admin package so the admin layer stays decoupled
+// from the concrete deploy-control type -- the package depends on the
+// narrow port shape, the wiring layer satisfies it.
+type deployControlReaderAdapter struct {
+	svc *deploycontrol.Service
+}
+
+func (a *deployControlReaderAdapter) DeploymentStatus(ctx context.Context, env string) (*memqlv1.DeploymentStatus, error) {
+	return a.svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: env})
 }

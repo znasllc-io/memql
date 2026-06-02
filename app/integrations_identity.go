@@ -366,6 +366,11 @@ func (a *App) integrationsIdentity() {
 	adminSrv.SetNodeTokenAdapter(&storeNodeTokenAdapter{store: store})
 	svc.SetAdminMounter(adminSrv)
 
+	// Stash the admin server so setupDeployControlService (which runs
+	// after the deploy-control service is constructed) can wire the
+	// in-process deployment-status reader onto it (memql#726).
+	a.adminServer = adminSrv
+
 	a.identityService = svc
 	a.Logger.Info("identity service initialized",
 		"base_url", cfg.BaseURL,

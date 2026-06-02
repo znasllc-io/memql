@@ -319,11 +319,20 @@ func (s *Service) finishWrite(
 // -----------------------------------------------------------------------------
 
 // GetDeploymentStatus returns the aggregate per-env deployment view.
-// Read-only; not audited per call.
+// Read-only; gated to owner/admin (#728). A successful read is NOT
+// audited (reads stay un-audited on success); a denial emits a
+// blocked audit event via authorize.
 func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeploymentStatusRequest) (*memqlv1.DeploymentStatus, error) {
 	env := req.GetEnv()
 	if !validEnvs[env] {
 		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
+	}
+
+	// Owner/admin gate (#728). The read RPC is the API read-gate the
+	// console's portal view rides on; deny non-admins with a blocked
+	// audit event. Successful reads are not audited.
+	if _, err := s.authorize(ctx, "get_status", map[string]any{"env": env}); err != nil {
+		return nil, err
 	}
 
 	out := &memqlv1.DeploymentStatus{Env: env}
