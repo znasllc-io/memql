@@ -1,4 +1,10 @@
-# memQL backend cluster on AKS (epic znasllc-io/memql#522).
+# memQL backend cluster on AKS (epic znasllc-io/memql#522) -- the BASE.
+#
+# deployment-v2 Phase 1 (#699): do NOT apply this base directly. The committed
+# overlay deploy/k8s/overlays/<env> is the single image authority -- it pins
+# every image by @sha256: digest. Apply/reconcile the OVERLAY. The :tags carried
+# in the base manifests below are human-readable placeholders only; the overlay's
+# images: transformer replaces them with the pinned digest.
 #
 # NO database resource: staging/prod use the managed Tiger Cloud DB
 # (xahn9ru4v6) via the MEMORY_NODES_DATABASE_DSN key in memql-secrets.
@@ -12,7 +18,7 @@
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
 #     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
 #     --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
-#   kubectl apply -k deploy/k8s/
+#   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699)
 #
 # identity comes up first (runs the one-time migration + serves JWKS); the
 # other nodes' verifiers retry JWKS non-fatally until it is ready.

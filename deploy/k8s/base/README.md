@@ -141,9 +141,14 @@ kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
   --from-literal=MEMORY_NODES_DATABASE_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
 
-# 3. All node Deployments + Services
-kubectl apply -k deploy/k8s/
+# 3. All node Deployments + Services (digest-pinned overlay, #699)
+kubectl apply -k deploy/k8s/overlays/staging
 ```
+
+> deployment-v2 Phase 1 (#699): apply the per-env **overlay**, not this base.
+> The overlay pins every image by `@sha256:` digest (the single image
+> authority); the base `:tags` are placeholders. Rollback = `git revert` of the
+> overlay (see `scripts/deploy/aks-rollback.sh`), never `kubectl rollout undo`.
 
 Or, from the repo root: `make deploy-aks ENV=staging` (runs the namespace +
 kustomize apply; the Secret step is a one-time prerequisite). `identity`
@@ -173,7 +178,7 @@ in-process rather than via a `preStop` sleep.)
 ## Validate
 
 ```bash
-kubectl kustomize deploy/k8s/ | kubeconform -strict -summary -kubernetes-version 1.30.0
+kubectl kustomize deploy/k8s/overlays/staging | kubeconform -strict -summary -kubernetes-version 1.30.0
 ```
 
 ## Smoke test (live front door)
