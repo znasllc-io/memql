@@ -1,9 +1,9 @@
-package agent
+package avatarvendor
 
-// avatar_anam.go is the direct Go integration of the Anam REST API, replacing
-// the retired Python Anam LiveKit plugin + the AnamPersonaSession subclass in
-// the Python voice-agent's anam_persona_session.py. No Python, no LiveKit
-// plugin -- just Anam's documented HTTP endpoints.
+// anam.go is the direct Go integration of the Anam REST API, replacing the
+// retired Python Anam LiveKit plugin + the AnamPersonaSession subclass in the
+// Python voice-agent's anam_persona_session.py. No Python, no LiveKit plugin --
+// just Anam's documented HTTP endpoints.
 //
 // Flow (the ephemeral client-audio path, so the avatar lip-syncs OUR audio
 // rather than speaking with Anam's bundled voice):
@@ -18,10 +18,6 @@ package agent
 //  3. POST /v1/engine/session (Bearer sessionToken) to start the engine
 //     session; Anam's cloud engine then dials INTO the LiveKit room as the
 //     avatar participant and subscribes to our published audio byte-stream.
-//
-// This is exactly the request shape AnamPersonaSession reverse-engineered from
-// the LiveKit plugin, ported 1:1 -- the persona-id resolution, the ephemeral
-// payload, and the engine-session start.
 
 import (
 	"context"
@@ -33,7 +29,7 @@ import (
 // anamClient is the CGO-free Anam REST integration for one resolved plan.
 type anamClient struct {
 	plan AvatarPlan
-	doer httpDoer
+	doer HTTPDoer
 }
 
 // anamPersonaRecord is the subset of GET /v1/personas/{id} we read: the
@@ -59,28 +55,28 @@ type anamEngineSessionResponse struct {
 
 // Start performs the full Anam bring-up for one session and returns the
 // started-session details. livekitToken is the join token minted for the
-// avatar participant identity (avatar_room_voice.go mints it); Anam embeds it
-// in the session-token environment so its engine can join the room.
-func (c *anamClient) Start(ctx context.Context, roomName, livekitURL, livekitToken string) (avatarStartResult, error) {
+// avatar participant identity; Anam embeds it in the session-token environment
+// so its engine can join the room.
+func (c *anamClient) Start(ctx context.Context, roomName, livekitURL, livekitToken string) (AvatarStartResult, error) {
 	avatarID, err := c.resolveAvatarID(ctx)
 	if err != nil {
-		return avatarStartResult{}, err
+		return AvatarStartResult{}, err
 	}
 
 	sessionToken, err := c.createSessionToken(ctx, avatarID, livekitURL, livekitToken)
 	if err != nil {
-		return avatarStartResult{}, err
+		return AvatarStartResult{}, err
 	}
 
 	sessionID, err := c.startEngineSession(ctx, sessionToken)
 	if err != nil {
-		return avatarStartResult{}, err
+		return AvatarStartResult{}, err
 	}
 
-	return avatarStartResult{
+	return AvatarStartResult{
 		SessionID:         sessionID,
-		AvatarIdentity:    avatarParticipantIdentity,
-		LiveKitSampleRate: avatarPCMSampleRate,
+		AvatarIdentity:    AvatarParticipantIdentity,
+		LiveKitSampleRate: DefaultPCMSampleRate,
 	}, nil
 }
 
@@ -164,7 +160,7 @@ func (c *anamClient) displayName() string {
 	if n := strings.TrimSpace(c.plan.DisplayName); n != "" {
 		return n
 	}
-	return avatarParticipantName
+	return AvatarParticipantName
 }
 
 // bearerAPIKey stamps the Anam API key as the request's Bearer credential (the

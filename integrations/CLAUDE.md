@@ -74,6 +74,7 @@ integrations/
 ├── arch.md           # Architecture documentation
 ├── agent/            # SI tool-loop + chat replier + AiSuggest dispatcher (agent build only)
 ├── audio/            # PCM16 resampling for the Polyphon pipeline
+├── avatarvendor/     # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
 ├── auth/             # resolveUser, checkPermission
 ├── cognition/        # Routing+conductor, Polyphon scoring, client-tool relay
 ├── copresent/        # CoPresent product event-routing rules

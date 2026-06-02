@@ -1,4 +1,4 @@
-package agent
+package avatarvendor
 
 import (
 	"testing"
@@ -7,17 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// avatar_dispatch_test.go covers the pure vendor-selection + gating rules
-// ported from avatar_plugin.py: persona-stamped vendor wins, runtime default
-// fallback, video gating -> audio-only, and the per-vendor persona-id
-// resolution.
+// dispatch_test.go covers the pure vendor-selection + gating rules: persona-
+// stamped vendor wins, runtime default fallback, video gating -> audio-only,
+// and the per-vendor persona-id resolution.
 
-func videoOnPersona(vendor, personaID string) Persona {
-	return Persona{
-		AvatarVendor:     vendor,
-		AvatarPersonaID:  personaID,
-		InitialAudioMode: "always_on",
-		InitialVideoMode: "always_on",
+func videoOnPersona(vendor, personaID string) PersonaInput {
+	return PersonaInput{
+		AvatarVendor:    vendor,
+		AvatarPersonaID: personaID,
+		VideoEnabled:    true,
 	}
 }
 
@@ -46,11 +44,10 @@ func TestResolveAvatarPlan_VideoGatedOffIsAudioOnly(t *testing.T) {
 	// Video disabled -> no avatar at all (cost-saving gate), even though a
 	// vendor + persona id are present. (nil, nil) == audio-only.
 	ac := AvatarConfig{Vendor: "anam", AnamAPIKey: "ak"}
-	persona := Persona{
-		AvatarVendor:     "anam",
-		AvatarPersonaID:  "persona-3",
-		InitialAudioMode: "always_on",
-		InitialVideoMode: "always_off",
+	persona := PersonaInput{
+		AvatarVendor:    "anam",
+		AvatarPersonaID: "persona-3",
+		VideoEnabled:    false,
 	}
 	plan, err := ResolveAvatarPlan(ac, persona)
 	require.NoError(t, err)

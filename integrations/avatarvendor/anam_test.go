@@ -1,4 +1,4 @@
-package agent
+package avatarvendor
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubHTTP is a scripted httpDoer: it records every request (method, URL,
+// stubHTTP is a scripted HTTPDoer: it records every request (method, URL,
 // headers, decoded JSON body) and returns the next queued response. It lets the
 // vendor REST clients be tested for exact wire shape without a network.
 type stubHTTP struct {
@@ -81,7 +81,7 @@ func TestAnamClient_StartPersonaIDShape(t *testing.T) {
 	res, err := c.Start(context.Background(), "polyphon-space1", "wss://lk.public", "lk-join-token")
 	require.NoError(t, err)
 	assert.Equal(t, "engine-sess-1", res.SessionID)
-	assert.Equal(t, avatarParticipantIdentity, res.AvatarIdentity)
+	assert.Equal(t, AvatarParticipantIdentity, res.AvatarIdentity)
 	require.Len(t, stub.calls, 3)
 
 	// 1. Persona lookup: GET /v1/personas/{id} with Bearer API key.

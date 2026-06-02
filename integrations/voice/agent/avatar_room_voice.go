@@ -3,14 +3,14 @@
 package agent
 
 // avatar_room_voice.go is the voice-tagged LiveKit glue that binds the
-// CGO-free avatar core (avatar.go / avatar_dispatch.go / avatar_anam.go /
-// avatar_simli.go) to the live room media plane. It is the Go analog of the
-// Python avatar.start(session, room) seam (avatar_drive.py): it runs AFTER the
-// room join + local-track publish, mints a LiveKit join token for the avatar
-// participant, tells the vendor engine to join, and -- the load-bearing part --
-// reassigns the cascade's audio sink so the assistant's PCM is forwarded to the
-// avatar over a LiveKit byte data-stream instead of going only to the local
-// Opus track.
+// CGO-free avatar-vendor core (integrations/avatarvendor) to the live room
+// media plane. It is the Go analog of the Python avatar.start(session, room)
+// seam (avatar_drive.py): it runs AFTER the room join + local-track publish,
+// mints a LiveKit join token for the avatar participant, tells the vendor
+// engine to join (via avatarvendor.StartAvatarSession), and -- the load-bearing
+// part -- reassigns the cascade's audio sink so the assistant's PCM is
+// forwarded to the avatar over a LiveKit byte data-stream instead of going only
+// to the local Opus track.
 //
 // Source-agnostic invariant (avatar_drive.py): the cascade (#455) and the
 // realtime executor (#457) both write the assistant's PCM into the audioSink
@@ -20,8 +20,8 @@ package agent
 // `session.output.audio` reassignment.
 //
 // Everything that touches the LiveKit room/media types is here behind
-// `//go:build voice`; the REST + dispatch logic it calls is pure Go and tested
-// in the default lane.
+// `//go:build voice`; the REST + dispatch logic it calls is pure Go (the
+// avatarvendor package) and tested in the default lane.
 
 import (
 	"context"
@@ -34,11 +34,26 @@ import (
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
+
+	"github.com/znasllc-io/memql/integrations/avatarvendor"
 )
 
 // avatarTokenTTL bounds the avatar participant's LiveKit join token. Generous
 // for a long session; the session ends well before it expires.
 const avatarTokenTTL = 24 * time.Hour
+
+// avatarConfigFromConfig projects the process Config onto the narrow
+// avatarvendor.AvatarConfig the dispatch layer consumes.
+func avatarConfigFromConfig(cfg Config) avatarvendor.AvatarConfig {
+	return avatarvendor.AvatarConfig{
+		Vendor:                cfg.AvatarVendor,
+		AnamAPIKey:            cfg.AnamAPIKey,
+		SimliAPIKey:           cfg.SimliAPIKey,
+		AnamDefaultPersonaID:  cfg.AnamDefaultPersonaID,
+		AnamDefaultAvatarID:   cfg.AnamDefaultAvatarID,
+		AnamDefaultPersonaNam: cfg.AnamDefaultPersonaNm,
+	}
+}
 
 // maybeStartAvatar resolves the avatar plan for the session and, when an avatar
 // should run, mints the avatar's LiveKit token, starts the vendor session, and
@@ -68,14 +83,18 @@ func maybeStartAvatar(ctx context.Context, cfg Config, req RoomRequest, room *lk
 		return underlying
 	}
 
-	startCtx, cancel := context.WithTimeout(ctx, avatarRequestTimeout*3)
+	startCtx, cancel := context.WithTimeout(ctx, avatarvendor.AvatarRequestTimeout*3)
 	defer cancel()
 
 	// Anam's engine dials INTO the LiveKit server from the cloud, so it needs a
 	// publicly-reachable URL. LIVEKIT_PUBLIC_URL wins when set (the internal
 	// ws://livekit:7880 the agent uses is unreachable from outside), matching
 	// the Python AnamPersonaSession.start url resolution.
-	res, started, err := startAvatarSession(startCtx, avatarConfigFromConfig(cfg), req.Persona, avatarStartParams{
+	res, started, err := avatarvendor.StartAvatarSession(startCtx, avatarConfigFromConfig(cfg), avatarvendor.PersonaInput{
+		AvatarPersonaID: req.Persona.AvatarPersonaID,
+		AvatarVendor:    req.Persona.AvatarVendor,
+		VideoEnabled:    req.Persona.VideoEnabled(),
+	}, avatarvendor.AvatarStartParams{
 		RoomName:     req.RoomName,
 		LiveKitURL:   cfg.LiveKitPublicURL(),
 		LiveKitToken: token,
@@ -123,8 +142,8 @@ func mintAvatarToken(cfg Config, roomName, gaIdentity string) (string, error) {
 	grant := &auth.VideoGrant{RoomJoin: true, Room: roomName}
 	at.SetVideoGrant(grant).
 		SetKind(livekit.ParticipantInfo_AGENT).
-		SetIdentity(avatarParticipantIdentity).
-		SetName(avatarParticipantName).
+		SetIdentity(avatarvendor.AvatarParticipantIdentity).
+		SetName(avatarvendor.AvatarParticipantName).
 		SetAttributes(map[string]string{"lk.publish_on_behalf": gaIdentity}).
 		SetValidFor(avatarTokenTTL)
 	token, err := at.ToJWT()
@@ -178,7 +197,7 @@ func (s *avatarForwardingSink) forward(pcm []byte) error {
 	defer s.mu.Unlock()
 	if s.writer == nil {
 		w := s.room.LocalParticipant.StreamBytes(lksdk.StreamBytesOptions{
-			Topic:                 audioStreamTopic,
+			Topic:                 avatarvendor.AudioStreamTopic,
 			MimeType:              "audio/x-raw",
 			DestinationIdentities: []string{s.avatarIdentity},
 			Attributes: map[string]string{
@@ -216,7 +235,7 @@ func (s *avatarForwardingSink) Flush() {
 		go func() {
 			_, _ = s.room.LocalParticipant.PerformRpc(lksdk.PerformRpcParams{
 				DestinationIdentity: s.avatarIdentity,
-				Method:              rpcClearBuffer,
+				Method:              avatarvendor.RPCClearBuffer,
 				Payload:             "",
 			})
 		}()
