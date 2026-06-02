@@ -1,0 +1,195 @@
+syntax = "proto3";
+
+package znasllc.memql.deploycontrol.v1;
+
+option go_package = "github.com/znasllc-io/memql/grpc/gen;memqlv1";
+
+// DeployControlService is the gRPC surface behind the memQL Deployment
+// Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
+// machinery -- per-env image authority (the kustomize overlays), the
+// release lockfiles, Argo CD app status, Argo Rollouts progressive
+// delivery, and the in-cluster deploy gate -- as a small set of unary
+// RPCs.
+//
+// Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
+// state into typed status. Write RPCs (DeployStaging / Promote /
+// Rollback / RolloutAction) go through the sanctioned action scripts
+// (scripts/release/promote.sh, `git revert`, `kubectl argo rollouts`)
+// -- never ad-hoc `kubectl set image`. Every write RPC is gated to
+// owner/admin (#728) and emits an audit event (success / failure /
+// blocked).
+service DeployControlService {
+  // GetDeploymentStatus returns the full deployment picture for one
+  // environment: deployed digests, the resolved release lockfile,
+  // Argo CD sync/health, per-rollout progressive-delivery state, and
+  // the latest deploy-gate result. Read-only; not audited per call.
+  rpc GetDeploymentStatus(GetDeploymentStatusRequest) returns (DeploymentStatus);
+
+  // DeployStaging assembles + applies a release into the staging
+  // overlay via scripts/release/promote.sh --env=staging.
+  rpc DeployStaging(DeployStagingRequest) returns (ActionResult);
+
+  // Promote copies a validated staging release into the prod overlay
+  // (digest copy, no rebuild) via promote.sh --env=prod.
+  rpc Promote(PromoteRequest) returns (ActionResult);
+
+  // Rollback reverts the overlay commit identified by commit_sha for
+  // the given environment via `git revert`.
+  rpc Rollback(RollbackRequest) returns (ActionResult);
+
+  // RolloutAction promotes or aborts an in-flight Argo Rollout via
+  // `kubectl argo rollouts promote|abort`.
+  rpc RolloutAction(RolloutActionRequest) returns (ActionResult);
+}
+
+// -----------------------------------------------------------------------------
+// Requests
+// -----------------------------------------------------------------------------
+
+message GetDeploymentStatusRequest {
+  // env is "staging" or "prod".
+  string env = 1;
+}
+
+message DeployStagingRequest {
+  // version is the release lockfile version to deploy (releases/<version>.yaml).
+  string version = 1;
+}
+
+message PromoteRequest {
+  // version is the validated release lockfile version to promote staging->prod.
+  string version = 1;
+}
+
+message RollbackRequest {
+  // env is "staging" or "prod".
+  string env = 1;
+  // commit_sha is the overlay commit to `git revert`.
+  string commit_sha = 2;
+}
+
+message RolloutActionRequest {
+  // env is "staging" or "prod".
+  string env = 1;
+  // rollout is the Argo Rollout name (e.g. "bff", "cognition").
+  string rollout = 2;
+  // action is "promote" or "abort".
+  string action = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Status (read)
+// -----------------------------------------------------------------------------
+
+// DeploymentStatus is the aggregate per-env view surfaced by the
+// console's dashboard.
+message DeploymentStatus {
+  // env echoes the requested environment.
+  string env = 1;
+  // version is the deployed release version (parsed from the prod
+  // overlay's "Promoted from releases/<version>.yaml" comment; empty
+  // for staging where the overlay carries no promotion provenance).
+  string version = 2;
+  // engine_version is the engine version from the resolved lockfile.
+  string engine_version = 3;
+  // validated_at is the lockfile's validatedAt (RFC3339).
+  string validated_at = 4;
+  // gate is the lockfile's gate provenance string.
+  string gate = 5;
+  // components are the 8 deployed component digests, from the overlay.
+  repeated ComponentDigest components = 6;
+  // argocd is the Argo CD application status.
+  ArgoStatus argocd = 7;
+  // rollouts are the per-Rollout progressive-delivery states.
+  repeated RolloutStatus rollouts = 8;
+  // gate_result is the latest deploy-gate AnalysisRun outcome.
+  GateResult gate_result = 9;
+}
+
+// ComponentDigest is one entry of the overlay's images: list.
+message ComponentDigest {
+  // name is the fully-qualified image name (e.g.
+  // "acrmemql.azurecr.io/memql-identity").
+  string name = 1;
+  // digest is the pinned "sha256:<64hex>" image authority.
+  string digest = 2;
+  // repo is the source repo for the component (from the lockfile),
+  // empty when only the overlay was consulted.
+  string repo = 3;
+}
+
+// ArgoStatus mirrors the relevant slice of `kubectl -n argocd get app
+// memql -o json` .status.
+message ArgoStatus {
+  // sync_status is "Synced" / "OutOfSync".
+  string sync_status = 1;
+  // health_status is "Healthy" / "Degraded" / "Progressing" / etc.
+  string health_status = 2;
+  // last_sync_revision is the git SHA of the last synced revision.
+  string last_sync_revision = 3;
+  // last_sync_at is when the last sync operation finished (RFC3339).
+  string last_sync_at = 4;
+  // out_of_sync is true when sync_status != "Synced".
+  bool out_of_sync = 5;
+}
+
+// RolloutStatus mirrors the relevant slice of `kubectl -n memql get
+// rollout <name> -o json` .status.
+message RolloutStatus {
+  // name is the Rollout name.
+  string name = 1;
+  // kind is "bluegreen" or "canary".
+  string kind = 2;
+  // phase is the Rollout phase ("Healthy" / "Progressing" / "Paused" /
+  // "Degraded").
+  string phase = 3;
+  // active_color is the active ReplicaSet pod-hash (blue/green).
+  string active_color = 4;
+  // preview_color is the preview ReplicaSet pod-hash (blue/green).
+  string preview_color = 5;
+  // canary_weight is the current canary traffic weight (canary).
+  int32 canary_weight = 6;
+  // current_step is the current step index (0-based, -1 if none).
+  int32 current_step = 7;
+  // latest_analysis_result is the latest inline-analysis status
+  // ("Successful" / "Failed" / "Running" / "Inconclusive").
+  string latest_analysis_result = 8;
+}
+
+// GateResult is the latest deploy-gate AnalysisRun outcome.
+message GateResult {
+  // result is "pass" / "fail" / "unknown".
+  string result = 1;
+  // legs are the individual gate legs (readyz schema, authenticated query, ...).
+  repeated GateLeg legs = 2;
+  // ran_at is when the AnalysisRun completed (RFC3339).
+  string ran_at = 3;
+}
+
+// GateLeg is one leg of the deploy gate.
+message GateLeg {
+  // name is the metric/leg name.
+  string name = 1;
+  // passed is whether this leg passed.
+  bool passed = 2;
+  // detail carries the leg's message / phase.
+  string detail = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Action result (write)
+// -----------------------------------------------------------------------------
+
+// ActionResult is the uniform return for every write RPC.
+message ActionResult {
+  // ok is true when the action succeeded.
+  bool ok = 1;
+  // message is a human-readable summary (script output tail or error).
+  string message = 2;
+  // audit_event_id is the id of the emitted audit event.
+  string audit_event_id = 3;
+  // correlation_id ties together the audit event + any downstream logs.
+  string correlation_id = 4;
+  // details carries action-specific key/values (env, version, rollout, ...).
+  map<string, string> details = 5;
+}

@@ -151,6 +151,14 @@ func (c *Connection) Dispatcher() *Dispatcher {
 	return c.dispatcher
 }
 
+// ClientConn returns the underlying gRPC client connection. Used by
+// sibling typed clients (e.g. the DeployControl client) that speak a
+// secondary unary service mounted on the same listener as
+// MemqlService rather than riding the multiplexed Stream.
+func (c *Connection) ClientConn() *grpc.ClientConn {
+	return c.conn
+}
+
 // Close shuts down the stream and connection.
 func (c *Connection) Close() {
 	if c.dispatcher != nil {
