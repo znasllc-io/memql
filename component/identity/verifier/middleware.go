@@ -148,6 +148,7 @@ func normalizePublicPathSet(paths []string) map[string]struct{} {
 	}
 	set["/health"] = struct{}{}
 	set["/healthz"] = struct{}{}
+	set["/readyz"] = struct{}{} // schema-assertion readiness probe (#657), unauthenticated
 	return set
 }
 

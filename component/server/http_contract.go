@@ -212,6 +212,9 @@ func HandlerWithOptions(handler ServerInterface, options StdHTTPServerOptions) h
 	basePath := strings.TrimSuffix(strings.TrimSpace(options.BaseURL), "/")
 
 	registerRoute(baseRouter, http.MethodGet, joinPath(basePath, "/healthz"), handler.getHealthz())
+	// /readyz asserts critical schema presence (#657); plain handler, outside
+	// the OpenAPI strict surface, public + unauthenticated (see PublicPaths).
+	registerRoute(baseRouter, http.MethodGet, joinPath(basePath, "/readyz"), ReadyzHandler())
 	registerAutomationTriggerRoute(baseRouter, basePath, handler.postAutomationTrigger(basePath))
 	registerRoute(baseRouter, http.MethodPost, joinPath(basePath, "/automations/resume"), handler.postAutomationResume())
 

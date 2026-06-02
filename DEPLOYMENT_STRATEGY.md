@@ -192,13 +192,24 @@ and a validated artifact is **immutable**.
 `SMOKE_PROFILE`:
 
 - **baseline** (default): front-door reachability — TLS+DNS, identity health +
-  JWKS (direct + app proxy), login page, `/memql/ws` + `/memql/audio` wiring,
-  SPA boot assets, identity styling. A SKIP never fails the run.
+  JWKS (direct + app proxy), **`/readyz` schema assertion**, login page,
+  `/memql/ws` + `/memql/audio` wiring, SPA boot assets, identity styling. A SKIP
+  never fails the run.
 - **deep** (the gate): all baseline checks **plus** a real authenticated WS query
   that fans BFF → cognition/agent. Every deep check **must run and PASS** — a
   missing input (no `MEMQL_SMOKE_TOKEN` / ws client) is a **FAIL, not a SKIP**.
   This is what makes the gate conclusive (the 0.9.6 incident went
   8-PASS/0-FAIL/2-SKIP green while the authenticated app was broken).
+
+**Server-side readiness (`/readyz`, #657).** The app exposes an unauthenticated
+`GET /readyz` that asserts critical schema presence via `to_regclass` (the core
+`"MemoryNodes"` table + `automation_execution_claims`) and returns 503 when an
+invariant is missing. The smoke `check_readiness` hits it in every profile (no
+token needed); in the deep gate a non-200 — or a 404 from a version that
+predates the probe — is a hard FAIL. This proves a migration actually applied
+WITHOUT DB credentials (the DB is firewalled to AKS egress) and is the runtime
+counterpart to the §2c migrate gate (#671) — together they close the gap that
+let #624 ship a broken schema behind a green deploy.
 
 ```bash
 SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=<pat-or-jwt> bash scripts/deploy/staging-smoke-test.sh
@@ -207,9 +218,8 @@ SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=<pat-or-jwt> bash scripts/deploy/staging-sm
 `aks-deploy.sh` runs the deep profile automatically when `MEMQL_SMOKE_TOKEN` is
 in the deploy environment, and flags a token-less deploy as not promotable.
 
-Deeper tiers tracked as follow-ups: a server-side readiness endpoint asserting
-the `automation_execution_claims` table (the DB is firewalled to AKS egress), and
-a headless-browser walkthrough + console-error tier.
+Deeper tier tracked as a follow-up: a headless-browser walkthrough +
+console-error tier (#658).
 
 ---
 

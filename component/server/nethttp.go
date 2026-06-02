@@ -650,6 +650,22 @@ func HealthzPaths() []string {
 	return paths
 }
 
+// ReadyzPaths returns the public path(s) for the schema-assertion readiness
+// probe (#657), honoring SERVER_PUBLIC_PATH the same way HealthzPaths does.
+func ReadyzPaths() []string {
+	base := sanitizeBaseURLFromEnv()
+	paths := []string{"/readyz"}
+
+	if base != "" {
+		readyPath := base + "/readyz"
+		if readyPath != "/readyz" {
+			paths = append(paths, readyPath)
+		}
+	}
+
+	return paths
+}
+
 // AuthPaths returns paths for the identity-service auth endpoints
 // proxied through this binary. They're listed as public so the
 // verifier's HTTP middleware doesn't gate the unauthenticated
@@ -697,6 +713,7 @@ func JWKSPaths() []string {
 
 func PublicPaths() []string {
 	paths := HealthzPaths()
+	paths = append(paths, ReadyzPaths()...) // schema-assertion readiness probe (#657)
 	paths = append(paths, JWKSPaths()...)  // public keyset (cross-node verifier fetch)
 	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
 	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)

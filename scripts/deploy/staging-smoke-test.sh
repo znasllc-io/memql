@@ -193,6 +193,40 @@ function check_identity() {
     fi
 }
 
+# 2b. Server-side readiness: GET /readyz asserts critical schema presence
+# (#657). This proves migrations actually applied WITHOUT needing DB creds (the
+# staging DB is firewalled), closing the gap that let #624 ship a broken schema
+# behind a green deploy -- the runtime counterpart to the #671 migrate gate.
+# Needs no token, so it runs in every profile; a missing endpoint (404) is a
+# hard FAIL in the deep promotion gate (a version that predates #657 is not
+# promotable) and a SKIP in baseline.
+function check_readiness() {
+    section "2b. Server-side readiness (/readyz schema invariants)"
+
+    local code body
+    code="$(http_status GET "https://$APP_HOST/readyz")"
+    case "$code" in
+        200)
+            body="$(http_body "https://$APP_HOST/readyz")"
+            if echo "$body" | grep -q '"status":"ready"'; then
+                pass "/readyz is ready -- critical schema present"
+            else
+                fail "/readyz returned 200 but status is not \"ready\": $body"
+            fi
+            ;;
+        404)
+            if is_deep; then
+                fail "/readyz not found (404) -- this version predates the schema-assertion probe (#657); NOT promotable"
+            else
+                skip "/readyz not present (404) -- deploy #657+ to enable server-side schema gating"
+            fi
+            ;;
+        *)
+            fail "/readyz returned $code (expected 200 \"ready\")"
+            ;;
+    esac
+}
+
 # 3. Auth surface: the login page is served. Optional DEEP magic-link issue.
 function check_auth_surface() {
     section "3. Auth surface (login page + optional magic-link)"
@@ -478,6 +512,7 @@ function main() {
 
     check_tls
     check_identity
+    check_readiness
     check_auth_surface
     check_bff_ws
     check_bootstrap_transport

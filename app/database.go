@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"fmt"
+
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
 	conceptSeeder "github.com/znasllc-io/memql/component/database/memory-nodes/seeder"
 	"github.com/znasllc-io/memql/component/memql"
@@ -50,6 +53,18 @@ func (a *App) databaseAndConcepts() {
 	if conceptSeedDep != nil {
 		a.Dependencies = append(a.Dependencies, conceptSeedDep)
 	}
+
+	// Readiness probe (#657): GET /readyz asserts critical schema presence so a
+	// deploy gate can prove migrations actually applied WITHOUT DB credentials
+	// (the staging DB is firewalled to in-cluster egress). The closure resolves
+	// a.db lazily; a not-yet-connected DB reports not-ready instead of panicking.
+	// Runtime counterpart to the #671 migrate gate.
+	server.RegisterReadinessCheck("critical-schema", func(ctx context.Context) error {
+		if a.db == nil {
+			return fmt.Errorf("database not initialized")
+		}
+		return a.db.AssertCriticalSchema(ctx)
+	})
 
 	// Observe runtime: wire the TimescaleDB sink so instrumentation
 	// calls via component/observe land in the code_invocation
