@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 	"time"
 
@@ -14,7 +15,40 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/id"
 )
+
+// genOutputIdEngine is the content-id engine used to derive deterministic
+// generatedOutput ids. Safe for concurrent use.
+var genOutputIdEngine = id.New()
+
+// deriveGeneratedOutputId mints a deterministic v1:library:generatedOutput
+// id from the producing (source, ownerUserId, stableKey). Deterministic by
+// design: inserting with the same outputId re-versions the same logical
+// row (the indexGeneratedOutputOnCreate automation is idempotent), so a
+// re-run of the same producing action updates in place instead of minting
+// a duplicate. NEVER derive from time -- that would defeat the idempotency
+// the Library index relies on. Built on core/id (content-addressed SHA256)
+// per the integrations no-raw-sha256 conformance rule.
+func deriveGeneratedOutputId(source, ownerUserId, stableKey string) string {
+	h := genOutputIdEngine.MustFromMap(map[string]any{
+		"source":      source,
+		"ownerUserId": ownerUserId,
+		"stableKey":   stableKey,
+	})
+	return "genout-" + string(h)[:16]
+}
+
+// pathBasename returns the final path element, suitable for a Library
+// title. Uses forward-slash semantics (path, not filepath) so remote
+// POSIX paths resolve consistently regardless of the agent host OS.
+func pathBasename(p string) string {
+	p = strings.TrimRight(strings.TrimSpace(p), "/")
+	if p == "" {
+		return ""
+	}
+	return path.Base(p)
+}
 
 // Integration registers the agent-side worker capabilities with the
 // MemQL engine. Four capabilities are exposed:
@@ -150,6 +184,18 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 	if err != nil {
 		return nil, err
 	}
+
+	// Library promotion (memql#722): a successful fs_write through a
+	// worker is a standalone deliverable the user should be able to
+	// find in their Library. Best-effort -- a promotion failure must
+	// never break the producing tool call, so errors are logged and
+	// swallowed. Only fs_write produces a durable artifact; exec /
+	// fs_read / fs_list / fs_stat / http_fetch are read-only or have
+	// no addressable deliverable, so they are skipped.
+	if res.OK && action == "fs_write" {
+		i.promoteWorkerOutput(ctx, req)
+	}
+
 	payload, _ := json.Marshal(map[string]any{
 		"ok":            res.OK,
 		"output":        rawOrString(res.OutputJSON),
@@ -166,6 +212,55 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}, nil
+}
+
+// promoteWorkerOutput records a v1:library:generatedOutput row for a
+// file a worker just wrote to the remote host. The worker writes on a
+// REMOTE machine, so there are no in-process bytes to attach -- the row
+// is a pointer with a human note carrying the written path. Idempotent:
+// the outputId is derived deterministically from (ownerUserId, planId,
+// path) so a re-run of the same write re-versions the same logical row
+// rather than minting duplicates. Best-effort: any error is logged and
+// swallowed so a Library failure can't break the worker tool call.
+func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
+	if i.engine == nil {
+		return
+	}
+	path := strings.TrimSpace(asString(req.Args["path"]))
+	if path == "" {
+		// No addressable artifact -- nothing meaningful to surface.
+		return
+	}
+	ownerUserId := strings.TrimSpace(req.OwnerUserId)
+	if ownerUserId == "" {
+		return
+	}
+
+	outputId := deriveGeneratedOutputId("computer_use", ownerUserId, req.PlanId+":"+path)
+	title := pathBasename(path)
+	if title == "" {
+		title = path
+	}
+	body := fmt.Sprintf("File written to the connected computer at `%s`.", path)
+
+	mutationCtx := withUserActor(ctx, ownerUserId)
+	var b strings.Builder
+	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
+		outputId, ownerUserId, title, body, "computer_use")
+	if req.AgentId != "" {
+		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
+	}
+	if req.PlanId != "" {
+		fmt.Fprintf(&b, `, producedByPlanId:%q`, req.PlanId)
+	}
+	b.WriteString("})")
+
+	if _, err := i.engine.Execute(mutationCtx, b.String()); err != nil {
+		if i.logger != nil {
+			i.logger.Warn("worker integration: generatedOutput promotion failed",
+				"path", path, "owner_user_id", ownerUserId, "error", err)
+		}
+	}
 }
 
 func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

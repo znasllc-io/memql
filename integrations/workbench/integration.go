@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/safety"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Integration is the workbench IntegrationProvider. It owns the
@@ -35,6 +38,11 @@ type Integration struct {
 	logger  *slog.Logger
 	router  *ForwardRouter
 	remote  bool
+	// engine is used by the memql#722 Library-promotion path to record
+	// a v1:library:generatedOutput row after a successful fs_write. Nil
+	// on builds / wiring paths that don't inject it (promotion is then a
+	// silent no-op). Injected via SetEngine during plug-in materialization.
+	engine memql.IntegrationEngineAccess
 }
 
 // NewIntegration constructs the workbench integration with a fresh
@@ -55,6 +63,16 @@ func NewIntegration(logger *slog.Logger) *Integration {
 // this nil.
 func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 	i.router = r
+}
+
+// SetEngine injects the MemQL engine used by the memql#722
+// Library-promotion path (a successful fs_write records a
+// v1:library:generatedOutput row). Wired during plug-in
+// materialization; nil-safe -- when the engine is absent the
+// promotion path is a silent no-op so the workbench tool still
+// works. Mirrors the SetForwardRouter injection pattern.
+func (i *Integration) SetEngine(e memql.IntegrationEngineAccess) {
+	i.engine = e
 }
 
 // IntegrationName implements memql.IntegrationProvider.
@@ -243,6 +261,16 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		}
 	}
 
+	// Library promotion (memql#722): a successful fs_write into the
+	// per-Plan workspace is a standalone deliverable, so mirror it into
+	// the producing user's Library as a generatedOutput. Best-effort:
+	// failures are logged inside the helper and never break the tool
+	// call. Other actions (exec / fs_read / fs_list / fs_stat /
+	// http_fetch) are read-only or have no addressable artifact.
+	if res.OK && action == "fs_write" {
+		i.promoteWorkbenchOutput(ctx, planId, agentId, innerArgs)
+	}
+
 	if i.logger != nil {
 		level := slog.LevelInfo
 		if !res.OK {
@@ -299,6 +327,13 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 	if resp.ErrorCode != "" {
 		return errorResultNode(planId, action, resp.ErrorCode, resp.ErrorMessage, started), true
 	}
+	// Library promotion (memql#722) for the cluster-mode path: a remote
+	// workbench fs_write is just as much a deliverable as a local one.
+	// The bytes live on the workbench node, but the path + planId we
+	// hold locally are enough to record the pointer row. Best-effort.
+	if action == "fs_write" {
+		i.promoteWorkbenchOutput(ctx, planId, stringArg(allArgs["agentId"], ""), innerArgs)
+	}
 	// Pass the workbench node's payload through verbatim. The shape
 	// mirrors dispatchResult so the agent tool loop's downstream
 	// formatting works without translation.
@@ -329,6 +364,100 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}
+}
+
+// promoteWorkbenchOutput records a v1:library:generatedOutput row for a
+// file just written into the per-Plan workspace (memql#722). The bytes
+// live in the workspace (and, for cluster mode, on a remote node), so
+// this records the artifact INLINE: a pointer row with the workspace
+// path in the body and the file extension mapped to a Library format.
+// The GCS attachment-byte upload (reading workspace bytes ->
+// v1:common:attachment -> attachmentId) is deferred to a follow-up;
+// this row carries NO attachmentId.
+//
+// ownerUserId / spaceId are resolved from the producing Plan
+// (queryPlanById -> createdBy / spaceId): the workbench dispatch args
+// don't carry the user id, but the Plan's createdBy is server-stamped
+// from actor.userId so it is the authoritative owner. Idempotent: the
+// outputId is derived deterministically from (ownerUserId, planId,
+// path). Best-effort: any failure (engine nil, owner unresolved,
+// insert error) is logged and swallowed so it can't break fs_write.
+func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentId string, innerArgs map[string]any) {
+	if i.engine == nil {
+		return
+	}
+	path := ""
+	if innerArgs != nil {
+		path, _ = innerArgs["path"].(string)
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || strings.TrimSpace(planId) == "" {
+		return
+	}
+
+	ownerUserId, spaceId := i.resolvePlanOwner(ctx, planId)
+	if ownerUserId == "" {
+		if i.logger != nil {
+			i.logger.Warn("workbench: generatedOutput promotion skipped -- could not resolve plan owner",
+				slog.String("planId", planId), slog.String("path", path))
+		}
+		return
+	}
+
+	outputId := deriveGeneratedOutputId("workbench_generated", ownerUserId, planId+":"+path)
+	title := pathBasename(path)
+	if title == "" {
+		title = path
+	}
+	body := fmt.Sprintf("File written to the task workspace at `%s`.", path)
+	format := formatForExtension(path)
+
+	mutationCtx := withUserActor(ctx, ownerUserId)
+	var b strings.Builder
+	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
+		outputId, ownerUserId, title, body, "workbench_generated", format)
+	if agentId = strings.TrimSpace(agentId); agentId != "" {
+		fmt.Fprintf(&b, `, producedByAgentId:%q`, agentId)
+	}
+	fmt.Fprintf(&b, `, producedByPlanId:%q`, planId)
+	if spaceId != "" {
+		fmt.Fprintf(&b, `, spaceId:%q`, spaceId)
+	}
+	b.WriteString("})")
+
+	if _, err := i.engine.Execute(mutationCtx, b.String()); err != nil {
+		if i.logger != nil {
+			i.logger.Warn("workbench: generatedOutput promotion failed",
+				slog.String("planId", planId), slog.String("path", path),
+				slog.String("ownerUserId", ownerUserId), slog.Any("error", err))
+		}
+	}
+}
+
+// resolvePlanOwner reads queryPlanById and returns the Plan's owner
+// user id (createdBy, server-stamped from actor.userId) and spaceId.
+// Returns empty strings on any failure -- the caller treats an empty
+// owner as "skip promotion". The planFull shape flattens, so rows land
+// in res.OutputPayload() with createdBy / spaceId as top-level fields.
+func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (ownerUserId, spaceId string) {
+	if i.engine == nil {
+		return "", ""
+	}
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`queryPlanById({planId:%q})`, planId))
+	if err != nil || res == nil {
+		return "", ""
+	}
+	for _, row := range outputPayloadRows(res.OutputPayload()) {
+		if row == nil {
+			continue
+		}
+		owner := strings.TrimSpace(stringFromRow(row, "createdBy"))
+		space := strings.TrimSpace(stringFromRow(row, "spaceId"))
+		if owner != "" {
+			return owner, space
+		}
+	}
+	return "", ""
 }
 
 // handleTeardownDirectory removes the per-Plan workspace directory.
@@ -374,4 +503,123 @@ func (i *Integration) handleTeardownDirectory(ctx context.Context, args map[stri
 		CreatedAt: time.Now().UTC(),
 		Payload:   payloadBytes,
 	}}, nil
+}
+
+// ----- Library-promotion helpers (memql#722) -------------------------------
+
+// genOutputIdEngine is the content-id engine used to derive deterministic
+// generatedOutput ids. Safe for concurrent use.
+var genOutputIdEngine = id.New()
+
+// deriveGeneratedOutputId mints a deterministic v1:library:generatedOutput
+// id from (source, ownerUserId, stableKey). Deterministic by design:
+// re-inserting with the same outputId re-versions the same logical row
+// (the indexGeneratedOutputOnCreate automation is idempotent), so a
+// re-write updates in place instead of minting a duplicate. NEVER derive
+// from time. Built on core/id (content-addressed SHA256) per the
+// integrations no-raw-sha256 conformance rule.
+func deriveGeneratedOutputId(source, ownerUserId, stableKey string) string {
+	h := genOutputIdEngine.MustFromMap(map[string]any{
+		"source":      source,
+		"ownerUserId": ownerUserId,
+		"stableKey":   stableKey,
+	})
+	return "genout-" + string(h)[:16]
+}
+
+// pathBasename returns the final path element of a workspace-relative
+// path, suitable for a Library title. POSIX forward-slash semantics
+// (path, not filepath) so workspace paths resolve consistently.
+func pathBasename(p string) string {
+	p = strings.TrimRight(strings.TrimSpace(p), "/")
+	if p == "" {
+		return ""
+	}
+	return path.Base(p)
+}
+
+// formatForExtension maps a filename extension to a Library
+// generatedOutput.format enum value (markdown / document / pdf /
+// spreadsheet / image / text / other). Defaults to "text" for unknown
+// or extension-less files -- a written workspace file is text far more
+// often than not, and "text" is a safe, honest fallback.
+func formatForExtension(p string) string {
+	ext := strings.ToLower(strings.TrimPrefix(path.Ext(pathBasename(p)), "."))
+	switch ext {
+	case "md", "markdown":
+		return "markdown"
+	case "pdf":
+		return "pdf"
+	case "doc", "docx", "odt", "rtf":
+		return "document"
+	case "csv", "tsv", "xls", "xlsx", "ods":
+		return "spreadsheet"
+	case "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff":
+		return "image"
+	case "txt", "log", "json", "yaml", "yml", "xml", "html", "htm",
+		"go", "py", "js", "ts", "sh", "toml", "ini", "conf":
+		return "text"
+	case "":
+		return "text"
+	default:
+		return "other"
+	}
+}
+
+// stringFromRow reads a string field out of a flattened shape() row.
+func stringFromRow(row map[string]any, key string) string {
+	if row == nil {
+		return ""
+	}
+	if s, ok := row[key].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// outputPayloadRows normalises a shape() query's OutputPayload into a
+// []map[string]any slice. shape() can land as a slice of maps, a slice
+// of `any` whose elements are maps, or a bare map (single-row
+// projections). Mirrors the worker integration's helper of the same
+// name -- duplicated to keep the workbench package self-contained.
+func outputPayloadRows(payload any) []map[string]any {
+	if payload == nil {
+		return nil
+	}
+	switch v := payload.(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		return []map[string]any{v}
+	}
+	return nil
+}
+
+// withUserActor stamps a synthetic TokenInfo on ctx so the
+// mutationCreateGeneratedOutput insert attributes its createdBy column
+// to the producing user. The workbench dispatch path doesn't carry the
+// user's JWT into the per-call context, and the mutation handler
+// requires an actor. Mirrors the worker integration's helper and
+// automations/executor.go's contextWithSystemActor pattern, scoped to a
+// real user.
+func withUserActor(ctx context.Context, ownerUserId string) context.Context {
+	if strings.TrimSpace(ownerUserId) == "" {
+		return ctx
+	}
+	claims := map[string]any{
+		"sub":   ownerUserId,
+		"email": ownerUserId,
+		"role":  "user",
+	}
+	token := auth.BuildTokenInfo(claims)
+	ctx = auth.ContextWithClaims(ctx, claims)
+	return auth.ContextWithToken(ctx, token)
 }

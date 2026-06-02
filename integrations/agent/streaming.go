@@ -9,10 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // defaultMaxStreamingToolLoopIterations is the built-in cap when no
@@ -539,6 +541,16 @@ StreamLoop:
 				content = result
 				hadSuccess = true
 				sink.ToolResult(tc.ID, result, "")
+				// Library promotion (memql#722): publishing a canvas card
+				// is a standalone deliverable the agent emits, so mirror
+				// it into the user's Library as a generatedOutput. Args
+				// are the post-injectAgentContext map (carries the actor
+				// + space stamps); title/body come from the card's `data`
+				// object. Best-effort -- failures are logged inside the
+				// helper and never break the turn.
+				if tc.Name == "canvasPublish" {
+					r.promoteCanvasOutput(ctx, turnCtx, args)
+				}
 				// Log worker tool results so the agent log makes the
 				// "Sofia says unconfigured but the pill is green"
 				// debugging path visible. Contents are short JSON
@@ -1016,4 +1028,115 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 			args["forUserId"] = ctx.ForUserId
 		}
 	}
+}
+
+// promoteCanvasOutput records a v1:library:generatedOutput row for a
+// canvas card the agent just published (memql#722). canvasPublish args
+// carry the card content in a nested `data` object: `data.title` and
+// `data.source` (markdown body) -- see the agentReply seed prompt and
+// the canvasPublish arg schema (kind/data/importance/space/actor).
+// Ambient / empty cards (no meaningful body) are skipped so the Library
+// isn't polluted with status chrome. Idempotent: outputId is derived
+// deterministically from (ownerUserId, spaceId, title) so a re-publish
+// of the same card re-versions the same row. Best-effort: a promotion
+// failure is logged and swallowed and never breaks the turn.
+func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, args map[string]any) {
+	if r.engine == nil {
+		return
+	}
+	ownerUserId := strings.TrimSpace(turnCtx.OwnerUserId)
+	if ownerUserId == "" {
+		return
+	}
+	data, _ := args["data"].(map[string]any)
+	title := strings.TrimSpace(stringField(data, "title"))
+	body := strings.TrimSpace(stringField(data, "source"))
+	// Skip ambient / empty cards: a card with no body isn't a
+	// deliverable worth surfacing in the Library. Fall back to the
+	// top-level title only when there's a body to anchor it.
+	if body == "" {
+		return
+	}
+	if title == "" {
+		title = strings.TrimSpace(stringField(args, "title"))
+	}
+	if title == "" {
+		title = "Canvas card"
+	}
+
+	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.SpaceId+":"+title)
+
+	mutationCtx := withUserActor(ctx, ownerUserId)
+	var b strings.Builder
+	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
+		outputId, ownerUserId, title, body, "agent_generated")
+	if turnCtx.AgentId != "" {
+		fmt.Fprintf(&b, `, producedByAgentId:%q`, turnCtx.AgentId)
+	}
+	if turnCtx.PlanId != "" {
+		fmt.Fprintf(&b, `, producedByPlanId:%q`, turnCtx.PlanId)
+	}
+	if turnCtx.SpaceId != "" {
+		fmt.Fprintf(&b, `, spaceId:%q`, turnCtx.SpaceId)
+	}
+	b.WriteString("})")
+
+	if _, err := r.engine.Execute(mutationCtx, b.String()); err != nil {
+		r.logger.Warn("agent streaming: generatedOutput promotion failed",
+			"title", title, "owner_user_id", ownerUserId, "error", err)
+	}
+}
+
+// stringField reads a string field out of an args map, tolerating a
+// nil map. Returns "" when absent or not a string.
+func stringField(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if s, ok := m[key].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// genOutputIdEngine is the content-id engine used to derive deterministic
+// generatedOutput ids. Safe for concurrent use.
+var genOutputIdEngine = id.New()
+
+// deriveGeneratedOutputId mints a deterministic v1:library:generatedOutput
+// id from (source, ownerUserId, stableKey). Deterministic by design:
+// re-inserting with the same outputId re-versions the same logical row
+// (the indexGeneratedOutputOnCreate automation is idempotent), so a
+// re-publish updates in place instead of minting a duplicate. NEVER
+// derive from time. Built on core/id (content-addressed SHA256) per the
+// integrations no-raw-sha256 conformance rule.
+func deriveGeneratedOutputId(source, ownerUserId, stableKey string) string {
+	h := genOutputIdEngine.MustFromMap(map[string]any{
+		"source":      source,
+		"ownerUserId": ownerUserId,
+		"stableKey":   stableKey,
+	})
+	return "genout-" + string(h)[:16]
+}
+
+// withUserActor stamps a synthetic TokenInfo on ctx so engine mutations
+// attribute their createdBy column to the named user. The agent-tool
+// dispatch path doesn't carry the user's JWT through to per-turn context
+// (cognition's forwarder builds a fresh context), and bare engine.Execute
+// calls a mutation handler that requires an actor. Mirrors the worker
+// integration's helper (integrations/agent/worker/integration.go) and
+// automations/executor.go's contextWithSystemActor pattern, but scoped
+// to a real user.
+func withUserActor(ctx context.Context, ownerUserId string) context.Context {
+	if strings.TrimSpace(ownerUserId) == "" {
+		return ctx
+	}
+	claims := map[string]any{
+		"sub":   ownerUserId,
+		"email": ownerUserId,
+		"role":  "user",
+	}
+	token := auth.BuildTokenInfo(claims)
+	ctx = auth.ContextWithClaims(ctx, claims)
+	return auth.ContextWithToken(ctx, token)
 }
