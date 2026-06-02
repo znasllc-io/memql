@@ -6,7 +6,7 @@
 @version("1.0.0")
 @namespace("worker")
 @description("Per-call telemetry for worker tool invocations. Written once on call completion (success / failure / cancelled / timeout / denied). Operator reads these for plan debugging; auditor reads identity:auditEvent for the security timeline. Linkage between the two layers is via correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the workerInvocationRetentionSweep cron soft-deletes rows past their TTL.")
-concept workerInvocation {
+concept invocation {
   ownerUserId    string  @required  @description("v1:identity:user.id of the worker's owner. Same as WorkerRegistration.ownerUserId; denormalized so the frontend's per-user invocations query doesn't need to join.")
   workerId       string  @required  @description("v1:worker:registration.id the call dispatched to.")
   agentId        string  @required  @description("v1:agents:agent.id the call originated from.")
