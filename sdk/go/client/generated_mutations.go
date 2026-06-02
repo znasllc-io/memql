@@ -5961,6 +5961,42 @@ func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) st
 	return b.String()
 }
 
+// MutationMarkChunkSuperseded -- Flag an existing knowledge chunk as outdated. Called by the Trainer Agent's markChunkSuperseded tool during a mode='refresh' trainSpecialist Plan. Sets superseded=true + supersededAt + supersededReason; retrieval excludes superseded chunks. Partial update -- the chunk row is preserved for audit.
+//
+// Bound concept: documentChunk.
+type MutationMarkChunkSupersededArgs struct {
+	ChunkId          string
+	SupersededAt     string
+	SupersededReason string
+}
+
+// MutationMarkChunkSuperseded calls the engine mutation mutationMarkChunkSuperseded.
+func (qc *QueryClient) MutationMarkChunkSuperseded(ctx context.Context, args MutationMarkChunkSupersededArgs) (*Result, error) {
+	call := MutationMarkChunkSupersededBuild(args)
+	return qc.executeNamed(ctx, "mutationMarkChunkSuperseded", call)
+}
+
+func MutationMarkChunkSupersededBuild(args MutationMarkChunkSupersededArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMarkChunkSuperseded({")
+	b.WriteString("chunkId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("supersededAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
+	if args.SupersededReason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("supersededReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.SupersededReason))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationMarkKnowledgeDomainSeeded -- Stamp lastSeededAt + seederRecipeVersion on a knowledge domain after a successful seeder run. Partial update via update() -- only the freshness fields change; everything else inherits from the prior row.
 //
 // Bound concept: knowledgeDomain.
@@ -9762,6 +9798,70 @@ func MutationUpdateWorkerLastSeenBuild(args MutationUpdateWorkerLastSeenArgs) st
 		}
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationWriteKnowledgeChunk -- Write a knowledge chunk distilled by the Trainer Agent during a trainSpecialist Plan. Hard-stamps source='trainerAgent' + validationStatus='validated'. sourceRef is REQUIRED (the Trainer's no-fabricated-citations invariant -- every chunk points at a real URL or named source). Lands as canonical, retrievable once embedded.
+//
+// Bound concept: documentChunk.
+type MutationWriteKnowledgeChunkArgs struct {
+	ChunkId     string
+	DomainId    string
+	Text        string
+	SourceRef   string
+	Seq         int
+	TokenCount  int
+	SourceTopic string
+}
+
+// MutationWriteKnowledgeChunk calls the engine mutation mutationWriteKnowledgeChunk.
+func (qc *QueryClient) MutationWriteKnowledgeChunk(ctx context.Context, args MutationWriteKnowledgeChunkArgs) (*Result, error) {
+	call := MutationWriteKnowledgeChunkBuild(args)
+	return qc.executeNamed(ctx, "mutationWriteKnowledgeChunk", call)
+}
+
+func MutationWriteKnowledgeChunkBuild(args MutationWriteKnowledgeChunkArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationWriteKnowledgeChunk({")
+	b.WriteString("chunkId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domainId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DomainId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("text: ")
+	b.WriteString(fmt.Sprintf("%q", args.Text))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceRef: ")
+	b.WriteString(fmt.Sprintf("%q", args.SourceRef))
+	if args.Seq != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("seq: ")
+		b.WriteString(fmt.Sprintf("%v", args.Seq))
+	}
+	if args.TokenCount != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
+	}
+	if args.SourceTopic != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceTopic: ")
+		b.WriteString(fmt.Sprintf("%q", args.SourceTopic))
 	}
 	b.WriteString("})")
 	return b.String()

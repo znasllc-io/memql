@@ -53,6 +53,12 @@ type Engine interface {
 	// returns the assistant response. Used by the Phase 4 Planner
 	// Agent loop to drive structured-output decisions.
 	InvokeSI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	// InvokeSIChatWithFilteredTools renders a prompt and runs a bounded
+	// tool-calling loop restricted to the named tool set, returning the
+	// model's final assistant text. Used by the trainSpecialist
+	// dispatcher to drive the Trainer Agent (webSearch / fetchUrl /
+	// writeKnowledgeChunk / markChunkSuperseded / embedChunk).
+	InvokeSIChatWithFilteredTools(ctx context.Context, templateId string, data map[string]any, toolNames []string) (string, error)
 }
 
 // AgentForwarder is the wire-level interface the planner uses to
@@ -96,6 +102,8 @@ type PlannerIntegration struct {
 	eventBus       *events.Bus
 	agentForwarder AgentForwarder
 	agentLoop      *PlannerAgentLoop
+	trainDispatch  *TrainSpecialistDispatcher
+	refreshCron    *RefreshCron
 	logger         *slog.Logger
 	unsubscribes   []func()
 	started        atomic.Bool
@@ -144,6 +152,8 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 		p.logger = slog.Default().With("component", ComponentName)
 	}
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
+	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
+	p.refreshCron = NewRefreshCron(p.engine, p.logger)
 	return p, nil
 }
 
@@ -194,14 +204,48 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.agentLoop.HandlePlanUpdated,
 			events.WithSubscriberName("planner:agent-loop-updated"),
 		))
+		// trainSpecialist dispatcher (#644). Claims kind=trainSpecialist
+		// Plans -- the agent loop skips that kind so the two don't race.
+		// Subscribes to both created + updated so a Plan spawned in
+		// 'planning' (cron / stale-signal path) AND one flipped to
+		// 'running' (mutationStartPlan) both dispatch; the dispatcher's
+		// own claim guard dedups the double-fire.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.created.v1:planner:plan",
+			p.trainDispatch.HandlePlanCreated,
+			events.WithSubscriberName("planner:train-specialist-created"),
+		))
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.trainDispatch.HandlePlanUpdated,
+			events.WithSubscriberName("planner:train-specialist-updated"),
+		))
+		// Event-driven stale-signal refresh (#644). When a domain's
+		// staleSignalCount crosses the threshold (Planner Agent bumped
+		// it via markKnowledgeDomainStale), spawn an immediate refresh
+		// Plan instead of waiting for the cadence backstop.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:common:knowledgeDomain",
+			p.refreshCron.HandleDomainUpdated,
+			events.WithSubscriberName("planner:knowledge-stale-signal"),
+		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: subscriptions registered",
 			"patterns", []string{
 				"graph.node.updated.v1:planner:plan (scope-elevation)",
 				"graph.node.created.v1:planner:plan (agent loop)",
 				"graph.node.updated.v1:planner:plan (agent loop)",
+				"graph.node.created.v1:planner:plan (trainSpecialist)",
+				"graph.node.updated.v1:planner:plan (trainSpecialist)",
 			},
 		)
+		// Start the daily-refresh cron poller (#644). Polls
+		// queryDueRefreshDomains, does the elapsed-time math Go-side,
+		// and spawns trainSpecialist(mode='refresh') Plans -- which the
+		// dispatcher above then picks up.
+		if p.refreshCron != nil {
+			p.refreshCron.Start(ctx)
+		}
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
 	// readyCh close, IsRunning bookkeeping) to the base
@@ -226,6 +270,9 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	}
 	p.unsubscribes = nil
 	p.mu.Unlock()
+	if p.refreshCron != nil {
+		p.refreshCron.Stop()
+	}
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)
 	}

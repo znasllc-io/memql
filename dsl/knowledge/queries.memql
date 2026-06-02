@@ -12,6 +12,23 @@ query documentChunk queryAllDocumentChunkDomains {
   shape   documentChunkDomainLite
 }
 
+// queryDocumentChunksForDomain -- every chunk in a knowledge domain.
+// Backs the Trainer Agent's mode='refresh' existingCorpus input: the
+// trainSpecialist dispatcher reads the current chunks so the Trainer
+// can decide what's still current vs. what to mark superseded. The
+// Go-side dispatcher truncates the text per chunk before handing the
+// corpus to the prompt (token budget).
+
+@enabled
+@description("Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).")
+query documentChunk queryDocumentChunksForDomain {
+  args {
+    domainId  string  @required
+  }
+  filter  payload.domainId==args.domainId
+  shape   documentChunkFull
+}
+
 @enabled
 @description("Single Document by id.")
 query document queryDocumentById {

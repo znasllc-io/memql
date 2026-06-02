@@ -69,6 +69,22 @@ func (a *CognitionEngineAdapter) InvokeSIStructured(
 	return a.Engine.InvokeSIStructured(ctx, templateId, data, schemaName, schema, strict)
 }
 
+// InvokeSIChatWithFilteredTools delegates to the engine's bounded
+// tool-calling loop, restricted to the named tool set. Used by the
+// planner integration's trainSpecialist dispatcher to drive the
+// Trainer Agent's web-search + chunk-write tool loop.
+func (a *CognitionEngineAdapter) InvokeSIChatWithFilteredTools(
+	ctx context.Context,
+	templateId string,
+	data map[string]any,
+	toolNames []string,
+) (string, error) {
+	if a == nil || a.Engine == nil {
+		return "", fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.InvokeSIChatWithFilteredTools(ctx, templateId, data, toolNames)
+}
+
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")

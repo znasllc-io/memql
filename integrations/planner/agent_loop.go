@@ -73,6 +73,15 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	if !ok {
 		return
 	}
+	if kind == "trainSpecialist" {
+		// trainSpecialist Plans are NOT decomposed by the Planner
+		// Agent -- they're claimed by the TrainSpecialistDispatcher
+		// (train_specialist_dispatch.go), which invokes the Trainer
+		// Agent's web-search + chunk-write tool loop and completes the
+		// Plan directly. Returning here keeps the Planner Agent loop
+		// from racing the dispatcher on the same Plan.
+		return
+	}
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.

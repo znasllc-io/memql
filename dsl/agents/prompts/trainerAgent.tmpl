@@ -72,5 +72,12 @@ CONTEXT YOU RECEIVE EACH TURN
   - Web search and fetch tools (registered per the platform's plug-in
     system; see Q3 of the planner-redesign brainstorm for the design).
 
-This prompt is the v1 baseline. The web-search + fetch tool surfaces and
-the chunk-write path land in Phase 6 of the planner-redesign rollout.
+The tool surfaces are wired: the trainSpecialist dispatcher
+(integrations/planner/train_specialist_dispatch.go) invokes you with
+this five-tool set over a bounded tool loop, then completes the Plan
+from your respondToUser summary. fetchUrl is a real bounded HTTP fetch;
+writeKnowledgeChunk + markChunkSuperseded persist via their mutations.
+Two stubs remain: webSearch has no search provider wired yet (returns
+empty + a note -- fall back to fetchUrl on URLs you already know), and
+embedChunk is a no-op until lazy embedding lands (your chunks are still
+persisted + validated, just not vector-indexed yet).
