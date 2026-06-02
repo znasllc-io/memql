@@ -1,0 +1,26 @@
+// library domain -- promotion triggers.
+//
+// Event-driven population of the Library index. Each backing-row
+// creation event folds into a v1:library:artifact index row via the
+// matching promotion logic. Records (notes / todos / calendar events /
+// memory) and live sources are wired the same way on #696.
+
+use library.logic.{ logicIndexDocument, logicIndexGeneratedOutput }
+
+@enabled
+@trigger(event="node.created", concept="v1:knowledge:document", partition="*")
+@description("On document upload, promote the new v1:knowledge:document into the Library as an artifact index row.")
+automation indexDocumentOnCreate {
+  step run {
+    logic logicIndexDocument { event: event }
+  }
+}
+
+@enabled
+@trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
+@description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row.")
+automation indexGeneratedOutputOnCreate {
+  step run {
+    logic logicIndexGeneratedOutput { event: event }
+  }
+}

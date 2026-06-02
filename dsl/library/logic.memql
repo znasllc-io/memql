@@ -1,0 +1,33 @@
+// library domain -- promotion logic.
+//
+// One logic per backing source: read the just-created row off the
+// triggering event and fold it into a v1:library:artifact index row.
+// Wired to creation events by the automations in automations.memql.
+// The document path has a live producer today (the attachment handler
+// inserts v1:knowledge:document); the generatedOutput path's producers
+// (workbench / computer-use / agent integrations) are the remaining
+// integration step on #694.
+
+use library.mutations.{ mutationCreateArtifact }
+
+@enabled
+@description("On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.")
+logic logicIndexDocument {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:document:", args.event.payload.id), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, producedByPlanId: args.event.payload.planId, validationStatus: args.event.payload.validationStatus })
+  }
+}
+
+@enabled
+@description("On v1:library:generatedOutput creation, promote the produced deliverable into a Library artifact index row (lens=artifact, kind=generated_output). source + agent / plan provenance are carried from the generatedOutput row. ownerUserId is the producing user. Idempotent via the deterministic artifact id.")
+logic logicIndexGeneratedOutput {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:library:generatedOutput:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId })
+  }
+}

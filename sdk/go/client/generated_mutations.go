@@ -1388,6 +1388,128 @@ func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) 
 	return b.String()
 }
 
+// MutationCreateArtifact -- Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.
+//
+// Bound concept: artifact.
+type MutationCreateArtifactArgs struct {
+	SourceConceptRef string
+	OwnerUserId      string
+	// Enum: artifact | record
+	Lens string
+	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source
+	Kind string
+	// Enum: uploaded | workbench_generated | computer_use | agent_generated | derived | live
+	Source  string
+	Title   string
+	Summary string
+	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
+	Format           string
+	MimeType         string
+	Live             bool
+	LiveSet          bool // set true to send live; required because zero-value bool is ambiguous
+	SpaceId          string
+	AgentId          string
+	ProducedByPlanId string
+	// Enum: none | unvalidated | validated | rejected | partiallyValidated | superseded
+	ValidationStatus string
+}
+
+// MutationCreateArtifact calls the engine mutation mutationCreateArtifact.
+func (qc *QueryClient) MutationCreateArtifact(ctx context.Context, args MutationCreateArtifactArgs) (*Result, error) {
+	call := MutationCreateArtifactBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateArtifact", call)
+}
+
+func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateArtifact({")
+	b.WriteString("sourceConceptRef: ")
+	b.WriteString(fmt.Sprintf("%q", args.SourceConceptRef))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lens: ")
+	b.WriteString(fmt.Sprintf("%q", args.Lens))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if args.Summary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%q", args.Summary))
+	}
+	if args.Format != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(fmt.Sprintf("%q", args.Format))
+	}
+	if args.MimeType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mimeType: ")
+		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+	}
+	if args.LiveSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("live: ")
+		b.WriteString(fmt.Sprintf("%v", args.Live))
+	}
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.AgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	if args.ProducedByPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.ValidationStatus != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("validationStatus: ")
+		b.WriteString(fmt.Sprintf("%q", args.ValidationStatus))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateAuditEvent -- Append a row to the append-only security audit log.
 //
 // Bound concept: auditEvent.
@@ -2605,6 +2727,112 @@ func MutationCreateEntityIndexEntryBuild(args MutationCreateEntityIndexEntryArgs
 		}
 		b.WriteString("dedupOverrideNote: ")
 		b.WriteString(fmt.Sprintf("%q", args.DedupOverrideNote))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateGeneratedOutput -- Create a generated-output row -- a deliverable PRODUCED through the app (workbench result, computer-use output, or standalone agent output). System / agent-invoked: ownerUserId is the producing user. logicIndexGeneratedOutput folds the new row into the Library index automatically. body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
+//
+// Bound concept: generatedOutput.
+type MutationCreateGeneratedOutputArgs struct {
+	OutputId     string
+	OwnerUserId  string
+	Title        string
+	Summary      string
+	Body         string
+	AttachmentId string
+	// Enum: markdown | document | pdf | spreadsheet | image | text | other
+	Format   string
+	MimeType string
+	// Enum: workbench_generated | computer_use | agent_generated | derived
+	Source            string
+	SpaceId           string
+	ProducedByPlanId  string
+	ProducedByAgentId string
+}
+
+// MutationCreateGeneratedOutput calls the engine mutation mutationCreateGeneratedOutput.
+func (qc *QueryClient) MutationCreateGeneratedOutput(ctx context.Context, args MutationCreateGeneratedOutputArgs) (*Result, error) {
+	call := MutationCreateGeneratedOutputBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateGeneratedOutput", call)
+}
+
+func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateGeneratedOutput({")
+	b.WriteString("outputId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if args.Summary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%q", args.Summary))
+	}
+	if args.Body != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("body: ")
+		b.WriteString(fmt.Sprintf("%q", args.Body))
+	}
+	if args.AttachmentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attachmentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	}
+	if args.Format != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(fmt.Sprintf("%q", args.Format))
+	}
+	if args.MimeType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mimeType: ")
+		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.ProducedByPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.ProducedByAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
 	b.WriteString("})")
 	return b.String()
