@@ -692,6 +692,23 @@ deploy-aks:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: deploy-autoscaler
+
+## Converge the AKS staging nodepool to the cluster-autoscaler sizing codified
+## for #614 (DEPLOYMENT_STRATEGY.md §9): min 2 / max 5 on nodepool1 (B2s) so a
+## rolling-update surge gets headroom automatically and scales back after.
+## Idempotent. OWNER-GATED: enabling the autoscaler on shared cluster infra is
+## a persistent cost decision -- run with DRY_RUN=1 to print the plan; drop it
+## only to apply the live change. Impl in scripts/deploy/aks-autoscaler.sh.
+##   make deploy-autoscaler DRY_RUN=1     # print the plan, change nothing
+##   make deploy-autoscaler ARGS=--show   # read current autoscaler state
+##   make deploy-autoscaler               # APPLY the codified sizing (owner-gated)
+deploy-autoscaler:
+	@bash scripts/deploy/aks-autoscaler.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
 .PHONY: smoke-staging
 
 ## Repeatable end-to-end smoke test against the LIVE staging front door

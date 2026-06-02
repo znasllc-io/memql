@@ -58,19 +58,97 @@ func requireKubectl(t *testing.T) {
 	}
 }
 
-func TestAksDeploySyntax(t *testing.T)   { aksSyntax(t, "aks-deploy.sh") }
-func TestAksRollbackSyntax(t *testing.T) { aksSyntax(t, "aks-rollback.sh") }
+func TestAksDeploySyntax(t *testing.T)     { aksSyntax(t, "aks-deploy.sh") }
+func TestAksRollbackSyntax(t *testing.T)   { aksSyntax(t, "aks-rollback.sh") }
+func TestAksAutoscalerSyntax(t *testing.T) { aksSyntax(t, "aks-autoscaler.sh") }
 
-// The deploy --help must advertise the gate knobs added in #554.
+// The deploy --help must advertise the gate knobs added in #554, plus the
+// pre-deploy headroom guard added in #614.
 func TestAksDeployHelpHasGateFlags(t *testing.T) {
 	out, err := runAks(t, "aks-deploy.sh", "--help")
 	if err != nil {
 		t.Fatalf("--help exited non-zero: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Usage:", "--no-gate", "--no-smoke", "--skip-migrate"} {
+	for _, want := range []string{"Usage:", "--no-gate", "--no-smoke", "--skip-migrate", "--gate-headroom", "--skip-headroom"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("deploy --help missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// A dry-run deploy plans the pre-deploy headroom check with the correct surge
+// math (8 Deployments x 200m = 1600m) and never touches Azure or the cluster.
+func TestAksDeployDryRunPlansHeadroomCheck(t *testing.T) {
+	requireKubectl(t)
+	out, err := runAks(t, "aks-deploy.sh", "--dry-run", "--skip-build")
+	if err != nil {
+		t.Fatalf("--dry-run exited non-zero: %v\n%s", err, out)
+	}
+	for _, want := range []string{"headroom guard", "8 pods", "1600m"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run plan missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// --skip-headroom suppresses the surge check.
+func TestAksDeploySkipHeadroom(t *testing.T) {
+	requireKubectl(t)
+	out, err := runAks(t, "aks-deploy.sh", "--dry-run", "--skip-build", "--skip-headroom")
+	if err != nil {
+		t.Fatalf("--dry-run exited non-zero: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "skipping the surge headroom check") {
+		t.Errorf("--skip-headroom should suppress the check:\n%s", out)
+	}
+}
+
+// The autoscaler IaC --help advertises the codified #614 / §9 sizing and the
+// owner-gated live command.
+func TestAksAutoscalerHelp(t *testing.T) {
+	out, err := runAks(t, "aks-autoscaler.sh", "--help")
+	if err != nil {
+		t.Fatalf("--help exited non-zero: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Usage:", "--dry-run", "--show", "--enable-cluster-autoscaler", "--min-count 2", "--max-count 5", "nodepool1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("autoscaler --help missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A dry-run autoscaler converge plans the exact §9 enable command (min 2 /
+// max 5 on nodepool1) and mutates nothing -- no az calls.
+func TestAksAutoscalerDryRunPlansEnable(t *testing.T) {
+	out, err := runAks(t, "aks-autoscaler.sh", "--dry-run")
+	if err != nil {
+		t.Fatalf("--dry-run exited non-zero: %v\n%s", err, out)
+	}
+	want := "az aks nodepool update -g rg-memql-staging --cluster-name aks-memql-staging -n nodepool1 --enable-cluster-autoscaler --min-count 2 --max-count 5"
+	if !strings.Contains(out, want) {
+		t.Errorf("autoscaler dry-run missing the §9 enable command %q:\n%s", want, out)
+	}
+}
+
+// An env with no codified defaults requires explicit --resource-group/--cluster.
+func TestAksAutoscalerUnknownEnvRejected(t *testing.T) {
+	out, err := runAks(t, "aks-autoscaler.sh", "--env=prod", "--dry-run")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for an env with no codified defaults:\n%s", out)
+	}
+	if !strings.Contains(out, "no codified defaults") {
+		t.Errorf("expected 'no codified defaults' error:\n%s", out)
+	}
+}
+
+// min > max is rejected.
+func TestAksAutoscalerBadRangeRejected(t *testing.T) {
+	out, err := runAks(t, "aks-autoscaler.sh", "--min=5", "--max=2", "--dry-run")
+	if err == nil {
+		t.Fatalf("expected non-zero exit for min>max:\n%s", out)
+	}
+	if !strings.Contains(out, "must be <=") {
+		t.Errorf("expected min<=max validation error:\n%s", out)
 	}
 }
 

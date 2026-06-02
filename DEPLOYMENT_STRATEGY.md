@@ -231,16 +231,31 @@ a headless-browser walkthrough + console-error tier.
 
 Staging runs nodepool `nodepool1` = 4× `Standard_B2s`. The pool handles the
 current mesh (16 pods) but has thin headroom for rolling-update surge. Enable the
-cluster autoscaler so a roll can surge without a scheduling deadlock:
+cluster autoscaler so a roll can surge without a scheduling deadlock.
+
+The chosen sizing is **codified as IaC** in `scripts/deploy/aks-autoscaler.sh`
+(`make deploy-autoscaler`) — an idempotent, declarative converge to the floor
+below. It supports `--dry-run` (prints the plan, no Azure writes) and `--show`
+(read-only state). The **live enable is owner-gated** (enabling the autoscaler
+on shared cluster infra is a persistent cost decision), so the script defaults
+to a plan-and-stop posture; the exact live command it converges to is:
 
 ```bash
 az aks nodepool update -g rg-memql-staging --cluster-name aks-memql-staging \
     -n nodepool1 --enable-cluster-autoscaler --min-count 2 --max-count 5
 ```
 
-> Sizing (min/max, SKU) is a cost decision — confirm before enabling on shared
-> infra, and codify the chosen values in IaC. Recommended staging floor: min 2,
-> max 5 on B2s.
+> Sizing (min/max, SKU) is a cost decision. **Codified floor: min 2, max 5 on
+> B2s** (the committed default in `aks-autoscaler.sh`; override per-call with
+> `--min`/`--max`/`--nodepool` if a future right-sizing changes it).
+
+A complementary **pre-deploy headroom guard** in `scripts/deploy/aks-deploy.sh`
+(`check_nodepool_headroom`) runs before the mesh rolls: it sums the
+rolling-update surge CPU (one maxSurge pod per Deployment × the per-node CPU
+request) and compares it to the cluster's free allocatable CPU. It **warns** by
+default (and points at `aks-autoscaler.sh`), or **fails** the deploy with
+`--gate-headroom`; `--skip-headroom` opts out. Until the autoscaler is live this
+is the belt-and-suspenders signal against the surge-deadlock that stalled 0.9.6.
 
 ---
 
