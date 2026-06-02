@@ -23,6 +23,10 @@ func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App
 	a.engineAndBus()
 	a.integrationsIdentity()
 	a.transportBase()
+	// Deploy-control gRPC service: depends on the gRPC server existing
+	// (transportBase) + the engine being ready. Lands before
+	// transportIdentity so the service is registered before serving.
+	a.setupDeployControlService()
 	a.transportIdentity()
 	a.createHTTPServer()
 	a.cluster()

@@ -131,6 +131,16 @@ type App struct {
 	// in integrations_worker_agent.go reads it back via type
 	// assertion.
 	workerService any
+
+	// deployControlService is the DeployControlService gRPC
+	// implementation behind the memQL Deployment Console
+	// (znasllc-io/memql#725 + #728). Set on the identity build only
+	// (the identity node hosts the admin portal). Stored as `any` to
+	// avoid importing component/deploycontrol in non-identity binaries;
+	// the identity-tagged helper in integrations_deploy_control.go
+	// reads it back via type assertion, and the in-process admin portal
+	// reads it via DeployControlService().
+	deployControlService any
 }
 
 // newApp creates an App with the given overrides, applying defaults for nil fields.
@@ -177,3 +187,11 @@ func (a *App) Engine() *memql.MemQLEngine { return a.engine }
 // identity-tagged subcommand handler type-asserts back to
 // *identity.Service. Nil on binaries built without -tags identity.
 func (a *App) IdentityService() any { return a.identityService }
+
+// DeployControlService exposes the deploy-control service wired during
+// the identity integrations phase. Returned as `any` to keep
+// component/deploycontrol out of non-identity builds' import graphs;
+// the identity-tagged admin portal type-asserts back to
+// *deploycontrol.Service for in-process calls. Nil on binaries built
+// without -tags identity.
+func (a *App) DeployControlService() any { return a.deployControlService }
