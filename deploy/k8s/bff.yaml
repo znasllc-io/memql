@@ -41,7 +41,7 @@ spec:
 
       containers:
         - name: bff
-          image: acrmemql.azurecr.io/memql-bff-copresent:0.9.6
+          image: acrmemql.azurecr.io/memql-bff-copresent:0.9.9
           # preStop (#615): pause before SIGTERM so the EndpointSlice
           # controller removes this pod from the bff / bff-external
           # Services first -- new connections stop landing here while the
