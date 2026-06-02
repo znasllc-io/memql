@@ -15,7 +15,7 @@
 // Planner tab's queryAllPlans / mutationCreatePlan calls were
 // failing with "function not found" as a result.
 
-use planner.concepts.{ plan, task, taskState }
+use planner.concepts.{ plan, task, taskState, responsibility }
 
 @enabled
 @description("Create a synthetic Plan that wraps an ad-hoc tool call made outside any user-initiated planning context. Per Q5: every tool call must produce a Task; Tasks must have a parent Plan; chat-driven tool calls (no user-facing Plan) get a synthetic Plan with kind='adHocAction' so the invariant holds. Status is set to running and completes immediately when the synthetic semantic Task wrapping the tool call resolves.")
@@ -409,5 +409,113 @@ mutation task mutationUpdateTaskStatus {
     args.parkedAt
     args.parkedAtCheckpoint
     args.metrics
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Responsibility CRUD (epic #631 / program #629).
+//
+// A responsibility is a user-authored standing directive aimed at an
+// agent, in three archetypes (reactive / standing / recurring). It
+// folds in and replaces the retired standingTask concept -- recurring
+// responsibilities carry the cron schedule standingTask used to.
+//
+// Authorization (owned tier): create stamps ownerUserId from
+// actor.userId; the status + evaluation update paths re-stamp
+// ownerUserId: actor.userId so the conformance classifier buckets
+// them as owned and a caller can only ever rewrite their own rows.
+// -----------------------------------------------------------------------------
+
+@enabled
+@description("Create a v1:planner:responsibility in status='draft'. ownerUserId is stamped from actor.userId (owned tier) so a caller cannot author a directive owned by someone else. trigger discriminates the archetype: recurring carries schedule, reactive carries condition, standing carries neither. Single write path for responsibility creation.")
+mutation responsibility mutationCreateResponsibility {
+  args {
+    responsibilityId  string
+    statement         string  @required
+    trigger           string  @required  @enum("reactive", "standing", "recurring")
+    schedule          string
+    condition         object
+    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    assignedAgentId   string
+    assignedRoleSlug  string
+    successCriteria   string
+    scopeSpaceId      string
+    enabled           bool
+  }
+  insert responsibility {
+    id: args.responsibilityId
+    ownerUserId: actor.userId
+    args.statement
+    args.trigger
+    args.schedule
+    args.condition
+    targetKind: coalesce(args.targetKind, "unassigned")
+    args.assignedAgentId
+    args.assignedRoleSlug
+    args.successCriteria
+    args.scopeSpaceId
+    enabled: coalesce(args.enabled, true)
+    status: "draft"
+  }
+}
+
+@enabled
+@description("Update an existing v1:planner:responsibility's editable fields (statement / schedule / condition / target binding / scope / enabled). Partial-update via update() -- only the fields you pass change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId (owned tier) so a caller can only rewrite their own rows.")
+mutation responsibility mutationUpdateResponsibility {
+  args {
+    responsibilityId  string  @required
+    statement         string
+    trigger           string  @enum("reactive", "standing", "recurring")
+    schedule          string
+    condition         object
+    targetKind        string  @enum("assistant", "specialist", "unassigned")
+    assignedAgentId   string
+    assignedRoleSlug  string
+    successCriteria   string
+    scopeSpaceId      string
+    enabled           bool
+  }
+  update responsibility {
+    id: args.responsibilityId
+    ownerUserId: actor.userId
+    args.statement
+    args.trigger
+    args.schedule
+    args.condition
+    args.targetKind
+    args.assignedAgentId
+    args.assignedRoleSlug
+    args.successCriteria
+    args.scopeSpaceId
+    args.enabled
+  }
+}
+
+@enabled
+@description("Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).")
+mutation responsibility mutationSetResponsibilityStatus {
+  args {
+    responsibilityId  string  @required
+    status            string  @required  @enum("draft", "active", "paused", "archived")
+  }
+  update responsibility {
+    id: args.responsibilityId
+    ownerUserId: actor.userId
+    args.status
+  }
+}
+
+@enabled
+@description("Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).")
+mutation responsibility mutationRecordResponsibilityEvaluation {
+  args {
+    responsibilityId  string  @required
+    lastResult        string  @required
+  }
+  update responsibility {
+    id: args.responsibilityId
+    ownerUserId: actor.userId
+    args.lastResult
+    lastEvaluatedAt: now()
   }
 }
