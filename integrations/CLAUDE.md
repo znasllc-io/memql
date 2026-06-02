@@ -85,7 +85,7 @@ integrations/
 ├── gcs/              # storage.upload
 ├── identity/         # Identity-side helpers
 ├── knowledge/        # Corpus seed + lookup helpers (concept:* surfaces for agents)
-├── liveavatar/       # createSessionToken
+├── avatardirect/     # Direct/Guide avatar: mint LiveKit room + bring Anam up (avatarDirectStartSession)
 ├── deepgram/         # Polyphon ASR/TTS via Deepgram (Nova-3 WS + Aura-2 REST)
 ├── openai/           # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech)
 ├── router/           # SI router ledger

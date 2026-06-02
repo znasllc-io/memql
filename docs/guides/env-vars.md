@@ -48,7 +48,7 @@ Where `COMPONENT` is the subsystem that consumes the value:
 | `MEMQL_SI_`     | Synthetic-intelligence providers (LLM / STT / TTS). Vendor goes after the prefix.          | `MEMQL_SI_OPENAI_API_KEY`, `MEMQL_SI_ANTHROPIC_API_KEY`.                         |
 | `EMAIL_`        | Email integration (Microsoft Graph or SMTP sender).                                        | `EMAIL_AZURE_TENANT_ID`, `EMAIL_SENDER`, `EMAIL_FROM_NAME`.                      |
 | `IDENTITY_`     | In-house identity service (auth subsystem) -- both the service itself and the per-node verifier.   | `IDENTITY_BASE_URL`, `IDENTITY_VERIFIER_BASE_URL`, `IDENTITY_KEY_ENCRYPTION_KEY`.|
-| `LIVEAVATAR_`   | LiveAvatar integration. Same pattern -- vendor doubles as component.                       | `LIVEAVATAR_API_KEY`.                                                            |
+| `ANAM_` / `SIMLI_` | Avatar vendors (lip-synced video). Used by the voice-agent avatar and the direct/Guide avatar (`integrations/avatardirect` + `integrations/avatarvendor`). | `ANAM_API_KEY`, `SIMLI_API_KEY`. |
 | `POLYPHON_`     | Polyphon voice helpers (room provider + /memql/audio path).                                | `POLYPHON_VOICE_PROVIDER`, `POLYPHON_LIVEKIT_URL`.                               |
 | `SERVER_`       | HTTP transport (listen address, public path, CORS).                                        | `SERVER_ADDRESS`, `SERVER_PUBLIC_PATH`.                                          |
 | `SERVICE_`      | Service-level metadata (logging, name).                                                    | `SERVICE_NAME`, `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`.                        |
@@ -60,7 +60,6 @@ the browser"):
 |---------------------|----------------------------------------------------------------------------|--------------------------------------------------------------------------|
 | `VITE_MEMQL_`       | Backend connection URLs (memQL is the backend product name).               | `VITE_MEMQL_WS_URL`, `VITE_MEMQL_API_URL`.                               |
 | `VITE_IDENTITY_`    | Identity-service metadata visible to the browser.                          | `VITE_IDENTITY_BASE_URL`.                                                |
-| `VITE_LIVEAVATAR_`  | LiveAvatar widget configuration.                                           | `VITE_LIVEAVATAR_SANDBOX`.                                               |
 | `VITE_OPENAI_`      | Direct browser-to-OpenAI calls (Realtime / STT / TTS model names).         | `VITE_OPENAI_REALTIME_MODEL`.                                            |
 | `VITE_BYPASS_AUTH`  | Dev-only auth bypass.                                                      | -                                                                        |
 | `VITE_ENABLE_ADMIN` | Admin panel feature flag.                                                  | -                                                                        |
@@ -387,7 +386,8 @@ Stored in `v1:platform:globalSecret`, sealed under `MEMQL_MASTER_KEY`.
 | `ANTHROPIC_API_KEY`           | `vendor_api_key` | Instance-wide Anthropic key for Claude chat / vision providers.                                                                           |
 | `IDENTITY_KEY_ENCRYPTION_KEY` | `integration`    | Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production.                       |
 | `EMAIL_AZURE_CLIENT_SECRET`   | `oauth_secret`   | Microsoft Graph client secret used by the **email integration**'s GraphSender. Legacy name `AZURE_CLIENT_SECRET` still accepted (fallback). |
-| `LIVEAVATAR_API_KEY`          | `integration`    | LiveAvatar API key (server-side, used by the memQL liveavatar integration).                                                               |
+| `ANAM_API_KEY`                | `integration`    | Anam avatar vendor key (server-side). Used by the direct/Guide avatar (`integrations/avatardirect`) and the voice-agent avatar.            |
+| `SIMLI_API_KEY`               | `integration`    | Simli avatar vendor key (server-side). Used by the voice-agent avatar (direct-path Simli support lands in #293).                          |
 
 ### Default global variables (manifest)
 

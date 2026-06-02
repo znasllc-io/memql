@@ -29,7 +29,8 @@ integrations/
 ├── gcs/                                # storage.upload
 ├── identity/                           # identity-side helpers
 ├── knowledge/                          # corpus seed + lookup helpers
-├── liveavatar/                         # LiveAvatar session tokens
+├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
+├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
 ├── deepgram/    asr.go, tts.go         # Polyphon ASR/TTS via Deepgram (Nova-3 WS + Aura-2 REST)
 ├── openai/      asr.go, tts.go         # Polyphon ASR/TTS via OpenAI Realtime + /v1/audio/speech
 ├── router/                             # SI router ledger + integration
@@ -197,7 +198,7 @@ Self-registering plug-in. Capability:
 | `gcs` | `storage.upload` |
 | `identity` | identity-side helpers (resolve etc.) |
 | `knowledge` | corpus seed + lookup helpers |
-| `liveavatar` | `createSessionToken` |
+| `avatardirect` | `startSession` / `stopSession` (direct/Guide Anam avatar) |
 | `router` | SI router ledger writes |
 | `similarity` | pgvector `similarTo()` builtin |
 
