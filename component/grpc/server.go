@@ -32,6 +32,7 @@ import (
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/polyphon"
+	healthsrv "github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -503,10 +504,17 @@ func (s *service) Stream(stream memqlv1.MemqlService_StreamServer) error {
 	session := newStreamSession(s, stream, identity)
 	session.requestMeta = requestMeta
 
+	// Blue/green drain accounting (#616): count this open MemqlService.Stream
+	// so /healthz reports it and the cutover script can keep an OLD-color pod
+	// alive until its existing connections drain to 0. Paired decrement in the
+	// defer below.
+	healthsrv.StreamOpened()
+
 	// Emit session opened event with full identity for user provisioning automation
 	s.publishSessionEvent(events.TopicSessionOpened, events.KindSessionOpened, identity)
 
 	defer func() {
+		healthsrv.StreamClosed()
 		session.shutdown()
 		// Emit session closed event
 		s.publishSessionEvent(events.TopicSessionClosed, events.KindSessionClosed, identity)

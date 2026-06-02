@@ -35,6 +35,20 @@ var (
 	// servers tear down -- closing the SIGTERM-vs-endpoint-removal race
 	// that otherwise drops in-flight connections on every rollout.
 	draining atomic.Bool
+
+	// activeStreams counts currently-open MemqlService.Stream sessions
+	// on this pod (WS->gRPC and direct gRPC). The gRPC Stream handler
+	// increments on open and decrements on close. Blue/green BFF (#616)
+	// reads this via /healthz so the cutover script can keep an OLD-color
+	// pod alive until it has drained to 0 active streams (existing users
+	// finish on their current version) before tearing the color down.
+	//
+	// NOTE (WIP #616): only MemqlService.Stream is counted here today.
+	// VoiceAgent / Node / Worker streams ride other handlers; whether the
+	// drain definition should include them is an OPEN QUESTION for the
+	// owner (the BFF is the user connection anchor, so the user-facing
+	// MemqlService.Stream is the load-bearing count -- but see the PR body).
+	activeStreams atomic.Int64
 )
 
 // SetDraining marks the node as draining (or clears it). Called from the
@@ -44,6 +58,21 @@ func SetDraining(d bool) { draining.Store(d) }
 
 // IsDraining reports whether the node is in its shutdown drain window.
 func IsDraining() bool { return draining.Load() }
+
+// StreamOpened records a newly-opened MemqlService.Stream session and
+// returns the new active count. Concurrency-safe. Pair every call with a
+// deferred StreamClosed in the Stream handler. (#616)
+func StreamOpened() int64 { return activeStreams.Add(1) }
+
+// StreamClosed records a closed MemqlService.Stream session and returns the
+// new active count. Concurrency-safe. (#616)
+func StreamClosed() int64 { return activeStreams.Add(-1) }
+
+// ActiveStreams reports the number of currently-open MemqlService.Stream
+// sessions on this pod. The blue/green cutover (#616) polls this (via the
+// activeStreams field of /healthz) to know when an OLD-color pod has
+// drained its existing connections and is safe to remove. (#616)
+func ActiveStreams() int64 { return activeStreams.Load() }
 
 // SetNodeIdentity stores the node identity so /healthz can include it.
 // Called from app/cluster.go after the node identity is created.
@@ -127,8 +156,9 @@ func buildHealthResponse() GetHealthzResponseObject {
 			status = "draining"
 		}
 		resp := GetHealthz503JSONResponse{
-			Status:       status,
-			Dependencies: statuses,
+			Status:        status,
+			ActiveStreams: ActiveStreams(),
+			Dependencies:  statuses,
 		}
 		if id != nil {
 			resp.NodeId = id.NodeId
@@ -140,8 +170,9 @@ func buildHealthResponse() GetHealthzResponseObject {
 	}
 
 	resp := GetHealthz200JSONResponse{
-		Status:       "ok",
-		Dependencies: statuses,
+		Status:        "ok",
+		ActiveStreams: ActiveStreams(),
+		Dependencies:  statuses,
 	}
 	if id != nil {
 		resp.NodeId = id.NodeId
