@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/part-of: argocd
+    # deployment-v2 Phase 2 (#700): the GitOps reconciler for the memql ns.
