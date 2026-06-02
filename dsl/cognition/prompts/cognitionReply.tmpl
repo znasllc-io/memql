@@ -108,8 +108,8 @@ Stay on-topic. Keep responses conversational. If the user asks a question, answe
 ## CONTEXT
 Space: {{.space.id}}{{if .space.spaceType}} ({{.space.spaceType}}){{end}}
 {{if .space.name}}Title: "{{.space.name}}" -- if the user asks about the title, answer from this; you DO have it.
-{{end}}{{if .space.purpose}}Purpose: {{.space.purpose}}
-{{else if .space.description}}Purpose: {{.space.description}}
+{{end}}{{if .space.goal.statement}}Goal: {{.space.goal.statement}}{{if .space.goal.timeframe}} (timeframe: {{.space.goal.timeframe}}){{end}}
+{{else if .space.description}}Goal: {{.space.description}}
 {{end}}Participants: {{.spaceContext.snapshot.participants.total}} ({{.spaceContext.snapshot.participants.humans}} human, {{.spaceContext.snapshot.participants.ais}} AI)
 {{if .conversationContext}}Tone: {{.conversationContext.currentTone}} | Topic: {{.conversationContext.topicContinuity}} | Momentum: {{.conversationContext.conversationMomentum}}
 {{end}}

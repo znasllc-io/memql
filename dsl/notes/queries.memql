@@ -1,0 +1,34 @@
+// notes domain -- caller-scoped reads.
+//
+// Authz tier: owned. Every filter gates on
+// payload.ownerUserId==actor.userId so a caller can only ever read
+// their own notes; no arg widens the row set beyond their ownership.
+
+use notes.concepts.{ note }
+
+@enabled
+@description("List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible.")
+query note queryNotes {
+  filter  payload.ownerUserId==actor.userId
+  shape   noteFull
+}
+
+@enabled
+@description("Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version.")
+query note queryNoteById {
+  args {
+    noteId  string  @required
+  }
+  filter  ?.id==args.noteId; payload.ownerUserId==actor.userId
+  shape   noteFull
+}
+
+@enabled
+@description("Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users.")
+query note queryNotesByTag {
+  args {
+    tag  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; ?.payload.tags has args.tag
+  shape   noteFull
+}

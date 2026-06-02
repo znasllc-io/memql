@@ -182,3 +182,17 @@ concept operatorMemory {
 
   @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
 }
+
+@version("1.0.0")
+@namespace("agents")
+@description("Operator-curated avatar persona catalog (memql#609). Global operator catalog -- like agentRole / skill: a shared set of vendor-minted avatar personas every user PICKS from when creating an assistant (copresent#239). Each row is minted ONCE from an operator image into ONE vendor (Anam or Simli) by the `make avatar-mint` tooling, which captures the vendor-issued id and emits the seed under dsl/agents/avatarPersonas.memql. When a user picks a persona the agent's avatarPersonaId/avatarVendor are stamped from the entry; the voice-agent resolves the persona at session start (integrations/voice/agent/avatar_*.go). Per-assistant vendor choice: an entry belongs to exactly one vendor.")
+@displayCard(primary="name", secondary="vendor", tertiary="gender", status="active")
+concept avatarPersona {
+  vendor      enum("anam", "simli")  @required  @description("Which avatar vendor minted personaId. The agent's avatarVendor is stamped from this when the user picks the persona, so the voice-agent instantiates the matching vendor plugin regardless of the runtime MEMQL_AVATAR_VENDOR default.")
+  personaId   string  @required  @description("Vendor-issued id for the persona/face, resolved verbatim at session start. Anam: the avatarId returned by POST /v1/avatars. Simli: the faceId returned by POST /generateFaceID.")
+  name        string  @required  @description("Display name shown in the persona picker (e.g. 'Ava'). Operator-curated label, not user-edited.")
+  gender      enum("female", "male")  @required  @description("Gender bucket the persona presents. The Create-Assistant picker filters to the user's selected gender, and the agent's gender + canonical voice align with it.")
+  imageRef    string  @description("Reference to the source operator image the persona was minted from (e.g. 'avatars/female_0.png'). Provenance + re-mint idempotency key.")
+  previewRef  string  @description("Reference to a still preview shown in the picker before a live session. Falls back to imageRef when empty.")
+  active      bool  @default("true")  @description("Soft-deactivate flag. Inactive personas disappear from the picker but agents already pointing at them keep resolving.")
+}
