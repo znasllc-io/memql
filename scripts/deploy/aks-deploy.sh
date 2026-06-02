@@ -387,14 +387,24 @@ function apply_ordered() {
 # 4. SMOKE
 #=============================================================================
 
+# The post-deploy smoke. Runs the DEEP promotion-gate profile (#627) when a
+# MEMQL_SMOKE_TOKEN is available -- a real authenticated WS query + cross-node
+# AI forward, so the gate proves the authenticated app path, not just front-door
+# 200s (the 0.9.6 incident went front-door-green while the app was broken). With
+# no token it falls back to baseline and LOUDLY flags the deploy as NOT
+# promotable -- a validated promotion REQUIRES a green deep run.
 function smoke_test() {
     section "4. Smoke test (live front door)"
     if [ "$NO_SMOKE" = true ]; then
         info "--no-smoke set; skipping."
         return 0
     fi
+
+    local profile="baseline"
+    [ -n "${MEMQL_SMOKE_TOKEN:-}" ] && profile="deep"
+
     if [ "$DRY_RUN" = true ]; then
-        plan "bash scripts/deploy/staging-smoke-test.sh   (baseline checks)"
+        plan "SMOKE_PROFILE=$profile bash scripts/deploy/staging-smoke-test.sh"
         return 0
     fi
     local smoke="$SCRIPT_DIR/staging-smoke-test.sh"
@@ -402,8 +412,12 @@ function smoke_test() {
         warn "smoke script not found at $smoke; skipping."
         return 0
     fi
-    info "running baseline smoke checks..."
-    if ! bash "$smoke"; then
+    if [ "$profile" = "deep" ]; then
+        info "running DEEP smoke checks (promotion gate: authenticated WS + AI forward + SPA/identity assets)..."
+    else
+        warn "no MEMQL_SMOKE_TOKEN in the environment -- running BASELINE smoke only. This deploy is NOT promotable; a validated promotion requires a green deep run (SMOKE_PROFILE=deep MEMQL_SMOKE_TOKEN=...)."
+    fi
+    if ! SMOKE_PROFILE="$profile" bash "$smoke"; then
         warn "smoke test reported failures (see above)."
         return 1
     fi
