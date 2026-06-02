@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
+	"net/http"
 	"os"
 	"path"
 	"strings"
@@ -43,6 +46,23 @@ type Integration struct {
 	// on builds / wiring paths that don't inject it (promotion is then a
 	// silent no-op). Injected via SetEngine during plug-in materialization.
 	engine memql.IntegrationEngineAccess
+	// uploader + bucket are the GCS attachment surface (memql#733). When
+	// present (injected on the agent node where a GCS bucket is
+	// configured), a successful LOCAL fs_write uploads the written bytes
+	// to v1:common:attachment and the generatedOutput row carries the
+	// resulting attachmentId. Nil on builds / nodes without GCS -- the
+	// promotion then falls back to the inline pointer row.
+	uploader attachmentUploader
+	bucket   string
+}
+
+// attachmentUploader is the minimal slice of the GCS FileUploader the
+// workbench needs to push generated-output bytes to object storage
+// (memql#733). Declared locally (structural typing) so the workbench
+// package doesn't take a dependency on component/server; *gcs.GCSUploader
+// (and server.FileUploader) satisfy it.
+type attachmentUploader interface {
+	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (string, error)
 }
 
 // NewIntegration constructs the workbench integration with a fresh
@@ -73,6 +93,17 @@ func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 // works. Mirrors the SetForwardRouter injection pattern.
 func (i *Integration) SetEngine(e memql.IntegrationEngineAccess) {
 	i.engine = e
+}
+
+// SetAttachmentUploader injects the GCS uploader + bucket used by the
+// memql#733 byte-upload path. Wired on the agent node
+// (app/transport_agent.go) after the uploader is constructed, and only
+// when a bucket is configured. nil-safe: without it, workbench
+// generatedOutput rows stay inline pointers (no attachmentId), exactly
+// as the #722 behaviour.
+func (i *Integration) SetAttachmentUploader(u attachmentUploader, bucket string) {
+	i.uploader = u
+	i.bucket = bucket
 }
 
 // IntegrationName implements memql.IntegrationProvider.
@@ -268,7 +299,9 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	// call. Other actions (exec / fs_read / fs_list / fs_stat /
 	// http_fetch) are read-only or have no addressable artifact.
 	if res.OK && action == "fs_write" {
-		i.promoteWorkbenchOutput(ctx, planId, agentId, innerArgs)
+		// Local dispatch: the bytes are on this node's disk, so memql#733
+		// can upload them (local=true).
+		i.promoteWorkbenchOutput(ctx, planId, agentId, innerArgs, true)
 	}
 
 	if i.logger != nil {
@@ -329,10 +362,11 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 	}
 	// Library promotion (memql#722) for the cluster-mode path: a remote
 	// workbench fs_write is just as much a deliverable as a local one.
-	// The bytes live on the workbench node, but the path + planId we
-	// hold locally are enough to record the pointer row. Best-effort.
+	// The bytes live on the remote workbench node (local=false), so this
+	// records the inline pointer row; the memql#733 GCS byte-upload only
+	// runs for local writes. Best-effort.
 	if action == "fs_write" {
-		i.promoteWorkbenchOutput(ctx, planId, stringArg(allArgs["agentId"], ""), innerArgs)
+		i.promoteWorkbenchOutput(ctx, planId, stringArg(allArgs["agentId"], ""), innerArgs, false)
 	}
 	// Pass the workbench node's payload through verbatim. The shape
 	// mirrors dispatchResult so the agent tool loop's downstream
@@ -382,7 +416,14 @@ func errorResultNode(planId, action, code, msg string, started time.Time) []memo
 // outputId is derived deterministically from (ownerUserId, planId,
 // path). Best-effort: any failure (engine nil, owner unresolved,
 // insert error) is logged and swallowed so it can't break fs_write.
-func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentId string, innerArgs map[string]any) {
+// local reports whether the fs_write landed on THIS node's disk
+// (single-node, or the agent-node fallback when no remote peer is
+// available) -- only then are the bytes readable here for the memql#733
+// GCS upload. For the forwarded cluster path the bytes live on the
+// remote workbench node, so local is false and the row stays an inline
+// pointer (binary-safe cross-node byte transfer is a separate effort --
+// fs_read coerces bytes to a string that JSON-mangles non-UTF-8).
+func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentId string, innerArgs map[string]any, local bool) {
 	if i.engine == nil {
 		return
 	}
@@ -409,13 +450,34 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	if title == "" {
 		title = path
 	}
-	body := fmt.Sprintf("File written to the task workspace at `%s`.", path)
 	format := formatForExtension(path)
-
 	mutationCtx := withUserActor(ctx, ownerUserId)
+
+	// memql#733: when the bytes are LOCAL and a GCS uploader + a target
+	// space are available, upload them to v1:common:attachment and carry
+	// the attachmentId + mimeType so the Library renders / downloads the
+	// real file. Any failure (or the cluster path) falls back to the
+	// inline pointer row below; it never breaks the producing fs_write.
+	attachmentId, mimeType := "", ""
+	if local && i.uploader != nil && i.bucket != "" && spaceId != "" {
+		attachmentId, mimeType = i.uploadWorkbenchAttachment(mutationCtx, planId, path, title, spaceId, ownerUserId)
+	}
+
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
-		outputId, ownerUserId, title, body, "workbench_generated", format)
+	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, source:%q, format:%q`,
+		outputId, ownerUserId, title, "workbench_generated", format)
+	if attachmentId != "" {
+		// File-backed: the bytes ARE the deliverable, so reference the
+		// attachment instead of an inline pointer note (mirrors the
+		// uploaded-document path).
+		fmt.Fprintf(&b, `, attachmentId:%q`, attachmentId)
+		if mimeType != "" {
+			fmt.Fprintf(&b, `, mimeType:%q`, mimeType)
+		}
+	} else {
+		// Pointer row: no bytes uploaded, so describe where the file lives.
+		fmt.Fprintf(&b, `, body:%q`, fmt.Sprintf("File written to the task workspace at `%s`.", path))
+	}
 	if agentId = strings.TrimSpace(agentId); agentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, agentId)
 	}
@@ -432,6 +494,103 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 				slog.String("ownerUserId", ownerUserId), slog.Any("error", err))
 		}
 	}
+}
+
+// uploadWorkbenchAttachment reads the just-written workspace file, pushes
+// the bytes to GCS, and creates a v1:common:attachment row, returning the
+// attachmentId + detected mimeType. Returns ("", "") on any failure, so
+// the caller falls back to the inline pointer row. Idempotent: the
+// attachmentId and the GCS object name are derived deterministically from
+// (planId, path) so a re-promoted fs_write re-versions / overwrites
+// instead of leaking duplicates. Bytes are read straight off local disk
+// (binary-safe -- no JSON round-trip), capped at the fs_write ceiling.
+func (i *Integration) uploadWorkbenchAttachment(ctx context.Context, planId, relPath, fileName, spaceId, ownerUserId string) (attachmentId, mimeType string) {
+	data, err := i.readWorkspaceFile(planId, relPath)
+	if err != nil {
+		if i.logger != nil {
+			i.logger.Warn("workbench: attachment byte read failed -- using pointer row",
+				slog.String("planId", planId), slog.String("path", relPath), slog.Any("error", err))
+		}
+		return "", ""
+	}
+	if len(data) == 0 {
+		return "", ""
+	}
+
+	mimeType = detectMimeType(fileName, data)
+	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": relPath}))[:16]
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
+
+	gcsURL, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
+	if err != nil {
+		if i.logger != nil {
+			i.logger.Warn("workbench: attachment GCS upload failed -- using pointer row",
+				slog.String("planId", planId), slog.String("path", relPath), slog.Any("error", err))
+		}
+		return "", ""
+	}
+
+	attachmentId = spaceId + ":" + det
+	var b strings.Builder
+	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, gcsURL:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, spaceId, fileName, mimeType, len(data), gcsURL, "ready", ownerUserId)
+	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
+		if i.logger != nil {
+			i.logger.Warn("workbench: attachment row create failed -- using pointer row",
+				slog.String("planId", planId), slog.String("attachmentId", attachmentId), slog.Any("error", err))
+		}
+		return "", ""
+	}
+	return attachmentId, mimeType
+}
+
+// readWorkspaceFile reads a file from the per-Plan workspace, reusing the
+// same provisioning + safe-join guard as fs_read so it can't escape the
+// workspace root. Capped at maxFSWriteBytes (the write ceiling), so it
+// can never read more than fs_write could have produced.
+func (i *Integration) readWorkspaceFile(planId, relPath string) ([]byte, error) {
+	if i.manager == nil {
+		return nil, fmt.Errorf("workbench: manager not configured")
+	}
+	ws, err := i.manager.provisionForPlan(planId)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := ws.safeJoin(relPath)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	buf := make([]byte, maxFSWriteBytes)
+	n, err := io.ReadFull(f, buf)
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// detectMimeType picks a MIME type for an uploaded workbench file:
+// extension first (mime.TypeByExtension), then content sniffing
+// (http.DetectContentType) on the leading bytes, falling back to
+// application/octet-stream. Extension wins because sniffing reports a
+// generic text/plain for many structured text formats (csv, md, json).
+func detectMimeType(fileName string, data []byte) string {
+	if ext := path.Ext(fileName); ext != "" {
+		if mt := mime.TypeByExtension(ext); mt != "" {
+			return mt
+		}
+	}
+	if len(data) > 0 {
+		return http.DetectContentType(data)
+	}
+	return "application/octet-stream"
 }
 
 // resolvePlanOwner reads queryPlanById and returns the Plan's owner
