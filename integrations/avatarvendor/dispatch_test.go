@@ -27,7 +27,10 @@ func TestResolveAvatarPlan_PersonaStampedVendorWins(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, plan)
 	assert.Equal(t, avatarVendorAnam, plan.Vendor)
-	assert.Equal(t, "persona-1", plan.PersonaID)
+	// The catalog stores Anam AVATAR ids, so the stamped id rides AvatarID
+	// (bare-avatarId path), not PersonaID.
+	assert.Equal(t, "persona-1", plan.AvatarID)
+	assert.Empty(t, plan.PersonaID)
 }
 
 func TestResolveAvatarPlan_RuntimeDefaultFallback(t *testing.T) {
@@ -37,7 +40,7 @@ func TestResolveAvatarPlan_RuntimeDefaultFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, plan)
 	assert.Equal(t, avatarVendorAnam, plan.Vendor)
-	assert.Equal(t, "persona-2", plan.PersonaID)
+	assert.Equal(t, "persona-2", plan.AvatarID)
 }
 
 func TestResolveAvatarPlan_VideoGatedOffIsAudioOnly(t *testing.T) {
