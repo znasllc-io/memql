@@ -141,6 +141,65 @@ func TestIssueVoiceAgentAccessToken_RejectsEmptyFields(t *testing.T) {
 	}
 }
 
+// TestIssueServiceAccountAccessToken_StampsClass pins the contract for #691
+// (deployment-v2 Phase 3): the service-account mint stamps
+// class="service_account" + the subject + the label on the NodeId slot.
+// Downstream the service-account interceptor reads class to admit + pin the
+// surface, and the per-node JWKS verifier accepts it with no DB lookup.
+func TestIssueServiceAccountAccessToken_StampsClass(t *testing.T) {
+	dir := t.TempDir()
+	km, err := identity.NewKeyManager(dir, "")
+	require.NoError(t, err)
+	require.NoError(t, km.Load())
+	iss, err := identity.NewJWTIssuer(km, identity.Config{
+		Enabled:     true,
+		BaseURL:     "https://identity.test",
+		JWTAudience: "memql",
+		KeyDir:      dir,
+	})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	tok, exp, err := iss.IssueServiceAccountAccessToken(identity.ServiceAccountIssueInput{
+		Subject: "system:deploy-gate",
+		Label:   "deploy-gate-staging",
+	}, now)
+	require.NoError(t, err)
+	require.NotEmpty(t, tok)
+	assert.True(t, exp.After(now))
+
+	claims, err := iss.VerifyAccessToken(tok, now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, identity.ClassServiceAccount, claims.Class)
+	assert.Equal(t, "deploy-gate-staging", claims.NodeId)
+	assert.Equal(t, "system:deploy-gate", claims.Subject)
+}
+
+// TestIssueServiceAccountAccessToken_RejectsEmptyFields locks input validation
+// (subject + label both required) at the mint surface.
+func TestIssueServiceAccountAccessToken_RejectsEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	km, err := identity.NewKeyManager(dir, "")
+	require.NoError(t, err)
+	require.NoError(t, km.Load())
+	iss, err := identity.NewJWTIssuer(km, identity.Config{
+		Enabled:     true,
+		BaseURL:     "https://identity.test",
+		JWTAudience: "memql",
+		KeyDir:      dir,
+	})
+	require.NoError(t, err)
+
+	cases := []identity.ServiceAccountIssueInput{
+		{Label: "deploy-gate-staging"},  // missing subject
+		{Subject: "system:deploy-gate"}, // missing label
+	}
+	for _, in := range cases {
+		_, _, err := iss.IssueServiceAccountAccessToken(in, time.Now().UTC())
+		require.Error(t, err)
+	}
+}
+
 // TestIssueAccessToken_DefaultsToEmptyClass keeps existing user
 // tokens unchanged: the class claim is the omit-empty case for the
 // default mint path, so pre-#105 verifiers (which don't read it)

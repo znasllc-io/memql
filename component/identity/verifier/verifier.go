@@ -31,9 +31,10 @@ const (
 // the layering -- identity is the issuer, verifier is the per-node
 // reader). See #105 / #109.
 const (
-	ClassUser       = "user"
-	ClassNode       = "node"
-	ClassVoiceAgent = "voice_agent"
+	ClassUser           = "user"
+	ClassNode           = "node"
+	ClassVoiceAgent     = "voice_agent"
+	ClassServiceAccount = "service_account"
 )
 
 // VerifiedClaims is the unified shape both the JWT and PAT paths

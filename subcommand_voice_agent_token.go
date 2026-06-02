@@ -37,6 +37,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runVoiceAgentTokenSubcommand(args[1:])
 	case "node-token":
 		return true, runNodeTokenSubcommand(args[1:])
+	case "service-account-token":
+		return true, runServiceAccountTokenSubcommand(args[1:])
 	}
 	return false, 0
 }

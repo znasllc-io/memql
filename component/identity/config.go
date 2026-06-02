@@ -92,6 +92,13 @@ const (
 	// No refresh path; rotate by minting fresh + restarting.
 	DefaultVoiceAgentTokenTTLSeconds = 90 * 24 * 60 * 60 // 90 days
 
+	// DefaultServiceAccountTokenTTLSeconds is the lifetime of issued
+	// class="service_account" tokens (#691, deployment-v2 Phase 3). Short by
+	// design: the machine principal (deploy gate / automation) mints one per
+	// run, so a leaked synthetic credential expires quickly. Rotate by minting
+	// fresh; no refresh path.
+	DefaultServiceAccountTokenTTLSeconds = 60 * 60 // 1 hour
+
 	// DefaultMagicLinkTTLSeconds is how long a magic-link is valid.
 	DefaultMagicLinkTTLSeconds = 600 // 10 min
 

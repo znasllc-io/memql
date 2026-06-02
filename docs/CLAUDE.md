@@ -90,6 +90,7 @@ are the authoritative source.
 | `access-model.md` | Identity / user / partitionAccess data model. Roles (owner/admin/writer/reader). Stream lifecycle + middleware enforcement. Per-node verifier (JWKS) and PAT path. Cockpit "My Access" panel. |
 | `user-provisioning.md` | Registration modes, magic-link flow, invitations, personal partitions, account-deletion cooldown. |
 | `identity-service.md` | Operator-side narrative: env vars, deployment topology, key management + rotation, anti-abuse tuning, email delivery. |
+| `node-jwt.md` / `voice-agent-jwt.md` / `service-account-jwt.md` | The three machine credential classes (`node` #105, `voice_agent` #109, `service_account` #691). Each is an identity-issued JWT verified via JWKS (no DB) and surface-pinned by a dedicated interceptor. `service-account-jwt.md` documents the deploy-gate machine identity end to end (mint → verify → surface-pin → in-cluster gate usage) with diagrams. |
 
 ---
 
