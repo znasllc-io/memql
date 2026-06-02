@@ -84,6 +84,25 @@ query memory queryMemoryById {
   shape   memoryFull
 }
 
+// `@public` marks this query as intentionally NOT caller-scoped. Workspace
+// liveSources (liveSource.scope=="workspace") are partition-shared and carry
+// no ownerId, so their promoted index rows have an empty ownerUserId that the
+// owned reads above can never match -- they'd be invisible to everyone. This
+// path surfaces exactly those rows (kind=live_source AND scope=workspace, NO
+// owner gate) so every partition member sees the shared sources, mirroring the
+// canvasState public/private split. The audit stays honest: the widening is
+// bounded to workspace-scoped live sources (private sources keep ownerUserId
+// and only ever surface through the owned queries), and partition isolation is
+// enforced upstream of the read. The frontend merges this into the Records lens
+// alongside the owned queryLibraryArtifactsByLens("record") results (#723).
+@enabled
+@public
+@description("List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).")
+query artifact queryLibraryWorkspaceLiveSources {
+  filter  payload.kind=="live_source"; payload.scope=="workspace"
+  shape   artifactFull
+}
+
 @enabled
 @description("Live-data freshness drill-in: fetch the cached snapshots for a live source so the Library can render the LIVE badge + 'fetched X ago' indicator (and the latest result on open). Returns every snapshot for the source; the panel picks the most recent by materializedAt. Reads are by liveSourceId -- the live source itself carries the ownership / scope decision (#696).")
 query liveSnapshot queryLatestLiveSnapshotForSource {

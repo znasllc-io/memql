@@ -1403,10 +1403,12 @@ type MutationCreateArtifactArgs struct {
 	Title   string
 	Summary string
 	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
-	Format           string
-	MimeType         string
-	Live             bool
-	LiveSet          bool // set true to send live; required because zero-value bool is ambiguous
+	Format   string
+	MimeType string
+	Live     bool
+	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
+	// Enum: workspace | private
+	Scope            string
 	SpaceId          string
 	AgentId          string
 	ProducedByPlanId string
@@ -1477,6 +1479,13 @@ func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
 		}
 		b.WriteString("live: ")
 		b.WriteString(fmt.Sprintf("%v", args.Live))
+	}
+	if args.Scope != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scope: ")
+		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
 	if args.SpaceId != "" {
 		if b.Len() > 17 {

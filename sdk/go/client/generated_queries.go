@@ -2071,6 +2071,23 @@ func QueryLibraryArtifactsBySpaceBuild(args QueryLibraryArtifactsBySpaceArgs) st
 	return b.String()
 }
 
+// QueryLibraryWorkspaceLiveSources -- List the partition's workspace-scoped live sources for the Library Records lens. Non-owned by design: workspace liveSources have no single owner (empty ownerUserId), so this reads kind=live_source AND scope=workspace with no caller gate and the frontend merges it into the owned Records results. Private live sources are excluded here -- they surface through the owner-gated queries. See the @public justification above (#723).
+//
+// Bound concept: artifact.
+type QueryLibraryWorkspaceLiveSourcesArgs struct {
+}
+
+// QueryLibraryWorkspaceLiveSources calls the engine query queryLibraryWorkspaceLiveSources.
+func (qc *QueryClient) QueryLibraryWorkspaceLiveSources(ctx context.Context, args QueryLibraryWorkspaceLiveSourcesArgs) (*Result, error) {
+	call := QueryLibraryWorkspaceLiveSourcesBuild(args)
+	return qc.executeNamed(ctx, "queryLibraryWorkspaceLiveSources", call)
+}
+
+func QueryLibraryWorkspaceLiveSourcesBuild(args QueryLibraryWorkspaceLiveSourcesArgs) string {
+	_ = args
+	return "queryLibraryWorkspaceLiveSources({})"
+}
+
 // QueryListKnowledgeDomains -- List all active knowledge domains. Used by the agent builder's knowledge picker and by operator-turn retrieval to resolve domain metadata.
 //
 // Bound concept: knowledgeDomain.

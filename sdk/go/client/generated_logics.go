@@ -349,7 +349,7 @@ func LogicIndexGeneratedOutputBuild(args LogicIndexGeneratedOutputArgs) string {
 	return b.String()
 }
 
-// LogicIndexLiveSource -- On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (private sources); workspace-scoped visibility is a follow-up.
+// LogicIndexLiveSource -- On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (empty for workspace-scoped sources); scope is threaded from liveSource.scope so workspace sources surface through the non-owned queryLibraryWorkspaceLiveSources path while private sources stay owner-gated (#723).
 type LogicIndexLiveSourceArgs struct {
 	Event map[string]any
 }
