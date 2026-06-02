@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -24,6 +25,24 @@ type DeployControlReader interface {
 	DeploymentStatus(ctx context.Context, env string) (*memqlv1.DeploymentStatus, error)
 }
 
+// DeployControlActions is the narrow write port the admin package uses
+// to drive the deploy-control write actions from the
+// /admin/deployments POST handlers (memql#727). The wiring layer
+// satisfies this with the same in-process adapter that backs
+// DeployControlReader, forwarding to the owner/admin-gated +
+// server-side-audited write RPCs on the *deploycontrol.Service.
+//
+// Each method returns the service's *memqlv1.ActionResult so the
+// handler can surface the audit-event id in the success flash. As with
+// the reader, the caller must stamp an actor context (deployActorContext)
+// so the gated RPCs admit the in-process call.
+type DeployControlActions interface {
+	DeployStaging(ctx context.Context, version string) (*memqlv1.ActionResult, error)
+	Promote(ctx context.Context, version string) (*memqlv1.ActionResult, error)
+	Rollback(ctx context.Context, env, commitSha string) (*memqlv1.ActionResult, error)
+	RolloutAction(ctx context.Context, env, rollout, action string) (*memqlv1.ActionResult, error)
+}
+
 // SetDeployControlReader wires the deployment-status read dependency.
 // Called once at bootstrap. When nil, the /admin/deployments route
 // still mounts but renders an error flash rather than 500ing -- the
@@ -34,6 +53,18 @@ func (s *AdminServer) SetDeployControlReader(r DeployControlReader) {
 		return
 	}
 	s.deployReader = r
+}
+
+// SetDeployControlActions wires the deployment write-action dependency
+// (memql#727). Called once at bootstrap alongside SetDeployControlReader.
+// When nil, the POST /admin/deployments/* routes still mount but reject
+// with an error flash rather than 500ing -- the page degrades
+// gracefully on a binary built without the deploy-control surface.
+func (s *AdminServer) SetDeployControlActions(a DeployControlActions) {
+	if s == nil {
+		return
+	}
+	s.deployActions = a
 }
 
 // deployActorContext stamps an auth.AccessContext built from the
@@ -89,6 +120,187 @@ func (s *AdminServer) handleDeploymentsGet(w http.ResponseWriter, r *http.Reques
 
 	data.Status = projectDeploymentStatus(status)
 	s.render(w, r, "admin/deployments", webtempl.AdminDeployments(data))
+}
+
+// deployRedirect bounces back to the deployments view for the given
+// env with a one-shot flash, mirroring the flash-redirect convention
+// the other admin POST handlers use (?flash=...&flash_kind=...).
+func deployRedirect(w http.ResponseWriter, r *http.Request, env, kind, msg string) {
+	q := url.Values{}
+	if env != "" {
+		q.Set("env", env)
+	}
+	q.Set("flash", msg)
+	q.Set("flash_kind", kind)
+	http.Redirect(w, r, "/admin/deployments?"+q.Encode(), http.StatusSeeOther)
+}
+
+// deployActionResultFlash bounces back with a SUCCESS / ERROR flash
+// derived from the deploy-control ActionResult. On a non-ok result the
+// service-supplied message is surfaced; on ok the audit-event id is
+// threaded into the success line so the operator has the audit anchor.
+func deployActionResultFlash(w http.ResponseWriter, r *http.Request, env, verb string, res *memqlv1.ActionResult) {
+	if res == nil {
+		deployRedirect(w, r, env, "error", "ERROR: "+verb+" returned no result")
+		return
+	}
+	if !res.GetOk() {
+		msg := strings.TrimSpace(res.GetMessage())
+		if msg == "" {
+			msg = "action failed"
+		}
+		deployRedirect(w, r, env, "error", "ERROR: "+verb+": "+msg)
+		return
+	}
+	deployRedirect(w, r, env, "success",
+		"SUCCESS: "+verb+" (audit "+res.GetAuditEventId()+")")
+}
+
+// handleDeployStagingPost handles POST /admin/deployments/deploy-staging:
+// assemble + apply a release into the staging overlay. Form: version.
+// Staging is the non-destructive lane, so no type-to-confirm token.
+func (s *AdminServer) handleDeployStagingPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		deployRedirect(w, r, "staging", "error", "ERROR: form submission failed")
+		return
+	}
+	if s.deployActions == nil {
+		deployRedirect(w, r, "staging", "error", "ERROR: deploy actions are not available on this node")
+		return
+	}
+	version := strings.TrimSpace(r.PostForm.Get("version"))
+	if version == "" {
+		deployRedirect(w, r, "staging", "error", "ERROR: version is required")
+		return
+	}
+	res, err := s.deployActions.DeployStaging(deployActorContext(r.Context()), version)
+	if err != nil {
+		s.Logger.Warn("admin: deploy-staging failed", "error", err, "version", version)
+		deployRedirect(w, r, "staging", "error", "ERROR: deploy staging: "+err.Error())
+		return
+	}
+	deployActionResultFlash(w, r, "staging", "deploy staging "+version, res)
+}
+
+// handleDeployPromotePost handles POST /admin/deployments/promote:
+// copy a validated staging release into the prod overlay. Form:
+// version, confirm. Destructive (touches prod) -- the operator must
+// type the exact version into the confirm field or the action is
+// rejected before it reaches the service.
+func (s *AdminServer) handleDeployPromotePost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		deployRedirect(w, r, "prod", "error", "ERROR: form submission failed")
+		return
+	}
+	if s.deployActions == nil {
+		deployRedirect(w, r, "prod", "error", "ERROR: deploy actions are not available on this node")
+		return
+	}
+	version := strings.TrimSpace(r.PostForm.Get("version"))
+	if version == "" {
+		deployRedirect(w, r, "prod", "error", "ERROR: version is required")
+		return
+	}
+	confirm := strings.TrimSpace(r.PostForm.Get("confirm"))
+	if confirm != version {
+		deployRedirect(w, r, "prod", "error",
+			"ERROR: promote not confirmed -- type the exact version to confirm promotion to prod")
+		return
+	}
+	res, err := s.deployActions.Promote(deployActorContext(r.Context()), version)
+	if err != nil {
+		s.Logger.Warn("admin: promote failed", "error", err, "version", version)
+		deployRedirect(w, r, "prod", "error", "ERROR: promote: "+err.Error())
+		return
+	}
+	deployActionResultFlash(w, r, "prod", "promote "+version+" to prod", res)
+}
+
+// handleDeployRollbackPost handles POST /admin/deployments/rollback:
+// revert the overlay commit identified by commitSha for the given env.
+// Form: env, commitSha, confirm. Destructive -- the operator must type
+// either the exact commit SHA or the literal "rollback" into the
+// confirm field.
+func (s *AdminServer) handleDeployRollbackPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		deployRedirect(w, r, "staging", "error", "ERROR: form submission failed")
+		return
+	}
+	env := normalizeDeployEnv(r.PostForm.Get("env"))
+	if s.deployActions == nil {
+		deployRedirect(w, r, env, "error", "ERROR: deploy actions are not available on this node")
+		return
+	}
+	commitSha := strings.TrimSpace(r.PostForm.Get("commitSha"))
+	if commitSha == "" {
+		deployRedirect(w, r, env, "error", "ERROR: commit SHA is required")
+		return
+	}
+	confirm := strings.TrimSpace(r.PostForm.Get("confirm"))
+	if confirm != commitSha && confirm != "rollback" {
+		deployRedirect(w, r, env, "error",
+			"ERROR: rollback not confirmed -- type the commit SHA or the word rollback to confirm")
+		return
+	}
+	res, err := s.deployActions.Rollback(deployActorContext(r.Context()), env, commitSha)
+	if err != nil {
+		s.Logger.Warn("admin: rollback failed", "error", err, "env", env, "commitSha", commitSha)
+		deployRedirect(w, r, env, "error", "ERROR: rollback: "+err.Error())
+		return
+	}
+	deployActionResultFlash(w, r, env, "rollback "+env+" to "+commitSha, res)
+}
+
+// handleDeployRolloutPost handles POST /admin/deployments/rollout:
+// promote or abort an in-flight Argo Rollout. Form: env, rollout,
+// action[, confirm]. "abort" is destructive (drops the new revision)
+// so it requires the operator to type the literal "abort" into the
+// confirm field; "promote" advances the rollout and needs no confirm.
+func (s *AdminServer) handleDeployRolloutPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		deployRedirect(w, r, "staging", "error", "ERROR: form submission failed")
+		return
+	}
+	env := normalizeDeployEnv(r.PostForm.Get("env"))
+	if s.deployActions == nil {
+		deployRedirect(w, r, env, "error", "ERROR: deploy actions are not available on this node")
+		return
+	}
+	rollout := strings.TrimSpace(r.PostForm.Get("rollout"))
+	if rollout == "" {
+		deployRedirect(w, r, env, "error", "ERROR: rollout is required")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(r.PostForm.Get("action")))
+	if action != "promote" && action != "abort" {
+		deployRedirect(w, r, env, "error", "ERROR: action must be promote or abort")
+		return
+	}
+	if action == "abort" {
+		confirm := strings.ToLower(strings.TrimSpace(r.PostForm.Get("confirm")))
+		if confirm != "abort" {
+			deployRedirect(w, r, env, "error",
+				"ERROR: abort not confirmed -- type the word abort to confirm aborting the rollout")
+			return
+		}
+	}
+	res, err := s.deployActions.RolloutAction(deployActorContext(r.Context()), env, rollout, action)
+	if err != nil {
+		s.Logger.Warn("admin: rollout action failed", "error", err, "env", env, "rollout", rollout, "action", action)
+		deployRedirect(w, r, env, "error", "ERROR: rollout "+action+": "+err.Error())
+		return
+	}
+	deployActionResultFlash(w, r, env, "rollout "+action+" "+rollout, res)
+}
+
+// normalizeDeployEnv mirrors handleDeploymentsGet's env normalization:
+// anything other than "prod" collapses to "staging".
+func normalizeDeployEnv(raw string) string {
+	env := strings.ToLower(strings.TrimSpace(raw))
+	if env != "prod" {
+		env = "staging"
+	}
+	return env
 }
 
 // projectDeploymentStatus maps the generated DeploymentStatus proto

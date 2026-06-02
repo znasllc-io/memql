@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,6 +168,219 @@ func TestHandleDeploymentsGetRendersWithAdminContext(t *testing.T) {
 	if !strings.Contains(body, "Deployments") || !strings.Contains(body, "1.2.3") {
 		t.Errorf("rendered body missing expected content:\n%s", body)
 	}
+}
+
+// fakeDeployActions records calls to the write port so tests can
+// assert which action ran (and that a rejected confirm never invokes
+// the service). Each method returns a canned ActionResult.
+type fakeDeployActions struct {
+	deployStagingCalls []string
+	promoteCalls       []string
+	rollbackCalls      [][2]string
+	rolloutCalls       [][3]string
+
+	result *memqlv1.ActionResult
+	err    error
+}
+
+func (f *fakeDeployActions) DeployStaging(_ context.Context, version string) (*memqlv1.ActionResult, error) {
+	f.deployStagingCalls = append(f.deployStagingCalls, version)
+	return f.result, f.err
+}
+
+func (f *fakeDeployActions) Promote(_ context.Context, version string) (*memqlv1.ActionResult, error) {
+	f.promoteCalls = append(f.promoteCalls, version)
+	return f.result, f.err
+}
+
+func (f *fakeDeployActions) Rollback(_ context.Context, env, commitSha string) (*memqlv1.ActionResult, error) {
+	f.rollbackCalls = append(f.rollbackCalls, [2]string{env, commitSha})
+	return f.result, f.err
+}
+
+func (f *fakeDeployActions) RolloutAction(_ context.Context, env, rollout, action string) (*memqlv1.ActionResult, error) {
+	f.rolloutCalls = append(f.rolloutCalls, [3]string{env, rollout, action})
+	return f.result, f.err
+}
+
+// postForm builds an admin-stamped POST request carrying the given
+// form values.
+func postForm(path string, form url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req.WithContext(adminClaimsContext("admin"))
+}
+
+// TestHandleDeployStagingPostInvokesAction proves a deploy-staging POST
+// with an admin context invokes the action adapter and redirects with a
+// SUCCESS flash carrying the audit-event id.
+func TestHandleDeployStagingPostInvokesAction(t *testing.T) {
+	actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-123"}}
+	s := newRenderableAdminServer(t)
+	s.SetDeployControlActions(actions)
+
+	rec := httptest.NewRecorder()
+	s.handleDeployStagingPost(rec, postForm("/admin/deployments/deploy-staging", url.Values{
+		"version": {"0.9.10"},
+	}))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", rec.Code)
+	}
+	if len(actions.deployStagingCalls) != 1 || actions.deployStagingCalls[0] != "0.9.10" {
+		t.Fatalf("deploy-staging calls = %v, want [0.9.10]", actions.deployStagingCalls)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "flash_kind=success") || !strings.Contains(loc, "evt-123") {
+		t.Errorf("redirect = %q, want success flash carrying audit id", loc)
+	}
+}
+
+// TestHandleDeployPromotePostWrongConfirm proves a promote with a
+// mismatched confirm token is rejected with an ERROR flash and never
+// reaches the action adapter.
+func TestHandleDeployPromotePostWrongConfirm(t *testing.T) {
+	actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-x"}}
+	s := newRenderableAdminServer(t)
+	s.SetDeployControlActions(actions)
+
+	rec := httptest.NewRecorder()
+	s.handleDeployPromotePost(rec, postForm("/admin/deployments/promote", url.Values{
+		"version": {"0.9.10"},
+		"confirm": {"0.9.11"}, // wrong
+	}))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", rec.Code)
+	}
+	if len(actions.promoteCalls) != 0 {
+		t.Fatalf("promote invoked despite wrong confirm: %v", actions.promoteCalls)
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "flash_kind=error") {
+		t.Errorf("redirect = %q, want error flash", loc)
+	}
+}
+
+// TestHandleDeployPromotePostCorrectConfirm proves a promote with a
+// matching confirm token invokes the action adapter and surfaces the
+// audit id.
+func TestHandleDeployPromotePostCorrectConfirm(t *testing.T) {
+	actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-456"}}
+	s := newRenderableAdminServer(t)
+	s.SetDeployControlActions(actions)
+
+	rec := httptest.NewRecorder()
+	s.handleDeployPromotePost(rec, postForm("/admin/deployments/promote", url.Values{
+		"version": {"0.9.10"},
+		"confirm": {"0.9.10"},
+	}))
+
+	if len(actions.promoteCalls) != 1 || actions.promoteCalls[0] != "0.9.10" {
+		t.Fatalf("promote calls = %v, want [0.9.10]", actions.promoteCalls)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "flash_kind=success") || !strings.Contains(loc, "evt-456") {
+		t.Errorf("redirect = %q, want success flash carrying audit id", loc)
+	}
+}
+
+// TestHandleDeployRollbackPostConfirm covers both the rejected and the
+// accepted rollback confirm paths.
+func TestHandleDeployRollbackPostConfirm(t *testing.T) {
+	t.Run("wrong confirm rejected", func(t *testing.T) {
+		actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt"}}
+		s := newRenderableAdminServer(t)
+		s.SetDeployControlActions(actions)
+
+		rec := httptest.NewRecorder()
+		s.handleDeployRollbackPost(rec, postForm("/admin/deployments/rollback", url.Values{
+			"env":       {"prod"},
+			"commitSha": {"a1b2c3d"},
+			"confirm":   {"nope"},
+		}))
+		if len(actions.rollbackCalls) != 0 {
+			t.Fatalf("rollback invoked despite wrong confirm: %v", actions.rollbackCalls)
+		}
+		if loc := rec.Header().Get("Location"); !strings.Contains(loc, "flash_kind=error") {
+			t.Errorf("redirect = %q, want error flash", loc)
+		}
+	})
+
+	t.Run("literal rollback confirm invokes", func(t *testing.T) {
+		actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-789"}}
+		s := newRenderableAdminServer(t)
+		s.SetDeployControlActions(actions)
+
+		rec := httptest.NewRecorder()
+		s.handleDeployRollbackPost(rec, postForm("/admin/deployments/rollback", url.Values{
+			"env":       {"prod"},
+			"commitSha": {"a1b2c3d"},
+			"confirm":   {"rollback"},
+		}))
+		if len(actions.rollbackCalls) != 1 || actions.rollbackCalls[0] != [2]string{"prod", "a1b2c3d"} {
+			t.Fatalf("rollback calls = %v, want [[prod a1b2c3d]]", actions.rollbackCalls)
+		}
+		loc := rec.Header().Get("Location")
+		if !strings.Contains(loc, "flash_kind=success") || !strings.Contains(loc, "evt-789") {
+			t.Errorf("redirect = %q, want success flash carrying audit id", loc)
+		}
+	})
+}
+
+// TestHandleDeployRolloutPost covers promote (no confirm) + abort
+// (confirm required) paths.
+func TestHandleDeployRolloutPost(t *testing.T) {
+	t.Run("promote needs no confirm", func(t *testing.T) {
+		actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-p"}}
+		s := newRenderableAdminServer(t)
+		s.SetDeployControlActions(actions)
+
+		rec := httptest.NewRecorder()
+		s.handleDeployRolloutPost(rec, postForm("/admin/deployments/rollout", url.Values{
+			"env":     {"staging"},
+			"rollout": {"memql-bff"},
+			"action":  {"promote"},
+		}))
+		if len(actions.rolloutCalls) != 1 || actions.rolloutCalls[0] != [3]string{"staging", "memql-bff", "promote"} {
+			t.Fatalf("rollout calls = %v, want [[staging memql-bff promote]]", actions.rolloutCalls)
+		}
+	})
+
+	t.Run("abort without confirm rejected", func(t *testing.T) {
+		actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt"}}
+		s := newRenderableAdminServer(t)
+		s.SetDeployControlActions(actions)
+
+		rec := httptest.NewRecorder()
+		s.handleDeployRolloutPost(rec, postForm("/admin/deployments/rollout", url.Values{
+			"env":     {"staging"},
+			"rollout": {"memql-bff"},
+			"action":  {"abort"},
+		}))
+		if len(actions.rolloutCalls) != 0 {
+			t.Fatalf("abort invoked despite missing confirm: %v", actions.rolloutCalls)
+		}
+		if loc := rec.Header().Get("Location"); !strings.Contains(loc, "flash_kind=error") {
+			t.Errorf("redirect = %q, want error flash", loc)
+		}
+	})
+
+	t.Run("abort with confirm invokes", func(t *testing.T) {
+		actions := &fakeDeployActions{result: &memqlv1.ActionResult{Ok: true, AuditEventId: "evt-a"}}
+		s := newRenderableAdminServer(t)
+		s.SetDeployControlActions(actions)
+
+		rec := httptest.NewRecorder()
+		s.handleDeployRolloutPost(rec, postForm("/admin/deployments/rollout", url.Values{
+			"env":     {"staging"},
+			"rollout": {"memql-bff"},
+			"action":  {"abort"},
+			"confirm": {"abort"},
+		}))
+		if len(actions.rolloutCalls) != 1 || actions.rolloutCalls[0] != [3]string{"staging", "memql-bff", "abort"} {
+			t.Fatalf("rollout calls = %v, want [[staging memql-bff abort]]", actions.rolloutCalls)
+		}
+	})
 }
 
 // deployReaderFunc adapts a func to the DeployControlReader port.
