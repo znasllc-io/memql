@@ -36,6 +36,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -354,8 +355,14 @@ func intField(m map[string]any, key string, def int) int {
 	case int:
 		return v
 	case int64:
+		if v > int64(math.MaxInt) || v < int64(math.MinInt) {
+			return def
+		}
 		return int(v)
 	case float64:
+		if v > float64(math.MaxInt) || v < float64(math.MinInt) {
+			return def
+		}
 		return int(v)
 	}
 	return def
