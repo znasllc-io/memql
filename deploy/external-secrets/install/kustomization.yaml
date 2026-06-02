@@ -1,0 +1,20 @@
+# External Secrets Operator install (deployment-v2 Phase 5, znasllc-io/memql#703).
+#
+# Pins the upstream ESO bundle by tag (reproducible). Installs the controller +
+# CRDs (SecretStore / ClusterSecretStore / ExternalSecret) into the
+# `external-secrets` namespace. Additive: it does not touch the existing
+# memql-secrets Secret until an ExternalSecret is applied (see ../secretstore.yaml
+# + ../externalsecret-memql.yaml).
+#
+# Bootstrap (or manage via the Argo CD app-of-apps):
+#   kubectl apply -k deploy/external-secrets/install
+#   kubectl -n external-secrets rollout status deploy/external-secrets
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: external-secrets
+
+resources:
+  - namespace.yaml
+  # Upstream External Secrets Operator v0.10.4 (pinned), CRDs included.
+  - https://github.com/external-secrets/external-secrets/releases/download/v0.10.4/external-secrets.yaml

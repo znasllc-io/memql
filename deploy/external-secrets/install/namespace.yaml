@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    app.kubernetes.io/part-of: external-secrets
+    # deployment-v2 Phase 5 (#703): syncs k8s Secret material from Key Vault.
