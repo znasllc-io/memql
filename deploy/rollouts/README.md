@@ -37,13 +37,26 @@ Converting a Deployment to a Rollout (below) is the supervised step.
 
 ## Gate client image
 
-`analysis/deploy-gate.yaml` runs `acrmemql.azurecr.io/deploy-gate:<digest>`, a
-small image bundling `curl` + the WS/gRPC client + a `deploy-gate-check`
-entrypoint that performs the authenticated query. Build it in CI (digest-pinned
-like every artifact) from the useful logic migrated out of
-`scripts/deploy/staging-smoke-test.sh` (the `/readyz` probe + `deep_authenticated_query`).
-The `/readyz` leg already works with stock `curl`; only the authenticated-query
-leg needs this image. (Image build wiring is a small follow-up task on #701.)
+`analysis/deploy-gate.yaml` runs `acrmemql.azurecr.io/deploy-gate:<digest>`,
+whose entrypoint is **`deploy-gate-check`** (`cmd/deploy-gate-check`, built by
+`cmd/deploy-gate-check/Dockerfile`). It does both gate legs in-process (no curl,
+no shell — distroless static):
+
+- **`/readyz`** over Go `net/http` (the #657 schema assertion);
+- the **authenticated query** over `MemqlService.Stream` gRPC with
+  `Authorization: Bearer $MEMQL_SVC_JWT` (the `service_account` JWT, #691),
+  mirroring `component/grpc/gateway.go`. It passes when the BFF accepts the token
+  and the engine answers; a gRPC `Unauthenticated`/`PermissionDenied` (auth
+  rejected) or `Unavailable` (backend down) is a FAIL.
+
+Build:
+```bash
+az acr build --registry acrmemql --image deploy-gate:<tag> \
+  -f cmd/deploy-gate-check/Dockerfile .
+```
+CI builds the image on every change (`.github/workflows/deploy-gate-image.yml`);
+the digest-emitting ACR **push** is wired with the per-repo image pipeline
+(release lockfile, #702) once ACR OIDC is set up.
 
 ## Provisioning the gate JWT (#691)
 
