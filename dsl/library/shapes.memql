@@ -1,6 +1,7 @@
 // library domain -- row projections.
 
-use library.concepts.{ artifact, generatedOutput }
+use library.concepts.{ artifact, generatedOutput, memory }
+use knowledge.concepts.{ liveSnapshot }
 
 @row
 @description("Comprehensive Library index projection: every payload field plus row id and timestamps. The default shape for the Library list / search / filter reads (memql#695) and the per-item detail view.")
@@ -39,5 +40,32 @@ shape generatedOutput generatedOutputFull {
   payload.spaceId
   payload.producedByPlanId
   payload.producedByAgentId
+  row.createdAt
+}
+
+@row
+@description("Full memory projection for the Library Records lens detail / drill-in.")
+shape memory memoryFull {
+  row.id
+  payload.ownerUserId
+  payload.title
+  payload.content
+  payload.summary
+  payload.kind
+  payload.agentId
+  payload.spaceId
+  payload.sourceUtteranceId
+  row.createdAt
+}
+
+@row
+@description("Freshness projection of a live-source snapshot: the materialized result plus the timestamps + citation label the Library uses to render the LIVE badge and 'fetched X ago' indicator. Bound to v1:knowledge:liveSnapshot.")
+shape liveSnapshot liveSnapshotFreshness {
+  row.id
+  payload.liveSourceId
+  payload.result
+  payload.materializedAt
+  payload.expiresAt
+  payload.citationLabel
   row.createdAt
 }

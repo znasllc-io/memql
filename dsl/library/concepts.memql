@@ -95,3 +95,31 @@ concept generatedOutput {
 
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
 }
+
+// ---- memory: user-facing assistant (LLM) memory ----
+//
+// The durable things the assistant remembers about the user across
+// sessions -- facts, preferences, standing instructions, episodic
+// recollections. No user-facing memory concept existed before; this
+// is it (#696). Surfaced in the Library's Records lens so the user can
+// see and navigate what the assistant has retained. Per-row authz:
+// owned -- created in the user's (or their delegated agent's) session,
+// ownerUserId stamped from actor.userId; reads gate on
+// ownerUserId==actor.userId. Auto-promoted via logicIndexMemory.
+
+@version("1.0.0")
+@namespace("library")
+@displayCard(primary="title", secondary="content", tertiary="createdAt")
+@description("A durable memory the assistant retains about the user across sessions (a fact, preference, standing instruction, or episodic recollection). The user-facing LLM-memory concept; surfaced in the Library's Records lens. Per-row authz: owned -- ownerUserId stamped from actor.userId; reads gate on ownerUserId==actor.userId.")
+concept memory {
+  ownerUserId       string  @required  @description("v1:identity:user.id this memory is about / belongs to. Stamped from actor.userId at create time. The per-row authz key.")
+  title             string  @required  @description("Short label for the memory, e.g. 'Prefers concise replies'. The primary display line.")
+  content           string  @required  @description("The memory text itself -- what the assistant should recall.")
+  summary           string  @description("Optional one-line summary for dense list rendering.")
+  kind              enum("fact", "preference", "instruction", "episodic", "other")  @required @default("fact")  @description("Memory flavor. fact = stable truth about the user; preference = how they like things done; instruction = a standing directive; episodic = a specific past interaction worth recalling.")
+  agentId           string  @description("v1:agents:agent.id that formed / owns this memory, when agent-scoped. Empty for user-global memories.")
+  spaceId           string  @description("v1:cognition:space.id this memory was formed in, when space-scoped.")
+  sourceUtteranceId string  @description("Optional back-reference to the v1:cognition:utterance that produced this memory -- provenance for 'where did the assistant learn this'.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}

@@ -10,6 +10,19 @@
 
 use library.mutations.{ mutationCreateArtifact }
 
+// Record + live-source promotion (#696). Notes / to-dos / calendar
+// events / memories land in the Records lens (lens=record); their
+// provenance is agent_generated (the assistant manages them on the
+// user's behalf). Live sources land as LIVE-flagged records
+// (lens=record, kind=live_source, source=live, live=true); the
+// Library renders freshness from the latest liveSnapshot
+// (queryLatestLiveSnapshotForSource).
+//
+// NOTE on live sources: workspace-scoped liveSources carry no ownerId,
+// so this owned index can't fan them out per-user yet -- private
+// sources (ownerId set) surface end-to-end; workspace-source
+// visibility is a follow-up needing a non-owned visibility tier.
+
 @enabled
 @description("On v1:knowledge:document creation, promote the uploaded document into a Library artifact index row (lens=artifact, kind=document, source=uploaded). ownerUserId is threaded from the document's uploadedBy. Idempotent via the deterministic artifact id derived from the document's concept ref.")
 logic logicIndexDocument {
@@ -29,5 +42,60 @@ logic logicIndexGeneratedOutput {
   }
   body {
     return mutationCreateArtifact({ sourceConceptRef: concat("v1:library:generatedOutput:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId })
+  }
+}
+
+@enabled
+@description("On v1:notes:note creation, promote it into the Library Records lens (lens=record, kind=note, source=agent_generated).")
+logic logicIndexNote {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:notes:note:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "note", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled note"), summary: args.event.payload.body, live: false })
+  }
+}
+
+@enabled
+@description("On v1:todos:todo creation, promote it into the Library Records lens (lens=record, kind=todo, source=agent_generated).")
+logic logicIndexTodo {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:todos:todo:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "todo", source: "agent_generated", title: args.event.payload.title, live: false })
+  }
+}
+
+@enabled
+@description("On v1:calendar:calendarEvent creation, promote it into the Library Records lens (lens=record, kind=calendar_event, source=agent_generated).")
+logic logicIndexCalendarEvent {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:calendar:calendarEvent:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "calendar_event", source: "agent_generated", title: args.event.payload.title, live: false })
+  }
+}
+
+@enabled
+@description("On v1:library:memory creation, promote it into the Library Records lens (lens=record, kind=memory, source=agent_generated).")
+logic logicIndexMemory {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:library:memory:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: args.event.payload.summary, agentId: args.event.payload.agentId, spaceId: args.event.payload.spaceId, live: false })
+  }
+}
+
+@enabled
+@description("On v1:knowledge:liveSource creation, promote it into the Library Records lens as a LIVE-flagged record (lens=record, kind=live_source, source=live, live=true). ownerUserId is the source's ownerId (private sources); workspace-scoped visibility is a follow-up.")
+logic logicIndexLiveSource {
+  args {
+    event  object  @required
+  }
+  body {
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:liveSource:", args.event.payload.id), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true })
   }
 }

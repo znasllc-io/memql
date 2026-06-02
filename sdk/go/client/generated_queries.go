@@ -1900,6 +1900,28 @@ func QueryKnowledgeDomainByIdBuild(args QueryKnowledgeDomainByIdArgs) string {
 	return b.String()
 }
 
+// QueryLatestLiveSnapshotForSource -- Live-data freshness drill-in: fetch the cached snapshots for a live source so the Library can render the LIVE badge + 'fetched X ago' indicator (and the latest result on open). Returns every snapshot for the source; the panel picks the most recent by materializedAt. Reads are by liveSourceId -- the live source itself carries the ownership / scope decision (#696).
+//
+// Bound concept: liveSnapshot.
+type QueryLatestLiveSnapshotForSourceArgs struct {
+	LiveSourceId string
+}
+
+// QueryLatestLiveSnapshotForSource calls the engine query queryLatestLiveSnapshotForSource.
+func (qc *QueryClient) QueryLatestLiveSnapshotForSource(ctx context.Context, args QueryLatestLiveSnapshotForSourceArgs) (*Result, error) {
+	call := QueryLatestLiveSnapshotForSourceBuild(args)
+	return qc.executeNamed(ctx, "queryLatestLiveSnapshotForSource", call)
+}
+
+func QueryLatestLiveSnapshotForSourceBuild(args QueryLatestLiveSnapshotForSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("queryLatestLiveSnapshotForSource({")
+	b.WriteString("liveSourceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.LiveSourceId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryLatestSpaceContextForSpace -- Returns the latest v1:cognition:space:context row for a given spaceId, shaped via spaceContextFull. memql#294 in-tree exerciser for the wired sort + paginate struct-query directives; also directly unblocks memql#288's Go-side migration of getSpaceContextForPrompt away from a handwritten paginate(sort(filter, ...)) runtime query. Returns at most 1 row.
 //
 // Bound concept: context.
@@ -2084,6 +2106,28 @@ func QueryMagicLinkRequestByTokenHashBuild(args QueryMagicLinkRequestByTokenHash
 	b.WriteString("queryMagicLinkRequestByTokenHash({")
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryMemoryById -- Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.
+//
+// Bound concept: memory.
+type QueryMemoryByIdArgs struct {
+	MemoryId string
+}
+
+// QueryMemoryById calls the engine query queryMemoryById.
+func (qc *QueryClient) QueryMemoryById(ctx context.Context, args QueryMemoryByIdArgs) (*Result, error) {
+	call := QueryMemoryByIdBuild(args)
+	return qc.executeNamed(ctx, "queryMemoryById", call)
+}
+
+func QueryMemoryByIdBuild(args QueryMemoryByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryMemoryById({")
+	b.WriteString("memoryId: ")
+	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	b.WriteString("})")
 	return b.String()
 }

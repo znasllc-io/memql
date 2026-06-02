@@ -15,7 +15,7 @@
 // re-versions the same logical row instead of creating duplicates --
 // the idempotency guarantee #694 calls for.
 
-use library.concepts.{ artifact, generatedOutput }
+use library.concepts.{ artifact, generatedOutput, memory }
 
 @enabled
 @description("Insert (or re-version) a Library artifact index row for a backing source concept. System / automation-invoked: ownerUserId is threaded from the backing row's owner because promotion runs server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so re-promoting the same source versions the same row. Not a user-facing tool; the Library is populated automatically.")
@@ -86,5 +86,31 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     args.spaceId
     args.producedByPlanId
     args.producedByAgentId
+  }
+}
+
+@enabled
+@description("Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). logicIndexMemory folds it into the Library Records lens automatically.")
+mutation memory mutationCreateMemory {
+  args {
+    memoryId           string  @required
+    title              string  @required
+    content            string  @required
+    summary            string
+    kind               string  @enum("fact", "preference", "instruction", "episodic", "other")
+    agentId            string
+    spaceId            string
+    sourceUtteranceId  string
+  }
+  insert memory {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    args.title
+    args.content
+    args.summary
+    kind: coalesce(args.kind, "fact")
+    args.agentId
+    args.spaceId
+    args.sourceUtteranceId
   }
 }

@@ -3534,6 +3534,81 @@ func MutationCreateMagicLinkRequestBuild(args MutationCreateMagicLinkRequestArgs
 	return b.String()
 }
 
+// MutationCreateMemory -- Create a memory the assistant retains about the user. Owned: ownerUserId is stamped from actor.userId, so a memory can only ever be created for the acting user (or their delegated agent's bound user). logicIndexMemory folds it into the Library Records lens automatically.
+//
+// Bound concept: memory.
+type MutationCreateMemoryArgs struct {
+	MemoryId string
+	Title    string
+	Content  string
+	Summary  string
+	// Enum: fact | preference | instruction | episodic | other
+	Kind              string
+	AgentId           string
+	SpaceId           string
+	SourceUtteranceId string
+}
+
+// MutationCreateMemory calls the engine mutation mutationCreateMemory.
+func (qc *QueryClient) MutationCreateMemory(ctx context.Context, args MutationCreateMemoryArgs) (*Result, error) {
+	call := MutationCreateMemoryBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateMemory", call)
+}
+
+func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateMemory({")
+	b.WriteString("memoryId: ")
+	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(fmt.Sprintf("%q", args.Content))
+	if args.Summary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%q", args.Summary))
+	}
+	if args.Kind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(fmt.Sprintf("%q", args.Kind))
+	}
+	if args.AgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("agentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	}
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.SourceUtteranceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceUtteranceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreateNode -- Register a node in the cluster
 //
 // Bound concept: node.
