@@ -37,7 +37,7 @@ concept workerInvocation {
 @version("1.0.0")
 @namespace("worker")
 @description("Operational registration of a worker -- the runtime record for a memql-cockpit instance running in worker mode and connected to this cluster. Persists stable identity + capabilities + last-seen state. The currently-connected gRPC stream + per-call concurrency live in-memory on whichever agent node holds the stream; this concept is for everything that needs to survive disconnect and binary restart. Per-user routing: every registration is owned by exactly one v1:identity:user; only agents in sessions owned by that user can dispatch tools to this worker.")
-concept workerRegistration {
+concept registration {
   ownerUserId    string  @required  @description("v1:identity:user.id who owns this worker. Set once at register time from the worker_token's registeredBy. Dispatch-time access check: caller's session-owner must equal this value.")
   identityId     string  @required  @description("v1:identity:identity.id of the worker_token credential the worker authenticated with. Lookup target on every reconnect; rotated tokens stamp a new identity row, not a new registration.")
   name           string  @required  @description("User-chosen display name. Defaults to hostname. Shown in /me/workers and /admin/workers.")
