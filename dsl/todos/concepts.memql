@@ -1,0 +1,27 @@
+// todos domain -- app-native to-do items.
+//
+// A `todo` is a user-owned task: a title, a done flag, and optional
+// scheduling / priority metadata. To-dos are a source-of-truth
+// productivity primitive the assistant manages on the user's behalf
+// (via the `todos` skill) and that responsibilities can spawn (via
+// the sourceResponsibilityId back-pointer).
+//
+// Per-row authz tier: owned. Every read filters on
+// payload.ownerUserId==actor.userId; every write stamps
+// ownerUserId from actor.userId server-side so a caller can never
+// create or mutate another user's to-dos.
+
+@version("1.0.0")
+@namespace("todos")
+@displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
+@description("A user-owned to-do item: a titled task with a done flag plus optional due date, priority, and a back-pointer to the responsibility that spawned it. The standalone source-of-truth to-do concept the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
+concept todo {
+  ownerUserId  string  @required  @description("v1:identity:user.id that owns this to-do. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
+  title        string  @required  @description("Short human-readable description of the task. The primary display field.")
+  done         bool    @default("false")  @description("Completion flag. Flipped to true by the complete operation; the row keeps its history so an undo is just another version with done=false.")
+  dueAt        datetime  @description("Optional due date / time in RFC3339. Used by the frontend to sort + surface overdue items; absence means no deadline.")
+  priority     enum("low", "medium", "high")  @description("Optional priority bucket. Absence means unprioritized; the frontend sorts high > medium > low > unset.")
+  sourceResponsibilityId  string  @description("Optional back-pointer to the responsibility (or plan / automation) that spawned this to-do. Empty for user-created to-dos. Lets the frontend group app-generated tasks under their originating responsibility and lets a responsibility reconcile the to-dos it created.")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}

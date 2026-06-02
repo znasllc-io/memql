@@ -479,6 +479,34 @@ func MutationCompleteHarnessStepBuild(args MutationCompleteHarnessStepArgs) stri
 	return b.String()
 }
 
+// MutationCompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
+//
+// Bound concept: todo.
+type MutationCompleteTodoArgs struct {
+	TodoId  string
+	Payload map[string]any
+}
+
+// MutationCompleteTodo calls the engine mutation mutationCompleteTodo.
+func (qc *QueryClient) MutationCompleteTodo(ctx context.Context, args MutationCompleteTodoArgs) (*Result, error) {
+	call := MutationCompleteTodoBuild(args)
+	return qc.executeNamed(ctx, "mutationCompleteTodo", call)
+}
+
+func MutationCompleteTodoBuild(args MutationCompleteTodoArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCompleteTodo({")
+	b.WriteString("todoId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCompleteToolInvocation -- Update a toolInvocation Task to a terminal state with its result or error. Companion to mutationCreateToolInvocationTask. Status MUST be 'succeeded' or 'failed' (the only terminal transitions a toolInvocation can take -- there is no 'paused' or 'cancelled' on a tool call). On succeeded: toolResult populated. On failed: errorMessage populated.
 //
 // Bound concept: task.
@@ -3186,6 +3214,48 @@ func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityAr
 	return b.String()
 }
 
+// MutationCreateNote -- Create a note for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own notes. title and tags are optional; body is required. updatedAt is stamped to now.
+//
+// Bound concept: note.
+type MutationCreateNoteArgs struct {
+	NoteId string
+	Title  string
+	Body   string
+	Tags   []string
+}
+
+// MutationCreateNote calls the engine mutation mutationCreateNote.
+func (qc *QueryClient) MutationCreateNote(ctx context.Context, args MutationCreateNoteArgs) (*Result, error) {
+	call := MutationCreateNoteBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateNote", call)
+}
+
+func MutationCreateNoteBuild(args MutationCreateNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateNote({")
+	b.WriteString("noteId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	if args.Title != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("title: ")
+		b.WriteString(fmt.Sprintf("%q", args.Title))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(fmt.Sprintf("%q", args.Body))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tags: ")
+	b.WriteString(renderMemQLValue(args.Tags))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationCreatePATIdentity -- Create a Personal Access Token identity (api_key) owned by a user. Stores only the SHA-256 hex hash; plaintext lives at the caller for one-time display.
 //
 // Bound concept: identity.
@@ -4271,6 +4341,57 @@ func MutationCreateTaskBuild(args MutationCreateTaskArgs) string {
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateTodo -- Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty.
+//
+// Bound concept: todo.
+type MutationCreateTodoArgs struct {
+	TodoId string
+	Title  string
+	DueAt  string
+	// Enum: low | medium | high
+	Priority               string
+	SourceResponsibilityId string
+}
+
+// MutationCreateTodo calls the engine mutation mutationCreateTodo.
+func (qc *QueryClient) MutationCreateTodo(ctx context.Context, args MutationCreateTodoArgs) (*Result, error) {
+	call := MutationCreateTodoBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateTodo", call)
+}
+
+func MutationCreateTodoBuild(args MutationCreateTodoArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateTodo({")
+	b.WriteString("todoId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dueAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.DueAt))
+	if args.Priority != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("priority: ")
+		b.WriteString(fmt.Sprintf("%q", args.Priority))
+	}
+	if args.SourceResponsibilityId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceResponsibilityId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SourceResponsibilityId))
+	}
 	b.WriteString("})")
 	return b.String()
 }
@@ -9185,6 +9306,34 @@ func MutationUpdateNodeHealthBuild(args MutationUpdateNodeHealthArgs) string {
 	return b.String()
 }
 
+// MutationUpdateNote -- Update a note (title / body / tags) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership; updatedAt is re-stamped to now. The caller threads the full merged payload built from the current row plus the changed fields.
+//
+// Bound concept: note.
+type MutationUpdateNoteArgs struct {
+	NoteId  string
+	Payload map[string]any
+}
+
+// MutationUpdateNote calls the engine mutation mutationUpdateNote.
+func (qc *QueryClient) MutationUpdateNote(ctx context.Context, args MutationUpdateNoteArgs) (*Result, error) {
+	call := MutationUpdateNoteBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateNote", call)
+}
+
+func MutationUpdateNoteBuild(args MutationUpdateNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateNote({")
+	b.WriteString("noteId: ")
+	b.WriteString(fmt.Sprintf("%q", args.NoteId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationUpdateParticipantPresence -- Upsert a participant presence snapshot for multi-client status consistency.
 //
 // Bound concept: presence.
@@ -9772,6 +9921,34 @@ func MutationUpdateTaskStatusBuild(args MutationUpdateTaskStatusArgs) string {
 	}
 	b.WriteString("metrics: ")
 	b.WriteString(renderMemQLValue(args.Metrics))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateTodo -- Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields.
+//
+// Bound concept: todo.
+type MutationUpdateTodoArgs struct {
+	TodoId  string
+	Payload map[string]any
+}
+
+// MutationUpdateTodo calls the engine mutation mutationUpdateTodo.
+func (qc *QueryClient) MutationUpdateTodo(ctx context.Context, args MutationUpdateTodoArgs) (*Result, error) {
+	call := MutationUpdateTodoBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateTodo", call)
+}
+
+func MutationUpdateTodoBuild(args MutationUpdateTodoArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateTodo({")
+	b.WriteString("todoId: ")
+	b.WriteString(fmt.Sprintf("%q", args.TodoId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString("})")
 	return b.String()
 }
