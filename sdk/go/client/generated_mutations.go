@@ -9354,6 +9354,34 @@ func MutationStartPlanBuild(args MutationStartPlanArgs) string {
 	return b.String()
 }
 
+// MutationSuppressGreetOnJoin -- Arm greet-on-join suppression for a space while a first-run walkthrough / guide starts (copresent#252). TTL-bounded via expiresAt; deterministic id per space (hash of the canonical spaceId) so re-arming upserts the latest row instead of growing history. greet-on-join reads it via queryActiveGreetSuppression and skips the opening greeting.
+//
+// Bound concept: greetSuppression.
+type MutationSuppressGreetOnJoinArgs struct {
+	SpaceId   string
+	ExpiresAt string
+}
+
+// MutationSuppressGreetOnJoin calls the engine mutation mutationSuppressGreetOnJoin.
+func (qc *QueryClient) MutationSuppressGreetOnJoin(ctx context.Context, args MutationSuppressGreetOnJoinArgs) (*Result, error) {
+	call := MutationSuppressGreetOnJoinBuild(args)
+	return qc.executeNamed(ctx, "mutationSuppressGreetOnJoin", call)
+}
+
+func MutationSuppressGreetOnJoinBuild(args MutationSuppressGreetOnJoinArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSuppressGreetOnJoin({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationToggleComputerUseEnabled -- Set User.preferences.computerUseEnabled.
 //
 // Bound concept: user.
