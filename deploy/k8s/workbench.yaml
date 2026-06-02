@@ -36,7 +36,7 @@ spec:
 
       containers:
         - name: workbench
-          image: acrmemql.azurecr.io/memql-workbench:0.9.4
+          image: acrmemql.azurecr.io/memql-workbench:0.9.6
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }

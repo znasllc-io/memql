@@ -33,7 +33,7 @@ spec:
 
       containers:
         - name: voice
-          image: acrmemql.azurecr.io/memql-voice:0.9.4
+          image: acrmemql.azurecr.io/memql-voice:0.9.6
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }

@@ -51,7 +51,7 @@ spec:
 
       containers:
         - name: identity
-          image: acrmemql.azurecr.io/memql-identity:0.9.5
+          image: acrmemql.azurecr.io/memql-identity:0.9.6
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
