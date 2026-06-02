@@ -32,7 +32,13 @@ secrets:
   - name: IDENTITY_KEY_ENCRYPTION_KEY
     scope: global
     kind: integration
-    description: Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production (non-localhost IDENTITY_BASE_URL).
+    description: Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair (disk-key mode). Required in production only when IDENTITY_SIGNING_KEY_B64 is NOT set (i.e. the legacy on-disk KeyDir path).
+
+  - name: IDENTITY_SIGNING_KEY_B64
+    scope: global
+    kind: integration
+    optional: true
+    description: Base64 (std) 32-byte Ed25519 signing seed (#550/#619). When set, identity runs in envMode -- every replica derives the SAME key + kid + JWKS from this seed, so identity needs NO single-writer RWO key PVC and runs >=2 replicas (HA). REQUIRED for the HA deploy/k8s/identity.yaml manifest; absent only in local-dev disk-key mode. Optional here so local seals don't fail; staging/prod envelopes MUST carry it. Rotate by re-sealing a new seed + rolling identity.
 
   - name: EMAIL_AZURE_CLIENT_SECRET
     scope: global

@@ -128,6 +128,54 @@ func TestLoadManifest_Embedded(t *testing.T) {
 	}
 }
 
+// IDENTITY_SIGNING_KEY_B64 is declared optional (memql#619): it must be
+// present in the manifest secrets (documented + sealed-when-present) but MUST
+// NOT appear in Names() (the required floor), so a local-dev .env that omits it
+// still seals.
+func TestEmbeddedManifest_SigningKeyOptional(t *testing.T) {
+	t.Setenv("MEMQL_MANIFEST_PATH", "")
+	t.Setenv("MEMQL_REPO", "")
+
+	m, err := LoadManifest("")
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+
+	var entry *ManifestEntry
+	for i := range m.Secrets {
+		if m.Secrets[i].Name == "IDENTITY_SIGNING_KEY_B64" {
+			entry = &m.Secrets[i]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatal("IDENTITY_SIGNING_KEY_B64 not declared in embedded manifest secrets")
+	}
+	if !entry.Optional {
+		t.Error("IDENTITY_SIGNING_KEY_B64 should be optional: true")
+	}
+
+	for _, n := range m.Names() {
+		if n == "IDENTITY_SIGNING_KEY_B64" {
+			t.Fatal("IDENTITY_SIGNING_KEY_B64 must NOT be in Names() (the required floor) -- it is optional")
+		}
+	}
+
+	// A .env lacking the optional key must not be flagged as missing.
+	if missing := FindMissing(nil, m.Names()); contains(missing, "IDENTITY_SIGNING_KEY_B64") {
+		t.Errorf("optional key wrongly reported missing: %v", missing)
+	}
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestLoadManifest_FromFlagPath(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "mini-manifest.yaml")

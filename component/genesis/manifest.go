@@ -23,6 +23,12 @@ type ManifestEntry struct {
 	Kind        string `yaml:"kind,omitempty"`
 	Default     string `yaml:"default,omitempty"`
 	Description string `yaml:"description,omitempty"`
+	// Optional entries are documented + sealed-when-present, but are NOT
+	// part of the strict-superset floor: a .env that omits them still seals.
+	// Use for secrets that only some deployments carry (e.g. the identity
+	// envMode signing seed IDENTITY_SIGNING_KEY_B64, which staging/prod need
+	// for HA but local-dev disk-key mode does not). memql#619.
+	Optional bool `yaml:"optional,omitempty"`
 }
 
 // Manifest is the on-disk shape of memql's manifest.yaml. Source is
@@ -34,15 +40,23 @@ type Manifest struct {
 	Source    string          `yaml:"-"`
 }
 
-// Names returns the required entry names (secrets + variables) in
+// Names returns the REQUIRED entry names (secrets + variables) in
 // manifest order. Strict-superset validation walks this list to
-// verify the operator's .env covers the manifest floor.
+// verify the operator's .env covers the manifest floor. Entries marked
+// `optional: true` are excluded -- they are documented + sealed when
+// present, but never required (memql#619).
 func (m *Manifest) Names() []string {
 	out := make([]string, 0, len(m.Secrets)+len(m.Variables))
 	for _, e := range m.Secrets {
+		if e.Optional {
+			continue
+		}
 		out = append(out, e.Name)
 	}
 	for _, e := range m.Variables {
+		if e.Optional {
+			continue
+		}
 		out = append(out, e.Name)
 	}
 	return out
