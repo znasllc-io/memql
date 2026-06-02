@@ -1,0 +1,61 @@
+// library domain -- the Library index.
+//
+// The Library is the user-facing, provenance-aware home for
+// everything the app creates or ingests: uploaded documents,
+// generated outputs (workbench / computer-use / agent), and the
+// structured records the assistant manages (notes, to-dos, calendar
+// events, memories) plus live-data sources. See the Library epic
+// (copresent#296).
+//
+// `artifact` is the LOCKED design choice (memql#693): a single thin
+// INDEX row that points at an underlying source concept and carries
+// the shared provenance / kind / type spine, so the Library panel can
+// list / search / filter / sort across heterogeneous sources with one
+// query surface instead of N client-side fan-queries. The index row
+// owns NO content of its own -- the bytes / payload live on the
+// backing concept (v1:knowledge:document + v1:common:attachment,
+// v1:notes:note, v1:knowledge:liveSource, etc.); the index carries
+// only what the listing + facets need.
+//
+// Per-row authz tier: owned. Every read filters on
+// payload.ownerUserId==actor.userId; every write stamps ownerUserId
+// from actor.userId server-side so a caller can never see or mutate
+// another user's index rows.
+
+@version("1.0.0")
+@namespace("library")
+@displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
+@description("A single Library index row pointing at one underlying source concept (document / generated output / note / to-do / calendar event / memory / live source). Carries the shared provenance + type spine the Library panel needs to list / search / filter / sort across heterogeneous sources, while the actual content stays on the backing concept referenced by sourceConceptRef. The LOCKED backend shape for the Library epic (memql#693): a real index concept, not a UI projection. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every read gates on ownerUserId==actor.userId.")
+concept artifact {
+  ownerUserId      string  @required  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
+
+  lens             enum("artifact", "record")  @required  @description("Which Library lens this row belongs to. 'artifact' = file-like, content-bearing item opened in a type-aware viewer (documents, generated outputs). 'record' = structured memql row read/edited as data (notes, to-dos, calendar events, memories, live sources). Drives the Artifacts | Records toggle in the Library panel.")
+
+  kind             enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source")  @required  @description("The flavor of the backing concept. document = uploaded file (v1:knowledge:document); generated_output = an output produced on the workbench / via computer-use / by an agent; note = v1:notes:note; todo = v1:todos:todo; calendar_event = v1:calendar:calendarEvent; memory = user-facing assistant memory; live_source = v1:knowledge:liveSource. Extensible -- new sources append a value.")
+
+  source           enum("uploaded", "workbench_generated", "computer_use", "agent_generated", "derived", "live")  @required  @description("Provenance -- WHERE this item came from. uploaded = user-provided file; workbench_generated = produced in a v1:workbench:workspace container; computer_use = produced at the computer-use level; agent_generated = emitted by an agent as a standalone deliverable; derived = computed from another artifact; live = a current-state read against a live source (paired with live==true). Rendered as the per-row source label in the Library list.")
+
+  sourceConceptRef string  @required  @description("Fully-qualified reference to the backing row, e.g. 'v1:knowledge:document:<id>', 'v1:notes:note:<id>', 'v1:knowledge:liveSource:<id>'. The Library drill-in resolves content + children (document->documentChunk, liveSource->liveSnapshot) through this ref. Also the idempotency key for the write-path (one index row per source ref).")
+
+  title            string  @required  @description("Display title for the list row. Copied from the backing concept at index time (document.fileName, note.title, liveSource.name, etc.).")
+
+  summary          string  @description("Optional short summary / description for the list row. From document.summary, liveSource.description, etc. when available.")
+
+  format           enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")  @description("High-level content classification for artifacts -- picks the viewer in the Library (markdown / Word document / PDF / Excel spreadsheet) and falls back to a metadata-only card for 'other'. Mirrors v1:knowledge:document.format with 'document' added for Word-style docs. Null for record-lens rows.")
+
+  mimeType         string  @description("MIME type of the backing bytes when this is a content-bearing artifact, copied from the attachment. Used alongside format to pick the viewer.")
+
+  live             bool    @default("false")  @description("True when this row is a live-data source (kind=live_source, source=live). The Library renders a LIVE badge + freshness indicator computed from the backing liveSource's latest liveSnapshot (materializedAt / expiresAt). False for everything else.")
+
+  spaceId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
+
+  agentId          string  @description("v1:agents:agent.id associated with this item, when one applies (e.g. the agent that produced a generated output or owns a memory). Backs the per-agent facet filter.")
+
+  producedByPlanId string  @description("v1:planner:plan.id that produced this item, when it came from a plan (documents carry document.planId; generated outputs carry the producing plan). Provenance back-pointer surfaced in the detail view.")
+
+  validationStatus enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")  @default("none")  @description("Validation rollup for document-backed artifacts, mirrored from v1:knowledge:document.validationStatus so the Library can facet on it without a join. 'none' for items that have no validation lifecycle (records, generated outputs).")
+
+  updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
+
+  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+}
