@@ -31,6 +31,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 	switch args[0] {
 	case "migrate":
 		return true, runMigrateSubcommand(args[1:])
+	case "pat":
+		return true, runPATSubcommand(args[1:])
 	case "voice-agent-token":
 		return true, runVoiceAgentTokenSubcommand(args[1:])
 	case "node-token":
