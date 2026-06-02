@@ -355,12 +355,14 @@ func intField(m map[string]any, key string, def int) int {
 	case int:
 		return v
 	case int64:
-		if v > int64(math.MaxInt) || v < int64(math.MinInt) {
+		// Bound against the 32-bit range (worst-case int width) so the
+		// narrowing conversion is provably safe on every platform.
+		if v > math.MaxInt32 || v < math.MinInt32 {
 			return def
 		}
 		return int(v)
 	case float64:
-		if v > float64(math.MaxInt) || v < float64(math.MinInt) {
+		if v > math.MaxInt32 || v < math.MinInt32 {
 			return def
 		}
 		return int(v)
