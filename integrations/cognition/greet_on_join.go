@@ -232,6 +232,16 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 		return
 	}
 
+	// Skip entirely if a first-run walkthrough / guide has armed suppression
+	// for this space (copresent#252). Checked AFTER the initialGreetingDelay
+	// sleep so a suppression the frontend armed during that window is seen --
+	// the guided intake is taking over the conversation, so an opening greeting
+	// on top of it is wasteful + noisy.
+	if c.greetSuppressed(ctx, spaceId) {
+		c.Logger.Debug("greet_on_join: suppressed for guide/first-run", "spaceId", spaceId)
+		return
+	}
+
 	// Build the same context the conversational reply path uses, so
 	// the agent has space title, participant roster, peer roster,
 	// etc. when composing the greeting.
@@ -347,6 +357,42 @@ func (c *CognitionIntegration) greetingExists(ctx context.Context, spaceId, agen
 	}
 	query := fmt.Sprintf(`queryGreetingUtterance({spaceId: %s, agentId: %s})`,
 		escapeJSONString(spaceId), escapeJSONString(agentId))
+	result, err := c.engine.Execute(ctx, query)
+	if err != nil || result == nil {
+		return false
+	}
+	resultMap, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	bundle, ok := resultMap["bundle"].(map[string]any)
+	if !ok {
+		bundle, ok = resultMap["Bundle"].(map[string]any)
+		if !ok {
+			return false
+		}
+	}
+	if nodes, ok := bundle["nodes"].([]any); ok {
+		return len(nodes) > 0
+	}
+	if nodes, ok := bundle["Nodes"].([]any); ok {
+		return len(nodes) > 0
+	}
+	return false
+}
+
+// greetSuppressed reports whether a non-expired greet-on-join suppression
+// exists for the space (copresent#252). The frontend arms one (via
+// mutationSuppressGreetOnJoin) while a first-run walkthrough / guide is
+// starting, so the opening greeting + its LLM call don't fire over the guided
+// intake that's taking over the conversation. Best-effort: a query error
+// returns false (greet as normal) rather than silently muting greetings.
+func (c *CognitionIntegration) greetSuppressed(ctx context.Context, spaceId string) bool {
+	if c == nil || c.engine == nil {
+		return false
+	}
+	query := fmt.Sprintf(`queryActiveGreetSuppression({spaceId: %s, now: %s})`,
+		escapeJSONString(spaceId), escapeJSONString(time.Now().UTC().Format(time.RFC3339)))
 	result, err := c.engine.Execute(ctx, query)
 	if err != nil || result == nil {
 		return false

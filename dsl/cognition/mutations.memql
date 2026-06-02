@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cognition.concepts.{ audioOverride, chunk, request, response, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
+use cognition.concepts.{ audioOverride, chunk, request, response, greetSuppression, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
 
 @enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
@@ -937,6 +937,24 @@ mutation audioOverride mutationSetAgentAudioOverride {
     args.setBy
     args.mode
     active: coalesce(args.active, true)
+  }
+}
+
+// ---- mutations/v1/cognition/suppressGreetOnJoin.memql ----
+
+@enabled
+@description("Arm greet-on-join suppression for a space while a first-run walkthrough / guide starts (copresent#252). TTL-bounded via expiresAt; deterministic id per space (hash of the canonical spaceId) so re-arming upserts the latest row instead of growing history. greet-on-join reads it via queryActiveGreetSuppression and skips the opening greeting.")
+mutation greetSuppression mutationSuppressGreetOnJoin {
+  args {
+    spaceId    string  @required
+    expiresAt  string  @required
+  }
+  insert greetSuppression {
+    id: concat("greetSuppression-", hash(canonicalId(args.spaceId, "v1:cognition:space")))
+    spaceId: canonicalId(args.spaceId, "v1:cognition:space")
+    armedBy: actor.userId
+    args.expiresAt
+    active: true
   }
 }
 

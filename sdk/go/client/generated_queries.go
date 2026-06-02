@@ -165,6 +165,34 @@ func QueryActiveDelegationsForAgentBuild(args QueryActiveDelegationsForAgentArgs
 	return b.String()
 }
 
+// QueryActiveGreetSuppression -- Active (non-expired) greet-on-join suppression for a space (copresent#252). greet-on-join reads this before firing the opening greeting and skips when a row is returned. Callers pass `now` (RFC3339); the filter keeps only suppressions whose expiresAt is still in the future.
+//
+// Bound concept: greetSuppression.
+type QueryActiveGreetSuppressionArgs struct {
+	SpaceId string
+	Now     string
+}
+
+// QueryActiveGreetSuppression calls the engine query queryActiveGreetSuppression.
+func (qc *QueryClient) QueryActiveGreetSuppression(ctx context.Context, args QueryActiveGreetSuppressionArgs) (*Result, error) {
+	call := QueryActiveGreetSuppressionBuild(args)
+	return qc.executeNamed(ctx, "queryActiveGreetSuppression", call)
+}
+
+func QueryActiveGreetSuppressionBuild(args QueryActiveGreetSuppressionArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActiveGreetSuppression({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("now: ")
+	b.WriteString(fmt.Sprintf("%q", args.Now))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveHumanParticipants -- Get active human participants in a space
 //
 // Bound concept: participant.
