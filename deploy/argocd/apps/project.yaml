@@ -23,6 +23,11 @@ spec:
   clusterResourceWhitelist:
     - group: ''
       kind: Namespace
+    # The public-entry overlay manages a cert-manager ClusterIssuer
+    # (letsencrypt-prod) for the ingress TLS certs -- a cluster-scoped resource
+    # the memql app legitimately owns, so the reconciler must be permitted it.
+    - group: cert-manager.io
+      kind: ClusterIssuer
   namespaceResourceWhitelist:
     - group: '*'
       kind: '*'
