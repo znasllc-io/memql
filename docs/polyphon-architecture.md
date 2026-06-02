@@ -57,8 +57,11 @@ All under [`integrations/voice/agent/`](../integrations/voice/agent/):
 - `persona.go` / `grounding.go` / `instructions.go` /
   `voice_resolve.go` -- persona + grounding parity, canonical voice +
   persona id lookup at session start.
-- `avatar.go` / `avatar_anam.go` / `avatar_simli.go` /
-  `avatar_dispatch.go` -- Anam / Simli avatar participant.
+- `avatar_room_voice.go` (`//go:build voice`) -- the LiveKit
+  room/media glue for the Anam / Simli avatar participant. The
+  CGO-free vendor REST + dispatch core it drives lives in the shared
+  `integrations/avatarvendor` package (so the direct/Guide avatar
+  capability reuses it).
 
 ## memql side
 

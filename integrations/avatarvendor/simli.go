@@ -1,8 +1,8 @@
-package agent
+package avatarvendor
 
-// avatar_simli.go is the direct Go integration of the Simli REST API,
-// replacing the retired Python Simli LiveKit plugin. Same two-step shape as
-// the stock plugin's AvatarSession.start, ported 1:1:
+// simli.go is the direct Go integration of the Simli REST API, replacing the
+// retired Python Simli LiveKit plugin. Same two-step shape as the stock
+// plugin's AvatarSession.start, ported 1:1:
 //
 //  1. POST {base}/compose/token (header x-simli-api-key) with the face id +
 //     session knobs -> a session token.
@@ -12,7 +12,7 @@ package agent
 //     subscribes to our published audio byte-stream for lip-sync.
 //
 // As with Anam, this client is pure REST and CGO-free; the LiveKit token mint
-// + media forwarding live in avatar_room_voice.go.
+// + media forwarding live in the caller's voice-tagged / direct-path glue.
 
 import (
 	"context"
@@ -40,7 +40,7 @@ const (
 // simliClient is the CGO-free Simli REST integration for one resolved plan.
 type simliClient struct {
 	plan AvatarPlan
-	doer httpDoer
+	doer HTTPDoer
 }
 
 // simliTokenResponse is the POST /compose/token reply. Simli surfaces the
@@ -66,18 +66,18 @@ type simliAgentResponse struct {
 
 // Start performs the Simli bring-up for one session. livekitToken is the join
 // token minted for the avatar participant identity.
-func (c *simliClient) Start(ctx context.Context, roomName, livekitURL, livekitToken string) (avatarStartResult, error) {
+func (c *simliClient) Start(ctx context.Context, roomName, livekitURL, livekitToken string) (AvatarStartResult, error) {
 	sessionToken, err := c.createSessionToken(ctx)
 	if err != nil {
-		return avatarStartResult{}, err
+		return AvatarStartResult{}, err
 	}
 
 	sessionID, err := c.startLiveKitAgent(ctx, sessionToken, livekitURL, livekitToken)
 	if err != nil {
-		return avatarStartResult{}, err
+		return AvatarStartResult{}, err
 	}
 
-	return avatarStartResult{
+	return AvatarStartResult{
 		SessionID:         sessionID,
 		AvatarIdentity:    simliAvatarIdentity,
 		LiveKitSampleRate: simliSampleRate,

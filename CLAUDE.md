@@ -510,9 +510,13 @@ Key files (all under `integrations/voice/agent/`):
   `realtime_budget.go` -- the gpt-realtime executor + guardrails.
 - `persona.go` / `grounding.go` / `instructions.go` -- persona +
   grounding parity.
-- `avatar.go` / `avatar_anam.go` / `avatar_simli.go` -- Anam (default)
-  or Simli, selected by `MEMQL_AVATAR_VENDOR`; the persona's stamped
-  `avatarVendor` wins over the runtime knob when set.
+- `avatar_room_voice.go` (`//go:build voice`) -- the LiveKit room/media
+  glue that mints the avatar's join token, forwards the assistant's PCM
+  to the avatar, and handles barge-in. The CGO-free vendor REST/dispatch
+  core it drives lives in the shared `integrations/avatarvendor` package
+  (Anam default or Simli, selected by `MEMQL_AVATAR_VENDOR`; the persona's
+  stamped `avatarVendor` wins over the runtime knob when set), so the
+  direct/Guide avatar capability can reuse it too.
 
 Auth: identity-issued `class="voice_agent"` JWT bearer, pinned to the
 `VoiceAgent*` message surface by

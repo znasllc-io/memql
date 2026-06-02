@@ -1,24 +1,22 @@
-package agent
+package avatarvendor
 
-// avatar.go is the audio-source-agnostic avatar core for the Go voice-agent,
-// the port of the Python voice-agent's avatar_drive.py plus the shared HTTP
-// plumbing the vendor clients (avatar_anam.go / avatar_simli.go) ride on.
+// avatarvendor.go is the audio-source-agnostic, CGO-free avatar-vendor core,
+// extracted from the voice-tagged `integrations/voice/agent` package so BOTH
+// the voice-agent (via the voice-tagged LiveKit room glue) AND the direct/Guide
+// avatar capability (#237 step 2, a core plugin) can mint Anam / Simli sessions
+// from the same code.
 //
-// The whole vendor REST/dispatch layer is PURE Go (CGO-free) so it builds and
-// unit-tests in the default CI lane; only the LiveKit room/participant glue
-// (avatar_room_voice.go) is `//go:build voice`. The split mirrors the rest of
-// the package: the wire-protocol logic is testable without standing up a
-// libopus media stack, the media-plane binding is not.
+// The whole vendor REST/dispatch layer is PURE Go (CGO-free, build-tag-free) so
+// it builds and unit-tests in the default CI lane. Only the LiveKit
+// room/participant glue stays `//go:build voice` in the voice package; this
+// package never touches the media plane -- it deals in plans, REST calls, and a
+// vendor-neutral start result.
 //
-// The source-agnostic invariant (avatar_drive.py): both executors -- the
-// cascade TTS loop (#455) today and the realtime model (#457) later -- write
-// the assistant's PCM into the SAME audioSink the cascade publishes from. The
-// avatar lip-syncs by INTERCEPTING that sink: instead of (or in addition to)
-// the local Opus track, the assistant's PCM frames are forwarded over a
-// LiveKit byte data-stream to the avatar participant, which runs lip-sync and
-// republishes audio + video. Because the interception is at the sink the
-// executors share, the avatar never branches on which executor produced the
-// frames -- exactly the Python `output.audio` reassignment, expressed in Go.
+// The source-agnostic invariant (avatar_drive.py) lives where the audio sink
+// is wrapped (the voice room glue / the direct-path capability): the assistant
+// PCM is forwarded to the avatar participant over a LiveKit byte data-stream so
+// the avatar lip-syncs whichever executor produced the frames. This package
+// only resolves the vendor session that the avatar joins under.
 
 import (
 	"bytes"
@@ -31,17 +29,17 @@ import (
 	"time"
 )
 
-// avatarRequestTimeout bounds each vendor REST call (session-token mint,
+// AvatarRequestTimeout bounds each vendor REST call (session-token mint,
 // persona lookup, engine-session start). Generous for a cold cloud call but
 // bounded so a wedged vendor can't hang session bring-up. Mirrors the Python
 // APIConnectOptions(timeout=10s) the LiveKit plugins ship.
-const avatarRequestTimeout = 15 * time.Second
+const AvatarRequestTimeout = 15 * time.Second
 
-// httpDoer is the minimal HTTP surface the vendor clients depend on. The real
+// HTTPDoer is the minimal HTTP surface the vendor clients depend on. The real
 // clients use *http.Client; tests inject a stub so the request shape (URL,
 // headers, JSON body) is asserted without a network round-trip. Mirrors the
 // doer seam the deepgram clients use.
-type httpDoer interface {
+type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
@@ -64,40 +62,41 @@ const (
 	anamAPIBase  = "https://api.anam.ai"
 	simliAPIBase = "https://api.simli.ai"
 
-	// audioStreamTopic is the LiveKit byte-stream topic the avatar participant
+	// AudioStreamTopic is the LiveKit byte-stream topic the avatar participant
 	// subscribes to for the assistant's PCM (LiveKit Agents' DataStreamAudioOutput
-	// AUDIO_STREAM_TOPIC). The forwarding sink (avatar_room_voice.go) opens a
-	// byte stream on this topic addressed to the avatar identity.
-	audioStreamTopic = "lk.audio_stream"
+	// AUDIO_STREAM_TOPIC). The forwarding sink (voice room glue / direct-path)
+	// opens a byte stream on this topic addressed to the avatar identity.
+	AudioStreamTopic = "lk.audio_stream"
 
-	// rpcClearBuffer is the LiveKit RPC method the avatar exposes to drop any
+	// RPCClearBuffer is the LiveKit RPC method the avatar exposes to drop any
 	// queued-but-unplayed audio on a barge-in (DataStreamAudioOutput.clear_buffer
 	// -> "lk.clear_buffer"). The forwarding sink calls it on Flush so an
 	// interruption cuts the avatar's speech immediately, not after the buffered
 	// tail drains.
-	rpcClearBuffer = "lk.clear_buffer"
+	RPCClearBuffer = "lk.clear_buffer"
 
-	// avatarPCMSampleRate is the sample rate stamped on the audio byte-stream
+	// DefaultPCMSampleRate is the sample rate stamped on the audio byte-stream
 	// header so the avatar engine resamples our PCM correctly. It matches the
-	// rate the executor publishes -- the cascade TTS emits linear16 at
-	// ttsPCMSampleRate today, and the realtime executor (#457) writes into the
-	// same sink, so a single rate covers both. Kept equal to ttsPCMSampleRate
-	// (tts_pipeline.go) so the source-agnostic invariant holds without the
-	// avatar layer knowing which executor is active.
-	avatarPCMSampleRate = ttsPCMSampleRate
+	// rate the producers publish -- the voice cascade TTS emits linear16 at this
+	// rate (ttsPCMSampleRate), and the realtime executor + the direct-path
+	// browser audio republish into the same sink, so a single rate covers them
+	// all. Previously coupled to the voice package's ttsPCMSampleRate; this
+	// package owns its own const so it stays voice-dependency-free.
+	DefaultPCMSampleRate = 16000
 
-	// avatarParticipantIdentity / avatarParticipantName are the room identity
+	// AvatarParticipantIdentity / AvatarParticipantName are the room identity
 	// the avatar joins under. Fixed (one avatar per session) and excluded from
 	// STT so the agent never transcribes the avatar's republished audio.
-	avatarParticipantIdentity = "avatar-agent"
-	avatarParticipantName     = "Assistant"
+	AvatarParticipantIdentity = "avatar-agent"
+	AvatarParticipantName     = "Assistant"
 )
 
 // AvatarPlan is the resolved, vendor-agnostic decision of HOW (or whether) to
 // drive an avatar for one session. It is produced by ResolveAvatarPlan from the
-// Config + resolved Persona, entirely without network or media dependencies,
-// so the dispatch rules (persona-stamped vendor wins, runtime default
-// fallback, video-gating -> no avatar) are unit-tested in the default lane.
+// AvatarConfig + a PersonaInput, entirely without network or media
+// dependencies, so the dispatch rules (persona-stamped vendor wins, runtime
+// default fallback, video-gating -> no avatar) are unit-tested in the default
+// lane.
 //
 // A nil *AvatarPlan means "no avatar -- ride audio-only", the explicit signal
 // the Python build_avatar(...) returns None for.
@@ -127,10 +126,10 @@ type AvatarPlan struct {
 	APIBase string
 }
 
-// AvatarConfig is the slice of the agent Config the avatar layer reads. It is a
-// narrow view (not the whole Config) so ResolveAvatarPlan stays trivially
-// testable and the dispatch rules read cleanly. Populated from Config by
-// avatarConfigFromConfig.
+// AvatarConfig is the slice of config the avatar layer reads. It is a narrow
+// view (not a whole process Config) so ResolveAvatarPlan stays trivially
+// testable and the dispatch rules read cleanly. The voice package and the
+// direct-path capability each project their own config onto it.
 type AvatarConfig struct {
 	// Vendor is the runtime default vendor (MEMQL_AVATAR_VENDOR): "anam" |
 	// "simli" | "none". Used only when the persona carries no stamped vendor.
@@ -147,53 +146,58 @@ type AvatarConfig struct {
 	AnamDefaultPersonaNam string
 }
 
-// avatarConfigFromConfig projects the process Config onto the narrow
-// AvatarConfig the dispatch layer consumes.
-func avatarConfigFromConfig(cfg Config) AvatarConfig {
-	return AvatarConfig{
-		Vendor:                cfg.AvatarVendor,
-		AnamAPIKey:            cfg.AnamAPIKey,
-		SimliAPIKey:           cfg.SimliAPIKey,
-		AnamDefaultPersonaID:  cfg.AnamDefaultPersonaID,
-		AnamDefaultAvatarID:   cfg.AnamDefaultAvatarID,
-		AnamDefaultPersonaNam: cfg.AnamDefaultPersonaNm,
-	}
+// PersonaInput is the narrow, voice-type-free view of the resolved persona the
+// dispatch layer reads. It decouples this package from the voice agent's rich
+// Persona type: callers project their own persona representation onto these
+// three fields. VideoEnabled is the already-resolved video gate (the voice
+// persona resolver / the direct-path video-control lookup computes it).
+type PersonaInput struct {
+	// AvatarPersonaID is the per-agent stamped Anam personaId / Simli faceId.
+	AvatarPersonaID string
+
+	// AvatarVendor is the per-agent stamped vendor ("anam" / "simli" / ""); it
+	// wins over the runtime default when set.
+	AvatarVendor string
+
+	// VideoEnabled is the resolved video gate. False -> no avatar (audio-only).
+	VideoEnabled bool
 }
 
-// avatarStartResult is what a vendor client returns after minting + starting
+// AvatarStartResult is what a vendor client returns after minting + starting
 // its session: the vendor session id (for logging / teardown) and the LiveKit
-// participant identity the avatar joined under (the byte-stream destination
-// the forwarding sink targets). Vendor-neutral so the room glue stays
+// participant identity the avatar joined under (the byte-stream destination the
+// forwarding sink targets). Vendor-neutral so the room glue stays
 // dispatch-free.
-type avatarStartResult struct {
+type AvatarStartResult struct {
 	SessionID         string
 	AvatarIdentity    string
 	LiveKitSampleRate int
 }
 
-// avatarVendorClient is the vendor-specific REST integration: given a minted
+// AvatarVendorClient is the vendor-specific REST integration: given a minted
 // LiveKit join token for the avatar participant, mint the vendor session and
 // instruct the vendor's cloud engine to join the room. The CGO-free vendor
-// clients (anamClient / simliClient) satisfy it; the voice-tagged room glue
-// constructs the right one from the AvatarPlan and supplies the LiveKit token.
+// clients (anamClient / simliClient) satisfy it; the caller (voice room glue /
+// direct-path capability) constructs the right one from the AvatarPlan and
+// supplies the LiveKit token.
 //
 // Start does NOT touch the media plane -- it is pure REST -- so the whole
-// vendor surface is unit-tested against a stub httpDoer in the default lane.
-type avatarVendorClient interface {
+// vendor surface is unit-tested against a stub HTTPDoer in the default lane.
+type AvatarVendorClient interface {
 	// Start mints the vendor session and tells the vendor engine to join the
 	// LiveKit room named roomName using livekitURL + livekitToken (the token
 	// minted for the avatar participant identity). It returns the started
 	// session details. Errors are returned for the caller to treat as
 	// non-fatal (fall back to audio-only).
-	Start(ctx context.Context, roomName, livekitURL, livekitToken string) (avatarStartResult, error)
+	Start(ctx context.Context, roomName, livekitURL, livekitToken string) (AvatarStartResult, error)
 }
 
-// newAvatarVendorClient constructs the vendor REST client for a resolved plan.
-// doer may be nil, in which case a default *http.Client with avatarRequestTimeout
+// NewAvatarVendorClient constructs the vendor REST client for a resolved plan.
+// doer may be nil, in which case a default *http.Client with AvatarRequestTimeout
 // is used. The room glue passes nil; tests pass a stub.
-func newAvatarVendorClient(plan AvatarPlan, doer httpDoer) (avatarVendorClient, error) {
+func NewAvatarVendorClient(plan AvatarPlan, doer HTTPDoer) (AvatarVendorClient, error) {
 	if doer == nil {
-		doer = &http.Client{Timeout: avatarRequestTimeout}
+		doer = &http.Client{Timeout: AvatarRequestTimeout}
 	}
 	switch plan.Vendor {
 	case avatarVendorAnam:
@@ -205,16 +209,16 @@ func newAvatarVendorClient(plan AvatarPlan, doer httpDoer) (avatarVendorClient, 
 	}
 }
 
-// avatarStartParams carries everything startAvatarSession needs to bring an
+// AvatarStartParams carries everything StartAvatarSession needs to bring an
 // avatar up, decoupled from the LiveKit media types so the start/fallback
 // decision is unit-testable in the default lane.
-type avatarStartParams struct {
+type AvatarStartParams struct {
 	RoomName     string
 	LiveKitURL   string
 	LiveKitToken string
 }
 
-// startAvatarSession is the CGO-free core of the avatar-start seam (the testable
+// StartAvatarSession is the CGO-free core of the avatar-start seam (the testable
 // half of avatar_drive.py::start_avatar). It resolves the plan, constructs the
 // vendor client (via newClient, overridable in tests), and starts the vendor
 // session, returning the started-session result and whether an avatar is now
@@ -231,41 +235,41 @@ type avatarStartParams struct {
 //
 // On success the caller wraps the executor's audio sink so the assistant's PCM
 // is forwarded to res.AvatarIdentity; because that sink is the one BOTH the
-// cascade (#455) and the realtime executor (#457) write into, the avatar
-// lip-syncs whichever produced the frames without this code ever branching on
-// the executor.
-func startAvatarSession(
+// cascade and the realtime executor (and the direct-path browser republish)
+// write into, the avatar lip-syncs whichever produced the frames without this
+// code ever branching on the source.
+func StartAvatarSession(
 	ctx context.Context,
 	ac AvatarConfig,
-	persona Persona,
-	params avatarStartParams,
-	newClient func(plan AvatarPlan) (avatarVendorClient, error),
-) (avatarStartResult, bool, error) {
+	persona PersonaInput,
+	params AvatarStartParams,
+	newClient func(plan AvatarPlan) (AvatarVendorClient, error),
+) (AvatarStartResult, bool, error) {
 	plan, err := ResolveAvatarPlan(ac, persona)
 	if err != nil {
-		return avatarStartResult{}, false, err
+		return AvatarStartResult{}, false, err
 	}
 	if plan == nil {
-		return avatarStartResult{}, false, nil
+		return AvatarStartResult{}, false, nil
 	}
 	if newClient == nil {
-		newClient = func(p AvatarPlan) (avatarVendorClient, error) {
-			return newAvatarVendorClient(p, nil)
+		newClient = func(p AvatarPlan) (AvatarVendorClient, error) {
+			return NewAvatarVendorClient(p, nil)
 		}
 	}
 	client, err := newClient(*plan)
 	if err != nil {
-		return avatarStartResult{}, false, err
+		return AvatarStartResult{}, false, err
 	}
 	res, err := client.Start(ctx, params.RoomName, params.LiveKitURL, params.LiveKitToken)
 	if err != nil {
-		return avatarStartResult{}, false, err
+		return AvatarStartResult{}, false, err
 	}
 	if res.LiveKitSampleRate <= 0 {
-		res.LiveKitSampleRate = avatarPCMSampleRate
+		res.LiveKitSampleRate = DefaultPCMSampleRate
 	}
 	if res.AvatarIdentity == "" {
-		res.AvatarIdentity = avatarParticipantIdentity
+		res.AvatarIdentity = AvatarParticipantIdentity
 	}
 	return res, true, nil
 }
@@ -275,7 +279,7 @@ func startAvatarSession(
 // status-check / decode dance the vendor clients share, matching the
 // liveavatar integration's callAPI helper. applyAuth stamps the vendor's auth
 // header (Bearer / x-simli-api-key) so the caller stays declarative.
-func doJSON(ctx context.Context, doer httpDoer, method, url string, body any, applyAuth func(*http.Request), out any) error {
+func doJSON(ctx context.Context, doer HTTPDoer, method, url string, body any, applyAuth func(*http.Request), out any) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
