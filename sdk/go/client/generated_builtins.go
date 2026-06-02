@@ -14,6 +14,26 @@ var (
 	_ = strings.Builder{}
 )
 
+// HarnessTrace -- Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142).
+type HarnessTraceArgs struct {
+	PlanId string
+}
+
+// HarnessTrace calls the engine builtin harnessTrace.
+func (qc *QueryClient) HarnessTrace(ctx context.Context, args HarnessTraceArgs) (*Result, error) {
+	call := HarnessTraceBuild(args)
+	return qc.executeNamed(ctx, "harnessTrace", call)
+}
+
+func HarnessTraceBuild(args HarnessTraceArgs) string {
+	var b strings.Builder
+	b.WriteString("harnessTrace({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // KnowledgeAugmentDomainAnalyze -- Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight.
 type KnowledgeAugmentDomainAnalyzeArgs struct {
 	UserQuestion  string
