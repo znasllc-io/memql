@@ -40,6 +40,18 @@ RUN go mod download
 
 COPY . .
 
+# Generate the identity web assets BEFORE compiling so the identity binary
+# (BUILD_TAGS=identity) embeds them via //go:embed in component/identity/web:
+#   1. templ -> component/identity/web/templ/*_templ.go
+#   2. Tailwind -> component/identity/web/static/app.css  (gitignored, generated)
+# This MUST mirror docker/memql.Dockerfile. The root Dockerfile (used by
+# scripts/deploy/aks-deploy.sh) was missing these steps, so identity images
+# shipped WITHOUT app.css -> /static/app.css 404 -> unstyled login page.
+# Cheap (a few seconds) for non-identity node builds; kept unconditional so
+# the two Dockerfiles stay in sync.
+RUN go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ
+RUN bash scripts/identity/build-css.sh
+
 # Stamp VERSION file with build timestamp
 RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
     echo "${prefix:-0.0.0}-$(date +%s)" > VERSION
