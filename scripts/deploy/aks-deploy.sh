@@ -69,6 +69,17 @@ readonly ALL_DEPLOYMENTS=(identity bff cognition voice agent planner workbench c
 # Per-Deployment rollout wait.
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-180s}"
 
+# Pre-deploy headroom guard (#614). A RollingUpdate surges one extra pod per
+# Deployment (every engine + carrier + SPA manifest pins maxSurge=1), so a roll
+# transiently needs free CPU for that many surge pods on top of steady state.
+# Each surge pod requests ~200m CPU (the manifests' per-node CPU request); the
+# SPA is lighter but we use the conservative engine figure as a single knob.
+# If the nodepool's free allocatable CPU can't cover the surge, the roll can
+# deadlock with Pending surge pods (the #614 incident). With the cluster
+# autoscaler enabled (aks-autoscaler.sh) this self-heals; until then we WARN,
+# or FAIL when --gate-headroom is set so CI/operators catch it pre-roll.
+SURGE_POD_CPU_MILLI="${SURGE_POD_CPU_MILLI:-200}"
+
 #=============================================================================
 # OUTPUT HELPERS
 #=============================================================================
@@ -114,6 +125,9 @@ Options:
     --no-gate         Run the smoke test but do NOT auto-rollback on failure
                       (useful when a smoke failure is environmental, e.g.
                       DNS/cert propagation lag). Default: gate ON.
+    --gate-headroom   FAIL the deploy if the nodepool lacks free CPU for the
+                      rolling-update surge (#614). Default: WARN only.
+    --skip-headroom   Skip the pre-deploy nodepool headroom check entirely.
     --allow-overwrite Permit re-cutting an engine tag that already exists in ACR.
                       Default OFF: release tags are immutable (the promotion gate
                       rests on a validated tag never being re-cut in place). Use
@@ -149,6 +163,8 @@ function parse_arguments() {
     GATE=true
     DRY_RUN=false
     ALLOW_OVERWRITE=false
+    GATE_HEADROOM=false
+    SKIP_HEADROOM=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -159,6 +175,8 @@ function parse_arguments() {
             --skip-migrate) SKIP_MIGRATE=true; shift ;;
             --no-smoke)   NO_SMOKE=true; shift ;;
             --no-gate)    GATE=false; shift ;;
+            --gate-headroom) GATE_HEADROOM=true; shift ;;
+            --skip-headroom) SKIP_HEADROOM=true; shift ;;
             --allow-overwrite) ALLOW_OVERWRITE=true; shift ;;
             --dry-run)    DRY_RUN=true; shift ;;
             --help)       show_help; exit 0 ;;
@@ -195,6 +213,83 @@ function check_prerequisites() {
     if ! kubectl kustomize "$K8S_DIR" > /dev/null 2>&1; then
         echo "ERROR: kustomize render failed"; exit 1
     fi
+}
+
+#=============================================================================
+# 0b. PRE-DEPLOY HEADROOM GUARD (#614)
+#=============================================================================
+
+# Verify the cluster has enough free CPU to absorb the rolling-update surge
+# BEFORE we roll. A RollingUpdate brings up maxSurge extra pods per Deployment
+# while the old ones still run; if the nodepool is packed (staging ran B2s at
+# 91-93% CPU requests), those surge pods go Pending and the rollout deadlocks
+# -- exactly the #614 incident. We sum requestable surge CPU across the
+# Deployments we roll and compare it to the cluster's free allocatable CPU
+# (allocatable minus already-requested, summed over Ready nodes).
+#
+# Outcome:
+#   - enough headroom            -> INFO, proceed.
+#   - short on headroom          -> WARN (default) and proceed, OR FAIL when
+#                                   --gate-headroom is set.
+#   - can't measure (no metrics) -> WARN and proceed (never block on a missing
+#                                   read; the smoke gate still guards the roll).
+# With the cluster autoscaler enabled (scripts/deploy/aks-autoscaler.sh, the
+# #614 IaC) a shortfall self-heals as the autoscaler adds a node; this check is
+# the belt-and-suspenders signal until/when that is live.
+function check_nodepool_headroom() {
+    section "0b. Pre-deploy headroom guard (rolling-update surge, #614)"
+
+    if [ "$SKIP_HEADROOM" = true ]; then
+        info "--skip-headroom set; skipping the surge headroom check."
+        return 0
+    fi
+
+    # Surge pods = one per Deployment we roll (every manifest pins maxSurge=1).
+    local surge_pods="${#ALL_DEPLOYMENTS[@]}"
+    local need_milli=$((surge_pods * SURGE_POD_CPU_MILLI))
+
+    if [ "$DRY_RUN" = true ]; then
+        plan "compute free allocatable CPU across Ready nodes and compare to surge need (${surge_pods} pods x ${SURGE_POD_CPU_MILLI}m = ${need_milli}m)"
+        return 0
+    fi
+
+    # Sum allocatable CPU (millicores) over Ready nodes.
+    local alloc_milli requested_milli free_milli
+    alloc_milli="$(kubectl get nodes \
+        -o jsonpath='{range .items[?(@.status.allocatable.cpu)]}{.status.allocatable.cpu}{"\n"}{end}' 2>/dev/null \
+        | awk '{ if ($1 ~ /m$/) { sub(/m$/,"",$1); s+=$1 } else { s+=$1*1000 } } END { print s+0 }')"
+
+    # Sum already-requested CPU across all non-terminal pods cluster-wide.
+    requested_milli="$(kubectl get pods --all-namespaces \
+        -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.resources.requests.cpu}{"\n"}{end}{end}' 2>/dev/null \
+        | awk 'NF { if ($1 ~ /m$/) { sub(/m$/,"",$1); s+=$1 } else { s+=$1*1000 } } END { print s+0 }')"
+
+    if [ -z "$alloc_milli" ] || [ "$alloc_milli" -eq 0 ]; then
+        warn "could not read node allocatable CPU; skipping the headroom check (the smoke gate still guards the roll)."
+        return 0
+    fi
+
+    free_milli=$((alloc_milli - requested_milli))
+    info "cluster allocatable CPU : ${alloc_milli}m"
+    info "already requested       : ${requested_milli}m"
+    info "free for surge          : ${free_milli}m"
+    info "rolling-update surge need: ${need_milli}m (${surge_pods} pods x ${SURGE_POD_CPU_MILLI}m)"
+
+    if [ "$free_milli" -ge "$need_milli" ]; then
+        info "headroom OK -- the rolling-update surge fits."
+        return 0
+    fi
+
+    warn "INSUFFICIENT headroom: free ${free_milli}m < surge need ${need_milli}m."
+    warn "A rolling update may strand surge pods in Pending and stall the rollout (#614)."
+    warn "Enable the cluster autoscaler so a roll can surge automatically:"
+    warn "  bash scripts/deploy/aks-autoscaler.sh        # converges nodepool1 to min 2 / max 5 (owner-gated)"
+    warn "or scale the nodepool up manually before deploying."
+    if [ "$GATE_HEADROOM" = true ]; then
+        echo "ERROR: headroom gate armed (--gate-headroom) and the surge does not fit; aborting BEFORE rolling the mesh." >&2
+        return 1
+    fi
+    return 0
 }
 
 #=============================================================================
@@ -624,6 +719,15 @@ function main() {
     build_and_push
     ensure_tls_secrets
     warn_if_app_secret_missing
+
+    # Verify the nodepool can absorb the rolling-update surge before we roll
+    # (#614). Aborts here only when --gate-headroom is set; otherwise warns.
+    if ! check_nodepool_headroom; then
+        state_report
+        echo ""
+        echo "RESULT: deploy ABORTED -- insufficient nodepool headroom for the rolling-update surge (--gate-headroom). The mesh was NOT rolled."
+        exit 1
+    fi
 
     # Migrate up front and abort the deploy if it fails -- never roll the
     # mesh onto an unmigrated/half-migrated schema (#553).
