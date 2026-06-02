@@ -521,6 +521,33 @@ EOF
     exit 1
 }
 
+# Cap on the Docker build cache kept between refreshes. dev-refresh
+# rebuilds all seven images with `go build -a` every run, so BuildKit
+# layer cache + superseded :latest image layers accumulate without
+# bound -- left alone it has grown past 1TB and filled the disk
+# mid-build ("no space left on device"). Override via the env var.
+readonly LIB_DOCKER_BUILD_CACHE_CAP="${LIB_DOCKER_BUILD_CACHE_CAP:-50GB}"
+
+# lib_prune_docker_build_cache trims the BuildKit cache down to the cap
+# and drops dangling (untagged) images BEFORE a build, so each refresh
+# keeps recent cache for fast incremental rebuilds without the
+# unbounded growth. --max-used-space evicts least-recently-used cache
+# beyond the cap (Docker >= 27); older daemons fall back to the legacy
+# --keep-storage flag. Best-effort: a prune failure logs but never
+# aborts the refresh (set -e is handled via the `|| true` guards).
+function lib_prune_docker_build_cache() {
+    if ! command -v docker >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "  Capping Docker build cache at ${LIB_DOCKER_BUILD_CACHE_CAP} + dropping dangling images..."
+    if docker builder prune --help 2>/dev/null | grep -q -- '--max-used-space'; then
+        docker builder prune -f --max-used-space "${LIB_DOCKER_BUILD_CACHE_CAP}" >/dev/null 2>&1 || true
+    else
+        docker builder prune -f --keep-storage "${LIB_DOCKER_BUILD_CACHE_CAP}" >/dev/null 2>&1 || true
+    fi
+    docker image prune -f >/dev/null 2>&1 || true
+}
+
 # -----------------------------------------------------------------
 # ngrok: shared with refresh.sh + ngrok-up.sh
 # -----------------------------------------------------------------
