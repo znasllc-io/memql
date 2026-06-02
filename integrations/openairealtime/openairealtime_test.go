@@ -90,6 +90,53 @@ func TestCreateClientSecret_GAShape(t *testing.T) {
 	}
 }
 
+// voiceFromBody pulls session.audio.output.voice out of a captured mint body.
+func voiceFromBody(body map[string]any) any {
+	session, _ := body["session"].(map[string]any)
+	audio, _ := session["audio"].(map[string]any)
+	output, _ := audio["output"].(map[string]any)
+	return output["voice"]
+}
+
+func TestCreateClientSecret_VoiceBakedIntoMintBody(t *testing.T) {
+	// The requested voice must reach OpenAI in the ephemeral-session config
+	// (session.audio.output.voice) so the minted session actually speaks in it
+	// -- not just be echoed back in `config` (copresent#274).
+	var gotBody map[string]any
+	i := newTestIntegration(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ek_v", "expires_at": float64(1)})
+	})
+
+	if _, err := i.handleCreateClientSecret(
+		context.Background(),
+		map[string]any{"voice": "cedar"},
+		0,
+	); err != nil {
+		t.Fatalf("handleCreateClientSecret: %v", err)
+	}
+	if got := voiceFromBody(gotBody); got != "cedar" {
+		t.Errorf("request session.audio.output.voice = %v, want cedar", got)
+	}
+}
+
+func TestCreateClientSecret_DefaultVoiceBakedIntoMintBody(t *testing.T) {
+	// With no voice arg the default voice still reaches the mint body, so the
+	// minted session is never voiceless.
+	var gotBody map[string]any
+	i := newTestIntegration(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ek_v", "expires_at": float64(1)})
+	})
+
+	if _, err := i.handleCreateClientSecret(context.Background(), map[string]any{}, 0); err != nil {
+		t.Fatalf("handleCreateClientSecret: %v", err)
+	}
+	if got := voiceFromBody(gotBody); got != defaultVoice {
+		t.Errorf("request session.audio.output.voice = %v, want %s", got, defaultVoice)
+	}
+}
+
 func TestCreateClientSecret_LegacyNestedShape(t *testing.T) {
 	// Pre-GA /realtime/sessions nested the secret under client_secret.value;
 	// mint() must tolerate it.
