@@ -259,6 +259,15 @@ function main() {
     # writes the clusterSettings row but skips the mlIssuer.Issue call;
     # the operator can still claim ownership via /setup if they need to.
     export MAIL_SUPPRESS_OWNER_BOOTSTRAP=1
+    # copresent#237: auto-stamp the per-user Assistant's avatar persona on first
+    # materialization (i.e. on login, since dev-refresh wipes the DB + suppresses
+    # owner bootstrap) so the assistant's Anam avatar renders with zero manual
+    # steps. The SeedMaterializer resolves this NAME against the
+    # v1:agents:avatarPersona catalog at materialization time, so it stays
+    # deployment-agnostic (minted persona ids vary per vendor account). Override
+    # by exporting MEMQL_DEV_DEFAULT_AVATAR_PERSONA before `make dev-refresh`;
+    # set it empty to opt out.
+    export MEMQL_DEV_DEFAULT_AVATAR_PERSONA="${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-Ava}"
     step3_wipe_and_restart
     step4_mint_voice_agent_token
     step4b_mint_node_tokens

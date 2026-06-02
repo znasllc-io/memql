@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +14,18 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/provenance"
 )
+
+// devDefaultAvatarPersonaEnv names the dev-only knob that auto-assigns an
+// avatar persona to the per-user Assistant when it is first materialized.
+// When set (to a catalog persona NAME, e.g. "Ava"), materializePerUser stamps
+// the assistant's avatarVendor + avatarPersonaId from the matching
+// v1:agents:avatarPersona catalog row -- so a freshly-provisioned assistant
+// renders its avatar with no manual stamping. Unset (production default) -> no
+// behavior change. Deployment-agnostic: the persona id is resolved from the
+// catalog at materialization time, never hardcoded (the minted ids vary per
+// vendor account). `make dev-refresh` exports this so the avatar "just works"
+// after login. See copresent#237.
+const devDefaultAvatarPersonaEnv = "MEMQL_DEV_DEFAULT_AVATAR_PERSONA"
 
 // seedMaterializerActor is the synthetic actor every materializer
 // mutation runs as. Mutations require an actor (for createdBy
@@ -281,8 +294,137 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 		return fmt.Errorf("dedup lookup: %w", err)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
+	m.applyDevDefaultAvatarPersona(ctx, def, args)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
+}
+
+// applyDevDefaultAvatarPersona is the dev-only hook (#237) that stamps a
+// default avatar persona onto the per-user Assistant at first materialization,
+// so a freshly-provisioned assistant renders its avatar with no manual step.
+// Gated on the MEMQL_DEV_DEFAULT_AVATAR_PERSONA env (a catalog persona NAME);
+// unset -> no-op (production default). Only touches the `assistant` seed, and
+// never overrides an avatar the body already carries. The persona id + vendor
+// are resolved from the v1:agents:avatarPersona catalog at runtime so the value
+// stays deployment-agnostic (minted ids vary per vendor account).
+//
+// Because mutationCreateAgent is create-only (no-op on an existing row), this
+// only takes effect on the first create; a later user choice (the #239 picker)
+// is preserved across restarts. All cluster nodes read the same env value, so
+// concurrent materializer runs inject identical fields -- no last-writer race.
+func (m *SeedMaterializer) applyDevDefaultAvatarPersona(ctx context.Context, def *SeedDefinition, args map[string]any) {
+	if def == nil || def.Name != "assistant" {
+		return
+	}
+	personaName := strings.TrimSpace(os.Getenv(devDefaultAvatarPersonaEnv))
+	if personaName == "" {
+		return
+	}
+	// Respect an avatar the seed/body already declared.
+	if existing, ok := args["avatarPersonaId"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+
+	vendor, personaId, ok := m.resolveAvatarPersonaByName(ctx, personaName)
+	if !ok {
+		if m.engine != nil && m.engine.Logger != nil {
+			m.engine.Logger.Warn("seed materializer: dev default avatar persona not found in catalog; assistant stays avatar-less",
+				"env", devDefaultAvatarPersonaEnv, "personaName", personaName)
+		}
+		return
+	}
+	args["avatarVendor"] = vendor
+	args["avatarPersonaId"] = personaId
+	if m.engine != nil && m.engine.Logger != nil {
+		m.engine.Logger.Info("seed materializer: stamped dev default avatar persona on assistant",
+			"personaName", personaName, "vendor", vendor, "avatarPersonaId", personaId)
+	}
+}
+
+// resolveAvatarPersonaByName looks up a v1:agents:avatarPersona catalog row by
+// its display name and returns its (vendor, personaId). The catalog is
+// materialized in the global pass before any perUser seed, so it is present by
+// the time the assistant is materialized. Returns ok=false on lookup failure or
+// no match.
+func (m *SeedMaterializer) resolveAvatarPersonaByName(ctx context.Context, name string) (vendor, personaId string, ok bool) {
+	if m.engine == nil {
+		return "", "", false
+	}
+	result, err := m.engine.Execute(systemActorContext(ctx), `queryAvatarPersonas({})`)
+	if err != nil {
+		if m.engine.Logger != nil {
+			m.engine.Logger.Warn("seed materializer: queryAvatarPersonas failed resolving dev default avatar",
+				"error", err)
+		}
+		return "", "", false
+	}
+	for _, row := range materializerResultRows(result) {
+		if rowStringField(row, "name") != name {
+			continue
+		}
+		v := rowStringField(row, "vendor")
+		pid := rowStringField(row, "personaId")
+		if pid == "" {
+			continue
+		}
+		if v == "" {
+			v = "anam"
+		}
+		return v, pid, true
+	}
+	return "", "", false
+}
+
+// materializerResultRows normalizes an Execute result into row maps. Shape-
+// projected queries (queryAvatarPersonas uses avatarPersonaFull) surface flat
+// rows via OutputPayload; a raw bundle is walked as a fallback.
+func materializerResultRows(result *ExecuteResult) []map[string]any {
+	if result == nil {
+		return nil
+	}
+	switch v := result.OutputPayload().(type) {
+	case []map[string]any:
+		return v
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if mrow, ok := item.(map[string]any); ok {
+				out = append(out, mrow)
+			}
+		}
+		return out
+	}
+	if result.Bundle != nil {
+		out := make([]map[string]any, 0, len(result.Bundle.Nodes))
+		for _, n := range result.Bundle.Nodes {
+			if n == nil {
+				continue
+			}
+			row := map[string]any{}
+			if p := n.GetPayload(); p != nil {
+				for k, val := range p.AsMap() {
+					row[k] = val
+				}
+			}
+			out = append(out, row)
+		}
+		return out
+	}
+	return nil
+}
+
+// rowStringField reads a string field off a row map, probing the bare key and
+// a nested payload map (shape output may nest under payload).
+func rowStringField(row map[string]any, field string) string {
+	if v, ok := row[field].(string); ok {
+		return v
+	}
+	if p, ok := row["payload"].(map[string]any); ok {
+		if v, ok := p[field].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // lookupOrMintPerUserId returns the existing perUser-seed row id for
