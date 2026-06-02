@@ -79,7 +79,7 @@ shape space spaceFull {
   row.id
   payload.name
   payload.description
-  payload.purpose
+  payload.goal
   payload.status
   payload.archivedAt
   payload.expiresAt

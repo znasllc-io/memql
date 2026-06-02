@@ -1776,7 +1776,7 @@ var recentChatSeedCorpus = []struct {
 	},
 	{
 		SourceRef: "recentChat:tool-usage",
-		Text:      `The recentChat tool gives you READ-ONLY access to the space chat + space context. Five operations: (1) readRecent({count}) -- last N utterances; (2) readByKeyword({keyword}) -- most recent utterances containing a substring; (3) readByTime({fromTime, toTime}) -- utterances in a time window (ISO-8601); (4) getSpaceContext() -- the space's title, purpose, and active participants; (5) listParticipants() -- humans + agents currently active. Each utterance result has speakerId, speakerName, speakerKind, timestamp, content, utteranceId. When you quote prior content, attach a citation with the utteranceId; the frontend renders a click-to-jump chip. NEVER invent the existence of an utterance you didn't actually retrieve.`,
+		Text:      `The recentChat tool gives you READ-ONLY access to the space chat + space context. Five operations: (1) readRecent({count}) -- last N utterances; (2) readByKeyword({keyword}) -- most recent utterances containing a substring; (3) readByTime({fromTime, toTime}) -- utterances in a time window (ISO-8601); (4) getSpaceContext() -- the space's title, goal, and active participants; (5) listParticipants() -- humans + agents currently active. Each utterance result has speakerId, speakerName, speakerKind, timestamp, content, utteranceId. When you quote prior content, attach a citation with the utteranceId; the frontend renders a click-to-jump chip. NEVER invent the existence of an utterance you didn't actually retrieve.`,
 	},
 }
 

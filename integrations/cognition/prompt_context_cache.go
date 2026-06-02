@@ -40,13 +40,17 @@ type cachedAgent struct {
 type spaceInfo struct {
 	spaceType   string
 	description string
-	// purpose is the short one-liner set by the Configure-manually
-	// path in CreateSpaceModal ("Plan Q3 roadmap", "Talk to ops
-	// about the Houston facility"). Exposed in prompt context so
+	// goalStatement / goalTimeframe are the structured space goal set
+	// by the Configure-manually path in CreateSpaceModal ("Plan Q3
+	// roadmap", "Talk to ops about the Houston facility"; timeframe is
+	// one of daily / weekly / monthly). Exposed in prompt context so
 	// cognition routing + agent replies can key turn-taking and
 	// role-playing decisions on what the space is FOR, not just on
 	// whatever long-form description the AI-describe path stored.
-	purpose string
+	// timeframe is descriptive grounding only -- NOT tied to
+	// space.kind=daily or status=scheduled (separate concerns).
+	goalStatement string
+	goalTimeframe string
 	// name is the space's user-visible title. Without this in the
 	// prompt context, agents truthfully answer "I can't see the
 	// title" when asked, even though the spaceFull shape already
@@ -62,10 +66,10 @@ type cachedSpaceInfo struct {
 
 // buildSpaceData constructs the space data map for prompt templates.
 // Each field is only included when non-empty so the prompt-schema
-// validator doesn't reject a blank string. The newer `purpose`
-// field (short one-liner) is preferred by templates that offer a
-// fallback chain; legacy `description` still surfaces verbatim for
-// spaces that predate purpose.
+// validator doesn't reject a blank string. The structured `goal`
+// {statement, timeframe} is preferred by templates that offer a
+// fallback chain; `description` still surfaces verbatim for spaces
+// created via the AI-describe path that produces no goal.
 func buildSpaceData(spaceId string, si spaceInfo) map[string]any {
 	m := map[string]any{
 		"id":        spaceId,
@@ -77,10 +81,24 @@ func buildSpaceData(spaceId string, si spaceInfo) map[string]any {
 	if si.description != "" {
 		m["description"] = si.description
 	}
-	if si.purpose != "" {
-		m["purpose"] = si.purpose
+	if goal := buildGoalData(si); goal != nil {
+		m["goal"] = goal
 	}
 	return m
+}
+
+// buildGoalData assembles the structured goal sub-map for prompt
+// templates, returning nil when the space has no goal statement so
+// the prompt-schema validator doesn't reject an empty object.
+func buildGoalData(si spaceInfo) map[string]any {
+	if si.goalStatement == "" {
+		return nil
+	}
+	goal := map[string]any{"statement": si.goalStatement}
+	if si.goalTimeframe != "" {
+		goal["timeframe"] = si.goalTimeframe
+	}
+	return goal
 }
 
 type cachedAttachments struct {
@@ -434,8 +452,13 @@ func (c *CognitionIntegration) getSpaceInfoCached(ctx context.Context, spaceId s
 				if desc, ok := m["description"].(string); ok {
 					val.description = desc
 				}
-				if p, ok := m["purpose"].(string); ok {
-					val.purpose = p
+				if goal, ok := m["goal"].(map[string]any); ok {
+					if s, ok := goal["statement"].(string); ok {
+						val.goalStatement = s
+					}
+					if tf, ok := goal["timeframe"].(string); ok {
+						val.goalTimeframe = tf
+					}
 				}
 				// `name` is the user-visible space title. Without
 				// extracting it here, agents can't ground answers

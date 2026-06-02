@@ -11,7 +11,7 @@
 //                                            containing a substring
 //   readByTime({fromTime, toTime})       -- utterances in an
 //                                            ISO-8601 window
-//   getSpaceContext()                    -- title, purpose,
+//   getSpaceContext()                    -- title, goal,
 //                                            architecture, status
 //   listParticipants()                   -- humans + agents
 //                                            currently active

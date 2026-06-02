@@ -3999,7 +3999,7 @@ type MutationCreateSpaceArgs struct {
 	SpaceId        string
 	Name           string
 	Description    string
-	Purpose        string
+	Goal           map[string]any
 	Settings       map[string]any
 	Status         string
 	SpaceType      string
@@ -4038,13 +4038,11 @@ func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
-	if args.Purpose != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("purpose: ")
-		b.WriteString(fmt.Sprintf("%q", args.Purpose))
+	if b.Len() > 17 {
+		b.WriteString(", ")
 	}
+	b.WriteString("goal: ")
+	b.WriteString(renderMemQLValue(args.Goal))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}
@@ -8415,6 +8413,34 @@ func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
 		b.WriteString("revertMinRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevertMinRole))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSetSpaceGoal -- Set or replace a space's structured goal {statement, timeframe} after creation. Partial update via update() -- only the goal changes; everything else inherits from the prior row.
+//
+// Bound concept: space.
+type MutationSetSpaceGoalArgs struct {
+	SpaceId string
+	Goal    map[string]any
+}
+
+// MutationSetSpaceGoal calls the engine mutation mutationSetSpaceGoal.
+func (qc *QueryClient) MutationSetSpaceGoal(ctx context.Context, args MutationSetSpaceGoalArgs) (*Result, error) {
+	call := MutationSetSpaceGoalBuild(args)
+	return qc.executeNamed(ctx, "mutationSetSpaceGoal", call)
+}
+
+func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetSpaceGoal({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("goal: ")
+	b.WriteString(renderMemQLValue(args.Goal))
 	b.WriteString("})")
 	return b.String()
 }

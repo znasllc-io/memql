@@ -54,9 +54,9 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 			data["fitScore"] = routing.FitScore
 		}
 
-		// space -- identity / type / description / purpose plus the
+		// space -- identity / type / description / goal plus the
 		// current human's display name. The agentReply template
-		// reads `.space.id`, `.space.spaceType`, `.space.purpose`,
+		// reads `.space.id`, `.space.spaceType`, `.space.goal`,
 		// `.space.description`, and `.space.currentUserDisplayName`.
 		// (template uses `spaceType` for the type field; we map the
 		// proto's `Type` onto that key for compat.) The retired
@@ -74,8 +74,14 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 			if d := strings.TrimSpace(routing.Space.Description); d != "" {
 				space["description"] = d
 			}
-			if p := strings.TrimSpace(routing.Space.Purpose); p != "" {
-				space["purpose"] = p
+			if g := routing.Space.GetGoal(); g != nil {
+				if s := strings.TrimSpace(g.GetStatement()); s != "" {
+					goal := map[string]any{"statement": s}
+					if tf := strings.TrimSpace(g.GetTimeframe()); tf != "" {
+						goal["timeframe"] = tf
+					}
+					space["goal"] = goal
+				}
 			}
 			if u := strings.TrimSpace(routing.Space.CurrentUserDisplayName); u != "" {
 				space["currentUserDisplayName"] = u
