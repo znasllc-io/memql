@@ -45,7 +45,7 @@ spec:
 
       containers:
         - name: copresent
-          image: acrmemql.azurecr.io/copresent:0.9.6
+          image: acrmemql.azurecr.io/copresent:0.9.9
           ports:
             - { name: http, containerPort: 8080 }
           env:
