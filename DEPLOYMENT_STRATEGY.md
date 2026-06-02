@@ -181,12 +181,15 @@ and a validated artifact is **immutable**.
    before prod.)
 2. **Deep gate** — `SMOKE_PROFILE=deep` (§7) must pass; a token-less baseline
    gate is not a basis for promotion.
-3. **Validated ledger** — on a green deep gate, `record_validated_version` appends
-   `{version, env, validatedAt, gate, per-engine digests}` to
-   `deploy/validated-versions.json`. Commit it.
-4. **Prod promotes only validated versions** — a prod deploy takes a version that
-   appears in the ledger and pins it by the recorded digests. `0.9.6` is
-   intentionally absent (it was rebuilt in-place and never deep-gated).
+3. **Release lockfile** (deployment-v2 Phase 4, #702) — on a green deep gate, the
+   8 component digests are assembled into `releases/<version>.yaml`
+   (`scripts/release/assemble-lockfile.sh`) and PR'd; the `release-lockfile` CI
+   gate (`coherence-check.sh`) enforces 8-digest-pinned + carrier/SPA
+   coherence. This **supersedes** `deploy/validated-versions.json`.
+4. **Prod promotes by digest copy, no rebuild** — `scripts/release/promote.sh
+   --version=X --env=prod` copies the validated lockfile's digests into
+   `deploy/k8s/overlays/prod`; PR it and Argo CD reconciles prod. Prod runs the
+   exact bytes staging validated. See `releases/README.md`.
 
 ---
 
