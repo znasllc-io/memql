@@ -4,9 +4,9 @@
 #
 # This is the design-draft replacement for the single `bff` Deployment in
 # bff.yaml. It is intentionally NOT added to kustomization.yaml yet -- it ships
-# alongside bff.yaml so the owner can review the shape before we cut over. The
-# implementation is finalized only after the open questions in PR #<this> are
-# answered.
+# alongside bff.yaml so the owner can review the shape and approve the
+# production cutover before it goes live. (decision 8: the cutover stays a
+# separate operator step; it is NOT folded into aks-deploy.sh.)
 #
 # GOAL (distinct from #615 graceful-drain, which already shipped):
 #   - Two BFF colors run simultaneously (bff-blue + bff-green).
@@ -21,6 +21,10 @@
 #     deadline -- at which point the OLD color's pods take the #615 graceful
 #     -drain teardown (preStop + GOAWAY + terminationGracePeriod).
 #
+# SCOPE (decision 1): BFF-only. Mesh nodes (cognition/agent/planner/voice) are
+# stateless behind the BFF and roll normally once the BFF drains; voice/LiveKit
+# room drain is a separate story, out of scope here.
+#
 # WHY the in-mesh `bff` Service stays color-agnostic:
 #   Peer nodes dial `bff:50058` (NodeService) for cross-node forwards. Those
 #   forwards must reach WHICHEVER color holds the user's stream, so the in-mesh
@@ -28,13 +32,13 @@
 #   Ingress + the external LB) is color-pinned, because that is where "new
 #   login -> new color" is enforced.
 #
-# Cutover is driven by scripts/deploy/bff-bluegreen-cutover.sh (WIP).
+# Cutover is driven by scripts/deploy/bff-bluegreen-cutover.sh (operator step).
 #
 # -----------------------------------------------------------------------------
-# OPEN QUESTION (owner): one shared Deployment template parametrized by color
-# via kustomize overlays, vs. two near-duplicate Deployments as below. The
-# duplication is explicit-but-verbose; an overlay is DRYer but hides the color
-# in patch files. Drafted as two explicit Deployments for review clarity.
+# TOPOLOGY (decision 5): two explicit color Deployments (below). The duplication
+# is explicit-but-verbose; a kustomize base + per-color overlay is DRYer but
+# hides the color in patch files. Two explicit Deployments chosen for review
+# clarity now; an overlay refactor can come later without changing behavior.
 # -----------------------------------------------------------------------------
 
 # ---- BLUE color Deployment ---------------------------------------------------
@@ -49,10 +53,11 @@ metadata:
     memql/node-type: bff
     memql/color: blue
 spec:
-  # Each color carries the full replica count. During a cutover BOTH colors
-  # are briefly up -> 2x BFF capacity is required (depends on #614 surge
-  # headroom). OPEN QUESTION: scale the OLD color down to 0 only after drain,
-  # or keep it at full replicas until drain completes (capacity vs. safety).
+  # Each color carries the full replica count. During a cutover BOTH colors are
+  # briefly up. The #614 cluster autoscaler is LIVE (min 2 / max 5 on B2s) and
+  # supplies the surge headroom (decision 7). The cutover script scales the OLD
+  # color DOWN progressively as it drains (default), so peak is bounded and we
+  # do NOT sit at a sustained 2x for the whole drain window.
   replicas: 2
   strategy:
     type: RollingUpdate
@@ -252,8 +257,9 @@ spec:
 ---
 # ---- External LoadBalancer (COLOR-PINNED) ----------------------------------
 # Same color pin as bff-active. New external connections land on the active
-# color only. (If the public path is exclusively the nginx Ingress -> bff-active
-# in production, this LB may be redundant -- OPEN QUESTION for the owner.)
+# color only. (decision 6: keep bff-external LB color-pinned to the active
+# color; the public entry path is nginx Ingress -> bff-active, and this LB is
+# the color-pinned external fallback. Both flip together in the cutover script.)
 apiVersion: v1
 kind: Service
 metadata:

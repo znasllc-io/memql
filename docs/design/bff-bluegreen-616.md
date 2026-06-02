@@ -1,8 +1,11 @@
-# Blue/green BFF cutover (#616) -- DESIGN DRAFT (WIP)
+# Blue/green BFF cutover (#616) -- DESIGN
 
-Status: DRAFT for owner review. Pairs with the draft PR for #616. Not wired
-into `deploy/k8s/kustomization.yaml` yet; implementation is finalized only
-after the open questions below are answered.
+Status: READY FOR REVIEW. Pairs with PR for #616. All 8 design questions have
+proposed answers (see "Resolved decisions" below) -- each is the
+implementation's current behavior and is marked "proposed; owner may override."
+Intentionally NOT wired into `deploy/k8s/kustomization.yaml`: the new-color
+manifest ships alongside `bff.yaml` and the cutover is a separate operator step,
+so the owner approves the production-behavior change before it goes live.
 
 ## Problem
 
@@ -40,7 +43,8 @@ voluntarily disconnect." That is #616.
    it only steers NEW connection establishment. So old-color pods keep serving
    their open streams.
 4. The OLD color is removed only AFTER it drains to 0 active streams (or a
-   max-drain deadline). Residual streams at the deadline take the #615 path.
+   max-drain deadline). It shrinks progressively as its pods empty (peak-bounded
+   capacity, decision 7). Residual streams at the deadline take the #615 path.
 
 ## Topology (`deploy/k8s/bff-bluegreen.yaml`)
 
@@ -55,11 +59,15 @@ voluntarily disconnect." That is #616.
 Key invariant: the in-mesh `bff` Service is color-agnostic (mesh forwards reach
 any color); only the user-facing entry is color-pinned (new login steering).
 
-### Required Ingress change (NOT yet made -- see open questions)
+### Required Ingress change (applied at cutover time, not in this PR)
 
 `deploy/k8s/public-entry.yaml` currently routes `/memql -> service bff`. For
-blue/green it must route `/memql -> service bff-active`. Drafted but not applied
-pending the owner's decision on whether to also keep `bff-external`.
+blue/green it must route `/memql -> service bff-active`. This PR deliberately
+does NOT change `public-entry.yaml`: `bff-active` only exists once
+`bff-bluegreen.yaml` is applied, and that manifest is out of the default
+kustomization path. The owner makes the Ingress edit (one backend service name)
+as part of approving the production cutover, together with applying
+`bff-bluegreen.yaml`. Decision 6 keeps `bff-external` (color-pinned) as well.
 
 ## "New login -> new color" enforcement
 
@@ -87,39 +95,65 @@ localhost) and sums `activeStreams` until 0 or the deadline.
 
 ## Cutover sequence (`scripts/deploy/bff-bluegreen-cutover.sh`)
 
+Invocation (operator step, decision 2/8 -- NOT folded into `aks-deploy.sh`):
+
+```
+scripts/deploy/bff-bluegreen-cutover.sh --to=<blue|green> [--version=X.Y.Z] \
+    [--max-drain=SECS] [--no-progressive-teardown] [--no-teardown] [--dry-run]
+```
+
 1. Bring up NEW color (set image to new version, wait Ready). Abort before the
    flip if it isn't Ready.
-2. Flip `bff-active` + `bff-external` selector `color: OLD -> NEW`.
-3. Poll OLD color pods' `/healthz activeStreams` until 0 or `--max-drain`.
+2. Flip `bff-active` + `bff-external` selector `color: OLD -> NEW`. From here new
+   logins land on NEW; existing streams stay on OLD-color pods.
+3. Drain (progressive, default): poll each OLD pod's `/healthz activeStreams`
+   until 0 or `--max-drain` (default 1h). As individual OLD pods reach 0, scale
+   the OLD Deployment down to the count of pods that still hold streams. This
+   bounds peak capacity -- the OLD color shrinks as users disconnect rather than
+   sitting at a sustained 2x for the whole window (decision 7; relies on the
+   #614 autoscaler for the brief surge). `--no-progressive-teardown` holds OLD
+   at full replicas for instant rollback during a watched first cutover.
 4. Scale OLD color to 0 (unless `--no-teardown`). Residual streams take #615.
 
 ## Rollback
 
 - Pre-teardown: re-run with `--to=<OLD>` -- both colors are still up, so the
-  flip back is instant; new logins return to OLD and NEW drains instead.
+  flip back is instant; new logins return to OLD and NEW drains instead. With
+  progressive teardown, OLD may have shrunk; a late rollback scales it back up
+  first. For a fully-watched first cutover, use `--no-progressive-teardown` so
+  OLD stays at full replicas and rollback is always instant.
 - Post-teardown: bring the prior color back up at its prior image, then flip.
 
-## Open questions for the owner
+## Resolved decisions
 
-1. Scope: BFF-only? The issue notes mesh nodes are stateless behind the BFF and
-   can roll normally if the BFF drains. Confirm voice/LiveKit rooms are a
-   separate drain story (out of scope for #616).
-2. Switchover trigger: manual flip (operator runs the script) vs. automated
-   after the new color passes deep smoke? Draft is manual.
-3. Drain SLA / `--max-drain`: default ceiling is 1h. What is acceptable for
-   long sessions before forced teardown?
-4. Drain definition: count only `MemqlService.Stream`, or also VoiceAgent /
-   Node / Worker streams? Draft counts only `MemqlService.Stream` (the
-   user-facing anchor).
-5. Topology authoring: two explicit Deployments (drafted) vs. one kustomize
-   base + per-color overlay (DRYer, hides color in patches)?
-6. `bff-external` LoadBalancer: keep it (color-pinned) or is the public path
-   exclusively nginx Ingress -> `bff-active` in prod (making the LB redundant)?
-7. Capacity: blue/green needs ~2x BFF during cutover. Confirm #614 surge
-   headroom / autoscaler covers it, or scale OLD down progressively as it
-   drains.
-8. Integration with `aks-deploy.sh`: should the main deploy script call the
-   cutover for the bff, or stay a separate operator step? Draft is separate.
+All proposed; the owner may override any. Each is the implementation's current
+behavior.
+
+1. **Scope -- BFF-only.** Mesh nodes (cognition/agent/planner) are stateless
+   behind the BFF and roll normally once it drains; voice/LiveKit room drain is
+   a separate story. The BFF is the connection anchor, so it is the only color
+   that needs blue/green.
+2. **Switchover trigger -- operator-driven manual flip.** An operator runs the
+   cutover script. A clear hook is left to later automate after a green deep
+   smoke; automation is NOT wired into `aks-deploy.sh` yet.
+3. **Drain SLA -- `--max-drain` default 1h, configurable.** Past the ceiling the
+   OLD color is torn down and residual streams take the #615 graceful path.
+4. **Drain definition -- user-facing `MemqlService.Stream` (browser) only.**
+   Node (mesh) and Worker streams are infra (NodeService / WorkerService), not
+   user logins; VoiceAgent lives on voice nodes. Only the browser login anchor
+   is counted for the BFF color drain.
+5. **Topology -- two explicit color Deployments.** A kustomize base + per-color
+   overlay is DRYer but hides the color in patches; two explicit Deployments are
+   chosen for review clarity. An overlay refactor can come later.
+6. **Public entry -- nginx Ingress -> `bff-active`; keep `bff-external`.** The
+   external LB stays color-pinned to the active color and flips with
+   `bff-active` in the cutover.
+7. **Capacity -- the #614 autoscaler (LIVE, min 2 / max 5 on B2s) covers the
+   surge; the cutover scales the new color up and tears the old color down
+   progressively** so peak is bounded (no sustained 2x).
+8. **Cutover packaging -- separate operator step**
+   (`scripts/deploy/bff-bluegreen-cutover.sh`); NOT folded into `aks-deploy.sh`
+   yet. Invocation documented above.
 
 ## Staging-proof plan
 
@@ -128,6 +162,8 @@ localhost) and sums `activeStreams` until 0 or the deadline.
 - Run the cutover to the other color at a new image.
 - Assert: (a) new logins hit the NEW color, (b) the pre-existing N sessions stay
   served by OLD-color pods (no dropped streams) until closed, (c) `activeStreams`
-  on OLD pods winds down to 0, (d) OLD color tears down only after drain.
+  on OLD pods winds down to 0, (d) OLD color shrinks progressively as pods empty
+  and tears down only after drain, (e) peak combined replica count stays bounded
+  (no sustained 2x) and the #614 autoscaler absorbs the brief surge.
 - Metric: dropped-vs-resumed streams across the cutover (target: 0 dropped for
-  sessions that stayed connected).
+  sessions that stayed connected); peak node count during the window.

@@ -37,17 +37,21 @@ var (
 	draining atomic.Bool
 
 	// activeStreams counts currently-open MemqlService.Stream sessions
-	// on this pod (WS->gRPC and direct gRPC). The gRPC Stream handler
-	// increments on open and decrements on close. Blue/green BFF (#616)
-	// reads this via /healthz so the cutover script can keep an OLD-color
-	// pod alive until it has drained to 0 active streams (existing users
-	// finish on their current version) before tearing the color down.
+	// on this pod (browser WS->gRPC and direct gRPC). The gRPC Stream
+	// handler increments on open and decrements on close. Blue/green BFF
+	// (#616) reads this via /healthz so the cutover script can keep an
+	// OLD-color pod alive until it has drained to 0 active streams
+	// (existing users finish on their current version) before tearing the
+	// color down.
 	//
-	// NOTE (WIP #616): only MemqlService.Stream is counted here today.
-	// VoiceAgent / Node / Worker streams ride other handlers; whether the
-	// drain definition should include them is an OPEN QUESTION for the
-	// owner (the BFF is the user connection anchor, so the user-facing
-	// MemqlService.Stream is the load-bearing count -- but see the PR body).
+	// Drain definition (#616, owner-resolved): the BFF color drain counts
+	// ONLY the user-facing MemqlService.Stream -- the browser login anchor.
+	// Node (mesh) and Worker streams ride NodeService / WorkerService and
+	// are infra, not user logins; VoiceAgent lives on voice nodes, not the
+	// BFF. So MemqlService.Stream is the load-bearing count for "have all
+	// the users on this color gone home yet?" and the only one incremented
+	// here. (The same binary runs every node type, so non-BFF pods also
+	// maintain this counter harmlessly; the cutover only polls BFF pods.)
 	activeStreams atomic.Int64
 )
 
