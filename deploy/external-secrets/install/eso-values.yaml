@@ -1,0 +1,56 @@
+# Helm values for rendering the pinned External Secrets Operator install
+# (deployment-v2 Phase 5, znasllc-io/memql#703 / #738).
+#
+# This file documents EXACTLY how external-secrets.yaml in this directory was
+# rendered, so the install is reproducible. Re-render with:
+#
+#   helm repo add external-secrets https://charts.external-secrets.io
+#   helm template external-secrets external-secrets/external-secrets \
+#     --version 2.5.0 --namespace external-secrets \
+#     --values deploy/external-secrets/install/eso-values.yaml \
+#     > deploy/external-secrets/install/external-secrets.yaml
+#
+# Why Helm-rendered instead of the upstream release bundle (#738): the raw
+# `external-secrets.yaml` release artifact is templated for the `default`
+# namespace, hardcoding `--service-namespace=default` / `--secret-namespace=default`
+# on the cert-controller and `--dns-name=...default.svc` on the webhook. Kustomize's
+# `namespace:` transform rewrites resource namespaces but NOT those container arg
+# strings, so on k8s 1.34 the webhook never received a TLS cert and crashlooped.
+# The chart renders every namespace reference correctly for `external-secrets`.
+
+# CRDs are managed out-of-band (already installed on the cluster, serving v1).
+# Keeping them out of this render avoids re-applying the (very large) CRDs through
+# `kubectl apply`, which trips the last-applied-configuration annotation size limit.
+installCRDs: false
+crds:
+  createClusterExternalSecret: false
+  createClusterSecretStore: false
+  createSecretStore: false
+  createClusterGenerator: false
+  createClusterPushSecret: false
+  createPushSecret: false
+
+# The bundled cert-controller is what fails on k8s 1.34. Disable it entirely and
+# let cert-manager (already installed on this cluster) issue + rotate the webhook
+# serving cert instead.
+certController:
+  create: false
+
+webhook:
+  certManager:
+    # Switch the webhook from the bundled self-cert flow to cert-manager.
+    enabled: true
+    # Auto-stamp `cert-manager.io/inject-ca-from` on the validating webhook
+    # config (and CRD conversion webhooks, if any) so the cert-manager CA
+    # injector wires the caBundle. Requires the cert-manager cainjector (running).
+    addInjectorAnnotations: true
+    cert:
+      create: true
+      # Self-signed Issuer defined alongside this render (webhook-issuer.yaml).
+      # A self-signed issuer is the cert-manager-recommended pattern for a
+      # webhook serving cert: the issued leaf is its own CA, and the injector
+      # publishes that CA into the webhook's caBundle.
+      issuerRef:
+        group: cert-manager.io
+        kind: Issuer
+        name: external-secrets-webhook-issuer

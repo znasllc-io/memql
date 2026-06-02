@@ -1,0 +1,15 @@
+# Self-signed cert-manager Issuer for the ESO webhook serving cert (#738).
+#
+# The ESO Helm chart (webhook.certManager.enabled=true) creates the Certificate
+# but NOT the issuer it references. A self-signed Issuer is the pattern the
+# cert-manager docs recommend for an admission-webhook serving cert: the issued
+# leaf is its own CA, and the cert-manager CA injector publishes that CA into the
+# webhook's caBundle (via the `cert-manager.io/inject-ca-from` annotation the
+# chart stamps on the validating webhook config).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: external-secrets-webhook-issuer
+  namespace: external-secrets
+spec:
+  selfSigned: {}

@@ -132,20 +132,37 @@ identity signing seed).
 
 **To add/rotate a shared secret (the canonical flow — do NOT `kubectl set env`):**
 
+Since Phase 5 (#703), External Secrets owns `memql-secrets` and reconciles it
+from Key Vault (`creationPolicy: Merge`, 1h refresh), so **Key Vault is the
+single source of truth** and the cluster Secret follows it. The #734 drift —
+Key Vault and the cluster Secret silently diverging — came from updating the two
+sides as independent manual steps. The re-seal is therefore scripted, and the
+script **hard-verifies that the live Secret converged to what was pushed before
+it rolls any pod** (drift can no longer be left behind):
+
 ```bash
 # 1. Edit the per-env source of truth (real values, gitignored, NEVER committed):
 #    ~/Downloads/staging.genesis.env   (staging)   |   prod equivalent
-# 2. Re-seal it (reuses MEMQL_MASTER_KEY from env; must match the cluster's):
-go run ./cmd/genesis-seal --env-file=~/Downloads/staging.genesis.env \
-    --out=/tmp/staging.genesis.znas --sync-shell=false
-# 3. Push the new sealed blob to Key Vault (DR) and the cluster Secret:
-NEW="$(base64 < /tmp/staging.genesis.znas | tr -d '\n')"
-az keyvault secret set --vault-name kv-memql-staging --name memql-genesis-b64 --value "$NEW"
-kubectl patch secret memql-secrets -n memql --type merge \
-    -p "{\"stringData\":{\"MEMQL_GENESIS_B64\":\"$NEW\"}}"
-# 4. Roll the pods that consume it (envFrom is injected at pod start):
-kubectl rollout restart deployment/<name> -n memql
+# 2. Re-seal + propagate + verify-convergence + roll, in one guarded step:
+MEMQL_MASTER_KEY=... \
+scripts/secrets/reseal-genesis.sh \
+    --env=staging --env-file=~/Downloads/staging.genesis.env
 ```
+
+The script (`scripts/secrets/reseal-genesis.sh`):
+1. seals the env-file under `MEMQL_MASTER_KEY`;
+2. writes the blob to Key Vault (`kv-memql-<env>/memql-genesis-b64`);
+3. propagates to the cluster — when ESO is present it forces an `ExternalSecret`
+   refresh and waits for `SecretSynced` (ESO is the sole writer of the managed
+   keys, so a manual cluster patch would just be reverted); when ESO is absent
+   (pre-bootstrap) it `kubectl patch`es the Secret directly **in the same run**;
+4. **verifies the live `MEMQL_GENESIS_B64` hash equals what was pushed** — aborts
+   non-zero on divergence (the #734 guardrail) instead of rolling onto drift;
+5. rolls the consuming deployments (`--no-roll` / `--roll="deployment/identity …"`
+   to scope).
+
+Never hand-patch only Key Vault or only the cluster Secret — the convergence
+check exists precisely so neither side is updated alone.
 
 ---
 
