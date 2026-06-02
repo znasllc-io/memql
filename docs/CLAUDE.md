@@ -22,6 +22,7 @@ docs/
 ├── voice/             Voice-pipeline tuning notes
 ├── workbench/         Workbench (sandboxed per-Plan headless surface) ops
 ├── workers/           Workers (computer-use) ops
+├── ops/               Operations runbooks (DR / rollback / PITR)
 ├── guides/            Operational + how-to guides
 └── planning/          Active planning docs (added during multi-phase work, removed when shipped)
 ```
