@@ -141,6 +141,14 @@ type App struct {
 	// reads it back via type assertion, and the in-process admin portal
 	// reads it via DeployControlService().
 	deployControlService any
+
+	// adminServer is the *admin.AdminServer wired during the identity
+	// integrations phase (the /admin/* operator portal). Stored as
+	// `any` to avoid importing component/identity/admin in non-identity
+	// builds; setupDeployControlService reads it back via type
+	// assertion to wire the in-process deployment-status reader
+	// (memql#726). Nil on binaries built without -tags identity.
+	adminServer any
 }
 
 // newApp creates an App with the given overrides, applying defaults for nil fields.

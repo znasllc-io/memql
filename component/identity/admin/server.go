@@ -61,6 +61,14 @@ type AdminServer struct {
 	// safe: the page degrades to "PATs only" when this isn't wired
 	// (e.g. an identity binary built without the node-token surface).
 	nodeTokenAdapter NodeTokenAdapter
+
+	// memql#726: deployment-status reader backing the read-only
+	// /admin/deployments view. Wired by SetDeployControlReader from
+	// app/integrations_deploy_control.go after the deploy-control
+	// service is up. Nil-safe: the page renders an error flash when
+	// unwired (e.g. an identity binary without the deploy-control
+	// surface).
+	deployReader DeployControlReader
 }
 
 // Built-in nav links rendered in the layout header on every admin
@@ -71,6 +79,7 @@ var adminNav = []webtempl.NavLink{
 	{Href: "/admin/users", Label: "Users"},
 	{Href: "/admin/tokens", Label: "Tokens"},
 	{Href: "/admin/audit", Label: "Audit"},
+	{Href: "/admin/deployments", Label: "Deployments"},
 	{Href: "/admin/jwks", Label: "JWKS"},
 	{Href: "/admin/settings", Label: "Settings"},
 }
@@ -146,6 +155,8 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /admin/audit", gated(s.handleAuditList))
 
+	mux.HandleFunc("GET /admin/deployments", gated(s.handleDeploymentsGet))
+
 	mux.HandleFunc("GET /admin/tokens", gated(s.handleTokensList))
 	mux.HandleFunc("POST /admin/tokens/revoke", gated(s.handleTokensRevoke))
 	mux.HandleFunc("POST /admin/tokens/node/revoke", gated(s.handleNodeTokensRevoke))
@@ -170,7 +181,7 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 
 	s.Logger.Info("admin web routes mounted",
 		slog.String("base_url", s.Cfg.BaseURL),
-		slog.Int("routes", 14),
+		slog.Int("routes", 15),
 	)
 }
 

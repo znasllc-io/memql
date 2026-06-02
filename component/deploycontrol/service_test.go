@@ -281,8 +281,9 @@ func TestGetDeploymentStatusReadsAndDoesNotAudit(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
-	// A reader can read (read paths are not admin-gated).
-	out, err := svc.GetDeploymentStatus(ctxWithRole(auth.RoleReader), &memqlv1.GetDeploymentStatusRequest{Env: "prod"})
+	// An owner/admin can read; the read path is admin-gated (#728)
+	// but a successful read is NOT audited.
+	out, err := svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{Env: "prod"})
 	if err != nil {
 		t.Fatalf("GetDeploymentStatus: %v", err)
 	}
@@ -315,6 +316,48 @@ func TestGetDeploymentStatusReadsAndDoesNotAudit(t *testing.T) {
 	// Read path must NOT audit.
 	if len(audit.events) != 0 {
 		t.Errorf("read path emitted %d audit events, want 0", len(audit.events))
+	}
+}
+
+// --- (e) read RPC denies non-admin with a blocked audit event -------------
+
+func TestGetDeploymentStatusDeniesNonAdminWithBlockedAudit(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleReader} {
+		exec := &fakeExecutor{}
+		audit := &fakeAudit{}
+		svc := newTestService(t, exec, audit)
+
+		_, err := svc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("role %s: code = %v, want PermissionDenied", role, status.Code(err))
+		}
+		if len(audit.events) != 1 {
+			t.Fatalf("role %s: want exactly 1 audit event, got %d", role, len(audit.events))
+		}
+		ev := audit.events[0]
+		if ev.Outcome != identity.AuditOutcomeBlocked {
+			t.Errorf("role %s: outcome = %q, want blocked", role, ev.Outcome)
+		}
+		if ev.Action != "deployment_console_get_status" {
+			t.Errorf("role %s: action = %q, want deployment_console_get_status", role, ev.Action)
+		}
+		if ev.Category != identity.AuditCategoryAdmin {
+			t.Errorf("role %s: category = %q, want admin", role, ev.Category)
+		}
+	}
+}
+
+func TestGetDeploymentStatusUnauthenticatedDenied(t *testing.T) {
+	exec := &fakeExecutor{}
+	audit := &fakeAudit{}
+	svc := newTestService(t, exec, audit)
+
+	_, err := svc.GetDeploymentStatus(context.Background(), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want Unauthenticated", status.Code(err))
+	}
+	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeBlocked {
+		t.Errorf("want one blocked audit event, got %+v", audit.events)
 	}
 }
 

@@ -1,0 +1,233 @@
+package webtempl
+
+// AdminDeploymentsData drives /admin/deployments (memql#726). Env is
+// the selected environment (staging | prod). Status carries the
+// mapped per-env deployment view; Status.Present is false when the
+// reader returned nothing (e.g. an error flash is shown instead).
+type AdminDeploymentsData struct {
+	Layout LayoutData
+	Flash  *Flash
+	Env    string
+	Status AdminDeploymentStatus
+}
+
+// AdminDeploymentStatus is the templ-facing projection of the
+// deploy-control DeploymentStatus proto. Plain strings + slices so
+// the view stays decoupled from the generated package.
+type AdminDeploymentStatus struct {
+	Present       bool
+	Env           string
+	Version       string
+	EngineVersion string
+	ValidatedAt   string
+	Gate          string
+	Components    []AdminDeployComponent
+	Argo          *AdminDeployArgo
+	Rollouts      []AdminDeployRollout
+	GateResult    *AdminDeployGate
+}
+
+type AdminDeployComponent struct {
+	Name   string
+	Digest string
+	Repo   string
+}
+
+type AdminDeployArgo struct {
+	SyncStatus       string
+	HealthStatus     string
+	LastSyncRevision string
+	LastSyncAt       string
+	OutOfSync        bool
+}
+
+type AdminDeployRollout struct {
+	Name                 string
+	Kind                 string
+	Phase                string
+	ActiveColor          string
+	PreviewColor         string
+	CanaryWeight         int
+	CurrentStep          int
+	LatestAnalysisResult string
+}
+
+type AdminDeployGate struct {
+	Result string
+	RanAt  string
+	Legs   []AdminDeployGateLeg
+}
+
+type AdminDeployGateLeg struct {
+	Name   string
+	Passed bool
+	Detail string
+}
+
+// orDash renders a placeholder when a status field is empty so the
+// table cells don't collapse to nothing.
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+// passIndicator renders the no-emoji pass/fail box used across the
+// gate + drift panels: "[x]" passed, "[ ]" failed.
+func passIndicator(passed bool) string {
+	if passed {
+		return "[x]"
+	}
+	return "[ ]"
+}
+
+// envTabClass marks the active env toggle link.
+func envTabClass(tab, current string) string {
+	if tab == current {
+		return "active"
+	}
+	return ""
+}
+
+templ AdminDeployments(data AdminDeploymentsData) {
+	@Layout(data.Layout) {
+		<div class="card card-full">
+			<h1 class="card-title">Deployments</h1>
+			<p class="card-subtitle">
+				Read-only view of the deployment-v2 machinery: per-env image
+				authority, the release lockfile, Argo CD app status, Argo
+				Rollouts progressive delivery, and the in-cluster deploy gate.
+			</p>
+			if data.Flash != nil {
+				<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+			}
+			<nav class="nav">
+				<a href="/admin/deployments?env=staging" class={ envTabClass("staging", data.Env) }>staging</a>
+				<a href="/admin/deployments?env=prod" class={ envTabClass("prod", data.Env) }>prod</a>
+			</nav>
+		</div>
+		if data.Status.Present {
+			@deploymentOverviewPanel(data.Status)
+			@deploymentArgoPanel(data.Status.Argo)
+			@deploymentRolloutsPanel(data.Status.Rollouts)
+			@deploymentGatePanel(data.Status.GateResult)
+		}
+	}
+}
+
+templ deploymentOverviewPanel(st AdminDeploymentStatus) {
+	<div class="card card-full">
+		<h2 class="card-title">Overview — { orDash(st.Env) }</h2>
+		<table class="data">
+			<tr><th>Promoted version</th><td><code>{ orDash(st.Version) }</code></td></tr>
+			<tr><th>Engine version</th><td><code>{ orDash(st.EngineVersion) }</code></td></tr>
+			<tr><th>Validated at</th><td>{ orDash(st.ValidatedAt) }</td></tr>
+			<tr><th>Gate</th><td>{ orDash(st.Gate) }</td></tr>
+		</table>
+		<h3>Component digests</h3>
+		if len(st.Components) > 0 {
+			<table class="data">
+				<tr><th>Component</th><th>Repo</th><th>Digest</th></tr>
+				for _, c := range st.Components {
+					<tr>
+						<td>{ c.Name }</td>
+						<td>{ orDash(c.Repo) }</td>
+						<td><code>{ orDash(c.Digest) }</code></td>
+					</tr>
+				}
+			</table>
+		} else {
+			<p class="text-muted"><em>No component digests recorded for this overlay.</em></p>
+		}
+	</div>
+}
+
+templ deploymentArgoPanel(argo *AdminDeployArgo) {
+	<div class="card card-full">
+		<h2 class="card-title">Argo CD</h2>
+		if argo != nil {
+			<table class="data">
+				<tr><th>Sync status</th><td>{ orDash(argo.SyncStatus) }</td></tr>
+				<tr><th>Health status</th><td>{ orDash(argo.HealthStatus) }</td></tr>
+				<tr>
+					<th>Drift</th>
+					<td>
+						if argo.OutOfSync {
+							{ passIndicator(false) } OutOfSync
+						} else {
+							{ passIndicator(true) } in sync
+						}
+					</td>
+				</tr>
+				<tr><th>Last sync revision</th><td><code>{ orDash(argo.LastSyncRevision) }</code></td></tr>
+				<tr><th>Last sync at</th><td>{ orDash(argo.LastSyncAt) }</td></tr>
+			</table>
+		} else {
+			<p class="text-muted"><em>Argo CD app status unavailable (could not reach the cluster).</em></p>
+		}
+	</div>
+}
+
+templ deploymentRolloutsPanel(rollouts []AdminDeployRollout) {
+	<div class="card card-full">
+		<h2 class="card-title">Rollouts</h2>
+		if len(rollouts) > 0 {
+			<table class="data">
+				<tr>
+					<th>Name</th>
+					<th>Kind</th>
+					<th>Phase</th>
+					<th>Active</th>
+					<th>Preview</th>
+					<th>Canary weight</th>
+					<th>Step</th>
+					<th>Latest analysis</th>
+				</tr>
+				for _, ro := range rollouts {
+					<tr>
+						<td>{ ro.Name }</td>
+						<td>{ orDash(ro.Kind) }</td>
+						<td>{ orDash(ro.Phase) }</td>
+						<td>{ orDash(ro.ActiveColor) }</td>
+						<td>{ orDash(ro.PreviewColor) }</td>
+						<td>{ formatInt(ro.CanaryWeight) }%</td>
+						<td>{ formatInt(ro.CurrentStep) }</td>
+						<td>{ orDash(ro.LatestAnalysisResult) }</td>
+					</tr>
+				}
+			</table>
+		} else {
+			<p class="text-muted"><em>No rollouts found in the cluster.</em></p>
+		}
+	</div>
+}
+
+templ deploymentGatePanel(gate *AdminDeployGate) {
+	<div class="card card-full">
+		<h2 class="card-title">Deploy gate</h2>
+		if gate != nil {
+			<table class="data">
+				<tr><th>Result</th><td>{ orDash(gate.Result) }</td></tr>
+				<tr><th>Ran at</th><td>{ orDash(gate.RanAt) }</td></tr>
+			</table>
+			<h3>Legs</h3>
+			if len(gate.Legs) > 0 {
+				<table class="data">
+					<tr><th>Pass</th><th>Leg</th><th>Detail</th></tr>
+					for _, leg := range gate.Legs {
+						<tr>
+							<td><code>{ passIndicator(leg.Passed) }</code></td>
+							<td>{ leg.Name }</td>
+							<td>{ orDash(leg.Detail) }</td>
+						</tr>
+					}
+				</table>
+			} else {
+				<p class="text-muted"><em>No analysis legs recorded.</em></p>
+			}
+		} else {
+			<p class="text-muted"><em>No deploy-gate result available.</em></p>
+		}
+	</div>
+}
