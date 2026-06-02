@@ -82,18 +82,20 @@ func runPATMint(args []string) int {
 		resolvedLabel = "pat-cli"
 	}
 
+	// Redirect stdout to stderr BEFORE bootstrap (#686): the 15+ component-
+	// internal loggers (hardcoded to os.Stdout) are created during app.Build +
+	// dependency Start inside bootstrapPATEngine, so the swap MUST precede it or
+	// startup logs pollute the caller's `tok=$(kubectl exec ... pat mint)`
+	// capture. The plaintext token is written through the saved real-stdout fd.
+	// Same ordering as node-token / voice-agent-token mint.
+	realStdout := redirectStdoutToStderr()
+	defer restoreStdout(realStdout)
+
 	deps, engine, logger, code := bootstrapPATEngine("pat mint")
 	if code != 0 {
 		return code
 	}
 	defer stopPATDependencies(deps)
-
-	// stdout is redirected to stderr for the duration so the 15+ component-
-	// internal loggers (hardcoded to os.Stdout) don't pollute the caller's
-	// `tok=$(kubectl exec ... pat mint)` capture; the plaintext is written
-	// through the saved real-stdout fd. Same pattern as node-token mint.
-	realStdout := redirectStdoutToStderr()
-	defer restoreStdout(realStdout)
 
 	plain, keyHash, err := pat.Mint()
 	if err != nil {
@@ -205,11 +207,17 @@ func runPATRevoke(args []string) int {
 }
 
 // bootstrapPATEngine builds the app, applies the local .env overlay, and starts
-// the non-server dependencies (config + database + engine + supporting
-// components), returning the started deps, the engine, the CLI logger, and a
-// zero exit code on success. On failure it prints to stderr and returns a
-// non-zero code. The transport servers are skipped so the CLI does not bind to
-// ports the live container already owns.
+// the dependencies up to AND INCLUDING the engine (config -> database ->
+// memQLEngine), then STOPS -- it does NOT start the identity service,
+// automations, or the transport servers that come after the engine in the
+// bootstrap order. Returns the started deps, the engine, the CLI logger, and a
+// zero exit code on success.
+//
+// Stopping after the engine (#686, mirroring the migrate subcommand's
+// stop-after-database) matters because `pat mint` only needs the engine +
+// database; starting the identity service would fatal-validate
+// (IDENTITY_KEY_ENCRYPTION_KEY required ...) and abort the mint on the identity
+// binary -- the only binary the `pat` subcommand is dispatched on.
 func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine, *slog.Logger, int) {
 	// Mirror the server bootstrap's local /.env overlay so a dev run sees the
 	// same DSN as the cluster (a no-op in the container, where /.env is absent).
@@ -220,24 +228,33 @@ func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine,
 	logger := mustCreateCLILogger()
 	application := app.Build(logger, resolveVersionFn(), app.Overrides{})
 
-	deps := make([]common.Dependency, 0, len(application.Dependencies))
-	for _, d := range application.Dependencies {
-		// Skip network listeners (grpcServer, httpServer, ...) -- the live
-		// container owns those ports.
-		if strings.Contains(strings.ToLower(string(d.ComponentName())), "server") {
-			continue
-		}
+	selected, ok := depsUpToEngine(application.Dependencies)
+	if !ok || application.Engine() == nil {
+		fmt.Fprintf(os.Stderr, "%s: engine dependency not present in this build\n", prefix)
+		return nil, nil, logger, 1
+	}
+	deps := make([]common.Dependency, 0, len(selected))
+	for _, d := range selected {
 		d.Start(context.Background())
 		deps = append(deps, d)
 	}
+	return deps, application.Engine(), logger, 0
+}
 
-	engine := application.Engine()
-	if engine == nil {
-		fmt.Fprintf(os.Stderr, "%s: engine not wired\n", prefix)
-		stopPATDependencies(deps)
-		return nil, nil, logger, 1
+// depsUpToEngine returns the prefix of the bootstrap dependency list up to AND
+// INCLUDING the memQLEngine (config -> database -> engine + the supporting
+// components ordered before it), plus whether the engine was found. pat mint
+// starts ONLY these -- it must NOT start the identity service / automations /
+// transport servers that follow the engine in the order (#686), since the
+// identity service fatal-validates and would abort the mint. Pure (no side
+// effects) so it is unit-tested without a database.
+func depsUpToEngine(all []common.Dependency) ([]common.Dependency, bool) {
+	for i, d := range all {
+		if d.ComponentName() == memql.ComponentName {
+			return all[:i+1], true
+		}
 	}
-	return deps, engine, logger, 0
+	return all, false
 }
 
 func stopPATDependencies(deps []common.Dependency) {
