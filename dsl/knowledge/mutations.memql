@@ -352,6 +352,31 @@ mutation document mutationUpdateDocumentValidation {
   }
 }
 
+// ---- mutations/v1/knowledge/updateDocumentEmbeddingStatus.memql ----
+
+// mutationUpdateDocumentEmbeddingStatus -- drive a Document's
+// embeddingStatus none -> partial -> complete as its typed items get
+// lazily embedded into documentChunk (#645). Written by the knowledge
+// integration's embedDomainItems capability after it recomputes the live
+// vector coverage of the Document's chunks. Partial update: only the
+// embedding bookkeeping fields change; validation + content fields are
+// untouched.
+
+@enabled
+@description("Update a Document's embeddingStatus (none / partial / complete) + embeddedItemCount as its items get embedded into documentChunk. Driven by the embedDomainItems Plan; partial update preserves every other field.")
+mutation document mutationUpdateDocumentEmbeddingStatus {
+  args {
+    documentId         string  @required
+    embeddingStatus    string  @required
+    embeddedItemCount  int
+  }
+  update document {
+    id: args.documentId
+    args.embeddingStatus
+    embeddedItemCount: coalesce(args.embeddedItemCount, 0)
+  }
+}
+
 @enabled
 @description("Update a SpreadsheetRow's validation / dedup state. Append-only; new version with new fields wins.")
 mutation spreadsheetRow mutationUpdateSpreadsheetRow {

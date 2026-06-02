@@ -29,9 +29,12 @@
 //     This is the load-bearing grounding primitive -- the Trainer can
 //     pull a known authoritative URL and distill it into chunks.
 //
-//   - embedChunk is a deliberate no-op pointing at #645 (lazy
-//     embedding). The chunk is already persisted + validated by
-//     writeKnowledgeChunk; it just isn't vector-indexed until #645.
+//   - embedChunk is REAL as of #645 (lazy embedding): it resolves the
+//     chunk's text, computes a vector via the embedding provider, and
+//     writes it to node_vectors keyed by the chunk id (vector_field
+//     'content') so the chunk becomes retrievable by similarTo. The
+//     handler lives in embed_domain.go alongside the domain-wide
+//     embedDomainItems capability the Plan dispatcher drives.
 
 package knowledge
 
@@ -53,9 +56,10 @@ import (
 // "integration.knowledge."). Kept as constants so the capability
 // registration and any tests reference one source of truth.
 const (
-	capWebSearch  = "webSearch"
-	capFetchURL   = "fetchUrl"
-	capEmbedChunk = "embedChunk"
+	capWebSearch        = "webSearch"
+	capFetchURL         = "fetchUrl"
+	capEmbedChunk       = "embedChunk"
+	capEmbedDomainItems = "embedDomainItems"
 )
 
 // fetchUrl limits. A bounded client + response cap keeps a Trainer run
@@ -188,34 +192,9 @@ func (i *Integration) fetchUrlHandler(ctx context.Context, args map[string]any, 
 	}}, nil
 }
 
-// embedChunkHandler is the deliberate no-op for #645 (lazy embedding).
-// The chunk is already persisted + validated by writeKnowledgeChunk;
-// this just acknowledges the Trainer's call so its tool loop proceeds.
-// When #645 lands, this becomes the real embed-and-store path (resolve
-// chunk text -> embedding provider -> node_vectors), mirroring the
-// training integration's embedDomainContent.
-func (i *Integration) embedChunkHandler(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	chunkId, _ := args["chunkId"].(string)
-	if strings.TrimSpace(chunkId) == "" {
-		return nil, fmt.Errorf("knowledge.embedChunk: chunkId is required")
-	}
-	if i.Logger != nil {
-		i.Logger.Info("knowledge.embedChunk: no-op (embedding deferred to #645)",
-			"chunkId", chunkId)
-	}
-	body, _ := json.Marshal(map[string]any{
-		"chunkId":  chunkId,
-		"embedded": false,
-		"note":     "embedChunk is a no-op until #645 (lazy embedding) lands. The chunk is persisted + validated; it just isn't vector-indexed yet.",
-	})
-	return []memorynodes.MemoryNode{{
-		ID:        "trainer-embedchunk-result",
-		Concept:   "integration:knowledge:embedChunk",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   body,
-	}}, nil
-}
+// embedChunkHandler now lives in embed_domain.go (#645): the real
+// embed-and-store path plus the domain-wide embedDomainItems capability
+// the Plan dispatcher drives.
 
 // --- readable-text extraction -------------------------------------------
 

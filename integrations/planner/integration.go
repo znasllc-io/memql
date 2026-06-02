@@ -103,6 +103,7 @@ type PlannerIntegration struct {
 	agentForwarder AgentForwarder
 	agentLoop      *PlannerAgentLoop
 	trainDispatch  *TrainSpecialistDispatcher
+	embedDispatch  *EmbedDomainItemsDispatcher
 	refreshCron    *RefreshCron
 	logger         *slog.Logger
 	unsubscribes   []func()
@@ -153,6 +154,7 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	}
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
+	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
 	return p, nil
 }
@@ -220,6 +222,22 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.trainDispatch.HandlePlanUpdated,
 			events.WithSubscriberName("planner:train-specialist-updated"),
 		))
+		// embedDomainItems dispatcher (#645). Claims kind=embedDomainItems
+		// Plans -- the agent loop skips that kind so the two don't race.
+		// Subscribes to both created + updated so a Plan spawned in
+		// 'planning' (seed / upload path) AND one flipped to 'running'
+		// both dispatch; the dispatcher's own claim guard dedups the
+		// double-fire.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.created.v1:planner:plan",
+			p.embedDispatch.HandlePlanCreated,
+			events.WithSubscriberName("planner:embed-domain-items-created"),
+		))
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.embedDispatch.HandlePlanUpdated,
+			events.WithSubscriberName("planner:embed-domain-items-updated"),
+		))
 		// Event-driven stale-signal refresh (#644). When a domain's
 		// staleSignalCount crosses the threshold (Planner Agent bumped
 		// it via markKnowledgeDomainStale), spawn an immediate refresh
@@ -237,6 +255,8 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 				"graph.node.updated.v1:planner:plan (agent loop)",
 				"graph.node.created.v1:planner:plan (trainSpecialist)",
 				"graph.node.updated.v1:planner:plan (trainSpecialist)",
+				"graph.node.created.v1:planner:plan (embedDomainItems)",
+				"graph.node.updated.v1:planner:plan (embedDomainItems)",
 			},
 		)
 		// Start the daily-refresh cron poller (#644). Polls

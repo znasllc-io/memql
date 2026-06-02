@@ -497,7 +497,9 @@ builtin seedDomainContent {
 // tool loop. Three of those tools -- webSearch, fetchUrl, embedChunk --
 // are Go-backed builtins (the other two -- writeKnowledgeChunk,
 // markChunkSuperseded -- are mutation-backed and route via the tool's
-// @handler directly, no builtin needed).
+// @handler directly, no builtin needed). embedChunk is a real
+// embed-and-store path as of #645; embedDomainItems (below) is the bulk
+// domain-warm capability the planner's Plan dispatcher drives.
 //
 // The trainer-tool wiring lives in integrations/planner/train_specialist_dispatch.go;
 // the Go handlers live in integrations/knowledge/trainer_tools.go.
@@ -522,9 +524,20 @@ builtin fetchUrl {
 @enabled
 @executor("integration.knowledge.embedChunk")
 @args(profile="object", additionalProperties="true")
-@description("Trigger the embedding write so a Trainer-written chunk becomes retrievable. STUB / no-op for now: full embedding deferred to #645 (lazy embedding). Returns {chunkId, embedded:false, note}. The chunk is still persisted + validated; it just isn't vector-indexed until #645 lands.")
+@description("Embed one knowledge chunk so it becomes retrievable via similarTo (#645 lazy embedding). Resolves the chunk text, computes a vector, writes it to node_vectors keyed by the chunk id. Idempotent -- a chunk that already has a vector is acknowledged without re-embedding. Returns {chunkId, embedded, alreadyEmbedded}.")
 builtin embedChunk {
-  chunkId  string  @required
+  chunkId   string  @required
+  provider  string
+}
+
+@enabled
+@executor("integration.knowledge.embedDomainItems")
+@args(profile="object", additionalProperties="true")
+@description("Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus none -> partial -> complete (#645). Materializes vectors into node_vectors so seeded + uploaded knowledge becomes semantically retrievable. Idempotent. Driven by the planner's embedDomainItems Plan dispatcher. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.")
+builtin embedDomainItems {
+  domainId    string  @required
+  documentId  string
+  provider    string
 }
 
 // ---- queries/v1/common/builtin/builtinServiceVersion.memql ----

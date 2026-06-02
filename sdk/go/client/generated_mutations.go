@@ -9467,6 +9467,42 @@ func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) 
 	return b.String()
 }
 
+// MutationUpdateDocumentEmbeddingStatus -- Update a Document's embeddingStatus (none / partial / complete) + embeddedItemCount as its items get embedded into documentChunk. Driven by the embedDomainItems Plan; partial update preserves every other field.
+//
+// Bound concept: document.
+type MutationUpdateDocumentEmbeddingStatusArgs struct {
+	DocumentId        string
+	EmbeddingStatus   string
+	EmbeddedItemCount int
+}
+
+// MutationUpdateDocumentEmbeddingStatus calls the engine mutation mutationUpdateDocumentEmbeddingStatus.
+func (qc *QueryClient) MutationUpdateDocumentEmbeddingStatus(ctx context.Context, args MutationUpdateDocumentEmbeddingStatusArgs) (*Result, error) {
+	call := MutationUpdateDocumentEmbeddingStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateDocumentEmbeddingStatus", call)
+}
+
+func MutationUpdateDocumentEmbeddingStatusBuild(args MutationUpdateDocumentEmbeddingStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateDocumentEmbeddingStatus({")
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("embeddingStatus: ")
+	b.WriteString(fmt.Sprintf("%q", args.EmbeddingStatus))
+	if args.EmbeddedItemCount != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("embeddedItemCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.EmbeddedItemCount))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationUpdateDocumentValidation -- Update a Document's validationStatus + validatedBy/validatedAt. Append-only; new version with the new status wins.
 //
 // Bound concept: document.
