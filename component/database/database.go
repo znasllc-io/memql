@@ -41,6 +41,7 @@ type (
 		config        *config
 		lifecycle     common.Lifecycle
 		readyCh       chan struct{}
+		migrationErr  error
 	}
 
 	DatabaseEnvOptions struct {
@@ -1059,9 +1060,15 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 
 	defer cancel()
 
+	// Start each attempt from a clean slate so a successful re-run (e.g. after
+	// a reconnect) clears a previously recorded failure. MigrationError() then
+	// reflects the outcome of the most recent attempt (#671).
+	d.clearMigrationErr()
+
 	if d.config.migrator != nil {
 		if err := d.config.migrator.Migrate(runCtx, bunDB); err != nil {
 			d.Logger.Error("failed to migrate", "error", err)
+			d.recordMigrationErr(fmt.Errorf("migrator: %w", err))
 		}
 	}
 
@@ -1069,6 +1076,7 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 		migrator := migrate.NewMigrator(bunDB, d.config.migrations, migrate.WithMarkAppliedOnSuccess(true))
 		if err := migrator.Init(runCtx); err != nil {
 			d.Logger.Error("failed to initialize migrations", "error", err)
+			d.recordMigrationErr(fmt.Errorf("migration init: %w", err))
 		} else {
 			locked := false
 			if err := migrator.Lock(runCtx); err == nil {
@@ -1087,6 +1095,7 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 
 			if _, err := migrator.Migrate(runCtx); err != nil {
 				d.Logger.Error("failed to migrate", "error", err)
+				d.recordMigrationErr(fmt.Errorf("migrate: %w", err))
 			}
 		}
 	}
@@ -1102,6 +1111,45 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 			}
 		}
 	}
+}
+
+// recordMigrationErr stores the first error seen during the current migration
+// attempt. Logging stays as-is at each call site; this only makes the failure
+// observable to callers via MigrationError() so the gated pre-deploy migrate
+// Job can exit non-zero instead of shipping a broken schema behind a green
+// gate (#671). Errors are kept first-wins so the originating failure isn't
+// masked by a later cascading one.
+func (d *Database) recordMigrationErr(err error) {
+	if err == nil {
+		return
+	}
+
+	d.Lock()
+	defer d.Unlock()
+
+	if d.migrationErr == nil {
+		d.migrationErr = err
+	}
+}
+
+// clearMigrationErr resets the recorded error at the start of an attempt so a
+// successful re-run (e.g. after a reconnect) doesn't leave a stale failure.
+func (d *Database) clearMigrationErr() {
+	d.Lock()
+	defer d.Unlock()
+
+	d.migrationErr = nil
+}
+
+// MigrationError returns the error from the most recent migration attempt, or
+// nil if migrations succeeded or were skipped (migrateOnStart=false). The
+// gated pre-deploy migrate subcommand consults this to fail the deploy when a
+// migration did not complete (#671).
+func (d *Database) MigrationError() error {
+	d.Lock()
+	defer d.Unlock()
+
+	return d.migrationErr
 }
 
 func (d *Database) safeDSN() string {
