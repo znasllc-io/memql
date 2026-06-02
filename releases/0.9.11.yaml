@@ -1,0 +1,45 @@
+# Release lockfile (deployment-v2 Phase 4, #702). Assembled by
+# scripts/release/assemble-lockfile.sh from per-repo CI digests.
+#
+# 0.9.11 (Stage C, #712): carries the #751 fix (token subcommands now autoload
+# the genesis envelope) so the deploy-gate service_account JWT can be minted on
+# the envelope-based staging cluster -- the mint was broken on 0.9.10. The 6
+# engine images + the memql-bff-copresent carrier were freshly rebuilt from main.
+# The `copresent` SPA digest is CARRIED FORWARD from 0.9.9 (#751 is engine-only;
+# the SPA bundle + the browser<->BFF wire contract are unchanged). A fresh SPA
+# re-cut still needs the canonical staging VITE_* args -- pending the owner.
+version: "0.9.11"
+# validatedAt/gate are stamped on assembly; the deep staging validation is the
+# Stage C zero-dropped-stream cutover proof + smoke (not yet run at assembly).
+validatedAt: "2026-06-02T22:45:18Z"
+gate: "assembled-pending-staging-validation"
+engineVersion: "0.9.11"
+components:
+  memql-identity:
+    repo: znasllc-io/memql
+    digest: sha256:fb4b37e6ff43dff62afde47d1ed95d9ca68c80abf7d5df8603727b1fc903a47b
+  memql-cognition:
+    repo: znasllc-io/memql
+    digest: sha256:56b7a3309b46a66db721cb9ccf237e1e23fb3e86e48072546f0357103e5c3c23
+  memql-voice:
+    repo: znasllc-io/memql
+    digest: sha256:8aa7d108655cb6dc66a0f63a6b7ae1d96c0d4e84c17078e427f9441be251c2a1
+  memql-agent:
+    repo: znasllc-io/memql
+    digest: sha256:e947b849e72c4fb17563bb13d4b4aecdb59ba4f022a0fd37101aa3321f3cb712
+  memql-planner:
+    repo: znasllc-io/memql
+    digest: sha256:44674006747278969f812c138d65fea8824f3b827f2c0f7dfdae80cc7dd61830
+  memql-workbench:
+    repo: znasllc-io/memql
+    digest: sha256:4d2f91e61e4ef19beabf48c322c001a4ccff5a1810e504e5c0a4768438228b5c
+  memql-bff-copresent:
+    repo: visionarys-io/memql-bff-copresent
+    digest: sha256:4c0210b828d5ddd12b7660dbea500c9473537274e2015929b64731e28f03a94d
+    builtAgainstEngine: "0.9.11"
+  copresent:
+    repo: visionarys-io/copresent
+    # CARRIED FORWARD from 0.9.9 (#751 is engine-only; SPA bundle + wire contract
+    # unchanged). Re-cut with the canonical VITE_* args when the owner provides them.
+    digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
+    builtAgainstEngine: "0.9.11"

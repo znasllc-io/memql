@@ -3,8 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use observability.concepts.{ invocation }
-use worker.concepts.{ registration }
+use worker.concepts.{ invocation, registration }
 
 @row
 @description("Full projection of a v1:worker:invocation row. Backs the per-plan and per-user invocation feeds.")

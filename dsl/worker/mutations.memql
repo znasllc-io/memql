@@ -5,8 +5,7 @@
 
 use agents.concepts.{ agentAuthorization }
 use identity.concepts.{ user }
-use observability.concepts.{ invocation }
-use worker.concepts.{ registration }
+use worker.concepts.{ invocation, registration }
 
 @enabled
 @description("Insert a worker tool-invocation telemetry row.")
