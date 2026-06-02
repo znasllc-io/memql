@@ -146,6 +146,108 @@ func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessC
 	return b.String()
 }
 
+// MutationApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
+//
+// Bound concept: responsibility.
+type MutationApplyResponsibilityIntakeArgs struct {
+	ResponsibilityId string
+	// Enum: reactive | standing | recurring
+	Trigger   string
+	Schedule  string
+	Condition map[string]any
+	// Enum: assistant | specialist | unassigned
+	TargetKind       string
+	AssignedRoleSlug string
+	SuccessCriteria  string
+	NotifyHow        string
+	// Enum: draft | active | paused | archived
+	Status string
+	// Enum:  | pending | awaitingAnswers | clear | applied
+	IntakeStatus  string
+	IntakeRequest map[string]any
+}
+
+// MutationApplyResponsibilityIntake calls the engine mutation mutationApplyResponsibilityIntake.
+func (qc *QueryClient) MutationApplyResponsibilityIntake(ctx context.Context, args MutationApplyResponsibilityIntakeArgs) (*Result, error) {
+	call := MutationApplyResponsibilityIntakeBuild(args)
+	return qc.executeNamed(ctx, "mutationApplyResponsibilityIntake", call)
+}
+
+func MutationApplyResponsibilityIntakeBuild(args MutationApplyResponsibilityIntakeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationApplyResponsibilityIntake({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if args.Trigger != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("trigger: ")
+		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	}
+	if args.Schedule != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("schedule: ")
+		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("condition: ")
+	b.WriteString(renderMemQLValue(args.Condition))
+	if args.TargetKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	}
+	if args.AssignedRoleSlug != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedRoleSlug: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+	}
+	if args.SuccessCriteria != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("successCriteria: ")
+		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.NotifyHow != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notifyHow: ")
+		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+	}
+	if args.Status != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(fmt.Sprintf("%q", args.Status))
+	}
+	if args.IntakeStatus != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intakeStatus: ")
+		b.WriteString(fmt.Sprintf("%q", args.IntakeStatus))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intakeRequest: ")
+	b.WriteString(renderMemQLValue(args.IntakeRequest))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
 //
 // Bound concept: accessRequest.
@@ -3692,6 +3794,7 @@ type MutationCreateResponsibilityArgs struct {
 	AssignedAgentId  string
 	AssignedRoleSlug string
 	SuccessCriteria  string
+	NotifyHow        string
 	ScopeSpaceId     string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
@@ -3759,6 +3862,13 @@ func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) st
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.NotifyHow != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notifyHow: ")
+		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopeSpaceId != "" {
 		if b.Len() > 17 {
@@ -5759,6 +5869,90 @@ func MutationFailHarnessStepBuild(args MutationFailHarnessStepArgs) string {
 	return b.String()
 }
 
+// MutationFoldResponsibilityIntakeAnswers -- Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp.
+//
+// Bound concept: responsibility.
+type MutationFoldResponsibilityIntakeAnswersArgs struct {
+	ResponsibilityId string
+	IntakeResponse   map[string]any
+	// Enum: reactive | standing | recurring
+	Trigger   string
+	Schedule  string
+	Condition map[string]any
+	// Enum: assistant | specialist | unassigned
+	TargetKind       string
+	AssignedRoleSlug string
+	SuccessCriteria  string
+	NotifyHow        string
+}
+
+// MutationFoldResponsibilityIntakeAnswers calls the engine mutation mutationFoldResponsibilityIntakeAnswers.
+func (qc *QueryClient) MutationFoldResponsibilityIntakeAnswers(ctx context.Context, args MutationFoldResponsibilityIntakeAnswersArgs) (*Result, error) {
+	call := MutationFoldResponsibilityIntakeAnswersBuild(args)
+	return qc.executeNamed(ctx, "mutationFoldResponsibilityIntakeAnswers", call)
+}
+
+func MutationFoldResponsibilityIntakeAnswersBuild(args MutationFoldResponsibilityIntakeAnswersArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationFoldResponsibilityIntakeAnswers({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("intakeResponse: ")
+	b.WriteString(renderMemQLValue(args.IntakeResponse))
+	if args.Trigger != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("trigger: ")
+		b.WriteString(fmt.Sprintf("%q", args.Trigger))
+	}
+	if args.Schedule != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("schedule: ")
+		b.WriteString(fmt.Sprintf("%q", args.Schedule))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("condition: ")
+	b.WriteString(renderMemQLValue(args.Condition))
+	if args.TargetKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("targetKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
+	}
+	if args.AssignedRoleSlug != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("assignedRoleSlug: ")
+		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
+	}
+	if args.SuccessCriteria != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("successCriteria: ")
+		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.NotifyHow != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notifyHow: ")
+		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationInsertOutputScreening -- Insert one v1:safety:outputScreening row recording the OutputGate's verdict for a single piece of incoming content. Called from component/safety/recorder/output_persisting.go via the engine's mutation path; the args correspond 1:1 to the concept fields. redactedSample arrives already truncated + secret-scrubbed by the caller (cap 4 KiB).
 //
 // Bound concept: outputScreening.
@@ -6445,6 +6639,28 @@ func MutationMarkKnowledgeDomainStaleBuild(args MutationMarkKnowledgeDomainStale
 	}
 	b.WriteString("staleSignalCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.StaleSignalCount))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationMarkResponsibilityIntakePending -- Mark a v1:planner:responsibility's intake as in-progress (issue #637). The intake dispatcher calls this when it claims a freshly-created draft so a created+updated double-fire (or a multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips ” -> 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope reference, so it's engine-internal bookkeeping on a row the human already owns.
+//
+// Bound concept: responsibility.
+type MutationMarkResponsibilityIntakePendingArgs struct {
+	ResponsibilityId string
+}
+
+// MutationMarkResponsibilityIntakePending calls the engine mutation mutationMarkResponsibilityIntakePending.
+func (qc *QueryClient) MutationMarkResponsibilityIntakePending(ctx context.Context, args MutationMarkResponsibilityIntakePendingArgs) (*Result, error) {
+	call := MutationMarkResponsibilityIntakePendingBuild(args)
+	return qc.executeNamed(ctx, "mutationMarkResponsibilityIntakePending", call)
+}
+
+func MutationMarkResponsibilityIntakePendingBuild(args MutationMarkResponsibilityIntakePendingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationMarkResponsibilityIntakePending({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -10073,6 +10289,7 @@ type MutationUpdateResponsibilityArgs struct {
 	AssignedAgentId  string
 	AssignedRoleSlug string
 	SuccessCriteria  string
+	NotifyHow        string
 	ScopeSpaceId     string
 	Enabled          bool
 	EnabledSet       bool // set true to send enabled; required because zero-value bool is ambiguous
@@ -10142,6 +10359,13 @@ func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) st
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
+	}
+	if args.NotifyHow != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notifyHow: ")
+		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopeSpaceId != "" {
 		if b.Len() > 17 {

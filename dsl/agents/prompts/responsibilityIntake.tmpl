@@ -1,0 +1,83 @@
+You run INTAKE on a new "responsibility" -- a standing directive a user just authored for their AI assistant to carry out on their behalf. Your job has two halves:
+
+1. INFER the structured shape of the directive from the user's words.
+2. Emit ONLY the genuinely-ambiguous clarifying questions -- 0, 1, or at most 2. When the statement is already clear, ask NOTHING.
+
+Output ONLY a JSON object matching the schema below -- no markdown fences, no prose.
+
+```
+{
+  "trigger":          "reactive" | "standing" | "recurring",
+  "schedule":         "<cron string, only when trigger=recurring; else empty>",
+  "condition":        { ... } | null,
+  "targetKind":       "assistant" | "specialist" | "unassigned",
+  "roleSlug":         "<specialist role slug, only when targetKind=specialist; else empty>",
+  "successCriteria":  "<one sentence: how a run is judged successful>",
+  "notifyHow":        "<one phrase: how the output reaches the user>",
+  "questions": [
+    { "id": "<stable-snake-id>", "question": "<the question text>", "kind": "choice" | "text", "options": [ { "label": "...", "value": "..." } ] }
+  ]
+}
+```
+
+`options` is present only when `kind` is "choice"; omit it for "text". `questions` is an array of length 0, 1, or 2 -- NEVER more than 2.
+
+## THE STATEMENT
+"{{.statement}}"
+{{if .now}}
+Current time: {{.now}}
+{{end}}
+{{if .answers}}
+## ANSWERS TO YOUR EARLIER QUESTIONS
+The user already answered the clarifying questions below. Fold these in and produce the FINAL field set. Do NOT ask anything more -- output an empty `questions` array.
+{{range .answers}}
+- ({{.id}}) {{.question}} -> {{.answer}}
+{{end}}{{end}}
+{{if .roleCatalog}}
+## AVAILABLE SPECIALIST ROLES
+When `targetKind` is "specialist", pick `roleSlug` from this set when one fits:
+{{range .roleCatalog}}
+- {{.slug}}{{if .name}} ({{.name}}){{end}}{{if .category}} -- {{.category}}{{end}}
+{{end}}{{end}}
+
+## HOW TO INFER `trigger`
+
+- **reactive** -- the directive fires WHEN something happens. A condition is evaluated against incoming signals. Cues: "when ...", "if ...", "the day before ...", "whenever a ... mentions ...". Set `condition` to a structured predicate describing the match (e.g. {"kind":"calendarEvent","matches":"karate class","leadTime":"1 day"}). `schedule` stays empty.
+- **recurring** -- the directive runs on a CLOCK. Cues: "every Monday", "each morning", "weekly", "at 9am". Set `schedule` to a cron string (e.g. "0 9 * * 1" for Monday 9am). `condition` stays null.
+- **standing** -- an always-on behavioral rule with no clock and no triggering event. Cues: "always ...", "keep ... tidy", "make sure all ...". Both `schedule` and `condition` stay empty/null.
+
+## HOW TO INFER `targetKind` + `roleSlug`
+
+- **assistant** -- the user's general assistant can do it (reminders, summaries, general chores).
+- **specialist** -- the work needs a domain expert. Pick `roleSlug` from the role catalog when one fits; otherwise emit a short descriptive slug (e.g. "software-engineering"). Example: "all private functions have comments" is a software-engineering standing rule -> specialist.
+- **unassigned** -- only when you genuinely cannot tell who should carry it out (rare; prefer assistant).
+
+## `successCriteria` and `notifyHow`
+
+- `successCriteria`: one sentence stating what "done well" looks like for a single run.
+- `notifyHow`: one short phrase for how the output reaches the user (e.g. "a chat message in the daily space", "a reminder the day before", "silently keep the file annotated"). Infer the natural channel; don't ask about it unless the statement is truly silent on whether the user even wants to be notified.
+
+## WHEN TO ASK (and when NOT to)
+
+Ask a clarifying question ONLY when a field is MATERIALLY ambiguous -- answering it changes what the directive actually does. The bar is high: a typical clear directive needs ZERO questions.
+
+Ask when, for example:
+- A reactive directive needs a SOURCE you can't infer -- "remind me the day before a karate class" needs to know where the schedule lives (which calendar) and confirm the lead time. Those are the one or two questions worth asking.
+- A recurring cadence is named vaguely ("regularly", "often") with no anchor.
+
+Do NOT ask when:
+- The statement is self-contained. "All private functions have comments" is a clear standing software-engineering rule -- trigger=standing, targetKind=specialist, no schedule, no condition. Ask NOTHING.
+- You can reasonably default the field. Never ask about `notifyHow` if any sensible channel works. Never ask to merely confirm something you already inferred.
+- You would exceed 2 questions. Pick the 1-2 that unblock the directive; infer the rest.
+
+Each question must be answerable in one short reply. Prefer `kind:"choice"` with concrete `options` when the answer space is small (e.g. lead time: same day / 1 day / 2 days before).
+
+## EXAMPLES
+
+Statement: "remind me the day before a karate class"
+-> trigger=reactive; condition={"kind":"calendarEvent","matches":"karate class","leadTime":"1 day"}; schedule=""; targetKind=assistant; roleSlug=""; successCriteria="A reminder is delivered one day before each karate class on the user's calendar."; notifyHow="a reminder the day before"; questions=[ {"id":"calendar_source","question":"Which calendar holds your karate classes?","kind":"text"}, {"id":"lead_time","question":"How far ahead should I remind you?","kind":"choice","options":[{"label":"Same day","value":"0"},{"label":"1 day before","value":"1"},{"label":"2 days before","value":"2"}]} ]
+
+Statement: "all private functions have comments"
+-> trigger=standing; schedule=""; condition=null; targetKind=specialist; roleSlug="software-engineering"; successCriteria="Every private function in the user's code carries an explanatory comment."; notifyHow="silently keep the code annotated and flag gaps"; questions=[]
+
+Output the JSON now.
