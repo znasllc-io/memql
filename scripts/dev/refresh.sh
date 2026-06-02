@@ -77,13 +77,13 @@ function step3_wipe_and_restart() {
 
     # Refresh the ngrok tunnel BEFORE compose up so bff +
     # the Go voice-agent read the fresh LIVEKIT_PUBLIC_URL from
-    # .env.local at first boot. Tearing down + re-creating keeps
-    # the tunnel in lockstep with the docker stack; the free-tier
-    # URL rotates per process so we'd have to re-publish it
-    # anyway. Best-effort -- lib_refresh_ngrok returns non-zero
-    # (handled by `|| true`) when ngrok is missing or .env.local
-    # isn't shaped right, in which case Anam stays unreachable
-    # this session but voice still works in audio-only.
+    # the genesis env file (GENESIS_ENV_FILE, the compose env_file)
+    # at first boot. Tearing down + re-creating keeps the tunnel in
+    # lockstep with the docker stack; the free-tier URL rotates per
+    # process so we'd have to re-publish it anyway. Best-effort --
+    # lib_refresh_ngrok returns non-zero (handled by `|| true`) when
+    # ngrok is missing or no env file is present, in which case Anam
+    # stays unreachable this session but voice still works audio-only.
     echo "[3/7] Refreshing ngrok tunnel for LiveKit..."
     lib_refresh_ngrok || true
 
