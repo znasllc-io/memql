@@ -29,7 +29,7 @@ cluster Secret on the next refresh, replacing the manual `kubectl patch` step.
 
 | Path | What |
 |---|---|
-| `install/` | Pinned ESO v0.10.4 controller + CRDs + `external-secrets` ns. Additive. |
+| `install/` | ESO v2.5.0 (Helm-rendered, pinned) controller + webhook + the cert-manager Issuer/Certificate for the webhook cert, in `external-secrets` ns. CRDs are managed out-of-band (already installed, serving `external-secrets.io/v1`). Additive. See `install/eso-values.yaml` for the render recipe. |
 | `secretstore.yaml` | `SecretStore` → `kv-memql-staging` via AKS **Workload Identity** (secret-less auth). |
 | `externalsecret-memql.yaml` | The `external-secrets-kv` ServiceAccount + the `ExternalSecret` mapping the 3 Key Vault entries → `memql-secrets`. |
 
@@ -50,15 +50,19 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 # 3. put the client id on the SA annotation (externalsecret-memql.yaml).
 ```
 
-> **KNOWN ISSUE on Kubernetes 1.34 (memql#738):** ESO's *bundled* cert-controller
-> does not populate the `external-secrets-webhook` TLS cert on this cluster (both
-> v0.10.4 and v2.5.0), so the webhook crashloops and CRs can't be admitted. The
-> fix is to issue the webhook cert via **cert-manager** (already installed here) —
-> install ESO via its **Helm chart** with `webhook.certManager.enabled=true`
-> rather than the raw `install.yaml` below. Track + resolve in #738 before this
-> install step works. The Azure-side identity/role + the Key Vault reconcile
-> (#734) are already done, so once the webhook is healthy the ExternalSecret
-> applies as a verified no-op.
+> **RESOLVED — webhook cert on Kubernetes 1.34 (memql#738):** ESO's *bundled*
+> cert-controller never populated the `external-secrets-webhook` TLS cert on k8s
+> 1.34 (the upstream release bundle is also templated for the `default` namespace,
+> so its `--service-namespace=default` / `--dns-name=…default.svc` args pointed the
+> cert plumbing at the wrong namespace). Fixed by rendering ESO from the **Helm
+> chart** with `certController.create=false` + `webhook.certManager.enabled=true`,
+> so **cert-manager** (already installed here) issues + rotates the webhook serving
+> cert and its CA injector wires the `caBundle` onto the webhook configs. The
+> render + a self-signed Issuer live in `install/` (see `install/eso-values.yaml`).
+> The SecretStore also needs an explicit `tenantId` for the Azure provider under
+> WorkloadIdentity (added to `secretstore.yaml`). With the webhook healthy the
+> ExternalSecret reconciles as a **verified no-op** — Key Vault already equals the
+> live Secret (#734), confirmed by sha256 before/after.
 
 ## Install + migrate (SUPERVISED — touches the live Secret)
 
@@ -67,9 +71,11 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 az keyvault secret set --vault-name kv-memql-staging --name memql-master-key --value "$MEMQL_MASTER_KEY"
 az keyvault secret set --vault-name kv-memql-staging --name memory-nodes-database-dsn --value "$DSN"
 
-# 1. Install ESO (additive — doesn't touch memql-secrets yet):
+# 1. Install ESO (additive — doesn't touch memql-secrets yet). cert-manager
+#    issues the webhook cert, so the webhook is the readiness signal:
 kubectl apply -k deploy/external-secrets/install
-kubectl -n external-secrets rollout status deploy/external-secrets
+kubectl -n external-secrets rollout status deploy/external-secrets-webhook
+kubectl -n external-secrets get certificate external-secrets-webhook   # -> READY True
 
 # 2. Apply the SecretStore + ExternalSecret (creationPolicy: Merge -> it manages
 #    the 3 keys without clobbering the existing Secret):
@@ -77,9 +83,12 @@ kubectl apply -f deploy/external-secrets/secretstore.yaml
 kubectl apply -f deploy/external-secrets/externalsecret-memql.yaml
 kubectl -n memql get externalsecret memql-secrets -w   # -> SecretSynced
 
-# 3. Verify the synced values match, then (optional) flip to Owner so ESO is the
-#    sole writer and a Key-Vault deletion propagates. Pods pick up changes on
-#    their next restart (envFrom is injected at pod start).
+# 3. Verify the synced values match (sha256 before/after; KV == live, so a no-op).
+#    Pods pick up changes on their next restart (envFrom is injected at pod start);
+#    do NOT roll if the values were unchanged. Going forward, shared-secret
+#    rotation runs through scripts/secrets/reseal-genesis.sh (DEPLOYMENT_STRATEGY
+#    §4), which writes Key Vault, drives the ESO refresh, verifies convergence, and
+#    rolls — so Key Vault and the cluster Secret can never silently diverge (#734).
 ```
 
 Manage these manifests via the Argo CD app-of-apps (Phase 2) so the secret
