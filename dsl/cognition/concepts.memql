@@ -424,3 +424,17 @@ concept misrouteFeedback {
 
   @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
 }
+
+// ---- concepts/v1/cognition/greetSuppression/concept.memql ----
+
+@version("1.0.0")
+@namespace("cognition")
+@description("Short-lived marker that suppresses the greet-on-join LLM greeting for a space while a first-run walkthrough / guide is starting (copresent#252). The frontend arms it (deterministic id per space) when a brand-new user's first-run flow begins; greet-on-join reads it (queryActiveGreetSuppression) and SKIPS the greeting + LLM call when a non-expired one exists -- so the wasteful opening greeting doesn't fire while the guided intake is taking over the conversation. TTL-bounded via expiresAt so it never permanently mutes greetings. id is the deterministic greetSuppression-<hash(canonical spaceId)> so re-arming the same space upserts the latest row instead of growing history. Space-scoped (read by the cognition handler), mirroring v1:cognition:audioOverride.")
+concept greetSuppression {
+  spaceId    string  @required @description("Canonical v1:cognition:space.id whose greet-on-join to suppress.")
+  armedBy    string  @description("v1:identity:user.id of the actor who armed it (the space owner under v1 permission rules). Audit only.")
+  expiresAt  string  @required @description("RFC3339; the suppression is ignored once now > expiresAt.")
+  active     bool    @default("true") @description("Soft-revoke flag (mirrors the override concepts).")
+
+  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+}
