@@ -531,13 +531,13 @@ readonly LIB_NGROK_LOG="/tmp/ngrok-livekit.log"
 
 # lib_refresh_ngrok tears down any existing ngrok HTTP tunnel and
 # starts a fresh one in front of localhost:LIB_NGROK_LIVEKIT_PORT
-# (the polyphon-livekit container's published port), then rewrites
-# LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL in .env.local
-# in-place so the rest of the stack picks up the new URL on the
-# next service start.
+# (the polyphon-livekit container's published port), then upserts
+# LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL in the env file
+# the cluster reads (GENESIS_ENV_FILE in the genesis flow, else
+# .env.local) so the stack picks up the new URL on the next start.
 #
 # The function is best-effort: returns 1 (non-fatal) when ngrok
-# is unavailable or .env.local isn't shaped right, so refresh.sh
+# is unavailable or no env file is present, so refresh.sh
 # can keep going without poisoning the whole dev-refresh flow.
 # Real terminal failures (ngrok crashes mid-startup) still bubble
 # up via set -e on the calling script.
@@ -564,13 +564,19 @@ function lib_refresh_ngrok() {
         echo "        Run: ngrok config add-authtoken <token>"
         return 1
     fi
-    if [ ! -f .env.local ]; then
-        echo "  INFO: .env.local not found -- skipping ngrok refresh."
-        return 1
+    # Target the env file the cluster actually reads. In the genesis
+    # flow (refresh.sh) that is the decrypted GENESIS_ENV_FILE the
+    # compose env_file points at -- NOT .env.local, which the bff
+    # never loads. Genesis ships POLYPHON_LIVEKIT_PUBLIC_URL but not
+    # LIVEKIT_PUBLIC_URL, so we upsert (replace-or-append) both keys
+    # rather than requiring a pre-existing line. Outside genesis
+    # (interactive ngrok-up.sh) we fall back to .env.local.
+    local envfile="${GENESIS_ENV_FILE:-}"
+    if [ -z "${envfile}" ] || [ ! -f "${envfile}" ]; then
+        envfile=".env.local"
     fi
-    if ! grep -qE '^LIVEKIT_PUBLIC_URL=' .env.local; then
-        echo "  INFO: .env.local has no LIVEKIT_PUBLIC_URL line -- skipping ngrok refresh."
-        echo "        Add an empty placeholder if you want ngrok integration."
+    if [ ! -f "${envfile}" ]; then
+        echo "  INFO: no env file (${envfile}) to update -- skipping ngrok refresh."
         return 1
     fi
 
@@ -624,15 +630,27 @@ for t in data.get('tunnels', []):
 
     local wss_url="${https_url/https:/wss:}"
 
-    # In-place rewrite. macOS sed needs `-i ''`, GNU sed accepts
-    # `-i` alone -- the .bak form below works on both.
-    sed -i.bak \
-        -e "s|^LIVEKIT_PUBLIC_URL=.*|LIVEKIT_PUBLIC_URL=${wss_url}|" \
-        -e "s|^POLYPHON_LIVEKIT_PUBLIC_URL=.*|POLYPHON_LIVEKIT_PUBLIC_URL=${wss_url}|" \
-        .env.local
-    rm -f .env.local.bak
+    # Anam's cloud engine and the browser reach LiveKit by different
+    # routes: LIVEKIT_PUBLIC_URL is the cloud-reachable tunnel (Anam
+    # dials in over it); POLYPHON_LIVEKIT_PUBLIC_URL is the browser's
+    # public URL. Both point at the same ngrok edge in dev.
+    lib_ngrok_upsert_env "${envfile}" "LIVEKIT_PUBLIC_URL" "${wss_url}"
+    lib_ngrok_upsert_env "${envfile}" "POLYPHON_LIVEKIT_PUBLIC_URL" "${wss_url}"
 
     echo "  ngrok up: ${https_url}"
-    echo "  .env.local updated: LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL=${wss_url}"
+    echo "  ${envfile} updated: LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL=${wss_url}"
     return 0
+}
+
+# lib_ngrok_upsert_env sets KEY=VAL in an env file: replaces the line
+# in place when it exists, appends it otherwise. The .bak form of sed
+# works on both GNU (Linux) and BSD (macOS) sed.
+function lib_ngrok_upsert_env() {
+    local file="$1" key="$2" val="$3"
+    if grep -qE "^${key}=" "${file}"; then
+        sed -i.bak -e "s|^${key}=.*|${key}=${val}|" "${file}"
+        rm -f "${file}.bak"
+    else
+        printf '%s=%s\n' "${key}" "${val}" >> "${file}"
+    fi
 }

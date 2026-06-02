@@ -93,35 +93,116 @@ function check_mkcert() {
     echo "  [ok] mkcert"
 }
 
-function check_ngrok() {
-    # dev-refresh's lib_refresh_ngrok publishes a public
-    # LIVEKIT_PUBLIC_URL so the Anam avatar cloud engine (and any
-    # other external service that has to reach the local LiveKit)
-    # can hit it. Without ngrok the voice-agent still works in
-    # audio-only via the internal "ws://livekit:7880" URL, but the
-    # avatar plugin fails to negotiate -- so the full voice+video
-    # loop on dev needs ngrok present + authed.
-    #
-    # Non-blocking (matches mkcert): the dev stack still comes up.
-    # We surface the hint so a fresh contributor doesn't burn an
-    # hour wondering why the avatar isn't rendering.
+# install_ngrok auto-installs the ngrok CLI (macOS + Linux) and, when an
+# authtoken is available in the environment, configures it -- so a fresh
+# `make dev-refresh` brings up the public LIVEKIT_PUBLIC_URL the Anam avatar
+# cloud engine dials into without any manual steps. The avatar (direct/Guide
+# AND voice-agent) needs Anam's cloud to reach the local LiveKit; on a dev box
+# that means a public tunnel, which dev-refresh's lib_refresh_ngrok stands up
+# from this binary. Without ngrok the voice loop still works in audio-only.
+#
+# Non-blocking throughout (matches mkcert): a failed install / missing
+# authtoken prints a clear hint but never aborts the dev stack bring-up.
+function install_ngrok() {
+    if command -v ngrok >/dev/null 2>&1; then
+        echo "  [ok] ngrok present ($(ngrok version 2>/dev/null | head -1))"
+        ngrok_ensure_authed
+        return 0
+    fi
+
+    local os
+    os=$(detect_os)
+    echo "  ngrok not found -- installing (needed for the public LIVEKIT_PUBLIC_URL the Anam avatar dials in on)..."
+    case "${os}" in
+        darwin)
+            if command -v brew >/dev/null 2>&1; then
+                brew install ngrok || { echo "  WARNING: 'brew install ngrok' failed; install manually from https://ngrok.com/download"; return 0; }
+            else
+                echo "  HINT: Homebrew not found -- install ngrok from https://ngrok.com/download, then re-run."
+                return 0
+            fi
+            ;;
+        linux)
+            install_ngrok_linux || return 0
+            ;;
+        *)
+            echo "  HINT: ngrok auto-install unsupported on this OS -- see https://ngrok.com/download"
+            return 0
+            ;;
+    esac
+
     if ! command -v ngrok >/dev/null 2>&1; then
-        echo "  HINT: ngrok is not installed -- voice-agent runs audio-only without it."
-        case "$(uname -s)" in
-            Darwin) echo "        Install: brew install ngrok" ;;
-            Linux)  echo "        Install: snap install ngrok  (or https://ngrok.com/download)" ;;
-            *)      echo "        Install: see https://ngrok.com/download" ;;
-        esac
-        echo "        Then: ngrok config add-authtoken <your-token>"
-        echo "        (Not blocking; the voice+video loop needs ngrok for the public LIVEKIT_PUBLIC_URL.)"
+        echo "  WARNING: ngrok install reported success but the binary isn't on PATH."
         return 0
     fi
-    if ! ngrok config check >/dev/null 2>&1; then
-        echo "  HINT: ngrok installed but unauthenticated -- run 'ngrok config add-authtoken <your-token>'."
-        echo "        (Not blocking; voice-agent runs audio-only without the public LIVEKIT_PUBLIC_URL.)"
+    echo "  [ok] ngrok installed ($(ngrok version 2>/dev/null | head -1))"
+    ngrok_ensure_authed
+}
+
+# install_ngrok_linux downloads ngrok's official static binary for the host
+# arch and drops it on PATH -- no sudo, works across distros (snap/apt aren't
+# always present). Installs into the Go bin dir (already PATH-ensured for the
+# protoc plugins) so refresh.sh's later lib_refresh_ngrok finds it.
+function install_ngrok_linux() {
+    local arch tgz_arch url dest tmp
+    arch=$(uname -m)
+    case "${arch}" in
+        x86_64|amd64)  tgz_arch="amd64" ;;
+        aarch64|arm64) tgz_arch="arm64" ;;
+        *) echo "  HINT: unknown arch '${arch}' -- install ngrok from https://ngrok.com/download"; return 1 ;;
+    esac
+    url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${tgz_arch}.tgz"
+
+    dest=$(go env GOBIN 2>/dev/null)
+    if [ -z "${dest}" ]; then dest="$(go env GOPATH 2>/dev/null)/bin"; fi
+    if [ -z "${dest}" ] || [ "${dest}" = "/bin" ]; then dest="${HOME}/.local/bin"; fi
+    mkdir -p "${dest}"
+
+    tmp=$(mktemp -d)
+    echo "  downloading ngrok (linux-${tgz_arch}) -> ${dest}/ngrok ..."
+    if ! curl -fsSL "${url}" -o "${tmp}/ngrok.tgz"; then
+        echo "  WARNING: ngrok download failed (${url}); install manually from https://ngrok.com/download"
+        rm -rf "${tmp}"; return 1
+    fi
+    if ! tar -xzf "${tmp}/ngrok.tgz" -C "${tmp}"; then
+        echo "  WARNING: ngrok archive extract failed."
+        rm -rf "${tmp}"; return 1
+    fi
+    mv "${tmp}/ngrok" "${dest}/ngrok" && chmod +x "${dest}/ngrok"
+    rm -rf "${tmp}"
+
+    case ":${PATH}:" in
+        *":${dest}:"*) ;;
+        *) export PATH="${PATH}:${dest}"
+           echo "  HINT: add ${dest} to your shell PATH so ngrok persists across sessions." ;;
+    esac
+}
+
+# ngrok_ensure_authed configures the authtoken from $NGROK_AUTHTOKEN (or
+# $MEMQL_NGROK_AUTHTOKEN) when ngrok isn't already authed -- so the operator
+# sets the token once in their environment and `make dev-refresh` is turnkey.
+function ngrok_ensure_authed() {
+    if ngrok config check >/dev/null 2>&1; then
+        echo "  [ok] ngrok (authed)"
         return 0
     fi
-    echo "  [ok] ngrok (authed)"
+    local token="${NGROK_AUTHTOKEN:-${MEMQL_NGROK_AUTHTOKEN:-}}"
+    if [ -n "${token}" ]; then
+        echo "  ngrok: configuring authtoken from \$NGROK_AUTHTOKEN ..."
+        if ngrok config add-authtoken "${token}" >/dev/null 2>&1; then
+            echo "  [ok] ngrok authed"
+            return 0
+        fi
+        echo "  WARNING: 'ngrok config add-authtoken' failed -- check the token value."
+        return 0
+    fi
+    cat <<'EOF'
+  HINT: ngrok is installed but not authenticated. Do ONE of:
+    - export NGROK_AUTHTOKEN=<your token>   (then `make dev-refresh` auto-configures it), or
+    - run once:  ngrok config add-authtoken <your token>
+  Without it the Anam avatar can't get a public LIVEKIT_PUBLIC_URL (the
+  voice + avatar loop stays audio-only / orb-only on a local box).
+EOF
 }
 
 function install_protoc() {
@@ -257,9 +338,9 @@ function main() {
     check_go
     check_docker
     check_mkcert
-    check_ngrok
     install_protoc
     install_protoc_go_plugins
+    install_ngrok
     summary
 }
 
