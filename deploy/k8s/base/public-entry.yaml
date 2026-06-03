@@ -68,7 +68,11 @@ spec:
       http:
         paths:
           - { path: /memql/audio, pathType: Prefix, backend: { service: { name: voice, port: { number: 8085 } } } }
-          - { path: /memql, pathType: Prefix, backend: { service: { name: bff, port: { number: 8085 } } } }
+          # /memql targets the Rollout's ACTIVE color (bff-active), not the
+          # color-agnostic `bff` Service, so NEW logins land only on the active
+          # color (deployment-v2 #766). bff-active is managed by the `rollouts`
+          # Argo app; established streams stay bound to their old-color pods.
+          - { path: /memql, pathType: Prefix, backend: { service: { name: bff-active, port: { number: 8085 } } } }
           - { path: /, pathType: Prefix, backend: { service: { name: copresent, port: { number: 8080 } } } }
 ---
 # app.staging.copresent.ai same-origin auth proxy: the token-management XHRs
