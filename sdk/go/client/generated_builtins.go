@@ -14,7 +14,47 @@ var (
 	_ = strings.Builder{}
 )
 
-// AvatarDirectStartSession -- Start a direct/Guide avatar session for an anam-vendor agent. Mints a LiveKit room + browser join token and brings Anam up (audio-driven). Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.
+// AvatarDirectEngageVendor -- Phase 2 of the direct/Guide avatar handshake. Brings the vendor cloud engine (anam/simli) up to dial into the room from startSession; call only after the browser has joined and started forwarding audio over the lk.audio_stream byte stream. Mints the avatar token (publish_on_behalf=browser_identity) and starts the session. Returns { session_id, vendor, avatar_identity, ok }.
+type AvatarDirectEngageVendorArgs struct {
+	AgentId         string
+	RoomName        string
+	BrowserIdentity string
+	SpaceId         string
+}
+
+// AvatarDirectEngageVendor calls the engine builtin avatarDirectEngageVendor.
+func (qc *QueryClient) AvatarDirectEngageVendor(ctx context.Context, args AvatarDirectEngageVendorArgs) (*Result, error) {
+	call := AvatarDirectEngageVendorBuild(args)
+	return qc.executeNamed(ctx, "avatarDirectEngageVendor", call)
+}
+
+func AvatarDirectEngageVendorBuild(args AvatarDirectEngageVendorArgs) string {
+	var b strings.Builder
+	b.WriteString("avatarDirectEngageVendor({")
+	b.WriteString("agentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AgentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("room_name: ")
+	b.WriteString(fmt.Sprintf("%q", args.RoomName))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("browser_identity: ")
+	b.WriteString(fmt.Sprintf("%q", args.BrowserIdentity))
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// AvatarDirectStartSession -- Phase 1 of the direct/Guide avatar handshake (anam/simli). Mints a LiveKit room + an agent-kind browser join token and validates the agent has an avatar persona; does NOT start the vendor engine. The browser joins + starts forwarding audio, THEN calls avatarDirectEngageVendor (Simli waits for the audio-providing participant to be present first, memql#782). Returns { livekit_url, livekit_client_token, browser_identity, vendor, room_name }.
 type AvatarDirectStartSessionArgs struct {
 	AgentId string
 	SpaceId string
