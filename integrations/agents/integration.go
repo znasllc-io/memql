@@ -144,10 +144,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 }
 
 // produceArtifactKind is the v1:planner:plan.kind the produceArtifact
-// handler stamps. The planner agent loop decomposes plans of this kind
-// through the generic decompose path (it is NOT in the special-cased
-// dispatch list) and auto-starts them (skipping the manual Run gate)
-// so the deliverable is produced asynchronously.
+// handler stamps. The planner agent loop does NOT decompose this kind: it
+// starts the plan directly and dispatches a single agent turn to the plan's
+// ownerAgentId (the requesting assistant), avoiding the heavyweight
+// plannerAgent decompose loop that spammed the LLM into a 429 (memql#816).
 const produceArtifactKind = "produceArtifact"
 
 // envelopeConcept is the namespace used for the MemoryNode this
@@ -469,6 +469,10 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 		format = "markdown"
 	}
 	filename := strings.TrimSpace(asString(args["filename"]))
+	// The calling assistant (auto-stamped agentId) becomes the plan's
+	// ownerAgentId so the planner dispatches the production turn straight to it
+	// -- NO planner-agent decompose loop (which spammed the LLM, memql#816).
+	agentId := strings.TrimSpace(asString(args["agentId"]))
 
 	planId := id.NewShortId()
 	// Plan.input is the per-kind input shape the executing agent reads to
@@ -499,11 +503,18 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	// requestUserFeedback does -- the per-tool context doesn't carry the
 	// user's JWT.
 	mutationCtx := withUserActor(ctx, ownerUserId)
-	query := fmt.Sprintf(
-		`mutationCreatePlan({planId: %q, spaceId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s})`,
+	var qb strings.Builder
+	fmt.Fprintf(&qb,
+		`mutationCreatePlan({planId: %q, spaceId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
 		planId, spaceId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
 	)
-	if _, err := i.engine.Execute(mutationCtx, query); err != nil {
+	if agentId != "" {
+		// Dispatch the production turn straight to the requesting assistant
+		// (no planner-agent decompose loop -- memql#816).
+		fmt.Fprintf(&qb, `, ownerAgentId: %q`, agentId)
+	}
+	qb.WriteString(`})`)
+	if _, err := i.engine.Execute(mutationCtx, qb.String()); err != nil {
 		return nil, fmt.Errorf("produceArtifact: mutationCreatePlan failed: %w", err)
 	}
 

@@ -148,6 +148,7 @@ mutation plan mutationCreatePlan {
     requestedBy           string  @required
     triggerSource         string
     authorizedBy          string
+    ownerAgentId          string
     input                 object  @required
     refinementContext     object
     tokenBudget           int
@@ -164,6 +165,7 @@ mutation plan mutationCreatePlan {
     args.requestedBy
     triggerSource: coalesce(args.triggerSource, "user.explicit")
     args.authorizedBy
+    args.ownerAgentId
     args.input
     args.refinementContext
     args.tokenBudget
