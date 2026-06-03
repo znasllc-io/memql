@@ -359,6 +359,18 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 
 	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", data)
 	if err != nil {
+		// Provider rate-limit (429) is RETRYABLE-LATER, not a plan
+		// failure (memql#821). Re-attempting immediately would be a
+		// retry storm -- the exact behavior that blew the rate limit.
+		// Park the plan to awaitingFeedback (resumable) and make NO
+		// further LLM call this cycle. This also catches the #825
+		// circuit breaker's synthetic 429.
+		if isRateLimitError(err) {
+			l.logger.Warn("planner agent loop: provider rate-limited; parking (no retry storm)",
+				"planId", planId, "iter", iter, "error", err)
+			return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
+				"The planner was rate-limited by the model provider (429). The plan is parked and can be resumed shortly -- it was NOT re-attempted, to avoid hammering the provider.")
+		}
 		return l.markPlanFailed(ctx, planId, fmt.Sprintf("plannerAgent invocation failed: %v", err))
 	}
 	// Count this invocation against the cumulative ceiling immediately
