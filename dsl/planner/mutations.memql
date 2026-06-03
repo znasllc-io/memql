@@ -432,6 +432,28 @@ mutation plan mutationUpdatePlanStatus {
   }
 }
 
+// mutationRecordPlannerInvocation -- bump the cumulative per-plan LLM
+// spend counters without touching status. Used by the Planner Agent
+// loop after every plannerAgent call to advance metrics.llmCallCount +
+// tokenSpent so the hard per-plan ceiling (memql#819) keeps climbing
+// toward its limit across cycles / retries. Partial-update so the
+// Plan's @required fields (status, goal, etc.) inherit from the prior
+// row -- this is NOT a status transition.
+@enabled
+@description("Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).")
+mutation plan mutationRecordPlannerInvocation {
+  args {
+    planId      string  @required
+    tokenSpent  int
+    metrics     object
+  }
+  update plan {
+    id: args.planId
+    args.tokenSpent
+    args.metrics
+  }
+}
+
 // mutationUpdateTaskStatus -- partial Task status transition.
 // Partial-update via update() so the caller doesn't have to re-pass
 // the Task concept's @required fields (planId, kind, seq,

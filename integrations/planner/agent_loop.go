@@ -329,16 +329,37 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 		specialists = []map[string]any{}
 	}
 
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", map[string]any{
+	data := map[string]any{
 		"plan":        plan,
 		"tasks":       tasks,
 		"specialists": specialists,
 		"partition":   getString(plan, "partition"),
 		"now":         time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+
+	// HARD per-plan LLM ceiling (memql#819). Before EVERY plannerAgent
+	// call, check the cumulative invocation count + token budget
+	// (persisted on the Plan, so they survive across cycles / retries).
+	// On exceed we park the Plan to awaitingFeedback and NEVER make
+	// another LLM call -- this is what makes unbounded spend
+	// structurally impossible, independent of the per-cycle
+	// maxPlannerIterations cap above.
+	estTokens := estimatePlannerCallTokens(data)
+	if gate := evaluatePlannerCallGate(plan, estTokens, maxPlannerInvocationsPerPlan(), plannerDefaultTokenBudget()); gate.Blocked {
+		l.logger.Warn("planner agent loop: per-plan LLM ceiling reached; parking",
+			"planId", planId, "llmCallCount", planLLMCallCount(plan),
+			"tokenSpent", asInt(plan["tokenSpent"]), "iter", iter, "reason", gate.Reason)
+		return l.escalateAwaitingFeedback(ctx, planId, gate.Reason, gate.Message)
+	}
+
+	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", data)
 	if err != nil {
 		return l.markPlanFailed(ctx, planId, fmt.Sprintf("plannerAgent invocation failed: %v", err))
 	}
+	// Count this invocation against the cumulative ceiling immediately
+	// (before parsing / dispatch) and persist it, so a parse failure or
+	// a later re-trigger still sees the spend. (memql#819)
+	l.recordPlannerInvocation(ctx, plan, planId, estTokens)
 
 	decision, err := parsePlannerDecision(resp)
 	if err != nil {
