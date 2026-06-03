@@ -39,6 +39,31 @@ services:
       - memql
     restart: unless-stopped
 
+  # coturn -- standalone TURN relay for the Anam direct/Guide avatar
+  # (memql#764 / #770). Anam's CLOUD engine cannot reach the local
+  # LiveKit's loopback media, and ngrok only tunnels signaling. coturn
+  # bridges the gap: Anam reaches it over a RAW ngrok TCP endpoint
+  # (scripts/dev/lib.sh lib_refresh_turn_relay stands the tunnel up and
+  # stamps livekit-dev.yaml's rtc.turn_servers + node_ip), and coturn
+  # relays the media to polyphon-livekit over this docker network.
+  # See docs/voice/turn-relay.md for the full path + gotchas.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: memql-coturn
+    hostname: coturn
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      # Published so the ngrok TCP tunnel (host:3478) reaches coturn.
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      # The relay allocation range (min-port/max-port in the config).
+      - "49160-49200:49160-49200/udp"
+    networks:
+      - memql
+    restart: unless-stopped
+
   # Redis
   # Shared conversation state for Polyphon sessions.
   redis:
