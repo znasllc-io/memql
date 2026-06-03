@@ -277,7 +277,6 @@ logic logicSweep {
 // purgeExpired{ArchivedSpaces,PolicyTraces}, and the rest of the
 // `return X.Len()` family run end-to-end.
 func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("expiredDelegations", &StepResult{
 		Status: "success",
@@ -293,7 +292,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	})
 
 	// .Len() -> count of nodes
-	val, handled, err := r.tryEvaluateReturnLocally("expiredDelegations.Len()", evaluator)
+	val, handled, err := tryEvaluateReturnLocally("expiredDelegations.Len()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
@@ -305,7 +304,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	}
 
 	// .Empty() -> false (3 nodes)
-	val, handled, err = r.tryEvaluateReturnLocally("expiredDelegations.Empty()", evaluator)
+	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.Empty()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
@@ -314,7 +313,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	}
 
 	// .First().id navigation
-	val, handled, err = r.tryEvaluateReturnLocally("expiredDelegations.First()", evaluator)
+	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.First()", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
@@ -332,7 +331,6 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 // value, not surface as `unknown spec "nodeRecord"` when the engine's
 // query parser treats the bare identifier as a spec name.
 func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("nodeRecord", &StepResult{
 		Status: "success",
@@ -343,7 +341,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
 		},
 	})
 
-	val, handled, err := r.tryEvaluateReturnLocally("nodeRecord", evaluator)
+	val, handled, err := tryEvaluateReturnLocally("nodeRecord", evaluator)
 	if err != nil {
 		t.Fatalf("tryEvaluateReturnLocally: %v", err)
 	}
@@ -365,7 +363,6 @@ func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
 // expressions, mutation calls, and literals from being silently
 // short-circuited.
 func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("rows", &StepResult{
 		Status: "success",
@@ -386,7 +383,7 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, handled, err := r.tryEvaluateReturnLocally(tt.expr, evaluator)
+			_, handled, err := tryEvaluateReturnLocally(tt.expr, evaluator)
 			if err != nil {
 				t.Errorf("expected no error for %q, got %v", tt.expr, err)
 			}
@@ -407,11 +404,10 @@ func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
 // via EvaluateStepReference, literals via strconv parsing) and
 // applies the first-non-empty semantics.
 func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
 
 	t.Run("first non-empty arg wins", func(t *testing.T) {
 		evaluator := NewEvaluator()
-		val, handled, err := r.tryEvaluateBuiltinLocally(`coalesce("first", "second")`, evaluator)
+		val, handled, err := tryEvaluateBuiltinLocally(`coalesce("first", "second")`, evaluator)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -425,7 +421,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 
 	t.Run("empty string is skipped to fallback", func(t *testing.T) {
 		evaluator := NewEvaluator()
-		val, _, err := r.tryEvaluateBuiltinLocally(`coalesce("", "fallback")`, evaluator)
+		val, _, err := tryEvaluateBuiltinLocally(`coalesce("", "fallback")`, evaluator)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -445,7 +441,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 				},
 			},
 		})
-		val, handled, err := r.tryEvaluateBuiltinLocally(
+		val, handled, err := tryEvaluateBuiltinLocally(
 			`coalesce(args.event.payload.database.host, "localhost")`,
 			evaluator,
 		)
@@ -465,7 +461,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 		evaluator.SetCustom("args", map[string]any{
 			"event": map[string]any{"payload": map[string]any{}},
 		})
-		val, _, err := r.tryEvaluateBuiltinLocally(
+		val, _, err := tryEvaluateBuiltinLocally(
 			`coalesce(args.event.payload.database.host, "localhost")`,
 			evaluator,
 		)
@@ -488,7 +484,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 			Status: "success",
 			Result: map[string]any{"id": "new-cluster"},
 		})
-		val, _, err := r.tryEvaluateBuiltinLocally(
+		val, _, err := tryEvaluateBuiltinLocally(
 			`coalesce(clusterRecord, existing.First())`,
 			evaluator,
 		)
@@ -505,7 +501,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 
 	t.Run("non-builtin name returns handled=false", func(t *testing.T) {
 		evaluator := NewEvaluator()
-		val, handled, err := r.tryEvaluateBuiltinLocally(`someUserFunc("a", "b")`, evaluator)
+		val, handled, err := tryEvaluateBuiltinLocally(`someUserFunc("a", "b")`, evaluator)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -520,7 +516,7 @@ func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
 		// This pins that the builtin matcher doesn't accidentally
 		// swallow bare identifiers.
 		evaluator := NewEvaluator()
-		_, handled, _ := r.tryEvaluateBuiltinLocally("clusterRecord", evaluator)
+		_, handled, _ := tryEvaluateBuiltinLocally("clusterRecord", evaluator)
 		if handled {
 			t.Errorf("expected handled=false for bare identifier")
 		}
@@ -558,7 +554,6 @@ func TestReconstructPositionalBuiltinCall(t *testing.T) {
 	})
 
 	t.Run("reconstructed coalesce evaluates locally (the bug repro)", func(t *testing.T) {
-		r := NewLogicRunner(nil, nil, nil)
 		evaluator := NewEvaluator()
 		fn := &FunctionStepConfig{
 			Name: "coalesce",
@@ -568,7 +563,7 @@ func TestReconstructPositionalBuiltinCall(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected ok=true")
 		}
-		val, handled, err := r.tryEvaluateBuiltinLocally(callStr, evaluator)
+		val, handled, err := tryEvaluateBuiltinLocally(callStr, evaluator)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
