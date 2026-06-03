@@ -926,7 +926,9 @@ func streamingHTTPClient() *http.Client {
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.ResponseHeaderTimeout = 30 * time.Second
 	base.IdleConnTimeout = 90 * time.Second
-	return &http.Client{Transport: base}
+	// Front the timeout-tuned transport with the global LLM circuit
+	// breaker (memql#825) so streaming providers' calls are loop-guarded.
+	return guardedHTTPClient(&http.Client{Transport: base})
 }
 
 func newSIProvider(cfg ProviderConfig) (SIProvider, error) {
@@ -1089,6 +1091,9 @@ func newOpenSIProvider(cfg ProviderConfig) (SIProvider, error) {
 	if baseURL := strings.TrimSpace(cfg.Auth["baseURL"]); baseURL != "" {
 		config.BaseURL = baseURL
 	}
+	// Route through the global LLM circuit breaker (memql#825) before the
+	// optional project-header wrap composes over it.
+	config.HTTPClient = guardedHTTPClient(nil)
 	if projectId := resolveOpenAIProjectId(cfg); projectId != "" {
 		config.HTTPClient = &openAIProjectHeaderClient{inner: config.HTTPClient, projectId: projectId}
 	}
@@ -1883,7 +1888,11 @@ func newAnthropicProvider(cfg ProviderConfig) (SIProvider, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
 	}
-	client := anthropic.NewClient(option.WithAPIKey(apiKey))
+	client := anthropic.NewClient(
+		option.WithAPIKey(apiKey),
+		// Route through the global LLM circuit breaker (memql#825).
+		option.WithHTTPClient(guardedHTTPClient(nil)),
+	)
 	return &anthropicProvider{
 		client: client,
 		model:  cfg.Model,
