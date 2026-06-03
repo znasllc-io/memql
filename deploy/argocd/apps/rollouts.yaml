@@ -1,0 +1,73 @@
+# The BFF blue/green Rollout + deploy-gate Application (deployment-v2, #766).
+#
+# Brings the LIVE Argo Rollouts surface (manually applied during the #712
+# cutover, PR #763) under Argo CD GitOps. Source of truth = deploy/rollouts
+# (the kustomization there selects only the live resources -- see its header).
+# After this app syncs, the Rollout / bff-active / bff-preview / deploy-gate /
+# deploy-gate-jwt are Git-managed: GitOps-clean, self-healing, prunable.
+#
+# THE ARGO <-> ROLLOUTS THRASH TRAP (why ignoreDifferences below):
+# The Argo Rollouts controller OWNS two fields that Git cannot express:
+#   1. Service.spec.selector on bff-active / bff-preview -- the controller
+#      injects `rollouts-pod-template-hash: <hash>` to pin each Service to a
+#      specific color's ReplicaSet. Git only carries `app.kubernetes.io/name`.
+#      Without the ignore + RespectIgnoreDifferences, selfHeal would strip the
+#      hash -> the controller re-adds it -> thrash that can misroute traffic.
+#   2. Rollout.status -- the controller's progress/health bookkeeping.
+# We ignore those fields so Argo adopts the live objects as a NO-OP and never
+# fights the Rollouts controller.
+#
+# The bff Deployment (workloadRef target, kept scaled to 0 by the Rollout) is
+# owned by the `memql` Application (deploy/k8s/base/bff.yaml), which already
+# ignores Deployment /spec/replicas -- so the Rollout owning its scale does not
+# fight Argo. This app must NOT also manage that Deployment.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rollouts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: memql
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/rollouts
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: memql
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      # Honour ignoreDifferences during APPLY too (not just diffing): the
+      # controller-managed selector hash must survive every sync, or the first
+      # sync would strip it and trigger one thrash cycle.
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+  ignoreDifferences:
+    # The Rollouts controller injects rollouts-pod-template-hash into these two
+    # Services' selectors to pin them to a color. Git can't express it; leave
+    # the controller authoritative on the selector.
+    - group: ''
+      kind: Service
+      name: bff-active
+      namespace: memql
+      jsonPointers:
+        - /spec/selector
+    - group: ''
+      kind: Service
+      name: bff-preview
+      namespace: memql
+      jsonPointers:
+        - /spec/selector
+    # The Rollout's status is controller-owned progress/health bookkeeping.
+    - group: argoproj.io
+      kind: Rollout
+      name: bff
+      namespace: memql
+      jsonPointers:
+        - /status
