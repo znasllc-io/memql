@@ -35,4 +35,4 @@ images:
   - name: acrmemql.azurecr.io/memql-workbench
     digest: sha256:16e6308bf9aec548ff66cd7b0ff8b8a19d9f737d1ab151bd7e36f2af1d6ff4d1
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
+    digest: sha256:0656df9734c77e36ebb7d3c367487a984cb634d348a0a6f4716ea2b3f9c7fc6f
