@@ -118,6 +118,84 @@ func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) 
 	go p.executeApprovedPlan(bgCtx, fields.ID)
 }
 
+// handleProduceArtifactCompletion is the event-bus subscriber that closes the
+// async loop for the conversational produce-artifact path (memql#792). When a
+// produceArtifact Plan (spawned by the Assistant's produceArtifact tool,
+// memql#788) reaches terminal success, the deliverable has landed in the user's
+// Library -- but the user is back in the conversation and doesn't know. This
+// emits a notify canvas card (so the bell pings) telling them their file is
+// ready and deep-linking the Library. Fires regardless of WHICH code path
+// stamped the Plan succeeded.
+func (p *PlannerIntegration) handleProduceArtifactCompletion(event events.Event) {
+	fields := extractPlanRoutingFields(event)
+	if fields.Kind != produceArtifactPlanKind || fields.Status != "succeeded" || fields.ID == "" {
+		return
+	}
+	bgCtx := contextWithSystemActor(context.Background())
+	go p.notifyProduceArtifactComplete(bgCtx, fields.ID)
+}
+
+// notifyProduceArtifactComplete loads the completed Plan and emits a
+// private, notify-importance canvas card announcing the deliverable. Best-
+// effort: a failure here must never affect the Plan's terminal state.
+func (p *PlannerIntegration) notifyProduceArtifactComplete(ctx context.Context, planId string) {
+	plan, err := p.fetchPlanForExecution(ctx, planId)
+	if err != nil {
+		p.logger.Warn("produceArtifact completion: fetch plan failed",
+			"plan_id", planId, "error", err)
+		return
+	}
+	requestedBy := strings.TrimSpace(plan.RequestedBy)
+	spaceId := strings.TrimSpace(plan.SpaceId)
+	if requestedBy == "" || spaceId == "" {
+		p.logger.Warn("produceArtifact completion: missing requestedBy/spaceId; skipping notify",
+			"plan_id", planId)
+		return
+	}
+
+	goal := strings.TrimSpace(plan.Goal)
+	body := "Your file is ready in the Library."
+	if goal != "" {
+		body = fmt.Sprintf("%s\n\nIt's ready in your Library.", goal)
+	}
+	// kind="document" notify card -- the same renderable shape agents use for
+	// task-done cards. `link` deep-links the Library; producedByPlanId lets a
+	// future build resolve + highlight the exact artifact (memql#792 follow-up).
+	cardData := map[string]any{
+		"format":           "markdown",
+		"title":            "Deliverable ready",
+		"body":             body,
+		"source":           "planner",
+		"link":             "/space?panel=library",
+		"producedByPlanId": planId,
+	}
+	args := map[string]any{
+		"canvasStateId": fmt.Sprintf("produce-artifact-done-%s", planId),
+		"space":         spaceId,
+		"kind":          "document",
+		"data":          cardData,
+		"visibility":    "private",
+		"forUserId":     requestedBy,
+		"importance":    "notify",
+		"actor": map[string]any{
+			"kind": "system",
+		},
+	}
+	payload, err := json.Marshal(args)
+	if err != nil {
+		p.logger.Warn("produceArtifact completion: marshal card failed", "plan_id", planId, "error", err)
+		return
+	}
+	call := fmt.Sprintf(`mutationCreateCanvasState(%s)`, string(payload))
+	if _, err := p.engine.Execute(contextWithSystemActor(ctx), call); err != nil {
+		p.logger.Warn("produceArtifact completion: emit notify card failed",
+			"plan_id", planId, "error", err)
+		return
+	}
+	p.logger.Info("produceArtifact completion: notify card emitted",
+		"plan_id", planId, "space_id", spaceId, "for_user", requestedBy)
+}
+
 // executeApprovedPlan does the actual dispatch. Reads the Plan,
 // resolves Sofia's SI participant, forwards the agent turn,
 // consumes the response, posts the reply, and stamps the Plan

@@ -210,6 +210,15 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.agentLoop.HandlePlanUpdated,
 			events.WithSubscriberName("planner:agent-loop-updated"),
 		))
+		// produceArtifact completion notifier (memql#792). Fires when a
+		// produceArtifact Plan (memql#788) reaches terminal success and
+		// emits a notify canvas card so the user -- back in the
+		// conversation -- learns their deliverable landed in the Library.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.handleProduceArtifactCompletion,
+			events.WithSubscriberName("planner:produce-artifact-completion"),
+		))
 		// trainSpecialist dispatcher (#644). Claims kind=trainSpecialist
 		// Plans -- the agent loop skips that kind so the two don't race.
 		// Subscribes to both created + updated so a Plan spawned in
