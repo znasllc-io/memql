@@ -41,6 +41,7 @@ func (a *App) transportAgent() {
 	// Attachment upload endpoints. Storage backend is Azure Blob (memql#801);
 	// the "bucket" arg below is the Azure container name.
 	var uploader server.FileUploader
+	var downloader server.FileDownloader
 	blobContainer := azureblob.ContainerFromEnv()
 	if blobContainer != "" {
 		blobClient, err := azureblob.New(context.Background())
@@ -48,6 +49,7 @@ func (a *App) transportAgent() {
 			a.Logger.Warn("Azure Blob uploader unavailable", "error", err)
 		} else {
 			uploader = blobClient
+			downloader = blobClient // same client serves GET downloads (memql#804)
 		}
 	}
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
@@ -75,12 +77,13 @@ func (a *App) transportAgent() {
 	store := server.NewEngineAttachmentStore(engineAdapter)
 	planStore := server.NewEnginePlanStore(engineAdapter)
 	attachmentHandler := server.NewAttachmentHandler(server.AttachmentHandlerOptions{
-		Logger:    a.Logger,
-		Bucket:    blobContainer,
-		Uploader:  uploader,
-		Extractor: processor,
-		Store:     store,
-		PlanStore: planStore,
+		Logger:     a.Logger,
+		Bucket:     blobContainer,
+		Uploader:   uploader,
+		Downloader: downloader,
+		Extractor:  processor,
+		Store:      store,
+		PlanStore:  planStore,
 	})
 	for _, path := range server.SpaceAttachmentPaths() {
 		a.mux.Handle("POST "+path, attachmentHandler)

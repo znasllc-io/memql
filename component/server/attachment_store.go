@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -100,6 +101,47 @@ func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, spaceId str
 		return false, fmt.Errorf("execute queryOwnedSpaceById: %w", err)
 	}
 	return queryResultHasRow(res), nil
+}
+
+// GetAttachment reads one v1:common:attachment row by id within a space via
+// the queryAttachmentById DSL query. The query's filter pins
+// payload.spaceId==args.spaceId, so an attachment id from a different space
+// returns no row. Returns nil (no error) when not found. (memql#804)
+func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId, spaceId string) (*AttachmentRow, error) {
+	if s == nil || s.engine == nil {
+		return nil, fmt.Errorf("engine not configured")
+	}
+	attachmentId = strings.TrimSpace(attachmentId)
+	spaceId = strings.TrimSpace(spaceId)
+	if attachmentId == "" || spaceId == "" {
+		return nil, fmt.Errorf("attachmentId and spaceId are required")
+	}
+
+	q := fmt.Sprintf(`queryAttachmentById({"attachmentId": %s, "spaceId": %s})`,
+		jsonString(attachmentId), jsonString(spaceId))
+	res, err := s.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("execute queryAttachmentById: %w", err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	r := rows[0]
+	getStr := func(k string) string {
+		if v, ok := r[k].(string); ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	return &AttachmentRow{
+		ID:       getStr("id"),
+		FileName: getStr("fileName"),
+		MimeType: getStr("mimeType"),
+		GCSUrl:   getStr("gcsURL"),
+		SpaceId:  getStr("spaceId"),
+		Status:   getStr("status"),
+	}, nil
 }
 
 // queryResultHasRow returns true if the engine result contains at

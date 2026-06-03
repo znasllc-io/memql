@@ -4,7 +4,18 @@
 // files cover the other construct kinds.
 
 use knowledge.concepts.{ documentChunk, knowledgeDomain }
-use common.concepts.{ media }
+use common.concepts.{ media, attachment }
+
+@row
+@description("Attachment projection for the download endpoint (memql#804): the file's storage URL + the metadata needed to serve it back (name + MIME + owning space for the cross-space guard).")
+shape attachment attachmentDownload {
+  row.id
+  payload.fileName
+  payload.mimeType
+  payload.gcsURL
+  payload.spaceId
+  payload.status
+}
 
 @row
 @description("Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without paying for full-chunk-payload bandwidth.")
