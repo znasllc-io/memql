@@ -74,6 +74,28 @@ type AttachmentStore interface {
 	// rejected before any GCS bytes are written. The DSL mutation
 	// re-enforces ownership; this is defense in depth.
 	CallerOwnsSpace(ctx context.Context, spaceId string) (bool, error)
+	// GetAttachment reads one v1:common:attachment row by id within a space
+	// (queryAttachmentById). Returns nil (no error) when not found. Backs the
+	// download endpoint (memql#804); callers gate on CallerOwnsSpace first.
+	GetAttachment(ctx context.Context, attachmentId, spaceId string) (*AttachmentRow, error)
+}
+
+// AttachmentRow is the projected v1:common:attachment row the download path
+// needs: the storage URL plus the metadata to serve the bytes back.
+type AttachmentRow struct {
+	ID       string
+	FileName string
+	MimeType string
+	GCSUrl   string
+	SpaceId  string
+	Status   string
+}
+
+// FileDownloader reads stored file bytes back from object storage given the
+// stored blob URL. Provider-agnostic: the handler passes the URL string, the
+// backend (azureblob) parses + fetches. (memql#804)
+type FileDownloader interface {
+	DownloadURL(ctx context.Context, blobURL string) ([]byte, error)
 }
 
 // AISummarizer generates a short summary of text content.
@@ -115,6 +137,7 @@ type AttachmentHandler struct {
 	logger     *slog.Logger
 	bucket     string
 	uploader   FileUploader
+	downloader FileDownloader // optional; enables GET download of stored bytes (memql#804)
 	extractor  TextExtractor
 	store      AttachmentStore
 	summarizer AISummarizer // optional
@@ -126,6 +149,7 @@ type AttachmentHandlerOptions struct {
 	Logger     *slog.Logger
 	Bucket     string
 	Uploader   FileUploader
+	Downloader FileDownloader // optional; enables GET download (memql#804)
 	Extractor  TextExtractor
 	Store      AttachmentStore
 	Summarizer AISummarizer // optional
@@ -142,6 +166,7 @@ func NewAttachmentHandler(opts AttachmentHandlerOptions) *AttachmentHandler {
 		logger:     logger,
 		bucket:     opts.Bucket,
 		uploader:   opts.Uploader,
+		downloader: opts.Downloader,
 		extractor:  opts.Extractor,
 		store:      opts.Store,
 		summarizer: opts.Summarizer,
@@ -149,11 +174,18 @@ func NewAttachmentHandler(opts AttachmentHandlerOptions) *AttachmentHandler {
 	}
 }
 
-// ServeHTTP dispatches POST /spaces/{spaceId}/attachments.
+// ServeHTTP dispatches:
+//   - POST /spaces/{spaceId}/attachments                 -> upload
+//   - GET  /spaces/{spaceId}/attachments/{attachmentId}  -> download (memql#804)
+//
 // Route must be registered on a ServeMux with a prefix that captures {spaceId}.
 func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		h.handleDownload(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
-		methodNotAllowed(w, r, http.MethodPost)
+		methodNotAllowed(w, r, http.MethodGet+", "+http.MethodPost)
 		return
 	}
 
@@ -458,4 +490,97 @@ func extractSpaceIdFromAttachmentPath(path string) string {
 		return ""
 	}
 	return middle
+}
+
+// parseAttachmentDownloadPath parses /spaces/{spaceId}/attachments/{attachmentId}
+// (tolerating a leading base prefix like /api). spaceId is the segment before
+// "attachments"; attachmentId the segment after. Both ids contain colons but no
+// slashes, so they survive single-segment splitting. (memql#804)
+func parseAttachmentDownloadPath(path string) (spaceId, attachmentId string, ok bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i, p := range parts {
+		if p != "attachments" {
+			continue
+		}
+		if i >= 1 && i+1 < len(parts) {
+			sid := strings.TrimSpace(parts[i-1])
+			aid := strings.TrimSpace(parts[i+1])
+			if sid != "" && aid != "" {
+				return sid, aid, true
+			}
+		}
+		return "", "", false
+	}
+	return "", "", false
+}
+
+// handleDownload serves GET /spaces/{spaceId}/attachments/{attachmentId}: it
+// streams the stored file bytes back (memql#804). Authz mirrors the upload
+// path -- the caller must own the space (404 otherwise, so id probing can't
+// tell "not mine" from "absent"); the attachment's spaceId is re-checked
+// against the path to block cross-space id probing.
+func (h *AttachmentHandler) handleDownload(w http.ResponseWriter, r *http.Request) {
+	spaceId, attachmentId, ok := parseAttachmentDownloadPath(r.URL.Path)
+	if !ok {
+		http.Error(w, "attachment id required", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(auth.ActorFromContext(r.Context())) == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	ctx := r.Context()
+
+	owns, err := h.store.CallerOwnsSpace(ctx, spaceId)
+	if err != nil {
+		h.logger.Error("attachment download ownership check failed", "error", err, "spaceId", spaceId)
+		http.Error(w, "ownership check failed", http.StatusInternalServerError)
+		return
+	}
+	if !owns {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	row, err := h.store.GetAttachment(ctx, attachmentId, spaceId)
+	if err != nil {
+		h.logger.Error("attachment lookup failed", "error", err, "attachmentId", attachmentId, "spaceId", spaceId)
+		http.Error(w, "lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if row == nil || row.SpaceId != spaceId {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if h.downloader == nil {
+		// No storage backend wired (e.g. local dev without a container): the
+		// bytes live only on the producing machine / placeholder URL.
+		http.Error(w, "file not available for download", http.StatusNotFound)
+		return
+	}
+
+	data, err := h.downloader.DownloadURL(ctx, row.GCSUrl)
+	if err != nil {
+		h.logger.Warn("attachment bytes unavailable", "error", err, "attachmentId", attachmentId)
+		http.Error(w, "file not available", http.StatusNotFound)
+		return
+	}
+
+	mimeType := strings.TrimSpace(row.MimeType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	fileName := strings.TrimSpace(row.FileName)
+	if fileName == "" {
+		fileName = "download"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

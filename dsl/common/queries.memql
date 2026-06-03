@@ -3,7 +3,31 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.concepts.{ media }
+use common.concepts.{ media, attachment }
+use common.shapes.{ attachmentDownload }
+
+// ---- queries/v1/common/attachmentById.memql ----
+
+// queryAttachmentById -- fetch one v1:common:attachment row by id, scoped to a
+// space, for the download endpoint (memql#804).
+//
+// Authz tier: granted. The attachment concept is space-scoped (no
+// ownerUserId), so the row set is gated by the spaceId arg + partition
+// isolation -- and the download HTTP handler enforces CallerOwnsSpace(spaceId)
+// (the same space-ownership gate the upload path uses) BEFORE calling this,
+// then re-checks the returned row's spaceId. The spaceId predicate here also
+// stops cross-space id probing. Mirrors querySpaceMedia's space-scoped pattern.
+
+@enabled
+@description("Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{spaceId}/attachments/{attachmentId}); the handler gates on space ownership first.")
+query attachment queryAttachmentById {
+  args {
+    attachmentId  string  @required
+    spaceId       string  @required
+  }
+  filter  ?.id==args.attachmentId; payload.spaceId==args.spaceId
+  shape   attachmentDownload
+}
 
 // ---- queries/v1/common/spaceMedia.memql ----
 

@@ -670,6 +670,34 @@ func QueryAssistantAgentForUserBuild(args QueryAssistantAgentForUserArgs) string
 	return b.String()
 }
 
+// QueryAttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{spaceId}/attachments/{attachmentId}); the handler gates on space ownership first.
+//
+// Bound concept: attachment.
+type QueryAttachmentByIdArgs struct {
+	AttachmentId string
+	SpaceId      string
+}
+
+// QueryAttachmentById calls the engine query queryAttachmentById.
+func (qc *QueryClient) QueryAttachmentById(ctx context.Context, args QueryAttachmentByIdArgs) (*Result, error) {
+	call := QueryAttachmentByIdBuild(args)
+	return qc.executeNamed(ctx, "queryAttachmentById", call)
+}
+
+func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAttachmentById({")
+	b.WriteString("attachmentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
 //
 // Bound concept: audioOverride.
