@@ -103,6 +103,7 @@ func TestAnamClient_StartPersonaIDShape(t *testing.T) {
 	assert.Equal(t, "avatar-from-persona", pc["avatarId"])
 	assert.Equal(t, anamClientAudioLLM, pc["llmId"])
 	assert.Equal(t, "Sofia", pc["name"])
+	assert.Equal(t, true, pc["enableAudioPassthrough"])
 	// avatarModel is omitted unless MEMQL_ANAM_AVATAR_MODEL is set (it's
 	// account/plan-specific -- see createSessionToken / memql#772).
 	assert.Nil(t, pc["avatarModel"])

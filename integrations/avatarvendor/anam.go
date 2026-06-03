@@ -119,6 +119,12 @@ func (c *anamClient) createSessionToken(ctx context.Context, avatarID, livekitUR
 		"name":     c.displayName(),
 		"avatarId": avatarID,
 		"llmId":    anamClientAudioLLM,
+		// We drive the avatar with OUR audio (OpenAI Realtime republished
+		// into the room), so the engine must pass that audio through to the
+		// lip-sync renderer. Anam defaults this off; with a real-time CARA
+		// model + client audio, leaving it off starves the engine (it joins,
+		// gets no audio it acts on, and closes in <1s). See memql#772.
+		"enableAudioPassthrough": true,
 	}
 	// avatarModel selects Anam's live rendering model (CARA). It is gated by
 	// plan AND by the avatar's own render version: requesting a model the org

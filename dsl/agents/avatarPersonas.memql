@@ -13,7 +13,7 @@ use agents.concepts.{ avatarPersona }
 @description("Avatar persona Sofia (female) -- Anam.")
 seed avatarPersona sofia {
   vendor:     "anam"
-  personaId:  "d5074bff-0190-4067-bdd1-cbf529562426"
+  personaId:  "8981b946-c125-4f41-b6b0-863fe67ae180"
   name:       "Sofia"
   gender:     "female"
   imageRef:   "avatars/female_0.png"
