@@ -10,12 +10,12 @@
 
 use agents.concepts.{ avatarPersona }
 
-@description("Avatar persona Sofia (female) -- Anam.")
 // Sofia now renders via SIMLI (memql#782): the Anam cara-3 client-audio
 // render is blocked vendor-side (memql#772), so the dev assistant uses the
 // Simli face below. personaId is the Simli faceId; SIMLI_API_KEY authenticates.
 // (Hand-set: `make avatar-mint` only manages the anam catalog -- re-add this
 // entry if you regenerate, or extend avatar-mint for simli.)
+@description("Avatar persona Sofia (female) -- Simli (memql#782).")
 seed avatarPersona sofia {
   vendor:     "simli"
   personaId:  "cace3ef7-a4c4-425d-a8cf-a5358eb0c427"
