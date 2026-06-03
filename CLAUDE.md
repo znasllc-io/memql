@@ -1868,13 +1868,19 @@ LLM-backed re-analysis ships with the async planner integration.
   init() time; the planner picks the backend via Task.executorBackend.
 
 - **Token-budget enforcement** -- `component/planner/budget.go`
-  ships the pre-call `CheckCall` helper the agent tool-call wrapper
-  invokes. The 75%/90% soft-warning canvas cards are the Go side's
-  responsibility -- the original `tokenBudgetSoftWarning`
-  automation was deleted because computing `spent / budget` needs
-  arithmetic the MemQL parser doesn't support yet. Emit the cards
-  from the planner integration when the threshold crosses on a
-  spend update.
+  ships the pre-call `CheckCall` helper. It is wired into the Planner
+  Agent decompose loop (`integrations/planner/agent_loop_budget.go`,
+  memql#819): before every `plannerAgent` call the loop checks a
+  CUMULATIVE per-plan ceiling (`Plan.metrics.llmCallCount` + token
+  budget, persisted so it survives across cycles/retries) and parks the
+  Plan on exceed rather than making another LLM call. The 75%/90%
+  soft-warning canvas cards remain the Go side's responsibility -- the
+  original `tokenBudgetSoftWarning` automation was deleted because
+  computing `spent / budget` needs arithmetic the MemQL parser doesn't
+  support yet. NOTE: a deeper goal-resolution restructure (cost-aware
+  routing, model tiering, up-front token estimate + user-approval
+  threshold) is tracked in epic memql#836 -- the current cap bounds
+  spend but does not make a trivial request cheap.
 
 - **Cognition plan-triage prompt** --
   `dsl/cognition/prompts/cognitionPlanTriage.tmpl` (schema in
@@ -1888,16 +1894,30 @@ LLM-backed re-analysis ships with the async planner integration.
   per-domain schema proposal called by the entity-inference Plan
   on second-Document trigger.
 
-**What still requires the planner Go integration** (not a schema
-gap -- a build-out): wiring all of the above prompts + helpers
-into a planner-node-owned async dispatch loop that reads queued
-Plans, decomposes via outline + per-phase, calls the prompts,
-checks the budget pre-call, dispatches container-executor work
-when needed, persists task state at parking checkpoints, and
-emits the canvas-state lifecycle cards. The pieces are all there;
-what's missing is the orchestrator that ties them together. The
-current synchronous-in-handler path covers the analyzeFile case
-end-to-end.
+**Planner Agent loop (shipped) + the goal-resolution restructure
+(planned).** The planner-node-owned decompose loop exists
+(`integrations/planner/agent_loop.go`): on a new userGoal Plan it
+invokes the `plannerAgent` prompt, which emits a structured decision
+(decompose / dispatchTask / createSpecialist / markPlanSucceeded /
+escalate), and the loop dispatches it, re-invoking until terminal.
+Safety guards are wired (memql#818): a cumulative per-plan LLM budget
+(#819), a lean prompt projection (#820, strips role embeddings), 429
+backoff (#821), a convergence/no-progress guard (#822), and a global
+identical-request circuit breaker at the provider HTTP chokepoint
+(#825, `component/memql/si_guard.go`).
+
+IMPORTANT (current state): `produceArtifact` (the conversational
+"make me a file" deliverable) does NOT go through this loop -- it uses
+a single-turn bypass (`startPlanDirect` -> running -> the owning agent
+writes the file via the workbench) so a trivial deliverable makes ZERO
+planner LLM calls. An attempt to route it through the loop (#823) was
+reverted (#832) after it re-triggered a cost runaway. The durable fix
+-- complexity triage (trivial -> one cheap call), model tiering
+(escalate to reasoning only on need), up-front token estimate +
+user-approval threshold, phased execution with checkpoints, gated
+specialist training, and a hard process-wide LLM rate ceiling -- is
+tracked in **epic memql#836**. The synchronous-in-handler path still
+covers the analyzeFile case end-to-end.
 
 ## Need Help?
 

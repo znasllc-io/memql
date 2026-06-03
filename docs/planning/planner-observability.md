@@ -1,10 +1,26 @@
 # Planner observability follow-up
 
-**Status:** scoped, not implemented. Pick this up in a focused session.
+**Status:** scoped, not implemented. Folded into epic memql#836
+(goal-resolution architecture: cost-aware routing, model tiering,
+token estimate + user-approval threshold). Pick up the observability
+pieces there.
+
+> **CORRECTION (2026-06-03):** the "switched the default to
+> `streamClaudeSonnet`" claim below is misleading. The prompt's
+> `@defaultProvider` was flipped to Sonnet, but the **`plannerAgent`
+> agent record** (`dsl/agents/plannerAgent.memql`) pins
+> `providerConfig.provider: "reasoningClaudeOpus"`, and the agent-level
+> provider OVERRIDES the prompt default — so the planner kept running
+> Opus 4.6 + extended thinking (~10x cost, per the prompt's own
+> comment). This was a direct contributor to a ~$250 runaway on a
+> trivial request on 2026-06-03. The fix (cheap-by-default, escalate to
+> reasoning only on need) is memql#838 under epic memql#836; the quick
+> win is flipping that one `provider:` line.
+
 **Origin:** 2026-05-17 debugging round — operator hit $35 on a single Plan
 because the planner was on `reasoningClaudeOpus` (Opus + extended thinking)
-and there was no in-app visibility into LLM call count or cost. Tonight we
-switched the default to `streamClaudeSonnet` and added per-call usage
+and there was no in-app visibility into LLM call count or cost. That round
+flipped the prompt default to `streamClaudeSonnet` and added per-call usage
 logging on the Anthropic stream provider, but the integrated per-plan
 token rollup that the cockpit can display is still missing. This doc
 spells out the work.
