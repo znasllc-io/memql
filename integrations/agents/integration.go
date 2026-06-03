@@ -127,8 +127,28 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"spaceId":     "string (optional) -- target space (auto-stamped)",
 			},
 		},
+		{
+			Name:        "produceArtifact",
+			Description: "Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename, and returns {status:\"delegated\", planId, ack}. The plan auto-runs; the deliverable lands in the Library asynchronously.",
+			Handler:     i.handleProduceArtifact,
+			ArgsSchema: map[string]string{
+				"goal":        "string (required) -- the deliverable to produce, phrased as a concrete artifact",
+				"format":      "string (optional) -- output format; defaults to markdown",
+				"filename":    "string (optional) -- preferred filename",
+				"agentId":     "string (optional) -- calling agent id (auto-stamped)",
+				"ownerUserId": "string (required) -- session-owner user id (auto-stamped); becomes the plan's requestedBy",
+				"spaceId":     "string (required) -- space the plan lives in (auto-stamped)",
+			},
+		},
 	}
 }
+
+// produceArtifactKind is the v1:planner:plan.kind the produceArtifact
+// handler stamps. The planner agent loop decomposes plans of this kind
+// through the generic decompose path (it is NOT in the special-cased
+// dispatch list) and auto-starts them (skipping the manual Run gate)
+// so the deliverable is produced asynchronously.
+const produceArtifactKind = "produceArtifact"
 
 // envelopeConcept is the namespace used for the MemoryNode this
 // handler returns. Distinct from any concept-row concept -- this is
@@ -409,6 +429,95 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	}
 	return []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("requestUserFeedback-envelope:%s:%d", planId, time.Now().UnixNano()),
+		Concept:   envelopeConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		CreatedBy: systemActorId,
+		Payload:   payload,
+	}}, nil
+}
+
+// handleProduceArtifact delegates a "produce an artifact" request to the
+// planner. It mints a v1:planner:plan (kind=produceArtifact,
+// triggerSource=user.implicit) via the single mutationCreatePlan write path,
+// carrying the goal + desired format/filename in Plan.input, and returns a
+// small ack {status:"delegated", planId, ack}. The plan auto-runs (the planner
+// agent loop auto-starts produceArtifact plans), so the deliverable is
+// produced + landed in the Library asynchronously while the Assistant just
+// acks and ends its turn. Mirrors createInvocationPlan + the
+// requestUserFeedback ack shape.
+func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil {
+		return nil, fmt.Errorf("produceArtifact: agents integration not initialized")
+	}
+
+	goal := strings.TrimSpace(asString(args["goal"]))
+	if goal == "" {
+		return nil, fmt.Errorf("produceArtifact: 'goal' is required -- describe the deliverable to produce")
+	}
+	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+	if ownerUserId == "" {
+		return nil, fmt.Errorf("produceArtifact: 'ownerUserId' required (auto-injection failed -- no session owner in the turn context)")
+	}
+	spaceId := strings.TrimSpace(asString(args["spaceId"]))
+	if spaceId == "" {
+		return nil, fmt.Errorf("produceArtifact: 'spaceId' required (auto-injection failed -- no space in the turn context)")
+	}
+	// Default the output format to markdown unless the caller named one.
+	format := strings.TrimSpace(asString(args["format"]))
+	if format == "" {
+		format = "markdown"
+	}
+	filename := strings.TrimSpace(asString(args["filename"]))
+
+	planId := id.NewShortId()
+	// Plan.input is the per-kind input shape the executing agent reads to
+	// know WHAT to write + in what format. goal is also the Plan.goal, but
+	// keep it in input too so a downstream consumer that only reads input
+	// has the full picture.
+	input := map[string]any{
+		"kind":   produceArtifactKind,
+		"goal":   goal,
+		"format": format,
+	}
+	if filename != "" {
+		input["filename"] = filename
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("produceArtifact: marshal Plan.input: %w", err)
+	}
+
+	if i.engine == nil {
+		return nil, fmt.Errorf("produceArtifact: engine handle missing")
+	}
+
+	// requestedBy is the OWNING USER so the planner's specialist lookup
+	// (queryActiveAgentsForUser{ownerUserId: requestedBy}) sees the user's
+	// agents, and the produced artifact is owned by the user. The mutation
+	// runs under a synthetic user actor for the same reason
+	// requestUserFeedback does -- the per-tool context doesn't carry the
+	// user's JWT.
+	mutationCtx := withUserActor(ctx, ownerUserId)
+	query := fmt.Sprintf(
+		`mutationCreatePlan({planId: %q, spaceId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s})`,
+		planId, spaceId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
+	)
+	if _, err := i.engine.Execute(mutationCtx, query); err != nil {
+		return nil, fmt.Errorf("produceArtifact: mutationCreatePlan failed: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"status":  "delegated",
+		"planId":  planId,
+		"format":  format,
+		"message": "Delegated to the planner; the deliverable will be produced asynchronously and land in the Library. Reply with a SHORT acknowledgement (e.g. naming what you're making and that it'll be in their Library) and END YOUR TURN -- do NOT author the deliverable yourself.",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("produceArtifact: marshal ack: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        fmt.Sprintf("produceArtifact-envelope:%s:%d", planId, time.Now().UnixNano()),
 		Concept:   envelopeConcept,
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),

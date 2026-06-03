@@ -1,0 +1,51 @@
+// produceArtifact -- delegate a "make me X" request to the planner (async)
+// =========================================================================
+//
+// The Assistant is the conversational front door. For a request that wants
+// something PRODUCED and persisted -- "create a file with the 10 most
+// beautiful birds", "put together a one-pager on our refund policy", "export
+// a CSV of ..." -- the Assistant does NOT try to author the deliverable inline
+// in the chat turn. It calls this tool, which hands the work to the planner
+// and returns IMMEDIATELY. The conversation stays fast and asynchronous: the
+// planner routes/creates the right specialist, does any research, produces the
+// deliverable (default: a markdown file) via the workbench, and lands it in
+// the user's Library -- all in the background.
+//
+// Contrast with a plain QUESTION ("what are the 10 most beautiful birds?"),
+// which the Assistant answers inline via respondToUser. The decision rule
+// (answer vs produce) lives in the agentReply prompt + the workbench knowledge
+// baseline; this tool is the produce-path mechanism.
+//
+// The handler:
+//   1. Mints a v1:planner:plan (kind="produceArtifact", triggerSource=
+//      "user.implicit") via the single mutationCreatePlan write path. The
+//      desired output format + filename ride in Plan.input so the executing
+//      agent knows what to write.
+//   2. Returns a small ack payload {status:"delegated", planId, ack}. The
+//      Assistant reads it, emits a SHORT respondToUser acknowledgement
+//      ("On it -- I'll put that together and drop it in your Library; I'll
+//      let you know when it's ready."), and ENDS ITS TURN.
+//
+// The plan auto-runs (kind="produceArtifact" plans skip the manual Run gate --
+// see the planner agent loop's auto-start), so the user never has to visit the
+// Tasks page. Completion threads back to the conversation + fires a
+// notification (memql#792).
+//
+// allowedRoles: assistant. Specialists ARE the delegates; they never delegate.
+// Mirrors the ensureAgent / requestUserFeedback tool->builtin->integration
+// shape (the builtin is integration.agents.produceArtifact in
+// dsl/agents/builtins.memql).
+
+@enabled
+@handler(type="function", name="produceArtifact")
+@allowedRoles("assistant")
+@executionTime("fast")
+@description("Delegate a PRODUCE request (the user wants a file / document / deliverable created or persisted, not just an answer) to the planner, asynchronously. Returns immediately with a planId. Use this -- NOT an inline answer -- when the user says create / make / build / generate / write / export / save a file, list, doc, report, sheet, etc. Default output is a markdown file in the Library unless the user names another format. After calling it, emit a SHORT acknowledgement via respondToUser and END YOUR TURN; the deliverable lands in the Library in the background. For a plain question the user just wants answered, do NOT call this -- answer inline instead.")
+tool produceArtifact {
+  goal                 string  @required @description("Self-contained description of the deliverable to produce, phrased as a concrete artifact (e.g. 'A markdown file titled \"10 Most Beautiful Birds\" listing ten birds, each with a one-line description'). The planner reads this verbatim to decompose the work, so name WHAT to make and any specifics the user gave; do not include chit-chat.")
+  format               string  @description("Desired output format. Defaults to \"markdown\" when omitted. Set only when the user asked for a specific format (e.g. \"csv\", \"pdf\", \"document\"). The executing agent maps this to the file it writes.")
+  filename             string  @description("Optional preferred filename for the deliverable (without path). When omitted the executing agent derives one from the goal.")
+  agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; the central validator drops any LLM-supplied value before dispatch.")
+  ownerUserId  string  @autoInjected @description("Session-owner user id. Server-stamped; becomes the plan's requestedBy + owner attribution. The central validator drops any LLM-supplied value.")
+  spaceId      string  @autoInjected @description("Space the plan lives in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
+}

@@ -970,6 +970,11 @@ var agentContextStamps = map[string]agentContextStamp{
 	// agentId / ownerUserId scope the mutation's owner attribution and
 	// spaceId targets the canvas card.
 	"requestUserFeedback": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true, SpaceField: "spaceId"},
+	// produceArtifact CREATES a new plan (it doesn't park the active one),
+	// so it needs the calling agent, the owning user (-> the new plan's
+	// requestedBy), and the space the plan lives in. No planId stamp -- the
+	// handler mints a fresh one.
+	"produceArtifact": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
 	// agentId rides inside `actor`. Space is `space`, not `spaceId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance

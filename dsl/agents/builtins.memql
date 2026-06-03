@@ -133,3 +133,27 @@ builtin ensureAgentForGoal {
   spaceId      string
   planId       string
 }
+
+// ---- builtin produceArtifact -----------------------------------------
+//
+// Backs the Assistant's `produceArtifact` tool (dsl/agents/tools/
+// produceArtifact.memql). Mints a v1:planner:plan (kind="produceArtifact",
+// triggerSource="user.implicit") via mutationCreatePlan and returns a small
+// ack {status:"delegated", planId, ack}. The plan auto-runs (the planner
+// agent loop auto-starts produceArtifact plans, skipping the manual Run gate),
+// so the deliverable is produced + landed in the Library asynchronously while
+// the Assistant just acks and ends its turn. Mirrors the requestUserFeedback
+// builtin's "mutate a Plan from the agents integration, return an ack" shape.
+
+@enabled
+@executor("integration.agents.produceArtifact")
+@args(profile="object")
+@description("Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename in Plan.input, and returns {status:\"delegated\", planId, ack}. The plan auto-runs; the deliverable lands in the Library asynchronously.")
+builtin produceArtifact {
+  goal         string    @required
+  format       string
+  filename     string
+  agentId      string
+  ownerUserId  string    @required
+  spaceId      string    @required
+}

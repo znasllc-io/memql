@@ -76,6 +76,10 @@ seed agent assistant {
     // The first three live in memql-bff-copresent/dsl/copresent/skills.memql;
     // the last two ship in dsl/agents/skills/foundational.memql in core.
     // memql#376.
+    //   - delegation-baseline    produceArtifact -- hand off "make me a file"
+    //                            requests to the async planner pipeline
+    //                            instead of authoring deliverables inline
+    //                            (dsl/agents/skills/foundational.memql).
     skillIds: [
       "copresent-takeover",
       "copresent-guide",
@@ -83,6 +87,7 @@ seed agent assistant {
       "copresent-canvas",
       "workbench-baseline",
       "operator-computer-use",
+      "delegation-baseline",
     ]
 
     // tools[] / domains[] are the retired flat-list capability surface

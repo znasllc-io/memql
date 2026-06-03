@@ -24,8 +24,8 @@ func TestIntegrationName(t *testing.T) {
 func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	caps := i.Capabilities()
-	if len(caps) != 4 {
-		t.Fatalf("Capabilities count: got %d want 4 (invoke + ensureForGoal + askSpecialist + requestUserFeedback)", len(caps))
+	if len(caps) != 5 {
+		t.Fatalf("Capabilities count: got %d want 5 (invoke + ensureForGoal + askSpecialist + requestUserFeedback + produceArtifact)", len(caps))
 	}
 	byName := make(map[string]bool, len(caps))
 	for _, c := range caps {
@@ -65,6 +65,13 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 				}
 			}
 		}
+		if c.Name == "produceArtifact" {
+			for _, key := range []string{"goal", "ownerUserId", "spaceId"} {
+				if _, ok := c.ArgsSchema[key]; !ok {
+					t.Errorf("produceArtifact ArgsSchema missing %q", key)
+				}
+			}
+		}
 	}
 	if !byName["invoke"] {
 		t.Error("missing 'invoke' capability")
@@ -77,6 +84,48 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	}
 	if !byName["requestUserFeedback"] {
 		t.Error("missing 'requestUserFeedback' capability")
+	}
+	if !byName["produceArtifact"] {
+		t.Error("missing 'produceArtifact' capability")
+	}
+}
+
+// handleProduceArtifact's early validation paths are testable without a
+// wired engine: missing goal, ownerUserId, and spaceId all fail before the
+// engine.Execute call (the engine-nil check sits after arg validation, as in
+// requestUserFeedback). The success path (mints a Plan via mutationCreatePlan)
+// needs a wired engine + database and is exercised by the cluster, not here.
+
+func TestHandleProduceArtifact_RequiresGoal(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
+		"ownerUserId": "u1",
+		"spaceId":     "s1",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "'goal' is required") {
+		t.Fatalf("expected 'goal' is required error, got: %v", err)
+	}
+}
+
+func TestHandleProduceArtifact_RequiresOwnerUserId(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
+		"goal":    "A markdown file listing 10 birds",
+		"spaceId": "s1",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "'ownerUserId' required") {
+		t.Fatalf("expected 'ownerUserId' required error, got: %v", err)
+	}
+}
+
+func TestHandleProduceArtifact_RequiresSpaceId(t *testing.T) {
+	i := New(memql.NewAgentRegistry(), nil)
+	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
+		"goal":        "A markdown file listing 10 birds",
+		"ownerUserId": "u1",
+	}, 0)
+	if err == nil || !strings.Contains(err.Error(), "'spaceId' required") {
+		t.Fatalf("expected 'spaceId' required error, got: %v", err)
 	}
 }
 
