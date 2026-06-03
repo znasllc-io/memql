@@ -55,6 +55,10 @@ concept artifact {
 
   producedByPlanId string  @description("v1:planner:plan.id that produced this item, when it came from a plan (documents carry document.planId; generated outputs carry the producing plan). Provenance back-pointer surfaced in the detail view.")
 
+  producedByWorkerId string  @description("v1:worker:registration.id of the worker MACHINE that produced this item, when source=computer_use. Lets the Library say WHICH of the user's registered computers a computer-use file came from, and detect when it is the machine the user is currently on. Empty for workbench / agent / uploaded items.")
+
+  producedByWorkerName string  @description("Human-readable name of the producing worker machine (e.g. 'MacBook-Pro'), copied from the worker registration at index time so the Library can label 'Computer use - <machine>' without a join. Empty unless producedByWorkerId is set.")
+
   validationStatus enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")  @default("none")  @description("Validation rollup for document-backed artifacts, mirrored from v1:knowledge:document.validationStatus so the Library can facet on it without a join. 'none' for items that have no validation lifecycle (records, generated outputs).")
 
   updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
@@ -94,6 +98,8 @@ concept generatedOutput {
   spaceId           string  @description("v1:cognition:space.id this output was produced in, when space-scoped.")
   producedByPlanId  string  @description("v1:planner:plan.id that produced this output, when it came from a plan.")
   producedByAgentId string  @description("v1:agents:agent.id that produced this output, when an agent emitted it.")
+  producedByWorkerId   string  @description("v1:worker:registration.id of the worker MACHINE that produced this output, when source=computer_use. Empty otherwise. Copied onto the artifact index row.")
+  producedByWorkerName string  @description("Human-readable name of the producing worker machine, copied from the worker registration at production time. Empty unless producedByWorkerId is set.")
 
   @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
 }

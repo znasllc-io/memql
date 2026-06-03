@@ -50,6 +50,34 @@ func pathBasename(p string) string {
 	return path.Base(p)
 }
 
+// formatForWorkerPath maps a computer-use file path to the
+// v1:library:generatedOutput.format vocabulary by its extension, so a
+// computer-use deliverable lands in the Library with the right viewer
+// classification instead of always inheriting the markdown default
+// (memql#789). Mirrors the workbench integration's formatForExtension.
+// Note: generatedOutput.format has no "conversation" member, so the
+// returned value is restricted to that concept's enum.
+func formatForWorkerPath(p string) string {
+	ext := strings.ToLower(strings.TrimPrefix(path.Ext(pathBasename(p)), "."))
+	switch ext {
+	case "md", "markdown":
+		return "markdown"
+	case "pdf":
+		return "pdf"
+	case "doc", "docx", "odt", "rtf":
+		return "document"
+	case "csv", "tsv", "xls", "xlsx", "ods":
+		return "spreadsheet"
+	case "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff":
+		return "image"
+	case "txt", "log", "json", "yaml", "yml", "xml", "html", "htm",
+		"go", "py", "js", "ts", "sh", "toml", "ini", "conf", "":
+		return "text"
+	default:
+		return "other"
+	}
+}
+
 // Integration registers the agent-side worker capabilities with the
 // MemQL engine. Four capabilities are exposed:
 //
@@ -241,17 +269,44 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	if title == "" {
 		title = path
 	}
-	body := fmt.Sprintf("File written to the connected computer at `%s`.", path)
+
+	// Resolve WHICH of the user's registered machines produced this file
+	// (memql#789). The dispatcher routes to a connected worker for the
+	// owner; surface that machine's id + name as provenance so the Library
+	// can say "Computer use - <machine>" and detect the current machine.
+	// For a single connected worker (the common case) this is exact; with
+	// several connected we take the first, matching the dispatcher's own
+	// owner-scoped resolution.
+	var workerId, workerName string
+	if i.registry != nil {
+		if workers := i.registry.WorkersForUser(ownerUserId); len(workers) > 0 {
+			workerId = strings.TrimSpace(workers[0].RegistrationId)
+			workerName = strings.TrimSpace(workers[0].Name)
+		}
+	}
+
+	machineLabel := workerName
+	if machineLabel == "" {
+		machineLabel = "the connected computer"
+	}
+	body := fmt.Sprintf("File written to %s at `%s`.", machineLabel, path)
+	format := formatForWorkerPath(path)
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
-		outputId, ownerUserId, title, body, "computer_use")
+	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
+		outputId, ownerUserId, title, body, "computer_use", format)
 	if req.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
 	}
 	if req.PlanId != "" {
 		fmt.Fprintf(&b, `, producedByPlanId:%q`, req.PlanId)
+	}
+	if workerId != "" {
+		fmt.Fprintf(&b, `, producedByWorkerId:%q`, workerId)
+	}
+	if workerName != "" {
+		fmt.Fprintf(&b, `, producedByWorkerName:%q`, workerName)
 	}
 	b.WriteString("})")
 
