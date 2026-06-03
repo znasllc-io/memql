@@ -56,6 +56,16 @@ const (
 	// publish rather than speaking with its own bundled voice.
 	anamClientAudioLLM = "CUSTOMER_CLIENT_V1"
 
+	// anamRealtimeAvatarModel is the Anam rendering model the engine uses to
+	// generate the live video stream. CARA is Anam's real-time diffusion model
+	// (the one that publishes a synchronized video track into LiveKit); without
+	// an explicit avatarModel the engine defaults to the avatar's stored v2
+	// model, which does NOT publish video in the LiveKit client-audio path --
+	// the engine joins, takes our audio, then closes with no video track
+	// (memql#772). Anam's own OpenAI-Realtime + LiveKit cookbook sends
+	// avatarModel:"cara-4-latest" in the ephemeral personaConfig; we mirror it.
+	anamRealtimeAvatarModel = "cara-4-latest"
+
 	// anamAPIBase / simliAPIBase are the vendor REST roots. Both are
 	// overridable per-plan (avatar_url) so a test or a self-hosted deployment
 	// can point elsewhere; these are the production defaults.

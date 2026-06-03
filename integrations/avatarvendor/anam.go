@@ -115,10 +115,11 @@ func (c *anamClient) resolveAvatarID(ctx context.Context) (string, error) {
 func (c *anamClient) createSessionToken(ctx context.Context, avatarID, livekitURL, livekitToken string) (string, error) {
 	payload := map[string]any{
 		"personaConfig": map[string]any{
-			"type":     "ephemeral",
-			"name":     c.displayName(),
-			"avatarId": avatarID,
-			"llmId":    anamClientAudioLLM,
+			"type":        "ephemeral",
+			"name":        c.displayName(),
+			"avatarId":    avatarID,
+			"avatarModel": anamRealtimeAvatarModel,
+			"llmId":       anamClientAudioLLM,
 		},
 		"environment": map[string]any{
 			"livekitUrl":   livekitURL,

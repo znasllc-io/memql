@@ -102,6 +102,7 @@ func TestAnamClient_StartPersonaIDShape(t *testing.T) {
 	assert.Equal(t, "ephemeral", pc["type"])
 	assert.Equal(t, "avatar-from-persona", pc["avatarId"])
 	assert.Equal(t, anamClientAudioLLM, pc["llmId"])
+	assert.Equal(t, anamRealtimeAvatarModel, pc["avatarModel"])
 	assert.Equal(t, "Sofia", pc["name"])
 	env, ok := tok.body["environment"].(map[string]any)
 	require.True(t, ok, "environment present")
