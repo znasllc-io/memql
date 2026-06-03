@@ -23,7 +23,7 @@ use agents.concepts.{ agent }
 @templateFile("templates/assistant.tmpl")
 @description("Per-user Assistant baseline. Designated fallback when no specialist fits; owns operator-facing UI-driving tools.")
 seed agent assistant {
-  name:        "Assistant"
+  name:        "Sofia"
   description: "Designated fallback when no specialist fits."
   personality: "Friendly, capable, proactive."
   kind:        "assistant"
