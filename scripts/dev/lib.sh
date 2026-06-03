@@ -553,31 +553,90 @@ function lib_prune_docker_build_cache() {
 # -----------------------------------------------------------------
 
 readonly LIB_NGROK_LIVEKIT_PORT=7880
+readonly LIB_COTURN_PORT=3478
 readonly LIB_NGROK_API="http://127.0.0.1:4040/api/tunnels"
-readonly LIB_NGROK_LOG="/tmp/ngrok-livekit.log"
+readonly LIB_NGROK_LOG="/tmp/ngrok-memql.log"
+readonly LIB_NGROK_TUNNELS_CONFIG="/tmp/memql-ngrok-tunnels.yml"
 
-# lib_refresh_ngrok tears down any existing ngrok HTTP tunnel and
-# starts a fresh one in front of localhost:LIB_NGROK_LIVEKIT_PORT
-# (the polyphon-livekit container's published port), then upserts
-# LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL in the env file
-# the cluster reads (GENESIS_ENV_FILE in the genesis flow, else
-# .env.local) so the stack picks up the new URL on the next start.
+# lib_refresh_ngrok tears down any existing ngrok agent and starts a
+# fresh one running BOTH endpoints the local Anam-avatar stack needs,
+# from a SINGLE agent (`ngrok start --all`):
 #
-# The function is best-effort: returns 1 (non-fatal) when ngrok
-# is unavailable or no env file is present, so refresh.sh
-# can keep going without poisoning the whole dev-refresh flow.
-# Real terminal failures (ngrok crashes mid-startup) still bubble
-# up via set -e on the calling script.
+#   - livekit (HTTPS) -> localhost:7880  -- LiveKit signaling. Anam's
+#     cloud engine dials in over it; the browser uses it too.
+#   - coturn  (TCP)   -> localhost:3478  -- the TURN media relay so
+#     Anam's cloud can exchange WebRTC media with the local LiveKit
+#     (memql#770). lib_refresh_turn_relay stamps this tunnel's
+#     host:port into livekit-dev.yaml after the stack is up.
 #
-# Used by scripts/dev/ngrok-up.sh (interactive, plus restarts
-# services) and scripts/dev/refresh.sh (between docker down + up
-# so services come up with the new URL on first boot).
+# One agent (not two) because ngrok v3 binds a single local API on
+# :4040; two agents collide there. The two endpoints live in a
+# generated config merged over the user's global ngrok.yml (which
+# carries the authtoken) via repeatable `--config`.
+#
+# Upserts LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL (from the
+# https tunnel) into the env file the cluster reads. Best-effort:
+# returns 1 (non-fatal) when ngrok is unavailable or no env file is
+# present, so refresh.sh keeps going.
+#
+# Used by scripts/dev/ngrok-up.sh (interactive) and
+# scripts/dev/refresh.sh (between docker down + up).
 function lib_ngrok_install_hint() {
     case "$(uname -s)" in
         Darwin) echo "brew install ngrok" ;;
         Linux)  echo "snap install ngrok  (or download from https://ngrok.com/download)" ;;
         *)      echo "see https://ngrok.com/download" ;;
     esac
+}
+
+# lib_ngrok_global_config echoes the path to the user's ngrok config
+# (which holds the authtoken), parsed from `ngrok config check`, or
+# empty when not found.
+function lib_ngrok_global_config() {
+    ngrok config check 2>&1 | grep -oE '/[^ ]*ngrok\.yml' | head -1
+}
+
+# lib_write_ngrok_tunnels_config generates the v3 endpoints file
+# defining the livekit (https) + coturn (tcp) tunnels. When
+# MEMQL_NGROK_TURN_ADDR is set (a reserved ngrok TCP addr like
+# 1.tcp.us-cal-1.ngrok.io:12345) the coturn endpoint pins it so
+# host:port stay stable across restarts; otherwise ngrok assigns a
+# dynamic addr each run (re-stamped by lib_refresh_turn_relay).
+# v3 syntax: the protocol comes from the endpoint `url` scheme --
+# `tcp://` for an ephemeral TCP endpoint -- not a `protocol:` field.
+function lib_write_ngrok_tunnels_config() {
+    local coturn_url="tcp://"
+    if [ -n "${MEMQL_NGROK_TURN_ADDR:-}" ]; then
+        coturn_url="tcp://${MEMQL_NGROK_TURN_ADDR}"
+    fi
+    cat > "${LIB_NGROK_TUNNELS_CONFIG}" <<YAML
+version: "3"
+endpoints:
+  - name: livekit
+    upstream:
+      url: ${LIB_NGROK_LIVEKIT_PORT}
+  - name: coturn
+    url: ${coturn_url}
+    upstream:
+      url: ${LIB_COTURN_PORT}
+YAML
+}
+
+# lib_ngrok_tunnel_url echoes the public_url of the first tunnel whose
+# proto matches $1 (https | tcp) from the local ngrok API, or empty.
+function lib_ngrok_tunnel_url() {
+    local proto="$1"
+    curl -s "${LIB_NGROK_API}" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for t in data.get('tunnels', []):
+    if t.get('proto') == '${proto}' and t.get('public_url'):
+        print(t['public_url'])
+        break
+" 2>/dev/null || true
 }
 
 function lib_refresh_ngrok() {
@@ -607,52 +666,44 @@ function lib_refresh_ngrok() {
         return 1
     fi
 
-    # Tear down any prior ngrok agent. Free tier allows one running
-    # agent per machine and reuses port 4040 for its local API, so
-    # a stale process would shadow the new tunnel's URL when we
-    # poll the API. pkill returns non-zero if no match -- that's
-    # fine, we just want a clean slate.
-    if pgrep -f "ngrok http" >/dev/null 2>&1; then
-        pkill -f "ngrok http" || true
+    # Tear down any prior ngrok agent so it doesn't shadow the new
+    # agent's :4040 API. `-x ngrok` matches the agent process exactly
+    # (NOT this script's command line, which would self-kill).
+    if pgrep -x ngrok >/dev/null 2>&1; then
+        pkill -x ngrok || true
         sleep 1
     fi
 
-    echo "  Starting ngrok HTTPS tunnel for localhost:${LIB_NGROK_LIVEKIT_PORT}..."
-    nohup ngrok http "${LIB_NGROK_LIVEKIT_PORT}" --log=stdout > "${LIB_NGROK_LOG}" 2>&1 &
+    lib_write_ngrok_tunnels_config
+    local global_cfg
+    global_cfg="$(lib_ngrok_global_config)"
+    local cfg_flags=(--config "${LIB_NGROK_TUNNELS_CONFIG}")
+    if [ -n "${global_cfg}" ]; then
+        # global config first (authtoken), tunnels file merged on top.
+        cfg_flags=(--config "${global_cfg}" --config "${LIB_NGROK_TUNNELS_CONFIG}")
+    fi
+
+    echo "  Starting ngrok agent (livekit https:${LIB_NGROK_LIVEKIT_PORT} + coturn tcp:${LIB_COTURN_PORT})..."
+    nohup ngrok start --all "${cfg_flags[@]}" --log=stdout > "${LIB_NGROK_LOG}" 2>&1 &
     disown
 
-    # Poll until the API is up AND the tunnel is registered with a
-    # public URL. The two states aren't simultaneous: the inspector
-    # API on :4040 comes up before ngrok finishes negotiating the
-    # tunnel with their edge, so an "is the API responsive" check
-    # exits the loop too early and we read back an empty tunnel
-    # list. ngrok typically completes negotiation in ~1-2s; allow
-    # 20s before giving up so a slow connection doesn't false-fail.
+    # Poll until the API is up AND the https tunnel is registered. The
+    # two aren't simultaneous: the :4040 API comes up before the edge
+    # negotiation finishes, so an "API responsive" check alone reads
+    # back an empty tunnel list. Allow 20s.
     local attempts=0
     local https_url=""
     while [ -z "$https_url" ]; do
         attempts=$((attempts + 1))
         if [ "$attempts" -gt 40 ]; then
-            echo "  WARNING: ngrok tunnel didn't register within 20s. Tail:"
+            echo "  WARNING: ngrok https tunnel didn't register within 20s. Tail:"
             tail -10 "${LIB_NGROK_LOG}" 2>/dev/null | sed 's/^/    /' || true
             return 1
         fi
         if curl -fs "${LIB_NGROK_API}" >/dev/null 2>&1; then
-            https_url=$(curl -s "${LIB_NGROK_API}" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for t in data.get('tunnels', []):
-    if t.get('proto') == 'https' and t.get('public_url'):
-        print(t['public_url'])
-        break
-" 2>/dev/null || true)
+            https_url="$(lib_ngrok_tunnel_url https)"
         fi
-        if [ -z "$https_url" ]; then
-            sleep 0.5
-        fi
+        [ -z "$https_url" ] && sleep 0.5
     done
 
     local wss_url="${https_url/https:/wss:}"
@@ -664,7 +715,7 @@ for t in data.get('tunnels', []):
     lib_ngrok_upsert_env "${envfile}" "LIVEKIT_PUBLIC_URL" "${wss_url}"
     lib_ngrok_upsert_env "${envfile}" "POLYPHON_LIVEKIT_PUBLIC_URL" "${wss_url}"
 
-    echo "  ngrok up: ${https_url}"
+    echo "  ngrok up: ${https_url} (+ coturn tcp tunnel; stamped post-compose by lib_refresh_turn_relay)"
     echo "  ${envfile} updated: LIVEKIT_PUBLIC_URL + POLYPHON_LIVEKIT_PUBLIC_URL=${wss_url}"
     return 0
 }
@@ -688,33 +739,30 @@ function lib_ngrok_upsert_env() {
 #
 # The Anam direct/Guide avatar needs Anam's CLOUD engine to relay WebRTC
 # media into the LOCAL dev LiveKit. coturn (the memql-coturn compose
-# service) does the relay; Anam reaches it over a RAW ngrok TCP endpoint.
-# This function stands that tunnel up and stamps the three
-# environment-specific values into docker/livekit/livekit-dev.yaml:
+# service) does the relay; Anam reaches it over the RAW ngrok TCP endpoint
+# that lib_refresh_ngrok already stood up (the `coturn` tunnel on the
+# single ngrok agent). This function, run AFTER the stack is up, stamps
+# the three environment-specific values into docker/livekit/livekit-dev.yaml:
 #   - rtc.node_ip               -> polyphon-livekit's docker-bridge IP
+#                                  (NOT 127.0.0.1 -- loopback makes Anam's
+#                                  TURN CreatePermission fail 403, and ICE
+#                                  fails with only-loopback candidates)
 #   - rtc.turn_servers[0].host  -> the ngrok TCP tunnel host
 #   - rtc.turn_servers[0].port  -> the ngrok TCP tunnel port
 # then restarts polyphon-livekit so it reloads the stamped config.
 #
-# This runs as a SEPARATE ngrok agent (own web-addr :4041) from the
-# LiveKit-signaling HTTPS tunnel (lib_refresh_ngrok, :4040), so the two
-# never shadow each other's local API. Running two agents needs an ngrok
-# plan that allows it (the dev account is PAYG, which does).
+# The TCP tunnel host:port is read from the SAME ngrok agent's :4040 API
+# (lib_ngrok_tunnel_url tcp) -- one agent serves both tunnels.
 #
 # Set MEMQL_NGROK_TURN_ADDR to a RESERVED ngrok TCP addr (e.g.
 # "1.tcp.us-cal-1.ngrok.io:12345") so host:port stay STABLE across
-# restarts -- otherwise ngrok hands out a fresh dynamic addr each run and
-# Anam can't be pre-configured. Reserve one in the ngrok dashboard once;
-# see docs/voice/turn-relay.md.
+# restarts -- otherwise ngrok hands out a fresh dynamic addr each run.
+# Reserve one in the ngrok dashboard once; see docs/voice/turn-relay.md.
 #
-# Best-effort: returns 1 (non-fatal) when ngrok / docker / the config are
-# unavailable so refresh.sh keeps going (the browser voice path does not
-# need the relay; only the Anam avatar does).
+# Best-effort: returns 1 (non-fatal) when the ngrok TCP tunnel / docker /
+# the config are unavailable so refresh.sh keeps going (the browser voice
+# path does not need the relay; only the Anam avatar does).
 
-readonly LIB_NGROK_TURN_PORT=3478
-readonly LIB_NGROK_TURN_WEBADDR="localhost:4041"
-readonly LIB_NGROK_TURN_API="http://127.0.0.1:4041/api/tunnels"
-readonly LIB_NGROK_TURN_LOG="/tmp/ngrok-turn.log"
 readonly LIB_LIVEKIT_CONFIG="docker/livekit/livekit-dev.yaml"
 readonly LIB_LIVEKIT_CONTAINER="polyphon-livekit"
 
@@ -728,7 +776,7 @@ function lib_livekit_docker_ip() {
 
 # lib_stamp_livekit_value replaces an indented `<key>: <value>` line in
 # livekit-dev.yaml in place. anchor is the full leading-whitespace+key
-# prefix (e.g. "  node_ip: " or "      host: ") so the match is unique.
+# prefix (e.g. "  node_ip: " or "    - host: ") so the match is unique.
 function lib_stamp_livekit_value() {
     local anchor="$1" val="$2"
     sed -i.bak -e "s|^${anchor}.*|${anchor}${val}|" "${LIB_LIVEKIT_CONFIG}"
@@ -736,10 +784,6 @@ function lib_stamp_livekit_value() {
 }
 
 function lib_refresh_turn_relay() {
-    if ! command -v ngrok >/dev/null 2>&1; then
-        echo "  INFO: ngrok CLI not found -- skipping TURN relay (Anam avatar disabled)."
-        return 1
-    fi
     if [ ! -f "${LIB_LIVEKIT_CONFIG}" ]; then
         echo "  INFO: ${LIB_LIVEKIT_CONFIG} missing -- skipping TURN relay."
         return 1
@@ -752,47 +796,18 @@ function lib_refresh_turn_relay() {
         echo "  WARNING: ${LIB_LIVEKIT_CONTAINER} not running -- cannot read its docker IP; skipping TURN relay."
         return 1
     fi
-    lib_stamp_livekit_value "  node_ip: " "${lk_ip}"
 
-    # 2. Stand up the ngrok TCP tunnel to coturn (separate agent / API).
-    if pgrep -f "ngrok tcp" >/dev/null 2>&1; then
-        pkill -f "ngrok tcp" || true
-        sleep 1
-    fi
-    local remote_flag=()
-    if [ -n "${MEMQL_NGROK_TURN_ADDR:-}" ]; then
-        remote_flag=(--remote-addr "${MEMQL_NGROK_TURN_ADDR}")
-        echo "  Starting ngrok TCP tunnel for coturn (reserved ${MEMQL_NGROK_TURN_ADDR})..."
-    else
-        echo "  Starting ngrok TCP tunnel for coturn (dynamic addr -- set MEMQL_NGROK_TURN_ADDR to pin it)..."
-    fi
-    nohup ngrok tcp "${LIB_NGROK_TURN_PORT}" "${remote_flag[@]}" \
-        --web-addr "${LIB_NGROK_TURN_WEBADDR}" --log=stdout \
-        > "${LIB_NGROK_TURN_LOG}" 2>&1 &
-    disown
-
-    # 3. Poll the tunnel's own API for its tcp:// public URL.
+    # 2. Read the coturn TCP tunnel (already up via lib_refresh_ngrok) from
+    #    the shared ngrok :4040 API. Allow a few seconds in case the TCP
+    #    endpoint registered slightly after the https one.
     local attempts=0 tcp_url=""
     while [ -z "${tcp_url}" ]; do
         attempts=$((attempts + 1))
-        if [ "${attempts}" -gt 40 ]; then
-            echo "  WARNING: ngrok TCP tunnel didn't register within 20s. Tail:"
-            tail -10 "${LIB_NGROK_TURN_LOG}" 2>/dev/null | sed 's/^/    /' || true
+        if [ "${attempts}" -gt 20 ]; then
+            echo "  WARNING: no ngrok TCP (coturn) tunnel registered -- is lib_refresh_ngrok's agent up? Skipping TURN stamp."
             return 1
         fi
-        if curl -fs "${LIB_NGROK_TURN_API}" >/dev/null 2>&1; then
-            tcp_url=$(curl -s "${LIB_NGROK_TURN_API}" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for t in data.get('tunnels', []):
-    if t.get('proto') == 'tcp' and t.get('public_url'):
-        print(t['public_url'])
-        break
-" 2>/dev/null || true)
-        fi
+        tcp_url="$(lib_ngrok_tunnel_url tcp)"
         [ -z "${tcp_url}" ] && sleep 0.5
     done
 
@@ -805,13 +820,14 @@ for t in data.get('tunnels', []):
         return 1
     fi
 
-    # 4. Stamp the tunnel host:port into livekit-dev.yaml's turn_servers.
+    # 3. Stamp node_ip + the tunnel host:port into livekit-dev.yaml.
     #    `host` is the first key on the YAML list-item dash line
     #    ("    - host: "); `port` is a 6-space continuation key.
+    lib_stamp_livekit_value "  node_ip: " "${lk_ip}"
     lib_stamp_livekit_value "    - host: " "${turn_host}"
     lib_stamp_livekit_value "      port: " "${turn_port}"
 
-    # 5. Restart LiveKit so it reloads the stamped config (mounted ro,
+    # 4. Restart LiveKit so it reloads the stamped config (mounted ro,
     #    read once at boot). Best-effort -- the polyphon compose owns it.
     docker restart "${LIB_LIVEKIT_CONTAINER}" >/dev/null 2>&1 || true
 
