@@ -140,9 +140,21 @@ func validateDisplayCard(conceptName string, card *DisplayCard, props []parsedPr
 		if fieldName == "" {
 			return nil
 		}
+		// Row intrinsics (createdAt, createdBy, id, ...) are real,
+		// always-present row columns that a card may render, but they
+		// can NOT be declared as concept properties (the loader rejects
+		// reserved fields), so they never appear in byName. Accept the
+		// displayable ones directly -- this is the only way a card can
+		// surface e.g. tertiary="createdAt". See memql#771.
+		if t, ok := displayableIntrinsicType(fieldName); ok {
+			if !isDisplayableType(t) {
+				return fmt.Errorf("@displayCard on concept %q: %s=%q references intrinsic of type %q which is not displayable", conceptName, slot, fieldName, t)
+			}
+			return nil
+		}
 		prop, ok := byName[fieldName]
 		if !ok {
-			return fmt.Errorf("@displayCard on concept %q: %s=%q references unknown field (must match a top-level concept property)", conceptName, slot, fieldName)
+			return fmt.Errorf("@displayCard on concept %q: %s=%q references unknown field (must match a top-level concept property or a displayable row intrinsic)", conceptName, slot, fieldName)
 		}
 		if !isDisplayableType(prop.typeName) {
 			return fmt.Errorf("@displayCard on concept %q: %s=%q references field of type %q which is not displayable (allowed: string, enum, bool, datetime, int, float)", conceptName, slot, fieldName, prop.typeName)
@@ -162,6 +174,24 @@ func validateDisplayCard(conceptName string, card *DisplayCard, props []parsedPr
 		return err
 	}
 	return nil
+}
+
+// displayableIntrinsicType returns the implicit type of a row
+// intrinsic that a displayCard slot may reference, and whether the
+// name is such an intrinsic. Intrinsics are the always-present row
+// columns (id, createdAt, createdBy, concept, type) that can't be
+// declared as concept properties yet are legitimately renderable in a
+// card. The non-scalar intrinsics (payload, schema) and the
+// isolation-only partition column are intentionally excluded -- they
+// don't reduce to a sensible single cell. See memql#771.
+func displayableIntrinsicType(name string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "createdat":
+		return "datetime", true
+	case "id", "createdby", "concept", "type":
+		return "string", true
+	}
+	return "", false
 }
 
 // isDisplayableType reports whether a property type can land in a
