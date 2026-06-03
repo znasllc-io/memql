@@ -26,19 +26,30 @@ LiveKit advertises the external coturn to every participant via
 `rtc.turn_servers` in `docker/livekit/livekit-dev.yaml`; Anam picks it
 up in its join response and relays through it.
 
-## What dev-refresh does (`step4c_turn_relay`)
+## What dev-refresh does
 
-`scripts/dev/lib.sh:lib_refresh_turn_relay` (called from
-`scripts/dev/refresh.sh`) after the stack is up:
+A single `make dev-refresh` brings the whole relay up, in two steps:
 
-1. Reads `polyphon-livekit`'s docker-bridge IP and stamps it into
-   `livekit-dev.yaml` `rtc.node_ip`.
-2. Starts an `ngrok tcp 3478` tunnel to coturn (a **separate** ngrok
-   agent on web-addr `:4041`, so it never shadows the LiveKit-signaling
-   HTTPS tunnel on `:4040`).
-3. Resolves the tunnel's `tcp://host:port` and stamps it into
-   `rtc.turn_servers[0]` host/port.
-4. Restarts `polyphon-livekit` so it reloads the stamped config.
+**`lib_refresh_ngrok`** (before compose-up) starts **one** ngrok agent
+running **both** endpoints via `ngrok start --all` over a generated
+config merged on top of the user's global `ngrok.yml` (for the
+authtoken):
+- `livekit` (https) -> `localhost:7880` -- LiveKit signaling; stamped
+  into `LIVEKIT_PUBLIC_URL` / `POLYPHON_LIVEKIT_PUBLIC_URL`.
+- `coturn` (tcp) -> `localhost:3478` -- the TURN relay.
+
+One agent (not two) because ngrok v3 binds a single local API on
+`:4040`; two agents collide there. The generated config uses v3
+`endpoints:` syntax, where the TCP protocol comes from the endpoint
+`url: tcp://` (an ephemeral addr, or `tcp://<MEMQL_NGROK_TURN_ADDR>`
+when a reserved one is set) -- there is no `protocol:` field.
+
+**`lib_refresh_turn_relay`** (`step4c` in `refresh.sh`, after the stack
+is up) then:
+1. Reads `polyphon-livekit`'s docker-bridge IP -> stamps `rtc.node_ip`.
+2. Reads the `coturn` tcp tunnel's `host:port` from the same ngrok
+   `:4040` API -> stamps `rtc.turn_servers[0]`.
+3. Restarts `polyphon-livekit` so it reloads the stamped config.
 
 `coturn` itself is the `memql-coturn` service in
 `docker/docker-compose.polyphon.yml`; it comes up with the rest of the
@@ -57,11 +68,12 @@ address once (requires a pay-as-you-go ngrok plan) and pin it:
    ```bash
    export MEMQL_NGROK_TURN_ADDR=1.tcp.us-cal-1.ngrok.io:12345
    ```
-   `lib_refresh_turn_relay` passes it to `ngrok tcp --remote-addr` so
-   host:port stay stable across restarts.
+   `lib_write_ngrok_tunnels_config` pins it as the coturn endpoint's
+   `url: tcp://<addr>` so host:port stay stable across restarts.
 
-Running both the signaling HTTPS tunnel and this TCP tunnel at once
-needs a plan that allows two simultaneous agents (PAYG does).
+Both tunnels run from a single ngrok agent (`ngrok start --all`), so a
+reserved TCP address is the only paid-plan dependency; a stock free
+agent still brings the relay up on a dynamic addr each refresh.
 
 ## Credential
 
