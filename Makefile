@@ -615,7 +615,25 @@ deploy-setup:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-.PHONY: db-provision deploy deploy-rollback
+.PHONY: db-provision blob-provision deploy deploy-rollback
+
+## Provision (create-or-verify) a dedicated Azure Storage account + blob
+## container for ENV and print the connection string for inclusion in the
+## genesis envelope (znasllc-io/memql#807, epic #805). Idempotent: re-running
+## detects the existing account and container and prints the current conn string.
+## Implementation lives in scripts/deploy/blob-provision.sh per the
+## function-based shell-script convention (CLAUDE.md).
+## NOTE: requires `az login`. Prints MEMQL_AZURE_STORAGE_CONNECTION_STRING for
+## manual placement into ~/Downloads/<env>.genesis.env (not wired to Key Vault
+## directly -- see docs/deploy/blob-provision.md for the full runbook).
+##   make blob-provision                          # staging
+##   make blob-provision DRY_RUN=1                # staging, plan only
+##   make blob-provision ENV=production DRY_RUN=1
+blob-provision:
+	@bash scripts/deploy/blob-provision.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
 
 ## Provision the managed Tiger Cloud DB (Timescale Community + pgvector)
 ## for ENV in Azure East US and wire its DSN into the per-env Key Vault
@@ -812,6 +830,8 @@ help:
 	@echo "  make deploy-setup DRY_RUN=1    Same, but print the plan without mutating"
 	@echo "  make db-provision              Provision Tiger Cloud DB + wire DSN to Key Vault (ENV=...)"
 	@echo "  make db-provision DRY_RUN=1    Same, but print the plan without mutating"
+	@echo "  make blob-provision            Provision Azure Storage account + container; print conn string (#807)"
+	@echo "  make blob-provision DRY_RUN=1  Same, but print the plan without mutating"
 	@echo "  make deploy                    Build/push + deploy the cluster to Container Apps (ENV=...)"
 	@echo "  make deploy DRY_RUN=1          Same, but print the full deploy plan without mutating"
 	@echo ""
