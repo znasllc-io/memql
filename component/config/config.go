@@ -110,8 +110,10 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		NodeLabels:         envStr("MEMQL_NODE_LABELS"),
 		NodeServiceAddress: envStr("MEMQL_NODE_SERVICE_ADDRESS"),
 
-		// GCS
-		GcsBucket: envStr("MEMQL_GCS_BUCKET"),
+		// Object storage is Azure Blob (memql#801); the agent node reads
+		// MEMQL_AZURE_BLOB_CONTAINER + MEMQL_AZURE_STORAGE_CONNECTION_STRING
+		// directly in app/transport_agent.go. (The legacy ConfigSnapshot
+		// GcsBucket field is unused and left unset.)
 
 		// Runtime-mutable
 		DemoMode: envBool("MEMQL_DEMO_MODE"),

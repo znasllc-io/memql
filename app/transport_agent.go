@@ -7,7 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
 	"github.com/znasllc-io/memql/component/server"
-	"github.com/znasllc-io/memql/integrations/gcs"
+	"github.com/znasllc-io/memql/integrations/azureblob"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
 
@@ -38,34 +38,35 @@ func (a *App) transportAgent() {
 	// Audio WebSocket (shared with the voice node; see transport_audio.go).
 	a.setupAudioWebsocket()
 
-	// Attachment upload endpoints
+	// Attachment upload endpoints. Storage backend is Azure Blob (memql#801);
+	// the "bucket" arg below is the Azure container name.
 	var uploader server.FileUploader
-	gcsBucket := gcs.BucketFromEnv()
-	if gcsBucket != "" {
-		gcsClient, err := gcs.New(context.Background())
+	blobContainer := azureblob.ContainerFromEnv()
+	if blobContainer != "" {
+		blobClient, err := azureblob.New(context.Background())
 		if err != nil {
-			a.Logger.Warn("GCS uploader unavailable", "error", err)
+			a.Logger.Warn("Azure Blob uploader unavailable", "error", err)
 		} else {
-			uploader = gcsClient
+			uploader = blobClient
 		}
 	}
-	// memql#733: hand the workbench integration the same GCS uploader so a
+	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
 	// successful LOCAL fs_write uploads its bytes to v1:common:attachment
 	// and the Library generatedOutput row carries a real attachmentId
 	// (cluster writes stay inline pointers). Only on the agent node, only
-	// when a bucket is configured; the integration was already
+	// when a container is configured; the integration was already
 	// materialized (with SetEngine) during integrationsAgent, which runs
 	// before transport. nil-safe inside the setter / promotion path.
 	if uploader != nil {
 		if wb := a.lookupWorkbenchIntegration(); wb != nil {
-			wb.SetAttachmentUploader(uploader, gcsBucket)
+			wb.SetAttachmentUploader(uploader, blobContainer)
 		}
-		// memql#794: same GCS uploader for the computer-use path so a worker
+		// memql#794: same uploader for the computer-use path so a worker
 		// fs_write's bytes (which the agent already forwarded) upload to a
 		// v1:common:attachment and the Library row is downloadable. Without a
-		// bucket, computer-use rows stay worker-local pointers (memql#789).
+		// container, computer-use rows stay worker-local pointers (memql#789).
 		if wo := a.lookupWorkerIntegration(); wo != nil {
-			wo.SetAttachmentUploader(uploader, gcsBucket)
+			wo.SetAttachmentUploader(uploader, blobContainer)
 		}
 	}
 
@@ -75,7 +76,7 @@ func (a *App) transportAgent() {
 	planStore := server.NewEnginePlanStore(engineAdapter)
 	attachmentHandler := server.NewAttachmentHandler(server.AttachmentHandlerOptions{
 		Logger:    a.Logger,
-		Bucket:    gcsBucket,
+		Bucket:    blobContainer,
 		Uploader:  uploader,
 		Extractor: processor,
 		Store:     store,
