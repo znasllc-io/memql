@@ -1,6 +1,7 @@
 package dsl
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -22,15 +23,52 @@ func TestUnifiedTreeLoadsClean(t *testing.T) {
 	t.Logf("loaded %d files from unified tree", len(tree.Files))
 }
 
-// TestUnifiedTreeCoversAllDomains spot-checks that every expected
-// top-level domain folder is present in the embed.
+// TestUnifiedTreeCoversAllDomains guards against the embed-omission
+// class (memql#771: the whole dsl/library/ namespace was authored on
+// disk but never added to the go:embed directive, so none of its
+// concepts / queries / mutations loaded and every Library read failed
+// `function not found`). Rather than a hand-maintained allow-list --
+// which is precisely what let library slip through -- it derives the
+// expected domains from the on-disk dsl/ tree (the test's CWD is the
+// package source dir) and asserts every authored namespace directory
+// is reachable through the embedded Tree(). Add a namespace dir on
+// disk without updating the embed list and this fails.
 func TestUnifiedTreeCoversAllDomains(t *testing.T) {
-	want := []string{
-		"agents", "calendar", "cluster", "cognition", "common", "curriculum",
-		"data", "guide", "harness", "identity", "knowledge", "memql",
-		"notes", "planner", "platform", "policies", "providers", "router",
-		"todos", "worker",
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir(.): %v", err)
 	}
+	var want []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// `_reference` (and any underscore-prefixed dir) holds
+		// authoring skeletons that are intentionally NOT embedded.
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		// A namespace dir is one that actually carries .memql sources.
+		hasMemql := false
+		files, err := os.ReadDir(name)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), ".memql") {
+				hasMemql = true
+				break
+			}
+		}
+		if hasMemql {
+			want = append(want, name)
+		}
+	}
+	if len(want) == 0 {
+		t.Fatal("no on-disk namespace dirs found; test harness misconfigured")
+	}
+
 	paths, err := dslfs.WalkMemqlFiles(Tree())
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
@@ -44,7 +82,7 @@ func TestUnifiedTreeCoversAllDomains(t *testing.T) {
 	}
 	for _, d := range want {
 		if !got[d] {
-			t.Errorf("domain %q missing from unified tree", d)
+			t.Errorf("namespace %q exists on disk but is missing from the embedded Tree() -- add `all:%s` to the go:embed directive in embed.go", d, d)
 		}
 	}
 }
