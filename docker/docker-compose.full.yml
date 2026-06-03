@@ -123,6 +123,16 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
+    healthcheck:
+      # nginx (and any gRPC client routed through it) must wait for the
+      # bff's HTTP/gRPC listeners to ACCEPT before traffic flows, else a
+      # request that races bring-up gets a 502 from the LB (copresent#313).
+      # Mirrors the identity gate. 8088 is the bff's HTTP server (/healthz).
+      test: ["CMD", "/app/healthcheck", "8088"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     networks:
       - memql
     restart: unless-stopped
@@ -160,9 +170,12 @@ services:
       # Vite natively on the host; host-gateway makes it work on Linux.
       - "host.docker.internal:host-gateway"
     depends_on:
-      - bff
-      - identity
-      - agent
+      bff:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      agent:
+        condition: service_started
     networks:
       - memql
     restart: unless-stopped
