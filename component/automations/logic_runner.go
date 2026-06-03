@@ -102,7 +102,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// bootstrap (SetEventBus) before this runner is constructed, so it's
 		// non-nil at runtime; stripped binaries with no bus keep the prior
 		// graceful "event bus not configured" error on the emit step. memql#572.
-		EventBus:  r.engine.EventBus(),
+		EventBus: r.engine.EventBus(),
 		Execution: &AutomationExecution{
 			ID:             fmt.Sprintf("logic-%s-%d", fnName, time.Now().UnixNano()),
 			AutomationName: "logic:" + fnName,
@@ -129,7 +129,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// engine's function registry -- the engine would fail the
 		// lookup with `function "coalesce" not found`. See #362.
 		if step.Type == StepTypeQuery && step.Query != nil {
-			if val, handled, err := r.tryEvaluateBuiltinLocally(step.Query.Query, evaluator); err != nil {
+			if val, handled, err := tryEvaluateBuiltinLocally(step.Query.Query, evaluator); err != nil {
 				return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 			} else if handled {
 				now := time.Now()
@@ -154,7 +154,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// workbench all use standalone `name := coalesce(...)` steps).
 		if step.Type == StepTypeFunction && step.Function != nil {
 			if callStr, ok := reconstructPositionalBuiltinCall(step.Function); ok {
-				if val, handled, err := r.tryEvaluateBuiltinLocally(callStr, evaluator); err != nil {
+				if val, handled, err := tryEvaluateBuiltinLocally(callStr, evaluator); err != nil {
 					return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
 				} else if handled {
 					now := time.Now()
@@ -191,16 +191,13 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 	// shorthand), so route through it before falling back to
 	// engine.Execute via the step registry.
 	if returnStep.Query != nil {
-		if val, handled, err := r.tryEvaluateReturnLocally(returnStep.Query.Query, evaluator); err != nil {
-			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
-		} else if handled {
-			return val, nil
-		}
-		// Builtin return short-circuit: `return coalesce(stepX, stepY.First())`.
-		// Same rationale as the step-RHS short-circuit above -- these
-		// helpers aren't engine-registered functions and would fail
-		// the lookup. See #362.
-		if val, handled, err := r.tryEvaluateBuiltinLocally(returnStep.Query.Query, evaluator); err != nil {
+		// One logic-time leaf entry (memql#593): EvaluateLocalExpr short-circuits
+		// engine.Execute for the shapes the engine's expression parser doesn't
+		// recognise -- a bare step ref, a `stepName.method()` call, or a local
+		// positional builtin (`coalesce(...)`, #362) -- evaluating them against
+		// the local Evaluator. It returns handled=false for a real engine query,
+		// which then runs through the step registry below.
+		if val, handled, err := EvaluateLocalExpr(returnStep.Query.Query, evaluator); err != nil {
 			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
 		} else if handled {
 			return val, nil
@@ -240,7 +237,30 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 // should fall back to engine.Execute. Returns (nil, false, err) on
 // a hard error (e.g. step exists but the dotted suffix didn't
 // resolve).
-func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+// EvaluateLocalExpr is the single logic-time entry for resolving a leaf value
+// expression against the local Evaluator WITHOUT round-tripping through the
+// engine (memql#593). It is the logic-time counterpart to the arg-time
+// MutationExecutor resolver, and the converge-onto-one entry point both the
+// LogicRunner return path and the conformance matrix drive.
+//
+// It handles exactly the shapes the engine's expression parser does NOT
+// recognise as a function call:
+//   - a bare step reference (`getActiveGA`) -> the step's result,
+//   - a `stepName.method()` call (`rows.First()` / `rows.Len()` / ...),
+//   - a local positional builtin (`coalesce(...)`, #362).
+//
+// Returns (value, true, nil) when it resolved the expression locally,
+// (nil, false, nil) when the expression is a real engine query/function that
+// the caller must run through the step registry, and (nil, false, err) on a
+// hard resolution error.
+func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
+	if val, handled, err := tryEvaluateReturnLocally(expr, evaluator); err != nil || handled {
+		return val, handled, err
+	}
+	return tryEvaluateBuiltinLocally(expr, evaluator)
+}
+
+func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, false, nil
@@ -299,7 +319,7 @@ func (r *LogicRunner) tryEvaluateReturnLocally(expr string, evaluator *Evaluator
 // engine.Execute via the step registry. Returns (nil, false, err)
 // on a hard resolution error (e.g. arg references a step that
 // isn't bound).
-func (r *LogicRunner) tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, error) {
+func tryEvaluateBuiltinLocally(expr string, evaluator *Evaluator) (any, bool, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" || !strings.HasSuffix(expr, ")") {
 		return nil, false, nil

@@ -5,9 +5,9 @@ package steps
 // memQL evaluates DSL value-expressions with TWO engines depending on where
 // the expression appears: ARG-TIME (mutation/function step args ->
 // MutationExecutor.evaluateValue) and LOGIC-TIME (logic-body RHS / return ->
-// Evaluator.EvaluateValue). Same syntax, two implementations -- so a fix to
-// one silently leaves the other broken (exactly how the #575/#580 ghost SI
-// survived).
+// the LogicRunner's local-leaf entry automations.EvaluateLocalExpr). Same
+// syntax, two implementations -- so a fix to one silently leaves the other
+// broken (exactly how the #575/#580 ghost SI survived).
 //
 // This matrix runs ONE table of (expression, seeded steps) -> expected value
 // against BOTH entry points, using REAL *memql.ExecuteResult step results (the
@@ -15,21 +15,21 @@ package steps
 // case that diverges between the two evaluators fails here, so they can never
 // drift apart undetected again.
 //
-// STAGE 1 (this file): the SHARED LEAF-RESOLUTION contract -- the
-// bare-step / skipped-step / non-step-literal behaviours both `evaluateValue`
-// (arg-time) and `Evaluator.EvaluateValue` (logic-time leaf) already produce
-// identically, pinned on the REAL result shape. This is the regression net the
-// #580 ghost-SI fix lacked.
+// Two contracts are pinned:
+//   - leafCases: the bare-step / skipped / non-step-literal LEAF resolution both
+//     evaluators bottom out in (arg-time evaluateValue vs the logic-time leaf
+//     Evaluator.EvaluateValue).
+//   - localExprCases: the local-expression subset logic bodies actually use --
+//     coalesce + step-method calls (.First()/.Len()/.Empty()) -- run through the
+//     FULL logic-time path (EvaluateLocalExpr) vs arg-time evaluateValue.
 //
-// The remaining divergences are NOT leaf-level: the arg-time `evaluateValue` is
-// ONE cohesive resolver (literals, coalesce, path nav, .First()/.Len()/...),
-// whereas the logic-time path fragments that same work across the LogicRunner
-// helpers (tryEvaluateBuiltinLocally / tryEvaluateReturnLocally) sitting ON TOP
-// of this leaf. Converging them means relocating the cohesive resolver into the
-// `automations` package so both call paths share it; this table then extends to
-// the builtin/path cases run through the FULL logic-time path.
+// The one KNOWN remaining divergence (a method-THEN-field path inside a logic
+// coalesce arg) is captured in TestExpressionEvaluators_KnownDivergence below;
+// it flips to a convergent localExprCase when the logic-time scalar-arg
+// resolver learns method-then-field navigation (the next #593 step).
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -52,14 +52,26 @@ func nodeResult(id string, payload map[string]any) *memqlengine.ExecuteResult {
 	}
 }
 
-// argTime / logicTime are the two entry points under test, sharing one seeded
-// *automations.Evaluator.
+// argTime is the ARG-TIME entry: MutationExecutor.evaluateValue (mutation/
+// function step args). logicLeaf is the LOGIC-TIME leaf primitive both share.
+// logicLocal is the FULL logic-time local-expression path.
 func argTime(eval *automations.Evaluator, expr string) (any, error) {
 	return (&MutationExecutor{}).evaluateValue(eval, expr)
 }
 
-func logicTime(eval *automations.Evaluator, expr string) (any, error) {
+func logicLeaf(eval *automations.Evaluator, expr string) (any, error) {
 	return eval.EvaluateValue(expr)
+}
+
+func logicLocal(eval *automations.Evaluator, expr string) (any, error) {
+	val, handled, err := automations.EvaluateLocalExpr(expr, eval)
+	if err != nil {
+		return nil, err
+	}
+	if !handled {
+		return nil, fmt.Errorf("EvaluateLocalExpr did not handle %q (it would run as an engine step)", expr)
+	}
+	return val, nil
 }
 
 type conformanceCase struct {
@@ -69,8 +81,6 @@ type conformanceCase struct {
 	want  any
 }
 
-// newSeededEvaluator returns a fresh evaluator with the case's steps applied,
-// so the two entry points never share mutable state.
 func (c conformanceCase) newSeededEvaluator() *automations.Evaluator {
 	eval := automations.NewEvaluator()
 	if c.setup != nil {
@@ -85,9 +95,16 @@ func seedStep(id string, result any, status string) func(*automations.Evaluator)
 	}
 }
 
-// conformanceCases are behaviours BOTH evaluators must produce identically.
-// Keep every entry here green; a regression on either side is a bug.
-var conformanceCases = []conformanceCase{
+func seedSteps(setups ...func(*automations.Evaluator)) func(*automations.Evaluator) {
+	return func(eval *automations.Evaluator) {
+		for _, s := range setups {
+			s(eval)
+		}
+	}
+}
+
+// leafCases: the shared LEAF resolution contract (arg-time vs logic-time leaf).
+var leafCases = []conformanceCase{
 	{
 		name: "bare_step_resolves_to_result",
 		setup: seedStep("getActiveGA",
@@ -108,46 +125,143 @@ var conformanceCases = []conformanceCase{
 	},
 }
 
+// localExprCases: the local-expression subset logic bodies use (coalesce +
+// step-method), run through the FULL logic-time path vs arg-time.
+var localExprCases = []conformanceCase{
+	{
+		name: "coalesce_first_present_step",
+		setup: seedSteps(
+			seedStep("active", nodeResult("v1:agents:agent:active", map[string]any{"name": "Sofia"}), "success"),
+			seedStep("fallback", nil, "skipped")),
+		expr: "coalesce(active, fallback)",
+		want: nodeResult("v1:agents:agent:active", nil),
+	},
+	{
+		name: "coalesce_skips_to_second_step",
+		setup: seedSteps(
+			seedStep("active", nil, "skipped"),
+			seedStep("fallback", nodeResult("v1:agents:agent:fallback", nil), "success")),
+		expr: "coalesce(active, fallback)",
+		want: nodeResult("v1:agents:agent:fallback", nil),
+	},
+	{
+		name:  "coalesce_falls_through_to_literal_default",
+		setup: seedStep("missing", nil, "skipped"),
+		expr:  `coalesce(missing, "default")`,
+		want:  "default",
+	},
+	{
+		name:  "step_method_first",
+		setup: seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success"),
+		expr:  "rows.First()",
+		want:  map[string]any{"id": "v1:x:1", "payload": map[string]any{"k": "v"}},
+	},
+	{
+		name:  "step_method_len",
+		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
+		expr:  "rows.Len()",
+		want:  1,
+	},
+	{
+		name:  "step_method_empty_false",
+		setup: seedStep("rows", nodeResult("v1:x:1", nil), "success"),
+		expr:  "rows.Empty()",
+		want:  false,
+	},
+}
+
 func TestExpressionEvaluators_Conformance(t *testing.T) {
-	engines := []struct {
+	run := func(t *testing.T, cases []conformanceCase, engines []struct {
+		name string
+		fn   func(*automations.Evaluator, string) (any, error)
+	}) {
+		for _, c := range cases {
+			for _, eng := range engines {
+				t.Run(c.name+"/"+eng.name, func(t *testing.T) {
+					got, err := eng.fn(c.newSeededEvaluator(), c.expr)
+					if err != nil {
+						t.Fatalf("%s(%q): unexpected error: %v", eng.name, c.expr, err)
+					}
+					if !conformanceEqual(got, c.want) {
+						t.Fatalf("%s(%q) = %#v, want %#v -- the two evaluators must agree (memql#593)", eng.name, c.expr, got, c.want)
+					}
+				})
+			}
+		}
+	}
+
+	run(t, leafCases, []struct {
 		name string
 		fn   func(*automations.Evaluator, string) (any, error)
 	}{
 		{"argTime", argTime},
-		{"logicTime", logicTime},
+		{"logicLeaf", logicLeaf},
+	})
+
+	run(t, localExprCases, []struct {
+		name string
+		fn   func(*automations.Evaluator, string) (any, error)
+	}{
+		{"argTime", argTime},
+		{"logicLocal", logicLocal},
+	})
+}
+
+// TestExpressionEvaluators_KnownDivergence pins the SINGLE remaining #593
+// divergence so it's captured + can't regress silently: a method-THEN-field
+// path inside a logic coalesce arg. ARG-TIME navigates `rows.First().id` to the
+// node id; the LOGIC-TIME scalar-arg resolver returns the raw expression text.
+// In the live DSL this pattern only appears in mutation args (arg-time), so it
+// is latent -- but it is exactly the ghost-SI shape, so it must be made to
+// converge (logic-time learns method-then-field navigation, OR fails closed to
+// nil) rather than ever flow raw text as a value. When fixed, move the
+// convergent case into localExprCases and delete this guard.
+func TestExpressionEvaluators_KnownDivergence(t *testing.T) {
+	setup := seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success")
+	expr := `coalesce(rows.First().id, "")`
+
+	arg, err := argTime(func() *automations.Evaluator {
+		e := automations.NewEvaluator()
+		setup(e)
+		return e
+	}(), expr)
+	if err != nil {
+		t.Fatalf("argTime(%q): %v", expr, err)
+	}
+	if arg != "v1:x:1" {
+		t.Fatalf("argTime(%q) = %#v, want %q (arg-time resolves method-then-field)", expr, arg, "v1:x:1")
 	}
 
-	for _, c := range conformanceCases {
-		for _, eng := range engines {
-			t.Run(c.name+"/"+eng.name, func(t *testing.T) {
-				got, err := eng.fn(c.newSeededEvaluator(), c.expr)
-				if err != nil {
-					t.Fatalf("%s(%q): unexpected error: %v", eng.name, c.expr, err)
-				}
-				if !conformanceEqual(got, c.want) {
-					t.Fatalf("%s(%q) = %#v, want %#v -- the two evaluators must agree (memql#593)", eng.name, c.expr, got, c.want)
-				}
-			})
-		}
+	logic, err := logicLocal(func() *automations.Evaluator {
+		e := automations.NewEvaluator()
+		setup(e)
+		return e
+	}(), expr)
+	if err != nil {
+		t.Fatalf("logicLocal(%q): %v", expr, err)
+	}
+	// CURRENT (divergent) behaviour: the raw expression text, not the id.
+	// This assertion documents the gap; flip it to converge with arg-time as
+	// the next #593 step.
+	if logic == "v1:x:1" {
+		t.Fatalf("logicLocal(%q) now resolves method-then-field -- the #593 divergence is fixed; move this into localExprCases and delete this test", expr)
 	}
 }
 
 // conformanceEqual compares results structurally enough for the matrix: two
 // *ExecuteResult are "equal" when their first node ids match (the navigable
-// identity the downstream payload/.First().id reads care about); everything
-// else falls back to ==.
+// identity the downstream payload/.First().id reads care about); maps and
+// primitives compare by value.
 func conformanceEqual(got, want any) bool {
 	gr, gok := got.(*memqlengine.ExecuteResult)
 	wr, wok := want.(*memqlengine.ExecuteResult)
-	if gok && wok {
-		gid := firstNodeID(gr)
-		wid := firstNodeID(wr)
-		return gid == wid
+	if gok || wok {
+		if !(gok && wok) {
+			return false
+		}
+		return firstNodeID(gr) == firstNodeID(wr)
 	}
-	if gok != wok {
-		return false
-	}
-	return got == want
+	return fmt.Sprintf("%v", got) == fmt.Sprintf("%v", want)
 }
 
 func firstNodeID(r *memqlengine.ExecuteResult) string {
