@@ -243,19 +243,20 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fileName = "upload"
 	}
 
-	// Upload to GCS.
+	// Upload to object storage (Azure Blob, memql#801). The stored URL lands
+	// on the attachment row's gcsURL field (legacy name; now an Azure blob URL).
 	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, id.NewShortId(), fileName)
 	gcsURL := ""
 	if h.uploader != nil && h.bucket != "" {
 		gcsURL, err = h.uploader.Upload(ctx, h.bucket, objectName, data, mimeType)
 		if err != nil {
-			h.logger.Error("upload attachment to gcs", "error", err, "spaceId", spaceId)
+			h.logger.Error("upload attachment to blob storage", "error", err, "spaceId", spaceId)
 			http.Error(w, "failed to upload file", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		// No uploader configured (dev/test): use a placeholder URI.
-		gcsURL = fmt.Sprintf("gs://local/%s", objectName)
+		gcsURL = fmt.Sprintf("local://%s", objectName)
 	}
 
 	// Async analysis architecture (v1):
