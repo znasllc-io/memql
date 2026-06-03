@@ -285,10 +285,10 @@ const maxPlannerIterations = 5
 // invokeAndDispatchIter so the same Plan gets the next decision in
 // the same event-cycle instead of parking until a future trigger.
 func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string) error {
-	return l.invokeAndDispatchIter(ctx, planId, 0)
+	return l.invokeAndDispatchIter(ctx, planId, 0, newConvTracker())
 }
 
-func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId string, iter int) error {
+func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId string, iter int, conv *convTracker) error {
 	if iter >= maxPlannerIterations {
 		// Park the plan rather than fail it -- the user can resume on
 		// the next trigger. Keeps a stuck LLM from killing a Plan
@@ -385,7 +385,7 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 
 	l.logger.Info("planner agent loop: dispatching decision",
 		"planId", planId, "action", decision.Action, "iter", iter)
-	return l.dispatchDecision(ctx, planId, decision, iter)
+	return l.dispatchDecision(ctx, planId, decision, iter, conv)
 }
 
 // dispatchDecision routes the Planner Agent's structured-output
@@ -395,7 +395,18 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 // same event cycle. Terminal actions (markPlanSucceeded / Failed /
 // escalate) and dispatchTask park the Plan for the next external
 // trigger.
-func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, d plannerDecision, iter int) error {
+func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, d plannerDecision, iter int, conv *convTracker) error {
+	// Convergence / no-progress guard (memql#822). If the planner has
+	// emitted the IDENTICAL non-terminal decision past the threshold in
+	// this cycle, it's oscillating without progressing -- park instead
+	// of dispatching the repeat and spinning (terminal decisions are
+	// never tracked, so this never blocks a real finish).
+	if park, count := conv.recordAndCheck(d); park {
+		l.logger.Warn("planner agent loop: no progress -- identical decision repeated; parking",
+			"planId", planId, "action", d.Action, "repeats", count, "iter", iter)
+		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
+			fmt.Sprintf("Planner repeated the same '%s' decision %d times without making progress. Resume to retry with fresh context.", d.Action, count))
+	}
 	switch d.Action {
 	case "decompose":
 		if err := l.stampPhases(ctx, planId, d.PlanOutline); err != nil {
@@ -405,7 +416,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// (createSpecialist / dispatchTask) given the freshly-stamped
 		// phases. Without this the Plan would sit at queued with
 		// phases set but no Tasks created.
-		return l.invokeAndDispatchIter(ctx, planId, iter+1)
+		return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 	case "dispatchTask":
 		if err := l.insertDispatchedTask(ctx, planId, d.Task); err != nil {
 			return err
@@ -418,7 +429,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// cycle, but in planning-mode there's no auto-dispatch
 		// pulling us forward. Continue iterating until the planner
 		// signals it's done (markPlanSucceeded) or we hit the cap.
-		return l.invokeAndDispatchIter(ctx, planId, iter+1)
+		return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 	case "markPlanSucceeded":
 		// "Planning complete" semantics: while a userGoal plan is
 		// still in status="planning", markPlanSucceeded from the
@@ -440,7 +451,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 			if terr == nil && len(existing) == 0 {
 				l.logger.Warn("planner agent loop: markPlanSucceeded with no tasks; re-invoking",
 					"planId", planId, "iter", iter)
-				return l.invokeAndDispatchIter(ctx, planId, iter+1)
+				return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 			}
 			return l.markPlanningComplete(ctx, planId)
 		}
@@ -456,7 +467,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// the ensureAgentForGoal factory builtin reads the role + agent
 		// catalogs and picks match-vs-extend-vs-create on its own. We
 		// pass the Plan's goal verbatim; the factory does the matching.
-		return l.ensureSpecialistForPlan(ctx, planId, iter)
+		return l.ensureSpecialistForPlan(ctx, planId, iter, conv)
 	case "mintSkill":
 		// Phase 3 (memql#159): authority gate + catalog-search
 		// heuristic + mutationMintSkill dispatch. In-envelope mints
@@ -497,7 +508,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 // and (b) the planner integration has full engine access -- routing
 // through the LLM's tool loop would add an unnecessary round trip
 // when the planner has already decided this is the right action.
-func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId string, iter int) error {
+func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId string, iter int, conv *convTracker) error {
 	plan, err := l.loadPlan(ctx, planId)
 	if err != nil {
 		return fmt.Errorf("load plan %s: %w", planId, err)
@@ -548,7 +559,7 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 
 	// Re-invoke so the planner picks dispatchTask now that the
 	// specialist exists.
-	return l.invokeAndDispatchIter(ctx, planId, iter+1)
+	return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 }
 
 // extractAgentFactoryResult digs the {agentId, action} fields out of

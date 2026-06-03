@@ -67,7 +67,7 @@ func TestInvokeAndDispatch_RateLimited_ParksNotFails(t *testing.T) {
 		},
 	}
 	l := NewPlannerAgentLoop(fe, testLogger())
-	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p1", 0); err != nil {
+	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p1", 0, newConvTracker()); err != nil {
 		t.Fatalf("invokeAndDispatchIter returned error: %v", err)
 	}
 
