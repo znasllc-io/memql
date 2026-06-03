@@ -23,6 +23,9 @@ type fakeEngine struct {
 	// execResponder returns a canned result for a query. Matched by the
 	// test on a substring; nil result + nil error when unset.
 	execResponder func(query string) (any, error)
+	// siResponder returns a canned result for an InvokeSI call. When
+	// unset, InvokeSI returns (nil, nil) -- the legacy behavior.
+	siResponder func(templateId string, data map[string]any) (any, error)
 	// toolResult is returned from InvokeSIChatWithFilteredTools.
 	toolResult string
 	toolErr    error
@@ -38,10 +41,14 @@ func (f *fakeEngine) Execute(_ context.Context, query string) (any, error) {
 	return nil, nil
 }
 
-func (f *fakeEngine) InvokeSI(_ context.Context, templateId string, _ map[string]any) (any, error) {
+func (f *fakeEngine) InvokeSI(_ context.Context, templateId string, data map[string]any) (any, error) {
 	f.mu.Lock()
 	f.siCalls = append(f.siCalls, templateId)
+	responder := f.siResponder
 	f.mu.Unlock()
+	if responder != nil {
+		return responder(templateId, data)
+	}
 	return nil, nil
 }
 

@@ -7554,6 +7554,42 @@ func MutationRecordMisrouteFeedbackBuild(args MutationRecordMisrouteFeedbackArgs
 	return b.String()
 }
 
+// MutationRecordPlannerInvocation -- Record a planner-agent LLM invocation against a Plan: advance metrics.llmCallCount + tokenSpent without changing status. Caller computes the new totals Go-side (the parser has no arithmetic).
+//
+// Bound concept: plan.
+type MutationRecordPlannerInvocationArgs struct {
+	PlanId     string
+	TokenSpent int
+	Metrics    map[string]any
+}
+
+// MutationRecordPlannerInvocation calls the engine mutation mutationRecordPlannerInvocation.
+func (qc *QueryClient) MutationRecordPlannerInvocation(ctx context.Context, args MutationRecordPlannerInvocationArgs) (*Result, error) {
+	call := MutationRecordPlannerInvocationBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordPlannerInvocation", call)
+}
+
+func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordPlannerInvocation({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if args.TokenSpent != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tokenSpent: ")
+		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("metrics: ")
+	b.WriteString(renderMemQLValue(args.Metrics))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordResponsibilityEvaluation -- Record the outcome of an evaluation/run on a v1:planner:responsibility: stamp lastEvaluatedAt to now() and lastResult to the run headline. Called by the reactive-loop evaluator (epic #632) after a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: responsibility.

@@ -32,6 +32,7 @@ shape plan planFull {
   payload.tokenSpent
   payload.tokenAllocatedToChildren
   payload.tokenCapDisabled
+  payload.metrics
   payload.parentPlanId
   payload.retryThreshold
   row.createdAt
