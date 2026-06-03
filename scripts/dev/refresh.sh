@@ -287,7 +287,7 @@ function main() {
     # deployment-agnostic (minted persona ids vary per vendor account). Override
     # by exporting MEMQL_DEV_DEFAULT_AVATAR_PERSONA before `make dev-refresh`;
     # set it empty to opt out.
-    export MEMQL_DEV_DEFAULT_AVATAR_PERSONA="${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-Ava}"
+    export MEMQL_DEV_DEFAULT_AVATAR_PERSONA="${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-Sofia}"
     step3_wipe_and_restart
     step4_mint_voice_agent_token
     step4b_mint_node_tokens

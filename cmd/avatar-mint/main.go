@@ -71,7 +71,7 @@ type stockPick struct {
 // rest wait for a plan upgrade (add them here when the cap lifts). These are the
 // operator's OWN faces and are listed first in the catalog.
 var operatorImages = []personaSpec{
-	{Slug: "ava", Name: "Ava", Gender: "female", File: "female_0.png"},
+	{Slug: "sofia", Name: "Sofia", Gender: "female", File: "female_0.png"},
 }
 
 type personaSpec struct {
