@@ -171,3 +171,35 @@ Idempotent: a Plan that never provisioned a workspace is a no-op.
 | `integrations/agent/replier.go`                        | `workbenchAvailable` data injection + domain auto-attach |
 | `dsl/agents/roles/*.memql`                             | `workbench_use` in every role's `lockedToolSlugs` |
 | `dsl/agents/prompts/agentFactoryAnalyze.tmpl`          | Factory rules for granting workbench / computer-use |
+
+## 10. Workbench -> Computer-use fallback (verified path)
+
+The "workbench first, computer-use fallback" ordering is real and the loop is
+**closed**, but it is **agent-driven and user-gated** -- NOT an automatic
+planner re-route. Verified path (memql#790):
+
+1. The agent prefers the workbench (`workbench_use` is universal). Guidance:
+   the `workbench:preferOverComputerUse` + `workbench:failureFallback` corpus
+   chunks in `integrations/knowledge/seed.go`.
+2. When the workbench genuinely can't do a job (macOS/Xcode, a GUI app, or a
+   file already on the user's machine), the agent does NOT silently switch and
+   does NOT dead-end. If it holds a computer-use slug it calls
+   `requestComputerUseScope({intent, requestedScope, summary})`, naming the
+   workbench limitation, and ends its turn with a short `respondToUser`.
+3. That mints a scope-elevation Plan; the user sees an approval card on the
+   canvas. On **Allow**, `handlePlanApprovedForExecution`
+   (`integrations/planner/plan_execution.go`) dispatches a fresh turn back to
+   the agent with `planApprovedTrigger=true`, where it runs the work on the
+   user's machine via `workerHost` / `workerComputer`.
+4. If the agent has no computer-use slug, it names the limitation and tells the
+   user that enabling Computer Use would unblock it, so the user can grant the
+   capability.
+
+There is **no** planner "saw a workbench failure -> auto-granted computer-use
+-> retried" path: the planner agent loop's task-completion re-invocation is
+deferred (see the `HandlePlanUpdated` comment in
+`integrations/planner/agent_loop.go`). The consent-gated escalation above is
+the intended fallback and keeps the user in control of anything that touches
+their machine. memql#790 hardened the `workbench:failureFallback` guidance so
+the agent reliably escalates via `requestComputerUseScope` instead of relying
+on a planner re-route that does not fire.
