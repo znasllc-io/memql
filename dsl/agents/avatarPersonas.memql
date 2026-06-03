@@ -10,19 +10,18 @@
 
 use agents.concepts.{ avatarPersona }
 
-// Sofia now renders via SIMLI (memql#782): the Anam cara-3 client-audio
-// render is blocked vendor-side (memql#772), so the dev assistant uses the
-// Simli face below. personaId is the Simli faceId; SIMLI_API_KEY authenticates.
-// (Hand-set: `make avatar-mint` only manages the anam catalog -- re-add this
-// entry if you regenerate, or extend avatar-mint for simli.)
-@description("Avatar persona Sofia (female) -- Simli (memql#782).")
+// Sofia uses Anam (memql#785). The Simli fallback (memql#782) was a workaround
+// while the TURN relay was blocked (memql#770/#772); that relay is now fixed so
+// we switch back to Anam as the default. personaId is the Anam-issued face id
+// for the Mia persona (female); ANAM_API_KEY authenticates.
+@description("Avatar persona Sofia (female) -- Anam (memql#785).")
 seed avatarPersona sofia {
-  vendor:     "simli"
-  personaId:  "cace3ef7-a4c4-425d-a8cf-a5358eb0c427"
+  vendor:     "anam"
+  personaId:  "edf6fdcb-acab-44b8-b974-ded72665ee26"
   name:       "Sofia"
   gender:     "female"
-  imageRef:   "avatars/female_0.png"
-  previewRef: "avatars/female_0.png"
+  imageRef:   "https://lab.anam.ai/persona_thumbnails/mia_studio.png"
+  previewRef: "https://lab.anam.ai/persona_thumbnails/mia_studio.png"
 }
 
 @description("Avatar persona Mia (female) -- Anam.")
