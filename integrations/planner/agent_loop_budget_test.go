@@ -137,7 +137,7 @@ func TestInvokeAndDispatch_AtCap_ParksWithoutLLMCall(t *testing.T) {
 		},
 	}
 	l := NewPlannerAgentLoop(fe, testLogger())
-	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p1", 0); err != nil {
+	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p1", 0, newConvTracker()); err != nil {
 		t.Fatalf("invokeAndDispatchIter returned error: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestInvokeAndDispatch_UnderCap_CallsLLMAndRecords(t *testing.T) {
 		},
 	}
 	l := NewPlannerAgentLoop(fe, testLogger())
-	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p2", 0); err != nil {
+	if err := l.invokeAndDispatchIter(context.Background(), "v1:planner:plan:p2", 0, newConvTracker()); err != nil {
 		t.Fatalf("invokeAndDispatchIter returned error: %v", err)
 	}
 
