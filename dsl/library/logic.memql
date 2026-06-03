@@ -43,7 +43,7 @@ logic logicIndexGeneratedOutput {
     event  object  @required
   }
   body {
-    return mutationCreateArtifact({ sourceConceptRef: concat("v1:library:generatedOutput:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId })
+    return mutationCreateArtifact({ sourceConceptRef: concat("v1:library:generatedOutput:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId, producedByWorkerId: args.event.payload.producedByWorkerId, producedByWorkerName: args.event.payload.producedByWorkerName })
   }
 }
 

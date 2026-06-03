@@ -1408,10 +1408,12 @@ type MutationCreateArtifactArgs struct {
 	Live     bool
 	LiveSet  bool // set true to send live; required because zero-value bool is ambiguous
 	// Enum: workspace | private
-	Scope            string
-	SpaceId          string
-	AgentId          string
-	ProducedByPlanId string
+	Scope                string
+	SpaceId              string
+	AgentId              string
+	ProducedByPlanId     string
+	ProducedByWorkerId   string
+	ProducedByWorkerName string
 	// Enum: none | unvalidated | validated | rejected | partiallyValidated | superseded
 	ValidationStatus string
 }
@@ -1507,6 +1509,20 @@ func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.ProducedByWorkerId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByWorkerId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
+	}
+	if args.ProducedByWorkerName != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByWorkerName: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
 	if args.ValidationStatus != "" {
 		if b.Len() > 17 {
@@ -2755,10 +2771,12 @@ type MutationCreateGeneratedOutputArgs struct {
 	Format   string
 	MimeType string
 	// Enum: workbench_generated | computer_use | agent_generated | derived
-	Source            string
-	SpaceId           string
-	ProducedByPlanId  string
-	ProducedByAgentId string
+	Source               string
+	SpaceId              string
+	ProducedByPlanId     string
+	ProducedByAgentId    string
+	ProducedByWorkerId   string
+	ProducedByWorkerName string
 }
 
 // MutationCreateGeneratedOutput calls the engine mutation mutationCreateGeneratedOutput.
@@ -2842,6 +2860,20 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 		}
 		b.WriteString("producedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
+	}
+	if args.ProducedByWorkerId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByWorkerId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
+	}
+	if args.ProducedByWorkerName != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByWorkerName: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
 	b.WriteString("})")
 	return b.String()

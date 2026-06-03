@@ -35,6 +35,8 @@ mutation artifact mutationCreateArtifact {
     spaceId           string
     agentId           string
     producedByPlanId  string
+    producedByWorkerId   string
+    producedByWorkerName string
     validationStatus  string  @enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
   }
   insert artifact {
@@ -53,6 +55,8 @@ mutation artifact mutationCreateArtifact {
     args.spaceId
     args.agentId
     args.producedByPlanId
+    args.producedByWorkerId
+    args.producedByWorkerName
     validationStatus: coalesce(args.validationStatus, "none")
     updatedAt: now
   }
@@ -74,6 +78,8 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     spaceId           string
     producedByPlanId  string
     producedByAgentId string
+    producedByWorkerId   string
+    producedByWorkerName string
   }
   insert generatedOutput {
     id: args.outputId
@@ -88,6 +94,8 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     args.spaceId
     args.producedByPlanId
     args.producedByAgentId
+    args.producedByWorkerId
+    args.producedByWorkerName
   }
 }
 
