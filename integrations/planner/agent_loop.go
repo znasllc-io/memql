@@ -91,6 +91,21 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		// the dispatcher on the same Plan (#645).
 		return
 	}
+	if kind == produceArtifactPlanKind {
+		// produceArtifact (#788) is a SINGLE-TURN deliverable, NOT a
+		// multi-step plan. It must NOT go through the planner-agent decompose
+		// loop (invokeAndDispatch): that loop is for decomposing complex goals
+		// + provisioning specialists via repeated large plannerAgent LLM calls,
+		// and for a simple "make me a markdown file" it spun/re-invoked and
+		// spammed the provider into a 429 rate-limit (memql#816). The requesting
+		// assistant was stamped as ownerAgentId at creation, and the goal is
+		// self-contained, so we just start the plan directly -> running;
+		// handlePlanApprovedForExecution -> executeApprovedPlan then dispatches
+		// it as ONE agent turn (the agent writes the file via the workbench).
+		// No plannerAgent call, no loop.
+		go l.startPlanDirect(context.Background(), planId)
+		return
+	}
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.
@@ -201,30 +216,29 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	if !ok {
 		return
 	}
-	if kind == "adHocAction" || kind == "scopeElevation" {
-		return
-	}
-	// Auto-run produceArtifact plans (memql#788). These are spawned by the
-	// Assistant's produceArtifact delegation tool from a conversational
-	// "make me X" request -- the user expects fire-and-forget ("drop it in my
-	// Library"), NOT a trip to the Tasks page to click Run. So when such a
-	// plan finishes decomposing and lands in "queued", auto-start it. Every
-	// OTHER kind keeps the review-then-Run gate. mutationStartPlan flips it to
-	// "running", which the existing status==running dispatch path picks up;
-	// the subsequent updated->running event re-enters here as a no-op (kind
-	// matches but status != queued), so there is no loop.
-	if kind == produceArtifactPlanKind && status == "queued" {
-		l.logger.Info("planner agent loop: auto-starting produceArtifact plan",
-			"planId", planId)
-		q := fmt.Sprintf(`mutationStartPlan({planId:%q})`, planId)
-		if _, err := l.engine.Execute(systemActorContext(context.Background()), q); err != nil {
-			l.logger.Warn("planner agent loop: auto-start produceArtifact plan failed",
-				"planId", planId, "error", err)
-		}
+	if kind == "adHocAction" || kind == "scopeElevation" || kind == produceArtifactPlanKind {
+		// produceArtifact is started directly at creation (HandlePlanCreated ->
+		// startPlanDirect) and executed by handlePlanApprovedForExecution; it
+		// never needs the decompose/auto-start dance, so updates are a no-op here.
 		return
 	}
 	l.logger.Debug("planner agent loop: plan updated (re-invoke deferred)",
 		"planId", planId, "kind", kind, "status", status)
+}
+
+// startPlanDirect flips a freshly-created Plan straight to "running" without
+// the planner-agent decompose loop -- for single-turn kinds (produceArtifact)
+// whose owning agent + self-contained goal are already set at creation. The
+// status=running transition is what handlePlanApprovedForExecution /
+// executeApprovedPlan key off to dispatch the single agent turn. Best-effort:
+// on failure the plan stays in planning and the safety net never fires (no
+// plannerAgent call was made), so there's nothing to spam. (memql#816)
+func (l *PlannerAgentLoop) startPlanDirect(ctx context.Context, planId string) {
+	q := fmt.Sprintf(`mutationStartPlan({planId:%q})`, planId)
+	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
+		l.logger.Warn("planner agent loop: startPlanDirect failed",
+			"planId", planId, "error", err)
+	}
 }
 
 // produceArtifactPlanKind mirrors the agents integration's

@@ -3883,6 +3883,7 @@ type MutationCreatePlanArgs struct {
 	RequestedBy             string
 	TriggerSource           string
 	AuthorizedBy            string
+	OwnerAgentId            string
 	Input                   map[string]any
 	RefinementContext       map[string]any
 	TokenBudget             int
@@ -3944,6 +3945,13 @@ func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
 		}
 		b.WriteString("authorizedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorizedBy))
+	}
+	if args.OwnerAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ownerAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
 	if b.Len() > 17 {
 		b.WriteString(", ")
