@@ -194,6 +194,19 @@ EOF
         bff voice cognition agent planner
 }
 
+function step4c_turn_relay() {
+    # Stand up the Anam-avatar TURN relay (memql#770): start the ngrok
+    # TCP tunnel to coturn and stamp polyphon-livekit's docker IP +
+    # the tunnel host:port into livekit-dev.yaml, then restart LiveKit
+    # so it advertises the external TURN. LiveKit has been up since
+    # step3; coturn came up with it. Best-effort -- a non-zero return
+    # (ngrok missing, container not up) just means the Anam avatar's
+    # media relay is unavailable this session; browser voice is
+    # unaffected. See docs/voice/turn-relay.md.
+    echo "[4c/7] Standing up the Anam TURN media relay (coturn + ngrok TCP)..."
+    lib_refresh_turn_relay || true
+}
+
 function step5_wait_for_ready() {
     local domain
     domain=$(lib_domain)
@@ -278,6 +291,7 @@ function main() {
     step3_wipe_and_restart
     step4_mint_voice_agent_token
     step4b_mint_node_tokens
+    step4c_turn_relay
     step5_wait_for_ready
     step6_seed_and_finish
     step7_restore_knowledge

@@ -681,3 +681,141 @@ function lib_ngrok_upsert_env() {
         printf '%s=%s\n' "${key}" "${val}" >> "${file}"
     fi
 }
+
+# -----------------------------------------------------------------
+# TURN relay: Anam-cloud-avatar media path (memql#770)
+# -----------------------------------------------------------------
+#
+# The Anam direct/Guide avatar needs Anam's CLOUD engine to relay WebRTC
+# media into the LOCAL dev LiveKit. coturn (the memql-coturn compose
+# service) does the relay; Anam reaches it over a RAW ngrok TCP endpoint.
+# This function stands that tunnel up and stamps the three
+# environment-specific values into docker/livekit/livekit-dev.yaml:
+#   - rtc.node_ip               -> polyphon-livekit's docker-bridge IP
+#   - rtc.turn_servers[0].host  -> the ngrok TCP tunnel host
+#   - rtc.turn_servers[0].port  -> the ngrok TCP tunnel port
+# then restarts polyphon-livekit so it reloads the stamped config.
+#
+# This runs as a SEPARATE ngrok agent (own web-addr :4041) from the
+# LiveKit-signaling HTTPS tunnel (lib_refresh_ngrok, :4040), so the two
+# never shadow each other's local API. Running two agents needs an ngrok
+# plan that allows it (the dev account is PAYG, which does).
+#
+# Set MEMQL_NGROK_TURN_ADDR to a RESERVED ngrok TCP addr (e.g.
+# "1.tcp.us-cal-1.ngrok.io:12345") so host:port stay STABLE across
+# restarts -- otherwise ngrok hands out a fresh dynamic addr each run and
+# Anam can't be pre-configured. Reserve one in the ngrok dashboard once;
+# see docs/voice/turn-relay.md.
+#
+# Best-effort: returns 1 (non-fatal) when ngrok / docker / the config are
+# unavailable so refresh.sh keeps going (the browser voice path does not
+# need the relay; only the Anam avatar does).
+
+readonly LIB_NGROK_TURN_PORT=3478
+readonly LIB_NGROK_TURN_WEBADDR="localhost:4041"
+readonly LIB_NGROK_TURN_API="http://127.0.0.1:4041/api/tunnels"
+readonly LIB_NGROK_TURN_LOG="/tmp/ngrok-turn.log"
+readonly LIB_LIVEKIT_CONFIG="docker/livekit/livekit-dev.yaml"
+readonly LIB_LIVEKIT_CONTAINER="polyphon-livekit"
+
+# lib_livekit_docker_ip echoes polyphon-livekit's IP on the first docker
+# network it is attached to, or empty when the container isn't running.
+function lib_livekit_docker_ip() {
+    docker inspect -f \
+        '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' \
+        "${LIB_LIVEKIT_CONTAINER}" 2>/dev/null | grep -m1 -E '^[0-9]' || true
+}
+
+# lib_stamp_livekit_value replaces an indented `<key>: <value>` line in
+# livekit-dev.yaml in place. anchor is the full leading-whitespace+key
+# prefix (e.g. "  node_ip: " or "      host: ") so the match is unique.
+function lib_stamp_livekit_value() {
+    local anchor="$1" val="$2"
+    sed -i.bak -e "s|^${anchor}.*|${anchor}${val}|" "${LIB_LIVEKIT_CONFIG}"
+    rm -f "${LIB_LIVEKIT_CONFIG}.bak"
+}
+
+function lib_refresh_turn_relay() {
+    if ! command -v ngrok >/dev/null 2>&1; then
+        echo "  INFO: ngrok CLI not found -- skipping TURN relay (Anam avatar disabled)."
+        return 1
+    fi
+    if [ ! -f "${LIB_LIVEKIT_CONFIG}" ]; then
+        echo "  INFO: ${LIB_LIVEKIT_CONFIG} missing -- skipping TURN relay."
+        return 1
+    fi
+
+    # 1. Stamp node_ip from the live LiveKit container's docker IP.
+    local lk_ip
+    lk_ip="$(lib_livekit_docker_ip)"
+    if [ -z "${lk_ip}" ]; then
+        echo "  WARNING: ${LIB_LIVEKIT_CONTAINER} not running -- cannot read its docker IP; skipping TURN relay."
+        return 1
+    fi
+    lib_stamp_livekit_value "  node_ip: " "${lk_ip}"
+
+    # 2. Stand up the ngrok TCP tunnel to coturn (separate agent / API).
+    if pgrep -f "ngrok tcp" >/dev/null 2>&1; then
+        pkill -f "ngrok tcp" || true
+        sleep 1
+    fi
+    local remote_flag=()
+    if [ -n "${MEMQL_NGROK_TURN_ADDR:-}" ]; then
+        remote_flag=(--remote-addr "${MEMQL_NGROK_TURN_ADDR}")
+        echo "  Starting ngrok TCP tunnel for coturn (reserved ${MEMQL_NGROK_TURN_ADDR})..."
+    else
+        echo "  Starting ngrok TCP tunnel for coturn (dynamic addr -- set MEMQL_NGROK_TURN_ADDR to pin it)..."
+    fi
+    nohup ngrok tcp "${LIB_NGROK_TURN_PORT}" "${remote_flag[@]}" \
+        --web-addr "${LIB_NGROK_TURN_WEBADDR}" --log=stdout \
+        > "${LIB_NGROK_TURN_LOG}" 2>&1 &
+    disown
+
+    # 3. Poll the tunnel's own API for its tcp:// public URL.
+    local attempts=0 tcp_url=""
+    while [ -z "${tcp_url}" ]; do
+        attempts=$((attempts + 1))
+        if [ "${attempts}" -gt 40 ]; then
+            echo "  WARNING: ngrok TCP tunnel didn't register within 20s. Tail:"
+            tail -10 "${LIB_NGROK_TURN_LOG}" 2>/dev/null | sed 's/^/    /' || true
+            return 1
+        fi
+        if curl -fs "${LIB_NGROK_TURN_API}" >/dev/null 2>&1; then
+            tcp_url=$(curl -s "${LIB_NGROK_TURN_API}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for t in data.get('tunnels', []):
+    if t.get('proto') == 'tcp' and t.get('public_url'):
+        print(t['public_url'])
+        break
+" 2>/dev/null || true)
+        fi
+        [ -z "${tcp_url}" ] && sleep 0.5
+    done
+
+    # tcp://host:port -> host, port
+    local hostport="${tcp_url#tcp://}"
+    local turn_host="${hostport%%:*}"
+    local turn_port="${hostport##*:}"
+    if [ -z "${turn_host}" ] || [ -z "${turn_port}" ]; then
+        echo "  WARNING: could not parse ngrok TCP URL '${tcp_url}'; skipping TURN stamp."
+        return 1
+    fi
+
+    # 4. Stamp the tunnel host:port into livekit-dev.yaml's turn_servers.
+    #    `host` is the first key on the YAML list-item dash line
+    #    ("    - host: "); `port` is a 6-space continuation key.
+    lib_stamp_livekit_value "    - host: " "${turn_host}"
+    lib_stamp_livekit_value "      port: " "${turn_port}"
+
+    # 5. Restart LiveKit so it reloads the stamped config (mounted ro,
+    #    read once at boot). Best-effort -- the polyphon compose owns it.
+    docker restart "${LIB_LIVEKIT_CONTAINER}" >/dev/null 2>&1 || true
+
+    echo "  TURN relay up: node_ip=${lk_ip}, turn=${turn_host}:${turn_port} (tcp)"
+    echo "  ${LIB_LIVEKIT_CONFIG} stamped; ${LIB_LIVEKIT_CONTAINER} restarted."
+    return 0
+}
