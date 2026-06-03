@@ -204,9 +204,34 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	if kind == "adHocAction" || kind == "scopeElevation" {
 		return
 	}
+	// Auto-run produceArtifact plans (memql#788). These are spawned by the
+	// Assistant's produceArtifact delegation tool from a conversational
+	// "make me X" request -- the user expects fire-and-forget ("drop it in my
+	// Library"), NOT a trip to the Tasks page to click Run. So when such a
+	// plan finishes decomposing and lands in "queued", auto-start it. Every
+	// OTHER kind keeps the review-then-Run gate. mutationStartPlan flips it to
+	// "running", which the existing status==running dispatch path picks up;
+	// the subsequent updated->running event re-enters here as a no-op (kind
+	// matches but status != queued), so there is no loop.
+	if kind == produceArtifactPlanKind && status == "queued" {
+		l.logger.Info("planner agent loop: auto-starting produceArtifact plan",
+			"planId", planId)
+		q := fmt.Sprintf(`mutationStartPlan({planId:%q})`, planId)
+		if _, err := l.engine.Execute(systemActorContext(context.Background()), q); err != nil {
+			l.logger.Warn("planner agent loop: auto-start produceArtifact plan failed",
+				"planId", planId, "error", err)
+		}
+		return
+	}
 	l.logger.Debug("planner agent loop: plan updated (re-invoke deferred)",
 		"planId", planId, "kind", kind, "status", status)
 }
+
+// produceArtifactPlanKind mirrors the agents integration's
+// produceArtifactKind (integrations/agents/integration.go). Plans of this
+// kind are spawned by the Assistant's produceArtifact tool and auto-run
+// (skip the manual Run gate) so the deliverable is produced asynchronously.
+const produceArtifactPlanKind = "produceArtifact"
 
 // systemPlannerActor is the synthetic subject the planner integration
 // stamps on its Execute calls so engine validators that gate writes

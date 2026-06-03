@@ -36,3 +36,17 @@ seed skill operator-computer-use {
   tier:          "B"
   predefined:    true
 }
+
+@description("Delegate produce-an-artifact requests to the planner. Bundles the produceArtifact tool so the Assistant can hand off 'create / make / build a file' requests to the async planner pipeline (which routes/creates a specialist, researches, and writes the deliverable into the Library) instead of authoring deliverables inline in a chat turn. Assistant-only -- specialists are the delegates, they never delegate. The tool itself is @allowedRoles(assistant), so a specialist that somehow carries this skill still cannot call it.")
+seed skill delegation-baseline {
+  slug:          "delegation-baseline"
+  name:          "Delegation Baseline"
+  description:   "Hand off produce-an-artifact requests to the planner (async). The conversational front door delegates file/document/deliverable creation rather than authoring it inline."
+  category:      "foundational"
+  tags:          ["universal", "assistant", "planner"]
+  domainIds:     []
+  toolSlugs:     ["produceArtifact"]
+  liveSourceIds: []
+  tier:          "A"
+  predefined:    true
+}
