@@ -91,21 +91,17 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		// the dispatcher on the same Plan (#645).
 		return
 	}
-	if kind == produceArtifactPlanKind {
-		// produceArtifact (#788) is a SINGLE-TURN deliverable, NOT a
-		// multi-step plan. It must NOT go through the planner-agent decompose
-		// loop (invokeAndDispatch): that loop is for decomposing complex goals
-		// + provisioning specialists via repeated large plannerAgent LLM calls,
-		// and for a simple "make me a markdown file" it spun/re-invoked and
-		// spammed the provider into a 429 rate-limit (memql#816). The requesting
-		// assistant was stamped as ownerAgentId at creation, and the goal is
-		// self-contained, so we just start the plan directly -> running;
-		// handlePlanApprovedForExecution -> executeApprovedPlan then dispatches
-		// it as ONE agent turn (the agent writes the file via the workbench).
-		// No plannerAgent call, no loop.
-		go l.startPlanDirect(context.Background(), planId)
-		return
-	}
+	// produceArtifact (#788) now flows through the SAME hardened decompose
+	// loop as every other userGoal plan (memql#823). The #816 single-turn
+	// bypass (startPlanDirect) was a stopgap for the 800k-tokens/min runaway;
+	// that runaway is fixed structurally now -- the loop has a hard per-plan
+	// LLM ceiling + token budget (#819), a lean prompt (#820), 429 backoff
+	// (#821), a convergence guard (#822), and a global circuit breaker
+	// (#825) -- so produceArtifact gets real multi-step / multi-agent
+	// decomposition + Tasks like everything else. It auto-runs once planning
+	// completes (see markPlanningComplete), so the deliverable is still
+	// produced asynchronously with no manual Run gate. The ownerAgentId
+	// stamped at creation stays as a hint for the executing turn.
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.
@@ -216,27 +212,31 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	if !ok {
 		return
 	}
-	if kind == "adHocAction" || kind == "scopeElevation" || kind == produceArtifactPlanKind {
-		// produceArtifact is started directly at creation (HandlePlanCreated ->
-		// startPlanDirect) and executed by handlePlanApprovedForExecution; it
-		// never needs the decompose/auto-start dance, so updates are a no-op here.
+	if kind == "adHocAction" || kind == "scopeElevation" {
+		// adHocAction: the stamper owns its lifecycle end-to-end.
+		// scopeElevation: handlePlanApprovedForExecution covers it on the
+		// Allow click. Neither needs the decompose/auto-start dance here.
 		return
 	}
 	l.logger.Debug("planner agent loop: plan updated (re-invoke deferred)",
 		"planId", planId, "kind", kind, "status", status)
 }
 
-// startPlanDirect flips a freshly-created Plan straight to "running" without
-// the planner-agent decompose loop -- for single-turn kinds (produceArtifact)
-// whose owning agent + self-contained goal are already set at creation. The
+// startPlan flips a Plan to "running" via mutationStartPlan. The
 // status=running transition is what handlePlanApprovedForExecution /
-// executeApprovedPlan key off to dispatch the single agent turn. Best-effort:
-// on failure the plan stays in planning and the safety net never fires (no
-// plannerAgent call was made), so there's nothing to spam. (memql#816)
-func (l *PlannerAgentLoop) startPlanDirect(ctx context.Context, planId string) {
+// executeApprovedPlan key off to dispatch the executing agent turn.
+//
+// Used to AUTO-RUN auto-run kinds (produceArtifact) once the planner has
+// finished decomposing -- see markPlanningComplete. (Previously this was
+// startPlanDirect, the #816 single-turn bypass invoked straight from
+// HandlePlanCreated; that bypass is retired in #823 now that the loop is
+// provably safe, but the mutationStartPlan mechanism is reused for the
+// post-planning auto-run.) Best-effort: on failure the plan stays queued
+// and the user can Run it manually.
+func (l *PlannerAgentLoop) startPlan(ctx context.Context, planId string) {
 	q := fmt.Sprintf(`mutationStartPlan({planId:%q})`, planId)
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
-		l.logger.Warn("planner agent loop: startPlanDirect failed",
+		l.logger.Warn("planner agent loop: startPlan (auto-run) failed",
 			"planId", planId, "error", err)
 	}
 }
@@ -453,7 +453,7 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 					"planId", planId, "iter", iter)
 				return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 			}
-			return l.markPlanningComplete(ctx, planId)
+			return l.markPlanningComplete(ctx, planId, getString(plan, "kind"))
 		}
 		return l.markPlanSucceeded(ctx, planId, d.outputAsMap())
 	case "markPlanFailed":
@@ -777,13 +777,27 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 // every Task I'm going to emit; the user can review and click Run."
 // No completedAt, no output -- the plan isn't actually done, just
 // done planning.
-func (l *PlannerAgentLoop) markPlanningComplete(ctx context.Context, planId string) error {
+//
+// AUTO-RUN (memql#823): for auto-run kinds (produceArtifact) there is no
+// manual Run gate -- the user delegated the deliverable and expects it
+// to be produced asynchronously. So once planning is complete we
+// immediately transition queued -> running (startPlan), which
+// handlePlanApprovedForExecution picks up to dispatch the executing
+// agent turn. Other kinds stay queued for the user to Run.
+func (l *PlannerAgentLoop) markPlanningComplete(ctx context.Context, planId, kind string) error {
 	q := fmt.Sprintf(
 		`mutationUpdatePlanStatus({planId:%q, status:"queued"})`,
 		planId,
 	)
-	_, err := l.engine.Execute(systemActorContext(ctx), q)
-	return err
+	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
+		return err
+	}
+	if kind == produceArtifactPlanKind {
+		l.logger.Info("planner agent loop: planning complete; auto-running produceArtifact",
+			"planId", planId)
+		l.startPlan(ctx, planId)
+	}
+	return nil
 }
 
 func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string, output map[string]any) error {
