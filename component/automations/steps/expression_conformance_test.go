@@ -20,13 +20,10 @@ package steps
 //     evaluators bottom out in (arg-time evaluateValue vs the logic-time leaf
 //     Evaluator.EvaluateValue).
 //   - localExprCases: the local-expression subset logic bodies actually use --
-//     coalesce + step-method calls (.First()/.Len()/.Empty()) -- run through the
-//     FULL logic-time path (EvaluateLocalExpr) vs arg-time evaluateValue.
-//
-// The one KNOWN remaining divergence (a method-THEN-field path inside a logic
-// coalesce arg) is captured in TestExpressionEvaluators_KnownDivergence below;
-// it flips to a convergent localExprCase when the logic-time scalar-arg
-// resolver learns method-then-field navigation (the next #593 step).
+//     coalesce + step-method calls (.First()/.Len()/.Empty()) AND a method-THEN-
+//     field path inside a coalesce arg (the ghost-SI shape) -- run through the
+//     FULL logic-time path (EvaluateLocalExpr) vs arg-time evaluateValue. They
+//     all converge.
 
 import (
 	"fmt"
@@ -168,6 +165,15 @@ var localExprCases = []conformanceCase{
 		expr:  "rows.Empty()",
 		want:  false,
 	},
+	{
+		// The ghost-SI shape (#575/#580): a method-THEN-field path inside a
+		// coalesce arg. Both evaluators now navigate it to the node id rather
+		// than ever flowing the raw expression text (memql#593).
+		name:  "coalesce_method_then_field",
+		setup: seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success"),
+		expr:  `coalesce(rows.First().id, "")`,
+		want:  "v1:x:1",
+	},
 }
 
 func TestExpressionEvaluators_Conformance(t *testing.T) {
@@ -205,47 +211,6 @@ func TestExpressionEvaluators_Conformance(t *testing.T) {
 		{"argTime", argTime},
 		{"logicLocal", logicLocal},
 	})
-}
-
-// TestExpressionEvaluators_KnownDivergence pins the SINGLE remaining #593
-// divergence so it's captured + can't regress silently: a method-THEN-field
-// path inside a logic coalesce arg. ARG-TIME navigates `rows.First().id` to the
-// node id; the LOGIC-TIME scalar-arg resolver returns the raw expression text.
-// In the live DSL this pattern only appears in mutation args (arg-time), so it
-// is latent -- but it is exactly the ghost-SI shape, so it must be made to
-// converge (logic-time learns method-then-field navigation, OR fails closed to
-// nil) rather than ever flow raw text as a value. When fixed, move the
-// convergent case into localExprCases and delete this guard.
-func TestExpressionEvaluators_KnownDivergence(t *testing.T) {
-	setup := seedStep("rows", nodeResult("v1:x:1", map[string]any{"k": "v"}), "success")
-	expr := `coalesce(rows.First().id, "")`
-
-	arg, err := argTime(func() *automations.Evaluator {
-		e := automations.NewEvaluator()
-		setup(e)
-		return e
-	}(), expr)
-	if err != nil {
-		t.Fatalf("argTime(%q): %v", expr, err)
-	}
-	if arg != "v1:x:1" {
-		t.Fatalf("argTime(%q) = %#v, want %q (arg-time resolves method-then-field)", expr, arg, "v1:x:1")
-	}
-
-	logic, err := logicLocal(func() *automations.Evaluator {
-		e := automations.NewEvaluator()
-		setup(e)
-		return e
-	}(), expr)
-	if err != nil {
-		t.Fatalf("logicLocal(%q): %v", expr, err)
-	}
-	// CURRENT (divergent) behaviour: the raw expression text, not the id.
-	// This assertion documents the gap; flip it to converge with arg-time as
-	// the next #593 step.
-	if logic == "v1:x:1" {
-		t.Fatalf("logicLocal(%q) now resolves method-then-field -- the #593 divergence is fixed; move this into localExprCases and delete this test", expr)
-	}
 }
 
 // conformanceEqual compares results structurally enough for the matrix: two

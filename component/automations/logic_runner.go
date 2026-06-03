@@ -536,11 +536,30 @@ func evaluateScalarArg(raw string, evaluator *Evaluator) (any, error) {
 		}
 		return val, nil
 	}
-	val, err := evaluator.EvaluateStepReference(raw)
+	// Normalize step-method CALLS (`rows.First().id`) to the navigable dotted
+	// form (`rows.First.id`) the resolver already handles -- so a method-then-
+	// field path inside a coalesce arg resolves to its value instead of its raw
+	// text (memql#593; matches the arg-time normalizer).
+	val, err := evaluator.EvaluateStepReference(normalizeStepMethodCalls(raw))
 	if err != nil {
 		return nil, nil //nolint:nilerr // soft-fail for coalesce
 	}
 	return val, nil
+}
+
+// stepMethodAccessors are the step-method names resolvePath navigates in dotted
+// form (`rows.first` / `rows.First` / `rows.Len` / ...).
+var stepMethodAccessors = []string{"First", "Last", "Empty", "Count", "Len", "Nodes", "Ran"}
+
+// normalizeStepMethodCalls strips the `()` from a step-method CALL so a
+// method-THEN-field path (`rows.First().id`) collapses to the navigable dotted
+// form (`rows.First.id`) the resolver already understands. The logic-time
+// counterpart to the arg-time method-accessor normalizer (memql#593).
+func normalizeStepMethodCalls(expr string) string {
+	for _, m := range stepMethodAccessors {
+		expr = strings.ReplaceAll(expr, "."+m+"()", "."+m)
+	}
+	return expr
 }
 
 // isCustomVarRoot reports whether segment is a well-known root the
