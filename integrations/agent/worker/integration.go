@@ -109,14 +109,14 @@ type Integration struct {
 	bucket   string
 }
 
-// attachmentUploader is the narrow GCS upload surface (same shape as the
-// workbench integration's). Implemented by the gcs client; injected via
+// attachmentUploader is the narrow blob storage upload surface (same shape as the
+// workbench integration's). Implemented by the azureblob uploader; injected via
 // SetAttachmentUploader from app/transport_agent.go.
 type attachmentUploader interface {
 	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (string, error)
 }
 
-// SetAttachmentUploader injects the GCS uploader + bucket. Called once from
+// SetAttachmentUploader injects the blob storage uploader + bucket. Called once from
 // app/transport_agent.go after the uploader is constructed, and only when a
 // bucket is configured (mirrors the workbench wiring, memql#733/#742). nil-safe:
 // without it, computer-use outputs stay worker-local pointer rows.
@@ -169,10 +169,10 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": filePath}))[:16]
 	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
 
-	gcsURL, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
+	blobUrl, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
 	if err != nil {
 		if i.logger != nil {
-			i.logger.Warn("worker integration: attachment GCS upload failed -- using pointer row",
+			i.logger.Warn("worker integration: attachment blob upload failed -- using pointer row",
 				"plan_id", planId, "path", filePath, "error", err)
 		}
 		return ""
@@ -180,8 +180,8 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 
 	attachmentId := spaceId + ":" + det
 	call := fmt.Sprintf(
-		`mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, gcsURL:%q, status:%q, uploadedBy:%q})`,
-		attachmentId, spaceId, fileName, mimeType, len(data), gcsURL, "ready", ownerUserId)
+		`mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, spaceId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, call); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("worker integration: attachment row create failed -- using pointer row",

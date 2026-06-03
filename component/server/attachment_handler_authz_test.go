@@ -190,7 +190,7 @@ func TestAttachmentDownload_ServesBytes(t *testing.T) {
 		owns: true,
 		attachment: &AttachmentRow{
 			ID: "att1", FileName: "birds.md", MimeType: "text/markdown",
-			GCSUrl:  "https://acct.blob.core.windows.net/c/spaces/s1/attachments/x/birds.md",
+			BlobUrl: "https://acct.blob.core.windows.net/c/spaces/s1/attachments/x/birds.md",
 			SpaceId: "v1:cognition:space:s1",
 		},
 	}

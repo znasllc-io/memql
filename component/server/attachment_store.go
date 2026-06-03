@@ -49,8 +49,8 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 	sb.WriteString(`, "mimeType": `)
 	sb.WriteString(jsonString(params.MimeType))
 	sb.WriteString(fmt.Sprintf(`, "fileSize": %d`, params.FileSize))
-	sb.WriteString(`, "gcsURL": `)
-	sb.WriteString(jsonString(params.GCSUrl))
+	sb.WriteString(`, "blobUrl": `)
+	sb.WriteString(jsonString(params.BlobUrl))
 	sb.WriteString(`, "status": `)
 	sb.WriteString(jsonString(params.Status))
 	sb.WriteString(`, "uploadedBy": `)
@@ -138,7 +138,7 @@ func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId,
 		ID:       getStr("id"),
 		FileName: getStr("fileName"),
 		MimeType: getStr("mimeType"),
-		GCSUrl:   getStr("gcsURL"),
+		BlobUrl:  getStr("blobUrl"),
 		SpaceId:  getStr("spaceId"),
 		Status:   getStr("status"),
 	}, nil

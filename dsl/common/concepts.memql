@@ -8,7 +8,7 @@
 concept attachment {
   fileName  string  @required  @description("Original filename of the uploaded file.")
   fileSize  int  @description("File size in bytes.")
-  gcsURL  string  @required  @description("Google Cloud Storage URI where the file is stored (gs://bucket/object).")
+  blobUrl  string  @required  @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
   mimeType  string  @required  @description("MIME type of the uploaded file.")
   spaceId  string  @required  @description("ID of the space this attachment belongs to.")
   status  enum("processing", "ready", "error")  @required  @description("Processing status of the attachment.")

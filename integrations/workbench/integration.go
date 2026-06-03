@@ -56,10 +56,10 @@ type Integration struct {
 	bucket   string
 }
 
-// attachmentUploader is the minimal slice of the GCS FileUploader the
+// attachmentUploader is the minimal slice of the blob storage FileUploader the
 // workbench needs to push generated-output bytes to object storage
 // (memql#733). Declared locally (structural typing) so the workbench
-// package doesn't take a dependency on component/server; *gcs.GCSUploader
+// package doesn't take a dependency on component/server; *azureblob.AzureBlobUploader
 // (and server.FileUploader) satisfy it.
 type attachmentUploader interface {
 	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (string, error)
@@ -549,10 +549,10 @@ func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath
 	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": relPath}))[:16]
 	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
 
-	gcsURL, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
+	blobUrl, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
 	if err != nil {
 		if i.logger != nil {
-			i.logger.Warn("workbench: attachment GCS upload failed -- using pointer row",
+			i.logger.Warn("workbench: attachment blob upload failed -- using pointer row",
 				slog.String("planId", planId), slog.String("path", relPath), slog.Any("error", err))
 		}
 		return "", ""
@@ -560,8 +560,8 @@ func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath
 
 	attachmentId = spaceId + ":" + det
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, gcsURL:%q, status:%q, uploadedBy:%q})`,
-		attachmentId, spaceId, fileName, mimeType, len(data), gcsURL, "ready", ownerUserId)
+	fmt.Fprintf(&b, `mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, spaceId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
 	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("workbench: attachment row create failed -- using pointer row",

@@ -55,7 +55,7 @@ var allowedAttachmentMIMETypes = map[string]bool{
 // FileUploader stores raw file bytes in a durable object store.
 type FileUploader interface {
 	// Upload persists data and returns a storage URI.
-	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (gcsURL string, err error)
+	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (blobUrl string, err error)
 }
 
 // TextExtractor extracts plain text from file bytes.
@@ -71,7 +71,7 @@ type AttachmentStore interface {
 	// CallerOwnsSpace reports whether the authenticated caller (resolved
 	// server-side via the engine envelope) owns the given space. Used as
 	// an explicit pre-upload ownership gate so cross-tenant uploads are
-	// rejected before any GCS bytes are written. The DSL mutation
+	// rejected before any blob bytes are written. The DSL mutation
 	// re-enforces ownership; this is defense in depth.
 	CallerOwnsSpace(ctx context.Context, spaceId string) (bool, error)
 	// GetAttachment reads one v1:common:attachment row by id within a space
@@ -86,7 +86,7 @@ type AttachmentRow struct {
 	ID       string
 	FileName string
 	MimeType string
-	GCSUrl   string
+	BlobUrl  string
 	SpaceId  string
 	Status   string
 }
@@ -110,7 +110,7 @@ type AttachmentCreateParams struct {
 	FileName      string
 	MimeType      string
 	FileSize      int
-	GCSUrl        string
+	BlobUrl       string
 	Transcription string
 	Summary       string
 	Status        string
@@ -124,7 +124,7 @@ type AttachmentResponse struct {
 	FileName      string `json:"fileName"`
 	MimeType      string `json:"mimeType"`
 	FileSize      int    `json:"fileSize"`
-	GCSUrl        string `json:"gcsURL"`
+	BlobUrl       string `json:"blobUrl"`
 	Transcription string `json:"transcription,omitempty"`
 	Summary       string `json:"summary,omitempty"`
 	Status        string `json:"status"`
@@ -205,7 +205,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Defense-in-depth: confirm the caller owns the target space
 	// BEFORE doing any expensive work (multipart parse, file read,
-	// GCS upload). The DSL mutation re-enforces ownership too; this
+	// blob upload). The DSL mutation re-enforces ownership too; this
 	// short-circuits before bytes hit storage.
 	if h.store != nil {
 		owns, err := h.store.CallerOwnsSpace(r.Context(), spaceId)
@@ -275,12 +275,11 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fileName = "upload"
 	}
 
-	// Upload to object storage (Azure Blob, memql#801). The stored URL lands
-	// on the attachment row's gcsURL field (legacy name; now an Azure blob URL).
+	// Upload to object storage (Azure Blob, memql#801).
 	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, id.NewShortId(), fileName)
-	gcsURL := ""
+	blobUrl := ""
 	if h.uploader != nil && h.bucket != "" {
-		gcsURL, err = h.uploader.Upload(ctx, h.bucket, objectName, data, mimeType)
+		blobUrl, err = h.uploader.Upload(ctx, h.bucket, objectName, data, mimeType)
 		if err != nil {
 			h.logger.Error("upload attachment to blob storage", "error", err, "spaceId", spaceId)
 			http.Error(w, "failed to upload file", http.StatusInternalServerError)
@@ -288,7 +287,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// No uploader configured (dev/test): use a placeholder URI.
-		gcsURL = fmt.Sprintf("local://%s", objectName)
+		blobUrl = fmt.Sprintf("local://%s", objectName)
 	}
 
 	// Async analysis architecture (v1):
@@ -319,7 +318,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		FileName:      fileName,
 		MimeType:      mimeType,
 		FileSize:      len(data),
-		GCSUrl:        gcsURL,
+		BlobUrl:       blobUrl,
 		Transcription: "",
 		Summary:       "",
 		Status:        attachmentStatusProcessing,
@@ -387,7 +386,7 @@ func (h *AttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			FileName:      fileName,
 			MimeType:      mimeType,
 			FileSize:      len(data),
-			GCSUrl:        gcsURL,
+			BlobUrl:       blobUrl,
 			Transcription: "",
 			Summary:       "",
 			Status:        attachmentStatusProcessing,
@@ -563,7 +562,7 @@ func (h *AttachmentHandler) handleDownload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	data, err := h.downloader.DownloadURL(ctx, row.GCSUrl)
+	data, err := h.downloader.DownloadURL(ctx, row.BlobUrl)
 	if err != nil {
 		h.logger.Warn("attachment bytes unavailable", "error", err, "attachmentId", attachmentId)
 		http.Error(w, "file not available", http.StatusNotFound)
