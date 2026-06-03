@@ -336,10 +336,20 @@ builtin knowledgeSeedStandardDomains {
 // session_id, vendor, room_name }. Simli joins as the second vendor in #293.
 @executor("integration.avatardirect.startSession")
 @sdk
-@description("Start a direct/Guide avatar session for an anam-vendor agent. Mints a LiveKit room + browser join token and brings Anam up (audio-driven). Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.")
+@description("Phase 1 of the direct/Guide avatar handshake (anam/simli). Mints a LiveKit room + an agent-kind browser join token and validates the agent has an avatar persona; does NOT start the vendor engine. The browser joins + starts forwarding audio, THEN calls avatarDirectEngageVendor (Simli waits for the audio-providing participant to be present first, memql#782). Returns { livekit_url, livekit_client_token, browser_identity, vendor, room_name }.")
 builtin avatarDirectStartSession {
   agentId  string  @required
   spaceId  string
+}
+
+@executor("integration.avatardirect.engageVendor")
+@sdk
+@description("Phase 2 of the direct/Guide avatar handshake. Brings the vendor cloud engine (anam/simli) up to dial into the room from startSession; call only after the browser has joined and started forwarding audio over the lk.audio_stream byte stream. Mints the avatar token (publish_on_behalf=browser_identity) and starts the session. Returns { session_id, vendor, avatar_identity, ok }.")
+builtin avatarDirectEngageVendor {
+  agentId          string  @required
+  room_name        string  @required
+  browser_identity string  @required
+  spaceId          string
 }
 
 @executor("integration.avatardirect.stopSession")
