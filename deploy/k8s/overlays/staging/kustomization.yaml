@@ -1,4 +1,4 @@
-# Promoted from releases/0.9.14.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
+# Promoted from releases/0.9.15.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -9,18 +9,18 @@ resources:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:625427d05edd0073247a4d0da2769e1098d14d15b95a5c43fda0ca07d361fdd3
+    digest: sha256:6a85f668b21c724aaca242607655e4dbba1714c6d5e7d397640be667bbabf92c
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:d3d8c76f127207a07a6ad0755074b744fe8d591d0446f89e6bde8898a4e35000
+    digest: sha256:0d6f16ea090ffea2df1540b0e32ec72b3a6cd93328f67bbc12f954efa52a5e32
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:9374c02336b4fcabda9d71c709af5aac1420f75b0b5fe919f856866472cc3c4f
+    digest: sha256:a2aec2734e2906343acab4dbc12533e2f230421f7a31a72e711e975630206d9d
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:85f6845e5cbb1157d8412961616e20a2713b2a57e7a2759018f31151c8cc6a84
+    digest: sha256:2c6a2ceb5120c3be0336d938fee8e89fb35d3436934417a80fd80b419792e79c
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:cf5e43bffd6ee84ad237280acb44d98798b6f7690e93b5d4c87dabd69c36bd18
+    digest: sha256:be99c4d5e521ffb712c07c82821607bf48c1c716eb08bbfd2c64bdf3f1da5af8
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:d28c7966cd184f1e9fdc3b9162451af4ad796a7aa923ace29a3f7a6a42c30bbd
+    digest: sha256:0d7e429af06a2a2fa3f949ebc0790febfd0383d0d655c49d6002b9afbc3f080e
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:8514928c05cec96c4bed5831f793f03026b53ec018b166a02580d69330aa9ab3
+    digest: sha256:2b8d6194f452e632e8a936e9d23b063d27e2541f63d11cead5218406404f4416
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:0656df9734c77e36ebb7d3c367487a984cb634d348a0a6f4716ea2b3f9c7fc6f
