@@ -35,7 +35,8 @@ func TestSimliClient_StartShape(t *testing.T) {
 	assert.Equal(t, http.MethodPost, tok.method)
 	assert.Equal(t, "https://api.simli.test/compose/token", tok.url)
 	assert.Equal(t, "simli-key", tok.header.Get("x-simli-api-key"))
-	assert.Equal(t, "face-42", tok.body["faceId"])
+	// Matches the stock plugin's composite "{faceId}/{emotionId}" form.
+	assert.Equal(t, "face-42/"+simliDefaultEmotionID, tok.body["faceId"])
 	assert.Equal(t, true, tok.body["handleSilence"])
 
 	// 2. integrations/livekit/agents with the session token + LiveKit room.

@@ -8,16 +8,24 @@
 // cloud-engine vendors work the opposite way -- the vendor DIALS INTO an
 // existing LiveKit room as the avatar participant and lip-syncs to audio
 // published INTO that room. There is no voice-agent on the direct path, so
-// memQL itself must, for an `anam`- or `simli`-vendor agent:
+// memQL drives a TWO-PHASE handshake for an `anam`- or `simli`-vendor agent.
+// The phases exist because Simli's cloud engine joins the room, waits for an
+// audio-providing AGENT-kind participant to ALREADY be present, and reads that
+// participant's lk.audio_stream byte stream for lip-sync; if memQL starts the
+// engine before the browser has joined and begun forwarding audio (the old
+// single-phase flow), the engine waits on an absent participant and never
+// publishes video (memql#782).
 //
-//  1. Resolve the agent's avatarVendor + avatarPersonaId.
-//  2. Mint a fresh LiveKit room + a BROWSER join token (returned to copresent)
-//     + an AVATAR-participant join token (handed to the vendor engine).
-//  3. Bring the vendor engine up via the shared integrations/avatarvendor
-//     client (audio-driven -- Anam's CUSTOMER_CLIENT_V1 / Simli's compose +
-//     livekit-agent path -- so it lip-syncs the audio copresent publishes).
-//  4. Return the same `{ livekit_url, livekit_client_token }` shape
-//     useLiveAvatar already consumes, plus session_id + vendor + room_name.
+//  1. startSession: resolve the agent's avatarVendor + avatarPersonaId, mint a
+//     fresh LiveKit room + an AGENT-kind BROWSER join token, validate the
+//     persona, and return { livekit_url, livekit_client_token, browser_identity,
+//     vendor, room_name }. The vendor engine is NOT started here.
+//  2. The browser joins the room with those creds and starts forwarding the
+//     assistant audio over the lk.audio_stream byte stream.
+//  3. engageVendor: mint the AVATAR-participant join token (kind=agent,
+//     lk.publish_on_behalf=browser_identity) and bring the vendor engine up via
+//     the shared integrations/avatarvendor client so it dials in and lip-syncs
+//     the forwarded audio. Returns { session_id, vendor, avatar_identity, ok }.
 //
 // Vendor gate: this capability serves the cloud-engine vendors `anam` and
 // `simli`; the agent's stamped avatarVendor (or the MEMQL_AVATAR_VENDOR runtime
@@ -27,7 +35,9 @@
 // Capabilities (callable as builtins from .memql files):
 //
 //	avatardirect.startSession({ agentId: string, spaceId?: string })
-//	    -> { livekit_url, livekit_client_token, session_id, vendor, room_name }
+//	    -> { livekit_url, livekit_client_token, browser_identity, vendor, room_name }
+//	avatardirect.engageVendor({ agentId, room_name, browser_identity, spaceId? })
+//	    -> { session_id, vendor, avatar_identity, ok }
 //	avatardirect.stopSession({ session_id?, vendor?, room_name? })
 //	    -> { ok }
 package avatardirect
@@ -115,11 +125,22 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "startSession",
-			Description: "Start a direct/Guide avatar session for an anam- or simli-vendor agent: mint a LiveKit room + browser join token, and bring the vendor cloud engine up (audio-driven) to dial in. Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.",
+			Description: "Phase 1 of the direct/Guide avatar handshake for an anam- or simli-vendor agent: mint a dedicated LiveKit room + an AGENT-kind browser join token, validate the agent has a usable avatar persona, and return the creds the browser joins with. Does NOT bring the vendor cloud engine up -- the browser must join the room and start forwarding the assistant audio first, then call engageVendor (Simli's engine waits for an audio-providing agent participant to already be present, memql#782). Returns { livekit_url, livekit_client_token, browser_identity, vendor, room_name }.",
 			Handler:     i.handleStartSession,
 			ArgsSchema: map[string]string{
 				"agentId": "string (required) - the agent whose avatarVendor + avatarPersonaId drive the session",
 				"spaceId": "string (optional) - originating space, for logging/correlation",
+			},
+		},
+		{
+			Name:        "engageVendor",
+			Description: "Phase 2 of the direct/Guide avatar handshake: bring the vendor cloud engine (Anam / Simli) up so it dials into the room minted by startSession. Call this only AFTER the browser has joined the room (browser_identity) and started forwarding the assistant audio over the lk.audio_stream byte stream, so the vendor engine finds the audio-providing participant already present. Mints the avatar join token (kind=agent, lk.publish_on_behalf=browser_identity) and starts the vendor session. Returns { session_id, vendor, avatar_identity, ok }.",
+			Handler:     i.handleEngageVendor,
+			ArgsSchema: map[string]string{
+				"agentId":          "string (required) - the same agent passed to startSession",
+				"room_name":        "string (required) - the room_name returned by startSession",
+				"browser_identity": "string (required) - the browser_identity returned by startSession; the avatar publishes its video on behalf of it",
+				"spaceId":          "string (optional) - originating space, for logging/correlation",
 			},
 		},
 		{
@@ -139,6 +160,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // Capability handlers
 // -----------------------------------------------------------------
 
+// handleStartSession is phase 1 of the avatar handshake. It mints the room +
+// the AGENT-kind browser join token and validates the agent has a usable avatar
+// persona, but does NOT bring the vendor engine up. The browser joins the room
+// with these creds and starts forwarding the assistant audio (over the
+// lk.audio_stream byte stream) BEFORE calling engageVendor -- because Simli's
+// cloud receiver waits for an audio-providing agent participant to already be
+// present and reads its byte stream; joining the engine first (the old
+// single-phase flow) left the engine waiting on an absent participant and it
+// never published video (memql#782).
 func (i *Integration) handleStartSession(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	agentId := strings.TrimSpace(asString(args["agentId"]))
 	if agentId == "" {
@@ -150,30 +180,24 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("avatardirect.startSession: LiveKit not configured (set POLYPHON_LIVEKIT_URL/API_KEY/API_SECRET)")
 	}
 
-	vendor, personaId, err := i.resolveAgentAvatar(ctx, agentId)
+	vendor, personaId, ac, err := i.resolveVendorConfig(ctx, agentId)
 	if err != nil {
 		return nil, err
 	}
 
-	// Vendor gate: the direct path supports the cloud-engine vendors anam and
-	// simli (memql#782). Resolve the matching API key (each vendor has its own
-	// global secret); anything else is unsupported here.
-	ac := avatarvendor.AvatarConfig{Vendor: vendor}
-	switch vendor {
-	case string(avatarvendor.AvatarVendor("anam")):
-		key, kerr := i.vendorAPIKey(ctx, secretAnamAPIKey)
-		if kerr != nil {
-			return nil, kerr
-		}
-		ac.AnamAPIKey = key
-	case string(avatarvendor.AvatarVendor("simli")):
-		key, kerr := i.vendorAPIKey(ctx, secretSimliAPIKey)
-		if kerr != nil {
-			return nil, kerr
-		}
-		ac.SimliAPIKey = key
-	default:
-		return nil, fmt.Errorf("avatardirect.startSession: agent %s avatarVendor=%q is not supported on the direct avatar path (expected anam or simli)", agentId, vendor)
+	// Validate the agent has a usable avatar persona up front (no network: this
+	// is the pure plan resolution), so phase 1 fails fast instead of handing
+	// back a room the avatar will never render in. A nil plan means audio-only.
+	plan, perr := avatarvendor.ResolveAvatarPlan(ac, avatarvendor.PersonaInput{
+		AvatarPersonaID: personaId,
+		AvatarVendor:    vendor,
+		VideoEnabled:    true,
+	})
+	if perr != nil {
+		return nil, fmt.Errorf("avatardirect.startSession: resolve %s avatar: %w", vendor, perr)
+	}
+	if plan == nil {
+		return nil, fmt.Errorf("avatardirect.startSession: agent %s has no avatar persona for vendor %q (audio-only)", agentId, vendor)
 	}
 
 	// Mint a fresh, dedicated room for this avatar session (the direct/Guide
@@ -185,23 +209,78 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 	if err != nil {
 		return nil, fmt.Errorf("avatardirect.startSession: mint browser token: %w", err)
 	}
-	avatarToken, err := i.mintAvatarToken(roomName)
-	if err != nil {
-		return nil, fmt.Errorf("avatardirect.startSession: mint avatar token: %w", err)
+
+	// browserURL is what copresent connects with: POLYPHON_LIVEKIT_PUBLIC_URL
+	// (e.g. wss://livekit.local.znas.io), or the internal URL as a fallback.
+	browserURL := i.lk.LiveKitPublicURL
+	if browserURL == "" {
+		browserURL = i.lk.LiveKitURL
 	}
 
-	// Two DIFFERENT LiveKit URLs are needed:
-	//   - browserURL: what copresent connects with. The browser reaches LiveKit
-	//     on POLYPHON_LIVEKIT_PUBLIC_URL (e.g. wss://livekit.local.znas.io), or
-	//     the internal URL as a fallback.
-	//   - engineURL: where the vendor's CLOUD engine (Anam or Simli) dials in
-	//     from the public internet. A browser-local URL (livekit.local /
-	//     192.168.x / ws://livekit:7880) is unreachable from the cloud, so this
-	//     MUST be an externally-reachable tunnel -- LIVEKIT_PUBLIC_URL (the same
-	//     env the voice-agent avatar uses; set by `make dev-refresh`'s ngrok
-	//     step). Without it the engine can't join the room and never publishes
-	//     video (the avatar stays the idle orb), so fall back to browserURL but
-	//     log a warning.
+	if i.logger != nil {
+		i.logger.Info("avatardirect startSession (phase 1: room minted, engine deferred)",
+			"agent_id", agentId,
+			"space_id", spaceId,
+			"vendor", vendor,
+			"room_name", roomName,
+			"browser_identity", browserIdentity)
+	}
+
+	out := map[string]any{
+		"livekit_url":          browserURL,
+		"livekit_client_token": browserToken,
+		"browser_identity":     browserIdentity,
+		"vendor":               vendor,
+		"room_name":            roomName,
+	}
+	return wrapResult("avatardirect:session-start", "integration:avatardirect:sessionStart", out)
+}
+
+// handleEngageVendor is phase 2 of the avatar handshake. With the browser
+// already in the room and forwarding audio, it mints the avatar join token
+// (kind=agent, lk.publish_on_behalf=browser_identity so the avatar's video is
+// attributed to the participant Simli reads audio from) and brings the vendor
+// cloud engine up to dial in.
+func (i *Integration) handleEngageVendor(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	agentId := strings.TrimSpace(asString(args["agentId"]))
+	if agentId == "" {
+		return nil, fmt.Errorf("avatardirect.engageVendor: agentId is required")
+	}
+	roomName := strings.TrimSpace(asString(args["room_name"]))
+	if roomName == "" {
+		return nil, fmt.Errorf("avatardirect.engageVendor: room_name is required (from startSession)")
+	}
+	browserIdentity := strings.TrimSpace(asString(args["browser_identity"]))
+	if browserIdentity == "" {
+		return nil, fmt.Errorf("avatardirect.engageVendor: browser_identity is required (from startSession)")
+	}
+	spaceId := strings.TrimSpace(asString(args["spaceId"]))
+
+	if !i.lk.LiveKitConfigured() {
+		return nil, fmt.Errorf("avatardirect.engageVendor: LiveKit not configured (set POLYPHON_LIVEKIT_URL/API_KEY/API_SECRET)")
+	}
+
+	vendor, personaId, ac, err := i.resolveVendorConfig(ctx, agentId)
+	if err != nil {
+		return nil, err
+	}
+
+	// The avatar token carries lk.publish_on_behalf=browser_identity. The
+	// browser is already in the room (phase 1 + the browser's join), so the
+	// on-behalf target exists -- setting it before the participant was present
+	// is what made Simli refuse to join (memql#782).
+	avatarToken, err := i.mintAvatarToken(roomName, browserIdentity)
+	if err != nil {
+		return nil, fmt.Errorf("avatardirect.engageVendor: mint avatar token: %w", err)
+	}
+
+	// engineURL is where the vendor's CLOUD engine dials in from the public
+	// internet. A browser-local URL (livekit.local / 192.168.x /
+	// ws://livekit:7880) is unreachable from the cloud, so this MUST be an
+	// externally-reachable tunnel -- LIVEKIT_PUBLIC_URL (the same env the
+	// voice-agent avatar uses; set by `make dev-refresh`'s ngrok step). Without
+	// it the engine can't join the room and never publishes video, so fall back
+	// to the browser URL but log a warning.
 	browserURL := i.lk.LiveKitPublicURL
 	if browserURL == "" {
 		browserURL = i.lk.LiveKitURL
@@ -230,33 +309,59 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 		LiveKitToken: avatarToken,
 	}, i.newClient)
 	if err != nil {
-		return nil, fmt.Errorf("avatardirect.startSession: bring up %s avatar: %w", vendor, err)
+		return nil, fmt.Errorf("avatardirect.engageVendor: bring up %s avatar: %w", vendor, err)
 	}
 	if !started {
-		// nil plan -- the agent has no usable persona id (and no platform
-		// default). Surface a specific error instead of silently returning a
-		// room the avatar will never join.
-		return nil, fmt.Errorf("avatardirect.startSession: agent %s has no avatar persona for vendor %q (audio-only)", agentId, vendor)
+		return nil, fmt.Errorf("avatardirect.engageVendor: agent %s has no avatar persona for vendor %q (audio-only)", agentId, vendor)
 	}
 
 	if i.logger != nil {
-		i.logger.Info("avatardirect session started",
+		i.logger.Info("avatardirect engageVendor (phase 2: vendor engine started)",
 			"agent_id", agentId,
 			"space_id", spaceId,
 			"vendor", vendor,
 			"room_name", roomName,
+			"browser_identity", browserIdentity,
 			"session_id", res.SessionID,
 			"avatar_identity", res.AvatarIdentity)
 	}
 
 	out := map[string]any{
-		"livekit_url":          browserURL,
-		"livekit_client_token": browserToken,
-		"session_id":           res.SessionID,
-		"vendor":               vendor,
-		"room_name":            roomName,
+		"session_id":      res.SessionID,
+		"vendor":          vendor,
+		"avatar_identity": res.AvatarIdentity,
+		"ok":              true,
 	}
-	return wrapResult("avatardirect:session-start", "integration:avatardirect:sessionStart", out)
+	return wrapResult("avatardirect:engage-vendor", "integration:avatardirect:engageVendor", out)
+}
+
+// resolveVendorConfig resolves the agent's avatar vendor + persona id and builds
+// the AvatarConfig with the matching vendor API key. Shared by both phases of
+// the handshake (startSession validates the plan; engageVendor starts it). The
+// vendor gate accepts only the cloud-engine vendors anam and simli.
+func (i *Integration) resolveVendorConfig(ctx context.Context, agentId string) (vendor, personaId string, ac avatarvendor.AvatarConfig, err error) {
+	vendor, personaId, err = i.resolveAgentAvatar(ctx, agentId)
+	if err != nil {
+		return "", "", avatarvendor.AvatarConfig{}, err
+	}
+	ac = avatarvendor.AvatarConfig{Vendor: vendor}
+	switch vendor {
+	case string(avatarvendor.AvatarVendor("anam")):
+		key, kerr := i.vendorAPIKey(ctx, secretAnamAPIKey)
+		if kerr != nil {
+			return "", "", avatarvendor.AvatarConfig{}, kerr
+		}
+		ac.AnamAPIKey = key
+	case string(avatarvendor.AvatarVendor("simli")):
+		key, kerr := i.vendorAPIKey(ctx, secretSimliAPIKey)
+		if kerr != nil {
+			return "", "", avatarvendor.AvatarConfig{}, kerr
+		}
+		ac.SimliAPIKey = key
+	default:
+		return "", "", avatarvendor.AvatarConfig{}, fmt.Errorf("avatardirect: agent %s avatarVendor=%q is not supported on the direct avatar path (expected anam or simli)", agentId, vendor)
+	}
+	return vendor, personaId, ac, nil
 }
 
 func (i *Integration) handleStopSession(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -305,9 +410,13 @@ func (i *Integration) resolveAgentAvatar(ctx context.Context, agentId string) (v
 // LiveKit token minting
 // -----------------------------------------------------------------
 
-// mintBrowserToken builds the LiveKit join token copresent connects with: a
-// standard participant that can publish (the assistant audio it republishes in
-// step 3) and subscribe (the avatar's video).
+// mintBrowserToken builds the LiveKit join token copresent connects with. It is
+// kind=AGENT: Simli's cloud receiver lip-syncs the audio of whichever AGENT-kind
+// participant it finds in the room (DataStreamAudioReceiver waits for an
+// agent-kind participant and reads its lk.audio_stream byte stream), so the
+// browser -- which forwards the assistant audio over that byte stream -- must
+// present as an agent participant for the engine to pick it up (memql#782). It
+// can publish (the audio byte stream) and subscribe (the avatar's video).
 func (i *Integration) mintBrowserToken(roomName, identity string) (string, error) {
 	canPublish := true
 	canSubscribe := true
@@ -318,16 +427,22 @@ func (i *Integration) mintBrowserToken(roomName, identity string) (string, error
 		CanPublish:   &canPublish,
 		CanSubscribe: &canSubscribe,
 	}).
+		SetKind(livekit.ParticipantInfo_AGENT).
 		SetIdentity(identity).
 		SetName("You").
 		SetValidFor(tokenTTL)
 	return at.ToJWT()
 }
 
-// mintAvatarToken builds the LiveKit join token the Anam engine dials in with.
+// mintAvatarToken builds the LiveKit join token the vendor engine dials in with.
 // kind=agent so it is recognized as an agent participant; it publishes the
-// lip-synced video the browser subscribes to.
-func (i *Integration) mintAvatarToken(roomName string) (string, error) {
+// lip-synced video the browser subscribes to. onBehalfIdentity, when non-empty,
+// is stamped as lk.publish_on_behalf so the avatar's video track is attributed
+// to the audio-providing participant -- mirroring the voice-agent path's
+// ATTRIBUTE_PUBLISH_ON_BEHALF. It must reference a participant already in the
+// room (the browser, joined in phase 1); setting it for an absent participant
+// makes the engine refuse to join (memql#782).
+func (i *Integration) mintAvatarToken(roomName, onBehalfIdentity string) (string, error) {
 	canPublish := true
 	canSubscribe := true
 	at := auth.NewAccessToken(i.lk.LiveKitAPIKey, i.lk.LiveKitAPISecret)
@@ -341,6 +456,9 @@ func (i *Integration) mintAvatarToken(roomName string) (string, error) {
 		SetIdentity(avatarvendor.AvatarParticipantIdentity).
 		SetName(avatarvendor.AvatarParticipantName).
 		SetValidFor(tokenTTL)
+	if strings.TrimSpace(onBehalfIdentity) != "" {
+		at.SetAttributes(map[string]string{"lk.publish_on_behalf": onBehalfIdentity})
+	}
 	return at.ToJWT()
 }
 

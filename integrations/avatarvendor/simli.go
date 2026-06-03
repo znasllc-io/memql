@@ -35,6 +35,13 @@ const (
 	// simliSampleRate is the PCM rate Simli's audio output operates at
 	// (SAMPLE_RATE = 16000 in the plugin).
 	simliSampleRate = 16000
+
+	// simliDefaultEmotionID is the neutral emotion the stock plugin defaults to
+	// (SimliConfig.emotion_id). The /compose/token API takes the face as
+	// "{faceId}/{emotionId}"; sending the bare faceId works too, but matching the
+	// plugin's composite form is the documented shape and avoids a silent
+	// emotion-default drift.
+	simliDefaultEmotionID = "92f24a0c-f046-45df-8df0-af7449c04571"
 )
 
 // simliClient is the CGO-free Simli REST integration for one resolved plan.
@@ -90,6 +97,11 @@ func (c *simliClient) createSessionToken(ctx context.Context) (string, error) {
 	faceID := strings.TrimSpace(c.plan.PersonaID)
 	if faceID == "" {
 		return "", fmt.Errorf("simli: plan carries no faceId")
+	}
+	// Match the stock plugin's composite "{faceId}/{emotionId}" form unless the
+	// caller already supplied an emotion segment.
+	if !strings.Contains(faceID, "/") {
+		faceID = faceID + "/" + simliDefaultEmotionID
 	}
 	payload := map[string]any{
 		"faceId":           faceID,

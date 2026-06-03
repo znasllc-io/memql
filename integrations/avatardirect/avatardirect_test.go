@@ -98,7 +98,10 @@ func decode(t *testing.T, nodes []memorynodes.MemoryNode, err error) map[string]
 	return out
 }
 
-func TestStartSession_AnamHappyPath(t *testing.T) {
+func TestStartSession_Phase1MintsCredsWithoutEngine(t *testing.T) {
+	// Phase 1 mints the room + browser creds and validates the persona, but
+	// must NOT bring the vendor engine up (the browser joins + forwards audio
+	// first, then engageVendor starts the engine, memql#782).
 	eng := &fakeEngine{vendor: "anam", personaId: "persona-x"}
 	client := &stubVendorClient{res: avatarvendor.AvatarStartResult{
 		SessionID: "anam-sess-1", AvatarIdentity: avatarvendor.AvatarParticipantIdentity, LiveKitSampleRate: 16000,
@@ -110,20 +113,54 @@ func TestStartSession_AnamHappyPath(t *testing.T) {
 
 	assert.Equal(t, "wss://lk.public", out["livekit_url"])
 	assert.NotEmpty(t, out["livekit_client_token"])
-	assert.Equal(t, "anam-sess-1", out["session_id"])
 	assert.Equal(t, "anam", out["vendor"])
 	assert.True(t, strings.HasPrefix(out["room_name"].(string), "avatar-"), "dedicated room name")
+	assert.True(t, strings.HasPrefix(out["browser_identity"].(string), "viewer-"), "browser identity returned for the on-behalf attribution")
 
-	// Anam was handed the public URL + the avatar token (NOT the browser token)
-	// for the same room copresent will join.
-	assert.Equal(t, "wss://lk.public", client.startedURL)
-	assert.NotEmpty(t, client.startedTok)
-	assert.NotEqual(t, out["livekit_client_token"], client.startedTok, "avatar token differs from browser token")
-	assert.Equal(t, out["room_name"], client.startedRoom)
+	// The engine was NOT started in phase 1.
+	assert.Empty(t, client.startedRoom, "vendor engine must not start in phase 1")
+	assert.Nil(t, out["session_id"], "no session id until engageVendor")
 
 	// The lookup used the named queryAgentById (no raw DSL).
 	assert.Contains(t, eng.gotQuery, "queryAgentById")
 	assert.Contains(t, eng.gotQuery, "v1:agents:agent:abc")
+}
+
+func TestEngageVendor_Phase2StartsEngine(t *testing.T) {
+	eng := &fakeEngine{vendor: "anam", personaId: "persona-x"}
+	client := &stubVendorClient{res: avatarvendor.AvatarStartResult{
+		SessionID: "anam-sess-1", AvatarIdentity: avatarvendor.AvatarParticipantIdentity, LiveKitSampleRate: 16000,
+	}}
+	i := newTestIntegration(eng, client)
+
+	nodes, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId":          "v1:agents:agent:abc",
+		"room_name":        "avatar-xyz",
+		"browser_identity": "viewer-123",
+	}, 0)
+	out := decode(t, nodes, err)
+
+	assert.Equal(t, "anam-sess-1", out["session_id"])
+	assert.Equal(t, "anam", out["vendor"])
+	assert.Equal(t, avatarvendor.AvatarParticipantIdentity, out["avatar_identity"])
+	assert.Equal(t, true, out["ok"])
+
+	// The engine was handed the public URL + the avatar token for the room from
+	// phase 1.
+	assert.Equal(t, "wss://lk.public", client.startedURL)
+	assert.Equal(t, "avatar-xyz", client.startedRoom)
+	assert.NotEmpty(t, client.startedTok)
+}
+
+func TestEngageVendor_RequiresRoomAndBrowserIdentity(t *testing.T) {
+	i := newTestIntegration(&fakeEngine{vendor: "simli", personaId: "f"}, &stubVendorClient{})
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{"agentId": "a", "browser_identity": "viewer-1"}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "room_name is required")
+
+	_, err = i.handleEngageVendor(context.Background(), map[string]any{"agentId": "a", "room_name": "avatar-x"}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "browser_identity is required")
 }
 
 func TestStartSession_SimliVendorAccepted(t *testing.T) {
@@ -161,11 +198,13 @@ func TestStartSession_NoPersonaIsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "no avatar persona")
 }
 
-func TestStartSession_VendorStartFailurePropagates(t *testing.T) {
+func TestEngageVendor_VendorStartFailurePropagates(t *testing.T) {
 	eng := &fakeEngine{vendor: "anam", personaId: "persona-x"}
 	client := &stubVendorClient{err: errors.New("anam 503")}
 	i := newTestIntegration(eng, client)
-	_, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "a"}, 0)
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "a", "room_name": "avatar-x", "browser_identity": "viewer-1",
+	}, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bring up anam avatar")
 }
