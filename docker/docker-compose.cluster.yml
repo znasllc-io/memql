@@ -279,10 +279,20 @@ services:
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      # Local Azure Blob Storage via Azurite (memql#806).
+      # The well-known Azurite dev account + key are public constants
+      # (non-secret; https://learn.microsoft.com/azure/storage/common/storage-use-azurite).
+      # Uses the in-network hostname `azurite` (NOT 127.0.0.1) so the
+      # agent container reaches the emulator. Cloud deploys override
+      # both vars via genesis; dev works out of the box with no reseal.
+      MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
+      MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-attachments}
     depends_on:
       postgres:
         condition: service_healthy
       identity:
+        condition: service_healthy
+      azurite:
         condition: service_healthy
     networks:
       - memql-cluster
@@ -326,12 +336,18 @@ services:
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      # Local Azure Blob Storage via Azurite (memql#806). Matches the
+      # agent node so workbench-initiated uploads go to the same emulator.
+      MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
+      MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-attachments}
     volumes:
       - workbench_workspaces:/var/lib/memql/workbenches
     depends_on:
       postgres:
         condition: service_healthy
       identity:
+        condition: service_healthy
+      azurite:
         condition: service_healthy
     networks:
       - memql-cluster
@@ -454,6 +470,32 @@ services:
       - memql-cluster
     restart: unless-stopped
 
+  # Azurite -- Azure Blob Storage emulator (memql#806).
+  # Provides a local Azure-compatible blob endpoint so attachment uploads
+  # from the agent/workbench/computer-use nodes produce real downloadable
+  # URLs (http://localhost:10000/devstoreaccount1/<container>/<blob>)
+  # instead of the `local://` placeholder that fires when no connection
+  # string is set. The agent service reads the well-known dev connection
+  # string via MEMQL_AZURE_STORAGE_CONNECTION_STRING (set below).
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: memql-azurite
+    hostname: azurite
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck
+    ports:
+      - "10000:10000"
+    volumes:
+      - cluster_azurite_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
   # pgAdmin (optional)
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -478,6 +520,8 @@ volumes:
   cluster_identity_keys:
     driver: local
   workbench_workspaces:
+    driver: local
+  cluster_azurite_data:
     driver: local
 
 networks:

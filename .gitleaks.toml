@@ -36,3 +36,13 @@ paths = [
   '''^README\.md$''',
   '''^TECH_STACK_AND_PRACTICES\.md$''',
 ]
+
+[[allowlists]]
+description    = "Azurite well-known dev storage account key (memql#806). Public constant documented by Microsoft at https://learn.microsoft.com/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key -- not a production credential. Every Azurite install ships this same literal key."
+condition      = "AND"
+regexTarget    = "match"
+regexes        = ['''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq''']
+paths = [
+  '''^docker/docker-compose\..*\.ya?ml$''',
+  '''^scripts/dev/.*''',
+]

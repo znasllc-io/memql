@@ -307,6 +307,11 @@ function print_dev_status_block() {
     https://agent.${domain}      Agent (WorkerService.Stream)
     Health probe:                https://bff.${domain}/healthz
 
+  Azurite (local Azure Blob emulator):
+    http://localhost:10000/devstoreaccount1 (blob endpoint)
+    Container: ${LIB_AZURITE_CONTAINER}    (pre-created by dev-refresh)
+    See scripts/dev/azurite-blob.md for details.
+
   Other handy:
     make dev-status       Status snapshot (this stack)
     make dev-logs         Follow logs
@@ -731,6 +736,91 @@ function lib_ngrok_upsert_env() {
     else
         printf '%s=%s\n' "${key}" "${val}" >> "${file}"
     fi
+}
+
+# -----------------------------------------------------------------
+# Azurite: local Azure Blob emulator setup (memql#806)
+# -----------------------------------------------------------------
+#
+# The dev cluster runs Azurite as the `azurite` compose service.
+# After the stack comes up, we need a container to exist for
+# attachment uploads -- Azurite does NOT auto-create containers.
+# lib_setup_blob waits for the blob endpoint then creates the
+# container IDEMPOTENTLY (a 409 Conflict == already exists == ok).
+#
+# We use a bare `curl` PUT against Azurite's REST API so this step
+# has zero extra dependencies (no az CLI, no Docker-in-Docker).
+# Azurite's storage account + key are the well-known public dev
+# constants (non-secret; ships with every Azurite install).
+
+# Azurite dev connection details (well-known constants):
+readonly LIB_AZURITE_ACCOUNT="devstoreaccount1"
+readonly LIB_AZURITE_CONTAINER="${MEMQL_AZURE_BLOB_CONTAINER:-attachments}"
+# Host-exposed port (compose maps 10000:10000 so we reach it from the
+# host; the agent container uses the in-network `azurite:10000` URL).
+readonly LIB_AZURITE_HOST="http://127.0.0.1:10000"
+
+# lib_setup_blob waits for the Azurite blob endpoint (up to $1 seconds,
+# default 60) then creates the container idempotently.
+#
+# Strategy (in preference order):
+#   1. `az storage container create` (Azure CLI) -- self-contained,
+#      handles HMAC signing, already installed on dev machines.
+#   2. Direct curl with an HMAC-signed Authorization header.
+# Returns 0 on success (container created or already existed);
+# returns 1 on timeout / unexpected error.
+function lib_setup_blob() {
+    local timeout=${1:-60}
+    local interval=2
+    local waited=0
+    local url="${LIB_AZURITE_HOST}/${LIB_AZURITE_ACCOUNT}"
+    # Well-known Azurite dev connection string (host-accessible; uses
+    # 127.0.0.1 so lib scripts reach Azurite's host-mapped port 10000).
+    local conn_str="DefaultEndpointsProtocol=http;AccountName=${LIB_AZURITE_ACCOUNT};AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=${LIB_AZURITE_HOST}/${LIB_AZURITE_ACCOUNT};"
+
+    echo "  Waiting for Azurite blob endpoint (${LIB_AZURITE_HOST})..."
+    while [ "$waited" -lt "$timeout" ]; do
+        # Any HTTP response (including 403 auth error) means Azurite is up.
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${url}?comp=list" 2>/dev/null || echo "000")
+        if [ "$http_code" != "000" ]; then
+            break
+        fi
+        sleep "$interval"
+        waited=$((waited + interval))
+    done
+    if [ "$waited" -ge "$timeout" ]; then
+        echo "  WARNING: Azurite blob endpoint did not respond within ${timeout}s -- skipping container create."
+        return 1
+    fi
+    echo "       Azurite responded after ${waited}s."
+
+    # Create the container idempotently using az CLI when available.
+    # `az storage container create` returns exit 0 whether the container
+    # was created (JSON: {"created": true}) or already existed
+    # ({"created": false}); only a real error (auth, network) yields
+    # non-zero. The output flag suppresses the JSON so no noise in logs.
+    if command -v az >/dev/null 2>&1; then
+        local az_out
+        az_out=$(az storage container create \
+                --name "${LIB_AZURITE_CONTAINER}" \
+                --connection-string "${conn_str}" \
+                --output json 2>&1) || {
+            echo "  WARNING: az storage container create failed: ${az_out}"
+            return 1
+        }
+        if echo "${az_out}" | grep -q '"created": true'; then
+            echo "  Azure Blob container '${LIB_AZURITE_CONTAINER}' created."
+        else
+            echo "  Azure Blob container '${LIB_AZURITE_CONTAINER}' already exists -- OK."
+        fi
+        return 0
+    fi
+
+    echo "  WARNING: az CLI not found; cannot create Azurite container automatically."
+    echo "           Install with: brew install azure-cli"
+    return 1
 }
 
 # -----------------------------------------------------------------

@@ -207,6 +207,19 @@ function step4c_turn_relay() {
     lib_refresh_turn_relay || true
 }
 
+function step4d_setup_blob() {
+    # Create the Azure Blob container on the local Azurite emulator
+    # (memql#806). Azurite is up from step3 (part of the compose stack);
+    # the container must exist before the first attachment upload --
+    # azblob.NewClientFromConnectionString succeeds without it but
+    # UploadBuffer returns 404 ContainerNotFound on the first call.
+    # Best-effort: skips gracefully when Azurite isn't in the active
+    # compose file (e.g. running the full.yml stack instead of
+    # cluster.yml). See scripts/dev/azurite-blob.md.
+    echo "[4d/7] Creating local Azurite blob container..."
+    lib_setup_blob 60 || true
+}
+
 function step5_wait_for_ready() {
     local domain
     domain=$(lib_domain)
@@ -296,6 +309,7 @@ function main() {
     step4_mint_voice_agent_token
     step4b_mint_node_tokens
     step4c_turn_relay
+    step4d_setup_blob
     step5_wait_for_ready
     step6_seed_and_finish
     step7_restore_knowledge
