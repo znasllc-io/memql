@@ -93,13 +93,28 @@ type agentTurnResult struct {
 	retrieved []*memqlv1.AgentRetrievedChunk
 }
 
+// executableViaApprovedPath reports whether a plan of this kind is executed by
+// forwarding its goal to the assigned agent's tool loop when it reaches
+// "running" (executeApprovedPlan). Two kinds use this path:
+//   - scopeElevation: the user clicked Allow on a computer-use scope card.
+//   - produceArtifact: the conversational "make me a file" delegation (#788),
+//     auto-started to running (#788) -- this is the executor that was missing,
+//     so the deliverable was never actually produced (memql#800).
+//
+// Other kinds have their own dispatchers (trainSpecialist / embedDomainItems)
+// or are handled elsewhere (adHocAction / agentInvocation), so they MUST NOT
+// flow through here.
+func executableViaApprovedPath(kind string) bool {
+	return kind == "scopeElevation" || kind == produceArtifactPlanKind
+}
+
 // handlePlanApprovedForExecution is the event-bus subscriber.
-// Filters to scope-elevation Plans transitioning to running, then
-// kicks off the dispatch in a goroutine so the bus loop doesn't
-// block on the multi-second tool-calling turn.
+// Filters to executable Plans transitioning to running, then kicks off the
+// dispatch in a goroutine so the bus loop doesn't block on the multi-second
+// tool-calling turn.
 func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) {
 	fields := extractPlanRoutingFields(event)
-	if fields.Kind != "scopeElevation" || fields.Status != "running" || fields.ID == "" {
+	if fields.Status != "running" || fields.ID == "" || !executableViaApprovedPath(fields.Kind) {
 		return
 	}
 
@@ -107,6 +122,14 @@ func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) 
 		p.logger.Warn("plan execution: agent forwarder not configured; skipping dispatch",
 			"plan_id", fields.ID,
 		)
+		return
+	}
+
+	// Dedup: a plan can receive more than one graph.node.updated event while
+	// in "running"; without this guard it would be dispatched to its agent
+	// twice (double file write, double token spend). LoadOrStore claims the
+	// plan; executeApprovedPlan clears it on return. (memql#800)
+	if _, alreadyExecuting := p.executing.LoadOrStore(fields.ID, true); alreadyExecuting {
 		return
 	}
 
@@ -201,6 +224,11 @@ func (p *PlannerIntegration) notifyProduceArtifactComplete(ctx context.Context, 
 // consumes the response, posts the reply, and stamps the Plan
 // terminal status.
 func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId string) {
+	// Release the in-flight claim taken in handlePlanApprovedForExecution when
+	// this dispatch finishes (success or failure), so a legitimate later
+	// re-run of the same plan id isn't permanently blocked. (memql#800)
+	defer p.executing.Delete(planId)
+
 	start := time.Now()
 	p.logger.Info("plan execution: starting", "plan_id", planId)
 
@@ -354,7 +382,18 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	// (Plan failed with the agent's text as the error message so
 	// the user sees WHY it didn't run).
 	planSucceeded, invocationCount, successCount := p.workerInvocationOutcomeForPlan(ctx, planId)
-	if planSucceeded {
+	// The worker-invocation gate is the right success signal for COMPUTER-USE
+	// work (scopeElevation): a remote workerHost/workerComputer call can return
+	// ok=false, so "turn finished" != "task done". But produceArtifact (#788)
+	// produces its deliverable via the WORKBENCH (in-process fs_write, promoted
+	// to the Library) and typically dispatches NO worker tool, so it would
+	// always have zero worker invocations and be wrongly failed. For
+	// produceArtifact the authoritative signal is a clean agent turn -- a turn
+	// error already returned early above with markPlanFailed, so reaching here
+	// means the agent completed; the workbench write either succeeded (and was
+	// promoted) or the agent surfaced the problem in its reply. (memql#800)
+	succeeded := planSucceeded || plan.Kind == produceArtifactPlanKind
+	if succeeded {
 		// Reply text lands on Plan.output.reply via markPlanSucceeded.
 		// The canvas card + Tasks panel render that field.
 		p.markPlanSucceeded(ctx, planId, replyText)
