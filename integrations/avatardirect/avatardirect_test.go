@@ -126,12 +126,22 @@ func TestStartSession_AnamHappyPath(t *testing.T) {
 	assert.Contains(t, eng.gotQuery, "v1:agents:agent:abc")
 }
 
-func TestStartSession_NonAnamVendorRejected(t *testing.T) {
+func TestStartSession_SimliVendorAccepted(t *testing.T) {
+	// memql#782: the direct path now supports the simli cloud-engine vendor.
 	eng := &fakeEngine{vendor: "simli", personaId: "face-1"}
 	i := newTestIntegration(eng, &stubVendorClient{})
 	_, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "a"}, 0)
+	require.NoError(t, err)
+}
+
+func TestStartSession_UnknownVendorRejected(t *testing.T) {
+	// Vendors other than anam / simli (e.g. the retired liveavatar) are not
+	// supported on the direct path.
+	eng := &fakeEngine{vendor: "liveavatar", personaId: "p-1"}
+	i := newTestIntegration(eng, &stubVendorClient{})
+	_, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "a"}, 0)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported on the direct Anam path")
+	assert.Contains(t, err.Error(), "not supported on the direct avatar path")
 }
 
 func TestStartSession_AgentNotFound(t *testing.T) {

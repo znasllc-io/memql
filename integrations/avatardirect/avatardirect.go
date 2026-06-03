@@ -1,26 +1,28 @@
 // Package avatardirect exposes the direct/Guide avatar session to the MemQL
-// DSL for the Anam vendor path (copresent#237 step 2 / #291).
+// DSL for the cloud-engine avatar vendors -- Anam (copresent#237 step 2 / #291)
+// and Simli (memql#782).
 //
 // Background. The legacy direct avatar (integration.liveavatar) used
 // liveavatar.com, which OWNS the LiveKit room and does its own TTS + lip-sync:
-// memQL just minted a liveavatar session and handed back room creds. Anam works
-// the opposite way -- it DIALS INTO an existing LiveKit room as the avatar
-// participant and lip-syncs to audio published INTO that room. There is no
-// voice-agent on the direct path, so memQL itself must, for an `anam`-vendor
-// agent:
+// memQL just minted a liveavatar session and handed back room creds. The
+// cloud-engine vendors work the opposite way -- the vendor DIALS INTO an
+// existing LiveKit room as the avatar participant and lip-syncs to audio
+// published INTO that room. There is no voice-agent on the direct path, so
+// memQL itself must, for an `anam`- or `simli`-vendor agent:
 //
 //  1. Resolve the agent's avatarVendor + avatarPersonaId.
 //  2. Mint a fresh LiveKit room + a BROWSER join token (returned to copresent)
-//     + an AVATAR-participant join token (handed to Anam).
-//  3. Bring Anam up via the shared integrations/avatarvendor client
-//     (CUSTOMER_CLIENT_V1 audio-driven, so it lip-syncs the audio copresent
-//     publishes in step 3 / #292).
+//     + an AVATAR-participant join token (handed to the vendor engine).
+//  3. Bring the vendor engine up via the shared integrations/avatarvendor
+//     client (audio-driven -- Anam's CUSTOMER_CLIENT_V1 / Simli's compose +
+//     livekit-agent path -- so it lip-syncs the audio copresent publishes).
 //  4. Return the same `{ livekit_url, livekit_client_token }` shape
 //     useLiveAvatar already consumes, plus session_id + vendor + room_name.
 //
-// Vendor gate: this capability is the `anam` direct path. Non-anam agents keep
-// the liveavatar path (unchanged) -- the liveavatar integration is retired
-// separately in #237 step 5 (#294). Simli joins as the second vendor in #293.
+// Vendor gate: this capability serves the cloud-engine vendors `anam` and
+// `simli`; the agent's stamped avatarVendor (or the MEMQL_AVATAR_VENDOR runtime
+// default) selects which. The per-vendor API key (ANAM_API_KEY / SIMLI_API_KEY)
+// is resolved lazily from the globalSecret store (env fallback).
 //
 // Capabilities (callable as builtins from .memql files):
 //
@@ -52,12 +54,13 @@ import (
 )
 
 const (
-	// secretAnamAPIKey is the global secret the Anam REST calls authenticate
-	// with. Resolved lazily at request time (with an env fallback) so the
-	// factory succeeds on a fresh install -- the "key not configured" surface
-	// error fires only when a caller actually invokes startSession for an
-	// anam-vendor agent.
-	secretAnamAPIKey = "ANAM_API_KEY"
+	// secretAnamAPIKey / secretSimliAPIKey are the global secrets the vendor
+	// REST calls authenticate with. Resolved lazily at request time (with an
+	// env fallback) so the factory succeeds on a fresh install -- the "key not
+	// configured" surface error fires only when a caller actually invokes
+	// startSession for an agent of that vendor.
+	secretAnamAPIKey  = "ANAM_API_KEY"
+	secretSimliAPIKey = "SIMLI_API_KEY"
 
 	// tokenTTL bounds both the browser and avatar LiveKit join tokens.
 	tokenTTL = 24 * time.Hour
@@ -112,7 +115,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "startSession",
-			Description: "Start a direct/Guide avatar session for an anam-vendor agent: mint a LiveKit room + browser join token, and bring Anam up (audio-driven) to dial in. Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.",
+			Description: "Start a direct/Guide avatar session for an anam- or simli-vendor agent: mint a LiveKit room + browser join token, and bring the vendor cloud engine up (audio-driven) to dial in. Returns { livekit_url, livekit_client_token, session_id, vendor, room_name }.",
 			Handler:     i.handleStartSession,
 			ArgsSchema: map[string]string{
 				"agentId": "string (required) - the agent whose avatarVendor + avatarPersonaId drive the session",
@@ -152,15 +155,25 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 		return nil, err
 	}
 
-	// Vendor gate: this capability is the anam direct path. Other vendors keep
-	// the liveavatar path until #294, and Simli arrives in #293.
-	if vendor != string(avatarvendor.AvatarVendor("anam")) {
-		return nil, fmt.Errorf("avatardirect.startSession: agent %s avatarVendor=%q is not supported on the direct Anam path (use the liveavatar path)", agentId, vendor)
-	}
-
-	anamKey, err := i.anamAPIKey(ctx)
-	if err != nil {
-		return nil, err
+	// Vendor gate: the direct path supports the cloud-engine vendors anam and
+	// simli (memql#782). Resolve the matching API key (each vendor has its own
+	// global secret); anything else is unsupported here.
+	ac := avatarvendor.AvatarConfig{Vendor: vendor}
+	switch vendor {
+	case string(avatarvendor.AvatarVendor("anam")):
+		key, kerr := i.vendorAPIKey(ctx, secretAnamAPIKey)
+		if kerr != nil {
+			return nil, kerr
+		}
+		ac.AnamAPIKey = key
+	case string(avatarvendor.AvatarVendor("simli")):
+		key, kerr := i.vendorAPIKey(ctx, secretSimliAPIKey)
+		if kerr != nil {
+			return nil, kerr
+		}
+		ac.SimliAPIKey = key
+	default:
+		return nil, fmt.Errorf("avatardirect.startSession: agent %s avatarVendor=%q is not supported on the direct avatar path (expected anam or simli)", agentId, vendor)
 	}
 
 	// Mint a fresh, dedicated room for this avatar session (the direct/Guide
@@ -181,30 +194,27 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 	//   - browserURL: what copresent connects with. The browser reaches LiveKit
 	//     on POLYPHON_LIVEKIT_PUBLIC_URL (e.g. wss://livekit.local.znas.io), or
 	//     the internal URL as a fallback.
-	//   - anamURL: where Anam's CLOUD engine dials in from the public internet.
-	//     A browser-local URL (livekit.local / 192.168.x / ws://livekit:7880) is
-	//     unreachable from Anam's cloud, so this MUST be an externally-reachable
-	//     tunnel -- LIVEKIT_PUBLIC_URL (the same env the voice-agent avatar uses
-	//     for its Anam dial-in; set by `make dev-refresh`'s ngrok step). Without
-	//     it Anam can't join the room and never publishes video (the avatar stays
-	//     the idle orb), so fall back to browserURL but log a warning.
+	//   - engineURL: where the vendor's CLOUD engine (Anam or Simli) dials in
+	//     from the public internet. A browser-local URL (livekit.local /
+	//     192.168.x / ws://livekit:7880) is unreachable from the cloud, so this
+	//     MUST be an externally-reachable tunnel -- LIVEKIT_PUBLIC_URL (the same
+	//     env the voice-agent avatar uses; set by `make dev-refresh`'s ngrok
+	//     step). Without it the engine can't join the room and never publishes
+	//     video (the avatar stays the idle orb), so fall back to browserURL but
+	//     log a warning.
 	browserURL := i.lk.LiveKitPublicURL
 	if browserURL == "" {
 		browserURL = i.lk.LiveKitURL
 	}
-	anamURL := strings.TrimSpace(os.Getenv("LIVEKIT_PUBLIC_URL"))
-	if anamURL == "" {
-		anamURL = browserURL
+	engineURL := strings.TrimSpace(os.Getenv("LIVEKIT_PUBLIC_URL"))
+	if engineURL == "" {
+		engineURL = browserURL
 		if i.logger != nil {
-			i.logger.Warn("avatardirect: LIVEKIT_PUBLIC_URL unset; Anam will get the browser-local URL and likely cannot dial in (avatar won't render). Set LIVEKIT_PUBLIC_URL to a publicly-reachable LiveKit tunnel.",
-				"anamURL", anamURL)
+			i.logger.Warn("avatardirect: LIVEKIT_PUBLIC_URL unset; the vendor cloud engine will get the browser-local URL and likely cannot dial in (avatar won't render). Set LIVEKIT_PUBLIC_URL to a publicly-reachable LiveKit tunnel.",
+				"engineURL", engineURL, "vendor", vendor)
 		}
 	}
 
-	ac := avatarvendor.AvatarConfig{
-		Vendor:     vendor,
-		AnamAPIKey: anamKey,
-	}
 	persona := avatarvendor.PersonaInput{
 		AvatarPersonaID: personaId,
 		AvatarVendor:    vendor,
@@ -216,7 +226,7 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 
 	res, started, err := avatarvendor.StartAvatarSession(ctx, ac, persona, avatarvendor.AvatarStartParams{
 		RoomName:     roomName,
-		LiveKitURL:   anamURL,
+		LiveKitURL:   engineURL,
 		LiveKitToken: avatarToken,
 	}, i.newClient)
 	if err != nil {
@@ -338,20 +348,22 @@ func (i *Integration) mintAvatarToken(roomName string) (string, error) {
 // Config resolution
 // -----------------------------------------------------------------
 
-func (i *Integration) anamAPIKey(ctx context.Context) (string, error) {
+// vendorAPIKey resolves a vendor REST key (secretName, e.g. ANAM_API_KEY /
+// SIMLI_API_KEY) from the globalSecret store, falling back to the process env
+// so a single-node dev box that exports the key works without a globalSecret
+// row.
+func (i *Integration) vendorAPIKey(ctx context.Context, secretName string) (string, error) {
 	if i.resolveSecret != nil {
-		if v, err := i.resolveSecret(ctx, secretAnamAPIKey); err == nil {
+		if v, err := i.resolveSecret(ctx, secretName); err == nil {
 			if trimmed := strings.TrimSpace(v); trimmed != "" {
 				return trimmed, nil
 			}
 		}
 	}
-	// Env fallback (the voice-agent reads ANAM_API_KEY from env; mirror it so a
-	// single-node dev box that exports the key works without a globalSecret row).
-	if v := strings.TrimSpace(os.Getenv(secretAnamAPIKey)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(secretName)); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("avatardirect: %s not found in v1:platform:globalSecret or env -- run `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration`", secretAnamAPIKey, secretAnamAPIKey)
+	return "", fmt.Errorf("avatardirect: %s not found in v1:platform:globalSecret or env -- run `make secret-set NAME=%s VALUE=... SCOPE=global KIND=integration`", secretName, secretName)
 }
 
 // -----------------------------------------------------------------
