@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -113,14 +114,25 @@ func (c *anamClient) resolveAvatarID(ctx context.Context) (string, error) {
 // _create_session_token_with_persona_id: the ephemeral path with
 // llmId=CUSTOMER_CLIENT_V1 so OUR audio is what the avatar lip-syncs.
 func (c *anamClient) createSessionToken(ctx context.Context, avatarID, livekitURL, livekitToken string) (string, error) {
+	personaCfg := map[string]any{
+		"type":     "ephemeral",
+		"name":     c.displayName(),
+		"avatarId": avatarID,
+		"llmId":    anamClientAudioLLM,
+	}
+	// avatarModel selects Anam's live rendering model (CARA). It is gated by
+	// plan AND by the avatar's own render version: requesting a model the org
+	// can't access 403s, and requesting one the avatar wasn't built for makes
+	// the engine fall back / close (memql#772). Because the right value is
+	// account-specific (cara-3 / cara-4-latest / ...), it is operator-set via
+	// MEMQL_ANAM_AVATAR_MODEL rather than hardcoded; unset = let the engine use
+	// the avatar's own model. Set it once the account has a cara-renderable
+	// avatar whose model the plan entitles.
+	if m := strings.TrimSpace(os.Getenv("MEMQL_ANAM_AVATAR_MODEL")); m != "" {
+		personaCfg["avatarModel"] = m
+	}
 	payload := map[string]any{
-		"personaConfig": map[string]any{
-			"type":        "ephemeral",
-			"name":        c.displayName(),
-			"avatarId":    avatarID,
-			"avatarModel": anamRealtimeAvatarModel,
-			"llmId":       anamClientAudioLLM,
-		},
+		"personaConfig": personaCfg,
 		"environment": map[string]any{
 			"livekitUrl":   livekitURL,
 			"livekitToken": livekitToken,
