@@ -114,6 +114,10 @@ services:
       POLYPHON_LIVEKIT_PUBLIC_URL: ${POLYPHON_LIVEKIT_PUBLIC_URL:-wss://livekit.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       POLYPHON_LIVEKIT_API_KEY: "devkey"
       POLYPHON_LIVEKIT_API_SECRET: "secret"
+      # Anam live render model for the direct/Guide avatar (memql#772).
+      # Sent as personaConfig.avatarModel; empty = let Anam use the avatar's
+      # own model. dev-refresh exports cara-3 (this org's entitled model).
+      MEMQL_ANAM_AVATAR_MODEL: ${MEMQL_ANAM_AVATAR_MODEL:-}
       # VOICE_AGENT_TOKEN is the voice-agent's own credential and
       # is NOT consumed by the bff. dev-refresh mints it post-
       # identity-up and injects it into the voice-agent service's
