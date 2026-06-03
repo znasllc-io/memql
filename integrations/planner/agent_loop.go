@@ -329,10 +329,15 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 		specialists = []map[string]any{}
 	}
 
+	// Lean prompt inputs (memql#820): project plan / tasks / specialists
+	// down to the decision-relevant fields before sending. This strips
+	// the specialists' roleEmbedding vectors + lineage and the plan/task
+	// input/output blobs -- the bloat that drove the 800k-tokens/min
+	// spike -- so each plannerAgent call is cheap.
 	data := map[string]any{
-		"plan":        plan,
-		"tasks":       tasks,
-		"specialists": specialists,
+		"plan":        compactPlanForPrompt(plan),
+		"tasks":       compactTasksForPrompt(tasks),
+		"specialists": compactSpecialistsForPrompt(specialists),
 		"partition":   getString(plan, "partition"),
 		"now":         time.Now().UTC().Format(time.RFC3339),
 	}
