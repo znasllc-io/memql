@@ -93,3 +93,21 @@ func workerAuditorForApp(a *App) worker.Auditor {
 // worker service when it hasn't been wired (e.g., on non-agent
 // binaries that nonetheless invoked an agent-only helper).
 var ErrWorkerNotConfigured = errors.New("worker service not configured on this build")
+
+// lookupWorkerIntegration finds the registered agentworker integration so
+// transport wiring can inject the GCS attachment uploader (memql#794). Mirrors
+// lookupWorkbenchIntegration. Returns nil if the integration didn't register
+// or the engine isn't available.
+func (a *App) lookupWorkerIntegration() *agentworker.Integration {
+	if a == nil || a.engine == nil {
+		return nil
+	}
+	provider := a.engine.IntegrationByName("agentworker")
+	if provider == nil {
+		return nil
+	}
+	if integ, ok := provider.(*agentworker.Integration); ok {
+		return integ
+	}
+	return nil
+}
