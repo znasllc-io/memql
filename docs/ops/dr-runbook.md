@@ -82,8 +82,18 @@ the fork. Do **not** repoint live staging during a drill.
 
 ## Pre-prod checklist
 
-- [ ] §1 git-revert rollback rehearsed on staging.
-- [ ] §2 ESO secret re-sync rehearsed.
-- [ ] §3 Tiger PITR fork rehearsed into a scratch service + `/readyz` green.
+- [x] §1 git-revert rollback rehearsed on staging (#712). `aks-rollback.sh --to`
+      prints the revert; a scratch revert restored prior pinned digests
+      (`drift-check --rendered` OK). The progressive-Rollout **auto-abort** path
+      was also proven live: a failed deploy-gate auto-rolled-back to the stable
+      color with zero human step and zero dropped streams.
+- [x] §2 ESO secret re-sync rehearsed (#712). Forced `force-sync` on the
+      `memql-secrets` ExternalSecret -> `SecretSynced`; the Secret recovered
+      **byte-identical** from Key Vault (sha256 match) -- KV is the durable source.
+- [x] §3 Tiger PITR fork rehearsed (#712). Forked `memql-staging` (last-snapshot)
+      into a scratch service; the fork came up `READY` with both critical-schema
+      tables present (`"MemoryNodes"` + `automation_execution_claims`, the #657
+      assertion) and data intact (77,945 `MemoryNodes` rows) -- a restored DB
+      would pass `/readyz`. Scratch fork deleted; live staging never repointed.
 - [ ] Prod RTO/RPO targets agreed with the owner; prod Key Vault + Tiger PITR
       window confirmed.
