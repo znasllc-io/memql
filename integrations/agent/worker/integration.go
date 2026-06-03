@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"path"
 	"strings"
 	"time"
@@ -97,6 +98,98 @@ type Integration struct {
 	registry   *workerservice.Registry
 	engine     *memql.MemQLEngine
 	logger     *slog.Logger
+	// uploader + bucket are the GCS attachment surface (memql#794). When
+	// present (injected on the agent node where a GCS bucket is configured),
+	// a successful computer-use fs_write uploads the bytes the agent forwarded
+	// to the worker so the Library generatedOutput row carries a real
+	// attachmentId and the file is downloadable. Without them (or when the
+	// written content isn't recoverable agent-side), the row stays a
+	// worker-local pointer naming the origin machine (memql#789).
+	uploader attachmentUploader
+	bucket   string
+}
+
+// attachmentUploader is the narrow GCS upload surface (same shape as the
+// workbench integration's). Implemented by the gcs client; injected via
+// SetAttachmentUploader from app/transport_agent.go.
+type attachmentUploader interface {
+	Upload(ctx context.Context, bucket, objectName string, data []byte, contentType string) (string, error)
+}
+
+// SetAttachmentUploader injects the GCS uploader + bucket. Called once from
+// app/transport_agent.go after the uploader is constructed, and only when a
+// bucket is configured (mirrors the workbench wiring, memql#733/#742). nil-safe:
+// without it, computer-use outputs stay worker-local pointer rows.
+func (i *Integration) SetAttachmentUploader(u attachmentUploader, bucket string) {
+	i.uploader = u
+	i.bucket = bucket
+}
+
+// planSpaceId resolves a Plan's spaceId from its id (memql#794). The worker
+// Request carries no space, but the attachment needs one for the GCS object
+// path + the /api/spaces/{spaceId}/attachments download route. Mirrors the
+// store's PlanScope lookup. Empty on any miss.
+func (i *Integration) planSpaceId(ctx context.Context, planId string) string {
+	if i.engine == nil || strings.TrimSpace(planId) == "" {
+		return ""
+	}
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`queryPlanById({"planId":%q})`, planId))
+	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(stringField(res.Bundle.Nodes[0], "spaceId"))
+}
+
+// workerMimeType maps a filename to a MIME type for a computer-use upload.
+// Extension-driven via the stdlib table, with a text/plain fallback (the
+// common produceArtifact case is markdown/text).
+func workerMimeType(fileName string) string {
+	if ext := path.Ext(fileName); ext != "" {
+		if mt := mime.TypeByExtension(ext); mt != "" {
+			return mt
+		}
+		if strings.EqualFold(ext, ".md") || strings.EqualFold(ext, ".markdown") {
+			return "text/markdown"
+		}
+	}
+	return "text/plain; charset=utf-8"
+}
+
+// uploadWorkerAttachment uploads the bytes the agent forwarded for a
+// computer-use fs_write to GCS and mints a v1:common:attachment row, returning
+// its id (memql#794). The bytes are the SAME `content` the agent sent the
+// worker, so no worker->agent round-trip and no binary-unsafe fs_read is
+// needed (the memql#742 insight, applied to the computer-use path). Returns ""
+// on any failure so the caller falls back to a worker-local pointer row.
+func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePath, fileName, spaceId, ownerUserId string, data []byte) string {
+	if i.uploader == nil || i.bucket == "" || spaceId == "" || len(data) == 0 {
+		return ""
+	}
+	mimeType := workerMimeType(fileName)
+	det := string(genOutputIdEngine.MustFromMap(map[string]any{"planId": planId, "path": filePath}))[:16]
+	objectName := fmt.Sprintf("spaces/%s/attachments/%s/%s", spaceId, det, fileName)
+
+	gcsURL, err := i.uploader.Upload(ctx, i.bucket, objectName, data, mimeType)
+	if err != nil {
+		if i.logger != nil {
+			i.logger.Warn("worker integration: attachment GCS upload failed -- using pointer row",
+				"plan_id", planId, "path", filePath, "error", err)
+		}
+		return ""
+	}
+
+	attachmentId := spaceId + ":" + det
+	call := fmt.Sprintf(
+		`mutationCreateAttachment({attachmentId:%q, spaceId:%q, fileName:%q, mimeType:%q, fileSize:%d, gcsURL:%q, status:%q, uploadedBy:%q})`,
+		attachmentId, spaceId, fileName, mimeType, len(data), gcsURL, "ready", ownerUserId)
+	if _, err := i.engine.Execute(ctx, call); err != nil {
+		if i.logger != nil {
+			i.logger.Warn("worker integration: attachment row create failed -- using pointer row",
+				"plan_id", planId, "attachment_id", attachmentId, "error", err)
+		}
+		return ""
+	}
+	return attachmentId
 }
 
 // NewIntegration constructs the integration over an existing
@@ -289,10 +382,32 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	if machineLabel == "" {
 		machineLabel = "the connected computer"
 	}
-	body := fmt.Sprintf("File written to %s at `%s`.", machineLabel, path)
 	format := formatForWorkerPath(path)
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
+
+	// Make the file DOWNLOADABLE when we can (memql#794): the agent already
+	// holds the `content` it forwarded to the worker for this fs_write, so
+	// upload those bytes to GCS as a v1:common:attachment and carry the
+	// attachmentId on the generatedOutput. No worker->agent round-trip, no
+	// binary-unsafe fs_read. Falls back to a worker-local pointer row when the
+	// content isn't recoverable agent-side (e.g. a binary write) or no GCS
+	// uploader is configured -- in that case the Library still names the origin
+	// machine (memql#789) and the copresent UI shows "lives on <machine>".
+	content := asString(req.Args["content"])
+	spaceId := i.planSpaceId(mutationCtx, req.PlanId)
+	var attachmentId string
+	if content != "" {
+		attachmentId = i.uploadWorkerAttachment(mutationCtx, req.PlanId, path, title, spaceId, ownerUserId, []byte(content))
+	}
+
+	var body string
+	if attachmentId != "" {
+		body = fmt.Sprintf("File written on %s at `%s` and saved to your Library.", machineLabel, path)
+	} else {
+		body = fmt.Sprintf("File written to %s at `%s`.", machineLabel, path)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q, format:%q`,
 		outputId, ownerUserId, title, body, "computer_use", format)
@@ -307,6 +422,12 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	}
 	if workerName != "" {
 		fmt.Fprintf(&b, `, producedByWorkerName:%q`, workerName)
+	}
+	if spaceId != "" {
+		fmt.Fprintf(&b, `, spaceId:%q`, spaceId)
+	}
+	if attachmentId != "" {
+		fmt.Fprintf(&b, `, attachmentId:%q, mimeType:%q`, attachmentId, workerMimeType(title))
 	}
 	b.WriteString("})")
 

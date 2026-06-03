@@ -84,6 +84,38 @@ func TestPromoteWorkerOutput_NilEngineNoPanic(t *testing.T) {
 		OwnerUserId: "user-1",
 		AgentId:     "agent-1",
 		PlanId:      "plan-1",
-		Args:        map[string]any{"path": "/tmp/out.txt"},
+		Args:        map[string]any{"path": "/tmp/out.txt", "content": "hello"},
 	})
+}
+
+func TestWorkerMimeType(t *testing.T) {
+	// Extension-resolved types may carry a "; charset=..." suffix from the
+	// stdlib table, so assert on the type prefix.
+	prefixes := map[string]string{
+		"report.md":      "text/markdown",
+		"notes.markdown": "text/markdown",
+		"data.csv":       "text/csv",
+		"noext":          "text/plain",
+		"":               "text/plain",
+	}
+	for in, want := range prefixes {
+		if got := workerMimeType(in); !strings.HasPrefix(got, want) {
+			t.Errorf("workerMimeType(%q) = %q, want prefix %q", in, got, want)
+		}
+	}
+}
+
+// uploadWorkerAttachment must fall back to "" (worker-local pointer) when no
+// GCS uploader is wired, with no panic -- so a cluster without a bucket keeps
+// working (memql#794 degrades to memql#789 behaviour).
+func TestUploadWorkerAttachment_NoUploaderFallsBack(t *testing.T) {
+	i := &Integration{} // uploader nil, bucket ""
+	got := i.uploadWorkerAttachment(context.Background(), "plan-1", "/tmp/out.md", "out.md", "space-1", "user-1", []byte("hello"))
+	if got != "" {
+		t.Fatalf("expected empty attachmentId without an uploader, got %q", got)
+	}
+	// Empty content also yields no attachment.
+	if got := i.uploadWorkerAttachment(context.Background(), "plan-1", "/tmp/out.md", "out.md", "space-1", "user-1", nil); got != "" {
+		t.Fatalf("expected empty attachmentId for empty content, got %q", got)
+	}
 }

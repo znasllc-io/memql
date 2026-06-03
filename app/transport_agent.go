@@ -60,6 +60,13 @@ func (a *App) transportAgent() {
 		if wb := a.lookupWorkbenchIntegration(); wb != nil {
 			wb.SetAttachmentUploader(uploader, gcsBucket)
 		}
+		// memql#794: same GCS uploader for the computer-use path so a worker
+		// fs_write's bytes (which the agent already forwarded) upload to a
+		// v1:common:attachment and the Library row is downloadable. Without a
+		// bucket, computer-use rows stay worker-local pointers (memql#789).
+		if wo := a.lookupWorkerIntegration(); wo != nil {
+			wo.SetAttachmentUploader(uploader, gcsBucket)
+		}
 	}
 
 	processor := fileprocessor.NewDefaultProcessor(a.engine.VisionProvider())
