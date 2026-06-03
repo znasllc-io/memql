@@ -111,6 +111,11 @@ type PlannerIntegration struct {
 	unsubscribes   []func()
 	started        atomic.Bool
 	mu             sync.Mutex
+	// executing dedups the running-plan executor (handlePlanApprovedForExecution)
+	// so one plan can't be dispatched to its agent twice -- e.g. if more than
+	// one graph.node.updated event arrives while the plan is in "running".
+	// Keyed by planId; cleared when executeApprovedPlan returns. (memql#800)
+	executing sync.Map
 }
 
 // PlannerArg is a functional option for NewPlannerIntegration.
