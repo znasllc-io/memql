@@ -1,16 +1,4 @@
-# Staging overlay — the SINGLE image authority for aks-memql-staging.
-#
-# deployment-v2 Phase 1 (znasllc-io/memql#699): every deployable image is pinned
-# here by @sha256: DIGEST, not a mutable tag. The base (../..) carries human-
-# readable :tags for readability/local use, but THIS overlay is what gets
-# applied/reconciled — kustomize's images: transformer replaces each tag with the
-# pinned digest. Nothing mutates the cluster out-of-band: no `kubectl set image`,
-# no `rollout undo`. Rollback = `git revert` of a change to this file.
-#
-# Digests below were captured from the live cluster (kubectl imageID) at the
-# 0.9.9 cutover so the first apply/reconcile is a no-op. To deploy a new version:
-# update the digest(s) here in a PR (Phase 4 assembles these from the release
-# lockfile); merge -> Argo CD reconciles (Phase 2).
+# Promoted from releases/0.9.14.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -21,18 +9,18 @@ resources:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:0b1dd335c8c5d99c93ff7d20ef8f95caa9719ebd38eb137fff83334785e02445
+    digest: sha256:625427d05edd0073247a4d0da2769e1098d14d15b95a5c43fda0ca07d361fdd3
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:bee3010c6908eec574cc3b897154eaf99d1307b9c3818a996ff5f9614412ca4c
+    digest: sha256:d3d8c76f127207a07a6ad0755074b744fe8d591d0446f89e6bde8898a4e35000
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:b4cd25d03a5a2855ba68f224a55fe4759f1f7d0559b4ce69589e6b44238950d0
+    digest: sha256:9374c02336b4fcabda9d71c709af5aac1420f75b0b5fe919f856866472cc3c4f
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:b0dad353e6557c02e79aecb9eed7e0b41a6915d60706fecdfe12aae656f66ed8
+    digest: sha256:85f6845e5cbb1157d8412961616e20a2713b2a57e7a2759018f31151c8cc6a84
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:2dd3c6d44ddb49b7d46df08b540aa2250ea38fdcb1df1152594273227068e856
+    digest: sha256:cf5e43bffd6ee84ad237280acb44d98798b6f7690e93b5d4c87dabd69c36bd18
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:f5e8c1dea1405abd9b7236c4a4cfcbb03fb863ab0fda3a6e498f66180a91fc84
+    digest: sha256:d28c7966cd184f1e9fdc3b9162451af4ad796a7aa923ace29a3f7a6a42c30bbd
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:16e6308bf9aec548ff66cd7b0ff8b8a19d9f737d1ab151bd7e36f2af1d6ff4d1
+    digest: sha256:8514928c05cec96c4bed5831f793f03026b53ec018b166a02580d69330aa9ab3
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:0656df9734c77e36ebb7d3c367487a984cb634d348a0a6f4716ea2b3f9c7fc6f
