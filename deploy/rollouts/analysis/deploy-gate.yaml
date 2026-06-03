@@ -47,52 +47,31 @@ spec:
                 restartPolicy: Never
                 containers:
                   - name: gate
-                    # Gate client image: bundles curl + the WS/gRPC client and
-                    # the in-cluster check script (migrated from the useful
-                    # logic in scripts/deploy/staging-smoke-test.sh). Built +
-                    # digest-pinned in CI like every other artifact; see
-                    # ../README.md "Gate client image".
+                    # deploy-gate-check is a distroless static binary (no /bin/sh,
+                    # no curl in the image). It runs BOTH gate legs in-process:
+                    #   1. /readyz schema assertion (#657) -- derived from --addr
+                    #      host as http://<host>:8085/readyz;
+                    #   2. the authenticated service_account query over gRPC (#691)
+                    #      using $MEMQL_SVC_JWT.
+                    # A non-200/not-ready /readyz, an auth rejection
+                    # (Unauthenticated/PermissionDenied), or a backend Unavailable
+                    # exits non-zero -> the metric fails -> the Rollout auto-aborts
+                    # to the stable color. Invoke the ENTRYPOINT binary directly --
+                    # do NOT wrap in `/bin/sh -c` (the image has no shell; that was
+                    # the #712 false-negative that aborted the first cutover).
                     image: acrmemql.azurecr.io/deploy-gate@sha256:4a65bd3dcf9e2f25092617e76667b5f40bf1a122e8dd58a6973322de241189c7
                     env:
-                      - name: GATE_SERVICE
-                        value: "{{args.service}}"
-                      - name: GATE_NAMESPACE
-                        value: "{{args.namespace}}"
-                      # The machine identity (#691). Short-lived class=
-                      # service_account JWT, surface-pinned to the read/query
-                      # path. Minted by the identity-side CronJob into this
-                      # Secret (see ../README.md "Provisioning the gate JWT").
+                      # The machine identity (#691): short-lived class=
+                      # service_account JWT minted into this Secret by the
+                      # deploy-gate-jwt CronJob. deploy-gate-check reads it here.
                       - name: MEMQL_SVC_JWT
                         valueFrom:
                           secretKeyRef:
                             name: deploy-gate-jwt
                             key: MEMQL_SVC_JWT
-                    command: ["/bin/sh", "-c"]
                     args:
-                      - |
-                        set -eu
-                        svc="$GATE_SERVICE"
-                        echo "== 1. readiness (/readyz schema assertion, #657) =="
-                        # In-cluster, plaintext http on the node's 8085; assert
-                        # 200 + ready (a non-200 or pre-/readyz 404 is a FAIL).
-                        body="$(curl -fsS "http://$svc:8085/readyz")"
-                        echo "$body" | grep -q '"status":"ready"' \
-                          || { echo "FAIL: /readyz not ready: $body"; exit 1; }
-                        echo "PASS: /readyz ready"
-
-                        echo "== 2. authenticated query (service_account JWT, #691) =="
-                        # The gate client opens MemqlService.Stream to the node's
-                        # gRPC (50051) with Authorization: Bearer $MEMQL_SVC_JWT,
-                        # runs the synthetic ExecuteQuery (+ a single agent turn),
-                        # and asserts a well-formed result. Exits non-zero on any
-                        # auth/transport/result failure. (deploy-gate-check is the
-                        # entrypoint baked into the gate image.)
-                        deploy-gate-check \
-                          --addr "$svc:50051" \
-                          --jwt "$MEMQL_SVC_JWT" \
-                          --query 'count v1:cognition:space' \
-                          --fan-agent
-                        echo "PASS: authenticated query"
+                      - "--addr={{args.service}}:50051"
+                      - "--query=count v1:cognition:space"
 ---
 # ---- 3: optional SLO gate (Prometheus) --------------------------------------
 # Enabled by referencing this template too in the Rollout's analysis block and
