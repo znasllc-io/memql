@@ -19,6 +19,18 @@
 // Returning a real 429 (not a transport error) means both vendor SDKs
 // surface their normal rate-limit error type, so this composes cleanly
 // with the planner's provider-rate-limit backoff (memql#821).
+//
+// Secondary guard (memql#834): a HARD, process-wide rate ceiling on
+// chat/messages calls. Independent of request content -- it counts
+// EVERY guarded LLM call leaving the process within a rolling window,
+// regardless of which caller fired it or what the body says. When the
+// count in the window reaches the ceiling, further calls get the same
+// synthetic 429 WITHOUT touching the vendor. This is the seatbelt the
+// per-fingerprint loop breaker can't be: a runaway that VARIES its
+// request body (growing context, timestamps) fingerprints differently
+// every call and sails past the loop breaker -- but it cannot outrun
+// the global call counter. With a generous default (20 calls / 10s) it
+// is invisible to real traffic and lethal to a spend loop.
 package memql
 
 import (
@@ -40,6 +52,14 @@ const (
 	defaultLoopGuardMaxRepeat      = 8
 	defaultLoopGuardWindowSeconds  = 60
 	defaultLoopGuardCooldownSecond = 30
+
+	// Global rate-ceiling defaults (memql#834). Generous for real
+	// traffic, lethal to a runaway: 20 guarded LLM calls in any rolling
+	// 10s window. A legitimate burst (a few concurrent users, a planner
+	// fanning out a handful of tasks) stays well under 2 calls/sec; a
+	// spend loop blows straight through it and is capped.
+	defaultRateMaxCalls      = 20
+	defaultRateWindowSeconds = 10
 )
 
 // llmGuard is the process-global circuit breaker shared by every
@@ -51,9 +71,27 @@ type llmGuard struct {
 	window    time.Duration
 	cooldown  time.Duration
 
+	// Global rate ceiling (memql#834). Independent of the per-fingerprint
+	// loop breaker above: counts EVERY admitted guarded call across the
+	// whole process within rateWindow. rateEnabled gates it separately
+	// so an operator can tune the loop breaker and the rate ceiling on
+	// their own switches.
+	rateEnabled bool
+	rateMax     int
+	rateWindow  time.Duration
+
 	mu      sync.Mutex
 	hits    map[string][]time.Time // fingerprint -> recent call times (within window)
 	tripped map[string]time.Time   // fingerprint -> breaker-open-until
+
+	// rateHits is the global sliding window of admitted guarded-call
+	// timestamps (memql#834). Blocked calls are NOT recorded, so a
+	// hammering loop can't extend its own window -- the window drains
+	// naturally and admits real traffic again once old calls age out.
+	rateHits []time.Time
+	// lastRateAlert throttles the loud ERROR log to once per window so a
+	// sustained runaway doesn't drown the logs while still being loud.
+	lastRateAlert time.Time
 
 	// now is injectable for tests; defaults to time.Now.
 	now func() time.Time
@@ -79,16 +117,27 @@ func newLLMGuardFromEnv() *llmGuard {
 		maxRepeat: envIntDefault("MEMQL_LLM_LOOP_MAX_REPEAT", defaultLoopGuardMaxRepeat),
 		window:    time.Duration(envIntDefault("MEMQL_LLM_LOOP_WINDOW_SECONDS", defaultLoopGuardWindowSeconds)) * time.Second,
 		cooldown:  time.Duration(envIntDefault("MEMQL_LLM_LOOP_COOLDOWN_SECONDS", defaultLoopGuardCooldownSecond)) * time.Second,
-		hits:      map[string][]time.Time{},
-		tripped:   map[string]time.Time{},
-		now:       time.Now,
-		logger:    slog.Default().With("component", "llmGuard"),
+
+		rateEnabled: envBoolDefault("MEMQL_LLM_RATE_GUARD_ENABLED", true),
+		rateMax:     envIntDefault("MEMQL_LLM_MAX_CALLS_PER_WINDOW", defaultRateMaxCalls),
+		rateWindow:  time.Duration(envIntDefault("MEMQL_LLM_RATE_WINDOW_SECONDS", defaultRateWindowSeconds)) * time.Second,
+
+		hits:    map[string][]time.Time{},
+		tripped: map[string]time.Time{},
+		now:     time.Now,
+		logger:  slog.Default().With("component", "llmGuard"),
 	}
 	if g.maxRepeat < 1 {
 		g.maxRepeat = defaultLoopGuardMaxRepeat
 	}
 	if g.window <= 0 {
 		g.window = defaultLoopGuardWindowSeconds * time.Second
+	}
+	if g.rateMax < 1 {
+		g.rateMax = defaultRateMaxCalls
+	}
+	if g.rateWindow <= 0 {
+		g.rateWindow = defaultRateWindowSeconds * time.Second
 	}
 	return g
 }
@@ -142,6 +191,52 @@ func (g *llmGuard) admit(fingerprint string) (open bool, repeatCount int) {
 	return false, len(kept)
 }
 
+// admitRate enforces the global, content-independent rate ceiling
+// (memql#834). It prunes the sliding window, and if the count of
+// admitted guarded calls in the last rateWindow has reached rateMax it
+// returns open=true (REJECT) WITHOUT recording this call -- so a
+// runaway can't keep its own window full and starve real traffic
+// forever; the window drains and admits again once old calls age out.
+// Otherwise it records the call and returns open=false (ADMIT).
+//
+// This is deliberately separate from admit(): admit fingerprints on the
+// request body and only catches byte-identical loops; admitRate counts
+// ALL guarded calls regardless of content, which is the only thing that
+// stops a loop that varies its request body.
+func (g *llmGuard) admitRate() (open bool, count int) {
+	if g == nil || !g.rateEnabled {
+		return false, 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.now()
+
+	cutoff := now.Add(-g.rateWindow)
+	kept := g.rateHits[:0]
+	for _, t := range g.rateHits {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	g.rateHits = kept
+
+	if len(kept) >= g.rateMax {
+		// Throttle the alert to once per window so a sustained runaway
+		// stays loud without flooding the logs.
+		if g.lastRateAlert.IsZero() || now.Sub(g.lastRateAlert) >= g.rateWindow {
+			g.lastRateAlert = now
+			g.log().Error("LLM rate ceiling TRIPPED: process-wide call rate exceeded; blocking to prevent a runaway spend loop",
+				"calls_in_window", len(kept),
+				"max_calls", g.rateMax,
+				"window", g.rateWindow.String(),
+			)
+		}
+		return true, len(kept)
+	}
+	g.rateHits = append(g.rateHits, now)
+	return false, len(g.rateHits)
+}
+
 // fingerprintRequest derives the loop-breaker key from a request:
 // method + URL path + a hash of the (buffered) body. Returns ("", body,
 // false) when the request is not a chat/messages call we want to guard
@@ -184,7 +279,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		base = http.DefaultTransport
 	}
 	g := t.guard
-	if g == nil || !g.enabled {
+	if g == nil || (!g.enabled && !g.rateEnabled) {
 		return base.RoundTrip(req)
 	}
 
@@ -210,8 +305,16 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	fp, guarded := fingerprintRequest(req.Method, req.URL.Path, bodyBytes)
 	if guarded {
+		// Per-fingerprint loop breaker first (catches byte-identical
+		// loops cheaply). admit() self-gates on g.enabled.
 		if open, repeats := g.admit(fp); open {
 			return loopBreakerResponse(req, repeats), nil
+		}
+		// Then the global, content-independent rate ceiling -- the
+		// backstop that catches loops varying their request body.
+		// admitRate() self-gates on g.rateEnabled.
+		if open, calls := g.admitRate(); open {
+			return rateCeilingResponse(req, calls), nil
 		}
 	}
 	return base.RoundTrip(req)
@@ -236,6 +339,33 @@ func loopBreakerResponse(req *http.Request, repeats int) *http.Response {
 		Header: http.Header{
 			"Content-Type": []string{"application/json"},
 			"Retry-After":  []string{"30"},
+		},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+	}
+}
+
+// rateCeilingResponse builds the synthetic HTTP 429 returned when the
+// process-wide rate ceiling (memql#834) is hit. Same envelope shape as
+// loopBreakerResponse so both vendor SDKs surface their normal
+// rate-limit error type and the planner's 429 backoff (memql#821)
+// composes cleanly.
+func rateCeilingResponse(req *http.Request, calls int) *http.Response {
+	msg := fmt.Sprintf(
+		"memql LLM rate ceiling: %d chat/messages calls left the process within the rolling rate window, at or above the configured ceiling, so this call was blocked to prevent a runaway spend loop. This is a local process-wide guard, not a provider limit; calls are admitted again as the window drains.",
+		calls,
+	)
+	body := fmt.Sprintf(`{"type":"error","error":{"type":"rate_limit_error","message":%q}}`, msg)
+	return &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Status:     "429 Too Many Requests",
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"Retry-After":  []string{"5"},
 		},
 		Body:          io.NopCloser(strings.NewReader(body)),
 		ContentLength: int64(len(body)),
