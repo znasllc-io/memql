@@ -12,7 +12,7 @@ shape attachment attachmentDownload {
   row.id
   payload.fileName
   payload.mimeType
-  payload.gcsURL
+  payload.blobUrl
   payload.spaceId
   payload.status
 }
