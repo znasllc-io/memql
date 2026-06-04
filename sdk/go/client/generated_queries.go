@@ -1564,6 +1564,28 @@ func QueryGeneratedOutputByIdBuild(args QueryGeneratedOutputByIdArgs) string {
 	return b.String()
 }
 
+// QueryGeneratedOutputsForPlan -- List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)
+//
+// Bound concept: generatedOutput.
+type QueryGeneratedOutputsForPlanArgs struct {
+	PlanId string
+}
+
+// QueryGeneratedOutputsForPlan calls the engine query queryGeneratedOutputsForPlan.
+func (qc *QueryClient) QueryGeneratedOutputsForPlan(ctx context.Context, args QueryGeneratedOutputsForPlanArgs) (*Result, error) {
+	call := QueryGeneratedOutputsForPlanBuild(args)
+	return qc.executeNamed(ctx, "queryGeneratedOutputsForPlan", call)
+}
+
+func QueryGeneratedOutputsForPlanBuild(args QueryGeneratedOutputsForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("queryGeneratedOutputsForPlan({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryGlobalVariable -- Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
 //
 // Bound concept: globalVariable.

@@ -659,7 +659,29 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	// error already returned early above with markPlanFailed, so reaching here
 	// means the agent completed; the workbench write either succeeded (and was
 	// promoted) or the agent surfaced the problem in its reply. (memql#800)
-	succeeded := planSucceeded || plan.Kind == produceArtifactPlanKind
+	succeeded := planSucceeded
+	if plan.Kind == produceArtifactPlanKind {
+		// produceArtifact produces its deliverable via the WORKBENCH
+		// (in-process fs_write, promoted to the Library), not a worker tool,
+		// so the worker-invocation gate is always zero here and cannot be the
+		// success signal. The authoritative signal is whether a
+		// v1:library:generatedOutput row actually landed for this plan --
+		// promoteWorkbenchOutput stamps producedByPlanId on it ONLY after a
+		// successful fs_write promotion. A turn that completed gracefully but
+		// produced NOTHING -- e.g. the workbench write was rejected and the
+		// agent merely apologised in prose (the exact memql#938 signature) --
+		// must NOT be reported as success. (memql#939)
+		produced, queryOK := p.artifactProducedForPlan(ctx, planId, plan.RequestedBy)
+		if queryOK {
+			succeeded = produced
+		} else {
+			// Inconclusive lookup (engine misconfigured / query error /
+			// unresolved owner): fall back to the prior clean-turn heuristic
+			// rather than false-failing a real deliverable on an infra problem.
+			// The empty-reply guard below still catches the stalled-turn case.
+			succeeded = true
+		}
+	}
 	// A produceArtifact turn that comes back EMPTY produced nothing. The
 	// classic signature is the agent's SI stream stalling and the idle
 	// watchdog killing it after exhausting retries -- the failure is swallowed
@@ -699,7 +721,13 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		"reply_chars", len(replyText),
 		"worker_invocations", invocationCount,
 		"worker_successes", successCount,
-		"plan_outcome", map[bool]string{true: "succeeded", false: "failed"}[planSucceeded],
+		// worker_outcome is the worker-invocation signal alone; plan_outcome
+		// is the FINAL decision the user sees (for produceArtifact it reflects
+		// the generatedOutput-evidence gate, not the always-zero worker
+		// signal). Logging only planSucceeded here used to read "failed" while
+		// the user was told "done" -- they now agree. (memql#939)
+		"worker_outcome", map[bool]string{true: "succeeded", false: "failed"}[planSucceeded],
+		"plan_outcome", map[bool]string{true: "succeeded", false: "failed"}[succeeded],
 	)
 }
 
@@ -742,6 +770,63 @@ func (p *PlannerIntegration) workerInvocationOutcomeForPlan(ctx context.Context,
 		}
 	}
 	return successes > 0, total, successes
+}
+
+// artifactProducedForPlan reports whether a produceArtifact turn
+// actually wrote a deliverable: at least one v1:library:generatedOutput
+// row stamped with this planId. promoteWorkbenchOutput writes that row
+// ONLY after a successful workbench fs_write promotion, so its presence
+// is the authoritative "did anything get produced?" signal -- the
+// produceArtifact analogue of workerInvocationOutcomeForPlan.
+//
+// The generatedOutput concept is owner-scoped (reads gate on
+// ownerUserId==actor.userId), so the lookup stamps the plan's owner as
+// the acting user via ownerActorContext and filters on producedByPlanId.
+//
+// Returns (produced, queryOK):
+//   - queryOK=true,  produced=true  -> a real deliverable landed.
+//   - queryOK=true,  produced=false -> the turn produced nothing (honest
+//     failure the user can see + retry).
+//   - queryOK=false                 -> the lookup could not run (engine
+//     misconfigured / query error / no resolvable owner); INCONCLUSIVE,
+//     so the caller does NOT fail an otherwise-clean turn on it.
+func (p *PlannerIntegration) artifactProducedForPlan(ctx context.Context, planId, ownerUserId string) (produced, queryOK bool) {
+	if p.engine == nil || strings.TrimSpace(planId) == "" {
+		return false, false
+	}
+	owner := strings.TrimSpace(ownerUserId)
+	if owner == "" {
+		// No owner to impersonate -> the owned read can't run. Inconclusive.
+		return false, false
+	}
+	q := fmt.Sprintf(`queryGeneratedOutputsForPlan({planId:%q})`, planId)
+	res, err := p.engine.Execute(ownerActorContext(ctx, owner), q)
+	if err != nil {
+		p.logger.Warn("plan execution: generatedOutput lookup failed; treating as inconclusive",
+			"plan_id", planId,
+			"error", err,
+		)
+		return false, false
+	}
+	return generatedOutputCountFromExecuteResult(res) > 0, true
+}
+
+// generatedOutputCountFromExecuteResult counts the rows queryGeneratedOutputsForPlan
+// returned, unpacking shape() output the same way invocationRowsFromExecuteResult
+// does: single-row -> bare map, multi-row -> []any, empty -> []any{}.
+func generatedOutputCountFromExecuteResult(res any) int {
+	resultMap, ok := res.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch data := resultMap["data"].(type) {
+	case map[string]any:
+		return 1
+	case []any:
+		return len(data)
+	default:
+		return 0
+	}
 }
 
 // invocationRow is the slim projection workerInvocationOutcomeForPlan
