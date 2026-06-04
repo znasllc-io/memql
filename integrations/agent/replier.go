@@ -203,20 +203,17 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// the Plan lands as failed even though the user clicked Allow.
 	r.fillActingAgentIfEmpty(ctx, msg, turnStart)
 
-	// Mirror the (now self-resolved) acting-agent role + id onto ctx so
-	// the engine's universal agent-only gate in ExecuteTool admits this
-	// turn's tools. fillActingAgentIfEmpty above restored msg.ActingAgent
-	// for PROMPT rendering, but the ctx acting-agent role was decided
-	// once already -- in agent_turn_handlers.go at dispatch time, reading
-	// the INCOMING msg.ActingAgent. On a planner-driven produceArtifact /
-	// post-approval turn that field arrives nil (the planner can't load
-	// v1:agents:agent -- not in its @visibility list), so NO role landed
-	// on ctx. Without this re-stamp the LLM sees the tools in its prompt,
-	// calls workbenchHost / canvasPublish, and every call is hard-rejected
-	// with "tools are agent-only -- no acting agent on context" -- the
-	// deliverable is never written and the agent falls back to apologising
-	// in prose. (memql#938)
-	ctx = stampActingAgentRoleIfMissing(ctx, msg)
+	// NOTE: the acting-agent role/id re-stamp onto ctx (memql#938) does NOT
+	// happen here. prepareTurn takes ctx by value and its callers
+	// (handleStreaming / handleBackground) drive the tool loop with THEIR
+	// OWN ctx, so a re-stamp local to prepareTurn would be discarded before
+	// it ever reached ExecuteTool -- which is exactly the bug that let the
+	// produceArtifact workbench write keep failing after the first attempt
+	// at #938. fillActingAgentIfEmpty above populated msg.ActingAgent (for
+	// prompt rendering); each lane caller mirrors that onto its ctx via
+	// stampActingAgentRoleIfMissing right before its tool loop. Nothing
+	// inside prepareTurn (RAG queries / buildPromptData) needs the role, so
+	// leaving it unstamped here is correct.
 
 	data := buildPromptData(msg)
 
@@ -733,6 +730,13 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 		"operatorEnabled", prep.operatorEnabled,
 		"requestId", prep.routerReq.RequestId,
 	)
+
+	// Mirror the acting-agent role + id (self-resolved in prepareTurn) onto
+	// the ctx that drives the tool loop, so ExecuteTool's agent-only gate
+	// admits this turn's tools on the planner-driven path where the incoming
+	// ActingAgent was nil. Must happen on THIS ctx (the one passed to
+	// runStreamingToolLoop), not inside prepareTurn. (memql#938)
+	ctx = stampActingAgentRoleIfMissing(ctx, msg)
 
 	result, err := r.runStreamingToolLoop(ctx, provider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
 	if err != nil {
