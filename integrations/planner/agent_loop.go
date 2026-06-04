@@ -285,6 +285,18 @@ const maxPlannerIterations = 5
 // invokeAndDispatchIter so the same Plan gets the next decision in
 // the same event-cycle instead of parking until a future trigger.
 func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string) error {
+	// Complexity triage runs FIRST (epic #836 / memql#837): a cheap
+	// classifier decides trivial vs moderate/complex. A trivial,
+	// self-contained deliverable (the "list of 10 birds" case) with an
+	// owning agent is produced in ONE direct turn -- NO decompose loop,
+	// no specialists, no training. Only moderate/complex goals (or
+	// trivial goals with no owning agent yet) fall through to the
+	// bounded, guarded decompose loop below. A classify failure never
+	// strands the Plan -- triageAndMaybeShortcut returns handled=false
+	// and we proceed to the loop.
+	if handled, err := l.triageAndMaybeShortcut(ctx, planId, time.Now().UTC().Format(time.RFC3339)); err != nil || handled {
+		return err
+	}
 	return l.invokeAndDispatchIter(ctx, planId, 0, newConvTracker())
 }
 
