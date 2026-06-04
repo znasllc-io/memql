@@ -933,22 +933,26 @@ How the DSL constructs lean on each other. Each layer can only depend
 - **Concepts** are pure schema. Every other construct references one
   or more concept ids.
 - **Shapes** are reusable field-projection templates. Every shape
-  declares its kind via `@row` (concept payload + row intrinsics —
-  requires `@concepts(...)`) and/or `@actor` (engine envelope —
-  forbids `@concepts(...)`). Trait shapes are `@row` shapes WITHOUT
-  `@concepts(...)` — concept-agnostic scaffolds for cross-concept
-  predicates (`activeRowTrait`, `statusRowTrait`, etc.). Shapes can
-  `include` other shapes for composition + aliasing.
-- **Specs** are atomic boolean predicates. Every spec REQUIRES a
-  `@shape("name")` binding; the spec's eval strategy is derived
-  from the bound shape's kind:
-  - Shape is `@row` → spec compiles to a SQL `WHERE` fragment.
-  - Shape is `@actor` → spec evaluates in-process against the
+  declares its kind via `@row` (concept payload + row intrinsics; the
+  concept is named by the `shape <Concept> <name>` signature) and/or
+  `@actor` (engine envelope, no signature concept). Trait shapes are
+  `@row` shapes signature-bound to a generic trait concept —
+  scaffolds for cross-concept predicates (`activeRowTrait`,
+  `statusRowTrait`, etc.). The legacy `@concepts(...)` binding
+  annotation is retired. Shapes can `include` other shapes for
+  composition + aliasing.
+- **Specs** are atomic boolean predicates. The eval strategy is
+  derived from the spec body's field references (`@shape("name")` is
+  an optional pin, not required):
+  - body references `payload.X` / row intrinsics → spec compiles to a
+    SQL `WHERE` fragment.
+  - body references `actor.X` → spec evaluates in-process against the
     auth-context envelope.
-  - Shape is mixed (`@row` + `@actor`) → spec compiles to SQL
-    with actor fields bound as query parameters.
-- **Mutations** write to concepts. One `insert(...)` per body
-  (parser limitation).
+  - mixed (row + actor) → spec compiles to SQL with actor fields
+    bound as query parameters.
+- **Mutations** write to concepts via the bare `insert { ... }` /
+  `update { ... }` block (target from the signature). One write per
+  body.
 - **Builtins** wrap Go integrations behind a declarative schema, so
   they look like regular DSL function calls.
 - **Providers** are SI vendor + model + auth records; **prompts**
@@ -1373,13 +1377,17 @@ declares its **kind** (where its fields come from) via `@row` and/or
 Each path becomes a template entry keyed by the path's terminal
 segment.
 
-**Row shapes** project a concept's payload + row intrinsics; require
-`@concepts(...)`:
+**Row shapes** project a concept's payload + row intrinsics. The bound
+concept is named by the **signature** `shape <Concept> <name>` (the
+short-name resolves through the file-top `use ...concepts.{ ... }`
+import); the legacy `@concepts("v1:...")` binding annotation is retired
+and rejected at load:
 ```memql
+use cognition.concepts.{ space }
+
 @description("Space summary card")
 @row
-@concepts("v1:cognition:space")
-shape spaceCard {
+shape space spaceCard {
   row.id
   row.payload.name
   row.payload.description
@@ -1388,8 +1396,8 @@ shape spaceCard {
 ```
 
 **Actor shapes** project the engine envelope (the authenticated
-actor + engine timestamp + allow-listed config). Forbid
-`@concepts(...)`. Closed field set:
+actor + engine timestamp + allow-listed config). They carry no
+signature concept. Closed field set:
 `actor.userId` / `actor.role` / `actor.identityId` /
 `actor.isClusterOwner` / `actor.now` /
 `actor.config.<allow-listed-key>`.
@@ -1404,14 +1412,16 @@ shape actorEnvelope {
 }
 ```
 
-**Mixed shapes** carry both annotations — useful for predicates that
-compare row fields against actor context (e.g. "rows I created" =
-`row.payload.createdBy == actor.userId`):
+**Mixed shapes** carry both `@row` and `@actor` — useful for predicates
+that compare row fields against actor context (e.g. "rows I created" =
+`row.payload.createdBy == actor.userId`). The row concept is
+signature-bound:
 ```memql
+use cognition.concepts.{ space }
+
 @row
 @actor
-@concepts("v1:cognition:space")
-shape ownedSpace {
+shape space ownedSpace {
   row.id
   row.payload.ownerId
   actor.userId
@@ -1423,8 +1433,7 @@ inclusion is supported, cycles + field collisions are errors. Pure
 aliasing is just a shape whose body is a single `include` line:
 ```memql
 @row
-@concepts("v1:cognition:space")
-shape spaceCardAlias {
+shape space spaceCardAlias {
   include spaceCard
 }
 ```
@@ -1450,13 +1459,15 @@ evaluation strategy:
 
 Bodies that mix both flavors are rejected at load time.
 
-**Every spec MUST carry `@shape("name")`** binding it to a shape.
-Concept-specific specs bind to a concept-bound `@row` shape;
-actor-side specs bind to an `@actor` shape; cross-concept specs
-bind to a **trait shape** (a `@row` shape without `@concepts(...)` —
-the predicate scaffolds in `dsl/common/shapes.memql`:
-`activeRowTrait`, `statusRowTrait`, `deletedRowTrait`,
-`archivedRowTrait`, `savedRowTrait`, `validationRowTrait`).
+**`@shape("name")` is optional** on a spec (only a handful of specs
+carry it — the eval strategy is derived from the spec body's field
+references, not the shape). When present it documents/pins the shape
+the predicate reads: concept-specific specs pin a concept-bound `@row`
+shape; actor-side specs an `@actor` shape; cross-concept specs a
+**trait shape** (a `@row` shape, signature-bound to its concept — the
+predicate scaffolds in `dsl/common/shapes.memql`: `activeRowTrait`,
+`statusRowTrait`, `deletedRowTrait`, `archivedRowTrait`,
+`savedRowTrait`, `validationRowTrait`).
 
 ```memql
 @enabled
