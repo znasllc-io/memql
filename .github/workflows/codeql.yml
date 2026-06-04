@@ -43,6 +43,9 @@ jobs:
       - uses: github/codeql-action/init@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4
         with:
           languages: ${{ matrix.language }}
+          # Richer suite: security queries + maintainability/quality
+          # queries, instead of the default security-only set.
+          queries: security-and-quality
       - uses: github/codeql-action/autobuild@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4
       - uses: github/codeql-action/analyze@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4
         with:
