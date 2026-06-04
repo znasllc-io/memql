@@ -15,16 +15,18 @@ permissions:
 
 # Generates a CycloneDX SBOM for the Go module tree on every release
 # (and on go.mod / go.sum changes for main, so the published SBOM
-# tracks current state). The artifact is uploaded to the release
-# when triggered by a release event, and stashed as a workflow
-# artifact otherwise.
+# tracks current state). The generate job runs read-only and always
+# stashes the SBOM as a workflow artifact. A SEPARATE, release-gated
+# attach job carries the only contents:write in this workflow -- so the
+# write token exists exclusively on the path that uploads release assets
+# (least privilege; Scorecard Token-Permissions).
 
 jobs:
-  sbom:
+  generate:
     name: cyclonedx-gomod
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # write only when uploading to a release asset
+      contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
@@ -44,8 +46,21 @@ jobs:
           name: sbom
           path: sbom/
           retention-days: 90
+
+  attach-to-release:
+    name: attach SBOM to release
+    if: github.event_name == 'release'
+    needs: generate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required only to upload assets onto the release
+    steps:
+      - name: download SBOM artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: sbom
+          path: sbom/
       - name: attach SBOM to release
-        if: github.event_name == 'release'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           files: |

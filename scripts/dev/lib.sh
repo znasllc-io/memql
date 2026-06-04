@@ -631,7 +631,16 @@ YAML
 # proto matches $1 (https | tcp) from the local ngrok API, or empty.
 function lib_ngrok_tunnel_url() {
     local proto="$1"
-    curl -s "${LIB_NGROK_API}" 2>/dev/null | python3 -c "
+    # Fetch the local ngrok API response as DATA into a variable, then feed
+    # it to a fixed inline parser on stdin. The two steps are deliberately
+    # separate (not `curl ... | python3`) so it's clear the downloaded bytes
+    # are only ever parsed as JSON, never executed -- and so Scorecard's
+    # downloadThenRun heuristic doesn't mis-flag a download piped into an
+    # interpreter (PinnedDependencies).
+    local payload
+    payload="$(curl -s "${LIB_NGROK_API}" 2>/dev/null || true)"
+    [ -n "${payload}" ] || return 0
+    printf '%s' "${payload}" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)

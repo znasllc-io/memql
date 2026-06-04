@@ -1,0 +1,12 @@
+# Hash-pinned Python deps for the release-lockfile coherence gate
+# (Scorecard PinnedDependencies). Installed with:
+#   pip install --require-hashes -r scripts/release/requirements.txt
+# --require-hashes makes pip reject any artifact whose sha256 is not
+# listed here. Hashes cover the linux x86_64 / aarch64 (many+musl) cp312
+# wheels the CI runner can resolve, plus the sdist fallback.
+PyYAML==6.0.2 \
+    --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 \
+    --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5 \
+    --hash=sha256:8b9c7197f7cb2738065c481a0461e50ad02f18c78cd75775628afb4d7137fb3b \
+    --hash=sha256:0833f8694549e586547b576dcfaba4a6b55b9e96098b36cdc7ebefe667dfed48 \
+    --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e
