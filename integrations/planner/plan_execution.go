@@ -298,91 +298,15 @@ func (p *PlannerIntegration) admitNextForAccount(ctx context.Context, account st
 	}
 }
 
-// handleProduceArtifactCompletion is the event-bus subscriber that closes the
-// async loop for the conversational produce-artifact path (memql#792). When a
-// produceArtifact Plan (spawned by the Assistant's produceArtifact tool,
-// memql#788) reaches terminal success, the deliverable has landed in the user's
-// Library -- but the user is back in the conversation and doesn't know. This
-// emits a notify canvas card (so the bell pings) telling them their file is
-// ready and deep-linking the Library. Fires regardless of WHICH code path
-// stamped the Plan succeeded.
-func (p *PlannerIntegration) handleProduceArtifactCompletion(event events.Event) {
-	fields := extractPlanRoutingFields(event)
-	if fields.Kind != produceArtifactPlanKind || fields.Status != "succeeded" || fields.ID == "" {
-		return
-	}
-	bgCtx := contextWithSystemActor(context.Background())
-	go p.notifyProduceArtifactComplete(bgCtx, fields.ID)
-}
-
-// notifyProduceArtifactComplete loads the completed Plan and emits a
-// private, notify-importance canvas card announcing the deliverable. Best-
-// effort: a failure here must never affect the Plan's terminal state.
-func (p *PlannerIntegration) notifyProduceArtifactComplete(ctx context.Context, planId string) {
-	plan, err := p.fetchPlanForExecution(ctx, planId)
-	if err != nil {
-		p.logger.Warn("produceArtifact completion: fetch plan failed",
-			"plan_id", planId, "error", err)
-		return
-	}
-	requestedBy := strings.TrimSpace(plan.RequestedBy)
-	spaceId := strings.TrimSpace(plan.SpaceId)
-	if requestedBy == "" || spaceId == "" {
-		p.logger.Warn("produceArtifact completion: missing requestedBy/spaceId; skipping notify",
-			"plan_id", planId)
-		return
-	}
-
-	goal := strings.TrimSpace(plan.Goal)
-	body := "Your file is ready in your Library."
-	if goal != "" {
-		body = fmt.Sprintf("%s\n\nIt's ready in your Library.", goal)
-	}
-	// kind="document" notify card. The data shape MUST match the frontend
-	// DocumentCard contract (copresent DocumentCardData): the markdown body
-	// rides on `source` (NOT `body`), an optional `category` label renders
-	// above the title, and navigation deep-links ride on
-	// `links: [{label, href}]` (NOT a flat `link` string) -- the card pushes
-	// each href via react-router navigate(). `/space?panel=library` opens the
-	// Library panel in the user's active space. producedByPlanId is carried
-	// for a future build to resolve + highlight the exact artifact
-	// (memql#792 follow-up); the frontend ignores unknown fields. (memql#890)
-	cardData := map[string]any{
-		"format":   "markdown",
-		"category": "Task Done",
-		"title":    "Deliverable ready",
-		"source":   body,
-		"links": []map[string]any{
-			{"label": "Open in Library", "href": "/space?panel=library"},
-		},
-		"producedByPlanId": planId,
-	}
-	args := map[string]any{
-		"canvasStateId": fmt.Sprintf("produce-artifact-done-%s", planId),
-		"space":         spaceId,
-		"kind":          "document",
-		"data":          cardData,
-		"visibility":    "private",
-		"forUserId":     requestedBy,
-		"importance":    "notify",
-		"actor": map[string]any{
-			"kind": "system",
-		},
-	}
-	payload, err := json.Marshal(args)
-	if err != nil {
-		p.logger.Warn("produceArtifact completion: marshal card failed", "plan_id", planId, "error", err)
-		return
-	}
-	call := fmt.Sprintf(`mutationCreateCanvasState(%s)`, string(payload))
-	if _, err := p.engine.Execute(contextWithSystemActor(ctx), call); err != nil {
-		p.logger.Warn("produceArtifact completion: emit notify card failed",
-			"plan_id", planId, "error", err)
-		return
-	}
-	p.logger.Info("produceArtifact completion: notify card emitted",
-		"plan_id", planId, "space_id", spaceId, "for_user", requestedBy)
-}
+// The produceArtifact completion card (the "Deliverable ready -> Open in
+// Library" notify card) is emitted from the CoPresent carrier side, NOT
+// here. mutationCreateCanvasState + v1:copresent:canvasState are
+// copresent-only constructs the planner core build doesn't load, so the
+// old planner-side notifier failed at runtime with `function
+// "mutationCreateCanvasState" not found`. The card now lands via the
+// emitProduceArtifactDoneCanvasCard automation in the copresent DSL,
+// which fires on the same v1:planner:plan succeeded transition on a
+// carrier node (memql#940).
 
 // executeApprovedPlan does the actual dispatch. Reads the Plan,
 // resolves Sofia's SI participant, forwards the agent turn,

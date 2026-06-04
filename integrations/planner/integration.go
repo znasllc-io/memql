@@ -245,15 +245,12 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.agentLoop.HandlePlanUpdated,
 			events.WithSubscriberName("planner:agent-loop-updated"),
 		))
-		// produceArtifact completion notifier (memql#792). Fires when a
-		// produceArtifact Plan (memql#788) reaches terminal success and
-		// emits a notify canvas card so the user -- back in the
-		// conversation -- learns their deliverable landed in the Library.
-		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:planner:plan",
-			p.handleProduceArtifactCompletion,
-			events.WithSubscriberName("planner:produce-artifact-completion"),
-		))
+		// produceArtifact completion card (memql#792 / #940): the
+		// "Deliverable ready -> Open in Library" notify card now emits from
+		// the CoPresent carrier (the emitProduceArtifactDoneCanvasCard
+		// automation), not here. mutationCreateCanvasState is copresent-only
+		// and the planner core build can't load it, so the old planner-side
+		// subscriber failed at runtime with "function not found".
 		// Admit-next-on-slot-free (epic memql#902 / #905). When a Plan
 		// leaves the running state (succeeded / failed / cancelled / paused
 		// / awaitingFeedback / needsAgent) a per-account concurrency slot
