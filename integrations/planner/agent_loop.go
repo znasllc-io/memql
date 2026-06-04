@@ -557,13 +557,11 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		if handled, err := l.gateSpecialistAction(ctx, planId, d.Action); err != nil || handled {
 			return err
 		}
-		// Approved (metrics.specialistApproved / tokenCapDisabled) but the
-		// trainer pickup loop isn't wired end-to-end yet, so still park
-		// with a clear message rather than silently dropping the request.
-		l.logger.Info("planner agent loop: spawnTrainingPlan approved but trainer pickup not wired; escalating",
-			"planId", planId)
-		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
-			"Training was approved, but the trainer pickup loop isn't wired end-to-end yet. Manual intervention required.")
+		// Approved (metrics.specialistApproved / tokenCapDisabled) ->
+		// mint the kind=trainSpecialist child Plan the dispatcher runs
+		// (memql#852 Gap 2). The initial-training target domain is the
+		// specialist's primary attached domain (resolved from its skills).
+		return l.mintApprovedTrainingPlan(ctx, planId, d)
 	case "retry":
 		// retry handling needs the failure-context surface that the agent
 		// worker emits, which isn't wired yet.
@@ -954,6 +952,15 @@ type plannerDecision struct {
 	LiveSourceIds []string `json:"liveSourceIds,omitempty"`
 	Tags          []string `json:"tags,omitempty"`
 	Justification string   `json:"justification,omitempty"`
+
+	// spawnTrainingPlan payload (memql#852 Gap 2). Populated only when
+	// Action == "spawnTrainingPlan". On approval the handler in
+	// agent_loop_training_mint.go mints a kind=trainSpecialist child
+	// Plan from these; the TrainSpecialistDispatcher then runs it. Mode
+	// defaults to "initial" when empty.
+	SpecialistId string `json:"specialistId,omitempty"`
+	Topic        string `json:"topic,omitempty"`
+	Mode         string `json:"mode,omitempty"`
 }
 
 // outputAsMap decodes plannerDecision.Output into a map. When the
