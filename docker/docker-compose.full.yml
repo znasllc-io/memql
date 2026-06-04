@@ -577,6 +577,14 @@ services:
       MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-memql-attachments}
       MEMQL_AZURE_BLOB_AUTOCREATE: ${MEMQL_AZURE_BLOB_AUTOCREATE:-1}
 
+      # Stream no-progress watchdog (memql#893). The default 30s is shorter
+      # than the gap between the model opening the fs_write tool call and
+      # emitting its (large) file-content input on a produceArtifact turn, so
+      # the watchdog was killing the file-writing turn on every retry and the
+      # deliverable never landed. Raise it to 120s on the agent (the node that
+      # runs the SI tool loop) so the production turn has room to finish.
+      MEMQL_STREAM_IDLE_TIMEOUT_SECONDS: ${MEMQL_STREAM_IDLE_TIMEOUT_SECONDS:-120}
+
     ports:
       - "8089:8089"
       # No raw gRPC port exposure -- nginx terminates TLS on
