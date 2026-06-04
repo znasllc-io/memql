@@ -188,9 +188,16 @@ concept lead {
 Options. Signature: `shape <Concept> <name>` (concept-bound) or `shape <name>`
 (trait/actor). Annotations: `@row`, `@actor`, `@description`; >=1 of `@row`/
 `@actor` required; mixed allowed (none in tree). Body lines: `row.X` (intrinsic),
-`payload.X`, `actor.X`, `include <shape>`. REJECTED: `@concepts`, `@caller`,
-`@useConcept`, `func (Shape)`. Real-tree caveats: no shape uses `include`; only 2
-`@actor` shapes; no mixed shapes.
+`payload.X`, `actor.X`, `include <shape>`. REJECTED: `@concepts` (#G.3.g),
+`@caller` (#221), `func (Shape)`. NOTE the internal inconsistency: `@useConcept(bareName)`
+is still SUPPORTED as a legacy binding form (0 live uses), and the converter's own
+reject hint for `@concepts` points authors AT `@useConcept` — even though the modern
+binding is the signature `shape <Concept> <name>`. Real-tree caveats: no shape uses
+`include`; only 2 `@actor` shapes; no mixed shapes. LIVE REMNANT: 3 shapes in
+`dsl/safety/shapes.memql` (6/30/53) still carry the rejected `@concepts(...)` on top
+of an already-present `use` import + signature binding — a redundant third concept
+statement that the converter rejects (load status of these 3 needs confirmation;
+removing the `@concepts` lines is the fix).
 
 Richest real: `workerInvocationFull` (`dsl/worker/shapes.memql:8`) — 22-path
 `@row` projection.
