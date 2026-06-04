@@ -166,7 +166,7 @@ func (s *harnessObservationSink) RecordObservation(ctx context.Context, kind, te
 	if s == nil || s.exec == nil {
 		return
 	}
-	obsKind := kind
+	var obsKind string
 	switch kind {
 	case "error":
 		obsKind = "error"
