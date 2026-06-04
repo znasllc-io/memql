@@ -412,7 +412,10 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 				"(action \"fs_write\"), defaulting to a markdown (.md) file unless the "+
 				"deliverable names another format, then end your turn with a short "+
 				"acknowledgement. The promoted file lands in the user's Library "+
-				"automatically.\n\nDeliverable:\n%s",
+				"automatically. Do NOT publish the deliverable's content to the canvas "+
+				"(no canvasPublish) -- the content belongs ONLY in the file; the canvas "+
+				"gets a short 'ready in your Library' notification automatically.\n\n"+
+				"Deliverable:\n%s",
 			plan.Goal,
 		)
 	}
@@ -444,6 +447,19 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		// doesn't import the agent package (separate build tags), so the
 		// literal strings are duplicated here intentionally.
 		"execution_lane": "background",
+	}
+	// produceArtifact delivers to the workbench/Library ONLY -- its content
+	// must never be dumped onto the canvas as a content card (the canvas is
+	// for events/notifications; the file is the deliverable). This hint tells
+	// the agent to scope canvasPublish OUT of this turn's tool set so the
+	// model physically can't publish the file body to the canvas, even as a
+	// fallback when something else fails (memql#950). The key/value mirror the
+	// agent package's DeliverableSurfaceHintKey / DeliverableSurfaceWorkbench;
+	// the planner binary doesn't import the agent package (separate build
+	// tags), so the literal strings are duplicated here intentionally (same as
+	// execution_lane above).
+	if plan.Kind == produceArtifactPlanKind {
+		hints["deliverable_surface"] = "workbench"
 	}
 	// Opt-in "watch agent work" (memql#900). A plan can request live,
 	// token-by-token streaming of its execution -- e.g. the user clicked

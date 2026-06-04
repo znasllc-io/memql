@@ -236,6 +236,15 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	}
 	toolNames = ScopeToolsForRole(harnessRole, toolNames)
 
+	// Deliverable-surface scoping (memql#950). A produceArtifact executor turn
+	// delivers ONLY by writing the file to its workbench (promoted to the
+	// Library); its content must never be dumped onto the canvas as a content
+	// card. The planner sets hints[deliverable_surface]=workbench, which drops
+	// canvasPublish from this turn so the model physically can't publish the
+	// file body to the canvas, even as a fallback when the workbench write
+	// hiccups. Ordinary turns are untouched (the hint is absent).
+	toolNames = ScopeToolsForDeliverableSurface(msg.Hints, toolNames)
+
 	// Provider selection runs through the memQL SI Router. The replier
 	// still owns the default policy (operator-capable agents get
 	// strongReasoning because the prompt is long and tool-calling
