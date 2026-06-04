@@ -35,15 +35,18 @@ import (
 const (
 	// defaultMaxPlannerInvocationsPerPlan is the hard cumulative cap on
 	// total plannerAgent LLM calls for a single Plan, across ALL event
-	// cycles / retries / re-triggers. Generous enough for a genuinely
-	// complex multi-phase decomposition (decompose + several
-	// createSpecialist + many dispatchTask + completion, spread over
-	// cycles) while still finite. Truly huge work decomposes via child
-	// sub-plans (requestSubPlan), each independently bounded by this
-	// same ceiling -- that is how the loop scales simple -> complex
-	// without any single Plan running away. Override with
+	// cycles / retries / re-triggers. Dropped 50 -> 8 (epic #836 / #843):
+	// under the goal-resolution restructure a trivial deliverable never
+	// enters this loop (the #837 triage shortcuts it) and a moderate plan
+	// converges in a handful of calls (decompose + a couple of
+	// dispatchTask + completion), so 8 is plenty for a real plan while
+	// making a misbehaving one park within a handful of calls instead of
+	// spending up to 50x. Genuinely huge work decomposes via child
+	// sub-plans (requestSubPlan), each independently bounded by this same
+	// ceiling -- that is how the loop scales simple -> complex without any
+	// single Plan running away. Override with
 	// MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN.
-	defaultMaxPlannerInvocationsPerPlan = 50
+	defaultMaxPlannerInvocationsPerPlan = 8
 
 	// defaultPlannerTokenBudget is the fallback per-plan token ceiling
 	// budget.go enforces when Plan.tokenBudget is unset (0). A runaway

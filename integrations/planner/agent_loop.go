@@ -501,6 +501,18 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 			// will bail us out if it keeps refusing.
 			existing, terr := l.loadTasks(ctx, planId)
 			if terr == nil && len(existing) == 0 {
+				// Convergence guard for the no-task markPlanSucceeded spin
+				// (memql#843): markPlanSucceeded is terminal and so isn't
+				// tracked by recordAndCheck, but a planning-phase plan whose
+				// model keeps emitting it with zero tasks would re-invoke up
+				// to the per-cycle cap every cycle. Track the repeats here
+				// and park once it's clearly not going to emit a task.
+				if park, count := conv.recordNoTaskSucceedAndCheck(); park {
+					l.logger.Warn("planner agent loop: repeated no-task markPlanSucceeded; parking",
+						"planId", planId, "repeats", count, "iter", iter)
+					return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
+						fmt.Sprintf("Planner emitted markPlanSucceeded %d times without ever creating a task. Resume to retry with fresh context.", count))
+				}
 				l.logger.Warn("planner agent loop: markPlanSucceeded with no tasks; re-invoking",
 					"planId", planId, "iter", iter)
 				return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
