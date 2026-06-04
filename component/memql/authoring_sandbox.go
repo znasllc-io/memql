@@ -80,7 +80,27 @@ var sandboxSupportedKinds = map[string]bool{
 func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
 	concepts := memoryNodes.DefaultRegistry()
 	rep := SandboxReport{OK: true}
+
+	// Pre-pass: a bundle that declares two constructs with the same
+	// (kind, name) would collide at registration in the authored runtime,
+	// so every occurrence after the first is a hard failure.
+	total := map[string]int{}
 	for _, c := range constructs {
+		total[c.Kind+"/"+c.Name]++
+	}
+	seenSoFar := map[string]int{}
+
+	for _, c := range constructs {
+		key := c.Kind + "/" + c.Name
+		seenSoFar[key]++
+		if total[key] > 1 && seenSoFar[key] > 1 {
+			rep.OK = false
+			rep.Diagnostics = append(rep.Diagnostics, SandboxDiagnostic{
+				Name: c.Name, Kind: c.Kind, OK: false,
+				Error: fmt.Sprintf("duplicate construct: %s %q is declared %d times in the bundle", c.Kind, c.Name, total[key]),
+			})
+			continue
+		}
 		d := sandboxCompileOne(c, concepts)
 		if !d.OK && !d.Skipped {
 			rep.OK = false
@@ -96,6 +116,11 @@ func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
 func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) SandboxDiagnostic {
 	d := SandboxDiagnostic{Name: c.Name, Kind: c.Kind, OK: true}
 	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+
+	// actualName is the name parsed from the source; compared to the declared
+	// construct.Name below so a row whose metadata lies about its source is
+	// caught at Gate 1 rather than mis-registering at activation.
+	var actualName string
 
 	switch c.Kind {
 	case "query", "mutation", "logic":
@@ -114,6 +139,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 				break
 			}
 		}
+		actualName = slice.Name
 		if _, err := dispatchPerConstructParser(slice, origin, concepts); err != nil {
 			return fail(d, err.Error())
 		}
@@ -124,6 +150,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		if err != nil {
 			return fail(d, fmt.Sprintf("%s: %v", origin, err))
 		}
+		actualName = decl.Name
 		if _, err := specDeclToSpec(decl, origin); err != nil {
 			return fail(d, err.Error())
 		}
@@ -133,6 +160,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		if err != nil {
 			return fail(d, fmt.Sprintf("%s: %v", origin, err))
 		}
+		actualName = decl.Name
 		if _, err := shapeDeclToShapeDefinition(decl, origin); err != nil {
 			return fail(d, err.Error())
 		}
@@ -143,6 +171,14 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		d.OK = false
 		d.Skipped = true
 		d.Error = fmt.Sprintf("kind %q is not yet compiled by the sandbox (follow-up #956)", c.Kind)
+		return d
+	}
+
+	// Name-mismatch: the construct row's declared name must equal the name in
+	// its source (the planner stamps construct.name; the authored runtime
+	// registers under it, so a mismatch mis-registers).
+	if actualName != "" && actualName != c.Name {
+		return fail(d, fmt.Sprintf("%s: declared name %q does not match the %s name in source (%q)", origin, c.Name, c.Kind, actualName))
 	}
 
 	return d

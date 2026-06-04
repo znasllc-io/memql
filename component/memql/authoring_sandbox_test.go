@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"strings"
 	"testing"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -133,5 +134,49 @@ func TestSandboxCompileBundle_AggregatesOK(t *testing.T) {
 	})
 	if rep.OK {
 		t.Fatalf("expected bundle FAIL (one bad spec), got OK: %+v", rep.Diagnostics)
+	}
+}
+
+// TestSandboxCompileBundle_DuplicateConstruct: two constructs with the same
+// (kind, name) fail the bundle; same name across different kinds does not.
+func TestSandboxCompileBundle_DuplicateConstruct(t *testing.T) {
+	rep := SandboxCompileBundle([]SandboxConstruct{
+		{Kind: "spec", Name: "dup", Source: `spec dup { actor.role == "admin" }`},
+		{Kind: "spec", Name: "dup", Source: `spec dup { actor.role == "owner" }`},
+	})
+	if rep.OK {
+		t.Fatalf("expected bundle FAIL on duplicate, got OK: %+v", rep.Diagnostics)
+	}
+	dupErrs := 0
+	for _, d := range rep.Diagnostics {
+		if !d.OK && !d.Skipped && strings.Contains(d.Error, "duplicate construct") {
+			dupErrs++
+		}
+	}
+	if dupErrs != 1 {
+		t.Errorf("expected exactly 1 duplicate diagnostic, got %d: %+v", dupErrs, rep.Diagnostics)
+	}
+
+	rep2 := SandboxCompileBundle([]SandboxConstruct{
+		{Kind: "spec", Name: "same", Source: `spec same { actor.role == "admin" }`},
+		{Kind: "shape", Name: "same", Source: "@actor\nshape same {\n  actor.userId\n}"},
+	})
+	if !rep2.OK {
+		t.Errorf("same name across different kinds is not a duplicate; got: %+v", rep2.Diagnostics)
+	}
+}
+
+// TestSandboxCompileBundle_NameMismatch: the declared construct.Name must
+// match the name in the source.
+func TestSandboxCompileBundle_NameMismatch(t *testing.T) {
+	rep := SandboxCompileBundle([]SandboxConstruct{
+		{Kind: "spec", Name: "claimedName", Source: `spec actualName { actor.role == "admin" }`},
+	})
+	if rep.OK {
+		t.Fatalf("expected bundle FAIL on name mismatch, got OK: %+v", rep.Diagnostics)
+	}
+	d := rep.Diagnostics[0]
+	if d.OK || d.Skipped || !strings.Contains(d.Error, "does not match") {
+		t.Errorf("expected a name-mismatch failure, got %+v", d)
 	}
 }
