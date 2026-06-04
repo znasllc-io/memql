@@ -25,7 +25,7 @@ type PolicyConfigField struct {
 	// convention.
 	Key string
 	// FieldName — the matching field on busv1.ConfigSnapshot
-	// (e.g. "SIOpenaiApiKey").
+	// (e.g. "SiOpenaiApiKey").
 	FieldName string
 	// Sensitive — when true, the ctx surface exposes only a boolean
 	// indicating presence (`ctx.config.openaiApiKey == true`); the
@@ -44,13 +44,13 @@ type PolicyConfigField struct {
 var PolicyExposableConfig = []PolicyConfigField{
 	{
 		Key:         "openaiApiKey",
-		FieldName:   "SIOpenaiApiKey",
+		FieldName:   "SiOpenaiApiKey",
 		Sensitive:   true,
 		Description: "Presence-only: is the OpenAI API key configured for this node?",
 	},
 	{
 		Key:         "defaultProvider",
-		FieldName:   "SIDefaultProvider",
+		FieldName:   "SiDefaultProvider",
 		Sensitive:   false,
 		Description: "Default SI provider name (e.g. chat54Mini).",
 	},
@@ -150,10 +150,10 @@ func readConfigField(snapshot *busv1.ConfigSnapshot, name string) any {
 		return nil
 	}
 	switch name {
-	case "SIOpenaiApiKey":
-		return snapshot.SIOpenaiApiKey
-	case "SIDefaultProvider":
-		return snapshot.SIDefaultProvider
+	case "SiOpenaiApiKey":
+		return snapshot.SiOpenaiApiKey
+	case "SiDefaultProvider":
+		return snapshot.SiDefaultProvider
 	case "SttProvider":
 		return snapshot.SttProvider
 	case "PolyphonVoiceProvider":
