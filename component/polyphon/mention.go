@@ -81,7 +81,7 @@ func ParseMentions(text string, participants []ParticipantRef) ([]Mention, strin
 	}
 
 	var mentions []Mention
-	cleanText := text
+	var cleanText string
 
 	for _, match := range matches {
 		// match[0]:match[1] is the full @name, match[2]:match[3] is the captured name.

@@ -529,12 +529,11 @@ func (s *session) dispatchLoop() error {
 			}
 
 			if err := s.stream.Send(qe.msg); err != nil {
-				// Best-effort cleanup so tokens don't leak.
-				if s.releaseRequest(qe.requestId) {
-					s.releaseToken()
-				} else {
-					s.releaseToken()
-				}
+				// Best-effort cleanup so tokens don't leak. Clear the
+				// in-flight record (side effect) then release the token
+				// unconditionally -- both former branches did the same.
+				s.releaseRequest(qe.requestId)
+				s.releaseToken()
 				return err
 			}
 			s.logDebug("memql ws execute dispatched", "request_id", qe.requestId)

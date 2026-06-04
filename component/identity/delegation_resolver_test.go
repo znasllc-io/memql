@@ -565,3 +565,30 @@ func TestResolve_AuditCarriesDelegationDetail(t *testing.T) {
 		t.Error("audit detail should carry expires_at")
 	}
 }
+
+func TestSanitizeLogValue_StripsControlChars(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "delegation expired", "delegation expired"},
+		{"newline", "ok\nADMIN forged=1", "ok ADMIN forged=1"},
+		{"carriage_return", "ok\rline", "ok line"},
+		{"crlf", "a\r\nb", "a  b"},
+		{"tab", "a\tb", "a b"},
+		{"null_and_bell", "a\x00b\x07c", "abc"},
+		{"del", "a\x7fb", "ab"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizeLogValue(tc.in)
+			if got != tc.want {
+				t.Errorf("sanitizeLogValue(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if strings.ContainsAny(got, "\n\r") {
+				t.Errorf("sanitized value still contains CR/LF: %q", got)
+			}
+		})
+	}
+}

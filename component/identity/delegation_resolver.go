@@ -294,10 +294,27 @@ func narrowScopes(raw []string, delegatorRole auth.Role) []string {
 	return out
 }
 
+// sanitizeLogValue strips CR, LF, and other control characters from a
+// (potentially user-controlled) string before it reaches the audit log
+// sink, so a crafted value cannot forge or split log entries
+// (CWE-117 log injection).
+func sanitizeLogValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1 // drop other control chars
+		}
+		return r
+	}, s)
+}
+
 func (r *EngineDelegationResolver) audit(ctx context.Context, subject string, row *delegationRow, action, reason string, outcome AuditOutcome) {
 	if r == nil || r.Auditor == nil || row == nil {
 		return
 	}
+	reason = sanitizeLogValue(reason)
 	detail := map[string]any{
 		"delegation_id":     row.ID,
 		"agent_id":          row.AgentId,

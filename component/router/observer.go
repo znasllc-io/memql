@@ -62,7 +62,6 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 			case <-ctx.Done():
 				// Forward-drop remaining chunks if the consumer left; we
 				// still record the call to capture cancellation.
-				chunkErr = ctx.Err()
 				return
 			}
 		}

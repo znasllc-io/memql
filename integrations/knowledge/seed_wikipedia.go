@@ -134,7 +134,6 @@ func fetchWikipediaArticle(ctx context.Context, articleName string) (title, body
 	// Combine: summary extract first (it's usually the cleanest
 	// intro), then full article body. Strip duplicates if the
 	// summary text is a prefix of the full extract.
-	body = summary.Extract
 	if !strings.HasPrefix(strings.TrimSpace(fullText), strings.TrimSpace(summary.Extract)) {
 		body = summary.Extract + "\n\n" + fullText
 	} else {

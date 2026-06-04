@@ -88,7 +88,6 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 		// silently change ownership for any system-side write.
 	case !elevated && rawForUser == "" && authenticatedSubject != "":
 		payload["forUserId"] = authenticatedSubject
-		rawForUser = authenticatedSubject
 	case !elevated && rawForUser != "" && authenticatedSubject == "":
 		return fmt.Errorf("v1:cognition:participant: forUserId provided but no authenticated user in context")
 	case !elevated && rawForUser != authenticatedSubject:

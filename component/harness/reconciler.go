@@ -373,7 +373,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, planID string) error {
 		return nil // nothing to do; plan already settled
 	}
 
-	steps, partition, err := r.reader.StepsForPlan(ctx, planID)
+	steps, _, err := r.reader.StepsForPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("read steps: %w", err)
 	}
@@ -388,7 +388,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, planID string) error {
 		r.logger.Debug("step promoted to ready", "plan", planID, "step", s.ID)
 	}
 	// Re-read so the runnable selection sees the promotions we just made.
-	steps, partition, err = r.reader.StepsForPlan(ctx, planID)
+	steps, partition, err := r.reader.StepsForPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("re-read steps: %w", err)
 	}
