@@ -7,3 +7,5 @@ import _ "embed"
 //
 //go:embed VERSION
 var embeddedVersionFile []byte
+
+// ci-routing verification (memql#856) — remove after verification
