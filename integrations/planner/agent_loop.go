@@ -369,7 +369,21 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 		return l.escalateAwaitingFeedback(ctx, planId, gate.Reason, gate.Message)
 	}
 
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "plannerAgent", data)
+	// Model tiering (memql#838): the plannerAgent prompt's @defaultProvider
+	// is the CHEAP tier (streamClaudeSonnet -- no extended thinking). We do
+	// NOT default to Opus+thinking. Reasoning (reasoningClaudeOpus) is an
+	// explicit, logged, bounded ESCALATION: only once the cheap tier has had
+	// a few iterations in this cycle without converging do we override the
+	// provider to the reasoning tier for the remaining iterations. A
+	// trivial/moderate plan converges in 1-2 iterations and so makes ZERO
+	// Opus+thinking calls.
+	siCtx := systemActorContext(ctx)
+	if provider, reasoning := selectPlannerProvider(iter); reasoning {
+		l.logger.Info("planner agent loop: escalating to reasoning tier (cheap tier not converging)",
+			"planId", planId, "iter", iter, "provider", provider)
+		siCtx = memql.WithProviderOverride(siCtx, provider)
+	}
+	resp, err := l.engine.InvokeSI(siCtx, "plannerAgent", data)
 	if err != nil {
 		// Provider rate-limit (429) is RETRYABLE-LATER, not a plan
 		// failure (memql#821). Re-attempting immediately would be a

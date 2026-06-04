@@ -26,16 +26,19 @@ seed agent plannerAgent {
 
   providerConfig {
     llm {
-      // Claude Opus 4.6 + extended thinking. The reasoning surface
-      // is exactly what the planner's decompose / createSpecialist /
-      // dispatchTask decision tree needs -- the model reasons over
-      // its goal + existing specialists + phase outline before
-      // emitting the structured-output action. See
-      // dsl/providers/providers.memql for the provider definition;
-      // the anthropicStreamProvider in component/memql/si_providers.go
-      // injects the thinking config into every MessageNewParams call
-      // path.
-      provider: "reasoningClaudeOpus"
+      // Cheap-by-default tier (epic #836 / memql#838). The planner runs
+      // on Claude Sonnet -- the decompose / dispatch / route decision
+      // tree is structured pattern-matching over the goal + catalog +
+      // phases, NOT novel chain-of-thought, so extended thinking added
+      // 5-30s and ~10x cost per call without improving decisions. That
+      // always-on-reasoning default was the cost bomb (~$250 runaway).
+      // Reasoning (reasoningClaudeOpus = Opus + extended thinking) is now
+      // an ESCALATE-ON-NEED path, not the default: the planner loop
+      // (integrations/planner/agent_loop_tiering.go, selectPlannerProvider)
+      // overrides the provider to the reasoning tier only once the cheap
+      // tier has iterated a few times without converging. A trivial or
+      // moderate plan therefore makes ZERO Opus+thinking calls.
+      provider: "streamClaudeSonnet"
     }
   }
 

@@ -73,6 +73,15 @@ func (e *MemQLEngine) InvokeSI(ctx context.Context, templateId string, data map[
 	invocation := &SIInvocation{
 		TemplateId: templateId,
 	}
+	// Honor a context-attached provider override (memql#838 model
+	// tiering): callers that want to escalate / downshift the model for
+	// THIS invocation wrap the ctx with WithProviderOverride(ctx, name).
+	// Mirrors the tool-loop paths (si_tool_loop.go) which already do
+	// this; without it, InvokeSI was the one SI entry point that ignored
+	// the override and always used the prompt's @defaultProvider.
+	if override := ProviderOverrideFromContext(ctx); override != "" {
+		invocation.ProviderOverride = &override
+	}
 
 	return e.siRuntime.Invoke(ctx, invocation, data)
 }
