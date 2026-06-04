@@ -73,6 +73,16 @@ const (
 // stalled streams hit the timer. When it fires we surface a typed
 // transient error so the existing retry logic catches it.
 //
+// INTERACTIVE-ONLY (memql#901). This watchdog lives in consumeStreamingTurn,
+// which only the interactive streaming lane uses. Background plan/task
+// execution runs on the non-streaming executor (runNonStreamingToolLoop,
+// memql#896), which has no idle watchdog -- it bounds each step with an
+// overall request timeout instead. The 30s default was briefly raised to
+// 120s (memql#893) to stop the watchdog false-killing slow produceArtifact
+// turns while they still ran through this path; that band-aid is retired now
+// that background work bypasses the watchdog, so the default is back to a
+// value tuned for genuinely-stalled LIVE streams.
+//
 // Override via MEMQL_STREAM_IDLE_TIMEOUT_SECONDS for ops; the resolver
 // caches once per process.
 const defaultStreamIdleTimeoutSeconds = 30
