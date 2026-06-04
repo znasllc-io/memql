@@ -35,6 +35,7 @@ package memql
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -48,6 +49,36 @@ import (
 	"time"
 )
 
+// laneCtxKey tags a context as belonging to the background (batch)
+// execution lane (memql#897). The background SI executor stamps it via
+// ContextWithBackgroundLane before issuing model calls; because the
+// vendor SDKs thread the call context all the way to the HTTP request,
+// guardedTransport.RoundTrip can read it off req.Context() and count the
+// call against the background rate bucket instead of the interactive one.
+type laneCtxKey struct{}
+
+// ContextWithBackgroundLane marks ctx as the background execution lane so
+// downstream LLM HTTP calls are rate-limited against the background bucket
+// rather than the interactive one. No-op-safe on a nil ctx.
+func ContextWithBackgroundLane(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, laneCtxKey{}, true)
+}
+
+// backgroundLaneFromContext reports whether ctx was tagged as the
+// background execution lane. Defaults to false (interactive) for any
+// context that wasn't stamped -- so chat, voice, suggest, and every legacy
+// path keep counting against the interactive ceiling unchanged.
+func backgroundLaneFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(laneCtxKey{}).(bool)
+	return v
+}
+
 const (
 	defaultLoopGuardMaxRepeat      = 8
 	defaultLoopGuardWindowSeconds  = 60
@@ -60,6 +91,16 @@ const (
 	// spend loop blows straight through it and is capped.
 	defaultRateMaxCalls      = 20
 	defaultRateWindowSeconds = 10
+
+	// Background-lane rate-ceiling defaults (memql#897). The background /
+	// batch execution lane (planner-dispatched plan/task turns) gets its
+	// OWN rate bucket, independent of the interactive ceiling above, so a
+	// burst of task executions counts against THIS budget and can never
+	// consume the interactive budget that protects live chat + voice. A
+	// touch more generous than interactive since background work is the
+	// fan-out path (memql#899) and nobody is waiting on its first token.
+	defaultBgRateMaxCalls      = 40
+	defaultBgRateWindowSeconds = 10
 )
 
 // llmGuard is the process-global circuit breaker shared by every
@@ -93,6 +134,19 @@ type llmGuard struct {
 	// sustained runaway doesn't drown the logs while still being loud.
 	lastRateAlert time.Time
 
+	// Background-lane rate ceiling (memql#897). A SEPARATE bucket from the
+	// interactive one above, selected per-call by a context flag the
+	// background executor stamps (see ContextWithBackgroundLane). Keeping
+	// the two buckets independent is the isolation that matters: a burst of
+	// planner-dispatched task executions fills bgRateHits and can trip the
+	// background ceiling without ever touching rateHits, so live chat +
+	// voice never get a synthetic 429 because batch work was busy.
+	bgRateEnabled   bool
+	bgRateMax       int
+	bgRateWindow    time.Duration
+	bgRateHits      []time.Time
+	bgLastRateAlert time.Time
+
 	// now is injectable for tests; defaults to time.Now.
 	now func() time.Time
 
@@ -122,6 +176,10 @@ func newLLMGuardFromEnv() *llmGuard {
 		rateMax:     envIntDefault("MEMQL_LLM_MAX_CALLS_PER_WINDOW", defaultRateMaxCalls),
 		rateWindow:  time.Duration(envIntDefault("MEMQL_LLM_RATE_WINDOW_SECONDS", defaultRateWindowSeconds)) * time.Second,
 
+		bgRateEnabled: envBoolDefault("MEMQL_LLM_BG_RATE_GUARD_ENABLED", true),
+		bgRateMax:     envIntDefault("MEMQL_LLM_BG_MAX_CALLS_PER_WINDOW", defaultBgRateMaxCalls),
+		bgRateWindow:  time.Duration(envIntDefault("MEMQL_LLM_BG_RATE_WINDOW_SECONDS", defaultBgRateWindowSeconds)) * time.Second,
+
 		hits:    map[string][]time.Time{},
 		tripped: map[string]time.Time{},
 		now:     time.Now,
@@ -138,6 +196,12 @@ func newLLMGuardFromEnv() *llmGuard {
 	}
 	if g.rateWindow <= 0 {
 		g.rateWindow = defaultRateWindowSeconds * time.Second
+	}
+	if g.bgRateMax < 1 {
+		g.bgRateMax = defaultBgRateMaxCalls
+	}
+	if g.bgRateWindow <= 0 {
+		g.bgRateWindow = defaultBgRateWindowSeconds * time.Second
 	}
 	return g
 }
@@ -203,38 +267,61 @@ func (g *llmGuard) admit(fingerprint string) (open bool, repeatCount int) {
 // request body and only catches byte-identical loops; admitRate counts
 // ALL guarded calls regardless of content, which is the only thing that
 // stops a loop that varies its request body.
-func (g *llmGuard) admitRate() (open bool, count int) {
-	if g == nil || !g.rateEnabled {
+//
+// background selects which lane's bucket the call counts against
+// (memql#897). The interactive and background buckets are fully
+// independent -- distinct windows, distinct ceilings, distinct alert
+// throttles -- so saturating one cannot trip the other. The background
+// executor stamps the lane on the request context; everything else
+// (chat, voice, suggest) counts against the interactive bucket.
+func (g *llmGuard) admitRate(background bool) (open bool, count int) {
+	if g == nil {
 		return false, 0
 	}
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
 
-	cutoff := now.Add(-g.rateWindow)
-	kept := g.rateHits[:0]
-	for _, t := range g.rateHits {
+	// Select the lane's bucket. Pointers so the single window-prune +
+	// record body works against either bucket without duplication.
+	enabled, max, window := g.rateEnabled, g.rateMax, g.rateWindow
+	hits, lastAlert := &g.rateHits, &g.lastRateAlert
+	lane := "interactive"
+	if background {
+		enabled, max, window = g.bgRateEnabled, g.bgRateMax, g.bgRateWindow
+		hits, lastAlert = &g.bgRateHits, &g.bgLastRateAlert
+		lane = "background"
+	}
+	if !enabled {
+		return false, 0
+	}
+
+	cutoff := now.Add(-window)
+	kept := (*hits)[:0]
+	for _, t := range *hits {
 		if t.After(cutoff) {
 			kept = append(kept, t)
 		}
 	}
-	g.rateHits = kept
+	*hits = kept
 
-	if len(kept) >= g.rateMax {
+	if len(kept) >= max {
 		// Throttle the alert to once per window so a sustained runaway
 		// stays loud without flooding the logs.
-		if g.lastRateAlert.IsZero() || now.Sub(g.lastRateAlert) >= g.rateWindow {
-			g.lastRateAlert = now
-			g.log().Error("LLM rate ceiling TRIPPED: process-wide call rate exceeded; blocking to prevent a runaway spend loop",
+		if lastAlert.IsZero() || now.Sub(*lastAlert) >= window {
+			*lastAlert = now
+			g.log().Error("LLM rate ceiling TRIPPED: per-lane call rate exceeded; blocking to prevent a runaway spend loop",
+				"lane", lane,
 				"calls_in_window", len(kept),
-				"max_calls", g.rateMax,
-				"window", g.rateWindow.String(),
+				"max_calls", max,
+				"window", window.String(),
 			)
 		}
 		return true, len(kept)
 	}
-	g.rateHits = append(g.rateHits, now)
-	return false, len(g.rateHits)
+	*hits = append(*hits, now)
+	return false, len(*hits)
 }
 
 // fingerprintRequest derives the loop-breaker key from a request:
@@ -310,10 +397,14 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if open, repeats := g.admit(fp); open {
 			return loopBreakerResponse(req, repeats), nil
 		}
-		// Then the global, content-independent rate ceiling -- the
-		// backstop that catches loops varying their request body.
-		// admitRate() self-gates on g.rateEnabled.
-		if open, calls := g.admitRate(); open {
+		// Then the per-lane, content-independent rate ceiling -- the
+		// backstop that catches loops varying their request body. The lane
+		// is read off the request context (memql#897): background-executor
+		// calls count against the background bucket, everything else against
+		// the interactive bucket. admitRate self-gates on the lane's enable
+		// flag.
+		background := backgroundLaneFromContext(req.Context())
+		if open, calls := g.admitRate(background); open {
 			return rateCeilingResponse(req, calls), nil
 		}
 	}

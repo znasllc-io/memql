@@ -85,6 +85,13 @@ const ExecutionLaneHintKey = "execution_lane"
 // turn onto the non-streaming background executor.
 const ExecutionLaneBackground = "background"
 
+// backgroundExecutionPolicy is the SI Router policy the background lane
+// resolves against (memql#897). It gives batch/plan execution its own
+// provider chain, tuned independently of the interactive chat policies, so
+// background model selection (and, per memql#898, its model tier) can
+// change without touching live chat. Defined in dsl/policies/policies.memql.
+const backgroundExecutionPolicy = "backgroundExecution"
+
 // IsBackgroundLane reports whether a turn's hints select the background
 // (non-streaming) execution lane.
 func IsBackgroundLane(hints map[string]string) bool {
