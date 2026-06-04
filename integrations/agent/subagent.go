@@ -118,6 +118,47 @@ func IsResume(hints map[string]string) bool {
 	return strings.EqualFold(strings.TrimSpace(hints[ResumeHintKey]), "true")
 }
 
+// DeliverableSurfaceHintKey marks a turn whose deliverable must land on a
+// specific surface. produceArtifact sets it to DeliverableSurfaceWorkbench so
+// the executor delivers ONLY by writing the file to its workbench (promoted to
+// the Library) -- the file body must never be dumped onto the canvas as a
+// content card. The canvas is for events/notifications; a produceArtifact plan
+// gets its short "ready in your Library" card from the carrier automation, not
+// from the agent. (memql#950)
+const DeliverableSurfaceHintKey = "deliverable_surface"
+
+// DeliverableSurfaceWorkbench is the DeliverableSurfaceHintKey value that
+// restricts a turn's deliverable surface to the workbench/Library and scopes
+// canvas-publishing OUT of the turn's tool set.
+const DeliverableSurfaceWorkbench = "workbench"
+
+// canvasContentToolSlugs are the tools that render free-form CONTENT onto the
+// canvas. They are scoped out when DeliverableSurfaceHintKey=workbench so a
+// file deliverable's body can't leak onto the canvas (memql#950).
+var canvasContentToolSlugs = map[string]bool{
+	"canvasPublish": true,
+}
+
+// ScopeToolsForDeliverableSurface drops canvas content-publishing tools when
+// the turn's deliverable is workbench-only. No-op for any other surface, so
+// ordinary turns keep canvasPublish. (memql#950)
+func ScopeToolsForDeliverableSurface(hints map[string]string, toolNames []string) []string {
+	if hints == nil {
+		return toolNames
+	}
+	if !strings.EqualFold(strings.TrimSpace(hints[DeliverableSurfaceHintKey]), DeliverableSurfaceWorkbench) {
+		return toolNames
+	}
+	out := toolNames[:0:0]
+	for _, name := range toolNames {
+		if canvasContentToolSlugs[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
 // IsBackgroundLane reports whether a turn's hints select the background
 // (non-streaming) execution lane.
 func IsBackgroundLane(hints map[string]string) bool {
