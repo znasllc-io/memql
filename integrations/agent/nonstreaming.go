@@ -104,6 +104,22 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 		return nil, err
 	}
 
+	// Resume from a saved checkpoint (memql#907). When the planner re-admits
+	// a previously-passed task (its slot freed and now available again), it
+	// re-dispatches with the resume hint set. The executor loads the
+	// taskState that #906 persisted at the pause and injects a "here's what
+	// you already did -- continue, don't redo it" block, so the agent picks
+	// up the thread instead of starting the deliverable over. Best-effort:
+	// no saved state (or a lookup miss) just runs a fresh turn. The slot
+	// re-admission itself is Session B's (#902 controller + queue).
+	if IsResume(msg.Hints) {
+		if block, ok := r.loadResumeContext(ctx, prep.turnCtx.PlanId); ok {
+			prep.messages = injectResumeContext(prep.messages, block)
+			r.logger.Info("agent background: resuming from persisted taskState",
+				"plan_id", prep.turnCtx.PlanId, "requestId", msg.RequestId)
+		}
+	}
+
 	// Isolate the lane's provider selection (memql#897). prepareTurn set
 	// PolicyName from the agent's INTERACTIVE preferences (its stored policy
 	// or the role default). Background work runs on its own policy so the
