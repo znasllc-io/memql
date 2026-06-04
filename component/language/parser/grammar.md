@@ -306,10 +306,10 @@ Precedence, tight to loose:
 2. Postfix member access: `.field`, `.method()`
 3. Unary: `!`, `-` (lead), `?.` (deprecated)
 4. Multiplicative: none today (no `*` / `/` at expression level;
-   numeric work happens in runtime via `add`, `sub`, `lt`, `gt`)
+   numeric work happens in runtime via `add`, `sub`)
 5. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `has`, `not in`
-6. Logical AND: `&&` or comma-less sequence via `and(...)`
-7. Logical OR: comma (inside expression groups) or `or(...)`
+6. Logical AND: `&&`
+7. Logical OR: comma (inside expression groups)
 8. Null coalesce: `??` -- deprecated
 9. Ternary: `? :`
 
@@ -381,8 +381,6 @@ FunctionCallExpr-shaped step configs.
 | `hash("text")` | scalar | SHA-256 hex digest. |
 | `first(collection)` / `last(collection)` | scalar | Pick edge element. |
 | `lower` / `upper` / `trim` | scalar | String helpers. |
-| `and(...)` / `or(...)` / `not(...)` | boolean | Legacy logic builtins. |
-| `eq`, `lt`, `gt`, `lte`, `gte` | boolean | Legacy comparison builtins. |
 
 ---
 

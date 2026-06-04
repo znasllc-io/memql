@@ -4428,22 +4428,6 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 		// so the case label MUST be lowercase too. The DSL still spells the call
 		// `canonicalId(...)` in source -- this just normalises the lookup.
 		return p.parseCanonicalIdFunction()
-	case "and":
-		return p.parseAndFunction()
-	case "or":
-		return p.parseOrFunction()
-	case "not":
-		return p.parseNotFunction()
-	case "eq":
-		return p.parseEqFunction()
-	case "lt":
-		return p.parseLtFunction()
-	case "gt":
-		return p.parseGtFunction()
-	case "lte":
-		return p.parseLteFunction()
-	case "gte":
-		return p.parseGteFunction()
 	case "tostring":
 		return p.parseToStringFunction()
 	case "addduration":
@@ -5710,48 +5694,6 @@ func (p *Parser) parseCanonicalIdFunction() (ExpressionNode, error) {
 	return &CanonicalIdExpr{Value: value, Concept: concept}, nil
 }
 
-// parseAndFunction parses and(a, b, ...) - all truthy.
-func (p *Parser) parseAndFunction() (ExpressionNode, error) {
-	args, err := p.parseExpressionArgList()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &AndExpr{Args: args}, nil
-}
-
-// parseOrFunction parses or(a, b, ...) - any truthy.
-func (p *Parser) parseOrFunction() (ExpressionNode, error) {
-	args, err := p.parseExpressionArgList()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &OrExpr{Args: args}, nil
-}
-
-// parseNotFunction parses not(expr) - boolean negation.
-func (p *Parser) parseNotFunction() (ExpressionNode, error) {
-	target, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &NotExpr{Target: target}, nil
-}
-
 // parseCaseFunction parses case(condition, value) - for match() branches.
 func (p *Parser) parseCaseFunction() (ExpressionNode, error) {
 	cond, err := p.parseExpressionArg()
@@ -5782,126 +5724,6 @@ func (p *Parser) parseDefaultFunction() (ExpressionNode, error) {
 		return nil, err
 	}
 	return &FunctionCallExpr{Name: "default", Args: map[string]any{"0": val}}, nil
-}
-
-// parseEqFunction parses eq(a, b) - equality check.
-func (p *Parser) parseEqFunction() (ExpressionNode, error) {
-	left, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "eq() requires two arguments")
-	}
-	p.advance()
-
-	right, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &EqExpr{Left: left, Right: right}, nil
-}
-
-// parseLtFunction parses lt(a, b) - less than.
-func (p *Parser) parseLtFunction() (ExpressionNode, error) {
-	left, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "lt() requires two arguments")
-	}
-	p.advance()
-
-	right, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &LtExpr{Left: left, Right: right}, nil
-}
-
-// parseGtFunction parses gt(a, b) - greater than.
-func (p *Parser) parseGtFunction() (ExpressionNode, error) {
-	left, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "gt() requires two arguments")
-	}
-	p.advance()
-
-	right, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &GtExpr{Left: left, Right: right}, nil
-}
-
-// parseLteFunction parses lte(a, b) - less than or equal.
-func (p *Parser) parseLteFunction() (ExpressionNode, error) {
-	left, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "lte() requires two arguments")
-	}
-	p.advance()
-
-	right, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &LteExpr{Left: left, Right: right}, nil
-}
-
-// parseGteFunction parses gte(a, b) - greater than or equal.
-func (p *Parser) parseGteFunction() (ExpressionNode, error) {
-	left, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if !p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "gte() requires two arguments")
-	}
-	p.advance()
-
-	right, err := p.parseExpressionArg()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &GteExpr{Left: left, Right: right}, nil
 }
 
 // parseToStringFunction parses toString(expr) - string conversion.
