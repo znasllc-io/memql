@@ -33,6 +33,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/node"
@@ -101,6 +103,13 @@ type PlannerIntegration struct {
 	engine         Engine
 	eventBus       *events.Bus
 	agentForwarder AgentForwarder
+	// dbGetter is the lazy *bun.DB accessor used by the admission
+	// controller for per-account advisory locks + running-Plan counts
+	// (epic memql#902 / #904). Optional: when nil, admission fails open
+	// (no concurrency cap is enforced).
+	dbGetter       func() *bun.DB
+	entitlements   *EntitlementResolver
+	admission      *AdmissionController
 	agentLoop      *PlannerAgentLoop
 	trainDispatch  *TrainSpecialistDispatcher
 	embedDispatch  *EmbedDomainItemsDispatcher
@@ -138,6 +147,15 @@ func WithLogger(logger *slog.Logger) PlannerArg {
 	return func(p *PlannerIntegration) { p.logger = logger }
 }
 
+// WithDBGetter wires the lazy *bun.DB accessor the admission controller
+// (epic memql#902 / #904) uses for per-account advisory locks + running-Plan
+// counts. Pass a.db.BunDB from app wiring. Optional -- omitting it leaves the
+// concurrency gate failing open (no cap enforced), matching the
+// default-unlimited contract.
+func WithDBGetter(getter func() *bun.DB) PlannerArg {
+	return func(p *PlannerIntegration) { p.dbGetter = getter }
+}
+
 // NewPlannerIntegration constructs a PlannerIntegration. Engine and
 // eventBus are required; the agent forwarder is installed
 // separately via SetAgentForwarder once cluster wiring resolves.
@@ -159,6 +177,12 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	if p.logger == nil {
 		p.logger = slog.Default().With("component", ComponentName)
 	}
+	// Admission control (epic memql#902): the resolver reads the per-account
+	// cap (#903), the controller enforces it race-free (#904). Both are always
+	// built; the controller fails open when no dbGetter was wired, so an
+	// unconfigured cap is a true no-op.
+	p.entitlements = NewEntitlementResolver(p.engine, p.logger)
+	p.admission = NewAdmissionController(p.dbGetter, p.logger)
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
 	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
