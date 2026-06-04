@@ -496,6 +496,13 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 	case "escalate":
 		return l.escalateAwaitingFeedback(ctx, planId, d.FeedbackReason, d.Question)
 	case "createSpecialist", "extendSpecialist":
+		// Gate specialist creation (memql#842): a one-off deliverable
+		// (produceArtifact / adHocAction) must complete with an EXISTING
+		// agent -- never auto-create a specialist. When gated + unapproved
+		// we park for approval instead of running the (expensive) factory.
+		if handled, err := l.gateSpecialistAction(ctx, planId, d.Action); err != nil || handled {
+			return err
+		}
 		// The plannerAgent prompt distinguishes createSpecialist from
 		// extendSpecialist (the latter prefers Q10's layered dedupe),
 		// but both resolve to the same handler from our perspective:
@@ -510,11 +517,26 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// approval card and park the Plan with
 		// feedbackReason='mint_skill_approval_required'.
 		return l.handleMintSkill(ctx, planId, d)
-	case "spawnTrainingPlan", "retry":
-		// Still parked. spawnTrainingPlan minted a kind=trainSpecialist
-		// child Plan; the Trainer Agent picks that up via its own loop
-		// once it ships. retry handling needs the failure-context
-		// surface that the agent worker emits, which isn't wired yet.
+	case "spawnTrainingPlan":
+		// Gate training (memql#842): training is expensive (Opus trainer
+		// turn + web fetches + embeddings) and is NEVER run automatically
+		// -- it requires explicit user approval. Park for approval with
+		// the dedicated specialist_approval_required reason so the user
+		// sees a "create + train this capability?" card rather than a
+		// generic "not supported" escalation.
+		if handled, err := l.gateSpecialistAction(ctx, planId, d.Action); err != nil || handled {
+			return err
+		}
+		// Approved (metrics.specialistApproved / tokenCapDisabled) but the
+		// trainer pickup loop isn't wired end-to-end yet, so still park
+		// with a clear message rather than silently dropping the request.
+		l.logger.Info("planner agent loop: spawnTrainingPlan approved but trainer pickup not wired; escalating",
+			"planId", planId)
+		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
+			"Training was approved, but the trainer pickup loop isn't wired end-to-end yet. Manual intervention required.")
+	case "retry":
+		// retry handling needs the failure-context surface that the agent
+		// worker emits, which isn't wired yet.
 		l.logger.Info("planner agent loop: decision deferred; escalating",
 			"planId", planId, "action", d.Action)
 		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
