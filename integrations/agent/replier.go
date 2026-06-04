@@ -203,6 +203,21 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// the Plan lands as failed even though the user clicked Allow.
 	r.fillActingAgentIfEmpty(ctx, msg, turnStart)
 
+	// Mirror the (now self-resolved) acting-agent role + id onto ctx so
+	// the engine's universal agent-only gate in ExecuteTool admits this
+	// turn's tools. fillActingAgentIfEmpty above restored msg.ActingAgent
+	// for PROMPT rendering, but the ctx acting-agent role was decided
+	// once already -- in agent_turn_handlers.go at dispatch time, reading
+	// the INCOMING msg.ActingAgent. On a planner-driven produceArtifact /
+	// post-approval turn that field arrives nil (the planner can't load
+	// v1:agents:agent -- not in its @visibility list), so NO role landed
+	// on ctx. Without this re-stamp the LLM sees the tools in its prompt,
+	// calls workbenchHost / canvasPublish, and every call is hard-rejected
+	// with "tools are agent-only -- no acting agent on context" -- the
+	// deliverable is never written and the agent falls back to apologising
+	// in prose. (memql#938)
+	ctx = stampActingAgentRoleIfMissing(ctx, msg)
+
 	data := buildPromptData(msg)
 
 	// Expand capability slugs + stamp operatorEnabled BEFORE rendering
@@ -1014,6 +1029,47 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 		"domains_count", len(acting.Domains),
 		"elapsed_from_turn_ms", time.Since(turnStart).Milliseconds(),
 	)
+}
+
+// stampActingAgentRoleIfMissing re-derives ctx to carry the acting
+// agent's guardrail role (and id) from msg.ActingAgent when ctx does
+// not already carry a role.
+//
+// The cognition chat path pre-fills msg.ActingAgent on the wire, so
+// agent_turn_handlers.go stamps the role onto ctx at dispatch time and
+// this is a no-op. The planner-driven path (produceArtifact #788 /
+// post-approval execution) is the case this exists for: the planner
+// forwards the turn with a nil ActingAgent (v1:agents:agent is not in
+// the planner's @visibility list), so dispatch stamped no role.
+// fillActingAgentIfEmpty has since self-resolved the agent on THIS node
+// for prompt rendering; mirror that role/id onto ctx so the engine's
+// universal agent-only gate in ExecuteTool
+// (component/memql/tool_execution.go) admits the agent's tools.
+//
+// The resolved role is the same v1:agents:agent.role value cognition
+// would have forwarded, so Tool.IsAllowedForRole behaves identically to
+// the normal chat path. Conservative: only stamps when ctx has no role,
+// so it never clobbers a role already set upstream. (memql#938)
+func stampActingAgentRoleIfMissing(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) context.Context {
+	if msg == nil {
+		return ctx
+	}
+	acting := msg.GetActingAgent()
+	if acting == nil {
+		return ctx
+	}
+	if memql.ActingAgentRoleFromContext(ctx) != "" {
+		return ctx
+	}
+	role := strings.TrimSpace(acting.GetRole())
+	if role == "" {
+		return ctx
+	}
+	ctx = memql.WithActingAgentRole(ctx, role)
+	if id := strings.TrimSpace(acting.GetId()); id != "" {
+		ctx = memql.WithActingAgentId(ctx, id)
+	}
+	return ctx
 }
 
 // agentRowFromExecuteResult unpacks queryAgentById's shape() result.
