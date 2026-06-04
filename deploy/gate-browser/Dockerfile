@@ -8,7 +8,7 @@
 #   docker build -t acrmemql.azurecr.io/deploy-gate-browser:<tag> .
 #   # or: az acr build --registry acrmemql --image deploy-gate-browser:<tag> \
 #   #        deploy/gate-browser
-FROM mcr.microsoft.com/playwright:v1.48.2-jammy@sha256:96dc479be9a603227fafc7126bd7d5e8152ae3e63749f377b2c49a4314b28ae1
+FROM mcr.microsoft.com/playwright:v1.55.1-jammy@sha256:a012a91c32e36b3300514684c5bdb60c07f01464abd03380320179e5273427ab
 WORKDIR /gate
 # npm ci installs the exact, integrity-pinned dependency tree from the
 # committed package-lock.json (Scorecard PinnedDependencies); it fails if
