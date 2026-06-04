@@ -16,7 +16,7 @@ query approvalRequest queryActiveApprovalsByCorrelationKey {
   args {
     correlationKey string @required
   }
-  filter  payload.correlationKey==args.correlationKey; payload.status!="denied"; payload.status!="expired"
+  filter  payload.correlationKey==args.correlationKey && payload.status!="denied" && payload.status!="expired"
   shape   approvalRequestFull
 }
 

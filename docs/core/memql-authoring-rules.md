@@ -927,7 +927,7 @@ query queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId == args.ownerId; specIsActiveRecord
+  filter  payload.ownerId == args.ownerId && specIsActiveRecord
   shape   spaceFull
 }
 

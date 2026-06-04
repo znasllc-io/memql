@@ -22,14 +22,14 @@ query guide queryGuideBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug; traitIsActiveRecord
+  filter  payload.slug==args.slug && traitIsActiveRecord
   shape   guideFull
 }
 
 @enabled
 @description("List every active Guide owned by the authenticated caller, across spaces. Self-scoped via actor.userId (no args) -- a caller cannot list another user's Guides. Backs the replay picker (copresent#196 -- 'run one of your saved Guides') and first-run detection.")
 query guide queryGuidesForUser {
-  filter  payload.ownerUserId==actor.userId; traitIsActiveRecord
+  filter  payload.ownerUserId==actor.userId && traitIsActiveRecord
   shape   guideFull
 }
 
@@ -39,7 +39,7 @@ query guide queryGuidesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && traitIsActiveRecord
   shape   guideFull
 }
 

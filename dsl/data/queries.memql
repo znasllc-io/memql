@@ -13,7 +13,7 @@ query record queryDetectConflicts {
     naturalKeyValue  string  @required
     recordType  string  @required
   }
-  filter  traitIsConfirmed; payload.spaceId==args.spaceId; payload.recordType==args.recordType; payload.naturalKeyValue==args.naturalKeyValue
+  filter  traitIsConfirmed && payload.spaceId==args.spaceId && payload.recordType==args.recordType && payload.naturalKeyValue==args.naturalKeyValue
   shape   recordFull
 }
 
@@ -45,7 +45,7 @@ query policy queryPolicy {
     targetRecordType  string  @required
     spaceId  string
   }
-  filter  traitIsActiveRecord; payload.targetRecordType==args.targetRecordType; ?.payload.spaceId==args.spaceId
+  filter  traitIsActiveRecord && payload.targetRecordType==args.targetRecordType && when(args.spaceId) { payload.spaceId==args.spaceId }
   shape   policyFull
 }
 
@@ -82,7 +82,7 @@ query record queryRecordsByState {
     validationState  string
     importSource  string
   }
-  filter  traitIsActiveRecord; ?.payload.spaceId==args.spaceId; ?.payload.recordType==args.recordType; ?.payload.validationState==args.validationState; ?.payload.importSource==args.importSource
+  filter  traitIsActiveRecord && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType } && when(args.validationState) { payload.validationState==args.validationState } && when(args.importSource) { payload.importSource==args.importSource }
   shape   recordFull
 }
 
@@ -124,7 +124,7 @@ query record queryUsableRecords {
     spaceId  string
     recordType  string
   }
-  filter  traitIsUsable; ?.payload.spaceId==args.spaceId; ?.payload.recordType==args.recordType
+  filter  traitIsUsable && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.recordType) { payload.recordType==args.recordType }
   shape   recordFull
 }
 
@@ -158,6 +158,6 @@ query log queryValidationLog {
     spaceId  string
     action  string
   }
-  filter  traitIsActiveRecord; ?.payload.recordId==args.recordId; ?.payload.spaceId==args.spaceId; ?.payload.action==args.action
+  filter  traitIsActiveRecord && when(args.recordId) { payload.recordId==args.recordId } && when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.action) { payload.action==args.action }
   shape   logFull
 }

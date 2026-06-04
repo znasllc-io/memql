@@ -19,7 +19,7 @@ query note queryNoteById {
   args {
     noteId  string  @required
   }
-  filter  ?.id==args.noteId; payload.ownerUserId==actor.userId
+  filter  when(args.noteId) { id==args.noteId } && payload.ownerUserId==actor.userId
   shape   noteFull
 }
 
@@ -29,6 +29,6 @@ query note queryNotesByTag {
   args {
     tag  string  @required
   }
-  filter  payload.ownerUserId==actor.userId; ?.payload.tags has args.tag
+  filter  payload.ownerUserId==actor.userId && when(args.tag) { args.tag in payload.tags }
   shape   noteFull
 }

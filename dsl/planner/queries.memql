@@ -43,7 +43,7 @@ query plan queryAllPlans {
 @enabled
 @description("Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.")
 query plan queryAwaitingFeedbackPlansPastTimeout {
-  filter  payload.status=="awaitingFeedback"; payload.feedbackRequest.timeoutAt < now()
+  filter  payload.status=="awaitingFeedback" && payload.feedbackRequest.timeoutAt < now()
   shape   planFull
 }
 
@@ -69,7 +69,7 @@ query plan queryAwaitingFeedbackPlansPastTimeout {
 @enabled
 @description("All queued trainAgentRetryStep Plans. The training poll loop filters by input.nextAttemptAt in Go.")
 query plan queryDueTrainAgentRetryPlans {
-  filter  payload.kind=="trainAgentRetryStep"; payload.status=="queued"
+  filter  payload.kind=="trainAgentRetryStep" && payload.status=="queued"
   shape   planFull
 }
 
@@ -93,7 +93,7 @@ query plan queryHistoricalPlanMetrics {
   args {
     planKind  string  @required
   }
-  filter  payload.kind==args.planKind; payload.status=="succeeded"
+  filter  payload.kind==args.planKind && payload.status=="succeeded"
   shape   planFull
 }
 
@@ -169,7 +169,7 @@ query plan queryPlansForSpace {
 @enabled
 @description("All currently-running trainAgent Plans across the tenant. Backs the Training Studio's per-agent in-flight lock; frontend filters by plan.input.agentId.")
 query plan queryRunningTrainAgentPlans {
-  filter  payload.kind=="trainAgent"; traitStatusIsRunning
+  filter  payload.kind=="trainAgent" && traitStatusIsRunning
   shape   planFull
 }
 
@@ -186,14 +186,14 @@ query plan queryRunningTrainAgentPlans {
 @enabled
 @description("The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.")
 query plan queryActivePlansForUser {
-  filter  payload.requestedBy==actor.userId; traitStatusIsRunning
+  filter  payload.requestedBy==actor.userId && traitStatusIsRunning
   shape   planFull
 }
 
 @enabled
 @description("The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.")
 query plan queryWaitingPlansForUser {
-  filter  payload.requestedBy==actor.userId; payload.status=="waitingForSlot"
+  filter  payload.requestedBy==actor.userId && payload.status=="waitingForSlot"
   shape   planFull
 }
 
@@ -267,7 +267,7 @@ query responsibility queryResponsibilitiesForUser {
 @enabled
 @description("The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.")
 query responsibility queryActiveResponsibilities {
-  filter  payload.ownerUserId==actor.userId; traitStatusIsActive; payload.enabled==true
+  filter  payload.ownerUserId==actor.userId && traitStatusIsActive && payload.enabled==true
   shape   responsibilityFull
 }
 
@@ -298,7 +298,7 @@ query responsibility queryDueResponsibilities {
   args {
     trigger  string  @required  @enum("reactive", "recurring")
   }
-  filter  payload.ownerUserId==actor.userId; traitStatusIsActive; payload.enabled==true; payload.trigger==args.trigger
+  filter  payload.ownerUserId==actor.userId && traitStatusIsActive && payload.enabled==true && payload.trigger==args.trigger
   shape   responsibilityFull
 }
 
@@ -328,7 +328,7 @@ query responsibility queryDueResponsibilities {
 @enabled
 @description("Every active + enabled responsibility in the partition, regardless of owner -- the cross-user sweep the reactive-loop heartbeat (epic #632) walks each tick. Cron-sweep-helper shape (no owner filter; classifies as 'other' like queryAllArchivedSpacesAcrossUsers). The planner poller reads this under the system actor, then impersonates each row's ownerUserId for the owned-tier per-user writes.")
 query responsibility queryActiveResponsibilitiesAcrossUsers {
-  filter  traitStatusIsActive; payload.enabled==true
+  filter  traitStatusIsActive && payload.enabled==true
   shape   responsibilityFull
 }
 

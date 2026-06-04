@@ -11,6 +11,6 @@ query budget queryRouterBudgets {
   args {
     scope  string
   }
-  filter  ?.payload.scope==args.scope; traitIsActiveRecord
+  filter  when(args.scope) { payload.scope==args.scope } && traitIsActiveRecord
   shape   budgetFull
 }

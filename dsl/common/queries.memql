@@ -25,7 +25,7 @@ query attachment queryAttachmentById {
     attachmentId  string  @required
     spaceId       string  @required
   }
-  filter  ?.id==args.attachmentId; payload.spaceId==args.spaceId
+  filter  when(args.attachmentId) { id==args.attachmentId } && payload.spaceId==args.spaceId
   shape   attachmentDownload
 }
 
@@ -53,6 +53,6 @@ query media querySpaceMedia {
     spaceId    string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
     mediaType  string
   }
-  filter  payload.spaceId==args.spaceId; ?.payload.mediaType==args.mediaType
+  filter  payload.spaceId==args.spaceId && when(args.mediaType) { payload.mediaType==args.mediaType }
   shape   mediaFull
 }

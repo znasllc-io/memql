@@ -15,7 +15,7 @@ query agent queryActiveAgents {
   args {
     groupId  string
   }
-  filter  traitIsActiveRecord; traitIsNotDeleted; ?.payload.groupIds has args.groupId
+  filter  traitIsActiveRecord && traitIsNotDeleted && when(args.groupId) { args.groupId in payload.groupIds }
   shape   agentFull
 }
 
@@ -33,7 +33,7 @@ query agentAuthorization queryAgentAuthorizationsForUser {
   args {
     userId  string  @required
   }
-  filter  payload.userId==args.userId; traitIsActiveRecord
+  filter  payload.userId==args.userId && traitIsActiveRecord
   shape   agentAuthorizationFull
 }
 
@@ -83,7 +83,7 @@ query agent queryAgentOwner {
 @enabled
 @description("Returns the roleSlug values currently occupied by non-deleted agents in this partition. Used by the create-agent UI to filter out already-taken roles.")
 query agent queryAgentRoleSlugsInUse {
-  filter  traitIsActiveRecord; traitIsNotDeleted
+  filter  traitIsActiveRecord && traitIsNotDeleted
   shape   agentRoleSlugLite
 }
 
@@ -116,7 +116,7 @@ query agent queryActiveAgentsForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId; traitIsActiveRecord; traitIsNotDeleted
+  filter  payload.ownerUserId==args.ownerUserId && traitIsActiveRecord && traitIsNotDeleted
   shape   agentMinimalForDedupe
 }
 
@@ -135,7 +135,7 @@ query agent queryAssistantAgentForUser {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId; payload.roleSlug=="assistant"; traitIsActiveRecord; traitIsNotDeleted
+  filter  payload.ownerUserId==args.ownerUserId && payload.roleSlug=="assistant" && traitIsActiveRecord && traitIsNotDeleted
   shape   agentMinimalForDedupe
 }
 
@@ -145,7 +145,7 @@ query agentRole queryAgentRoleBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug; traitIsActiveRecord
+  filter  payload.slug==args.slug && traitIsActiveRecord
   shape   agentRoleFull
 }
 
@@ -162,7 +162,7 @@ query skill querySkillBySlug {
   args {
     slug  string  @required
   }
-  filter  payload.slug==args.slug; traitIsActiveRecord
+  filter  payload.slug==args.slug && traitIsActiveRecord
   shape   skillFull
 }
 
@@ -186,7 +186,7 @@ query skill querySkillNeedsRefresh {
   args {
     staleDomainId  string  @required
   }
-  filter  traitIsActiveRecord; ?.payload.domainIds has args.staleDomainId
+  filter  traitIsActiveRecord && when(args.staleDomainId) { args.staleDomainId in payload.domainIds }
   shape   skillSummary
 }
 

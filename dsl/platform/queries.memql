@@ -63,7 +63,7 @@ query globalVariable queryGlobalVariable {
   args {
     name  string  @required
   }
-  filter  payload.name==args.name; traitIsActiveRecord
+  filter  payload.name==args.name && traitIsActiveRecord
   shape   variableFull
 }
 
@@ -95,7 +95,7 @@ query globalVariable queryGlobalVariables {
   args {
     names  array  @required
   }
-  filter  payload.name in args.names; traitIsActiveRecord
+  filter  payload.name in args.names && traitIsActiveRecord
   shape   variableFull
 }
 
@@ -142,7 +142,7 @@ query globalVariable queryGlobalVariables {
 @internal
 @description("Returns default configuration variables for user provisioning. Used by bootstrapUser automation.")
 query globalVariable queryUserDefaults {
-  filter  traitIsActiveRecord; payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
+  filter  traitIsActiveRecord && payload.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 @enabled
@@ -162,6 +162,6 @@ query missingCapability queryMissingCapabilityByKindAndName {
     kind        string  @required
     capability  string  @required
   }
-  filter  payload.kind==args.kind; payload.capability==args.capability
+  filter  payload.kind==args.kind && payload.capability==args.capability
   shape   missingCapabilityFull
 }

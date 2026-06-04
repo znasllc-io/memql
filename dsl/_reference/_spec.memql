@@ -109,7 +109,7 @@ trait traitStatusIsActive {
 //     -> ROW-SPEC. Compiles to a SQL WHERE fragment. Pushed down to the
 //        database. Composable in query filter clauses via:
 //
-//            filter <expr>; specName
+//            filter <expr> && specName
 //
 //   actor.*
 //     -> CONTEXT-SPEC. Evaluates in-process against the auth envelope.
@@ -202,7 +202,7 @@ spec specRichPredicate {
 //
 //         query participant queryActiveHumanParticipants {
 //           args { spaceId string @required }
-//           filter payload.spaceId == args.spaceId; specIsHumanParticipant
+//           filter payload.spaceId == args.spaceId && specIsHumanParticipant
 //           shape  participantFull
 //         }
 //

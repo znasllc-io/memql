@@ -11,7 +11,7 @@ query participant queryActiveHumanParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.participantType=="human"; traitStatusIsActive; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive && traitIsActiveRecord
   shape   participantFull
 }
 
@@ -21,7 +21,7 @@ query space queryActiveSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord; traitStatusIsActive; traitIsNotArchived; ?.createdBy==args.userId
+  filter  traitIsActiveRecord && traitStatusIsActive && traitIsNotArchived && when(args.userId) { createdBy==args.userId }
   shape   spaceFull
 }
 
@@ -95,7 +95,7 @@ query utterance queryAgentInteractionCount {
   args {
     agentId  string  @required
   }
-  filter  payload.source.agentId==args.agentId; payload.utteranceType in ["speech", "agentGreeting"]; traitIsActiveRecord
+  filter  payload.source.agentId==args.agentId && payload.utteranceType in ["speech", "agentGreeting"] && traitIsActiveRecord
   shape   utteranceFull
 }
 
@@ -120,7 +120,7 @@ query utterance queryAgentInteractionCount {
 @enabled
 @description("Returns every archived space in the partition, for the purge cron's per-row retention check.")
 query space queryAllArchivedSpacesAcrossUsers {
-  filter  traitIsActiveRecord; traitStatusIsArchived
+  filter  traitIsActiveRecord && traitStatusIsArchived
   shape   spaceFull
 }
 
@@ -155,7 +155,7 @@ query space queryArchivedSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord; traitStatusIsArchived; ?.createdBy==args.userId
+  filter  traitIsActiveRecord && traitStatusIsArchived && when(args.userId) { createdBy==args.userId }
   shape   spaceFull
 }
 
@@ -167,7 +167,7 @@ query space queryOwnedSpaceById {
   args {
     spaceId  string  @required
   }
-  filter  ?.id==args.spaceId; payload.ownerUserId==actor.userId; traitIsActiveRecord
+  filter  when(args.spaceId) { id==args.spaceId } && payload.ownerUserId==actor.userId && traitIsActiveRecord
   shape   spaceFull
 }
 
@@ -183,7 +183,7 @@ query audioOverride queryAudioOverridesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && traitIsActiveRecord
   shape   audioOverrideFull
 }
 
@@ -196,7 +196,7 @@ query greetSuppression queryActiveGreetSuppression {
     spaceId  string  @required
     now      string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); payload.expiresAt>args.now; traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && payload.expiresAt>args.now && traitIsActiveRecord
   shape   greetSuppressionFull
 }
 
@@ -227,7 +227,7 @@ query space queryExpiredArchivedSpaces {
   args {
     now  string  @required
   }
-  filter  traitIsActiveRecord; traitStatusIsArchived; payload.expiresAt<args.now
+  filter  traitIsActiveRecord && traitStatusIsArchived && payload.expiresAt<args.now
   shape   spaceFull
 }
 
@@ -260,7 +260,7 @@ query utterance queryGreetingUtterance {
     spaceId  string  @required
     agentId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.source.agentId==args.agentId; payload.source.kind in ["agentGreeting"]; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && payload.source.agentId==args.agentId && payload.source.kind in ["agentGreeting"] && traitIsActiveRecord
   shape   utteranceFull
 }
 
@@ -287,7 +287,7 @@ query participant queryGroupGAForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; traitStatusIsActive
+  filter  payload.spaceId==args.spaceId && payload.participantType=="si" && traitStatusIsActive
   shape   participantFull
 }
 
@@ -314,7 +314,7 @@ query utterance queryHasSIResponseForReply {
     replyToId  string  @required
     participantId  string  @required
   }
-  filter  payload.replyToId==args.replyToId; payload.participantId==args.participantId
+  filter  payload.replyToId==args.replyToId && payload.participantId==args.participantId
   shape   utteranceFull
 }
 
@@ -348,7 +348,7 @@ query participant queryParticipantByAgentSpace {
     spaceId  string  @required
     agentId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.agentId==args.agentId; payload.status!="left"; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && payload.agentId==args.agentId && payload.status!="left" && traitIsActiveRecord
   shape   participantFull
 }
 
@@ -395,7 +395,7 @@ query session queryParticipantSession {
     spaceId  string
     participantId  string
   }
-  filter  ?.payload.spaceId==args.spaceId; ?.payload.participantId==args.participantId
+  filter  when(args.spaceId) { payload.spaceId==args.spaceId } && when(args.participantId) { payload.participantId==args.participantId }
   shape   sessionFull
 }
 
@@ -429,7 +429,7 @@ query space querySavedSpaces {
   args {
     userId  string
   }
-  filter  traitIsActiveRecord; traitStatusIsSaved; ?.createdBy==args.userId
+  filter  traitIsActiveRecord && traitStatusIsSaved && when(args.userId) { createdBy==args.userId }
   shape   spaceFull
 }
 
@@ -454,7 +454,7 @@ query participant querySiParticipantForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; payload.participantType=="si"; traitStatusIsActive
+  filter  payload.spaceId==args.spaceId && payload.participantType=="si" && traitStatusIsActive
   shape   participantFull
 }
 
@@ -476,7 +476,7 @@ query context querySpaceContext {
   args {
     spaceId  string
   }
-  filter  ?.payload.spaceId==args.spaceId
+  filter  when(args.spaceId) { payload.spaceId==args.spaceId }
   shape   spaceContextFull
 }
 
@@ -519,7 +519,7 @@ query participant querySpaceParticipants {
     status           string
     participantType  string
   }
-  filter  payload.spaceId==args.spaceId; ?.payload.status==args.status; ?.payload.participantType==args.participantType
+  filter  payload.spaceId==args.spaceId && when(args.status) { payload.status==args.status } && when(args.participantType) { payload.participantType==args.participantType }
   shape   participantFull
 }
 
@@ -531,7 +531,7 @@ query utterance querySpaceUtterances {
     participantId    string
     utteranceType    string
   }
-  filter  payload.spaceId==args.spaceId; ?.payload.participantId==args.participantId; ?.payload.utteranceType==args.utteranceType
+  filter  payload.spaceId==args.spaceId && when(args.participantId) { payload.participantId==args.participantId } && when(args.utteranceType) { payload.utteranceType==args.utteranceType }
   shape   utteranceFull
 }
 
@@ -552,7 +552,7 @@ query micState queryUserMicStatesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  ?.payload.spaceId==args.spaceId
+  filter  when(args.spaceId) { payload.spaceId==args.spaceId }
   shape   micStateFull
 }
 
@@ -568,7 +568,7 @@ query videoOverride queryVideoOverridesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space"); traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && traitIsActiveRecord
   shape   videoOverrideFull
 }
 
@@ -600,7 +600,7 @@ query privateUtterance querySpacePrivateUtterancesForViewer {
   args {
     spaceId  string  @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
   }
-  filter  payload.spaceId==args.spaceId; payload.forUserId==actor.userId
+  filter  payload.spaceId==args.spaceId && payload.forUserId==actor.userId
   shape   privateUtteranceFull
 }
 

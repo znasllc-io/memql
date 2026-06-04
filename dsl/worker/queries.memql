@@ -68,7 +68,7 @@ query plan queryRunningPlansForUser {
   args {
     userId  string  @required
   }
-  filter  payload.requestedBy==args.userId; traitStatusIsRunning
+  filter  payload.requestedBy==args.userId && traitStatusIsRunning
   shape   planFull
 }
 
