@@ -16,7 +16,7 @@ logic logicReleaseWorkspaceOnPlanTerminal {
   body {
     status := coalesce(args.event.node.payload.status, "")
     planId := coalesce(args.event.node.id, "")
-    if (status == "succeeded" or status == "failed" or status == "cancelled") and planId != "" {
+    if (status == "succeeded" || status == "failed" || status == "cancelled") && planId != "" {
       workspaces := queryWorkspaceForPlan({ planId: planId })
       for item := range workspaces.Nodes() {
         flip := if item.payload.status == "provisioned" {
