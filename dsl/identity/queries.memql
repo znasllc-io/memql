@@ -3,7 +3,40 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, user, workerPairingCode }
+use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, user, workerPairingCode }
+
+// ---- queries/v1/identity/accountEntitlement.memql ----
+
+// queryAccountEntitlement - the account's task-concurrency cap
+// ============================================================
+//
+// Returns the v1:identity:accountEntitlement row for an account
+// (zero or one current row). Read by the admission controller (#904)
+// to resolve the per-account concurrent-running-task cap, and by the
+// Tasks UX (#909) for tier / upgrade messaging.
+//
+// Filters on accountId only -- a system / admin read (the planner
+// dispatch calls it under the system actor). It references no
+// caller-scope field (accountId is an arg, not actor.userId), so the
+// per-row-authz audit classifies it as 'other'. The default-unlimited
+// semantics (no row => uncapped) live in the Go resolver, not here.
+//
+// Arguments:
+//   accountId (string, required) - the paying account (v1: a
+//     v1:identity:user.id).
+//
+// Returns:
+//   Zero or one accountEntitlement row in accountEntitlementFull shape.
+
+@enabled
+@description("The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.")
+query accountEntitlement queryAccountEntitlement {
+  args {
+    accountId  string  @required
+  }
+  filter  payload.accountId==args.accountId
+  shape   accountEntitlementFull
+}
 
 // ---- queries/v1/identity/accessRequestById.memql ----
 
