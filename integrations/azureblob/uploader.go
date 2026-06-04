@@ -14,6 +14,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 )
 
 // maxDownloadBytes caps a single blob read so an oversized object can't
@@ -89,11 +90,52 @@ type Downloader interface {
 // fetches the bytes. Returns an error for a URL with no Azure object (the
 // local:// dev placeholder / legacy gs://) so the caller can 404 it.
 func (u *AzureBlobUploader) DownloadURL(ctx context.Context, blobURL string) ([]byte, error) {
-	container, objectName, ok := ParseBlobObject(blobURL)
+	container, objectName, ok := u.splitStoredURL(blobURL)
 	if !ok {
 		return nil, fmt.Errorf("not an azure blob URL (no downloadable object): %q", blobURL)
 	}
 	return u.Download(ctx, container, objectName)
+}
+
+// splitStoredURL turns a stored blob URL back into (container, object). It
+// first strips THIS client's service base URL, which works for BOTH the
+// production `https://<acct>.blob.core.windows.net/<container>/<object>` form
+// AND the Azurite `http://<host>:10000/<account>/<container>/<object>`
+// account-in-path form (the production-shaped ParseBlobObject can't parse the
+// latter -- wrong scheme + the account segment shifts container/object). Falls
+// back to ParseBlobObject for URLs minted by a different client/base.
+func (u *AzureBlobUploader) splitStoredURL(blobURL string) (string, string, bool) {
+	blobURL = strings.TrimSpace(blobURL)
+	if u != nil && u.client != nil {
+		base := strings.TrimSuffix(u.client.URL(), "/")
+		if base != "" && strings.HasPrefix(blobURL, base+"/") {
+			rest := strings.TrimPrefix(blobURL, base+"/")
+			if idx := strings.Index(rest, "/"); idx > 0 && idx < len(rest)-1 {
+				return rest[:idx], rest[idx+1:], true
+			}
+		}
+	}
+	return ParseBlobObject(blobURL)
+}
+
+// EnsureContainer creates the container if it does not already exist. Used on
+// the local-dev path (Azurite, MEMQL_AZURE_BLOB_AUTOCREATE=1) where -- unlike a
+// provisioned cloud account -- the container isn't created out of band. Idempotent:
+// an "already exists" response is success. Best-effort for the caller; a failure
+// is logged, not fatal, and the upload path falls back to inline/pointer rows.
+func (u *AzureBlobUploader) EnsureContainer(ctx context.Context, container string) error {
+	if u == nil || u.client == nil {
+		return fmt.Errorf("azure blob uploader not initialized")
+	}
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return fmt.Errorf("azure blob container name is required")
+	}
+	if _, err := u.client.CreateContainer(ctx, container, nil); err != nil &&
+		!bloberror.HasCode(err, bloberror.ContainerAlreadyExists) {
+		return fmt.Errorf("ensure azure blob container %q: %w", container, err)
+	}
+	return nil
 }
 
 // Download fetches the blob's bytes (capped at maxDownloadBytes). Used by the
@@ -146,4 +188,17 @@ func ContainerFromEnv() string {
 // MEMQL_AZURE_STORAGE_CONNECTION_STRING.
 func ConnectionStringFromEnv() string {
 	return strings.TrimSpace(os.Getenv("MEMQL_AZURE_STORAGE_CONNECTION_STRING"))
+}
+
+// AutoCreateContainerEnabled reports whether the configured container should be
+// created on startup when missing (MEMQL_AZURE_BLOB_AUTOCREATE). Defaults off;
+// turned on for local dev against the Azurite emulator, which -- unlike a
+// provisioned cloud account -- has no pre-created container.
+func AutoCreateContainerEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_AZURE_BLOB_AUTOCREATE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

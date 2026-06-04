@@ -18,5 +18,11 @@ package app
 func (a *App) transportBFF() {
 	a.transportBase()
 	a.wirePolyphonEndpoints()
+	// Attachment upload + download endpoints. The bff is the frontend-facing
+	// node every browser `/spaces/{id}/attachments` request routes to (nginx +
+	// the Vite dev proxy point `/spaces/...` at the bff), so the handler must
+	// live here, not only on the agent. Shared with the agent build in
+	// transport_attachments.go. (memql#888)
+	a.mountAttachmentEndpoints()
 	a.createHTTPServer()
 }
