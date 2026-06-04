@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# Cancel a superseded run when a new commit is pushed to the same PR
+# (or the same ref). On main we key off the commit SHA so each push to
+# main gets its own non-cancellable run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
