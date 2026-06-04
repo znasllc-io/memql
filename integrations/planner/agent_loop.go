@@ -222,6 +222,23 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 		// never needs the decompose/auto-start dance, so updates are a no-op here.
 		return
 	}
+	// Phased execution checkpoint (epic #836 / memql#840): when a running
+	// multi-phase plan crosses a phase boundary into a non-trivial next
+	// phase, park it to awaitingFeedback(phase_checkpoint) so the user can
+	// review progress + spend and approve continuing -- instead of firing
+	// every phase at once. Idempotent + gated to running multi-phase plans;
+	// a no-op for everything else. Runs in a goroutine (same reasoning as
+	// HandlePlanCreated -- the bus loop is synchronous per subscriber and
+	// this does an engine roundtrip).
+	if status == "running" {
+		go func() {
+			if _, cerr := l.maybeCheckpointAtPhaseBoundary(context.Background(), planId); cerr != nil {
+				l.logger.Warn("planner agent loop: phase-checkpoint park failed",
+					"planId", planId, "error", cerr)
+			}
+		}()
+		return
+	}
 	l.logger.Debug("planner agent loop: plan updated (re-invoke deferred)",
 		"planId", planId, "kind", kind, "status", status)
 }
