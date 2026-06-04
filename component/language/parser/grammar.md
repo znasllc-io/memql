@@ -303,9 +303,9 @@ removal in Phase 4; `coalesce()` is the replacement.)
 
 Precedence, tight to loose:
 
-1. Primary: literal, identifier, function call, grouping, nil
+1. Primary: literal, identifier, function call, grouping, nil, `when(args.x) { expr }` guard
 2. Postfix member access: `.field`, `.method()`
-3. Unary: `!`, `-` (lead), `?.` (deprecated)
+3. Unary: `!`, `-` (lead), `?.` (deprecated -- superseded by `when(){}`, retired in #977)
 4. Multiplicative: none today (no `*` / `/` at expression level;
    numeric work happens in runtime via `add`, `sub`)
 5. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `has`, `not in`
