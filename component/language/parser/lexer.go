@@ -31,6 +31,7 @@ const (
 	TokenQuestionQuestion // ?? for null coalescing
 	TokenAt               // @ for Python-style attributes/decorators
 	TokenAmpAmp           // && for logical AND
+	TokenPipePipe         // || for logical OR
 	TokenBang             // ! for boolean negation
 	TokenDot              // . between path and `{` in `use path.{ names }`
 
@@ -140,6 +141,8 @@ func (t TokenType) String() string {
 		return "'@'"
 	case TokenAmpAmp:
 		return "'&&'"
+	case TokenPipePipe:
+		return "'||'"
 	case TokenBang:
 		return "'!'"
 	case TokenDot:
@@ -346,6 +349,13 @@ func (l *Lexer) NextToken() (Token, error) {
 			return makeToken(TokenAmpAmp, "&&"), nil
 		}
 		return Token{}, fmt.Errorf("unexpected '&' at position %d (did you mean '&&'?)", start)
+	case '|':
+		l.advance()
+		if !l.eof() && l.peek() == '|' {
+			l.advance()
+			return makeToken(TokenPipePipe, "||"), nil
+		}
+		return Token{}, fmt.Errorf("unexpected '|' at position %d (did you mean '||'?)", start)
 	case '@':
 		l.advance()
 		return makeToken(TokenAt, "@"), nil
