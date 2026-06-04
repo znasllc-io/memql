@@ -974,6 +974,15 @@ var agentContextStamps = map[string]agentContextStamp{
 	"workerHost":              {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
 	"workerComputer":          {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
 	"workerStatus":            {StampAgentId: true, StampOwnerUserId: true},
+	// workbenchHost runs HEADLESS work in the per-Plan sandbox. planId is
+	// REQUIRED -- it keys the workspace AND is the producedByPlanId stamped
+	// on the promoted v1:library:generatedOutput row; without it the
+	// dispatch fails "workbench: missing required arg planId" and the
+	// produceArtifact deliverable is never written (memql#948). agentId
+	// attributes the output and overwrites any value the LLM hallucinated
+	// (the schema marks both @autoInjected -- LLM-supplied values are not
+	// trusted). taskId stays optional (invocation filing only).
+	"workbenchHost": {StampAgentId: true, StampPlanId: true},
 	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
 	// requestUserFeedback parks the ACTIVE Plan, so it needs the
 	// turn-context planId stamped (the LLM never knows its own Plan id);
