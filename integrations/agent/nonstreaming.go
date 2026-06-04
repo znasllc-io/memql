@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -223,6 +224,11 @@ func (r *Replier) runNonStreamingToolLoop(
 	// ceiling without starving live chat/voice of the interactive budget.
 	ctx = memql.ContextWithBackgroundLane(ctx)
 
+	// Cooperative preemption (memql#906): clear any pause flag for this
+	// turn's requestId on exit so a stale "pass" can never leak into a later
+	// turn that reuses the id.
+	defer ClearPause(requestId)
+
 	start := time.Now()
 	reqTimeout := backgroundRequestTimeout()
 
@@ -233,6 +239,9 @@ func (r *Replier) runNonStreamingToolLoop(
 	var terminalEnvelope *Envelope
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
+	// paused is set when the loop stops at a checkpoint because the turn was
+	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
+	paused := false
 
 	// Model tiering (memql#898): the turn starts on the cheap provider and
 	// escalates to escalationProvider at most once, when the cheap tier gets
@@ -246,6 +255,21 @@ func (r *Replier) runNonStreamingToolLoop(
 
 BackgroundLoop:
 	for iter := 0; iter < maxIter; iter++ {
+		// Cooperative preemption checkpoint (memql#906). The boundary
+		// between tool rounds is the only safe place to pause -- a model
+		// call can't be interrupted mid-token. If this turn was "passed",
+		// persist the in-progress working state (so #907 can resume the
+		// thread) and stop cleanly without burning more tokens. The
+		// planner-side "pass" action already marked the Plan paused (which
+		// frees its slot via #905), so the loop just needs to stop + persist.
+		if PauseRequested(requestId) {
+			r.persistTaskStateOnPause(ctx, turnCtx, messages, allToolCalls, fullText.String())
+			r.logger.Info("agent background: preempted at checkpoint -- pausing",
+				"iter", iter, "toolCalls", len(allToolCalls), "requestId", requestId)
+			paused = true
+			break
+		}
+
 		iterations++
 
 		// Wallclock cap across the whole turn (every step + retry). Surfaces
@@ -524,5 +548,75 @@ BackgroundLoop:
 		ToolCalls:  allToolCalls,
 		Iterations: iterations,
 		Citations:  citations,
+		Paused:     paused,
 	}, nil
+}
+
+// persistTaskStateOnPause writes a v1:planner:taskState row capturing the
+// turn's in-progress working state when it's preempted at a checkpoint
+// (memql#906), so a later resume (memql#907) can pick up the thread. Best-
+// effort: every failure is logged and swallowed -- a persistence miss must
+// never turn a clean pause into a crash.
+//
+// taskId contract (flagged for Session B on #906): the background turn is
+// plan-scoped today (one executeApprovedPlan turn per Plan; per-task
+// fan-out is memql#899, not yet live-wired), so the state is keyed to the
+// Plan's execution unit via turnCtx.PlanId. If resume needs a semantic
+// v1:planner:task.id instead, thread it through turnContext and swap here.
+func (r *Replier) persistTaskStateOnPause(ctx context.Context, turnCtx turnContext, messages []common.ChatMessage, toolCalls []common.ToolCall, reasoning string) {
+	if r.engine == nil {
+		return
+	}
+	taskId := strings.TrimSpace(turnCtx.PlanId)
+	if taskId == "" {
+		// No plan-scoped unit to key the state to -- nothing to resume.
+		return
+	}
+
+	// Replayable tool-call history: {toolName, args, result} per call,
+	// matching each result back to its call by tool-call id.
+	resultByID := make(map[string]string)
+	for _, m := range messages {
+		if m.Role == "tool" && m.ToolCallId != "" {
+			resultByID[m.ToolCallId] = m.Content
+		}
+	}
+	history := make([]map[string]any, 0, len(toolCalls))
+	var lastResult string
+	for _, tc := range toolCalls {
+		entry := map[string]any{"toolName": tc.Name, "args": tc.Arguments}
+		if res, ok := resultByID[tc.ID]; ok {
+			entry["result"] = res
+			lastResult = res
+		}
+		history = append(history, entry)
+	}
+
+	stateId := "taskstate-" + string(genOutputIdEngine.MustFromMap(map[string]any{
+		"taskId": taskId,
+		"kind":   "pause",
+	}))[:16]
+
+	args := map[string]any{
+		"stateId":         stateId,
+		"taskId":          taskId,
+		"reasoningChain":  strings.TrimSpace(reasoning),
+		"toolCallHistory": history,
+		"workingMemory": map[string]any{
+			"pausedAtCheckpoint": true,
+			"toolCallCount":      len(history),
+			"lastToolResult":     lastResult,
+		},
+	}
+	payload, err := json.Marshal(args)
+	if err != nil {
+		r.logger.Warn("agent background: marshal taskState on pause failed",
+			"error", err, "task_id", taskId)
+		return
+	}
+	call := fmt.Sprintf("mutationPersistTaskState(%s)", string(payload))
+	if _, err := r.engine.Execute(withUserActor(ctx, turnCtx.OwnerUserId), call); err != nil {
+		r.logger.Warn("agent background: persist taskState on pause failed",
+			"error", err, "task_id", taskId)
+	}
 }
