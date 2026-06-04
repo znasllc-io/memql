@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, user, workerPairingCode }
+use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, user, workerPairingCode }
 
 @enabled
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
@@ -1761,5 +1761,37 @@ mutation user mutationUpdateUser {
   update user {
     id: args.userId
     args.payload
+  }
+}
+
+// mutationSetAccountEntitlement
+// =============================
+//
+// Set (upsert) an account's task-concurrency entitlement (epic
+// memql#902 / foundation child #903). Mints a deterministic per-account
+// id (accountEntitlement-<hash(accountId)>) so each call appends a new
+// time-series version and the latest wins -- billing / admin tooling
+// calls this to change a tier's cap without a code change. Set
+// maxConcurrentTasks to a finite N to cap the account at N concurrent
+// running Plans; a value <= 0 (or tier='enterprise') leaves the account
+// unlimited. System / admin-actor mutation.
+
+@enabled
+@description("Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.")
+mutation accountEntitlement mutationSetAccountEntitlement {
+  args {
+    accountId          string  @required
+    tier               string  @required @enum("free", "pro", "team", "enterprise")
+    maxConcurrentTasks int
+    accountKind        string  @enum("user", "org")
+    note               string
+  }
+  insert accountEntitlement {
+    id: concat("accountEntitlement-", hash(args.accountId))
+    args.accountId
+    args.tier
+    accountKind: coalesce(args.accountKind, "user")
+    maxConcurrentTasks: coalesce(args.maxConcurrentTasks, 0)
+    note: coalesce(args.note, "")
   }
 }

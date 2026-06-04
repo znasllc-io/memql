@@ -8985,6 +8985,60 @@ func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
 	return b.String()
 }
 
+// MutationSetAccountEntitlement -- Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.
+//
+// Bound concept: accountEntitlement.
+type MutationSetAccountEntitlementArgs struct {
+	AccountId string
+	// Enum: free | pro | team | enterprise
+	Tier               string
+	MaxConcurrentTasks int
+	// Enum: user | org
+	AccountKind string
+	Note        string
+}
+
+// MutationSetAccountEntitlement calls the engine mutation mutationSetAccountEntitlement.
+func (qc *QueryClient) MutationSetAccountEntitlement(ctx context.Context, args MutationSetAccountEntitlementArgs) (*Result, error) {
+	call := MutationSetAccountEntitlementBuild(args)
+	return qc.executeNamed(ctx, "mutationSetAccountEntitlement", call)
+}
+
+func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetAccountEntitlement({")
+	b.WriteString("accountId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AccountId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tier: ")
+	b.WriteString(fmt.Sprintf("%q", args.Tier))
+	if args.MaxConcurrentTasks != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("maxConcurrentTasks: ")
+		b.WriteString(fmt.Sprintf("%v", args.MaxConcurrentTasks))
+	}
+	if args.AccountKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.AccountKind))
+	}
+	if args.Note != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(fmt.Sprintf("%q", args.Note))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationSetAgentAudioOverride -- Set the per-session audio control mode for an agent in a space.
 //
 // Bound concept: audioOverride.
