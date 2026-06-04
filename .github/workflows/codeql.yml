@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Merge queue (Tier 3, #858): if the "Analyze" checks are required for
+  # merge, they must also run on the queue's merge candidate or the queue
+  # would stall on a never-reported required check.
+  merge_group:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 
