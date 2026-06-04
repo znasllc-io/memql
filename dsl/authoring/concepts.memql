@@ -35,8 +35,6 @@ concept bundle {
   failureReason       string  @description("Populated when status transitions to failed -- which gate failed and why (e.g. 'gate1: spec specX references unknown field payload.foo'). Cleared on a successful re-author.")
   activatedAt         datetime @description("When the bundle was approved + registered into the authored runtime (status -> active). Null until activated.")
   retiredAt           datetime @description("When the bundle was retired. Null unless status=retired.")
-
-  @relationship(type="references", field="responsibilityId", target="v1:planner:responsibility", direction="outgoing")
 }
 
 @version("1.0.0")
@@ -54,6 +52,4 @@ concept construct {
   status            enum("draft", "active", "retired") @required @default("draft") @description("Follows the parent bundle's lifecycle at a construct grain: draft while the bundle is pre-activation, active once the bundle activates, retired when the bundle retires. Lets a cataloged construct outlive a single bundle.")
   catalogued        bool    @default("false") @description("True once this construct has been promoted into the owner's reusable catalog (post-activation), so later bundles can compose it instead of re-authoring. Drives the compose-first reuse path (#957).")
   catalogKey        string  @description("Dedup / match key for the catalog (#957): a stable signature of what this construct does (e.g. kind + bound concept + normalized predicate), used by the similarTo-backed matcher to find an existing construct before authoring a new one. Empty until catalogued.")
-
-  @relationship(type="parent", field="bundleId", target="v1:authoring:bundle", direction="outgoing")
 }
