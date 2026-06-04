@@ -457,15 +457,22 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	format := formatForExtension(path)
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
-	// When a GCS uploader + a target space are available, upload the
+	// When a blob uploader + a target space are available, upload the
 	// written bytes to v1:common:attachment and carry the attachmentId +
 	// mimeType so the Library renders / downloads the real file. The byte
 	// source depends on the dispatch path (see the doc comment): local =
 	// read back off disk (#733); cluster = the `content` we forwarded to
 	// the remote, which is exactly what it wrote (#742). Any miss falls
 	// back to the inline pointer row below; it never breaks the fs_write.
+	//
+	// A text-shaped deliverable (markdown/text) is deliberately NOT uploaded:
+	// it's stored inline on the generatedOutput body below, which the Library
+	// renders directly without a download round-trip. That keeps text viewable
+	// even where the download route isn't reachable, and avoids regressing the
+	// inline path when a blob backend IS configured (e.g. local Azurite).
+	// Binary deliverables (pdf/csv/images/...) still go to blob. (memql#888/#889)
 	attachmentId, mimeType := "", ""
-	if i.uploader != nil && i.bucket != "" && spaceId != "" {
+	if i.uploader != nil && i.bucket != "" && spaceId != "" && !isInlineTextFormat(format) {
 		if data := i.workbenchOutputBytes(planId, path, innerArgs, local); len(data) > 0 {
 			attachmentId, mimeType = i.uploadAttachmentBytes(mutationCtx, planId, path, title, spaceId, ownerUserId, data)
 		}
@@ -512,15 +519,20 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	}
 }
 
+// isInlineTextFormat reports whether a deliverable of this format (as returned
+// by formatForExtension) is stored inline on the generatedOutput body rather
+// than uploaded to blob -- the Library renders these directly. (memql#888/#889)
+func isInlineTextFormat(format string) bool {
+	return format == "markdown" || format == "text"
+}
+
 // inlineTextBody returns the just-written file's content as a string when it
 // is a text-shaped deliverable small enough to store inline, else "". Used on
 // the no-blob-uploader path (local dev) so a produced markdown/text file is
 // viewable in the Library without an attachment round-trip -- the bytes are
 // the same ones workbenchOutputBytes sources for the upload path. (memql#889)
 func (i *Integration) inlineTextBody(planId, relPath, format string, innerArgs map[string]any, local bool) string {
-	switch format {
-	case "markdown", "text":
-	default:
+	if !isInlineTextFormat(format) {
 		return ""
 	}
 	const maxInlineBytes = 256 << 10 // 256 KiB -- generatedOutput.body, not a blob

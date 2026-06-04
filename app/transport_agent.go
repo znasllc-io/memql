@@ -3,11 +3,6 @@
 package app
 
 import (
-	"context"
-
-	"github.com/znasllc-io/memql/component/fileprocessor"
-	"github.com/znasllc-io/memql/component/server"
-	"github.com/znasllc-io/memql/integrations/azureblob"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
 
@@ -38,20 +33,12 @@ func (a *App) transportAgent() {
 	// Audio WebSocket (shared with the voice node; see transport_audio.go).
 	a.setupAudioWebsocket()
 
-	// Attachment upload endpoints. Storage backend is Azure Blob (memql#801);
-	// the "bucket" arg below is the Azure container name.
-	var uploader server.FileUploader
-	var downloader server.FileDownloader
-	blobContainer := azureblob.ContainerFromEnv()
-	if blobContainer != "" {
-		blobClient, err := azureblob.New(context.Background())
-		if err != nil {
-			a.Logger.Warn("Azure Blob uploader unavailable", "error", err)
-		} else {
-			uploader = blobClient
-			downloader = blobClient // same client serves GET downloads (memql#804)
-		}
-	}
+	// Attachment upload + download endpoints (mountAttachmentEndpoints lives in
+	// transport_attachments.go, shared with the bff build). Returns the blob
+	// uploader + container so the agent can additionally hand them to the
+	// workbench / worker integrations below.
+	uploader, blobContainer := a.mountAttachmentEndpoints()
+
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
 	// successful LOCAL fs_write uploads its bytes to v1:common:attachment
 	// and the Library generatedOutput row carries a real attachmentId
@@ -70,23 +57,6 @@ func (a *App) transportAgent() {
 		if wo := a.lookupWorkerIntegration(); wo != nil {
 			wo.SetAttachmentUploader(uploader, blobContainer)
 		}
-	}
-
-	processor := fileprocessor.NewDefaultProcessor(a.engine.VisionProvider())
-	engineAdapter := &AttachmentEngineAdapter{Engine: a.engine}
-	store := server.NewEngineAttachmentStore(engineAdapter)
-	planStore := server.NewEnginePlanStore(engineAdapter)
-	attachmentHandler := server.NewAttachmentHandler(server.AttachmentHandlerOptions{
-		Logger:     a.Logger,
-		Bucket:     blobContainer,
-		Uploader:   uploader,
-		Downloader: downloader,
-		Extractor:  processor,
-		Store:      store,
-		PlanStore:  planStore,
-	})
-	for _, path := range server.SpaceAttachmentPaths() {
-		a.mux.Handle("POST "+path, attachmentHandler)
 	}
 
 	// AI endpoints live on MemqlService.Stream: SIChatMsg, SISuggestMsg,

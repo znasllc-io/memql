@@ -41,6 +41,26 @@ services:
       - memql
     restart: unless-stopped
 
+  # Azurite -- local Azure Blob Storage emulator (memql#888). Stands in for the
+  # cloud Azure Blob account so produced/uploaded attachment bytes have a real
+  # backend in local dev. The bff + agent nodes point their
+  # MEMQL_AZURE_STORAGE_CONNECTION_STRING at this service and auto-create the
+  # container on boot (MEMQL_AZURE_BLOB_AUTOCREATE=1). The AccountName/AccountKey
+  # used in that connection string are Azurite's well-known public dev
+  # credentials -- safe to commit.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: memql-azurite
+    hostname: azurite
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --skipApiVersionCheck
+    ports:
+      - "10000:10000"
+    volumes:
+      - azurite_data:/data
+    networks:
+      - memql
+    restart: unless-stopped
+
   # BFF node -- backend for frontend (domain-specific), primary API surface
   bff:
     # memql#356: bff is the CoPresent carrier binary, NOT the plain
@@ -116,6 +136,12 @@ services:
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVICE_CAPABILITIES_LOGGING: "true"
       SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL: debug
+      # Local Azure Blob (Azurite) so attachment uploads/downloads have a real
+      # backend (memql#888). The bff is the frontend-facing node browser
+      # /spaces/{id}/attachments requests route to, so it serves the handler.
+      MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
+      MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-memql-attachments}
+      MEMQL_AZURE_BLOB_AUTOCREATE: ${MEMQL_AZURE_BLOB_AUTOCREATE:-1}
     ports:
       - "8088:8088"
     depends_on:
@@ -123,6 +149,8 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
+      azurite:
+        condition: service_started
     healthcheck:
       # nginx (and any gRPC client routed through it) must wait for the
       # bff's HTTP/gRPC listeners to ACCEPT before traffic flows, else a
@@ -541,6 +569,14 @@ services:
       MEMORY_ENGINE_CAPABILITIES_LOGGING: "true"
       MEMORY_ENGINE_CAPABILITIES_LOGGING_LOG_LEVEL: debug
 
+      # Local Azure Blob (Azurite) so a workbench fs_write promotes BINARY
+      # deliverables to a real downloadable v1:common:attachment; text stays
+      # inline on the generatedOutput body. Same emulator + container as the
+      # bff (memql#888).
+      MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
+      MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-memql-attachments}
+      MEMQL_AZURE_BLOB_AUTOCREATE: ${MEMQL_AZURE_BLOB_AUTOCREATE:-1}
+
     ports:
       - "8089:8089"
       # No raw gRPC port exposure -- nginx terminates TLS on
@@ -553,6 +589,8 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
+      azurite:
+        condition: service_started
     networks:
       - memql
     restart: unless-stopped
@@ -741,6 +779,9 @@ volumes:
   postgres_data:
     driver: local
   identity_keys:
+    driver: local
+  # Azurite blob data (local Azure Blob emulator, memql#888).
+  azurite_data:
     driver: local
   # node_modules for the in-container CoPresent frontend dev server.
   # Keeps the host's bind-mounted copresent/ free of a node_modules
