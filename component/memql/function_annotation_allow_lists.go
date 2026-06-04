@@ -18,14 +18,14 @@ package memql
 // `constructAnnotationAllowLists` map (in unified_functions_loader.go)
 // is the sole consumer.
 //
-// Note on the `useConcept` / `useShape` / `useTrait` / `useSpec`
-// entries: those annotations were retired in #301 (no live `.memql`
-// file across any backend repo uses them; the AST no longer carries
-// a matching token), but the strings are kept in the allow-list as
-// a tolerated no-op so any straggler file that still carries the
-// annotation in a comment-stripped header doesn't trip the validator.
-// A follow-up sweep can prune them once the audit confirms zero
-// remaining occurrences anywhere in the tree.
+// The retired `@use*` family (`useConcept` / `useShape` / `useTrait` /
+// `useSpec` / `useQuery` / `useMutation` / `useLogic` / `useBuiltin` /
+// `usePrompt` / `useTool` / `useAutomation`) is deliberately NOT listed
+// here: `ValidateConstructAnnotations` (baseparser/iface.go) hard-rejects
+// anything matching the `@use*` prefix with a migration hint BEFORE the
+// allow-list is consulted, so listing them was a dead no-op. The audit in
+// #964 confirmed zero remaining occurrences across the tree; the no-op
+// entries were pruned in #966.
 
 var allowedQueryAnnotations = map[string]bool{
 	"description": true,
@@ -40,13 +40,6 @@ var allowedQueryAnnotations = map[string]bool{
 	"audit":       true,
 	"role":        true,
 	"permission":  true,
-	"useConcept":  true,
-	"useShape":    true,
-	"useSpec":     true,
-	"useTrait":    true,
-	"useQuery":    true,
-	"useLogic":    true,
-	"useBuiltin":  true,
 	// `@public` is a parse-only marker introduced by issue #54
 	// (per-row authorization audit). It carries no runtime
 	// semantics; the validator treats it as the author's explicit
@@ -73,14 +66,6 @@ var allowedMutationAnnotations = map[string]bool{
 	"audit":                true,
 	"role":                 true,
 	"permission":           true,
-	"useConcept":           true,
-	"useShape":             true,
-	"useSpec":              true,
-	"useTrait":             true,
-	"useQuery":             true,
-	"useMutation":          true,
-	"useLogic":             true,
-	"useBuiltin":           true,
 	// `@public` is a parse-only marker introduced by issue #54
 	// (per-row authorization audit). It carries no runtime
 	// semantics; the validator treats it as the author's explicit
@@ -96,36 +81,15 @@ var allowedLogicAnnotations = map[string]bool{
 	"enabled":     true,
 	"disabled":    true,
 	"deprecated":  true,
-	"useConcept":  true,
-	"useShape":    true,
-	"useSpec":     true,
-	"useTrait":    true,
-	"useQuery":    true,
-	"useMutation": true,
-	"useLogic":    true,
-	"useBuiltin":  true,
-	"usePrompt":   true,
-	"useTool":     true,
 }
 
 var allowedAutomationAnnotations = map[string]bool{
-	"description":   true,
-	"enabled":       true,
-	"disabled":      true,
-	"deprecated":    true,
-	"trigger":       true,
-	"schedule":      true,
-	"async":         true,
-	"filter":        true,
-	"useConcept":    true,
-	"useShape":      true,
-	"useSpec":       true,
-	"useTrait":      true,
-	"useQuery":      true,
-	"useMutation":   true,
-	"useLogic":      true,
-	"useBuiltin":    true,
-	"usePrompt":     true,
-	"useTool":       true,
-	"useAutomation": true,
+	"description": true,
+	"enabled":     true,
+	"disabled":    true,
+	"deprecated":  true,
+	"trigger":     true,
+	"schedule":    true,
+	"async":       true,
+	"filter":      true,
 }
