@@ -82,6 +82,44 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 	return observedCh, nil
 }
 
+// observedWithTools wraps a common.ToolCallingChatSIProvider -- the
+// non-streaming request/response tool-calling surface used by the
+// background execution lane (memql#896). One call == one model step; the
+// observer records a single non-streaming CallRecord (no time-to-first-
+// token, since the whole response arrives at once). Output work counts
+// both the assistant text and the requested tool-call argument bytes so
+// the ledger's token estimate reflects a tool-heavy step, not just prose.
+type observedWithTools struct {
+	inner    common.ToolCallingChatSIProvider
+	router   *Router
+	resolved Resolved
+	req      ResolveRequest
+}
+
+func (o *observedWithTools) CallChatWithTools(
+	ctx context.Context,
+	messages []common.ChatMessage,
+	tools []common.ToolDefinition,
+) (*common.ToolCallingChatResult, error) {
+	start := time.Now()
+	inputTokens := EstimateMessageTokens(messages)
+
+	result, err := o.inner.CallChatWithTools(ctx, messages, tools)
+
+	outputChars := 0
+	if result != nil {
+		outputChars += len(result.AssistantText)
+		for _, tc := range result.ToolCalls {
+			outputChars += len(tc.Arguments) + len(tc.Name)
+		}
+	}
+	outputTokens := EstimateTokensFromChars(outputChars)
+	// streaming=false, firstTokenAt=zero: a synchronous call has no
+	// meaningful TTFT, and buildRecord leaves timeToFirstTokenMs at 0.
+	o.router.recordCall(buildRecord(o.req, o.resolved, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	return result, err
+}
+
 // observedChat wraps a common.ChatSIProvider -- the non-streaming
 // synchronous chat surface used by suggest endpoints and the voice
 // (non-tool-calling) InvokeSI path.

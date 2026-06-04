@@ -312,6 +312,19 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	hints := map[string]string{
 		"plan_id": planId,
 		"trigger": "plan_approved",
+		// Route this turn onto the agent node's NON-STREAMING background
+		// executor (memql#896). Plan/task execution is batch work -- nobody
+		// is watching tokens arrive, the user gets a completion card when
+		// it's done -- so it runs through a request/response tool loop with
+		// one overall timeout instead of the interactive streaming path +
+		// per-chunk idle watchdog. Running background work through the
+		// interactive watchdog is exactly what false-killed slow
+		// produceArtifact turns (memql#893); the dedicated lane retires that
+		// failure mode. The hint key/value are the agent package's
+		// ExecutionLaneHintKey / ExecutionLaneBackground; the planner binary
+		// doesn't import the agent package (separate build tags), so the
+		// literal strings are duplicated here intentionally.
+		"execution_lane": "background",
 	}
 	// Forward the Plan's requestedBy as the owner-user hint when it
 	// looks like a canonical user id. The agent's resolveOwnerForAgent
