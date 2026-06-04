@@ -4132,6 +4132,36 @@ func (p *Parser) parseConditionalFilter() (ExpressionNode, error) {
 	}, nil
 }
 
+// membershipCollectionField recognises the RHS of `<scalar> in <collection>`
+// when the collection is a `payload.<field>` row collection. It consumes the
+// token and returns the dotted field path. A list-literal or any other RHS is
+// left for parseValue (the OpIn scalar-in-list form). #976.
+func membershipCollectionField(p *Parser) (string, bool) {
+	if p.check(TokenIdentifier) && strings.HasPrefix(p.current.Literal, "payload.") {
+		collection := p.current.Literal
+		p.advance()
+		return collection, true
+	}
+	return "", false
+}
+
+// scalarMembershipValue converts the bare LHS scalar of `<scalar> in
+// <collection>` into the comparison-value representation the membership (has)
+// codegen expects -- mirroring parseValue's accessor classification so the
+// desugared `in` produces an AST identical to the equivalent `has`.
+func scalarMembershipValue(name string) any {
+	if rest, ok := strings.CutPrefix(name, "args."); ok {
+		return &ArgRefExpr{Path: rest}
+	}
+	if rest, ok := strings.CutPrefix(name, "ctx."); ok {
+		return &ArgRefExpr{Path: rest}
+	}
+	if strings.HasPrefix(name, "actor.") {
+		return &ArgRefExpr{Path: name}
+	}
+	return name
+}
+
 // parseComparison parses field comparison expressions.
 func (p *Parser) parseComparison() (ExpressionNode, error) {
 	if !p.check(TokenIdentifier) {
@@ -4144,6 +4174,20 @@ func (p *Parser) parseComparison() (ExpressionNode, error) {
 	// Handle keyword-based operators: in, has, not in
 	if p.check(TokenKeywordIn) {
 		p.advance()
+		// `<scalar> in payload.<collectionField>` (e.g.
+		// `args.groupId in payload.groupIds`) is the canonical membership
+		// form (#976). It desugars to `payload.<collectionField> has <scalar>`
+		// so it reuses the existing array-contains codegen -- `in` becomes
+		// the single membership operator, `has` (its reverse) is retired.
+		// A list-literal RHS (`payload.kind in ["a", "b"]`) keeps the OpIn
+		// scalar-in-list form.
+		if collection, ok := membershipCollectionField(p); ok {
+			return &ComparisonExpr{
+				Field:    FieldReference{Raw: collection, Parts: strings.Split(collection, ".")},
+				Operator: OpHas,
+				Value:    scalarMembershipValue(field),
+			}, nil
+		}
 		value, err := p.parseValue()
 		if err != nil {
 			return nil, err
@@ -4323,6 +4367,16 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// Check for keyword-based operators: in, has, not in
 	if p.check(TokenKeywordIn) {
 		p.advance()
+		// `<scalar> in payload.<collectionField>` desugars to
+		// `payload.<collectionField> has <scalar>` (#976) -- see the
+		// parseComparison path for the rationale.
+		if collection, ok := membershipCollectionField(p); ok {
+			return &ComparisonExpr{
+				Field:    FieldReference{Raw: collection, Parts: strings.Split(collection, ".")},
+				Operator: OpHas,
+				Value:    scalarMembershipValue(name),
+			}, nil
+		}
 		value, err := p.parseValue()
 		if err != nil {
 			return nil, err
