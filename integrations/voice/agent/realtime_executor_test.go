@@ -552,9 +552,17 @@ func TestRealtimeExecutor_GatedSemanticVad_InputTranscriptDrivesGate(t *testing.
 
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "what's our cloud spend"}
 
-	require.Eventually(t, func() bool { return hasTurnRequest(fs) }, 2*time.Second, 10*time.Millisecond,
-		"the model's turn-end must drive the conductor gate (runTurn)")
-	final := findFinalTranscript(fs)
+	// The turn-request and the forwarded final transcript are two separate
+	// envelopes emitted by the executor's goroutine; poll until BOTH are
+	// present before asserting on the final, so we don't race the final
+	// arriving a tick after the turn-request (capture inside the poll, the
+	// pattern the native-path test above already uses).
+	var final *memqlv1.VoiceAgentFinalTranscript
+	require.Eventually(t, func() bool {
+		final = findFinalTranscript(fs)
+		return hasTurnRequest(fs) && final != nil
+	}, 2*time.Second, 10*time.Millisecond,
+		"the model's turn-end must drive the conductor gate (runTurn) and forward the final transcript")
 	require.NotNil(t, final)
 	assert.Equal(t, "what's our cloud spend", final.GetFinalText())
 	assert.False(t, final.GetNativeAuthored(), "the gate path forwards a normal (stt) final so cognition runs the gate")
