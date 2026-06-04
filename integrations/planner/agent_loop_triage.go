@@ -182,6 +182,25 @@ func (l *PlannerAgentLoop) triageAndMaybeShortcut(ctx context.Context, planId, n
 		return false, nil
 	}
 
+	// Known-trivial kinds skip the classifier entirely (memql#835): a
+	// produceArtifact plan is a single self-contained deliverable by
+	// construction -- the Assistant's produceArtifact tool only mints it
+	// for "make me a <file>" requests, and it carries the requesting
+	// assistant as ownerAgentId. Treat it as trivial directly (zero
+	// classifier LLM call) and route to the single direct production turn.
+	// This is what lets produceArtifact flow through the unified loop (its
+	// old hardcoded HandlePlanCreated bypass was removed) while still
+	// making ZERO planner LLM calls.
+	if getString(plan, "kind") == produceArtifactPlanKind {
+		if strings.TrimSpace(getString(plan, "ownerAgentId")) == "" {
+			return false, nil // no owner to run the turn -> let the loop assign one
+		}
+		l.logger.Info("planner triage: produceArtifact is known-trivial -> single direct production turn (no classifier, no decompose)",
+			"planId", planId)
+		l.startPlanDirect(ctx, planId)
+		return true, nil
+	}
+
 	complexity, reasoning, cerr := l.classifyGoalComplexity(ctx, goal, nowRFC3339)
 	if cerr != nil {
 		l.logger.Warn("planner triage: classify failed; falling through to decompose loop",

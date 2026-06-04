@@ -91,21 +91,22 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		// the dispatcher on the same Plan (#645).
 		return
 	}
-	if kind == produceArtifactPlanKind {
-		// produceArtifact (#788) is a SINGLE-TURN deliverable, NOT a
-		// multi-step plan. It must NOT go through the planner-agent decompose
-		// loop (invokeAndDispatch): that loop is for decomposing complex goals
-		// + provisioning specialists via repeated large plannerAgent LLM calls,
-		// and for a simple "make me a markdown file" it spun/re-invoked and
-		// spammed the provider into a 429 rate-limit (memql#816). The requesting
-		// assistant was stamped as ownerAgentId at creation, and the goal is
-		// self-contained, so we just start the plan directly -> running;
-		// handlePlanApprovedForExecution -> executeApprovedPlan then dispatches
-		// it as ONE agent turn (the agent writes the file via the workbench).
-		// No plannerAgent call, no loop.
-		go l.startPlanDirect(context.Background(), planId)
-		return
-	}
+	// produceArtifact (#788) NO LONGER hard-bypasses the loop here
+	// (memql#835, re-approaching the reverted #823 now that the
+	// goal-resolution restructure has landed). It flows through the
+	// normal invokeAndDispatch entry like any goal plan, where it hits,
+	// in order: the up-front token/approval gate (#839; a one-line
+	// deliverable estimates well under the threshold and auto-runs), then
+	// the complexity triage (#837) which recognizes produceArtifact as a
+	// known single self-contained deliverable and shortcuts it to ONE
+	// direct production turn (startPlanDirect) -- making ZERO plannerAgent
+	// decompose calls, exactly as the old hardcoded bypass did, but now as
+	// a first-class routing decision with the hard process-wide rate
+	// ceiling (#834), the lowered per-plan cap + no-task-succeed
+	// convergence guard (#843), and model tiering (#838) all in front of
+	// it as structural backstops. The earlier #823 attempt re-triggered
+	// the spam precisely because those backstops did not yet exist (#832
+	// reverted it); they do now.
 	if kind == "adHocAction" || kind == "scopeElevation" || kind == "agentInvocation" {
 		// adHocAction: stamper handles end-to-end.
 		// scopeElevation: existing handlePlanApprovedForExecution covers it.
