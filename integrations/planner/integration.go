@@ -116,6 +116,7 @@ type PlannerIntegration struct {
 	intakeDispatch *ResponsibilityIntakeDispatcher
 	refreshCron    *RefreshCron
 	reactiveLoop   *ReactiveLoop
+	fairnessCron   *FairnessCron
 	logger         *slog.Logger
 	unsubscribes   []func()
 	started        atomic.Bool
@@ -189,6 +190,11 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
 	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
+	// Fairness / anti-starvation sweep (memql#908). Needs the same lazy
+	// *bun.DB the admission controller uses for its across-account read SQL;
+	// disabled by default (MEMQL_TASK_FAIRNESS_ENABLED) and a no-op when no
+	// account has a finite cap producing a waiting queue.
+	p.fairnessCron = NewFairnessCron(p.engine, p.dbGetter, p.logger)
 	return p, nil
 }
 
@@ -356,6 +362,9 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		if p.reactiveLoop != nil {
 			p.reactiveLoop.Start(ctx)
 		}
+		if p.fairnessCron != nil {
+			p.fairnessCron.Start(ctx)
+		}
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
 	// readyCh close, IsRunning bookkeeping) to the base
@@ -385,6 +394,9 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	}
 	if p.reactiveLoop != nil {
 		p.reactiveLoop.Stop()
+	}
+	if p.fairnessCron != nil {
+		p.fairnessCron.Stop()
 	}
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)
