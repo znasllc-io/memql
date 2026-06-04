@@ -285,6 +285,15 @@ const maxPlannerIterations = 5
 // invokeAndDispatchIter so the same Plan gets the next decision in
 // the same event-cycle instead of parking until a future trigger.
 func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string) error {
+	// Token/cost approval gate runs BEFORE anything spends (epic #836 /
+	// #839). Estimate the Plan's cost up front; if it exceeds the
+	// approval threshold and the user hasn't already approved, PARK the
+	// Plan as awaitingFeedback(budget_approval_required) and make NO
+	// model call -- not even the cheap triage classifier. Below the
+	// threshold (the common case) it auto-runs and we fall through.
+	if handled, err := l.gatePlanApprovalIfNeeded(ctx, planId); err != nil || handled {
+		return err
+	}
 	// Complexity triage runs FIRST (epic #836 / memql#837): a cheap
 	// classifier decides trivial vs moderate/complex. A trivial,
 	// self-contained deliverable (the "list of 10 birds" case) with an
