@@ -58,7 +58,12 @@ mutation artifact mutationCreateArtifact {
     args.producedByWorkerId
     args.producedByWorkerName
     validationStatus: coalesce(args.validationStatus, "none")
-    updatedAt: now
+    // timestamp(), NOT bare `now`: this mutation is invoked from the index
+    // automations (logicIndexGeneratedOutput et al.), and the automation step
+    // resolver only evaluates the function-call forms timestamp()/now() -- a
+    // bare `now` passes through as the literal string "now" and fails the
+    // artifact's updatedAt date-time format. (memql#980)
+    updatedAt: timestamp()
   }
 }
 
