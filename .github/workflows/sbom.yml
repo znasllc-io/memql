@@ -14,12 +14,13 @@ permissions:
   contents: read
 
 # Generates a CycloneDX SBOM for the Go module tree on every release
-# (and on go.mod / go.sum changes for main, so the published SBOM
-# tracks current state). The generate job runs read-only and always
-# stashes the SBOM as a workflow artifact. A SEPARATE, release-gated
-# attach job carries the only contents:write in this workflow -- so the
-# write token exists exclusively on the path that uploads release assets
-# (least privilege; Scorecard Token-Permissions).
+# (and on go.mod / go.sum changes for main, so the published SBOM tracks
+# current state). The SBOM is retained as a workflow artifact (90 days);
+# fetch it from the run's Artifacts section or via `gh run download`.
+#
+# This workflow is intentionally read-only (contents: read, no job-level
+# escalation) -- it never needs a write token because it does not push
+# release assets. Scorecard Token-Permissions stays clean.
 
 jobs:
   generate:
@@ -46,23 +47,3 @@ jobs:
           name: sbom
           path: sbom/
           retention-days: 90
-
-  attach-to-release:
-    name: attach SBOM to release
-    if: github.event_name == 'release'
-    needs: generate
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write  # required only to upload assets onto the release
-    steps:
-      - name: download SBOM artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: sbom
-          path: sbom/
-      - name: attach SBOM to release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
-        with:
-          files: |
-            sbom/memql.cdx.json
-            sbom/memql.cdx.xml
