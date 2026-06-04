@@ -127,6 +127,15 @@ func (r *Replier) Handle(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg,
 	if toolsDisabled {
 		return r.handleNonStreaming(ctx, msg, sink)
 	}
+	// Background / batch lane (memql#896): planner-dispatched plan/task
+	// execution turns carry hints[ExecutionLaneHintKey]="background". No
+	// human is watching tokens arrive, so they run on the non-streaming
+	// request/response tool loop (one overall timeout, no idle watchdog)
+	// instead of the interactive streaming path. tools_disabled wins above
+	// (voice one-shot generation has no tool loop at all).
+	if IsBackgroundLane(msg.Hints) {
+		return r.handleBackground(ctx, msg, sink)
+	}
 	return r.handleStreaming(ctx, msg, sink)
 }
 
@@ -154,18 +163,34 @@ func (r *Replier) handleNonStreaming(ctx context.Context, msg *memqlv1.AgentGene
 	}, nil
 }
 
-// handleStreaming covers the standard 1:1 text path with tool-calling. Runs
-// a bounded multi-turn loop: render prompt, open stream, consume text +
-// tool-call deltas, execute tools, feed results back, repeat until the
-// model returns text-only or the iteration cap is hit.
-func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, sink DeltaSink) (*TurnResult, error) {
-	// turnStart marks the arrival of the turn message on this node; every
-	// downstream stage logs elapsed_ms relative to it so logs alone tell
-	// the "time-to-first-tool-call" story without manual timestamp diffs.
-	// Matched in streaming.go consumeStreamingTurn for TTFT (time-to-first-
-	// upstream-chunk) relative to this same anchor.
-	turnStart := time.Now()
+// preparedTurn is everything prepareTurn assembles for a tool-calling
+// turn that is common to BOTH execution lanes: the rendered prompt as a
+// message list, the role-scoped tool set, the per-turn agent context, the
+// RAG retrieval pool, and the router selection inputs. The streaming
+// (interactive) and non-streaming (background) handlers each call
+// prepareTurn and then diverge ONLY on how they drive the provider --
+// CallChatStreamWithTools + idle watchdog vs CallChatWithTools + one
+// overall request timeout. Keeping prep shared means prompt assembly, RAG,
+// tool scoping, and owner resolution can't drift between the two lanes.
+// (memql#896)
+type preparedTurn struct {
+	routerReq       router.ResolveRequest
+	messages        []common.ChatMessage
+	tools           []common.ToolDefinition
+	turnCtx         turnContext
+	retrievedChunks []RetrievedChunk
+	operatorEnabled bool
+}
 
+// prepareTurn assembles the shared, transport-agnostic turn state for a
+// tool-calling turn: prompt data + RAG -> rendered prompt -> message list,
+// the role-scoped tool definitions (incl. the respondToUser sentinel), the
+// per-turn agent context, and the router ResolveRequest inputs. It does
+// NOT resolve a provider or run the loop -- the lane-specific caller
+// (handleStreaming / handleBackground) does that against the streaming or
+// non-streaming surface. turnStart is passed in so the caller's stage logs
+// share one anchor with the loop's TTFT marker.
+func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, turnStart time.Time) (*preparedTurn, error) {
 	// Server-side ActingAgent fallback. If a caller forwarded the turn
 	// without populating msg.ActingAgent (planner-driven post-approval
 	// dispatch is the canonical example -- v1:agents:agent has
@@ -289,20 +314,10 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 		PolicyName:       policyName,
 		DefaultProvider:  defaultProvider,
 	}
-	provider, resolved, err := r.router.ResolveStreamWithTools(routerReq)
-	if err != nil {
-		return nil, fmt.Errorf("router: resolve stream-with-tools: %w", err)
-	}
-	r.logger.Info("agentReply: router picked provider",
-		"provider", resolved.ProviderName,
-		"vendor", resolved.Vendor,
-		"model", resolved.Model,
-		"policy", resolved.PolicyName,
-		"chain", resolved.Chain,
-		"explicitHint", explicitProvider,
-		"operatorEnabled", operatorEnabled,
-		"requestId", routerReq.RequestId,
-	)
+	// Provider resolution + the tool loop are the lane-specific caller's
+	// job (handleStreaming resolves stream-with-tools; handleBackground
+	// resolves the non-streaming tool surface). prepareTurn only builds
+	// the routerReq + the rest of the shared state. (memql#896)
 
 	// If operator-enabled, inject the CoPresent AppProfile so the
 	// agent has navigation + glossary context baked into its prompt.
@@ -664,37 +679,75 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 		"requestId", msg.RequestId,
 	)
 
-	result, err := r.runStreamingToolLoop(ctx, provider, messages, tools, sink, turnStart, msg.RequestId, turnCtx)
+	return &preparedTurn{
+		routerReq:       routerReq,
+		messages:        messages,
+		tools:           tools,
+		turnCtx:         turnCtx,
+		retrievedChunks: retrievedChunks,
+		operatorEnabled: operatorEnabled,
+	}, nil
+}
+
+// handleStreaming covers the standard interactive 1:1 text path with
+// tool-calling. A human is watching tokens arrive, so it drives the
+// streaming surface: render prompt, open a stream, consume text +
+// tool-call deltas, execute tools, feed results back, repeat until the
+// model returns text-only or the iteration cap is hit. The idle watchdog
+// in consumeStreamingTurn is correct here (a stalled live stream should
+// fail fast); background work runs through handleBackground instead.
+func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, sink DeltaSink) (*TurnResult, error) {
+	turnStart := time.Now()
+	prep, err := r.prepareTurn(ctx, msg, turnStart)
+	if err != nil {
+		return nil, err
+	}
+
+	provider, resolved, err := r.router.ResolveStreamWithTools(prep.routerReq)
+	if err != nil {
+		return nil, fmt.Errorf("router: resolve stream-with-tools: %w", err)
+	}
+	r.logger.Info("agentReply: router picked provider",
+		"lane", "interactive",
+		"provider", resolved.ProviderName,
+		"vendor", resolved.Vendor,
+		"model", resolved.Model,
+		"policy", resolved.PolicyName,
+		"chain", resolved.Chain,
+		"explicitHint", prep.routerReq.ExplicitProvider,
+		"operatorEnabled", prep.operatorEnabled,
+		"requestId", prep.routerReq.RequestId,
+	)
+
+	result, err := r.runStreamingToolLoop(ctx, provider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
 	if err != nil {
 		return result, err
 	}
-	if result != nil {
-		// Stamp the retrieval pool from the pre-LLM RAG pass onto the
-		// turn result. The streaming loop doesn't know about retrieval
-		// (intentional separation -- runStreamingToolLoop is provider-
-		// driven, RAG is replier-driven); replier owns the join.
-		result.RetrievedChunks = retrievedChunks
-		// Tangential-cite enforcement: when the agent left citations
-		// empty despite high-similarity retrievals, the prompt's
-		// Rule 4 was supposed to make it cite tangentially. Sonnet
-		// (and friends) treat that rule as advisory and frequently
-		// answer with academic citations to the underlying material
-		// (Parpola, Farmer et al, ...) without acknowledging the
-		// USER'S TRAINING CORPUS as the trained source. The user
-		// then sees "Answered from general knowledge" even after
-		// they trained the agent on the topic, with no signal that
-		// the chunks were even considered.
-		//
-		// Server-side fix: append a one-line tangential
-		// acknowledgment per uncited high-sim domain + a matching
-		// Citation entry. Honest framing -- the appended text says
-		// "I didn't draw on directly here", which is true given the
-		// agent didn't cite. The user gets visibility ("the trained
-		// content WAS in retrieval") without us pretending the agent
-		// used it.
-		injectMissingTangentialCitations(result, r.logger, msg.RequestId)
-	}
+	r.finishTurn(result, prep, msg.RequestId)
 	return result, nil
+}
+
+// finishTurn applies the lane-agnostic post-loop join: it stamps the
+// pre-LLM RAG retrieval pool onto the result (the loops are provider-
+// driven and don't know about retrieval -- the replier owns the join) and
+// runs the tangential-cite enforcement.
+//
+// Tangential-cite enforcement: when the agent left citations empty despite
+// high-similarity retrievals, the prompt's Rule 4 was supposed to make it
+// cite tangentially. Sonnet (and friends) treat that as advisory and
+// frequently answer with academic citations to the underlying material
+// without acknowledging the USER'S TRAINING CORPUS as the trained source.
+// The user then sees "Answered from general knowledge" even after training
+// the agent on the topic. The server-side fix appends a one-line
+// tangential acknowledgment per uncited high-sim domain + a matching
+// Citation entry -- honest framing that gives the user visibility without
+// pretending the agent used the content.
+func (r *Replier) finishTurn(result *TurnResult, prep *preparedTurn, requestId string) {
+	if result == nil || prep == nil {
+		return
+	}
+	result.RetrievedChunks = prep.retrievedChunks
+	injectMissingTangentialCitations(result, r.logger, requestId)
 }
 
 // resolveOwnerForAgent looks up the v1:agents:agent's createdBy

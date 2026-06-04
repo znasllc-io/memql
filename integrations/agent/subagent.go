@@ -65,6 +65,35 @@ const (
 // turn EXPLICITLY declares itself a specialist.
 const HarnessRoleHintKey = "harness_role"
 
+// ExecutionLaneHintKey is the hint that selects the SI execution lane for a
+// turn (msg.Hints[ExecutionLaneHintKey]). It is orthogonal to the harness
+// role: the role decides WHAT the turn may do (emit a human-facing reply or
+// not), the lane decides HOW the model is driven (interactive streaming vs
+// non-streaming request/response).
+//
+//   - "" / "interactive" -> the streaming tool loop + idle watchdog. A human
+//     is watching tokens arrive (chat, voice). This is the default for every
+//     legacy turn, so omitting the hint keeps the existing behavior.
+//   - "background" -> the non-streaming tool loop (one request/response per
+//     step, one overall timeout, no idle watchdog). Planner-dispatched
+//     plan/task execution turns set this -- nobody is watching token-by-token,
+//     and running background work through the interactive idle watchdog is
+//     what false-killed slow produceArtifact turns (memql#893). (memql#896)
+const ExecutionLaneHintKey = "execution_lane"
+
+// ExecutionLaneBackground is the ExecutionLaneHintKey value that routes a
+// turn onto the non-streaming background executor.
+const ExecutionLaneBackground = "background"
+
+// IsBackgroundLane reports whether a turn's hints select the background
+// (non-streaming) execution lane.
+func IsBackgroundLane(hints map[string]string) bool {
+	if hints == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(hints[ExecutionLaneHintKey]), ExecutionLaneBackground)
+}
+
 // ResolveHarnessRole maps a hint value to a HarnessRole. Unknown / empty
 // values resolve to RoleAssistant (the legacy human-facing chat path).
 // Only an explicit "specialist" enters the constrained worker path.

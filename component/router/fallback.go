@@ -65,6 +65,58 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 	return nil, errNoChainEntryAvailable
 }
 
+// fallbackWithTools walks a provider chain on CallChatWithTools -- the
+// non-streaming request/response tool-calling surface used by the
+// background execution lane (memql#896). Mirrors fallbackStreamWithTools:
+// a pre-flight error on a chain entry records outcome="fallback_used" and
+// advances to the next entry; the successful entry is wrapped with an
+// observedWithTools that records the terminal CallRecord. There is no
+// mid-stream concept here -- the call either returns a result or an error.
+type fallbackWithTools struct {
+	router *Router
+	chain  []string
+	req    ResolveRequest
+}
+
+func (f *fallbackWithTools) CallChatWithTools(
+	ctx context.Context,
+	messages []common.ChatMessage,
+	tools []common.ToolDefinition,
+) (*common.ToolCallingChatResult, error) {
+	var lastErr error
+	var lastFailedResolved Resolved
+
+	for _, name := range f.chain {
+		client, resolved, ok := f.router.providerLookup(name, modalityTools)
+		if !ok {
+			continue
+		}
+		inner := client.(common.ToolCallingChatSIProvider)
+
+		if lastErr != nil {
+			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))
+		}
+
+		observed := &observedWithTools{
+			inner:    inner,
+			router:   f.router,
+			resolved: resolved,
+			req:      f.req,
+		}
+		result, err := observed.CallChatWithTools(ctx, messages, tools)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		lastFailedResolved = resolved
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errNoChainEntryAvailable
+}
+
 // fallbackChat mirrors fallbackStreamWithTools for the non-streaming
 // synchronous ChatSIProvider path.
 type fallbackChat struct {

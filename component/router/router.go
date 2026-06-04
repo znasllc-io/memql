@@ -74,6 +74,29 @@ func (r *Router) ResolveStreamWithTools(req ResolveRequest) (common.ChatStreamWi
 	}, resolved, nil
 }
 
+// ResolveWithTools picks a provider chain for a NON-streaming
+// request/response chat-with-tools call -- the background / batch
+// execution lane (memql#896). A planner-dispatched plan/task turn has no
+// human watching tokens arrive, so it runs through the synchronous
+// CallChatWithTools surface (one request, one response, one overall
+// timeout) instead of the interactive streaming path + idle watchdog.
+// Fallback chain semantics mirror ResolveStreamWithTools: a pre-flight
+// error advances down the chain, recording each failed attempt as
+// outcome="fallback_used".
+func (r *Router) ResolveWithTools(req ResolveRequest) (common.ToolCallingChatSIProvider, Resolved, error) {
+	chain, resolved, err := r.resolveChain(req, modalityTools)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	req = r.stampRequestId(req)
+	resolved.Chain = chain
+	return &fallbackWithTools{
+		router: r,
+		chain:  chain,
+		req:    req,
+	}, resolved, nil
+}
+
 // ResolveChat picks a provider for a non-streaming synchronous chat call
 // (suggest endpoints, voice-path InvokeSI turns) and returns the wrapped
 // provider. Fallback chain semantics mirror ResolveStreamWithTools.
@@ -96,6 +119,13 @@ type providerModality int
 const (
 	modalityStreamTools providerModality = iota
 	modalityChat
+	// modalityTools is the non-streaming request/response tool-calling
+	// surface (common.ToolCallingChatSIProvider) used by the background
+	// execution lane (memql#896). Both the streaming providers
+	// (anthropicStreamProvider / openAIStreamProvider) and the plain
+	// non-streaming providers implement CallChatWithTools, so any chain
+	// entry that serves modalityStreamTools also serves modalityTools.
+	modalityTools
 )
 
 // resolveChain picks the ordered list of provider names to try for a
@@ -141,11 +171,16 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 			continue
 		}
 		// Confirm interface support for the requested modality.
-		if mod == modalityStreamTools {
+		switch mod {
+		case modalityStreamTools:
 			if _, ok := entry.Client.(common.ChatStreamWithToolsProvider); !ok {
 				continue
 			}
-		} else {
+		case modalityTools:
+			if _, ok := entry.Client.(common.ToolCallingChatSIProvider); !ok {
+				continue
+			}
+		default:
 			if _, ok := entry.Client.(common.ChatSIProvider); !ok {
 				continue
 			}
@@ -181,6 +216,10 @@ func (r *Router) providerLookup(name string, mod providerModality) (any, Resolve
 	switch mod {
 	case modalityStreamTools:
 		if c, ok := entry.Client.(common.ChatStreamWithToolsProvider); ok {
+			return c, resolved, true
+		}
+	case modalityTools:
+		if c, ok := entry.Client.(common.ToolCallingChatSIProvider); ok {
 			return c, resolved, true
 		}
 	case modalityChat:
