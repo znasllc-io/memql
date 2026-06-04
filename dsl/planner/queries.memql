@@ -173,6 +173,30 @@ query plan queryRunningTrainAgentPlans {
   shape   planFull
 }
 
+// ---- Per-account task-queue reads (epic memql#902 / #909) ----
+//
+// The CoPresent Tasks UX shows the caller their active vs waiting Plans and
+// each waiting Plan's queue position. These two owned-tier reads are its data
+// source: payload.requestedBy==actor.userId binds the caller server-side so a
+// caller only ever sees their own account's Plans (the account == the user in
+// v1). The cap comes from queryAccountEntitlement (#903); the active count is
+// the length of queryActivePlansForUser; the queue order + per-Plan position
+// come from queryWaitingPlansForUser sorted by createdAt.
+
+@enabled
+@description("The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.")
+query plan queryActivePlansForUser {
+  filter  payload.requestedBy==actor.userId; traitStatusIsRunning
+  shape   planFull
+}
+
+@enabled
+@description("The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.")
+query plan queryWaitingPlansForUser {
+  filter  payload.requestedBy==actor.userId; payload.status=="waitingForSlot"
+  shape   planFull
+}
+
 @enabled
 @description("Latest persisted state for a Task (planner reads this on resume).")
 query plan queryTaskStateById {

@@ -237,6 +237,23 @@ func QueryActiveHumanParticipantsBuild(args QueryActiveHumanParticipantsArgs) st
 	return b.String()
 }
 
+// QueryActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with queryAccountEntitlement for the cap and queryWaitingPlansForUser for the queue.
+//
+// Bound concept: plan.
+type QueryActivePlansForUserArgs struct {
+}
+
+// QueryActivePlansForUser calls the engine query queryActivePlansForUser.
+func (qc *QueryClient) QueryActivePlansForUser(ctx context.Context, args QueryActivePlansForUserArgs) (*Result, error) {
+	call := QueryActivePlansForUserBuild(args)
+	return qc.executeNamed(ctx, "queryActivePlansForUser", call)
+}
+
+func QueryActivePlansForUserBuild(args QueryActivePlansForUserArgs) string {
+	_ = args
+	return "queryActivePlansForUser({})"
+}
+
 // QueryActiveResponsibilities -- The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via traitStatusIsActive; enabled==true drops soft-disabled rows.
 //
 // Bound concept: responsibility.
@@ -3616,6 +3633,23 @@ func QueryVideoOverridesForSpaceBuild(args QueryVideoOverridesForSpaceArgs) stri
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	b.WriteString("})")
 	return b.String()
+}
+
+// QueryWaitingPlansForUser -- The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.
+//
+// Bound concept: plan.
+type QueryWaitingPlansForUserArgs struct {
+}
+
+// QueryWaitingPlansForUser calls the engine query queryWaitingPlansForUser.
+func (qc *QueryClient) QueryWaitingPlansForUser(ctx context.Context, args QueryWaitingPlansForUserArgs) (*Result, error) {
+	call := QueryWaitingPlansForUserBuild(args)
+	return qc.executeNamed(ctx, "queryWaitingPlansForUser", call)
+}
+
+func QueryWaitingPlansForUserBuild(args QueryWaitingPlansForUserArgs) string {
+	_ = args
+	return "queryWaitingPlansForUser({})"
 }
 
 // QueryWorkerByIdentityId -- Look up the worker registration owned by an identity row.
