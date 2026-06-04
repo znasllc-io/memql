@@ -53,3 +53,17 @@ concept construct {
   catalogued        bool    @default("false") @description("True once this construct has been promoted into the owner's reusable catalog (post-activation), so later bundles can compose it instead of re-authoring. Drives the compose-first reuse path (#957).")
   catalogKey        string  @description("Dedup / match key for the catalog (#957): a stable signature of what this construct does (e.g. kind + bound concept + normalized predicate), used by the similarTo-backed matcher to find an existing construct before authoring a new one. Empty until catalogued.")
 }
+
+@version("1.0.0")
+@namespace("authoring")
+@description("One dependency edge in a bundle's construct graph (epic memql#954, issue #957). Construct `fromConstruct` (kind `fromKind`) in bundle `bundleId` depends on construct `toName` (kind `toKind`), which resolves from `toSource` (core = sealed engine, catalog = the owner's reusable catalog, bundle = bundle-local). Edges are recorded at compile time so the catalog can run IMPACT ANALYSIS -- 'which bundles depend on this construct' -- before a shared / cataloged construct changes. This is the reuse-coupling mitigation from the design doc: editing a cataloged construct re-validates its dependents.")
+@displayCard(primary="fromConstruct", secondary="toName", tertiary="bundleId", status="toSource")
+concept dependencyEdge {
+  ownerUserId    string  @required @description("v1:identity:user.id who owns this edge (the bundle owner). Per-row authz owner; server-stamped from actor.userId.")
+  bundleId       string  @required @description("v1:authoring:bundle.id whose construct declares this dependency.")
+  fromConstruct  string  @required @description("Name of the depending construct (the one that references the dependency).")
+  fromKind       enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt") @required @description("Kind of the depending construct.")
+  toName         string  @required @description("Name of the depended-on construct.")
+  toKind         enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt") @required @description("Kind of the depended-on construct.")
+  toSource       enum("core", "catalog", "bundle") @required @description("Where the dependency resolves under the precedence core -> owner-catalog -> bundle-local. Edges to `catalog` are the ones impact analysis cares about when a shared construct changes.")
+}

@@ -7640,6 +7640,67 @@ func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs
 	return b.String()
 }
 
+// MutationRecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
+//
+// Bound concept: dependencyEdge.
+type MutationRecordDependencyEdgeArgs struct {
+	EdgeId        string
+	BundleId      string
+	FromConstruct string
+	// Enum: automation | logic | shape | spec | trait | policy | mutation | query | prompt
+	FromKind string
+	ToName   string
+	// Enum: automation | logic | shape | spec | trait | policy | mutation | query | prompt
+	ToKind string
+	// Enum: core | catalog | bundle
+	ToSource string
+}
+
+// MutationRecordDependencyEdge calls the engine mutation mutationRecordDependencyEdge.
+func (qc *QueryClient) MutationRecordDependencyEdge(ctx context.Context, args MutationRecordDependencyEdgeArgs) (*Result, error) {
+	call := MutationRecordDependencyEdgeBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordDependencyEdge", call)
+}
+
+func MutationRecordDependencyEdgeBuild(args MutationRecordDependencyEdgeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordDependencyEdge({")
+	b.WriteString("edgeId: ")
+	b.WriteString(fmt.Sprintf("%q", args.EdgeId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fromConstruct: ")
+	b.WriteString(fmt.Sprintf("%q", args.FromConstruct))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fromKind: ")
+	b.WriteString(fmt.Sprintf("%q", args.FromKind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toName: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToName))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toKind: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToKind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toSource: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToSource))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
 //
 // Bound concept: observation.

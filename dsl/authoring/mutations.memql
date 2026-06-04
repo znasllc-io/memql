@@ -8,7 +8,7 @@
 // the gates (#956 validation, #958 dry-run) and the authored runtime
 // (#959) call these to record state.
 
-use authoring.concepts.{ bundle, construct }
+use authoring.concepts.{ bundle, construct, dependencyEdge }
 
 @enabled
 @description("Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via mutationCreateAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.")
@@ -178,5 +178,29 @@ mutation construct mutationCatalogueConstruct {
     ownerUserId: actor.userId
     catalogued: true
     args.catalogKey
+  }
+}
+
+@enabled
+@description("Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.")
+mutation dependencyEdge mutationRecordDependencyEdge {
+  args {
+    edgeId         string  @required
+    bundleId       string  @required
+    fromConstruct  string  @required
+    fromKind       string  @required @enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")
+    toName         string  @required
+    toKind         string  @required @enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")
+    toSource       string  @required @enum("core", "catalog", "bundle")
+  }
+  insert dependencyEdge {
+    id: args.edgeId
+    ownerUserId: actor.userId
+    args.bundleId
+    args.fromConstruct
+    args.fromKind
+    args.toName
+    args.toKind
+    args.toSource
   }
 }
