@@ -9,6 +9,11 @@ name: govulncheck
 on:
   push:
     branches: [main]
+  # Merge queue (#858): re-run the advisory scan on the batched merge
+  # candidate, matching the header note. The `scan` context that gates
+  # the queue is satisfied by gitleaks; this adds govulncheck's advisory
+  # coverage to the candidate too.
+  merge_group:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 
