@@ -183,7 +183,9 @@ func queryResultHasRow(v any) bool {
 func jsonString(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {
-		return fmt.Sprintf(`"%s"`, strings.ReplaceAll(s, `"`, `\"`))
+		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		return fmt.Sprintf(`"%s"`, escaped)
 	}
 	return string(b)
 }
