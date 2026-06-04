@@ -62,6 +62,31 @@ func (c *convTracker) recordAndCheck(d plannerDecision) (park bool, count int) {
 	return count > maxIdenticalNonTerminalDecisions(), count
 }
 
+// noTaskSucceedKey is the fixed convTracker key for the "model emitted
+// markPlanSucceeded while the plan still has ZERO tasks" non-progress
+// signal (memql#843). markPlanSucceeded is normally a TERMINAL decision
+// and so isn't tracked by recordAndCheck -- but during the planning
+// phase a no-task markPlanSucceeded is reinterpreted as "re-invoke and
+// try again" (the model shortcutted the workflow), which can spin. This
+// key tracks those repeats explicitly so the loop parks instead of
+// re-inviting forever.
+const noTaskSucceedKey = "__noTaskSucceed__"
+
+// recordNoTaskSucceedAndCheck records one "markPlanSucceeded with no
+// tasks" event and reports whether the loop should PARK (it has now
+// repeated past the same identical-decision threshold). This closes the
+// gap where a planning-phase plan whose model keeps emitting
+// markPlanSucceeded without ever emitting a task would re-invoke up to
+// the per-cycle iteration cap every cycle.
+func (c *convTracker) recordNoTaskSucceedAndCheck() (park bool, count int) {
+	if c == nil {
+		return false, 0
+	}
+	c.seen[noTaskSucceedKey]++
+	count = c.seen[noTaskSucceedKey]
+	return count > maxIdenticalNonTerminalDecisions(), count
+}
+
 // isNonTerminalDecision reports whether an action keeps the loop going
 // (and so could spin). Terminal / parking actions are excluded.
 func isNonTerminalDecision(action string) bool {
