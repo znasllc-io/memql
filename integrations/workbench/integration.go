@@ -13,6 +13,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -481,8 +482,16 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		if mimeType != "" {
 			fmt.Fprintf(&b, `, mimeType:%q`, mimeType)
 		}
+	} else if inline := i.inlineTextBody(planId, path, format, innerArgs, local); inline != "" {
+		// No blob uploader configured (the typical local-dev path): without
+		// this the deliverable would be an un-viewable pointer note, so the
+		// user "can't see the file in the Library". We already hold the bytes
+		// the agent just wrote, so for a text-shaped file inline the content
+		// as the generatedOutput body -- the Library DocumentCard renders it
+		// directly (markdown / plain), no attachment round-trip needed. (memql#889)
+		fmt.Fprintf(&b, `, body:%q`, inline)
 	} else {
-		// Pointer row: no bytes uploaded, so describe where the file lives.
+		// Pointer row: bytes unavailable or non-text, so describe where the file lives.
 		fmt.Fprintf(&b, `, body:%q`, fmt.Sprintf("File written to the task workspace at `%s`.", path))
 	}
 	if agentId = strings.TrimSpace(agentId); agentId != "" {
@@ -501,6 +510,25 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 				slog.String("ownerUserId", ownerUserId), slog.Any("error", err))
 		}
 	}
+}
+
+// inlineTextBody returns the just-written file's content as a string when it
+// is a text-shaped deliverable small enough to store inline, else "". Used on
+// the no-blob-uploader path (local dev) so a produced markdown/text file is
+// viewable in the Library without an attachment round-trip -- the bytes are
+// the same ones workbenchOutputBytes sources for the upload path. (memql#889)
+func (i *Integration) inlineTextBody(planId, relPath, format string, innerArgs map[string]any, local bool) string {
+	switch format {
+	case "markdown", "text":
+	default:
+		return ""
+	}
+	const maxInlineBytes = 256 << 10 // 256 KiB -- generatedOutput.body, not a blob
+	data := i.workbenchOutputBytes(planId, relPath, innerArgs, local)
+	if len(data) == 0 || len(data) > maxInlineBytes || !utf8.Valid(data) {
+		return ""
+	}
+	return string(data)
 }
 
 // workbenchOutputBytes returns the bytes just written by an fs_write,
