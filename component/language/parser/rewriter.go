@@ -414,15 +414,18 @@ func emitMutation(name, conceptId, body string) (string, error) {
 		return "", err
 	}
 
-	// The write-target's bare name must match the bare concept name
-	// inferred from the file's binding (last colon-separated segment
-	// of the canonical id).
-	expected := conceptId
-	if idx := strings.LastIndex(conceptId, ":"); idx >= 0 {
-		expected = conceptId[idx+1:]
-	}
-	if parsed.writeTarget != expected {
-		return "", fmt.Errorf("%s target %q does not match the concept binding %q -- write it as `%s %s { ... }`", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected)
+	// The bare form (writeTarget == "") derives its target from the
+	// signature-bound concept directly. The transitional named form
+	// restates the concept's bare name; validate it still matches the
+	// binding (last colon-separated segment of the canonical id).
+	if parsed.writeTarget != "" {
+		expected := conceptId
+		if idx := strings.LastIndex(conceptId, ":"); idx >= 0 {
+			expected = conceptId[idx+1:]
+		}
+		if parsed.writeTarget != expected {
+			return "", fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected)
+		}
 	}
 
 	idExpr, payload, err := translateInsertBody(parsed.writeBody)
@@ -464,27 +467,38 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	}
 	out.argsText = argsText
 
-	// Scan a write block: `<insert|update> <bareConceptName> { ... }`.
+	// Scan a write block. The canonical form is bare `<keyword> { ... }`
+	// (#986) -- the write target is the concept bound by the mutation's
+	// `mutation <Concept> <name>` signature, so restating it in the body
+	// is redundant. The named form `<keyword> <conceptName> { ... }` is
+	// still accepted transitionally (the name is validated against the
+	// signature); its tree-wide migration to the bare form + hard
+	// rejection is the codemod child #988.
 	scanWrite := func(keyword string) (name, raw string, found bool, err error) {
-		re := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-		loc := re.FindStringSubmatchIndex(body)
-		if loc == nil {
-			// Detect the legacy bare form `insert { ... }` so the
-			// error message names the missing concept binding.
-			bareRe := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]*\{`)
-			if bareRe.FindStringIndex(body) != nil {
-				return "", "", false, fmt.Errorf("`%s { ... }` is retired -- use `%s <conceptName> { ... }` so the write target is visible at the block header (the concept name must match the mutation's signature-bound concept)", keyword, keyword)
+		// Named form first: `<keyword> <conceptName> { ... }`.
+		named := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+		if loc := named.FindStringSubmatchIndex(body); loc != nil {
+			name = body[loc[4]:loc[5]]
+			openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
+			open := loc[0] + openOffset
+			close := findMatchingCloseBrace(body, open)
+			if close < 0 {
+				return "", "", false, fmt.Errorf("`%s %s { ... }` block missing closing brace", keyword, name)
 			}
-			return "", "", false, nil
+			return name, body[open+1 : close], true, nil
 		}
-		name = body[loc[4]:loc[5]]
-		openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
-		open := loc[0] + openOffset
-		close := findMatchingCloseBrace(body, open)
-		if close < 0 {
-			return "", "", false, fmt.Errorf("`%s %s { ... }` block missing closing brace", keyword, name)
+		// Bare form (canonical): `<keyword> { ... }`. Target derived from
+		// the signature; name is left empty to signal "derive".
+		bare := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]*\{`)
+		if loc := bare.FindStringIndex(body); loc != nil {
+			open := loc[0] + strings.Index(body[loc[0]:loc[1]], "{")
+			close := findMatchingCloseBrace(body, open)
+			if close < 0 {
+				return "", "", false, fmt.Errorf("`%s { ... }` block missing closing brace", keyword)
+			}
+			return "", body[open+1 : close], true, nil
 		}
-		return name, body[open+1 : close], true, nil
+		return "", "", false, nil
 	}
 
 	insertName, insertRaw, hasInsert, err := scanWrite("insert")
@@ -497,7 +511,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	}
 	switch {
 	case hasInsert && hasUpdate:
-		return nil, fmt.Errorf("mutation body cannot mix `insert <name> { ... }` and `update <name> { ... }`")
+		return nil, fmt.Errorf("mutation body cannot mix an `insert { ... }` and an `update { ... }` block")
 	case hasInsert:
 		out.writeKind = "insert"
 		out.writeBody = insertRaw
@@ -507,7 +521,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		out.writeBody = updateRaw
 		out.writeTarget = updateName
 	default:
-		return nil, fmt.Errorf("mutation body must contain exactly one `insert <conceptName> { ... }` or `update <conceptName> { ... }` block")
+		return nil, fmt.Errorf("mutation body must contain exactly one `insert { ... }` or `update { ... }` block")
 	}
 	return out, nil
 }

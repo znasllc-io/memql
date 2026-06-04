@@ -5,29 +5,49 @@ import (
 	"testing"
 )
 
-// The struct-form mutation rewriter requires the write block opener
-// to name its target concept: `insert <bareName> { ... }` or
-// `update <bareName> { ... }`. The bare name must match the
-// mutation's signature-bound concept (`mutation <Concept> <name>`).
-// The bare `insert { ... }` shape that earlier phases of the DSL
-// accepted is now an error with a migration hint.
+// The canonical struct-form mutation write block is bare `insert { ... }`
+// / `update { ... }` (#986): the target concept comes from the mutation's
+// `mutation <Concept> <name>` signature, so restating it in the body is
+// redundant. The named form `insert <conceptName> { ... }` is still
+// accepted transitionally and its concept name is validated against the
+// signature; its tree-wide migration + hard rejection is the codemod #988.
 //
 // memql#314 retired the legacy concept-binding-via-annotation form;
 // every fixture below declares the binding through the signature.
 
-func TestNormaliseMutationSource_RequiresInsertTargetName(t *testing.T) {
+func TestNormaliseMutationSource_AcceptsBareInsert(t *testing.T) {
 	src := `mutation space createSpace {
   insert {
     id: "x"
     name: "untitled"
   }
 }`
-	_, err := NormaliseMutationSource(src)
-	if err == nil {
-		t.Fatal("expected error: bare `insert {` should be rejected")
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("bare `insert {` should be accepted, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "retired") || !strings.Contains(err.Error(), "<conceptName>") {
-		t.Fatalf("error should explain the migration; got %q", err.Error())
+	if !strings.Contains(out, "func (Mutation) createSpace") {
+		t.Fatalf("rewriter should produce the procedural form; got %q", out)
+	}
+	// The write target is derived from the signature-bound concept.
+	if !strings.Contains(out, "insert(") || !strings.Contains(out, "space") {
+		t.Fatalf("emitted insert should target the signature concept `space`; got %q", out)
+	}
+}
+
+func TestNormaliseMutationSource_AcceptsBareUpdate(t *testing.T) {
+	src := `mutation space renameSpace {
+  update {
+    id: args.id
+    name: "new"
+  }
+}`
+	out, err := NormaliseMutationSource(src)
+	if err != nil {
+		t.Fatalf("bare `update {` should be accepted, got: %v", err)
+	}
+	if !strings.Contains(out, "update(") {
+		t.Fatalf("emitted body should contain an update call; got %q", out)
 	}
 }
 
