@@ -136,21 +136,32 @@ func (l *PlannerAgentLoop) gateSpecialistAction(ctx context.Context, planId, act
 	}
 	l.logger.Info("planner specialist gate: parking for approval (no factory / trainer run)",
 		"planId", planId, "action", action, "kind", getString(plan, "kind"))
-	return true, l.parkForSpecialistApproval(ctx, planId, gate.Message)
+	return true, l.parkForSpecialistApproval(ctx, plan, action, gate.Message)
+}
+
+// approveDeclineOptions is the shared Approve/Decline choice list used by
+// both the Plan's feedbackRequest and the canvas card's data so the two
+// surfaces stay in sync.
+var approveDeclineOptions = []map[string]any{
+	{"label": "Approve & create", "value": "approve"},
+	{"label": "Decline (use existing agent)", "value": "decline"},
 }
 
 // parkForSpecialistApproval transitions the Plan to
 // awaitingFeedback(specialist_approval_required) with the message in the
-// feedbackRequest so the canvas card can render an Approve/Decline.
-func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, planId, message string) error {
+// feedbackRequest, then publishes the matching
+// plan.specialistApprovalRequested canvas card so the frontend's
+// SpecialistApprovalCard renders an Approve/Decline surface
+// (copresent#362). The card publish is best-effort: a failure logs but
+// does not undo the park -- the operator still gets the bare
+// feedbackReason prompt.
+func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan map[string]any, action, message string) error {
+	planId := getString(plan, "id")
 	fbReq := map[string]any{
 		"question": message,
 		"kind":     "choice",
-		"options": []map[string]any{
-			{"label": "Approve & create", "value": "approve"},
-			{"label": "Decline (use existing agent)", "value": "decline"},
-		},
-		"askedAt": time.Now().UTC().Format(time.RFC3339),
+		"options":  approveDeclineOptions,
+		"askedAt":  time.Now().UTC().Format(time.RFC3339),
 	}
 	fbReqJSON, err := json.Marshal(fbReq)
 	if err != nil {
@@ -160,6 +171,64 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, planId
 		`mutationUpdatePlanStatus({planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s})`,
 		planId, string(fbReqJSON),
 	)
-	_, err = l.engine.Execute(systemActorContext(ctx), q)
+	if _, err = l.engine.Execute(systemActorContext(ctx), q); err != nil {
+		return err
+	}
+	if cardErr := l.writeSpecialistApprovalCard(ctx, plan, action, message); cardErr != nil {
+		l.logger.Warn("planner specialist gate: failed to write approval card",
+			"planId", planId, "action", action, "error", cardErr)
+	}
+	return nil
+}
+
+// writeSpecialistApprovalCard inserts a v1:copresent:canvasState row of
+// kind='card' carrying data.variant='plan.specialistApprovalRequested'.
+// The frontend renderer (copresent SpecialistApprovalCard.tsx, #362)
+// reads variant + planId + action + goal + message and surfaces
+// Approve / Decline buttons; Approve read-merges
+// metrics.specialistApproved and resumes the Plan to running. We attach
+// the card to the Plan's space so it lands inline with the conversation
+// that triggered the request. Mirrors writeMintApprovalCard (the mintSkill
+// equivalent). memql#852 Gap 1.
+func (l *PlannerAgentLoop) writeSpecialistApprovalCard(ctx context.Context, plan map[string]any, action, message string) error {
+	spaceId := getString(plan, "spaceId")
+	if spaceId == "" {
+		// No space binding; nothing to render against. The
+		// awaitingFeedback park still happened -- the missing card just
+		// means the operator gets the bare feedbackReason instead of the
+		// rich approval surface.
+		return fmt.Errorf("plan has no spaceId; skipping plan.specialistApprovalRequested card")
+	}
+	planId := getString(plan, "id")
+	ownerAgentId := getString(plan, "ownerAgentId")
+
+	cardData := map[string]any{
+		"variant": "plan.specialistApprovalRequested",
+		"planId":  planId,
+		"action":  action,
+		"goal":    getString(plan, "goal"),
+		"message": message,
+		"options": approveDeclineOptions,
+	}
+
+	args := map[string]any{
+		"canvasStateId": fmt.Sprintf("specialist-approval-%s", planId),
+		"space":         spaceId,
+		"kind":          "card",
+		"data":          cardData,
+		"visibility":    "private",
+		"forUserId":     getString(plan, "requestedBy"),
+		"importance":    "notify",
+		"actor": map[string]any{
+			"kind":    "agent",
+			"agentId": ownerAgentId,
+		},
+	}
+	payload, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("marshal card args: %w", err)
+	}
+	call := fmt.Sprintf(`mutationCreateCanvasState(%s)`, string(payload))
+	_, err = l.engine.Execute(systemActorContext(ctx), call)
 	return err
 }

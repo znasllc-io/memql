@@ -106,3 +106,73 @@ func TestGateSpecialistAction_MultiStepProceeds(t *testing.T) {
 		t.Fatalf("a multi-step plan's createSpecialist must NOT be gated: handled=%v err=%v", handled, err)
 	}
 }
+
+// TestGateSpecialistAction_PublishesApprovalCard is memql#852 Gap 1: a
+// gated action whose Plan has a spaceId must, in addition to parking,
+// publish the plan.specialistApprovalRequested canvas card the copresent
+// SpecialistApprovalCard renders. The card carries the planId + action so
+// the frontend heading + approve flow target the right Plan.
+func TestGateSpecialistAction_PublishesApprovalCard(t *testing.T) {
+	planRow := map[string]any{
+		"output": []any{map[string]any{
+			"id": "plan-3", "kind": "produceArtifact", "status": "planning",
+			"goal": "translate documents to French", "spaceId": "v1:cognition:space:s1",
+			"ownerAgentId": "v1:agents:agent:ga", "requestedBy": "v1:identity:user:u1",
+		}},
+	}
+	fe := &fakeEngine{execResponder: func(query string) (any, error) {
+		if containsAll(query, "queryPlanById") {
+			return planRow, nil
+		}
+		return nil, nil
+	}}
+	l := &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}
+
+	handled, err := l.gateSpecialistAction(context.Background(), "plan-3", "spawnTrainingPlan")
+	if err != nil || !handled {
+		t.Fatalf("gated spawnTrainingPlan must be handled (parked): handled=%v err=%v", handled, err)
+	}
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, "specialist_approval_required") != 1 {
+		t.Fatalf("must park to awaitingFeedback(specialist_approval_required), got %d", countContains(exec, "specialist_approval_required"))
+	}
+	if countContains(exec, "mutationCreateCanvasState") != 1 {
+		t.Fatalf("must publish exactly one canvas approval card, got %d mutationCreateCanvasState calls", countContains(exec, "mutationCreateCanvasState"))
+	}
+	if countContains(exec, "plan.specialistApprovalRequested") != 1 {
+		t.Fatalf("card must carry the plan.specialistApprovalRequested variant the frontend renders")
+	}
+	if countContains(exec, "plan-3") < 1 {
+		t.Fatalf("card must carry the planId so the frontend approve flow targets the right Plan")
+	}
+}
+
+// TestGateSpecialistAction_ParksWithoutCardWhenNoSpace verifies the card
+// publish is best-effort: a gated Plan with no spaceId still parks (no
+// render surface to attach to, so no card) -- the park must not be undone.
+func TestGateSpecialistAction_ParksWithoutCardWhenNoSpace(t *testing.T) {
+	planRow := map[string]any{
+		"output": []any{map[string]any{
+			"id": "plan-4", "kind": "produceArtifact", "status": "planning", "goal": "a list of 10 birds",
+		}},
+	}
+	fe := &fakeEngine{execResponder: func(query string) (any, error) {
+		if containsAll(query, "queryPlanById") {
+			return planRow, nil
+		}
+		return nil, nil
+	}}
+	l := &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}
+
+	handled, err := l.gateSpecialistAction(context.Background(), "plan-4", "createSpecialist")
+	if err != nil || !handled {
+		t.Fatalf("gated createSpecialist must still be handled (parked) without a spaceId: handled=%v err=%v", handled, err)
+	}
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, "specialist_approval_required") != 1 {
+		t.Fatalf("must still park to awaitingFeedback even with no card, got %d", countContains(exec, "specialist_approval_required"))
+	}
+	if countContains(exec, "mutationCreateCanvasState") != 0 {
+		t.Fatalf("no spaceId -> no canvas card, got %d mutationCreateCanvasState calls", countContains(exec, "mutationCreateCanvasState"))
+	}
+}
