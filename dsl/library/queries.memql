@@ -75,6 +75,16 @@ query generatedOutput queryGeneratedOutputById {
 }
 
 @enabled
+@description("List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByPlanId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939)")
+query generatedOutput queryGeneratedOutputsForPlan {
+  args {
+    planId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.producedByPlanId==args.planId
+  shape   generatedOutputFull
+}
+
+@enabled
 @description("Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef.")
 query memory queryMemoryById {
   args {
