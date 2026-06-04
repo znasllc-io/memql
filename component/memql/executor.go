@@ -195,7 +195,7 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
 	// Optimization: Try to compile the entire expression tree into a single SQL query.
 	// This is much more efficient than running separate queries and intersecting/unioning results.
-	if combined, ok := e.tryCompileCombinedFilter(expr, conceptContext); ok {
+	if combined, ok := e.tryCompileCombinedFilter(ctx, expr, conceptContext); ok {
 		resolvedExpr, err := resolveExpressionForExecution(expr, conceptContext)
 		if err != nil {
 			return nil, err
