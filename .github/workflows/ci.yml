@@ -16,9 +16,72 @@ concurrency:
 permissions:
   contents: read
 
+# Affected-lane routing (Tier 1, #856)
+# ------------------------------------
+# The `changes` job classifies the PR diff into a few coarse buckets
+# (go / dsl / sdkts / voice / ci) via dorny/paths-filter. Each lane
+# below gates on the buckets it actually depends on, so a docs-only PR
+# skips the whole Go+voice+TS suite, a DSL-only PR runs only the DSL
+# lanes, etc.
+#
+# Routing only applies to `pull_request` events. On `push` to main (and
+# the future merge_group) every lane runs unconditionally -- main is the
+# integration point and must always get full coverage.
+#
+# BRANCH-PROTECTION SAFETY: a path-skipped lane reports `skipped`, which
+# would leave a directly-required status check perpetually pending and
+# block merge. So the SINGLE required check is the `ci-required`
+# aggregator at the bottom: it always runs and passes when every lane is
+# skipped-or-successful. The individual lanes must NOT be required checks
+# on their own.
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      dsl: ${{ steps.filter.outputs.dsl }}
+      sdkts: ${{ steps.filter.outputs.sdkts }}
+      voice: ${{ steps.filter.outputs.voice }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: |
+            # A CI/build-config change re-runs everything -- a workflow or
+            # Makefile edit can affect any lane, so never narrow it.
+            ci:
+              - '.github/workflows/**'
+              - 'Makefile'
+            # Any Go source or the module graph. Voice + generator + sdk/go
+            # are Go too, so they are a subset of this.
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'go.work'
+              - 'go.work.sum'
+            # The embedded DSL tree.
+            dsl:
+              - 'dsl/**'
+            # The TypeScript SDK and the generator that emits it.
+            sdkts:
+              - 'sdk/ts/**'
+              - 'scripts/sdk-gen/**'
+            # The CGO voice path (informational; the voice lane gates on
+            # `go` because the tagged build compiles the whole module).
+            voice:
+              - 'integrations/voice/**'
+
   build:
     name: build
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -31,6 +94,8 @@ jobs:
 
   test:
     name: test
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -48,8 +113,12 @@ jobs:
   # is behind `//go:build voice`, so the CGO-free lanes above never touch it.
   # This lane installs the C deps, sets CGO_ENABLED=1, and builds + vets the
   # voice path so the libopus foundation is actually exercised on every PR.
+  # Gates on `go` (not just voice paths): the tagged build compiles the whole
+  # module, so any Go change can break it.
   build-voice:
     name: build voice (cgo)
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -77,6 +146,8 @@ jobs:
 
   vet:
     name: vet
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -87,8 +158,13 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+  # SDK drift check: regenerates the typed Go SDK from the DSL and fails on a
+  # diff. Gates on `go` OR `dsl` -- the generator is Go and reads dsl/, so a
+  # change to either can move the generated output.
   sdk-gen-check:
     name: sdk-gen-check
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -99,8 +175,12 @@ jobs:
       - name: regenerate typed SDK and check for drift
         run: make sdk-gen-check
 
+  # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
+  # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
     name: sdk-ts-typecheck
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.sdkts == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -126,6 +206,8 @@ jobs:
   # fixture-based check is the regression tripwire. See cmd/harness-eval.
   harness-eval:
     name: harness eval
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -144,8 +226,11 @@ jobs:
   # pipeline the engine runs at startup, so the gate sees exactly
   # what production sees -- no cross-repo cockpit install required.
   # See memql#278 for the move from the cockpit-binary placeholder.
+  # Gates on `go` OR `dsl` (the linter is Go, the input is dsl/).
   dsl-lint:
     name: dsl lint
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -165,8 +250,11 @@ jobs:
   # DSL tree and runs engine.Init against it (DB-free; provider secret
   # resolution is lazy with OS-env fallback), turning that class of
   # bootstrap regression into a fast CI failure. See #599.
+  # Gates on `go` OR `dsl` (engine is Go, the loaded tree is dsl/).
   engine-load-check:
     name: engine load check
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -176,3 +264,44 @@ jobs:
           cache: true
       - name: engine init over full DSL tree
         run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
+
+  # Aggregator -- the SINGLE required status check for branch protection.
+  # It always runs (even when every lane is path-skipped) and fails only if
+  # a lane it depends on actually failed or was cancelled; a `skipped` lane
+  # is treated as a pass. This is what makes affected-lane routing safe to
+  # merge: point the ruleset's required check at `ci-required` ONLY, never
+  # at the individual lanes (a skipped required lane would block merge
+  # forever).
+  ci-required:
+    name: ci-required
+    if: ${{ always() }}
+    needs:
+      - changes
+      - build
+      - test
+      - build-voice
+      - vet
+      - sdk-gen-check
+      - sdk-ts-typecheck
+      - harness-eval
+      - dsl-lint
+      - engine-load-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify required lanes succeeded or were skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "lane results: $RESULTS"
+          status=0
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "FAIL: a required lane reported '$r'"; status=1 ;;
+            esac
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "ci-required: at least one lane did not pass"
+            exit 1
+          fi
+          echo "OK: all required lanes succeeded or were path-skipped"
