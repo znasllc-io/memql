@@ -71,6 +71,18 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 		return nil, err
 	}
 
+	// Isolate the lane's provider selection (memql#897). prepareTurn set
+	// PolicyName from the agent's INTERACTIVE preferences (its stored policy
+	// or the role default). Background work runs on its own policy so the
+	// chain (and, via #898, the model tier) is tuned independently of live
+	// chat. A per-turn explicit provider pin still wins -- routerReq
+	// precedence is ExplicitProvider > PolicyName -- so an admin hotfix hint
+	// is honored, but the agent's stored interactive policy no longer leaks
+	// into the background lane. The rate-budget isolation is independent of
+	// this and holds even when both lanes resolve the same provider (the
+	// si_guard buckets are split by context, not by provider).
+	prep.routerReq.PolicyName = backgroundExecutionPolicy
+
 	provider, resolved, err := r.router.ResolveWithTools(prep.routerReq)
 	if err != nil {
 		return nil, fmt.Errorf("router: resolve with-tools (background lane): %w", err)
@@ -128,6 +140,13 @@ func (r *Replier) runNonStreamingToolLoop(
 		OwnerUserId: turnCtx.OwnerUserId,
 		SpaceId:     turnCtx.SpaceId,
 	})
+
+	// Tag the lane so every model HTTP call this loop makes counts against
+	// the background si_guard rate bucket, not the interactive one
+	// (memql#897). The vendor SDKs thread this context to the request, where
+	// guardedTransport reads it. A batch burst can trip the background
+	// ceiling without starving live chat/voice of the interactive budget.
+	ctx = memql.ContextWithBackgroundLane(ctx)
 
 	start := time.Now()
 	reqTimeout := backgroundRequestTimeout()

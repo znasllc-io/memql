@@ -43,13 +43,13 @@ func TestAdmitRate_AdmitsUpToCeilingThenBlocks(t *testing.T) {
 	g := newTestRateGuard(5, 10*time.Second, &now)
 	// First 5 are admitted.
 	for i := 1; i <= 5; i++ {
-		if open, _ := g.admitRate(); open {
+		if open, _ := g.admitRate(false); open {
 			t.Fatalf("call %d should be admitted (<= rateMax 5)", i)
 		}
 	}
 	// The 6th and beyond are blocked.
 	for i := 6; i <= 10; i++ {
-		if open, _ := g.admitRate(); !open {
+		if open, _ := g.admitRate(false); !open {
 			t.Fatalf("call %d must be blocked (> rateMax 5)", i)
 		}
 	}
@@ -60,7 +60,7 @@ func TestAdmitRate_Disabled_NeverBlocks(t *testing.T) {
 	g := newTestRateGuard(2, 10*time.Second, &now)
 	g.rateEnabled = false
 	for i := 0; i < 100; i++ {
-		if open, _ := g.admitRate(); open {
+		if open, _ := g.admitRate(false); open {
 			t.Fatalf("disabled rate guard must never block (call %d)", i)
 		}
 	}
@@ -73,16 +73,16 @@ func TestAdmitRate_WindowSlides_EvictsOldCalls(t *testing.T) {
 	g := newTestRateGuard(3, 10*time.Second, &now)
 	// Fill the window.
 	for i := 0; i < 3; i++ {
-		if open, _ := g.admitRate(); open {
+		if open, _ := g.admitRate(false); open {
 			t.Fatalf("call %d within ceiling should be admitted", i)
 		}
 	}
-	if open, _ := g.admitRate(); !open {
+	if open, _ := g.admitRate(false); !open {
 		t.Fatalf("4th call within the window must be blocked")
 	}
 	// Advance past the window so the 3 old calls are evicted.
 	now = now.Add(11 * time.Second)
-	if open, _ := g.admitRate(); open {
+	if open, _ := g.admitRate(false); open {
 		t.Fatalf("after the window slides, the next call must be admitted again")
 	}
 }
@@ -93,7 +93,7 @@ func TestAdmitRate_PacedCalls_NeverThrottled(t *testing.T) {
 	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
 	g := newTestRateGuard(2, 10*time.Second, &now)
 	for i := 0; i < 50; i++ {
-		if open, _ := g.admitRate(); open {
+		if open, _ := g.admitRate(false); open {
 			t.Fatalf("paced call %d must never be throttled", i)
 		}
 		now = now.Add(11 * time.Second) // one call per window
@@ -106,18 +106,18 @@ func TestAdmitRate_PacedCalls_NeverThrottled(t *testing.T) {
 func TestAdmitRate_BlockedCallsNotRecorded_WindowDrains(t *testing.T) {
 	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
 	g := newTestRateGuard(2, 10*time.Second, &now)
-	g.admitRate()
-	g.admitRate()
+	g.admitRate(false)
+	g.admitRate(false)
 	// Hammer 100 blocked calls at t0 -- none recorded.
 	for i := 0; i < 100; i++ {
-		if open, _ := g.admitRate(); !open {
+		if open, _ := g.admitRate(false); !open {
 			t.Fatalf("call should be blocked while window is full")
 		}
 	}
 	// Advance just past the window from the ORIGINAL two admits. If
 	// blocked calls had been recorded, the window would still be full.
 	now = now.Add(11 * time.Second)
-	if open, _ := g.admitRate(); open {
+	if open, _ := g.admitRate(false); open {
 		t.Fatalf("after the original admits age out, traffic must resume (blocked calls must not extend the window)")
 	}
 }

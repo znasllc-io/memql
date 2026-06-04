@@ -49,3 +49,12 @@ policy lowLatencyVoice { }
 @preferredRole("operator")
 @description("Strong reasoning -- for operator-enabled agents driving the UI and for complex tool-calling choreography. Claude Sonnet primary, GPT-5.4 Pro as a second, Gemini Pro as a third.")
 policy strongReasoning { }
+
+// ---- policies/v1/backgroundExecution.memql ----
+
+@primary("streamClaudeSonnet")
+@fallback("stream54Pro")
+@fallback("streamGeminiPro")
+@maxLatencyMs(120000)
+@description("Background / batch execution lane (memql#897). The dedicated policy for planner-dispatched plan/task execution turns, kept SEPARATE from the interactive chat policies so the batch lane's provider chain (and, per memql#898, its model tier) is tuned independently of live chat -- a change here can never regress conversation latency or quality. Sonnet-class for now (mirrors strongReasoning); memql#898 retunes the default to a cheap tier with escalate-on-stuck. Higher maxLatencyMs because no human is watching tokens arrive -- the user gets a completion card when the work finishes. Pairs with the background si_guard rate bucket, which isolates batch spend from the interactive rate budget.")
+policy backgroundExecution { }
