@@ -260,6 +260,16 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.handleSlotFreed,
 			events.WithSubscriberName("planner:admit-next-on-slot-free"),
 		))
+		// Preempt-on-pass (epic memql#902 / #906). When a Plan with an
+		// in-flight turn goes paused/cancelled, send the cross-node
+		// AgentPreemptTurn so the agent's tool loop stops at its next
+		// checkpoint (and persists taskState for resume). No-op when the
+		// Plan isn't mid-execution here.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.handlePlanPreempt,
+			events.WithSubscriberName("planner:preempt-on-pass"),
+		))
 		// trainSpecialist dispatcher (#644). Claims kind=trainSpecialist
 		// Plans -- the agent loop skips that kind so the two don't race.
 		// Subscribes to both created + updated so a Plan spawned in

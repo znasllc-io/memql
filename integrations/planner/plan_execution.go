@@ -97,6 +97,10 @@ type agentTurnResult struct {
 	text      string
 	citations []*memqlv1.AgentTurnCitation
 	retrieved []*memqlv1.AgentRetrievedChunk
+	// paused is true when the turn ended by cooperative preemption ("pass",
+	// epic memql#902 / #906). The caller leaves the Plan in its paused state
+	// instead of stamping it succeeded/failed.
+	paused bool
 }
 
 // executableViaApprovedPath reports whether a plan of this kind is executed by
@@ -135,7 +139,14 @@ func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) 
 	// in "running"; without this guard it would be dispatched to its agent
 	// twice (double file write, double token spend). LoadOrStore claims the
 	// plan; executeApprovedPlan clears it on return. (memql#800)
-	if _, alreadyExecuting := p.executing.LoadOrStore(fields.ID, true); alreadyExecuting {
+	//
+	// The claim value is the turn's requestId (minted here so it's known
+	// before dispatch): handlePlanPreempt (#906) reads it to address the
+	// cross-node "pass" signal at the in-flight turn. Forwarding it as
+	// AgentGenerateTurnMsg.RequestId means the agent loop's pause check keys
+	// on the same id.
+	requestId := id.NewShortId()
+	if _, alreadyExecuting := p.executing.LoadOrStore(fields.ID, requestId); alreadyExecuting {
 		return
 	}
 
@@ -144,7 +155,7 @@ func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) 
 	// takes seconds (sometimes minutes); blocking the bus would
 	// stall every other subscriber's events behind us.
 	bgCtx := contextWithSystemActor(context.Background())
-	go p.executeApprovedPlan(bgCtx, fields.ID)
+	go p.executeApprovedPlan(bgCtx, fields.ID, requestId)
 }
 
 // isSlotFreeingStatus reports whether a Plan transition INTO this status
@@ -191,6 +202,68 @@ func (p *PlannerIntegration) handleSlotFreed(event events.Event) {
 	// Admit in a goroutine: the sweep takes a per-account advisory lock and
 	// issues engine mutations, which must not block the synchronous bus loop.
 	go p.admitNextForAccount(bgCtx, account)
+}
+
+// isPreemptTriggerStatus reports whether a Plan transition INTO this status
+// should preempt the in-flight agent turn (epic memql#902 / #906). A "pass"
+// (or a cancel) of a Plan that is mid-execution must cooperatively stop the
+// turn on the agent node so it actually relinquishes its slot, not just flip
+// the row's status. paused = the user/scheduler passed it (resumable, #907);
+// cancelled = terminal stop. Both want the in-flight turn to halt.
+func isPreemptTriggerStatus(status string) bool {
+	return status == "paused" || status == "cancelled"
+}
+
+// handlePlanPreempt is the event-bus subscriber that turns a "pass" (a Plan
+// going to paused/cancelled while a turn is in flight) into the cross-node
+// signal that actually stops the agent turn (epic memql#902 / #906). It looks
+// up the in-flight turn's requestId (stored in the executing map by
+// handlePlanApprovedForExecution) and forwards an AgentPreemptTurn on that
+// turn's open stream; the agent node calls RequestPause(requestId) and the
+// loop halts at its next checkpoint. The slot-free + admit-next is already
+// handled by handleSlotFreed on the same paused transition.
+//
+// No-op when the Plan has no in-flight turn here (not mid-execution, or the
+// turn already finished) -- the status change alone is sufficient then.
+func (p *PlannerIntegration) handlePlanPreempt(event events.Event) {
+	fields := extractPlanRoutingFields(event)
+	if fields.ID == "" || !isPreemptTriggerStatus(fields.Status) {
+		return
+	}
+	if p.agentForwarder == nil {
+		return
+	}
+	v, ok := p.executing.Load(fields.ID)
+	if !ok {
+		return // no in-flight turn for this Plan; nothing to preempt
+	}
+	requestId, _ := v.(string)
+	if strings.TrimSpace(requestId) == "" {
+		return
+	}
+	envelope := &memqlv1.MemqlClientMessage{
+		MessageId: id.NewShortId(),
+		Payload: &memqlv1.MemqlClientMessage_AgentPreemptTurn{
+			AgentPreemptTurn: &memqlv1.AgentPreemptTurnMsg{RequestId: requestId},
+		},
+	}
+	// Fire on the in-flight forwarded stream (keyed by requestId). authClaims
+	// + partition are unused by the agent-side preempt handler (it just sets
+	// the pause flag), so empty is fine.
+	if err := p.agentForwarder.ForwardContinuation(requestId, nil, "", envelope); err != nil {
+		p.logger.Warn("plan preempt: forward continuation failed",
+			"plan_id", fields.ID,
+			"request_id", requestId,
+			"status", fields.Status,
+			"error", err,
+		)
+		return
+	}
+	p.logger.Info("plan preempt: pass signal sent to agent; turn will stop at next checkpoint",
+		"plan_id", fields.ID,
+		"request_id", requestId,
+		"status", fields.Status,
+	)
 }
 
 // admitNextForAccount pulls as many of the account's waiting Plans into running
@@ -315,7 +388,7 @@ func (p *PlannerIntegration) notifyProduceArtifactComplete(ctx context.Context, 
 // resolves Sofia's SI participant, forwards the agent turn,
 // consumes the response, posts the reply, and stamps the Plan
 // terminal status.
-func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId string) {
+func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, requestId string) {
 	// Release the in-flight claim taken in handlePlanApprovedForExecution when
 	// this dispatch finishes (success or failure), so a legitimate later
 	// re-run of the same plan id isn't permanently blocked. (memql#800)
@@ -385,7 +458,10 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	// Tasks panel), not as a chat utterance. The participant lookup
 	// would require the v1:cognition:participant concept which is
 	// not loaded on the planner binary by design.
-	requestId := id.NewShortId()
+	//
+	// requestId is passed in from handlePlanApprovedForExecution (stored in
+	// the executing map) so handlePlanPreempt can address the in-flight turn
+	// for a cross-node "pass" (#906).
 
 	// History carries one synthetic user-role message with the
 	// Plan's goal. NOT written to chat -- it's prompt context the
@@ -538,6 +614,19 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 			"error", err,
 		)
 		p.markPlanFailed(ctx, planId, fmt.Sprintf("agent turn: %s", err.Error()))
+		return
+	}
+
+	// Preempted ("passed", epic memql#902 / #906): the turn stopped at a
+	// checkpoint and persisted its taskState for resume (#907). The pass
+	// action already stamped the Plan paused (which freed its slot + admitted
+	// the next via #905), so DON'T mark it succeeded/failed -- that would
+	// clobber the paused state. Leave it for resume.
+	if result.paused {
+		p.logger.Info("plan execution: turn preempted at checkpoint; left paused for resume",
+			"plan_id", planId,
+			"request_id", requestId,
+		)
 		return
 	}
 
@@ -772,6 +861,7 @@ func (p *PlannerIntegration) consumeAgentTurn(
 					text:      final,
 					citations: complete.GetCitations(),
 					retrieved: complete.GetRetrieved(),
+					paused:    complete.GetPaused(),
 				}, nil
 			case *memqlv1.MemqlServerMessage_QueryError:
 				e := payload.QueryError.GetError()

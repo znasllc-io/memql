@@ -203,6 +203,15 @@ message MemqlClientMessage {
     // the partition ACL, and swaps streamSession.identity + .access
     // atomically. See handleRotateAuth.
     RotateAuthMsg rotate_auth = 71;
+    // AgentPreemptTurn -- cooperative preemption of an in-flight agent
+    // turn (epic memql#902 / #906). The planner sends this on the same
+    // forwarded stream as the original AgentGenerateTurn (via
+    // ForwardContinuation, keyed by request_id) when a running Plan is
+    // "passed" to free its concurrency slot. The agent node calls
+    // agent.RequestPause(request_id); the background tool loop observes
+    // it at its next checkpoint, persists taskState, and ends the turn
+    // with AgentGenerateTurnComplete.paused=true. Fire-and-forget.
+    AgentPreemptTurnMsg agent_preempt_turn = 72;
   }
 }
 
@@ -1311,6 +1320,23 @@ message AgentGenerateTurnComplete {
   // and what (if anything) was actually used. Empty when no domains
   // were attached or retrieval returned nothing.
   repeated AgentRetrievedChunk retrieved = 8;
+  // True iff the turn ended because it was PREEMPTED ("passed") at a
+  // checkpoint rather than completing or failing (epic memql#902 / #906).
+  // The planner leaves the Plan in its paused state (the pass action
+  // already stamped it) instead of marking it succeeded/failed; the
+  // persisted taskState is the resume context for #907.
+  bool paused = 9;
+}
+
+// AgentPreemptTurnMsg signals the agent node to preempt the in-flight
+// background turn identified by request_id at its next checkpoint (the
+// boundary between tool rounds in runNonStreamingToolLoop) -- a model call
+// can't be interrupted mid-token (epic memql#902 / #906). Sent by the
+// planner via ForwardContinuation on the original turn's forwarded stream,
+// so request_id matches the in-flight AgentGenerateTurnMsg.request_id. The
+// agent node calls agent.RequestPause(request_id); fire-and-forget.
+message AgentPreemptTurnMsg {
+  string request_id = 1;
 }
 
 // AgentTurnCitation is one source-attribution entry. domain_id is the
