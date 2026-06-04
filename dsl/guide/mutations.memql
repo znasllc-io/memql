@@ -27,7 +27,7 @@ mutation guide mutationCreateGuide {
     version              int
     active               bool
   }
-  insert guide {
+  insert {
     id: args.guideId
     args.slug
     args.name
@@ -53,7 +53,7 @@ mutation guide mutationUpdateGuide {
     guideId  string  @required
     payload  object  @required
   }
-  update guide {
+  update {
     id: args.guideId
     args.payload
   }
@@ -75,7 +75,7 @@ mutation scene mutationCreateScene {
     allowsQuestions   bool
     successCondition  string
   }
-  insert scene {
+  insert {
     id: args.sceneId
     args.guideId
     args.slug
@@ -97,7 +97,7 @@ mutation scene mutationUpdateScene {
     sceneId  string  @required
     payload  object  @required
   }
-  update scene {
+  update {
     id: args.sceneId
     args.payload
   }

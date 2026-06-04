@@ -20,7 +20,7 @@ mutation note mutationCreateNote {
     body    string    @required
     tags    []string
   }
-  insert note {
+  insert {
     id: args.noteId
     ownerUserId: actor.userId
     args.title
@@ -37,7 +37,7 @@ mutation note mutationUpdateNote {
     noteId   string  @required
     payload  object  @required
   }
-  insert note {
+  insert {
     id: args.noteId
     ownerUserId: actor.userId
     updatedAt: now

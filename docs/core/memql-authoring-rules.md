@@ -29,10 +29,11 @@ parse-time error.
 ```memql
 use cognition.concepts.{ space }
 
-// Right -- one insert.
+// Right -- one bare insert. The target concept comes from the
+// `mutation <Concept> <name>` signature; restating it is retired.
 mutation space mutationCreateSpace {
   args { name string @required }
-  insert space {
+  insert {
     name: args.name
     status: "active"
     createdAt: now
@@ -43,8 +44,8 @@ mutation space mutationCreateSpace {
 // Wrong -- two writes in one body. The parser rejects it.
 mutation space mutationCreateSpaceAndGrantOwner {
   args { name string @required }
-  insert space { ... }            // ERROR -- only one write allowed
-  insert partitionAccess { ... }
+  insert { ... }                  // ERROR -- only one write allowed
+  insert { ... }
 }
 ```
 
@@ -72,7 +73,7 @@ mutation partition mutationCreatePartition {
     name      string  @required
     type      string  @default("standard")
   }
-  insert partition {
+  insert {
     name: args.name
     partitionType: args.type
     status: "active"
@@ -838,21 +839,25 @@ produce DUPLICATE rows with distinct ids.
 # Wrong -- bare-vs-canonical input shape changes the participant id
 id = concat("participant-", hash(concat(args.spaceId, ":", args.userId)))
 
-# Right -- canonicalId() collapses both forms to the same string
+# Right -- canonicalId() collapses both forms to the same string. The
+# second argument is the imported concept short-name (resolved against
+# the file-top `use ...concepts.{ space, user }` imports).
 id = concat("participant-", hash(concat(
-  canonicalId(args.spaceId, "v1:cognition:space"), ":",
-  canonicalId(args.userId,  "v1:identity:user")
+  canonicalId(args.spaceId, space), ":",
+  canonicalId(args.userId,  user)
 )))
 ```
 
-`canonicalId(value, conceptType)`:
+`canonicalId(value, concept)` -- `concept` is an imported concept
+short-name (the stringly-typed `"v1:ns:name"` literal is retired):
 
-- bare slug → prepends `<partition>:<conceptType>:` (engine reads the
+- bare slug → prepends `<partition>:<concept>:` (engine reads the
   concept's `@scope` to pick `_system` for global concepts, otherwise
   the request envelope's partition)
 - already-canonical, matching concept → returns as-is
 - canonical for a different concept → errors loudly (catches type-tag
-  typos like passing `userId` to `canonicalId(..., "v1:cognition:space")`)
+  typos like passing `userId` to `canonicalId(..., space)`)
+- an unimported / unknown concept name → errors at load
 - empty string → returns empty (optional foreign keys stay null)
 
 The engine ALSO auto-canonicalizes `@relationship`-tagged payload

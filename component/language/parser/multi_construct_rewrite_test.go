@@ -67,7 +67,7 @@ func TestRewriter_MultipleMutationsDifferentConcepts(t *testing.T) {
 	source := `@description("Create a cognition space.")
 mutation space mutationCreateSpace {
   args { name string @required }
-  insert space {
+  insert {
     id:   args.id
     name: args.name
   }
@@ -76,7 +76,7 @@ mutation space mutationCreateSpace {
 @description("Add a participant to a space.")
 mutation participant mutationAddParticipant {
   args { spaceId string @required; userId string @required }
-  insert participant {
+  insert {
     spaceId: args.spaceId
     userId:  args.userId
   }

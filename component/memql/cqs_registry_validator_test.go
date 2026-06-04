@@ -19,7 +19,7 @@ func TestValidateCQSAcrossRegistry_QueryCallsMutation(t *testing.T) {
 	must(t, reg.Upsert(&Function{
 		Name:         "mutationArchive",
 		FunctionKind: "mutation",
-		ExprSource:   `insert space { id: args.id }`,
+		ExprSource:   `insert { id: args.id }`,
 	}))
 
 	err := ValidateCQSAcrossRegistry(reg)
@@ -45,7 +45,7 @@ func TestValidateCQSAcrossRegistry_MutationCallsMutation(t *testing.T) {
 	must(t, reg.Upsert(&Function{
 		Name:         "mutationCallee",
 		FunctionKind: "mutation",
-		ExprSource:   `insert thing { id: args.id }`,
+		ExprSource:   `insert { id: args.id }`,
 	}))
 
 	err := ValidateCQSAcrossRegistry(reg)
@@ -90,7 +90,7 @@ func TestValidateCQSAcrossRegistry_IgnoresDottedCalls(t *testing.T) {
 	must(t, reg.Upsert(&Function{
 		Name:         "mutationLike",
 		FunctionKind: "mutation",
-		ExprSource:   `insert thing { }`,
+		ExprSource:   `insert { }`,
 	}))
 
 	if err := ValidateCQSAcrossRegistry(reg); err != nil {

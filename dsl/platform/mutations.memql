@@ -45,7 +45,7 @@ mutation policyTrace mutationInsertPolicyTrace {
     durationMs       number  @required
     error            string
   }
-  insert policyTrace {
+  insert {
     args.policyName
     args.tier
     actorUserId: coalesce(args.actorUserId, "")
@@ -95,7 +95,7 @@ mutation globalSecret mutationSetGlobalSecret {
     addedBy         string
     active          bool
   }
-  insert globalSecret {
+  insert {
     args.id
     args.name
     args.encryptedValue
@@ -126,7 +126,7 @@ mutation globalVariable mutationSetGlobalVariable {
     description  string
     active       bool
   }
-  insert globalVariable {
+  insert {
     args.id
     args.name
     args.value
@@ -162,7 +162,7 @@ mutation partitionSecret mutationSetPartitionSecret {
     addedBy         string
     active          bool
   }
-  insert partitionSecret {
+  insert {
     args.id
     args.name
     args.encryptedValue
@@ -194,7 +194,7 @@ mutation partitionVariable mutationSetPartitionVariable {
     description  string
     active       bool
   }
-  insert partitionVariable {
+  insert {
     args.id
     args.name
     args.value
@@ -218,7 +218,7 @@ mutation missingCapability mutationLogMissingCapability {
     firstSeenAt     string  @required
     exampleGoal     string
   }
-  insert missingCapability {
+  insert {
     id: args.missingId
     args.kind
     args.capability
@@ -243,7 +243,7 @@ mutation missingCapability mutationBumpMissingCapabilitySighting {
     sightingCount   int     @required
     lastSeenAt      string  @required
   }
-  update missingCapability {
+  update {
     id: args.missingId
     args.sightingCount
     args.lastSeenAt
@@ -258,7 +258,7 @@ mutation missingCapability mutationUpdateMissingCapabilityStatus {
     status      string  @required
     resolution  string
   }
-  update missingCapability {
+  update {
     id: args.missingId
     args.status
     args.resolution

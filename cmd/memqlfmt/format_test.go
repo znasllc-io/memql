@@ -39,7 +39,7 @@ mutation space mutationCreateSpace {
     spaceId  string  @required
     name     string  @required
   }
-  insert space {
+  insert {
     id:        args.spaceId
     name:      args.name
     status:    "active"

@@ -39,7 +39,7 @@ mutation artifact mutationCreateArtifact {
     producedByWorkerName string
     validationStatus  string  @enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
   }
-  insert artifact {
+  insert {
     id: concat("artifact-", hash(args.sourceConceptRef))
     args.sourceConceptRef
     args.ownerUserId
@@ -86,7 +86,7 @@ mutation generatedOutput mutationCreateGeneratedOutput {
     producedByWorkerId   string
     producedByWorkerName string
   }
-  insert generatedOutput {
+  insert {
     id: args.outputId
     args.ownerUserId
     args.title
@@ -117,7 +117,7 @@ mutation memory mutationCreateMemory {
     spaceId            string
     sourceUtteranceId  string
   }
-  insert memory {
+  insert {
     id: args.memoryId
     ownerUserId: actor.userId
     args.title

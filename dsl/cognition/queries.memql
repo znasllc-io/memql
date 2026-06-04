@@ -183,7 +183,7 @@ query audioOverride queryAudioOverridesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, space) && traitIsActiveRecord
   shape   audioOverrideFull
 }
 
@@ -196,7 +196,7 @@ query greetSuppression queryActiveGreetSuppression {
     spaceId  string  @required
     now      string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && payload.expiresAt>args.now && traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, space) && payload.expiresAt>args.now && traitIsActiveRecord
   shape   greetSuppressionFull
 }
 
@@ -568,7 +568,7 @@ query videoOverride queryVideoOverridesForSpace {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==canonicalId(args.spaceId, "v1:cognition:space") && traitIsActiveRecord
+  filter  payload.spaceId==canonicalId(args.spaceId, space) && traitIsActiveRecord
   shape   videoOverrideFull
 }
 

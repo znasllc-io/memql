@@ -14,7 +14,7 @@ mutation record mutationCheckRecord {
     newCheckCount  number  @required
     newState       string  @required
   }
-  insert record {
+  insert {
     id: args.recordId
     checkCount: args.newCheckCount
     lastCheckedBy: args.identityId
@@ -56,7 +56,7 @@ mutation record mutationConfirmRecord {
     newConfirmCount  number  @required
     newState         string  @required
   }
-  insert record {
+  insert {
     id: args.recordId
     confirmCount: args.newConfirmCount
     lastConfirmedBy: args.identityId
@@ -118,7 +118,7 @@ mutation record mutationCreateRecord {
     confidence          number
     createdAt           string
   }
-  insert record {
+  insert {
     id: args.recordId
     createdAt: coalesce(args.createdAt, timestamp())
     args.spaceId
@@ -191,7 +191,7 @@ mutation record mutationCreateRecordBatch {
     naturalKeyValue     string
     confidence          number
   }
-  insert record {
+  insert {
     id: args.recordId
     args.spaceId
     args.recordType
@@ -233,7 +233,7 @@ mutation record mutationDeleteRecord {
   args {
     recordId  string  @required
   }
-  insert record {
+  insert {
     id: args.recordId
     payload: {
       active: false
@@ -279,7 +279,7 @@ mutation record mutationRevertRecord {
     checkCount    number  @required
     confirmCount  number  @required
   }
-  insert record {
+  insert {
     id: args.recordId
     validationState: args.toState
     args.checkCount
@@ -327,7 +327,7 @@ mutation policy mutationSetPolicy {
     checkedDataUsable      bool
     revertMinRole          string
   }
-  insert policy {
+  insert {
     id: args.policyId
     args.targetRecordType
     args.spaceId
@@ -377,7 +377,7 @@ mutation record mutationUpdateRecord {
     naturalKeyValue  string
     confidence       number
   }
-  insert record {
+  insert {
     id: args.recordId
     payload: {
       args.data,

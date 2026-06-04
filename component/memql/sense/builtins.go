@@ -121,14 +121,14 @@ var BuiltinFunctions = map[string]BuiltinDef{
 		Parameters: []Parameter{{Label: "value", Documentation: "String to hash."}},
 	},
 	"canonicalId": {
-		Signature: `canonicalId(value, conceptType string)`,
-		Doc: "Normalize an id-shaped value to canonical form (`<partition>:<conceptType>:<bareSlug>`).\n\n" +
+		Signature: `canonicalId(value, concept)`,
+		Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +
 			"Use in mutation id derivations that hash foreign-key args, so the derived id stays stable whether the caller passes a bare slug or an already-canonical id.\n\n" +
-			"Example: `id = concat(\"participant-\", hash(concat(canonicalId(arg(\"spaceId\"), \"v1:cognition:space\"), \":\", canonicalId(arg(\"userId\"), \"v1:identity:user\"))))`\n\n" +
-			"The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept isn't registered or when the value is already canonical for a different concept (catches type-tag typos).",
+			"Example: `id = concat(\"participant-\", hash(concat(canonicalId(args.spaceId, space), \":\", canonicalId(args.userId, user))))`\n\n" +
+			"The second argument is an imported concept short-name (resolved against the file-top `use ...concepts.{ ... }` imports); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
 		Parameters: []Parameter{
 			{Label: "value", Documentation: "Id-shaped value (bare slug or canonical). Empty input returns empty."},
-			{Label: "conceptType", Documentation: "Quoted concept name, e.g. \"v1:identity:user\"."},
+			{Label: "concept", Documentation: "Imported concept short-name, e.g. `user` (from `use identity.concepts.{ user }`)."},
 		},
 	},
 	"first": {

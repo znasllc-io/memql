@@ -27,7 +27,7 @@ mutation plan mutationCreateAdHocPlan {
     ownerUserId   string  @required
     goal          string  @required
   }
-  insert plan {
+  insert {
     id: args.planId
     args.spaceId
     args.ownerUserId
@@ -55,7 +55,7 @@ mutation task mutationCreateSemanticTask {
     phase           string
     input           object  @required
   }
-  insert task {
+  insert {
     id: args.taskId
     args.planId
     category: "semantic"
@@ -81,7 +81,7 @@ mutation task mutationCreateToolInvocationTask {
     toolArgs        object
     seq             int     @required
   }
-  insert task {
+  insert {
     id: args.taskId
     args.planId
     args.parentTaskId
@@ -113,7 +113,7 @@ mutation task mutationCompleteToolInvocation {
     errorMessage  string
     completedAt   string
   }
-  update task {
+  update {
     id: args.taskId
     args.status
     args.toolResult
@@ -161,7 +161,7 @@ mutation plan mutationCreatePlan {
     pauseExtendsDeadline  bool
     chatAnchorMessageId   string
   }
-  insert plan {
+  insert {
     id: args.planId
     args.spaceId
     args.parentPlanId
@@ -194,7 +194,7 @@ mutation plan mutationStartPlan {
   args {
     planId  string  @required
   }
-  update plan {
+  update {
     id: args.planId
     status: "running"
     startedAt: now()
@@ -247,7 +247,7 @@ mutation plan mutationCreateScopeElevationPlan {
     summary         string  @required
     requestedScope  string  @required
   }
-  insert plan {
+  insert {
     id: args.planId
     kind: "scopeElevation"
     status: "awaitingFeedback"
@@ -318,7 +318,7 @@ mutation plan mutationRequestPlanFeedback {
     planId           string  @required
     feedbackRequest  object  @required
   }
-  update plan {
+  update {
     id: args.planId
     status: "awaitingFeedback"
     feedbackReason: "feedback_required"
@@ -339,7 +339,7 @@ mutation task mutationCreateTask {
     executorBackend   string
     input             object  @required
   }
-  insert task {
+  insert {
     id: args.taskId
     args.planId
     args.kind
@@ -363,7 +363,7 @@ mutation taskState mutationPersistTaskState {
     toolCallHistory    object
     pendingSubPlanIds  object
   }
-  insert taskState {
+  insert {
     id: args.stateId
     args.taskId
     args.workingMemory
@@ -413,7 +413,7 @@ mutation plan mutationUpdatePlanStatus {
     metrics                   object
     computerUseScope          string
   }
-  update plan {
+  update {
     id: args.planId
     args.status
     args.ownerAgentId
@@ -453,7 +453,7 @@ mutation plan mutationRecordPlannerInvocation {
     tokenSpent  int
     metrics     object
   }
-  update plan {
+  update {
     id: args.planId
     args.tokenSpent
     args.metrics
@@ -481,7 +481,7 @@ mutation task mutationUpdateTaskStatus {
     parkedAtCheckpoint  string
     metrics             object
   }
-  update task {
+  update {
     id: args.taskId
     args.status
     args.output
@@ -525,7 +525,7 @@ mutation responsibility mutationCreateResponsibility {
     scopeSpaceId      string
     enabled           bool
   }
-  insert responsibility {
+  insert {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.statement
@@ -560,7 +560,7 @@ mutation responsibility mutationUpdateResponsibility {
     scopeSpaceId      string
     enabled           bool
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.statement
@@ -584,7 +584,7 @@ mutation responsibility mutationSetResponsibilityStatus {
     responsibilityId  string  @required
     status            string  @required  @enum("draft", "active", "paused", "archived")
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.status
@@ -598,7 +598,7 @@ mutation responsibility mutationRecordResponsibilityEvaluation {
     responsibilityId  string  @required
     lastResult        string  @required
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.lastResult
@@ -615,7 +615,7 @@ mutation responsibility mutationAssignResponsibility {
     assignedAgentId   string
     assignedRoleSlug  string
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     ownerUserId: actor.userId
     args.targetKind
@@ -645,7 +645,7 @@ mutation responsibility mutationMarkResponsibilityIntakePending {
   args {
     responsibilityId  string  @required
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     intakeStatus: "pending"
   }
@@ -667,7 +667,7 @@ mutation responsibility mutationApplyResponsibilityIntake {
     intakeStatus      string  @enum("", "pending", "awaitingAnswers", "clear", "applied")
     intakeRequest     object
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     args.trigger
     args.schedule
@@ -696,7 +696,7 @@ mutation responsibility mutationFoldResponsibilityIntakeAnswers {
     successCriteria   string
     notifyHow         string
   }
-  update responsibility {
+  update {
     id: args.responsibilityId
     args.trigger
     args.schedule

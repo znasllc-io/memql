@@ -9,6 +9,11 @@
 // integration step on #694.
 
 use library.mutations.{ mutationCreateArtifact }
+use knowledge.concepts.{ document, liveSource }
+use notes.concepts.{ note }
+use todos.concepts.{ todo }
+use library.concepts.{ memory, generatedOutput }
+use calendar.concepts.{ calendarEvent }
 
 // Record + live-source promotion (#696). Notes / to-dos / calendar
 // events / memories land in the Records lens (lens=record); their
@@ -32,7 +37,7 @@ logic logicIndexDocument {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:document:", args.event.payload.id), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, producedByPlanId: args.event.payload.planId, validationStatus: args.event.payload.validationStatus })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, document), ownerUserId: args.event.payload.uploadedBy, lens: "artifact", kind: "document", source: "uploaded", title: args.event.payload.fileName, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, producedByPlanId: args.event.payload.planId, validationStatus: args.event.payload.validationStatus })
     return indexed
   }
 }
@@ -44,7 +49,7 @@ logic logicIndexGeneratedOutput {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:library:generatedOutput:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId, producedByWorkerId: args.event.payload.producedByWorkerId, producedByWorkerName: args.event.payload.producedByWorkerName })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, generatedOutput), ownerUserId: args.event.payload.ownerUserId, lens: "artifact", kind: "generated_output", source: args.event.payload.source, title: args.event.payload.title, summary: args.event.payload.summary, format: args.event.payload.format, mimeType: args.event.payload.mimeType, live: false, spaceId: args.event.payload.spaceId, agentId: args.event.payload.producedByAgentId, producedByPlanId: args.event.payload.producedByPlanId, producedByWorkerId: args.event.payload.producedByWorkerId, producedByWorkerName: args.event.payload.producedByWorkerName })
     return indexed
   }
 }
@@ -56,7 +61,7 @@ logic logicIndexNote {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:notes:note:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "note", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled note"), summary: args.event.payload.body, live: false })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, note), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "note", source: "agent_generated", title: coalesce(args.event.payload.title, "Untitled note"), summary: args.event.payload.body, live: false })
     return indexed
   }
 }
@@ -68,7 +73,7 @@ logic logicIndexTodo {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:todos:todo:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "todo", source: "agent_generated", title: args.event.payload.title, live: false })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, todo), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "todo", source: "agent_generated", title: args.event.payload.title, live: false })
     return indexed
   }
 }
@@ -80,7 +85,7 @@ logic logicIndexCalendarEvent {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:calendar:calendarEvent:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "calendar_event", source: "agent_generated", title: args.event.payload.title, live: false })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, calendarEvent), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "calendar_event", source: "agent_generated", title: args.event.payload.title, live: false })
     return indexed
   }
 }
@@ -92,7 +97,7 @@ logic logicIndexMemory {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:library:memory:", args.event.payload.id), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: args.event.payload.summary, agentId: args.event.payload.agentId, spaceId: args.event.payload.spaceId, live: false })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, memory), ownerUserId: args.event.payload.ownerUserId, lens: "record", kind: "memory", source: "agent_generated", title: args.event.payload.title, summary: args.event.payload.summary, agentId: args.event.payload.agentId, spaceId: args.event.payload.spaceId, live: false })
     return indexed
   }
 }
@@ -104,7 +109,7 @@ logic logicIndexLiveSource {
     event  object  @required
   }
   body {
-    indexed := mutationCreateArtifact({ sourceConceptRef: concat("v1:knowledge:liveSource:", args.event.payload.id), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true, scope: args.event.payload.scope })
+    indexed := mutationCreateArtifact({ sourceConceptRef: canonicalId(args.event.payload.id, liveSource), ownerUserId: args.event.payload.ownerId, lens: "record", kind: "live_source", source: "live", title: args.event.payload.name, summary: args.event.payload.description, live: true, scope: args.event.payload.scope })
     return indexed
   }
 }

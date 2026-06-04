@@ -24,7 +24,7 @@ func TestDeclaredUsage_AcceptsFullyUsedDecls(t *testing.T) {
     name string @required
     description string
   }
-  insert space {
+  insert {
     id: "x"
     name: args.name
     description: coalesce(args.description, "")
@@ -46,7 +46,7 @@ func TestDeclaredUsage_RejectsStaleArgsField(t *testing.T) {
     name  string @required
     other string @required
   }
-  insert space {
+  insert {
     id: "x"
     name: args.name
   }

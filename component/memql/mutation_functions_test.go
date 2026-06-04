@@ -119,7 +119,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
     name     string  @required
     status   string
   }
-  insert space {
+  insert {
     id: args.spaceId
     args.name
     args.status
@@ -172,7 +172,7 @@ mutation space mutationCreateDailySpace {
     name          string  @required
     dailyDateKey  string  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     args.name
     args.dailyDateKey
@@ -201,7 +201,7 @@ func TestLegacyProceduralMutationRejectsMultipleUses(t *testing.T) {
 use identity.concepts.{ request }
 
 func (Mutation) mutationLegacyForm(ctx any) (any, error) {
-  return insert space { id: ctx.input.id }, nil
+  return insert { id: ctx.input.id }, nil
 }`
 	_, err := tryParseNewFunctionSyntax("mutationLegacyForm", "mutation", src, "test.memql", registry)
 	require.Error(t, err)

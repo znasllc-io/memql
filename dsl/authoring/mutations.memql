@@ -22,7 +22,7 @@ mutation bundle mutationCreateAuthoringBundle {
     supersedesBundleId  string
     reusedConstructRefs []object
   }
-  insert bundle {
+  insert {
     id: args.bundleId
     ownerUserId: actor.userId
     args.title
@@ -46,7 +46,7 @@ mutation construct mutationCreateAuthoringConstruct {
     targetNamespace  string  @required
     source           string  @required
   }
-  insert construct {
+  insert {
     id: args.constructId
     ownerUserId: actor.userId
     args.bundleId
@@ -67,7 +67,7 @@ mutation bundle mutationRecordBundleValidation {
     validationReport  object  @required
     failureReason     string
   }
-  update bundle {
+  update {
     id: args.bundleId
     ownerUserId: actor.userId
     args.status
@@ -85,7 +85,7 @@ mutation bundle mutationRecordBundleDryRun {
     dryRunReport   object  @required
     failureReason  string
   }
-  update bundle {
+  update {
     id: args.bundleId
     ownerUserId: actor.userId
     args.status
@@ -100,7 +100,7 @@ mutation bundle mutationActivateAuthoringBundle {
   args {
     bundleId  string  @required
   }
-  update bundle {
+  update {
     id: args.bundleId
     ownerUserId: actor.userId
     status: "active"
@@ -116,7 +116,7 @@ mutation bundle mutationSetAuthoringBundleStatus {
     status         string  @required @enum("draft", "paused", "active", "failed")
     failureReason  string
   }
-  update bundle {
+  update {
     id: args.bundleId
     ownerUserId: actor.userId
     args.status
@@ -130,7 +130,7 @@ mutation bundle mutationRetireAuthoringBundle {
   args {
     bundleId  string  @required
   }
-  update bundle {
+  update {
     id: args.bundleId
     ownerUserId: actor.userId
     status: "retired"
@@ -145,7 +145,7 @@ mutation construct mutationSetConstructStatus {
     constructId  string  @required
     status       string  @required @enum("draft", "active", "retired")
   }
-  update construct {
+  update {
     id: args.constructId
     ownerUserId: actor.userId
     args.status
@@ -159,7 +159,7 @@ mutation construct mutationSetConstructCompiledForm {
     constructId   string  @required
     compiledForm  object  @required
   }
-  update construct {
+  update {
     id: args.constructId
     ownerUserId: actor.userId
     args.compiledForm
@@ -173,7 +173,7 @@ mutation construct mutationCatalogueConstruct {
     constructId  string  @required
     catalogKey   string  @required
   }
-  update construct {
+  update {
     id: args.constructId
     ownerUserId: actor.userId
     catalogued: true
@@ -193,7 +193,7 @@ mutation dependencyEdge mutationRecordDependencyEdge {
     toKind         string  @required @enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")
     toSource       string  @required @enum("core", "catalog", "bundle")
   }
-  insert dependencyEdge {
+  insert {
     id: args.edgeId
     ownerUserId: actor.userId
     args.bundleId

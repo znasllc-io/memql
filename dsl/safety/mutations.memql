@@ -23,7 +23,7 @@ mutation classification mutationInsertSafetyClassification {
     correlationId string
     mode          string @required
   }
-  insert classification {
+  insert {
     args.surface
     args.action
     args.argsRedacted
@@ -59,7 +59,7 @@ mutation approvalRequest mutationCreateApprovalRequest {
     ownerUserId    string
     planId         string
   }
-  insert approvalRequest {
+  insert {
     args.correlationKey
     args.surface
     args.action
@@ -84,7 +84,7 @@ mutation approvalRequest mutationResolveApprovalRequest {
     decidedBy      string   @required
     decisionReason string
   }
-  update approvalRequest {
+  update {
     id: args.id
     args.status
     args.decidedBy
@@ -114,7 +114,7 @@ mutation outputScreening mutationInsertOutputScreening {
     correlationId  string
     mode           string @required
   }
-  insert outputScreening {
+  insert {
     args.contentType
     args.contentLength
     args.redactedSample

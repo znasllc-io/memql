@@ -33,7 +33,7 @@ mutation utterance mutationCreateGreetingUtterance {
     text           string  @required
     greetingKind   string  @required
   }
-  insert utterance {
+  insert {
     args.spaceId
     args.participantId
     participantType: "si"

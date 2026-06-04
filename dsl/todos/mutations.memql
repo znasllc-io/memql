@@ -21,7 +21,7 @@ mutation todo mutationCreateTodo {
     priority                string  @enum("low", "medium", "high")
     sourceResponsibilityId  string
   }
-  insert todo {
+  insert {
     id: args.todoId
     ownerUserId: actor.userId
     args.title
@@ -39,7 +39,7 @@ mutation todo mutationCompleteTodo {
     todoId   string  @required
     payload  object  @required
   }
-  insert todo {
+  insert {
     id: args.todoId
     ownerUserId: actor.userId
     args.payload
@@ -53,7 +53,7 @@ mutation todo mutationUpdateTodo {
     todoId   string  @required
     payload  object  @required
   }
-  insert todo {
+  insert {
     id: args.todoId
     ownerUserId: actor.userId
     args.payload
