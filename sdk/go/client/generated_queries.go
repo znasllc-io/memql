@@ -143,6 +143,23 @@ func QueryActiveApprovalsByCorrelationKeyBuild(args QueryActiveApprovalsByCorrel
 	return b.String()
 }
 
+// QueryActiveAuthoringBundles -- The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.
+//
+// Bound concept: bundle.
+type QueryActiveAuthoringBundlesArgs struct {
+}
+
+// QueryActiveAuthoringBundles calls the engine query queryActiveAuthoringBundles.
+func (qc *QueryClient) QueryActiveAuthoringBundles(ctx context.Context, args QueryActiveAuthoringBundlesArgs) (*Result, error) {
+	call := QueryActiveAuthoringBundlesBuild(args)
+	return qc.executeNamed(ctx, "queryActiveAuthoringBundles", call)
+}
+
+func QueryActiveAuthoringBundlesBuild(args QueryActiveAuthoringBundlesArgs) string {
+	_ = args
+	return "queryActiveAuthoringBundles({})"
+}
+
 // QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
@@ -913,6 +930,89 @@ func QueryAuthSessionsForSubjectBuild(args QueryAuthSessionsForSubjectArgs) stri
 	return b.String()
 }
 
+// QueryAuthoringBundleById -- One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.
+//
+// Bound concept: bundle.
+type QueryAuthoringBundleByIdArgs struct {
+	BundleId string
+}
+
+// QueryAuthoringBundleById calls the engine query queryAuthoringBundleById.
+func (qc *QueryClient) QueryAuthoringBundleById(ctx context.Context, args QueryAuthoringBundleByIdArgs) (*Result, error) {
+	call := QueryAuthoringBundleByIdBuild(args)
+	return qc.executeNamed(ctx, "queryAuthoringBundleById", call)
+}
+
+func QueryAuthoringBundleByIdBuild(args QueryAuthoringBundleByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAuthoringBundleById({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryAuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
+//
+// Bound concept: bundle.
+type QueryAuthoringBundleForResponsibilityArgs struct {
+	ResponsibilityId string
+}
+
+// QueryAuthoringBundleForResponsibility calls the engine query queryAuthoringBundleForResponsibility.
+func (qc *QueryClient) QueryAuthoringBundleForResponsibility(ctx context.Context, args QueryAuthoringBundleForResponsibilityArgs) (*Result, error) {
+	call := QueryAuthoringBundleForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "queryAuthoringBundleForResponsibility", call)
+}
+
+func QueryAuthoringBundleForResponsibilityBuild(args QueryAuthoringBundleForResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAuthoringBundleForResponsibility({")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryAuthoringBundlesForOwner -- All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.
+//
+// Bound concept: bundle.
+type QueryAuthoringBundlesForOwnerArgs struct {
+}
+
+// QueryAuthoringBundlesForOwner calls the engine query queryAuthoringBundlesForOwner.
+func (qc *QueryClient) QueryAuthoringBundlesForOwner(ctx context.Context, args QueryAuthoringBundlesForOwnerArgs) (*Result, error) {
+	call := QueryAuthoringBundlesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryAuthoringBundlesForOwner", call)
+}
+
+func QueryAuthoringBundlesForOwnerBuild(args QueryAuthoringBundlesForOwnerArgs) string {
+	_ = args
+	return "queryAuthoringBundlesForOwner({})"
+}
+
+// QueryAuthoringConstructsForBundle -- All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.
+//
+// Bound concept: construct.
+type QueryAuthoringConstructsForBundleArgs struct {
+	BundleId string
+}
+
+// QueryAuthoringConstructsForBundle calls the engine query queryAuthoringConstructsForBundle.
+func (qc *QueryClient) QueryAuthoringConstructsForBundle(ctx context.Context, args QueryAuthoringConstructsForBundleArgs) (*Result, error) {
+	call := QueryAuthoringConstructsForBundleBuild(args)
+	return qc.executeNamed(ctx, "queryAuthoringConstructsForBundle", call)
+}
+
+func QueryAuthoringConstructsForBundleBuild(args QueryAuthoringConstructsForBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAuthoringConstructsForBundle({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
 //
 // Bound concept: avatarPersona.
@@ -989,6 +1089,23 @@ func QueryCalendarEventByIdBuild(args QueryCalendarEventByIdArgs) string {
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
 	b.WriteString("})")
 	return b.String()
+}
+
+// QueryCataloguedConstructsForOwner -- The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.
+//
+// Bound concept: construct.
+type QueryCataloguedConstructsForOwnerArgs struct {
+}
+
+// QueryCataloguedConstructsForOwner calls the engine query queryCataloguedConstructsForOwner.
+func (qc *QueryClient) QueryCataloguedConstructsForOwner(ctx context.Context, args QueryCataloguedConstructsForOwnerArgs) (*Result, error) {
+	call := QueryCataloguedConstructsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryCataloguedConstructsForOwner", call)
+}
+
+func QueryCataloguedConstructsForOwnerBuild(args QueryCataloguedConstructsForOwnerArgs) string {
+	_ = args
+	return "queryCataloguedConstructsForOwner({})"
 }
 
 // QueryClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)

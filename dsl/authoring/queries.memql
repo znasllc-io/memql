@@ -1,0 +1,63 @@
+// queries.memql
+//
+// Authoring-namespace read surface (epic memql#954, issue #955).
+// Every query is caller-scoped (filter on payload.ownerUserId ==
+// actor.userId) -- authored bundles + constructs are owned data, only
+// the author reads them. Backs the management UI, the gate runners
+// (#956/#958), the authored runtime loader (#959), and the compose-first
+// catalog matcher (#957).
+
+use authoring.concepts.{ bundle, construct }
+use authoring.shapes.{ bundleFull, constructFull }
+use common.traits.{ traitStatusIsActive }
+
+@enabled
+@description("All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list.")
+query bundle queryAuthoringBundlesForOwner {
+  filter  payload.ownerUserId==actor.userId
+  shape   bundleFull
+}
+
+@enabled
+@description("One authoring bundle by id, scoped to the caller. Backs the gate runners + the approval (Gate 3) artifact view.")
+query bundle queryAuthoringBundleById {
+  args {
+    bundleId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; id==args.bundleId
+  shape   bundleFull
+}
+
+@enabled
+@description("The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.")
+query bundle queryActiveAuthoringBundles {
+  filter  payload.ownerUserId==actor.userId; traitStatusIsActive
+  shape   bundleFull
+}
+
+@enabled
+@description("The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).")
+query bundle queryAuthoringBundleForResponsibility {
+  args {
+    responsibilityId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.responsibilityId==args.responsibilityId
+  shape   bundleFull
+}
+
+@enabled
+@description("All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.")
+query construct queryAuthoringConstructsForBundle {
+  args {
+    bundleId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId; payload.bundleId==args.bundleId
+  shape   constructFull
+}
+
+@enabled
+@description("The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.")
+query construct queryCataloguedConstructsForOwner {
+  filter  payload.ownerUserId==actor.userId; payload.catalogued==true
+  shape   constructFull
+}

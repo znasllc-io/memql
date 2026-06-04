@@ -1,0 +1,182 @@
+// mutations.memql
+//
+// Authoring-namespace write surface (epic memql#954, issue #955).
+// Lifecycle mutations for v1:authoring:bundle + v1:authoring:construct.
+// Every mutation server-stamps ownerUserId from actor.userId (never
+// caller-supplied) -- authored automations run under the author's authz
+// envelope, so ownership is the per-row gate. No engine wiring here;
+// the gates (#956 validation, #958 dry-run) and the authored runtime
+// (#959) call these to record state.
+
+use authoring.concepts.{ bundle, construct }
+
+@enabled
+@description("Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via mutationCreateAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.")
+mutation bundle mutationCreateAuthoringBundle {
+  args {
+    bundleId            string  @required
+    title               string  @required
+    summary             string
+    responsibilityId    string
+    version             int
+    supersedesBundleId  string
+    reusedConstructRefs []object
+  }
+  insert bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    args.title
+    args.summary
+    args.responsibilityId
+    args.supersedesBundleId
+    args.reusedConstructRefs
+    version: coalesce(args.version, 1)
+    status: "draft"
+  }
+}
+
+@enabled
+@description("Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.")
+mutation construct mutationCreateAuthoringConstruct {
+  args {
+    constructId      string  @required
+    bundleId         string  @required
+    kind             string  @required @enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")
+    name             string  @required
+    targetNamespace  string  @required
+    source           string  @required
+  }
+  insert construct {
+    id: args.constructId
+    ownerUserId: actor.userId
+    args.bundleId
+    args.kind
+    args.name
+    args.targetNamespace
+    args.source
+    status: "draft"
+  }
+}
+
+@enabled
+@description("Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).")
+mutation bundle mutationRecordBundleValidation {
+  args {
+    bundleId          string  @required
+    status            string  @required @enum("validated", "failed")
+    validationReport  object  @required
+    failureReason     string
+  }
+  update bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    args.status
+    args.validationReport
+    args.failureReason
+  }
+}
+
+@enabled
+@description("Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).")
+mutation bundle mutationRecordBundleDryRun {
+  args {
+    bundleId       string  @required
+    status         string  @required @enum("dryRunPassed", "failed")
+    dryRunReport   object  @required
+    failureReason  string
+  }
+  update bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    args.status
+    args.dryRunReport
+    args.failureReason
+  }
+}
+
+@enabled
+@description("Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via mutationSetConstructStatus.")
+mutation bundle mutationActivateAuthoringBundle {
+  args {
+    bundleId  string  @required
+  }
+  update bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    status: "active"
+    activatedAt: timestamp()
+  }
+}
+
+@enabled
+@description("Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by mutationRetireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.")
+mutation bundle mutationSetAuthoringBundleStatus {
+  args {
+    bundleId       string  @required
+    status         string  @required @enum("draft", "paused", "active", "failed")
+    failureReason  string
+  }
+  update bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    args.status
+    args.failureReason
+  }
+}
+
+@enabled
+@description("Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.")
+mutation bundle mutationRetireAuthoringBundle {
+  args {
+    bundleId  string  @required
+  }
+  update bundle {
+    id: args.bundleId
+    ownerUserId: actor.userId
+    status: "retired"
+    retiredAt: timestamp()
+  }
+}
+
+@enabled
+@description("Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.")
+mutation construct mutationSetConstructStatus {
+  args {
+    constructId  string  @required
+    status       string  @required @enum("draft", "active", "retired")
+  }
+  update construct {
+    id: args.constructId
+    ownerUserId: actor.userId
+    args.status
+  }
+}
+
+@enabled
+@description("Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.")
+mutation construct mutationSetConstructCompiledForm {
+  args {
+    constructId   string  @required
+    compiledForm  object  @required
+  }
+  update construct {
+    id: args.constructId
+    ownerUserId: actor.userId
+    args.compiledForm
+  }
+}
+
+@enabled
+@description("Promote a construct into the owner's reusable catalog (#957): catalogued -> true and catalogKey set to the match signature so the compose-first matcher finds it for later bundles.")
+mutation construct mutationCatalogueConstruct {
+  args {
+    constructId  string  @required
+    catalogKey   string  @required
+  }
+  update construct {
+    id: args.constructId
+    ownerUserId: actor.userId
+    catalogued: true
+    args.catalogKey
+  }
+}
