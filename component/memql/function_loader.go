@@ -159,6 +159,16 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		content = translateSignatureConceptPathsToPayload(content, name)
 	}
 
+	// #987: resolve the typed foreign-concept form
+	// `canonicalId(x, <importedConceptName>)` to the canonical-id string form
+	// against the file's `use ...concepts.{ ... }` imports + the registry. The
+	// quoted string form passes through unchanged (additive).
+	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefs(content); cerr != nil {
+		return nil, fmt.Errorf("%s: %w", origin, cerr)
+	} else {
+		content = resolved
+	}
+
 	// Try parsing with the full parser
 	lexer := languageParser.NewLexer(content)
 	tokens, err := lexer.Tokenize()
