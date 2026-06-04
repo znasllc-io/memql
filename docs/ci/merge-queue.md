@@ -77,3 +77,23 @@ job so the queue always gets a result. Recommended: (a).
   `gh-readonly-queue/main/...` ref appears and the full CI suite runs
   against it (every lane, not the narrowed subset).
 - Confirm the PR merges only after the merge-group run is green.
+
+## Status — enabled and verified
+
+The merge queue is **live** on the `default` ruleset (id 16630577). The
+`merge_queue` rule is configured as:
+
+| Setting | Value |
+|---|---|
+| `merge_method` | `MERGE` (matches the ruleset's allowed methods; squash/auto are blocked org-wide) |
+| `grouping_strategy` | `ALLGREEN` — a batch merges only if every entry passes (no optimistic merging) |
+| `check_response_timeout_minutes` | 60 |
+| `min_entries_to_merge` / wait | 1 / ~5 min batching window |
+| `max_entries_to_build` / `merge` | 5 / 5 |
+
+Required status checks are `ci-required`, `scan`, and `Analyze (go)` —
+all three trigger on `merge_group`, so a queued candidate always gets a
+result and never stalls. The queue has merged PRs end-to-end (each
+spawns a `gh-readonly-queue/main/...` candidate, runs the full suite on
+it, and merges only when green). This doc itself landed through the
+queue.
