@@ -25,24 +25,26 @@ concurrency:
 permissions:
   contents: read
 
-# Affected-lane routing (Tier 1, #856)
-# ------------------------------------
-# The `changes` job classifies the PR diff into a few coarse buckets
-# (go / dsl / sdkts / voice / ci) via dorny/paths-filter. Each lane
-# below gates on the buckets it actually depends on, so a docs-only PR
-# skips the whole Go+voice+TS suite, a DSL-only PR runs only the DSL
-# lanes, etc.
+# Affected-lane routing (Tier 1, #856) + warm-cache consolidation (Tier 2, #857)
+# -----------------------------------------------------------------------------
+# `changes` classifies the PR diff into coarse buckets (go / dsl / sdkts /
+# voice / ci). The CGO-free Go work that used to live in six separate jobs --
+# build, vet, test, harness-eval, dsl-lint, engine-load-check, sdk-gen-check --
+# is now ONE `go-checks` job so a single warm GOCACHE serves the whole
+# sequence (build populates the compiled-package cache; vet/test/run/lint
+# reuse it) instead of six runners each cold-compiling the module.
 #
-# Routing only applies to `pull_request` events. On `push` to main (and
-# the future merge_group) every lane runs unconditionally -- main is the
-# integration point and must always get full coverage.
+# Routing is preserved at the STEP level: each step keeps the same path gate
+# it had as a standalone lane (RUN_GO vs RUN_DSL), so a DSL-only PR still
+# skips build/vet/test and a docs-only PR skips the whole job -- no regression
+# of the #856 win.
 #
-# BRANCH-PROTECTION SAFETY: a path-skipped lane reports `skipped`, which
-# would leave a directly-required status check perpetually pending and
-# block merge. So the SINGLE required check is the `ci-required`
-# aggregator at the bottom: it always runs and passes when every lane is
-# skipped-or-successful. The individual lanes must NOT be required checks
-# on their own.
+# Routing applies to `pull_request` only; `push` to main (and the future
+# merge_group) runs everything unconditionally.
+#
+# BRANCH-PROTECTION SAFETY: the SINGLE required check is the `ci-required`
+# aggregator at the bottom; it always runs and passes when every lane is
+# skipped-or-successful. The individual jobs must NOT be required checks.
 jobs:
   changes:
     name: changes
@@ -87,43 +89,81 @@ jobs:
             voice:
               - 'integrations/voice/**'
 
-  build:
-    name: build
+  # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
+  # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
+  # changed (or on push / a CI-config change); within it each step keeps
+  # its original path gate so DSL-only PRs skip the pure-Go steps.
+  #
+  #   RUN_GO  -> build / vet / test / harness-eval         (go bucket)
+  #   RUN_DSL -> dsl-lint / engine-load / sdk-gen-check     (go OR dsl bucket)
+  #
+  # Step order matters: `go build ./...` runs first so the compiled-package
+  # cache is warm for vet/test/run/lint that follow.
+  go-checks:
+    name: go-checks
     needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+      RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26.4'
           cache: true
+
+      # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       - name: go build
+        if: ${{ env.RUN_GO == 'true' }}
         run: go build ./...
-
-  test:
-    name: test
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
+      - name: go vet
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go vet ./...
       - name: go test
+        if: ${{ env.RUN_GO == 'true' }}
         run: go test -count=1 -timeout=300s ./...
+      # Harness eval gate (#589). Fixture-driven regression tripwire over an
+      # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
+      # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
+      - name: harness eval (regression gate)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go run ./cmd/harness-eval
 
-  # Voice node CGO build lane. The Go voice-agent (integrations/voice/agent,
-  # epic #449) joins LiveKit rooms via github.com/livekit/server-sdk-go/v2 +
-  # its media-sdk, which pull a CGO libopus/opusfile/soxr dependency (see
-  # docs/voice/451-livekit-go-room-participation.md, Caveat 1). All such code
-  # is behind `//go:build voice`, so the CGO-free lanes above never touch it.
-  # This lane installs the C deps, sets CGO_ENABLED=1, and builds + vets the
-  # voice path so the libopus foundation is actually exercised on every PR.
-  # Gates on `go` (not just voice paths): the tagged build compiles the whole
-  # module, so any Go change can break it.
+      # --- DSL lanes (go OR dsl bucket) ---
+      # DSL-lint: runs `memqllint` over the embedded DSL tree, catching the
+      # parse/import/reference failures the runtime loader's WARN+ skip paths
+      # would surface at boot. See memql#278.
+      - name: dsl lint
+        if: ${{ env.RUN_DSL == 'true' }}
+        run: go run ./cmd/memqllint dsl/
+      # Engine-bootstrap smoke gate. dsl-lint runs the parse/diagnostic
+      # pipeline, but the engine's concept + relationship validation (and the
+      # spec/shape/function/builtin/tool/prompt/provider/policy loaders) run
+      # ONLY at engine Init -- which no other lane exercises without Postgres.
+      # That gap let #597 (an unregistered `dependsOn` relationship type)
+      # merge green and crash every node at boot. See #599.
+      - name: engine load check (engine init over full DSL tree)
+        if: ${{ env.RUN_DSL == 'true' }}
+        run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
+      # SDK drift check: regenerates the typed Go SDK from the DSL and fails
+      # on a diff. The generator is Go and reads dsl/, so it gates with the
+      # DSL lanes.
+      - name: sdk-gen-check (typed SDK drift)
+        if: ${{ env.RUN_DSL == 'true' }}
+        run: make sdk-gen-check
+
+  # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
+  # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
+  # `voice` build tag; folding it into the CGO-free lane would force the CGO
+  # toolchain (and apt installs) onto every check. The Go voice-agent
+  # (integrations/voice/agent, epic #449) joins LiveKit rooms via
+  # github.com/livekit/server-sdk-go/v2 + its media-sdk, which pull the CGO
+  # dependency (docs/voice/451-livekit-go-room-participation.md, Caveat 1).
+  # All such code is behind `//go:build voice`. Gates on `go` (not just voice
+  # paths): the tagged build compiles the whole module, so any Go change can
+  # break it.
   build-voice:
     name: build voice (cgo)
     needs: changes
@@ -153,37 +193,6 @@ jobs:
           CGO_ENABLED: '1'
         run: go test -tags voice -count=1 -timeout=300s ./integrations/voice/...
 
-  vet:
-    name: vet
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: go vet
-        run: go vet ./...
-
-  # SDK drift check: regenerates the typed Go SDK from the DSL and fails on a
-  # diff. Gates on `go` OR `dsl` -- the generator is Go and reads dsl/, so a
-  # change to either can move the generated output.
-  sdk-gen-check:
-    name: sdk-gen-check
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: regenerate typed SDK and check for drift
-        run: make sdk-gen-check
-
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.
   sdk-ts-typecheck:
@@ -203,98 +212,19 @@ jobs:
       - name: test sdk/ts
         run: make sdk-ts-test
 
-  # Harness eval gate (#589). Runs the agent-harness eval scaffold over a
-  # fixed task-fixture set, scoring each fixture on task success / step count
-  # / tool-call count / token cost / wall-clock, then failing on a configured
-  # regression threshold (component/harness DefaultThreshold). This is the
-  # fast lane: the fixtures are driven through the harness reconciler over an
-  # in-memory graph -- NO Postgres, NO LLM -- so it runs on every PR in
-  # milliseconds and catches a harness change that reorders dispatch,
-  # mis-fails a plan, or makes the loop chattier. The heavier DB/LLM-backed
-  # eval (real plans against a live engine) is gated out of CI for now; this
-  # fixture-based check is the regression tripwire. See cmd/harness-eval.
-  harness-eval:
-    name: harness eval
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: run harness eval (regression gate)
-        run: go run ./cmd/harness-eval
-
-  # DSL-lint gate. Runs `memqllint` over the embedded DSL tree on
-  # every PR + main push, catching the class of issues the runtime
-  # loader's WARN+ skip paths would surface at boot (parse failures,
-  # broken imports, missing references) before they land. The linter
-  # is in-tree at cmd/memqllint and shares the dslimports.Load
-  # pipeline the engine runs at startup, so the gate sees exactly
-  # what production sees -- no cross-repo cockpit install required.
-  # See memql#278 for the move from the cockpit-binary placeholder.
-  # Gates on `go` OR `dsl` (the linter is Go, the input is dsl/).
-  dsl-lint:
-    name: dsl lint
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: lint dsl tree
-        run: go run ./cmd/memqllint dsl/
-
-  # Engine-bootstrap smoke gate. dsl-lint above runs the parse/diagnostic
-  # pipeline, but the engine's concept + relationship validation (and the
-  # spec/shape/function/builtin/tool/prompt/provider/policy loaders) run
-  # ONLY at engine Init -- which no other lane exercises without Postgres.
-  # That gap let #597 (an unregistered `dependsOn` relationship type) merge
-  # green and crash every node at boot. This lane loads the full embedded
-  # DSL tree and runs engine.Init against it (DB-free; provider secret
-  # resolution is lazy with OS-env fallback), turning that class of
-  # bootstrap regression into a fast CI failure. See #599.
-  # Gates on `go` OR `dsl` (engine is Go, the loaded tree is dsl/).
-  engine-load-check:
-    name: engine load check
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
-        with:
-          go-version: '1.26.4'
-          cache: true
-      - name: engine init over full DSL tree
-        run: go test -count=1 -run TestEngineInitLoadsFullDSL ./component/memql/
-
   # Aggregator -- the SINGLE required status check for branch protection.
   # It always runs (even when every lane is path-skipped) and fails only if
   # a lane it depends on actually failed or was cancelled; a `skipped` lane
-  # is treated as a pass. This is what makes affected-lane routing safe to
-  # merge: point the ruleset's required check at `ci-required` ONLY, never
-  # at the individual lanes (a skipped required lane would block merge
-  # forever).
+  # is treated as a pass. Point the ruleset's required check at `ci-required`
+  # ONLY, never at the individual jobs.
   ci-required:
     name: ci-required
     if: ${{ always() }}
     needs:
       - changes
-      - build
-      - test
+      - go-checks
       - build-voice
-      - vet
-      - sdk-gen-check
       - sdk-ts-typecheck
-      - harness-eval
-      - dsl-lint
-      - engine-load-check
     runs-on: ubuntu-latest
     steps:
       - name: verify required lanes succeeded or were skipped
