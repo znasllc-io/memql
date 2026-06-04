@@ -49,18 +49,18 @@ func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, pay
 // results in Go, we combine the WHERE clauses into a single database query.
 // Returns (compiledExpression, true) if successful, or (empty, false) if the expression contains
 // nodes that cannot be combined (e.g., RelationshipExpression, BuiltinFunctionExpression).
-func (e *MemQLEngine) tryCompileCombinedFilter(expr ExpressionNode, conceptContext string) (compiledExpression, bool) {
+func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr ExpressionNode, conceptContext string) (compiledExpression, bool) {
 	if expr == nil {
 		return compiledExpression{}, false
 	}
 
 	switch node := expr.(type) {
 	case *LogicalExpression:
-		leftFilter, leftOk := e.tryCompileCombinedFilter(node.Left, conceptContext)
+		leftFilter, leftOk := e.tryCompileCombinedFilter(ctx, node.Left, conceptContext)
 		if !leftOk {
 			return compiledExpression{}, false
 		}
-		rightFilter, rightOk := e.tryCompileCombinedFilter(node.Right, conceptContext)
+		rightFilter, rightOk := e.tryCompileCombinedFilter(ctx, node.Right, conceptContext)
 		if !rightOk {
 			return compiledExpression{}, false
 		}
@@ -81,6 +81,20 @@ func (e *MemQLEngine) tryCompileCombinedFilter(expr ExpressionNode, conceptConte
 		return compiledExpression{sql: combinedSQL, args: combinedArgs}, true
 
 	case *ComparisonExpression:
+		// An `actor.<field>` comparison (e.g. `actor.role == "admin"`) is a
+		// constant at query time -- the resolved auth envelope. Bind the
+		// actor value + the comparison value as SQL parameters so the term
+		// can sit inside an OR/AND with row predicates and push down in one
+		// query (#974). This is what lets a mixed predicate like
+		// `payload.stage=="won" || actor.role=="admin"` compile to a single
+		// `(... OR ? = ?)` instead of needing a split evaluation.
+		if isActorFieldComparison(node) {
+			filter, err := compileActorFieldComparison(ctx, node)
+			if err != nil {
+				return compiledExpression{}, false
+			}
+			return filter, true
+		}
 		filter, err := e.compileComparisonExpressionWithContext(node, conceptContext)
 		if err != nil {
 			return compiledExpression{}, false
@@ -99,12 +113,41 @@ func (e *MemQLEngine) tryCompileCombinedFilter(expr ExpressionNode, conceptConte
 		if err != nil {
 			return compiledExpression{}, false
 		}
-		return e.tryCompileCombinedFilter(spec.Expr, conceptContext)
+		return e.tryCompileCombinedFilter(ctx, spec.Expr, conceptContext)
 
 	default:
 		// RelationshipExpression, BuiltinFunctionExpression, etc. cannot be combined
 		return compiledExpression{}, false
 	}
+}
+
+// isActorFieldComparison reports whether a comparison's left-hand side is an
+// `actor.<field>` accessor (the resolved auth envelope), e.g. `actor.role`.
+func isActorFieldComparison(node *ComparisonExpression) bool {
+	if node == nil {
+		return false
+	}
+	return len(node.Field.Parts) >= 2 && strings.EqualFold(strings.TrimSpace(node.Field.Parts[0]), "actor")
+}
+
+// compileActorFieldComparison compiles an `actor.<field> <op> <value>` term to
+// a bound-parameter SQL fragment. The actor field is resolved from the request's
+// AccessContext (a query-time constant), so both operands bind as parameters and
+// the DB evaluates the constant comparison -- correct inside any OR/AND nesting.
+func compileActorFieldComparison(ctx context.Context, node *ComparisonExpression) (compiledExpression, error) {
+	subPath := strings.Join(node.Field.Parts[1:], ".")
+	actorValue, err := resolveActorPath(ctx, subPath, node.Operator)
+	if err != nil {
+		return compiledExpression{}, err
+	}
+	sqlOp, err := sqlOperatorForComparison(node.Operator)
+	if err != nil {
+		return compiledExpression{}, err
+	}
+	return compiledExpression{
+		sql:  fmt.Sprintf("? %s ?", sqlOp),
+		args: []any{actorValue, node.Value},
+	}, nil
 }
 
 // executeCombinedFilterQuery executes a query using a combined SQL filter.
