@@ -662,10 +662,20 @@ func detectMimeType(fileName string, data []byte) string {
 }
 
 // resolvePlanOwner reads queryPlanById and returns the Plan's owner
-// user id (createdBy, server-stamped from actor.userId) and spaceId.
-// Returns empty strings on any failure -- the caller treats an empty
-// owner as "skip promotion". The planFull shape flattens, so rows land
-// in res.OutputPayload() with createdBy / spaceId as top-level fields.
+// user id and spaceId. Returns empty strings on any failure -- the
+// caller treats an empty owner as "skip promotion". The planFull shape
+// flattens, so rows land in res.OutputPayload() with the fields as
+// top-level keys.
+//
+// Owner = payload.requestedBy (the USER who asked for the deliverable),
+// NOT the row-intrinsic createdBy. On the produceArtifact path the Plan
+// row is INSERTED by the planner's system actor, so createdBy is
+// "system:planner"; using it stamped the promoted v1:library:generatedOutput
+// with ownerUserId="system:planner", which made it invisible to the user
+// (Library reads gate on ownerUserId==actor.userId) AND made the planner's
+// owner-scoped success check (memql#939) find zero rows -> Plan failed even
+// though the file was written. requestedBy is faithfully forwarded from the
+// originating user, so it's the correct owner. (memql#952)
 func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (ownerUserId, spaceId string) {
 	if i.engine == nil {
 		return "", ""
@@ -678,13 +688,26 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (owne
 		if row == nil {
 			continue
 		}
-		owner := strings.TrimSpace(stringFromRow(row, "createdBy"))
+		owner := planOwnerFromRow(row)
 		space := strings.TrimSpace(stringFromRow(row, "spaceId"))
 		if owner != "" {
 			return owner, space
 		}
 	}
 	return "", ""
+}
+
+// planOwnerFromRow picks the deliverable owner from a planFull row.
+// Prefers payload.requestedBy (the user who asked) over the row-intrinsic
+// createdBy (the actor that inserted the Plan -- "system:planner" on the
+// produceArtifact path). Falls back to createdBy only when requestedBy is
+// absent, e.g. a user-initiated workbench call where the inserter IS the
+// owner. (memql#952)
+func planOwnerFromRow(row map[string]any) string {
+	if owner := strings.TrimSpace(stringFromRow(row, "requestedBy")); owner != "" {
+		return owner
+	}
+	return strings.TrimSpace(stringFromRow(row, "createdBy"))
 }
 
 // handleTeardownDirectory removes the per-Plan workspace directory.
