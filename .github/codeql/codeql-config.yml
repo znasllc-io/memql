@@ -1,3 +1,14 @@
 name: "memql CodeQL config"
-paths-ignore:
-  - "**/*_templ.go"
+
+# NOTE: `paths`/`paths-ignore` have NO effect for Go (a compiled language
+# built during analysis); they only apply to interpreted languages, or
+# compiled languages analyzed without building (C/C++, C#, Java, Rust).
+# See: https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning
+#
+# `go/useless-assignment-to-local` is a low-value maintainability lint that
+# fires overwhelmingly on templ-generated *_templ.go files ("DO NOT EDIT").
+# Real dead code is already caught by `go vet` and CI linters, so we exclude
+# this one rule repo-wide to keep code-scanning signal-to-noise high.
+query-filters:
+  - exclude:
+      id: go/useless-assignment-to-local
