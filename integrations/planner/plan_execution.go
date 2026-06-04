@@ -426,18 +426,35 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	// means the agent completed; the workbench write either succeeded (and was
 	// promoted) or the agent surfaced the problem in its reply. (memql#800)
 	succeeded := planSucceeded || plan.Kind == produceArtifactPlanKind
+	// A produceArtifact turn that comes back EMPTY produced nothing. The
+	// classic signature is the agent's SI stream stalling and the idle
+	// watchdog killing it after exhausting retries -- the failure is swallowed
+	// upstream and surfaces here as a graceful-but-empty turn (no reply text,
+	// no tool output). Stamping that "succeeded" lies to the user: the
+	// completion card announces "your file is ready in the Library" when no
+	// file was ever written. A real production turn always ends with a
+	// respondToUser ack, so a non-empty reply is the floor for success. Treat
+	// an empty produceArtifact turn as an honest failure the user can see and
+	// retry instead of a silent fake-success. (memql#893)
+	if plan.Kind == produceArtifactPlanKind && replyText == "" {
+		succeeded = false
+	}
 	if succeeded {
 		// Reply text lands on Plan.output.reply via markPlanSucceeded.
 		// The canvas card + Tasks panel render that field.
 		p.markPlanSucceeded(ctx, planId, replyText)
 	} else {
-		// Worker tool never ran successfully. The agent's reply text
-		// is its explanation of why; surface it as the Plan's
-		// errorMessage so the Tasks panel + canvas card show the
-		// actual reason instead of a generic "failed."
+		// The work didn't complete. The agent's reply text (when present) is
+		// its explanation of why; surface it as the Plan's errorMessage so the
+		// Tasks panel + canvas card show the actual reason instead of a
+		// generic "failed."
 		errorMessage := replyText
 		if errorMessage == "" {
-			errorMessage = "agent finished the turn without dispatching a worker tool successfully"
+			if plan.Kind == produceArtifactPlanKind {
+				errorMessage = "The deliverable couldn't be produced -- the agent didn't finish the turn (it may have timed out before writing the file). Please try again."
+			} else {
+				errorMessage = "agent finished the turn without dispatching a worker tool successfully"
+			}
 		}
 		p.markPlanFailed(ctx, planId, errorMessage)
 	}
