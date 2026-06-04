@@ -61,7 +61,7 @@ query accessRequest queryAccessRequestById {
   args {
     requestId  string  @required
   }
-  filter  ?.id==args.requestId
+  filter  when(args.requestId) { id==args.requestId }
   shape   accessRequestFull
 }
 
@@ -89,7 +89,7 @@ query delegation queryActiveDelegationsForAgent {
   args {
     agentId  string  @required
   }
-  filter  payload.agentId==args.agentId; traitIsActiveRecord
+  filter  payload.agentId==args.agentId && traitIsActiveRecord
   shape   delegationFull
 }
 
@@ -123,7 +123,7 @@ query delegation queryActiveDelegationsByIdentitySubject {
   args {
     identitySubject  string  @required
   }
-  filter  payload.identitySubject==args.identitySubject; traitIsActiveRecord
+  filter  payload.identitySubject==args.identitySubject && traitIsActiveRecord
   shape   delegationFull
 }
 
@@ -134,7 +134,7 @@ query user queryActiveUsers {
     role     string
     groupId  string
   }
-  filter  traitIsActiveRecord; ?.payload.role==args.role; ?.payload.groupIds has args.groupId
+  filter  traitIsActiveRecord && when(args.role) { payload.role==args.role } && when(args.groupId) { args.groupId in payload.groupIds }
   shape   userFull
 }
 
@@ -447,7 +447,7 @@ query delegation queryDelegationsByIdentity {
   args {
     identityId  string  @required
   }
-  filter  payload.identityId==args.identityId; traitIsActiveRecord
+  filter  payload.identityId==args.identityId && traitIsActiveRecord
   shape   delegationFull
 }
 
@@ -480,7 +480,7 @@ query delegation queryExpiredActiveDelegations {
   args {
     now  string  @required
   }
-  filter  traitIsActiveRecord; payload.expiresAt<args.now
+  filter  traitIsActiveRecord && payload.expiresAt<args.now
   shape   delegationFull
 }
 
@@ -638,7 +638,7 @@ query invitation queryInvitationById {
   args {
     invitationId  string  @required
   }
-  filter  ?.id==args.invitationId
+  filter  when(args.invitationId) { id==args.invitationId }
   shape   invitationFull
 }
 
@@ -672,7 +672,7 @@ query invitation queryInvitationByTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.kind=="guest"; payload.tokenHash==args.tokenHash
+  filter  payload.kind=="guest" && payload.tokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -710,7 +710,7 @@ query invitation queryInvitationByPreviousTokenHash {
   args {
     tokenHash  string  @required
   }
-  filter  payload.kind=="guest"; payload.previousTokenHash==args.tokenHash
+  filter  payload.kind=="guest" && payload.previousTokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -784,7 +784,7 @@ query identity queryPatIdentitiesForUser {
   args {
     userId  string  @required
   }
-  filter  payload.userId==args.userId; traitIdentityIsApiKey
+  filter  payload.userId==args.userId && traitIdentityIsApiKey
   shape   patSummary
 }
 
@@ -816,7 +816,7 @@ query identity queryPatIdentityById {
   args {
     identityId  string  @required
   }
-  filter  traitIdentityIsApiKey; id==args.identityId
+  filter  traitIdentityIsApiKey && id==args.identityId
   shape   identityFull
 }
 
@@ -851,7 +851,7 @@ query identity queryPatIdentityByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  traitIdentityIsApiKey; payload.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsApiKey && payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -882,7 +882,7 @@ query auditEvent queryRecentAuditEvents {
   args {
     category  string
   }
-  filter  ?.payload.category==args.category
+  filter  when(args.category) { payload.category==args.category }
   shape   auditEventFull
 }
 
@@ -909,7 +909,7 @@ query user queryUserActiveSpace {
   args {
     userId  string  @required
   }
-  filter  ?.id==args.userId
+  filter  when(args.userId) { id==args.userId }
   shape   userActiveSpaceProjection
 }
 
@@ -937,7 +937,7 @@ query user queryUserByEmail {
   args {
     primaryEmail  string  @required
   }
-  filter  payload.primaryEmail==args.primaryEmail; traitIsActiveRecord
+  filter  payload.primaryEmail==args.primaryEmail && traitIsActiveRecord
   shape   userFull
 }
 
@@ -963,7 +963,7 @@ query user queryUserById {
   args {
     userId  string  @required
   }
-  filter  id==args.userId; traitIsActiveRecord
+  filter  id==args.userId && traitIsActiveRecord
   shape   userFull
 }
 
@@ -987,7 +987,7 @@ query user queryUserById {
 @enabled
 @description("Get the authenticated caller's own user record. Self-scoped via actor.userId (no args) -- the caller cannot read another user's row.")
 query user queryCurrentUser {
-  filter  id==actor.userId; traitIsActiveRecord
+  filter  id==actor.userId && traitIsActiveRecord
   shape   userFull
 }
 
@@ -1038,7 +1038,7 @@ query user queryUsersActiveInSpace {
   args {
     spaceId  string  @required
   }
-  filter  ?.payload.activeSpaceId==args.spaceId
+  filter  when(args.spaceId) { payload.activeSpaceId==args.spaceId }
   shape   userActiveSpaceProjection
 }
 
@@ -1071,7 +1071,7 @@ query user queryUsersActiveInSpace {
 @enabled
 @description("Active users with a pending deletionScheduledAt; consumers per-row check cooldown windows via addDuration.")
 query user queryUsersInDeletionCooldown {
-  filter  traitIsActiveRecord; traitIsDeletionScheduled
+  filter  traitIsActiveRecord && traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1106,7 +1106,7 @@ query user queryUsersInDeletionCooldown {
 @enabled
 @description("Active users whose deletionScheduledAt is set; cooldown enforcement happens in the automation per-row.")
 query user queryUsersScheduledForDeletion {
-  filter  traitIsActiveRecord; traitIsDeletionScheduled
+  filter  traitIsActiveRecord && traitIsDeletionScheduled
   shape   userFull
 }
 
@@ -1161,7 +1161,7 @@ query identity queryWorkerTokenByKeyHash {
   args {
     keyHash  string  @required
   }
-  filter  traitIdentityIsWorkerToken; payload.credentials.keyHash==args.keyHash
+  filter  traitIdentityIsWorkerToken && payload.credentials.keyHash==args.keyHash
   shape   identityFull
 }
 
@@ -1189,7 +1189,7 @@ query identity queryWorkerTokensForUser {
   args {
     userId  string  @required
   }
-  filter  traitIdentityIsWorkerToken; payload.userId==args.userId
+  filter  traitIdentityIsWorkerToken && payload.userId==args.userId
   shape   identityFull
 }
 
@@ -1224,7 +1224,7 @@ query identity queryNodeTokenIdentityByBinding {
     nodeType  string  @required
     nodeId    string  @required
   }
-  filter  traitIdentityIsNodeToken; payload.credentials.nodeType==args.nodeType; payload.credentials.nodeId==args.nodeId
+  filter  traitIdentityIsNodeToken && payload.credentials.nodeType==args.nodeType && payload.credentials.nodeId==args.nodeId
   shape   identityFull
 }
 
@@ -1267,6 +1267,6 @@ query identity queryNodeTokenIdentityById {
   args {
     identityId  string  @required
   }
-  filter  traitIdentityIsNodeToken; id==args.identityId
+  filter  traitIdentityIsNodeToken && id==args.identityId
   shape   identityFull
 }

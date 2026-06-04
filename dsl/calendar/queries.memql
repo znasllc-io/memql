@@ -17,7 +17,7 @@ query calendarEvent queryCalendarEventById {
   args {
     eventId  string  @required
   }
-  filter  id==args.eventId; payload.ownerUserId==actor.userId; traitIsNotDeleted
+  filter  id==args.eventId && payload.ownerUserId==actor.userId && traitIsNotDeleted
   shape   calendarEventFull
 }
 
@@ -28,7 +28,7 @@ query calendarEvent queryUpcomingEvents {
     windowStart  datetime  @required @description("Inclusive lower bound on payload.startsAt (typically `now`).")
     windowEnd    datetime  @required @description("Inclusive upper bound on payload.startsAt (e.g. now + 48h for a day-before reminder sweep).")
   }
-  filter  payload.ownerUserId==actor.userId; payload.startsAt>=args.windowStart; payload.startsAt<=args.windowEnd; traitIsNotDeleted
+  filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.windowStart && payload.startsAt<=args.windowEnd && traitIsNotDeleted
   shape   calendarEventFull
 }
 
@@ -39,7 +39,7 @@ query calendarEvent queryEventsByDay {
     dayStart  datetime  @required @description("Inclusive start-of-day instant in the user's timezone (e.g. 2026-06-01T00:00:00-07:00).")
     dayEnd    datetime  @required @description("Exclusive end-of-day instant (next midnight) in the user's timezone.")
   }
-  filter  payload.ownerUserId==actor.userId; payload.startsAt>=args.dayStart; payload.startsAt<args.dayEnd; traitIsNotDeleted
+  filter  payload.ownerUserId==actor.userId && payload.startsAt>=args.dayStart && payload.startsAt<args.dayEnd && traitIsNotDeleted
   shape   calendarEventFull
 }
 
@@ -49,6 +49,6 @@ query calendarEvent queryFindEvents {
   args {
     title  string  @required @description("Exact event title to match against payload.title.")
   }
-  filter  payload.ownerUserId==actor.userId; payload.title==args.title; traitIsNotDeleted
+  filter  payload.ownerUserId==actor.userId && payload.title==args.title && traitIsNotDeleted
   shape   calendarEventFull
 }

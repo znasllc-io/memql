@@ -1209,15 +1209,23 @@ The bound concept's payload is referenced from filter clauses as
 `insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
-**Canonical filter-clause syntax** (locked in 2026-05 on
-feature/dsl-improvements; enforced by `dsl/conformance_test.go`):
+**Canonical filter-clause syntax** (enforced by
+`dsl/conformance_test.go`):
 
 - Payload fields: `payload.<field>` — never `<conceptName>.<field>`
 - Intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
   `partition`, `type`, `schema`): bare names
-- Optional-chain prefix `?.` is preserved where it carries
-  arg-conditional semantics; the form is `?.payload.<field>==args.X`
-  or `?.<intrinsic>==args.X`, never `?.<conceptName>.<field>`
+- **One Go boolean grammar** (operator standardization #971): `&&`
+  (AND), `||` (OR), `!` (NOT), parens `( )` with Go precedence
+  (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR
+  separators are retired in authored filters and rejected by the
+  conformance test (`TestNoRetiredOperatorForms`).
+- Membership is the single `in` operator: `args.x in payload.list`
+  or `payload.kind in ["a", "b"]`. `has` (its reverse) is retired.
+- Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
+  if `args.x` is absent the guarded block AND its connective are
+  dropped as if never written (unambiguous under `||`). The `?.`
+  optional-chain prefix it replaces is retired.
 - When a trait spec covers the predicate (e.g. `traitIsActiveRecord`
   for `payload.active==true`), the trait is mandatory. Inline
   `payload.active==true` / `payload.deleted==false` are rejected
@@ -1246,7 +1254,7 @@ query participant querySpaceParticipants {
   args {
     spaceId  string  @required
   }
-  filter  payload.spaceId==args.spaceId; traitIsActiveRecord
+  filter  payload.spaceId==args.spaceId && traitIsActiveRecord
   shape   participantFull
 }
 ```

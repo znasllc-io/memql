@@ -207,7 +207,7 @@ trait traitIsClusterOwner {
 //     predicates, separated by `;`.
 //
 //         query foo {
-//           filter payload.spaceId==args.spaceId; traitIsActiveRecord
+//           filter payload.spaceId==args.spaceId && traitIsActiveRecord
 //           shape  fooFull
 //         }
 //

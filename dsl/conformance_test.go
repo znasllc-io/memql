@@ -569,13 +569,58 @@ func strim(s string, r byte) string {
 	return s
 }
 
+// splitPredicates splits a filter clause into its AND-ed predicates on the
+// canonical `&&` operator (#977), respecting paren/brace/string nesting so the
+// `&&` inside a `when(args.x) { a && b }` guard block is not split. Each
+// `when(args.x) { <inner> }` guard is unwrapped to its inner predicate so the
+// canonical-prefix / traitable checks apply to the real comparison.
 func splitPredicates(s string) []string {
-	parts := strings.Split(s, ";")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		out = append(out, strings.TrimSpace(p))
+	var raw []string
+	depth := 0
+	inStr := false
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// skip
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+		case depth == 0 && c == '&' && i+1 < len(s) && s[i+1] == '&':
+			raw = append(raw, s[start:i])
+			i++
+			start = i + 1
+		}
+	}
+	raw = append(raw, s[start:])
+
+	out := make([]string, 0, len(raw))
+	for _, p := range raw {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, unwrapWhenPredicate(p))
 	}
 	return out
+}
+
+// unwrapWhenPredicate returns the inner predicate of a `when(args.x) { <inner> }`
+// guard, or the predicate unchanged when it is not a guard.
+func unwrapWhenPredicate(p string) string {
+	if !strings.HasPrefix(p, "when(") {
+		return p
+	}
+	open := strings.Index(p, "{")
+	closeIdx := strings.LastIndex(p, "}")
+	if open < 0 || closeIdx <= open {
+		return p
+	}
+	return strings.TrimSpace(p[open+1 : closeIdx])
 }
 
 // splitFilterRef peels the leading identifier (and optional `?.`

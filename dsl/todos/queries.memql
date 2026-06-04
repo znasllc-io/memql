@@ -13,7 +13,7 @@ query todo queryTodos {
   args {
     done  bool
   }
-  filter  payload.ownerUserId==actor.userId; ?.payload.done==args.done
+  filter  payload.ownerUserId==actor.userId && when(args.done) { payload.done==args.done }
   shape   todoFull
 }
 
@@ -23,6 +23,6 @@ query todo queryTodoById {
   args {
     todoId  string  @required
   }
-  filter  ?.id==args.todoId; payload.ownerUserId==actor.userId
+  filter  when(args.todoId) { id==args.todoId } && payload.ownerUserId==actor.userId
   shape   todoFull
 }

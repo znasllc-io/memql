@@ -24,14 +24,14 @@ query bundle queryAuthoringBundleById {
   args {
     bundleId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId; id==args.bundleId
+  filter  payload.ownerUserId==actor.userId && id==args.bundleId
   shape   bundleFull
 }
 
 @enabled
 @description("The caller's currently-active bundles. Backs the authored-construct runtime loader (#959) -- the set of authored automations to register on boot / on change.")
 query bundle queryActiveAuthoringBundles {
-  filter  payload.ownerUserId==actor.userId; traitStatusIsActive
+  filter  payload.ownerUserId==actor.userId && traitStatusIsActive
   shape   bundleFull
 }
 
@@ -41,7 +41,7 @@ query bundle queryAuthoringBundleForResponsibility {
   args {
     responsibilityId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId; payload.responsibilityId==args.responsibilityId
+  filter  payload.ownerUserId==actor.userId && payload.responsibilityId==args.responsibilityId
   shape   bundleFull
 }
 
@@ -51,13 +51,13 @@ query construct queryAuthoringConstructsForBundle {
   args {
     bundleId  string  @required
   }
-  filter  payload.ownerUserId==actor.userId; payload.bundleId==args.bundleId
+  filter  payload.ownerUserId==actor.userId && payload.bundleId==args.bundleId
   shape   constructFull
 }
 
 @enabled
 @description("The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.")
 query construct queryCataloguedConstructsForOwner {
-  filter  payload.ownerUserId==actor.userId; payload.catalogued==true
+  filter  payload.ownerUserId==actor.userId && payload.catalogued==true
   shape   constructFull
 }

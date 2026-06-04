@@ -50,7 +50,7 @@ query document queryDocumentsForDomain {
   args {
     domainId  string  @required
   }
-  filter  payload.attachedDomains==args.domainId; payload.validationStatus=="validated"
+  filter  payload.attachedDomains==args.domainId && payload.validationStatus=="validated"
   shape   documentFull
 }
 
@@ -83,7 +83,7 @@ query entityIndex queryEntityIndexLookup {
     entityKind  string  @required
     keyHash  string  @required
   }
-  filter  payload.domainId==args.domainId; payload.entityKind==args.entityKind; payload.keyHash==args.keyHash
+  filter  payload.domainId==args.domainId && payload.entityKind==args.entityKind && payload.keyHash==args.keyHash
   shape   entityIndexFull
 }
 
@@ -93,7 +93,7 @@ query domainEntitySchema queryEntitySchemaForDomain {
   args {
     domainId  string  @required
   }
-  filter  payload.domainId==args.domainId; traitIsActiveRecord
+  filter  payload.domainId==args.domainId && traitIsActiveRecord
   shape   domainEntitySchemaFull
 }
 
@@ -113,7 +113,7 @@ query knowledgeBridge queryKnowledgeBridgeById {
   args {
     bridgeId  string  @required
   }
-  filter  ?.id==args.bridgeId
+  filter  when(args.bridgeId) { id==args.bridgeId }
   shape   knowledgeBridgeFull
 }
 
@@ -123,7 +123,7 @@ query knowledgeDomain queryKnowledgeDomainById {
   args {
     domainId  string  @required
   }
-  filter  ?.id==args.domainId
+  filter  when(args.domainId) { id==args.domainId }
   shape   knowledgeDomainFull
 }
 
@@ -164,6 +164,6 @@ query validationEvent queryValidationEventsForTarget {
 @description("Per Q9 scheduled fallback: list active knowledge domains whose lastSeededAt + refreshCadenceDays * 86400 < now (the cadence backstop fires). The refreshDueKnowledgeDomains cron consumes this nightly + spawns trainSpecialist Plans (mode='refresh') for each row returned. Predefined domains AND user-created domains are both eligible -- the picker constraint sits on the domain row's refreshCadenceDays (null = disabled).")
 query knowledgeDomain queryDueRefreshDomains {
   args {}
-  filter  traitIsActiveRecord; payload.refreshCadenceDays!=null
+  filter  traitIsActiveRecord && payload.refreshCadenceDays!=null
   shape   knowledgeDomainFull
 }
