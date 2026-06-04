@@ -1,4 +1,4 @@
-# Promoted from releases/0.9.15.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
+# Promoted from releases/0.9.16.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -9,18 +9,18 @@ resources:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:6a85f668b21c724aaca242607655e4dbba1714c6d5e7d397640be667bbabf92c
+    digest: sha256:ab2c3fa1eb53946524ce1ddbb5e84a6cf59439aacd8ad1251d42157e147bb8f6
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:0d6f16ea090ffea2df1540b0e32ec72b3a6cd93328f67bbc12f954efa52a5e32
+    digest: sha256:09312be1d0848392822af7e85405118bb51d584aaf05cbf23af5fe2a6bcca335
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:a2aec2734e2906343acab4dbc12533e2f230421f7a31a72e711e975630206d9d
+    digest: sha256:fe817185cf799c98838d5143d5075439980239369679f02f136c91a2cc622fc4
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:2c6a2ceb5120c3be0336d938fee8e89fb35d3436934417a80fd80b419792e79c
+    digest: sha256:44f4325f94d0b2fae4311f49f055942a16d0f7fcbe7a8f523396322163304917
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:be99c4d5e521ffb712c07c82821607bf48c1c716eb08bbfd2c64bdf3f1da5af8
+    digest: sha256:9978e0307564171a3bc2d9a7dc752162b0c36302b0bd30d5857c05a835c6765e
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:0d7e429af06a2a2fa3f949ebc0790febfd0383d0d655c49d6002b9afbc3f080e
+    digest: sha256:df958aa2854192ca5dc8fd1cef38c2e7ab93f2bc9323775d7ac87074d55371cd
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:2b8d6194f452e632e8a936e9d23b063d27e2541f63d11cead5218406404f4416
+    digest: sha256:c6277d3e39788a800345d0e1394099b7ed6b49905c305df04e9619e98eb89471
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:0656df9734c77e36ebb7d3c367487a984cb634d348a0a6f4716ea2b3f9c7fc6f
+    digest: sha256:9f48a4ba4c07a0d1247d8ba9d0bd8a802754b0c5d7a8a673697b4baa10d4917c
