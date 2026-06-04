@@ -1,0 +1,3 @@
+name: "memql CodeQL config"
+paths-ignore:
+  - "**/*_templ.go"
