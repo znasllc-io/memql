@@ -12,7 +12,7 @@ use library.logic.{ logicIndexDocument, logicIndexGeneratedOutput, logicIndexNot
 @description("On document upload, promote the new v1:knowledge:document into the Library as an artifact index row.")
 automation indexDocumentOnCreate {
   step run {
-    logic logicIndexDocument { event: event }
+    logic indexDocument { event: event }
   }
 }
 
@@ -21,7 +21,7 @@ automation indexDocumentOnCreate {
 @description("On generated-output creation, promote the new v1:library:generatedOutput into the Library as an artifact index row.")
 automation indexGeneratedOutputOnCreate {
   step run {
-    logic logicIndexGeneratedOutput { event: event }
+    logic indexGeneratedOutput { event: event }
   }
 }
 
@@ -30,7 +30,7 @@ automation indexGeneratedOutputOnCreate {
 @description("On note creation, promote it into the Library Records lens.")
 automation indexNoteOnCreate {
   step run {
-    logic logicIndexNote { event: event }
+    logic indexNote { event: event }
   }
 }
 
@@ -39,7 +39,7 @@ automation indexNoteOnCreate {
 @description("On to-do creation, promote it into the Library Records lens.")
 automation indexTodoOnCreate {
   step run {
-    logic logicIndexTodo { event: event }
+    logic indexTodo { event: event }
   }
 }
 
@@ -48,7 +48,7 @@ automation indexTodoOnCreate {
 @description("On calendar-event creation, promote it into the Library Records lens.")
 automation indexCalendarEventOnCreate {
   step run {
-    logic logicIndexCalendarEvent { event: event }
+    logic indexCalendarEvent { event: event }
   }
 }
 
@@ -57,7 +57,7 @@ automation indexCalendarEventOnCreate {
 @description("On memory creation, promote it into the Library Records lens.")
 automation indexMemoryOnCreate {
   step run {
-    logic logicIndexMemory { event: event }
+    logic indexMemory { event: event }
   }
 }
 
@@ -66,6 +66,6 @@ automation indexMemoryOnCreate {
 @description("On live-source creation, promote it into the Library Records lens as a LIVE-flagged record.")
 automation indexLiveSourceOnCreate {
   step run {
-    logic logicIndexLiveSource { event: event }
+    logic indexLiveSource { event: event }
   }
 }
