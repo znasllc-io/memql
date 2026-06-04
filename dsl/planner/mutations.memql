@@ -92,6 +92,12 @@ mutation task mutationCreateToolInvocationTask {
     status: "running"
     args.seq
     attemptNumber: 1
+    // executionSurface is @required on the task concept; the concept-level
+    // @default isn't applied to this insert, so the pre-dispatch stamp failed
+    // schema validation ("missing properties: 'executionSurface'") and every
+    // tool call went un-stamped. A toolInvocation always runs inside the agent
+    // node's process, so it's always inProcess (mirrors mutationCreateSemanticTask). (memql#889)
+    executionSurface: "inProcess"
     input: coalesce(args.toolArgs, {})
     startedAt: now()
   }

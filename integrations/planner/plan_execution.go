@@ -177,19 +177,27 @@ func (p *PlannerIntegration) notifyProduceArtifactComplete(ctx context.Context, 
 	}
 
 	goal := strings.TrimSpace(plan.Goal)
-	body := "Your file is ready in the Library."
+	body := "Your file is ready in your Library."
 	if goal != "" {
 		body = fmt.Sprintf("%s\n\nIt's ready in your Library.", goal)
 	}
-	// kind="document" notify card -- the same renderable shape agents use for
-	// task-done cards. `link` deep-links the Library; producedByPlanId lets a
-	// future build resolve + highlight the exact artifact (memql#792 follow-up).
+	// kind="document" notify card. The data shape MUST match the frontend
+	// DocumentCard contract (copresent DocumentCardData): the markdown body
+	// rides on `source` (NOT `body`), an optional `category` label renders
+	// above the title, and navigation deep-links ride on
+	// `links: [{label, href}]` (NOT a flat `link` string) -- the card pushes
+	// each href via react-router navigate(). `/space?panel=library` opens the
+	// Library panel in the user's active space. producedByPlanId is carried
+	// for a future build to resolve + highlight the exact artifact
+	// (memql#792 follow-up); the frontend ignores unknown fields. (memql#890)
 	cardData := map[string]any{
-		"format":           "markdown",
-		"title":            "Deliverable ready",
-		"body":             body,
-		"source":           "planner",
-		"link":             "/space?panel=library",
+		"format":   "markdown",
+		"category": "Task Done",
+		"title":    "Deliverable ready",
+		"source":   body,
+		"links": []map[string]any{
+			{"label": "Open in Library", "href": "/space?panel=library"},
+		},
 		"producedByPlanId": planId,
 	}
 	args := map[string]any{
@@ -264,9 +272,34 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 	// Plan's goal. NOT written to chat -- it's prompt context the
 	// agent reads. The chat-visible artifact from this turn is
 	// the agent's reply utterance posted below via insertAIReply.
+	//
+	// For produceArtifact, the owning agent is the SAME assistant whose
+	// persona says "for a PRODUCE request, call produceArtifact and end
+	// your turn -- do NOT author the deliverable yourself." On THIS turn
+	// that instinct is exactly wrong: the assistant IS the executor now,
+	// and re-calling produceArtifact just spawns another delegation loop
+	// that produces no file (memql#889 -- observed in the wild: the plan
+	// reached succeeded but wrote zero generatedOutput rows because the
+	// agent re-delegated + published a card instead of writing the file).
+	// Reframe the goal as an explicit production directive that overrides
+	// the delegation persona and steers the agent to write the deliverable
+	// with the workbench tool. scopeElevation plans keep the raw goal.
+	turnContent := plan.Goal
+	if plan.Kind == produceArtifactPlanKind {
+		turnContent = fmt.Sprintf(
+			"PRODUCE THIS DELIVERABLE NOW. You are the executor for this task -- "+
+				"do NOT call produceArtifact (that would re-delegate and produce nothing). "+
+				"Write the file to your workbench with the workbenchHost tool "+
+				"(action \"fs_write\"), defaulting to a markdown (.md) file unless the "+
+				"deliverable names another format, then end your turn with a short "+
+				"acknowledgement. The promoted file lands in the user's Library "+
+				"automatically.\n\nDeliverable:\n%s",
+			plan.Goal,
+		)
+	}
 	history := []*memqlv1.AgentTurnMessage{{
 		Role:    "user",
-		Content: plan.Goal,
+		Content: turnContent,
 	}}
 
 	// Hints carry the post-approval signal + IDs the agent's tool
