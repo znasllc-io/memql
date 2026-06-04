@@ -57,6 +57,7 @@ jobs:
       dsl: ${{ steps.filter.outputs.dsl }}
       sdkts: ${{ steps.filter.outputs.sdkts }}
       voice: ${{ steps.filter.outputs.voice }}
+      proto: ${{ steps.filter.outputs.proto }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -88,6 +89,15 @@ jobs:
             # `go` because the tagged build compiles the whole module).
             voice:
               - 'integrations/voice/**'
+            # Proto sources + their generated bindings + the gate script
+            # (memql#928 drift gate). A .proto edit WITHOUT its regenerated
+            # .pb.go matches here but NOT `go`, so this is what makes the
+            # "forgot to regenerate" case run the check.
+            proto:
+              - '**/*.proto'
+              - 'component/grpc/gen/**'
+              - 'component/node/gen/**'
+              - 'scripts/dev/proto-gen.sh'
 
   # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
   # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
@@ -102,11 +112,12 @@ jobs:
   go-checks:
     name: go-checks
     needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' }}
     runs-on: ubuntu-latest
     env:
       RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
       RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+      RUN_PROTO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
@@ -153,6 +164,18 @@ jobs:
       - name: sdk-gen-check (typed SDK drift)
         if: ${{ env.RUN_DSL == 'true' }}
         run: make sdk-gen-check
+      # Proto drift check (memql#928): regenerate the pinned-toolchain proto
+      # bindings (component/grpc + node; bus excluded pending a consumer-
+      # touching normalization) and diff against the checked-in tree, ignoring
+      # the cosmetic protoc version stamp. Catches a .proto edited without its
+      # .pb.go regenerated -- the gap that let stale bindings merge green.
+      # Needs the protobuf compiler; the script go-installs the pinned plugins.
+      - name: install protoc
+        if: ${{ env.RUN_PROTO == 'true' }}
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: proto-gen-check (proto drift)
+        if: ${{ env.RUN_PROTO == 'true' }}
+        run: make proto-gen-check
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the

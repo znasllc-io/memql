@@ -421,7 +421,7 @@ test-polyphon:
 # Code quality
 # ---------------------------------------------------------------------------
 
-.PHONY: vet fmt lint tidy generate
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check
 
 ## Run go vet on all packages
 vet:
@@ -441,6 +441,18 @@ tidy:
 ## Run code generation (protobuf, etc.)
 generate:
 	$(GO) generate ./...
+
+## Regenerate the pinned-toolchain proto bindings (component/grpc + node).
+## The fix command for `proto-gen-check`. component/bus is excluded (it needs
+## a consumer-touching toolchain normalization first -- see memql#928).
+proto-gen:
+	@bash scripts/dev/proto-gen.sh
+
+## CI gate: regenerate the pinned proto bindings, then diff against the
+## checked-in tree (ignoring the cosmetic protoc version stamp). Fails if a
+## .proto evolved without the generator running. Mirrors `sdk-gen-check`.
+proto-gen-check:
+	@bash scripts/dev/proto-gen.sh --check
 
 # ---------------------------------------------------------------------------
 # Local dev TLS (mkcert)
