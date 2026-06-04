@@ -82,6 +82,11 @@ type planExecutionRow struct {
 	SpaceId      string
 	OwnerAgentId string
 	RequestedBy  string
+	// WatchExecution is the opt-in "watch agent work" flag (memql#900),
+	// read off Plan.input.watchExecution. When true the execution turn is
+	// routed through the interactive streaming lane instead of the
+	// background default so live progress can be surfaced. Defaults false.
+	WatchExecution bool
 }
 
 // agentTurnResult mirrors cognition.agentReplyResult -- the
@@ -360,6 +365,19 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 		// doesn't import the agent package (separate build tags), so the
 		// literal strings are duplicated here intentionally.
 		"execution_lane": "background",
+	}
+	// Opt-in "watch agent work" (memql#900). A plan can request live,
+	// token-by-token streaming of its execution -- e.g. the user clicked
+	// "watch this run" -- by setting input.watchExecution=true at create
+	// time. That routes the turn through the INTERACTIVE streaming lane
+	// instead of the background default, so a CoPresent "watch agent work"
+	// view can render progress as it streams. The default stays background;
+	// this only flips the lane for plans that explicitly asked. "interactive"
+	// is anything the agent's IsBackgroundLane treats as non-background.
+	if plan.WatchExecution {
+		hints["execution_lane"] = "interactive"
+		p.logger.Info("plan execution: streaming opt-in (watch agent work)",
+			"plan_id", planId)
 	}
 	// Forward the Plan's requestedBy as the owner-user hint when it
 	// looks like a canonical user id. The agent's resolveOwnerForAgent
@@ -824,6 +842,15 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		}
 		if v, ok := m["requestedBy"].(string); ok {
 			row.RequestedBy = v
+		}
+		// Opt-in "watch agent work" (memql#900). Read input.watchExecution
+		// off the projected Plan.input object. The planFull shape flattens
+		// payload.input to the top-level "input" key. Tolerate the field
+		// being absent (the common case) or a non-bool; default false.
+		if input, ok := m["input"].(map[string]any); ok {
+			if w, ok := input["watchExecution"].(bool); ok {
+				row.WatchExecution = w
+			}
 		}
 		out = append(out, row)
 	}
