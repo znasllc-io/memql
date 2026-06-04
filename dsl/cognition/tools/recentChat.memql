@@ -27,7 +27,6 @@
 
 @enabled
 @handler(type="function", name="recentChat")
-@requires("recent-chat")
 @executionTime("fast")
 @description("Read recent space-chat content + space context. Read-only. The assistant's window into the space's utterance stream.")
 tool recentChat {

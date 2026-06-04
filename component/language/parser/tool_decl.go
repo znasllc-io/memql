@@ -38,8 +38,9 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 	p.advance()
 
 	// Translate the leading attribute set into typed ToolDecl fields.
-	// Unknown attributes are tolerated -- they'll be picked up by a
-	// future loader pass rather than rejected here.
+	// Unknown annotations are hard-rejected (#990) -- every other
+	// construct kind already does this; closing the silent-tolerance
+	// gap keeps typos and stale annotations from being dropped at load.
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -88,6 +89,8 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			decl.AllowedRoles = attrStringListValue(attr)
 		case "scopes":
 			decl.Scopes = attrStringListValue(attr)
+		default:
+			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @enabled, @executionTime, @handler, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
 		}
 	}
 
