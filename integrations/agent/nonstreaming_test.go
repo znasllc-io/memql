@@ -8,8 +8,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+// erroringExecutor is a taskstamp.Executor whose tool dispatch always
+// fails, driving the loop's all-errored path (so the model-tiering
+// escalation can be exercised). Execute is a benign no-op so the stamper's
+// synthetic-plan materialization doesn't get in the way.
+type erroringExecutor struct{}
+
+func (erroringExecutor) ExecuteToolByName(_ context.Context, _ string, _ map[string]any) (string, error) {
+	return "", errors.New("tool boom")
+}
+func (erroringExecutor) Execute(_ context.Context, _ string) (any, error) { return nil, nil }
+
+func toolCallStep(name string) scriptStep {
+	return scriptStep{result: &common.ToolCallingChatResult{
+		ToolCalls: []common.ToolCall{{ID: "t1", Name: name, Arguments: "{}"}},
+	}}
+}
 
 // scriptedToolProvider is a fake common.ToolCallingChatSIProvider that
 // replays a programmed sequence of (result, err) steps -- one per
@@ -72,7 +90,7 @@ func TestRunNonStreamingToolLoop_TextOnlyTerminates(t *testing.T) {
 	}}
 	sink := &captureSink{}
 
-	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, sink, time.Now(), "req-1", turnContext{})
+	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, nil, sink, time.Now(), "req-1", turnContext{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +110,7 @@ func TestRunNonStreamingToolLoop_RespondToUserEnvelopeTerminates(t *testing.T) {
 	prov := &scriptedToolProvider{steps: []scriptStep{respondToUserStep("here is your file")}}
 	sink := &captureSink{}
 
-	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, sink, time.Now(), "req-2", turnContext{})
+	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, nil, sink, time.Now(), "req-2", turnContext{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +138,7 @@ func TestRunNonStreamingToolLoop_RetriesTransientThenSucceeds(t *testing.T) {
 	}}
 	sink := &captureSink{}
 
-	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, sink, time.Now(), "req-3", turnContext{})
+	res, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, nil, sink, time.Now(), "req-3", turnContext{})
 	if err != nil {
 		t.Fatalf("unexpected error after transient retry: %v", err)
 	}
@@ -143,9 +161,77 @@ func TestRunNonStreamingToolLoop_HardErrorOnFirstStepFailsHonestly(t *testing.T)
 	}}
 	sink := &captureSink{}
 
-	_, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, sink, time.Now(), "req-4", turnContext{})
+	_, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, nil, sink, time.Now(), "req-4", turnContext{})
 	if err == nil {
 		t.Fatal("expected a hard error on first-step failure, got nil")
+	}
+}
+
+// memql#898: when the cheap tier gets stuck (repeated all-errored tool
+// rounds), the loop escalates to the stronger tier ONCE and lets it finish.
+func TestRunNonStreamingToolLoop_EscalatesToStrongerTierWhenStuck(t *testing.T) {
+	r := testReplier()
+	r.stamper = taskstamp.New(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// Cheap tier keeps asking for a tool that always errors -> all-errored
+	// rounds accumulate. With the default escalate-after threshold of 2,
+	// escalation fires on the 2nd errored round.
+	cheap := &scriptedToolProvider{steps: []scriptStep{
+		toolCallStep("workbenchHost"),
+		toolCallStep("workbenchHost"),
+		toolCallStep("workbenchHost"),
+	}}
+	// The stronger tier recovers and emits the terminal envelope.
+	strong := &scriptedToolProvider{steps: []scriptStep{respondToUserStep("recovered on the strong tier")}}
+	sink := &captureSink{}
+
+	res, err := r.runNonStreamingToolLoop(context.Background(), cheap, strong, nil, nil, sink, time.Now(), "req-esc", turnContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.FinalText != "recovered on the strong tier" {
+		t.Fatalf("FinalText = %q, want the strong-tier envelope response", res.FinalText)
+	}
+	// Cheap tier ran exactly twice (errored round 1 -> continue; errored
+	// round 2 -> hits the threshold and escalates), then the strong tier
+	// took over and finished in one call.
+	if cheap.calls != 2 {
+		t.Fatalf("cheap provider called %d times, want 2 before escalation", cheap.calls)
+	}
+	if strong.calls != 1 {
+		t.Fatalf("strong provider called %d times, want 1 after escalation", strong.calls)
+	}
+}
+
+// Without an escalation provider, a stuck cheap tier just breaks after the
+// hard all-errored cap -- no panic, no escalation.
+func TestRunNonStreamingToolLoop_NoEscalationProviderBreaksOnStuck(t *testing.T) {
+	r := testReplier()
+	r.stamper = taskstamp.New(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	cheap := &scriptedToolProvider{steps: []scriptStep{
+		toolCallStep("workbenchHost"), toolCallStep("workbenchHost"),
+		toolCallStep("workbenchHost"), toolCallStep("workbenchHost"),
+	}}
+	sink := &captureSink{}
+
+	res, err := r.runNonStreamingToolLoop(context.Background(), cheap, nil, nil, nil, sink, time.Now(), "req-noesc", turnContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Hard break after maxConsecutiveAllErrored (3) rounds with no escalation.
+	if cheap.calls != 3 {
+		t.Fatalf("cheap provider called %d times, want 3 (hard all-errored break)", cheap.calls)
+	}
+	if res == nil {
+		t.Fatal("expected a (best-effort) result, got nil")
+	}
+}
+
+func TestBackgroundEscalateAfterErroredRounds_Default(t *testing.T) {
+	// No env set in the test process -> the built-in default.
+	if got := backgroundEscalateAfterErroredRounds(); got != defaultBackgroundEscalateAfterErroredRounds {
+		t.Fatalf("backgroundEscalateAfterErroredRounds() = %d, want default %d", got, defaultBackgroundEscalateAfterErroredRounds)
 	}
 }
 

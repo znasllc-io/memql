@@ -90,7 +90,16 @@ const ExecutionLaneBackground = "background"
 // provider chain, tuned independently of the interactive chat policies, so
 // background model selection (and, per memql#898, its model tier) can
 // change without touching live chat. Defined in dsl/policies/policies.memql.
+// memql#898 retuned it to a CHEAP default tier.
 const backgroundExecutionPolicy = "backgroundExecution"
+
+// backgroundEscalationPolicy is the strong/expensive SI Router policy the
+// background executor swaps to mid-turn when the cheap backgroundExecution
+// tier gets stuck (memql#898). Cheap-by-default, strong-on-demand: most
+// routine deliverables finish on the cheap tier; only a turn that trips the
+// stuck signal pays for the stronger model. Defined in
+// dsl/policies/policies.memql.
+const backgroundEscalationPolicy = "backgroundEscalation"
 
 // IsBackgroundLane reports whether a turn's hints select the background
 // (non-streaming) execution lane.
