@@ -3,7 +3,6 @@
 use safety.concepts.{ classification, approvalRequest, outputScreening }
 
 @row
-@concepts("v1:safety:classification")
 @description("Comprehensive projection of every v1:safety:classification field. Backs the retention sweep + future cockpit Command Safety view.")
 shape classification classificationFull {
   row.id
@@ -27,7 +26,6 @@ shape classification classificationFull {
 }
 
 @row
-@concepts("v1:safety:approvalRequest")
 @description("Comprehensive projection of every v1:safety:approvalRequest field. Backs the cockpit approval inbox (memql-cockpit follow-up) + the Gate's bypass-check query.")
 shape approvalRequest approvalRequestFull {
   row.id
@@ -50,7 +48,6 @@ shape approvalRequest approvalRequestFull {
 }
 
 @row
-@concepts("v1:safety:outputScreening")
 @description("Comprehensive projection of every v1:safety:outputScreening field. Backs the retention sweep + future cockpit prompt-injection dashboard.")
 shape outputScreening outputScreeningFull {
   row.id
