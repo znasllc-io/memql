@@ -12,7 +12,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/lib/pq v1.12.3
 	github.com/livekit/media-sdk v0.0.0-20260424094251-1e21ae1138de
-	github.com/livekit/protocol v1.46.4
+	github.com/livekit/protocol v1.46.5
 	github.com/livekit/server-sdk-go/v2 v2.16.4
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pion/webrtc/v4 v4.2.11
