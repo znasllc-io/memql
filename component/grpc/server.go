@@ -112,6 +112,7 @@ type Server struct {
 	conceptRegistry   memoryNodes.Registry
 	aiForwarder       *SIForwardRouter
 	agentReplier      AgentTurnHandler
+	agentPauseHook    func(requestId string)
 	serviceRef        *serviceRef
 	extraRegistrars   []func(*grpc.Server)
 	// tokenVerifier honors RotateAuthMsg on open streams. Set by
@@ -442,6 +443,12 @@ type service struct {
 	// bootstrap). Other binaries leave this nil; handleAgentGenerateTurn
 	// returns an error when the caller lands on the wrong node type.
 	agentReplier AgentTurnHandler
+
+	// agentPauseHook flags an in-flight background turn for cooperative
+	// preemption (epic memql#902 / #906), keyed by request_id. Injected on
+	// agent binaries as agent.RequestPause via Server.SetAgentPauseHook.
+	// Nil on other node types; the AgentPreemptTurn handler no-ops when unset.
+	agentPauseHook func(requestId string)
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's

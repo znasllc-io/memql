@@ -403,6 +403,12 @@ func (s *service) HandleForwardedRequest(
 		// the waiter up by call_id and unblocks the original tool loop
 		// regardless of which forwarded session delivered it.
 		_ = sess.handleClientToolResult(&envelope, payload.ClientToolResult)
+	case *memqlv1.MemqlClientMessage_AgentPreemptTurn:
+		// Planner "pass" (epic memql#902 / #906): flag the in-flight
+		// background turn (keyed by request_id) to stop at its next
+		// checkpoint. Fire-and-forget; the turn ends with
+		// AgentGenerateTurnComplete.paused=true.
+		_ = sess.handleAgentPreemptTurn(&envelope, payload.AgentPreemptTurn)
 	default:
 		s.sendForwardError(send, requestId, codes.Unimplemented,
 			"unsupported ai forward payload type")

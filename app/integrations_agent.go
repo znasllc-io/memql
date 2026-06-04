@@ -55,6 +55,11 @@ func (a *App) setupAgentReplier() {
 		a.fatal("grpc server not constructed before agent replier setup")
 	}
 	a.grpcServer.SetAgentTurnHandler(&agentReplierHandlerAdapter{replier: replier})
+	// Cooperative preemption signal (epic memql#902 / #906): the planner's
+	// cross-node AgentPreemptTurn lands here and flags the in-flight turn to
+	// pause at its next checkpoint. component/grpc can't import
+	// integrations/agent, so the func is injected.
+	a.grpcServer.SetAgentPauseHook(agent.RequestPause)
 	a.Logger.Info("agent replier registered on gRPC server")
 }
 
@@ -105,6 +110,7 @@ func (a *agentReplierHandlerAdapter) Handle(ctx context.Context, msg *memqlv1.Ag
 		Iterations: result.Iterations,
 		Citations:  citations,
 		Retrieved:  retrieved,
+		Paused:     result.Paused,
 	}, nil
 }
 

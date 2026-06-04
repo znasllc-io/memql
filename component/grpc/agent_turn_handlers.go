@@ -48,6 +48,10 @@ type AgentTurnResult struct {
 	// them in the "Show details" expander beneath each reply -- so
 	// the user can see passages the model considered but didn't cite.
 	Retrieved []*memqlv1.AgentRetrievedChunk
+	// Paused is true iff the turn ended by cooperative preemption ("pass",
+	// epic memql#902 / #906) at a checkpoint rather than completing. The
+	// handler stamps it onto AgentGenerateTurnComplete.paused.
+	Paused bool
 }
 
 // SetAgentTurnHandler installs the per-binary handler. Called from app
@@ -62,6 +66,45 @@ func (s *Server) SetAgentTurnHandler(h AgentTurnHandler) {
 	if s.serviceRef != nil && s.serviceRef.svc != nil {
 		s.serviceRef.svc.agentReplier = h
 	}
+}
+
+// SetAgentPauseHook installs the cooperative-preemption signal the agent node
+// calls when it receives an AgentPreemptTurnMsg (epic memql#902 / #906).
+// Wired on agent binaries to integrations/agent.RequestPause during app
+// bootstrap; component/grpc can't import that package directly (the
+// agentReplier interface exists for the same reason), so it flows in as a
+// func. Nil-safe: the AgentPreemptTurn handler no-ops when unset.
+func (s *Server) SetAgentPauseHook(hook func(requestId string)) {
+	if s == nil {
+		return
+	}
+	s.agentPauseHook = hook
+	if s.serviceRef != nil && s.serviceRef.svc != nil {
+		s.serviceRef.svc.agentPauseHook = hook
+	}
+}
+
+// handleAgentPreemptTurn is the agent-node landing for a planner "pass"
+// (epic memql#902 / #906): it flags the in-flight background turn named by
+// request_id to stop at its next checkpoint. Fire-and-forget -- the turn ends
+// later with AgentGenerateTurnComplete.paused=true. No-op when the pause hook
+// isn't wired (non-agent node) or the id is empty.
+func (s *streamSession) handleAgentPreemptTurn(_ *memqlv1.MemqlClientMessage, msg *memqlv1.AgentPreemptTurnMsg) error {
+	if msg == nil || s.service == nil || s.service.agentPauseHook == nil {
+		return nil
+	}
+	requestId := strings.TrimSpace(msg.GetRequestId())
+	if requestId == "" {
+		return nil
+	}
+	s.service.agentPauseHook(requestId)
+	if s.logger != nil {
+		s.logger.Info("agent preempt-turn received; flagged for pause at next checkpoint",
+			"component", ComponentName,
+			"request_id", requestId,
+		)
+	}
+	return nil
 }
 
 // handleAgentGenerateTurn drives one turn through the installed handler
@@ -171,6 +214,7 @@ func (s *streamSession) runAgentTurn(
 		Iterations: int32(result.Iterations),
 		Citations:  result.Citations,
 		Retrieved:  result.Retrieved,
+		Paused:     result.Paused,
 	}
 	if len(result.ToolCalls) > 0 {
 		complete.ToolCalls = make([]*memqlv1.AgentTurnToolCall, 0, len(result.ToolCalls))
