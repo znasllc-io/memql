@@ -13,12 +13,10 @@
 # CI today. This mirrors the existing `make sdk-gen-check` drift gate for the
 # typed SDK.
 #
-# WHY component/bus IS EXCLUDED: its committed bus.pb.go was generated with an
-# OLDER protoc-gen-go whose initialism field naming (e.g. SIOpenaiApiKey, not
-# SiOpenaiApiKey) ~dozens of consumers depend on. Regenerating it under the
-# pinned plugins renames those fields and breaks the build. Normalizing bus +
-# its consumers onto the pinned toolchain is a separate, consumer-touching
-# change tracked in memql#928; bus joins this gate once that lands.
+# COVERAGE: component/grpc, component/node, component/bus -- every proto dir.
+# (bus was normalized onto the pinned toolchain in the same change that added
+# it here: its older-plugin field names, e.g. SIOpenaiApiKey, were regenerated
+# to SiOpenaiApiKey and the handful of consumers updated -- memql#928.)
 #
 # WHY THE PROTOC VERSION STAMP IS IGNORED: the generated code BODY is determined
 # by the protoc-gen-go / protoc-gen-go-grpc plugins (pinned here), not by the
@@ -31,13 +29,16 @@ set -euo pipefail
 readonly PROTOC_GEN_GO_VERSION="v1.36.11"
 readonly PROTOC_GEN_GO_GRPC_VERSION="v1.6.2"
 
-# "<dir>:<space-separated .proto files>" -- mirrors the //go:generate directives.
+# "<dir>|<grpc:yes|no>|<space-separated .proto files>" -- mirrors the
+# //go:generate directives. grpc=no for service-less protos (bus has only
+# messages, so running protoc-gen-go-grpc would emit an uncommitted file).
 readonly PROTO_TARGETS=(
-	"component/grpc:memql.proto worker.proto deploy_control.proto"
-	"component/node:node.proto"
+	"component/grpc|yes|memql.proto worker.proto deploy_control.proto"
+	"component/node|yes|node.proto"
+	"component/bus|no|bus.proto"
 )
 # Generated trees compared against the committed copies.
-readonly GEN_PATHS=("component/grpc/gen" "component/node/gen")
+readonly GEN_PATHS=("component/grpc/gen" "component/node/gen" "component/bus/gen")
 # Hunks whose only changed lines match this are ignored (the protoc stamp).
 readonly STAMP_IGNORE='^//[[:space:]].*protoc'
 
@@ -60,17 +61,24 @@ ensure_tools() {
 	export PATH="$bin:$PATH"
 }
 
-# regenerate runs protoc over every covered target, in place.
+# regenerate runs protoc over every covered target, in place. Targets flagged
+# grpc=no get --go_out only (service-less protos have no _grpc.pb.go).
 regenerate() {
-	local target dir files
+	local target dir grpc files grpc_args
 	for target in "${PROTO_TARGETS[@]}"; do
-		dir="${target%%:*}"
-		files="${target#*:}"
+		dir="${target%%|*}"
+		grpc="${target#*|}"
+		grpc="${grpc%%|*}"
+		files="${target##*|}"
+		grpc_args=()
+		if [[ "$grpc" == "yes" ]]; then
+			grpc_args=(--go-grpc_out=gen --go-grpc_opt=paths=source_relative)
+		fi
 		echo "  regenerating ${dir} (${files})..."
 		# shellcheck disable=SC2086 -- word-splitting the file list is intended.
 		(cd "$dir" && protoc --proto_path=. \
 			--go_out=gen --go_opt=paths=source_relative \
-			--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+			"${grpc_args[@]}" \
 			$files)
 	done
 }

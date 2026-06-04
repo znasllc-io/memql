@@ -30,9 +30,12 @@ source "${SCRIPT_DIR}/lib.sh"
 
 readonly REQUIRED_GO_VERSION="1.26.1"
 # Pinning protoc-plugin versions keeps the generated *.pb.go stable
-# across machines + CI. Bump these together with the toolchain.
-readonly PROTOC_GEN_GO_VERSION="v1.34.2"
-readonly PROTOC_GEN_GO_GRPC_VERSION="v1.5.1"
+# across machines + CI. These MUST match the versions the committed
+# bindings were generated with (and that scripts/dev/proto-gen.sh's drift
+# gate pins) -- otherwise `make generate` reproduces nothing. Bump all
+# three (here + proto-gen.sh) together with the toolchain.
+readonly PROTOC_GEN_GO_VERSION="v1.36.11"
+readonly PROTOC_GEN_GO_GRPC_VERSION="v1.6.2"
 
 # -----------------------------------------------------------------
 # Detection helpers

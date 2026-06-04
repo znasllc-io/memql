@@ -76,9 +76,9 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		EngineStepCacheEnabled: envBool("MEMQL_STEP_CACHE_ENABLED"),
 
 		// AI
-		SIOpenaiApiKey:    envStr("MEMQL_SI_OPENAI_API_KEY"),
-		SIOpenaiProjectId: envStr("MEMQL_SI_OPENAI_PROJECT_ID"),
-		SIDefaultProvider: envStr("MEMQL_DEFAULT_PROVIDER"),
+		SiOpenaiApiKey:    envStr("MEMQL_SI_OPENAI_API_KEY"),
+		SiOpenaiProjectId: envStr("MEMQL_SI_OPENAI_PROJECT_ID"),
+		SiDefaultProvider: envStr("MEMQL_DEFAULT_PROVIDER"),
 
 		// Server
 		GrpcAddress:    envStr("MEMQL_GRPC_ADDRESS"),
