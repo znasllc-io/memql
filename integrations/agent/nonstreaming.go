@@ -10,6 +10,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/taskstamp"
+	"github.com/znasllc-io/memql/component/router"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
 )
@@ -61,6 +62,37 @@ func backgroundRequestTimeout() time.Duration {
 	return cachedBgTimeout
 }
 
+// defaultBackgroundEscalateAfterErroredRounds is how many consecutive
+// all-errored tool rounds the cheap background tier may rack up before the
+// executor escalates that turn to the stronger tier (memql#898). The cheap
+// model getting tools wrong round after round is the explicit "stuck"
+// signal -- it usually means it's mishandling the workbench/worker tool, and
+// a stronger model is far more likely to recover. Kept BELOW the hard
+// all-errored break (maxConsecutiveAllErrored) so escalation gets a chance
+// to fire before the loop gives up. 0 disables escalation (cheap tier only).
+const defaultBackgroundEscalateAfterErroredRounds = 2
+
+const envBackgroundEscalateAfterErroredRounds = "MEMQL_BACKGROUND_ESCALATE_AFTER_ERRORED_ROUNDS"
+
+var (
+	loadBgEscalateOnce sync.Once
+	cachedBgEscalate   int
+)
+
+// backgroundEscalateAfterErroredRounds resolves the escalation threshold
+// once per process. A non-negative override is honored (0 = disabled);
+// a negative / unparsable value falls back to the default.
+func backgroundEscalateAfterErroredRounds() int {
+	loadBgEscalateOnce.Do(func() {
+		cachedBgEscalate = defaultBackgroundEscalateAfterErroredRounds
+		reader := env.NewEnvReader("")
+		if ptr, err := reader.OptionalInt(envBackgroundEscalateAfterErroredRounds); err == nil && ptr != nil && *ptr >= 0 {
+			cachedBgEscalate = *ptr
+		}
+	})
+	return cachedBgEscalate
+}
+
 // handleBackground covers the planner-dispatched background execution path.
 // It shares prepareTurn with handleStreaming, then drives the model through
 // the non-streaming tool surface instead of the streaming one.
@@ -89,6 +121,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 	}
 	r.logger.Info("agentReply: router picked provider",
 		"lane", "background",
+		"tier", "cheap",
 		"provider", resolved.ProviderName,
 		"vendor", resolved.Vendor,
 		"model", resolved.Model,
@@ -99,12 +132,53 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 		"requestId", prep.routerReq.RequestId,
 	)
 
-	result, err := r.runNonStreamingToolLoop(ctx, provider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
+	// Resolve the escalation tier up front (memql#898). The background lane
+	// runs cheap by default and escalates to the stronger tier mid-turn only
+	// on a stuck signal. Resolution is a cheap registry lookup; resolving it
+	// eagerly means the loop can swap providers without a resolve on the hot
+	// path. ExplicitProvider is cleared so escalation always lands on the
+	// strong tier even if the agent pinned a cheap provider. A resolution
+	// failure (no escalation provider available) just disables escalation --
+	// the cheap tier still runs to completion.
+	escalationProvider := r.resolveBackgroundEscalation(prep.routerReq, resolved.ProviderName)
+
+	result, err := r.runNonStreamingToolLoop(ctx, provider, escalationProvider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
 	if err != nil {
 		return result, err
 	}
 	r.finishTurn(result, prep, msg.RequestId)
 	return result, nil
+}
+
+// resolveBackgroundEscalation resolves the strong escalation tier for the
+// background lane (memql#898). Returns nil when escalation is unavailable or
+// would resolve to the same provider as the cheap tier (no point swapping).
+// cheapProviderName is the already-resolved cheap-tier provider name, used
+// to skip a no-op escalation.
+func (r *Replier) resolveBackgroundEscalation(baseReq router.ResolveRequest, cheapProviderName string) common.ToolCallingChatSIProvider {
+	escReq := baseReq
+	escReq.ExplicitProvider = "" // escalation always uses the strong policy chain
+	escReq.PolicyName = backgroundEscalationPolicy
+	provider, resolved, err := r.router.ResolveWithTools(escReq)
+	if err != nil {
+		r.logger.Warn("agentReply: background escalation tier unavailable; staying on cheap tier",
+			"error", err, "requestId", baseReq.RequestId)
+		return nil
+	}
+	if resolved.ProviderName == cheapProviderName {
+		// Escalation resolved to the same provider as the cheap tier (e.g.
+		// the cheap providers are all unavailable and both chains fell
+		// through to the same entry). Swapping would be a no-op.
+		return nil
+	}
+	r.logger.Info("agentReply: background escalation tier resolved",
+		"tier", "escalation",
+		"provider", resolved.ProviderName,
+		"model", resolved.Model,
+		"chain", resolved.Chain,
+		"requestId", baseReq.RequestId,
+	)
+	return provider
 }
 
 // runNonStreamingToolLoop drives a bounded multi-step request/response
@@ -124,6 +198,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 func (r *Replier) runNonStreamingToolLoop(
 	ctx context.Context,
 	provider common.ToolCallingChatSIProvider,
+	escalationProvider common.ToolCallingChatSIProvider,
 	messages []common.ChatMessage,
 	tools []common.ToolDefinition,
 	sink DeltaSink,
@@ -158,6 +233,13 @@ func (r *Replier) runNonStreamingToolLoop(
 	var terminalEnvelope *Envelope
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
+
+	// Model tiering (memql#898): the turn starts on the cheap provider and
+	// escalates to escalationProvider at most once, when the cheap tier gets
+	// stuck (repeated all-errored tool rounds). escalated guards the
+	// one-shot; escalateAt is the threshold (0 disables).
+	escalated := false
+	escalateAt := backgroundEscalateAfterErroredRounds()
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := maxTurnWallclock()
@@ -378,9 +460,30 @@ BackgroundLoop:
 			// Every tool in this round errored. Give the model a few rounds
 			// to self-correct from the structured error before giving up.
 			consecutiveAllErrored++
+
+			// Model tiering escalation (memql#898). Repeated all-errored
+			// rounds are the explicit "the cheap tier is stuck" signal --
+			// it's mishandling the tool surface and the structured errors
+			// aren't getting it unstuck. Swap to the stronger tier ONCE and
+			// let it continue with the in-progress history (one stronger
+			// continuation, not a full re-run). Reset the counter so the
+			// strong tier gets its own fresh budget of self-correction
+			// rounds before the hard break.
+			if escalationProvider != nil && !escalated && escalateAt > 0 && consecutiveAllErrored >= escalateAt {
+				r.logger.Warn("agent background: escalating to stronger tier after stuck cheap-tier rounds",
+					"erroredRounds", consecutiveAllErrored,
+					"escalateAt", escalateAt,
+					"iter", iter,
+					"requestId", requestId)
+				provider = escalationProvider
+				escalated = true
+				consecutiveAllErrored = 0
+				continue
+			}
+
 			if consecutiveAllErrored >= maxConsecutiveAllErrored {
 				r.logger.Warn("agent background: breaking after repeated all-errored rounds",
-					"consecutive", consecutiveAllErrored)
+					"consecutive", consecutiveAllErrored, "escalated", escalated)
 				break
 			}
 			continue

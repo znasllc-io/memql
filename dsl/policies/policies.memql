@@ -52,9 +52,17 @@ policy strongReasoning { }
 
 // ---- policies/v1/backgroundExecution.memql ----
 
+@primary("stream54Mini")
+@fallback("streamClaudeHaiku")
+@fallback("stream54Nano")
+@maxLatencyMs(120000)
+@description("Background / batch execution lane -- CHEAP DEFAULT tier (memql#898). Planner-dispatched plan/task execution (e.g. produceArtifact file generation) is routine work that does not need the strong/expensive interactive model, so it defaults to GPT-5.4 Mini with cross-vendor cheap fallbacks (Claude Haiku, then GPT-5.4 Nano). Every entry is OpenAI/Anthropic because only those vendors implement the NON-streaming tool-calling surface the background lane uses. When the cheap tier gets stuck on a turn (repeated tool-call failures), the background executor escalates mid-turn to the backgroundEscalation policy. Kept separate from the interactive chat policies (memql#897) so the batch tier is tuned independently of live chat; higher maxLatencyMs because no human waits on its first token; pairs with the background si_guard rate bucket.")
+policy backgroundExecution { }
+
+// ---- policies/v1/backgroundEscalation.memql ----
+
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
-@fallback("streamGeminiPro")
 @maxLatencyMs(120000)
-@description("Background / batch execution lane (memql#897). The dedicated policy for planner-dispatched plan/task execution turns, kept SEPARATE from the interactive chat policies so the batch lane's provider chain (and, per memql#898, its model tier) is tuned independently of live chat -- a change here can never regress conversation latency or quality. Sonnet-class for now (mirrors strongReasoning); memql#898 retunes the default to a cheap tier with escalate-on-stuck. Higher maxLatencyMs because no human is watching tokens arrive -- the user gets a completion card when the work finishes. Pairs with the background si_guard rate bucket, which isolates batch spend from the interactive rate budget.")
-policy backgroundExecution { }
+@description("Background lane ESCALATION tier (memql#898). The strong/expensive chain the background executor swaps to when the cheap backgroundExecution tier gets stuck on a turn (an explicit stuck signal -- repeated rounds where every tool call errored, which usually means the cheap model is mishandling the workbench/worker tool). Claude Sonnet primary, GPT-5.4 Pro as a tool-capable cross-vendor fallback (both implement the non-streaming tool surface; Gemini does not, so it is intentionally absent here). Escalation happens at most once per turn and reuses the in-progress message history, so it costs one stronger continuation, not a full re-run.")
+policy backgroundEscalation { }
