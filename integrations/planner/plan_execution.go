@@ -784,7 +784,31 @@ func (p *PlannerIntegration) consumeAgentTurn(
 // markPlanSucceeded stamps status=succeeded + completedAt=now,
 // rolling the agent's reply text into output.reply for the Tasks
 // panel's expand-drawer view.
+// planExternallyHalted reports whether the Plan's CURRENT status was set
+// out-of-band while a dispatch turn was in flight -- paused (incl. a
+// fairness pass, memql#908), re-queued for a slot (waitingForSlot, #905), or
+// cancelled. The background dispatch must NOT stamp a terminal status over
+// any of these: a passed plan whose turn happens to finish should stay
+// paused for resume (memql#907), not flip to succeeded/failed. Best-effort:
+// a lookup miss returns false so a normal turn still stamps its result.
+func (p *PlannerIntegration) planExternallyHalted(ctx context.Context, planId string) bool {
+	row, err := p.fetchPlanForExecution(ctx, planId)
+	if err != nil {
+		return false
+	}
+	switch row.Status {
+	case "paused", "waitingForSlot", "cancelled":
+		return true
+	}
+	return false
+}
+
 func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, replyText string) {
+	if p.planExternallyHalted(ctx, planId) {
+		p.logger.Info("plan execution: skipping succeeded stamp; plan halted out-of-band (paused/passed/cancelled)",
+			"plan_id", planId)
+		return
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	output := map[string]any{}
 	if replyText != "" {
@@ -806,6 +830,11 @@ func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, repl
 // markPlanFailed stamps status=failed + completedAt=now with the
 // supplied error message.
 func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMessage string) {
+	if p.planExternallyHalted(ctx, planId) {
+		p.logger.Info("plan execution: skipping failed stamp; plan halted out-of-band (paused/passed/cancelled)",
+			"plan_id", planId)
+		return
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
 		`mutationUpdatePlanStatus({planId:%q, status:"failed", completedAt:%q, errorMessage:%q})`,
