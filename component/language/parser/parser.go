@@ -4046,6 +4046,8 @@ func (p *Parser) parsePrimary() (ExpressionNode, error) {
 		return &NotExpr{Target: operand}, nil
 	case p.check(TokenQuestionDot):
 		return p.parseConditionalFilter()
+	case p.check(TokenKeywordWhen):
+		return p.parseWhenGuard()
 	case p.check(TokenKeywordNil):
 		p.advance()
 		return &NilExpr{}, nil
@@ -4160,6 +4162,47 @@ func scalarMembershipValue(name string) any {
 		return &ArgRefExpr{Path: name}
 	}
 	return name
+}
+
+// parseWhenGuard parses the `when(args.<field>) { <expr> }` arg-conditional
+// guard (#975). Semantics: a syntactic drop -- if the guard arg is absent at
+// query time the guarded block AND its connective are removed as if never
+// written. It reuses the `?.` machinery: a ConditionalFilterExpr carries the
+// guard arg path + the guarded expression, and the engine's arg-expansion pass
+// removes the node (and collapses the surrounding `&&` / `||`) when the arg is
+// missing. Unlike `?.`, the block can hold any boolean expression, which makes
+// the drop unambiguous inside `||`.
+func (p *Parser) parseWhenGuard() (ExpressionNode, error) {
+	p.advance() // consume 'when'
+	if err := p.expect(TokenParenOpen); err != nil {
+		return nil, err
+	}
+	if !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "when() requires an `args.<field>` guard, got %q", p.current.Literal)
+	}
+	guard := p.current.Literal
+	p.advance()
+	argPath, ok := strings.CutPrefix(guard, "args.")
+	if !ok || argPath == "" {
+		return nil, newParseErrorf(&p.current, "when() guard must be an `args.<field>` reference, got %q", guard)
+	}
+	if err := p.expect(TokenParenClose); err != nil {
+		return nil, err
+	}
+	if err := p.expect(TokenBraceOpen); err != nil {
+		return nil, err
+	}
+	inner, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if inner == nil {
+		return nil, newParseErrorf(&p.current, "when(%s) { ... } block must contain an expression", guard)
+	}
+	if err := p.expect(TokenBraceClose); err != nil {
+		return nil, err
+	}
+	return &ConditionalFilterExpr{ArgPath: argPath, Filter: inner}, nil
 }
 
 // parseComparison parses field comparison expressions.
