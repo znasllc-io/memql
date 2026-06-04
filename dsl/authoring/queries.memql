@@ -7,8 +7,8 @@
 // (#956/#958), the authored runtime loader (#959), and the compose-first
 // catalog matcher (#957).
 
-use authoring.concepts.{ bundle, construct }
-use authoring.shapes.{ bundleFull, constructFull }
+use authoring.concepts.{ bundle, construct, dependencyEdge }
+use authoring.shapes.{ bundleFull, constructFull, dependencyEdgeFull }
 use common.traits.{ traitStatusIsActive }
 
 @enabled
@@ -60,4 +60,32 @@ query construct queryAuthoringConstructsForBundle {
 query construct queryCataloguedConstructsForOwner {
   filter  payload.ownerUserId==actor.userId && payload.catalogued==true
   shape   constructFull
+}
+
+@enabled
+@description("All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.")
+query dependencyEdge queryDependencyEdgesForBundle {
+  args {
+    bundleId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId && payload.bundleId==args.bundleId
+  shape   dependencyEdgeFull
+}
+
+@enabled
+@description("IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.")
+query dependencyEdge queryDependentsOfConstruct {
+  args {
+    toName  string  @required
+    toKind  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId && payload.toName==args.toName && payload.toKind==args.toKind
+  shape   dependencyEdgeFull
+}
+
+@enabled
+@description("Every dependency edge owned by the caller. Backs a full dependency-graph view.")
+query dependencyEdge queryDependencyEdgesForOwner {
+  filter  payload.ownerUserId==actor.userId
+  shape   dependencyEdgeFull
 }

@@ -1215,6 +1215,73 @@ func QueryDelegationsByIdentityBuild(args QueryDelegationsByIdentityArgs) string
 	return b.String()
 }
 
+// QueryDependencyEdgesForBundle -- All dependency edges declared by a bundle (what it depends on), scoped to the caller. Backs dependency-closure inspection for a bundle.
+//
+// Bound concept: dependencyEdge.
+type QueryDependencyEdgesForBundleArgs struct {
+	BundleId string
+}
+
+// QueryDependencyEdgesForBundle calls the engine query queryDependencyEdgesForBundle.
+func (qc *QueryClient) QueryDependencyEdgesForBundle(ctx context.Context, args QueryDependencyEdgesForBundleArgs) (*Result, error) {
+	call := QueryDependencyEdgesForBundleBuild(args)
+	return qc.executeNamed(ctx, "queryDependencyEdgesForBundle", call)
+}
+
+func QueryDependencyEdgesForBundleBuild(args QueryDependencyEdgesForBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDependencyEdgesForBundle({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryDependencyEdgesForOwner -- Every dependency edge owned by the caller. Backs a full dependency-graph view.
+//
+// Bound concept: dependencyEdge.
+type QueryDependencyEdgesForOwnerArgs struct {
+}
+
+// QueryDependencyEdgesForOwner calls the engine query queryDependencyEdgesForOwner.
+func (qc *QueryClient) QueryDependencyEdgesForOwner(ctx context.Context, args QueryDependencyEdgesForOwnerArgs) (*Result, error) {
+	call := QueryDependencyEdgesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryDependencyEdgesForOwner", call)
+}
+
+func QueryDependencyEdgesForOwnerBuild(args QueryDependencyEdgesForOwnerArgs) string {
+	_ = args
+	return "queryDependencyEdgesForOwner({})"
+}
+
+// QueryDependentsOfConstruct -- IMPACT ANALYSIS (#957): every edge that depends ON a given construct, scoped to the caller. The dependents to re-validate before changing a shared / cataloged construct. The caller joins bundleId -> v1:authoring:bundle to filter to ACTIVE dependents.
+//
+// Bound concept: dependencyEdge.
+type QueryDependentsOfConstructArgs struct {
+	ToName string
+	ToKind string
+}
+
+// QueryDependentsOfConstruct calls the engine query queryDependentsOfConstruct.
+func (qc *QueryClient) QueryDependentsOfConstruct(ctx context.Context, args QueryDependentsOfConstructArgs) (*Result, error) {
+	call := QueryDependentsOfConstructBuild(args)
+	return qc.executeNamed(ctx, "queryDependentsOfConstruct", call)
+}
+
+func QueryDependentsOfConstructBuild(args QueryDependentsOfConstructArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDependentsOfConstruct({")
+	b.WriteString("toName: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToName))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toKind: ")
+	b.WriteString(fmt.Sprintf("%q", args.ToKind))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryDetectConflicts -- Find confirmed records that may conflict with a new record by natural key + record type
 //
 // Bound concept: record.
