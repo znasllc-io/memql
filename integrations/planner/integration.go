@@ -248,6 +248,18 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.handleProduceArtifactCompletion,
 			events.WithSubscriberName("planner:produce-artifact-completion"),
 		))
+		// Admit-next-on-slot-free (epic memql#902 / #905). When a Plan
+		// leaves the running state (succeeded / failed / cancelled / paused
+		// / awaitingFeedback / needsAgent) a per-account concurrency slot
+		// may have freed; this pulls the longest-waiting (waitingForSlot)
+		// Plan(s) for that account into running, FIFO. No-op for accounts
+		// with no waiting queue (the common case takes a single indexed
+		// probe, no lock).
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.handleSlotFreed,
+			events.WithSubscriberName("planner:admit-next-on-slot-free"),
+		))
 		// trainSpecialist dispatcher (#644). Claims kind=trainSpecialist
 		// Plans -- the agent loop skips that kind so the two don't race.
 		// Subscribes to both created + updated so a Plan spawned in
