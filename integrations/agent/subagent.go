@@ -101,6 +101,23 @@ const backgroundExecutionPolicy = "backgroundExecution"
 // dsl/policies/policies.memql.
 const backgroundEscalationPolicy = "backgroundEscalation"
 
+// ResumeHintKey marks a background dispatch as a RESUME of a previously
+// passed/paused task (memql#907). When the planner re-admits a task whose
+// slot freed up, it re-dispatches with hints[ResumeHintKey]="true"; the
+// executor then loads the taskState persisted at the pause (memql#906) and
+// seeds the turn with a resume-context block so the agent continues from
+// the checkpoint instead of redoing completed work. Absent / "false" runs
+// a normal fresh turn.
+const ResumeHintKey = "resume"
+
+// IsResume reports whether a turn's hints flag it as a resume dispatch.
+func IsResume(hints map[string]string) bool {
+	if hints == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(hints[ResumeHintKey]), "true")
+}
+
 // IsBackgroundLane reports whether a turn's hints select the background
 // (non-streaming) execution lane.
 func IsBackgroundLane(hints map[string]string) bool {
