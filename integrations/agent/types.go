@@ -82,6 +82,12 @@ type TurnResult struct {
 	Iterations      int
 	Citations       []Citation
 	RetrievedChunks []RetrievedChunk
+	// Paused is true when a background turn stopped at a checkpoint because
+	// it was preempted ("passed", memql#906) rather than running to natural
+	// completion. The in-progress working state was persisted to taskState
+	// for later resume (memql#907). Only ever set on the non-streaming
+	// background lane; interactive turns leave it false.
+	Paused bool
 }
 
 // RetrievedChunk is one entry in the RAG retrieval pool surfaced to the
