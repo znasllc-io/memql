@@ -34,6 +34,10 @@ func (a *App) setupPlannerIntegration() {
 		planner.WithEngine(&CognitionEngineAdapter{Engine: a.engine}),
 		planner.WithEventBus(a.eventBus),
 		planner.WithLogger(a.Logger),
+		// Per-account task-concurrency admission control (epic memql#902 / #904)
+		// needs a *bun.DB for per-account advisory locks + running-Plan counts.
+		// a.db.BunDB is the same lazy getter the cron leader uses; nil-safe.
+		planner.WithDBGetter(a.db.BunDB),
 	)
 	if err != nil {
 		a.fatal("failed to create planner integration", "error", err, "component", planner.ComponentName)

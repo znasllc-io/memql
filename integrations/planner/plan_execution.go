@@ -259,6 +259,41 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId str
 		return
 	}
 
+	// Admission control (epic memql#902). Bound the number of Plans an
+	// account may have running concurrently across all its spaces by its
+	// billing tier. DEFAULT = UNLIMITED: an unconfigured / enterprise account
+	// resolves to unlimited and we skip the gate entirely -- a true no-op, no
+	// extra query, no regression. For a finite cap we ask the controller to
+	// atomically count the account's running Plans and either admit this one
+	// or park it (waitingForSlot) for a free slot (#905). The gate FAILS OPEN:
+	// any resolver / controller error proceeds to dispatch rather than wedge
+	// the Plan.
+	if p.entitlements != nil {
+		ent := p.entitlements.Resolve(ctx, plan.RequestedBy)
+		if !ent.Unlimited && p.admission != nil {
+			demote := func(c context.Context) error {
+				return p.markPlanWaitingForSlot(c, planId)
+			}
+			admitted, admitErr := p.admission.TryAdmit(ctx, plan.RequestedBy, planId, ent.MaxConcurrentTasks, demote)
+			switch {
+			case admitErr != nil:
+				p.logger.Warn("plan execution: admission check errored; admitting (fail-open)",
+					"plan_id", planId,
+					"account_id", plan.RequestedBy,
+					"cap", ent.MaxConcurrentTasks,
+					"error", admitErr,
+				)
+			case !admitted:
+				p.logger.Info("plan execution: account at concurrency cap; parked waiting for slot",
+					"plan_id", planId,
+					"account_id", plan.RequestedBy,
+					"cap", ent.MaxConcurrentTasks,
+				)
+				return
+			}
+		}
+	}
+
 	// participantId stamped on AgentGenerateTurnMsg is left empty.
 	// The agent uses it as a self-reference for downstream emits
 	// (chat utterances) but the planner-driven dispatch posts the
@@ -685,6 +720,25 @@ func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMe
 			"error", err,
 		)
 	}
+}
+
+// markPlanWaitingForSlot parks a Plan in the per-account waiting queue
+// (epic memql#902 / #904). The user clicked Run -- the Plan is already
+// running -- but the account is at its tier's concurrency cap, so the Plan
+// holds at waitingForSlot until a slot frees and #905 admits the next one.
+// Distinct from queued (awaiting the user's Run) and paused (the user paused
+// it): the system is throttling concurrency. Returns the engine error so the
+// admission demote callback can fail open on a write failure.
+func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId string) error {
+	q := fmt.Sprintf(`mutationUpdatePlanStatus({planId:%q, status:"waitingForSlot"})`, planId)
+	if _, err := p.engine.Execute(ctx, q); err != nil {
+		p.logger.Warn("plan execution: markPlanWaitingForSlot failed",
+			"plan_id", planId,
+			"error", err,
+		)
+		return err
+	}
+	return nil
 }
 
 // extractPlanRoutingFields pulls planId / kind / status off the
