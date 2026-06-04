@@ -21,3 +21,11 @@ prompt reactiveConductor {
   recentMemory     []object          @description("Top-k recent + relevant memories from recall() -- [{content, createdAt, _score}]. Grounds the decision in what just happened so the loop does not re-surface work already in flight or re-nudge something just handled.")
   now              string   @required @description("RFC3339 wall-clock at invocation. Lets the conductor reason about elapsed time, schedule windows, and quiet hours.")
 }
+
+@defaultProvider("chat54Mini")
+@templateFile("prompts/goalComplexityTriage.tmpl")
+@description("Goal complexity triage (epic #836 / #837). The CHEAP, first-pass classifier that runs BEFORE the expensive plannerAgent decompose loop on every goal-bearing Plan. It answers one question: is this goal a TRIVIAL single self-contained deliverable (e.g. 'a list of 10 birds', 'a haiku about the sea', 'a one-page markdown summary'), MODERATE (a few clear steps, an existing specialist, no research/training), or COMPLEX (multi-phase program, multiple specialists, research, or a durable reused capability). Trivial routes to ONE direct production turn -- NO decompose recursion, NO specialist creation, NO training -- which is the cost fix: a one-line deliverable must never trigger the Opus+thinking decompose loop. Fast/cheap tier (chat54Mini) by design. Output contract: {complexity: 'trivial'|'moderate'|'complex', reasoning: '<one short sentence>'}.")
+prompt goalComplexityTriage {
+  goal  string  @required @description("The user-stated goal driving the Plan, verbatim. The single most important input -- the classification is inferred from it.")
+  now   string            @description("Optional RFC3339 wall-clock; opaque, never required.")
+}
