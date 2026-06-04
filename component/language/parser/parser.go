@@ -3949,7 +3949,11 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 	}, nil
 }
 
-// parseLogicalOr parses comma-separated (OR) expressions.
+// parseLogicalOr parses OR expressions. The Go-style `||` operator is the
+// canonical form; the legacy `,`-as-OR separator is still accepted (its
+// tree-wide retirement is #977). Both sit at the OR precedence level --
+// looser than `&&` (parseLogicalAnd) -- so `a && b || c` parses as
+// `(a && b) || c`, matching Go.
 func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 	left, err := p.parseNullCoalesce()
 	if err != nil {
@@ -3959,7 +3963,7 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	for p.check(TokenComma) {
+	for p.check(TokenComma) || p.check(TokenPipePipe) {
 		p.advance()
 		right, err := p.parseNullCoalesce()
 		if err != nil {
@@ -4627,16 +4631,20 @@ func (p *Parser) parseShapeLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	// In shape context, comma at depth 0 means end of query argument
-	// So we need to check if the comma is followed by { (template) or "name" (named shape)
-	for p.check(TokenComma) {
-		// Peek ahead to see if this comma separates query from template
-		nextType := p.peekAhead(1).Type
-		if nextType == TokenBraceOpen || nextType == TokenString {
-			// This comma precedes the template (inline or named), stop here
-			break
+	// In shape context, comma at depth 0 means end of query argument, so a
+	// comma followed by `{` (inline template) or "name" (named shape) ends
+	// the expression. The `||` operator is unambiguous OR and never a
+	// template separator, so it always continues the expression.
+	for p.check(TokenComma) || p.check(TokenPipePipe) {
+		if p.check(TokenComma) {
+			// Peek ahead to see if this comma separates query from template
+			nextType := p.peekAhead(1).Type
+			if nextType == TokenBraceOpen || nextType == TokenString {
+				// This comma precedes the template (inline or named), stop here
+				break
+			}
 		}
-		p.advance() // consume comma (this is OR in the expression)
+		p.advance() // consume the OR operator (`,` or `||`)
 		right, err := p.parseLogicalAnd()
 		if err != nil {
 			return nil, err

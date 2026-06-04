@@ -63,6 +63,7 @@ escape      = "\" ( '"' | "\" | "n" | "t" | "r" | "u" hex4 )
 | `TokenDefine` | `:=` | Step assignment. |
 | `TokenAt` | `@` | Annotation prefix. |
 | `TokenAmpAmp` | `&&` | Logical AND. |
+| `TokenPipePipe` | `\|\|` | Logical OR. |
 | `TokenBang` | `!` | Boolean negation. |
 | `TokenQuestion` | `?` | Ternary condition (`cond ? then : else`). |
 | `TokenQuestionDot` | `?.` | Optional chaining -- DEPRECATED; removal tracked in Phase 4. |
@@ -309,14 +310,14 @@ Precedence, tight to loose:
    numeric work happens in runtime via `add`, `sub`)
 5. Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `has`, `not in`
 6. Logical AND: `&&`
-7. Logical OR: comma (inside expression groups)
+7. Logical OR: `||` (canonical); the comma separator is the legacy form, retired tree-wide in #977
 8. Null coalesce: `??` -- deprecated
 9. Ternary: `? :`
 
 ```
 Expression      = Ternary
 Ternary         = LogicalOr ("?" Ternary ":" Ternary)?
-LogicalOr       = NullCoalesce ("," NullCoalesce)*
+LogicalOr       = NullCoalesce (("||" | ",") NullCoalesce)*
 NullCoalesce    = LogicalAnd ("??" LogicalAnd)*
 LogicalAnd      = Equality ("&&" Equality)*
 Equality        = Comparison (("==" | "!=") Comparison)*
