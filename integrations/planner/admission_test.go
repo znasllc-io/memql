@@ -171,3 +171,125 @@ func TestTryAdmit_AtomicCapUnderConcurrency(t *testing.T) {
 		t.Fatalf("DB shows %d running Plans, want exactly cap=%d (cap exceeded or under-admitted)", running, cap)
 	}
 }
+
+func TestIsSlotFreeingStatus(t *testing.T) {
+	freeing := []string{"succeeded", "failed", "cancelled", "paused", "awaitingFeedback", "needsAgent"}
+	for _, s := range freeing {
+		if !isSlotFreeingStatus(s) {
+			t.Errorf("%q should free a slot", s)
+		}
+	}
+	// running occupies a slot; waitingForSlot is the demote itself (account is
+	// at cap at that moment) so it must NOT trigger an admit sweep.
+	for _, s := range []string{"running", "waitingForSlot", "queued", "planning", "routing", ""} {
+		if isSlotFreeingStatus(s) {
+			t.Errorf("%q should NOT be treated as slot-freeing", s)
+		}
+	}
+}
+
+// TestAdmitNext_FIFOFillsFreeSlots is the #905 acceptance check: when slots are
+// free, AdmitNext promotes the longest-waiting Plans first, exactly up to the
+// cap, and leaves the rest queued. Seeds 1 running + 5 staggered waiting Plans
+// (cap=3) and asserts the two OLDEST waiting Plans are promoted (FIFO) and the
+// three newest stay parked.
+func TestAdmitNext_FIFOFillsFreeSlots(t *testing.T) {
+	db := openAdmissionTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	const cap = 3
+	// Nonce BOTH the account and the plan ids: the count/pick queries do
+	// DISTINCT ON (id) across the whole table (plan ids are globally unique in
+	// production), so reusing fixed ids across runs would let a prior run's
+	// rows shadow this one's. Cleanup is by account.
+	nonce := time.Now().UnixNano()
+	account := fmt.Sprintf("v1:identity:user:test-admitnext-%d", nonce)
+	t.Cleanup(func() {
+		_, _ = db.DB.ExecContext(context.Background(),
+			`DELETE FROM "MemoryNodes" WHERE concept = 'v1:planner:plan' AND payload->>'requestedBy' = $1`,
+			account)
+	})
+
+	insert := func(id, status, createdAtSQL string) {
+		t.Helper()
+		_, err := db.DB.ExecContext(ctx,
+			`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, concept)
+			 VALUES ($1, `+createdAtSQL+`, 'test', '{}', $2::jsonb, 'v1:planner:plan')`,
+			id, fmt.Sprintf(`{"status":%q,"requestedBy":%q}`, status, account))
+		if err != nil {
+			t.Fatalf("insert %s/%s: %v", id, status, err)
+		}
+	}
+
+	// One Plan already running (occupies 1 of 3 slots).
+	insert(fmt.Sprintf("v1:planner:plan:run-%d", nonce), "running", "now() - interval '10 minutes'")
+	// Five waiting Plans, w0 oldest .. w4 newest (FIFO order = w0,w1,...).
+	waitID := func(i int) string { return fmt.Sprintf("v1:planner:plan:wait-%d-%d", nonce, i) }
+	for i := 0; i < 5; i++ {
+		insert(waitID(i), "waitingForSlot", fmt.Sprintf("now() - interval '%d minutes'", 5-i))
+	}
+
+	ac := NewAdmissionController(func() *bun.DB { return db }, testLogger())
+	promote := func(c context.Context, planId string) error {
+		_, err := db.DB.ExecContext(c,
+			`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, concept)
+			 VALUES ($1, now(), 'test', '{}', $2::jsonb, 'v1:planner:plan')`,
+			planId, fmt.Sprintf(`{"status":"running","requestedBy":%q}`, account))
+		return err
+	}
+
+	admitted, err := ac.AdmitNext(ctx, account, cap, promote)
+	if err != nil {
+		t.Fatalf("AdmitNext: %v", err)
+	}
+	// 3 - 1 already running = 2 free slots.
+	if admitted != 2 {
+		t.Fatalf("admitted %d, want 2 (cap=3, 1 already running)", admitted)
+	}
+
+	statusOf := func(id string) string {
+		var s string
+		if err := db.DB.QueryRowContext(ctx,
+			`SELECT payload->>'status' FROM "MemoryNodes" WHERE id = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+			id).Scan(&s); err != nil {
+			t.Fatalf("status of %s: %v", id, err)
+		}
+		return s
+	}
+	// FIFO: the two oldest waiters now run; the three newest still wait.
+	for _, i := range []int{0, 1} {
+		if got := statusOf(waitID(i)); got != "running" {
+			t.Errorf("oldest waiter %s should be running (FIFO), got %q", waitID(i), got)
+		}
+	}
+	for _, i := range []int{2, 3, 4} {
+		if got := statusOf(waitID(i)); got != "waitingForSlot" {
+			t.Errorf("newer waiter %s should still wait, got %q", waitID(i), got)
+		}
+	}
+
+	var running int
+	if err := db.DB.QueryRowContext(ctx, countRunningQuery, account).Scan(&running); err != nil {
+		t.Fatalf("count running: %v", err)
+	}
+	if running != cap {
+		t.Fatalf("DB shows %d running, want cap=%d", running, cap)
+	}
+}
+
+// TestAdmitNext_NoQueueNoOp verifies the lock-free fast path: an account with
+// no waiting Plans admits nothing and returns cleanly.
+func TestAdmitNext_NoQueueNoOp(t *testing.T) {
+	db := openAdmissionTestDB(t)
+	defer db.Close()
+	account := fmt.Sprintf("v1:identity:user:test-noqueue-%d", time.Now().UnixNano())
+	ac := NewAdmissionController(func() *bun.DB { return db }, testLogger())
+	admitted, err := ac.AdmitNext(context.Background(), account, 5, func(context.Context, string) error {
+		t.Fatal("promote must not run when there is no queue")
+		return nil
+	})
+	if err != nil || admitted != 0 {
+		t.Fatalf("no-queue AdmitNext: admitted=%d err=%v", admitted, err)
+	}
+}

@@ -2,11 +2,16 @@ package planner
 
 import (
 	"context"
+	"database/sql"
 	"hash/fnv"
 	"log/slog"
 
 	"github.com/uptrace/bun"
 )
+
+// maxAdmitPerSweep bounds a single AdmitNext sweep so a pathological queue +
+// promote loop can never spin unbounded while holding the account lock.
+const maxAdmitPerSweep = 1000
 
 // admissionLockClass namespaces the planner's per-account admission advisory
 // locks. Postgres two-key advisory locks (pg_advisory_lock(classid, objid))
@@ -151,4 +156,115 @@ func accountLockKey(accountId string) int32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(accountId))
 	return int32(h.Sum32())
+}
+
+// anyWaitingQuery is the lock-free fast path: does the account have ANY Plan
+// parked at waitingForSlot? When not (the overwhelmingly common case -- no
+// queue), AdmitNext skips the advisory lock + count entirely.
+const anyWaitingQuery = `WITH latest AS (
+    SELECT DISTINCT ON (id) id, payload
+    FROM "MemoryNodes"
+    WHERE concept = 'v1:planner:plan'
+    ORDER BY id, "createdAt" DESC
+)
+SELECT 1 FROM latest
+WHERE payload->>'status' = 'waitingForSlot'
+  AND payload->>'requestedBy' = $1
+LIMIT 1`
+
+// pickOldestWaitingQuery selects the FIFO head of the account's waiting queue:
+// the longest-parked Plan, ordered by when it entered waitingForSlot (the
+// createdAt of its current version).
+const pickOldestWaitingQuery = `WITH latest AS (
+    SELECT DISTINCT ON (id) id, payload, "createdAt"
+    FROM "MemoryNodes"
+    WHERE concept = 'v1:planner:plan'
+    ORDER BY id, "createdAt" DESC
+)
+SELECT id FROM latest
+WHERE payload->>'status' = 'waitingForSlot'
+  AND payload->>'requestedBy' = $1
+ORDER BY "createdAt" ASC
+LIMIT 1`
+
+// AdmitNext admits as many of the account's waiting Plans as there are free
+// slots, FIFO (epic memql#902 / #905). It is the event-driven counterpart to
+// TryAdmit: when a running Plan reaches a slot-freeing state, the caller invokes
+// this to pull the longest-waiting Plan(s) into running.
+//
+// Under the per-account advisory lock (same key as TryAdmit, so the two never
+// race), it loops: count the account's running Plans; while a slot is free
+// (cap <= 0 means unlimited -> drain the whole queue) and a waiting Plan
+// exists, promote the FIFO head via `promote` (the caller's engine transition
+// to running) and re-count. The promote commits before the next count, so the
+// loop never over-admits past the cap. Returns the number promoted.
+//
+// FAIL-OPEN / no-op: a nil getter or nil DB returns (0, nil); infra errors
+// return what was admitted so far plus the error (the caller logs and moves on
+// -- a missed wakeup self-heals on the next slot-free event).
+func (ac *AdmissionController) AdmitNext(
+	ctx context.Context,
+	accountId string,
+	cap int,
+	promote func(context.Context, string) error,
+) (int, error) {
+	if ac == nil || ac.dbGetter == nil {
+		return 0, nil
+	}
+	db := ac.dbGetter()
+	if db == nil || db.DB == nil {
+		return 0, nil
+	}
+
+	// Fast path: no queue -> nothing to admit, don't even take the lock.
+	var probe int
+	switch err := db.DB.QueryRowContext(ctx, anyWaitingQuery, accountId).Scan(&probe); err {
+	case sql.ErrNoRows:
+		return 0, nil
+	case nil:
+		// there is at least one waiting Plan; fall through to the locked sweep
+	default:
+		return 0, err
+	}
+
+	conn, err := db.DB.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	objid := accountLockKey(accountId)
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1, $2)", admissionLockClass, objid); err != nil {
+		_ = conn.Close()
+		return 0, err
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1, $2)", admissionLockClass, objid)
+		_ = conn.Close()
+	}()
+
+	admitted := 0
+	for i := 0; i < maxAdmitPerSweep; i++ {
+		var running int
+		if err := conn.QueryRowContext(ctx, countRunningQuery, accountId).Scan(&running); err != nil {
+			return admitted, err
+		}
+		if cap > 0 && running >= cap {
+			break // no free slot
+		}
+		var planId string
+		switch err := conn.QueryRowContext(ctx, pickOldestWaitingQuery, accountId).Scan(&planId); err {
+		case sql.ErrNoRows:
+			return admitted, nil // queue drained
+		case nil:
+			// got the FIFO head
+		default:
+			return admitted, err
+		}
+		if promote != nil {
+			if perr := promote(ctx, planId); perr != nil {
+				return admitted, perr
+			}
+		}
+		admitted++
+	}
+	return admitted, nil
 }

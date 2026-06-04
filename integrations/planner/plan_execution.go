@@ -65,9 +65,10 @@ const systemActorId = "system:planner-integration"
 // a graph.node.updated.v1:planner:plan event payload to decide
 // whether this handler should fire.
 type planRoutingFields struct {
-	ID     string
-	Kind   string
-	Status string
+	ID          string
+	Kind        string
+	Status      string
+	RequestedBy string
 }
 
 // planExecutionRow is the projection fetchPlanForExecution returns.
@@ -144,6 +145,84 @@ func (p *PlannerIntegration) handlePlanApprovedForExecution(event events.Event) 
 	// stall every other subscriber's events behind us.
 	bgCtx := contextWithSystemActor(context.Background())
 	go p.executeApprovedPlan(bgCtx, fields.ID)
+}
+
+// isSlotFreeingStatus reports whether a Plan transition INTO this status
+// vacates an account concurrency slot -- i.e. the Plan is no longer counted as
+// running (epic memql#902 / #905). The count gate only counts status=running,
+// so every one of these states means a slot may now be free for a waiting
+// Plan. (We deliberately exclude waitingForSlot -- that transition is the
+// admission demote itself, which happens precisely when the account is AT cap,
+// so there is never a slot to hand out at that moment.)
+func isSlotFreeingStatus(status string) bool {
+	switch status {
+	case "succeeded", "failed", "cancelled", "paused", "awaitingFeedback", "needsAgent":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleSlotFreed is the event-bus subscriber that drives the FIFO waiting
+// queue (epic memql#902 / #905). When a Plan leaves the running state, a
+// concurrency slot may have opened for the owning account, so it admits the
+// longest-waiting Plan(s). Admission is idempotent and re-counts under the
+// per-account lock, so a spurious wakeup (the freed Plan wasn't actually
+// occupying a slot) is a harmless no-op.
+func (p *PlannerIntegration) handleSlotFreed(event events.Event) {
+	fields := extractPlanRoutingFields(event)
+	if fields.ID == "" || !isSlotFreeingStatus(fields.Status) {
+		return
+	}
+	if p.admission == nil || p.entitlements == nil {
+		return
+	}
+	bgCtx := contextWithSystemActor(context.Background())
+	account := fields.RequestedBy
+	if account == "" {
+		// The event didn't carry requestedBy; fall back to a by-id read.
+		if row, err := p.fetchPlanForExecution(bgCtx, fields.ID); err == nil {
+			account = strings.TrimSpace(row.RequestedBy)
+		}
+	}
+	if account == "" {
+		return
+	}
+	// Admit in a goroutine: the sweep takes a per-account advisory lock and
+	// issues engine mutations, which must not block the synchronous bus loop.
+	go p.admitNextForAccount(bgCtx, account)
+}
+
+// admitNextForAccount pulls as many of the account's waiting Plans into running
+// as there are free slots under its tier cap (#905). Unlimited accounts have
+// no live queue under normal operation, but a cap that was lowered-then-raised
+// can leave stale waitingForSlot Plans -- passing cap=0 (unlimited) drains them
+// all. Best-effort: errors are logged, never fatal.
+func (p *PlannerIntegration) admitNextForAccount(ctx context.Context, account string) {
+	ent := p.entitlements.Resolve(ctx, account)
+	cap := 0 // unlimited -> drain the whole queue
+	if !ent.Unlimited {
+		cap = ent.MaxConcurrentTasks
+	}
+	promote := func(c context.Context, planId string) error {
+		return p.markPlanRunningFromQueue(c, planId)
+	}
+	admitted, err := p.admission.AdmitNext(ctx, account, cap, promote)
+	if err != nil {
+		p.logger.Warn("plan execution: admit-next sweep errored",
+			"account_id", account,
+			"admitted", admitted,
+			"error", err,
+		)
+		return
+	}
+	if admitted > 0 {
+		p.logger.Info("plan execution: admitted waiting Plans into freed slots",
+			"account_id", account,
+			"admitted", admitted,
+			"cap", cap,
+		)
+	}
 }
 
 // handleProduceArtifactCompletion is the event-bus subscriber that closes the
@@ -759,6 +838,26 @@ func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId 
 	return nil
 }
 
+// markPlanRunningFromQueue promotes a parked Plan back to running when a slot
+// frees (epic memql#902 / #905). The status=running transition re-emits the
+// graph.node.updated event that handlePlanApprovedForExecution consumes, so the
+// Plan re-enters executeApprovedPlan and dispatches its turn (which it never
+// did -- a Plan is parked BEFORE the turn is forwarded). Re-admission there
+// re-checks the cap, but AdmitNext only promotes within the cap so it passes.
+// Returns the engine error so the AdmitNext promote loop can stop on failure.
+func (p *PlannerIntegration) markPlanRunningFromQueue(ctx context.Context, planId string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	q := fmt.Sprintf(`mutationUpdatePlanStatus({planId:%q, status:"running", startedAt:%q})`, planId, now)
+	if _, err := p.engine.Execute(ctx, q); err != nil {
+		p.logger.Warn("plan execution: markPlanRunningFromQueue failed",
+			"plan_id", planId,
+			"error", err,
+		)
+		return err
+	}
+	return nil
+}
+
 // extractPlanRoutingFields pulls planId / kind / status off the
 // event payload. Tolerates both the flattened-fields shape and the
 // nested-payload shape events.Event can carry depending on emitter.
@@ -770,6 +869,7 @@ func extractPlanRoutingFields(event events.Event) planRoutingFields {
 	}
 	out.Kind, _ = event.Payload["kind"].(string)
 	out.Status, _ = event.Payload["status"].(string)
+	out.RequestedBy, _ = event.Payload["requestedBy"].(string)
 	if nested, ok := event.Payload["payload"].(map[string]any); ok {
 		if out.ID == "" {
 			out.ID, _ = nested["id"].(string)
@@ -780,10 +880,14 @@ func extractPlanRoutingFields(event events.Event) planRoutingFields {
 		if out.Status == "" {
 			out.Status, _ = nested["status"].(string)
 		}
+		if out.RequestedBy == "" {
+			out.RequestedBy, _ = nested["requestedBy"].(string)
+		}
 	}
 	out.ID = strings.TrimSpace(out.ID)
 	out.Kind = strings.TrimSpace(out.Kind)
 	out.Status = strings.TrimSpace(out.Status)
+	out.RequestedBy = strings.TrimSpace(out.RequestedBy)
 	return out
 }
 
