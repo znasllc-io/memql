@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 
@@ -207,12 +208,17 @@ func asInt(v any) int {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return clampInt64ToInt(n, 0)
 	case float64:
-		return int(n)
+		// Bound the float before narrowing so the int64() conversion
+		// can't overflow, then funnel through the guarded sink.
+		if math.IsNaN(n) || n > math.MaxInt32 || n < math.MinInt32 {
+			return 0
+		}
+		return clampInt64ToInt(int64(n), 0)
 	case json.Number:
 		i, _ := n.Int64()
-		return int(i)
+		return clampInt64ToInt(i, 0)
 	case string:
 		i, _ := strconv.Atoi(n)
 		return i

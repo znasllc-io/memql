@@ -39,33 +39,28 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 
 	nodeId := strings.TrimSpace(params.SpaceId) + ":" + id.NewShortId()
 
-	var sb strings.Builder
-	sb.WriteString(`mutationCreateAttachment({"attachmentId": `)
-	sb.WriteString(jsonString(nodeId))
-	sb.WriteString(`, "spaceId": `)
-	sb.WriteString(jsonString(params.SpaceId))
-	sb.WriteString(`, "fileName": `)
-	sb.WriteString(jsonString(params.FileName))
-	sb.WriteString(`, "mimeType": `)
-	sb.WriteString(jsonString(params.MimeType))
-	sb.WriteString(fmt.Sprintf(`, "fileSize": %d`, params.FileSize))
-	sb.WriteString(`, "blobUrl": `)
-	sb.WriteString(jsonString(params.BlobUrl))
-	sb.WriteString(`, "status": `)
-	sb.WriteString(jsonString(params.Status))
-	sb.WriteString(`, "uploadedBy": `)
-	sb.WriteString(jsonString(params.UploadedBy))
+	args := map[string]any{
+		"attachmentId": nodeId,
+		"spaceId":      params.SpaceId,
+		"fileName":     params.FileName,
+		"mimeType":     params.MimeType,
+		"fileSize":     params.FileSize,
+		"blobUrl":      params.BlobUrl,
+		"status":       params.Status,
+		"uploadedBy":   params.UploadedBy,
+	}
 	if t := strings.TrimSpace(params.Transcription); t != "" {
-		sb.WriteString(`, "transcription": `)
-		sb.WriteString(jsonString(t))
+		args["transcription"] = t
 	}
 	if sm := strings.TrimSpace(params.Summary); sm != "" {
-		sb.WriteString(`, "summary": `)
-		sb.WriteString(jsonString(sm))
+		args["summary"] = sm
 	}
-	sb.WriteString(`})`)
+	q, err := dslCall("mutationCreateAttachment", args)
+	if err != nil {
+		return nil, err
+	}
 
-	result, err := s.engine.Execute(ctx, sb.String())
+	result, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("execute mutationCreateAttachment: %w", err)
 	}
@@ -95,7 +90,10 @@ func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, spaceId str
 		return false, fmt.Errorf("spaceId is required")
 	}
 
-	q := fmt.Sprintf(`queryOwnedSpaceById({"spaceId": %s})`, jsonString(spaceId))
+	q, err := dslCall("queryOwnedSpaceById", map[string]any{"spaceId": spaceId})
+	if err != nil {
+		return false, err
+	}
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return false, fmt.Errorf("execute queryOwnedSpaceById: %w", err)
@@ -117,8 +115,13 @@ func (s *EngineAttachmentStore) GetAttachment(ctx context.Context, attachmentId,
 		return nil, fmt.Errorf("attachmentId and spaceId are required")
 	}
 
-	q := fmt.Sprintf(`queryAttachmentById({"attachmentId": %s, "spaceId": %s})`,
-		jsonString(attachmentId), jsonString(spaceId))
+	q, err := dslCall("queryAttachmentById", map[string]any{
+		"attachmentId": attachmentId,
+		"spaceId":      spaceId,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("execute queryAttachmentById: %w", err)
@@ -179,7 +182,23 @@ func queryResultHasRow(v any) bool {
 	return false
 }
 
-// jsonString returns a JSON-encoded string literal (including surrounding quotes).
+// dslCall renders a MemQL function call `fn({...})` whose argument object
+// is produced entirely by json.Marshal. Marshalling the whole map (rather
+// than concatenating per-field literals) guarantees every caller-supplied
+// value -- an attachment id, space id, file name, etc. -- is fully escaped
+// for the JSON object it lands in, so a value containing a double quote can
+// never break out of its enclosing literal (CodeQL go/unsafe-quoting).
+func dslCall(fn string, args map[string]any) (string, error) {
+	b, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal %s args: %w", fn, err)
+	}
+	return fn + "(" + string(b) + ")", nil
+}
+
+// jsonString returns a JSON-encoded string literal (including surrounding
+// quotes). Used by plan_store.go's per-field query builders; new callers
+// should prefer dslCall, which marshals the whole argument object.
 func jsonString(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {

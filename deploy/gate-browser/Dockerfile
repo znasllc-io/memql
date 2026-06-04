@@ -8,9 +8,12 @@
 #   docker build -t acrmemql.azurecr.io/deploy-gate-browser:<tag> .
 #   # or: az acr build --registry acrmemql --image deploy-gate-browser:<tag> \
 #   #        deploy/gate-browser
-FROM mcr.microsoft.com/playwright:v1.48.2-jammy
+FROM mcr.microsoft.com/playwright:v1.48.2-jammy@sha256:96dc479be9a603227fafc7126bd7d5e8152ae3e63749f377b2c49a4314b28ae1
 WORKDIR /gate
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+# npm ci installs the exact, integrity-pinned dependency tree from the
+# committed package-lock.json (Scorecard PinnedDependencies); it fails if
+# package.json and the lockfile disagree.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY playwright.config.js deep-smoke.spec.js ./
 ENTRYPOINT ["npx", "playwright", "test"]

@@ -8,7 +8,7 @@
 #   # or: az acr build --registry acrmemql --image deploy-gate:<tag> \
 #   #        -f cmd/deploy-gate-check/Dockerfile .
 # CI emits the resulting @sha256 digest for the release lockfile (releases/).
-FROM golang:1.26.4 AS build
+FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edff595aa0479 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
 
 # Distroless static: ships curl-free; deploy-gate-check does /readyz over Go's
 # net/http and the query over gRPC, so no shell/curl is needed.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
 COPY --from=build /out/deploy-gate-check /usr/local/bin/deploy-gate-check
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/deploy-gate-check"]

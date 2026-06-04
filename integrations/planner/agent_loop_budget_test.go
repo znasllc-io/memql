@@ -2,9 +2,41 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
+
+// TestAsInt_ClampsAndCoerces guards the go/incorrect-integer-conversion
+// fix: every numeric JSON shape narrows to int through the bounded sink,
+// so an out-of-int32-range or NaN value can never wrap silently.
+func TestAsInt_ClampsAndCoerces(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want int
+	}{
+		{"nil", nil, 0},
+		{"int", 7, 7},
+		{"int64 small", int64(42), 42},
+		{"float64 small", float64(9), 9},
+		{"json.Number", json.Number("13"), 13},
+		{"string", "21", 21},
+		{"bad string", "nope", 0},
+		{"int64 overflow", int64(math.MaxInt32) + 1, 0},
+		{"float64 overflow", float64(math.MaxInt32) + 1, 0},
+		{"float64 NaN", math.NaN(), 0},
+		{"float64 -Inf", math.Inf(-1), 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := asInt(c.in); got != c.want {
+				t.Fatalf("asInt(%v) = %d, want %d", c.in, got, c.want)
+			}
+		})
+	}
+}
 
 // --- pure gate logic (the cap) ---------------------------------------------
 
