@@ -1906,18 +1906,31 @@ backoff (#821), a convergence/no-progress guard (#822), and a global
 identical-request circuit breaker at the provider HTTP chokepoint
 (#825, `component/memql/si_guard.go`).
 
-IMPORTANT (current state): `produceArtifact` (the conversational
-"make me a file" deliverable) does NOT go through this loop -- it uses
-a single-turn bypass (`startPlanDirect` -> running -> the owning agent
-writes the file via the workbench) so a trivial deliverable makes ZERO
-planner LLM calls. An attempt to route it through the loop (#823) was
-reverted (#832) after it re-triggered a cost runaway. The durable fix
--- complexity triage (trivial -> one cheap call), model tiering
-(escalate to reasoning only on need), up-front token estimate +
-user-approval threshold, phased execution with checkpoints, gated
-specialist training, and a hard process-wide LLM rate ceiling -- is
-tracked in **epic memql#836**. The synchronous-in-handler path still
-covers the analyzeFile case end-to-end.
+Goal-resolution restructure (epic memql#836) -- SHIPPED. The cost-safety
+structure is now in place: a hard process-wide LLM rate ceiling at the
+provider HTTP chokepoint (#834, `si_guard.go`), complexity triage that
+routes a trivial deliverable to ONE cheap path instead of the decompose
+loop (#837), model tiering that defaults the planner to a cheap tier and
+escalates to Opus+thinking only on an explicit stuck signal (#838), an
+up-front token estimate + user-approval gate that parks an expensive plan
+before it spends (#839), gated specialist creation/training so a one-off
+never auto-trains (#842), phased execution with per-phase checkpoints
+(#840), deterministic-first result verification (#841), and lowered +
+binding per-plan caps with a no-task-markPlanSucceeded convergence guard
+(#843).
+
+`produceArtifact` (the conversational "make me a file" deliverable) now
+flows through the unified loop (memql#835): its old hardcoded
+HandlePlanCreated bypass was removed; it enters invokeAndDispatch where
+the approval gate auto-runs it (tiny estimate) and the triage recognizes
+it as a known single deliverable, shortcutting to ONE direct production
+turn (`startPlanDirect` -> running -> the owning agent writes the file via
+the workbench) -- ZERO plannerAgent decompose calls, exactly as the old
+bypass did, but now as a first-class routing decision with the rate
+ceiling + lowered caps + tiering as structural backstops. The earlier
+#823 attempt was reverted (#832) precisely because those backstops did
+not yet exist; they do now. The synchronous-in-handler path still covers
+the analyzeFile case end-to-end.
 
 ## Need Help?
 
