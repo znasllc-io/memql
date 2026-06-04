@@ -64,6 +64,8 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			decl.IsBase = true
 		case "extends":
 			decl.Extends = attrStringValue(attr)
+		default:
+			return nil, newParseErrorf(&p.current, "provider %q: unknown annotation @%s -- supported: @base, @default, @description, @extends, @modality, @model, @type", decl.Name, attr.Name)
 		}
 	}
 

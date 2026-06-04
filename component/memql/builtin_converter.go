@@ -89,8 +89,10 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 				}
 			}
 		default:
-			// Unknown annotation -- tolerated silently. Mirrors
-			// parseBuiltinDecorator's drain-and-skip default branch.
+			// Unknown annotation -- hard-rejected (#990). Closes the
+			// silent-tolerance gap so typos and stale annotations on
+			// builtins fail at load instead of being dropped.
+			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @enabled, @executor, @sdk", origin, decl.Name, attr.Name)
 		}
 	}
 

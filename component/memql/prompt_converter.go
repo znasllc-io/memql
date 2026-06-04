@@ -79,8 +79,10 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 			}
 			out.templateFile = val
 		default:
-			// Unknown annotation -- tolerated silently. Mirrors
-			// parsePromptMemQL's drain-and-skip default branch.
+			// Unknown annotation -- hard-rejected (#990). Closes the
+			// silent-tolerance gap so typos and stale annotations on
+			// prompts fail at load instead of being dropped.
+			return nil, fmt.Errorf("%s: prompt %q: unknown annotation @%s -- supported: @defaultProvider, @description, @disabled, @enabled, @templateFile", origin, decl.Name, attr.Name)
 		}
 	}
 
