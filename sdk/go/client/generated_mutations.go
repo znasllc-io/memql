@@ -14,6 +14,28 @@ var (
 	_ = strings.Builder{}
 )
 
+// MutationActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via mutationSetConstructStatus.
+//
+// Bound concept: bundle.
+type MutationActivateAuthoringBundleArgs struct {
+	BundleId string
+}
+
+// MutationActivateAuthoringBundle calls the engine mutation mutationActivateAuthoringBundle.
+func (qc *QueryClient) MutationActivateAuthoringBundle(ctx context.Context, args MutationActivateAuthoringBundleArgs) (*Result, error) {
+	call := MutationActivateAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "mutationActivateAuthoringBundle", call)
+}
+
+func MutationActivateAuthoringBundleBuild(args MutationActivateAuthoringBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationActivateAuthoringBundle({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationAddAgentToSpace -- Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.
 //
 // Bound concept: participant.
@@ -554,6 +576,34 @@ func MutationCancelScheduledDeletionBuild(args MutationCancelScheduledDeletionAr
 	b.WriteString("mutationCancelScheduledDeletion({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCatalogueConstruct -- Promote a construct into the owner's reusable catalog (#957): catalogued -> true and catalogKey set to the match signature so the compose-first matcher finds it for later bundles.
+//
+// Bound concept: construct.
+type MutationCatalogueConstructArgs struct {
+	ConstructId string
+	CatalogKey  string
+}
+
+// MutationCatalogueConstruct calls the engine mutation mutationCatalogueConstruct.
+func (qc *QueryClient) MutationCatalogueConstruct(ctx context.Context, args MutationCatalogueConstructArgs) (*Result, error) {
+	call := MutationCatalogueConstructBuild(args)
+	return qc.executeNamed(ctx, "mutationCatalogueConstruct", call)
+}
+
+func MutationCatalogueConstructBuild(args MutationCatalogueConstructArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCatalogueConstruct({")
+	b.WriteString("constructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("catalogKey: ")
+	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
 	b.WriteString("})")
 	return b.String()
 }
@@ -1833,6 +1883,125 @@ func MutationCreateAuthSessionBuild(args MutationCreateAuthSessionArgs) string {
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateAuthoringBundle -- Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via mutationCreateAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.
+//
+// Bound concept: bundle.
+type MutationCreateAuthoringBundleArgs struct {
+	BundleId            string
+	Title               string
+	Summary             string
+	ResponsibilityId    string
+	Version             int
+	SupersedesBundleId  string
+	ReusedConstructRefs []map[string]any
+}
+
+// MutationCreateAuthoringBundle calls the engine mutation mutationCreateAuthoringBundle.
+func (qc *QueryClient) MutationCreateAuthoringBundle(ctx context.Context, args MutationCreateAuthoringBundleArgs) (*Result, error) {
+	call := MutationCreateAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateAuthoringBundle", call)
+}
+
+func MutationCreateAuthoringBundleBuild(args MutationCreateAuthoringBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateAuthoringBundle({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if args.Summary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%q", args.Summary))
+	}
+	if args.ResponsibilityId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("responsibilityId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	}
+	if args.Version != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%v", args.Version))
+	}
+	if args.SupersedesBundleId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("supersedesBundleId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SupersedesBundleId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reusedConstructRefs: ")
+	b.WriteString(renderMemQLValue(args.ReusedConstructRefs))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationCreateAuthoringConstruct -- Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
+//
+// Bound concept: construct.
+type MutationCreateAuthoringConstructArgs struct {
+	ConstructId string
+	BundleId    string
+	// Enum: automation | logic | shape | spec | trait | policy | mutation | query | prompt
+	Kind            string
+	Name            string
+	TargetNamespace string
+	Source          string
+}
+
+// MutationCreateAuthoringConstruct calls the engine mutation mutationCreateAuthoringConstruct.
+func (qc *QueryClient) MutationCreateAuthoringConstruct(ctx context.Context, args MutationCreateAuthoringConstructArgs) (*Result, error) {
+	call := MutationCreateAuthoringConstructBuild(args)
+	return qc.executeNamed(ctx, "mutationCreateAuthoringConstruct", call)
+}
+
+func MutationCreateAuthoringConstructBuild(args MutationCreateAuthoringConstructArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationCreateAuthoringConstruct({")
+	b.WriteString("constructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(fmt.Sprintf("%q", args.Kind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetNamespace: ")
+	b.WriteString(fmt.Sprintf("%q", args.TargetNamespace))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7385,6 +7554,92 @@ func MutationPruneHarnessSemanticMemoryBuild(args MutationPruneHarnessSemanticMe
 	return b.String()
 }
 
+// MutationRecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
+//
+// Bound concept: bundle.
+type MutationRecordBundleDryRunArgs struct {
+	BundleId string
+	// Enum: dryRunPassed | failed
+	Status        string
+	DryRunReport  map[string]any
+	FailureReason string
+}
+
+// MutationRecordBundleDryRun calls the engine mutation mutationRecordBundleDryRun.
+func (qc *QueryClient) MutationRecordBundleDryRun(ctx context.Context, args MutationRecordBundleDryRunArgs) (*Result, error) {
+	call := MutationRecordBundleDryRunBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordBundleDryRun", call)
+}
+
+func MutationRecordBundleDryRunBuild(args MutationRecordBundleDryRunArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordBundleDryRun({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dryRunReport: ")
+	b.WriteString(renderMemQLValue(args.DryRunReport))
+	if args.FailureReason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failureReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRecordBundleValidation -- Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).
+//
+// Bound concept: bundle.
+type MutationRecordBundleValidationArgs struct {
+	BundleId string
+	// Enum: validated | failed
+	Status           string
+	ValidationReport map[string]any
+	FailureReason    string
+}
+
+// MutationRecordBundleValidation calls the engine mutation mutationRecordBundleValidation.
+func (qc *QueryClient) MutationRecordBundleValidation(ctx context.Context, args MutationRecordBundleValidationArgs) (*Result, error) {
+	call := MutationRecordBundleValidationBuild(args)
+	return qc.executeNamed(ctx, "mutationRecordBundleValidation", call)
+}
+
+func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRecordBundleValidation({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("validationReport: ")
+	b.WriteString(renderMemQLValue(args.ValidationReport))
+	if args.FailureReason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failureReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
 //
 // Bound concept: observation.
@@ -8149,6 +8404,28 @@ func MutationRestoreSpaceBuild(args MutationRestoreSpaceArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationRetireAuthoringBundle -- Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition.
+//
+// Bound concept: bundle.
+type MutationRetireAuthoringBundleArgs struct {
+	BundleId string
+}
+
+// MutationRetireAuthoringBundle calls the engine mutation mutationRetireAuthoringBundle.
+func (qc *QueryClient) MutationRetireAuthoringBundle(ctx context.Context, args MutationRetireAuthoringBundleArgs) (*Result, error) {
+	call := MutationRetireAuthoringBundleBuild(args)
+	return qc.executeNamed(ctx, "mutationRetireAuthoringBundle", call)
+}
+
+func MutationRetireAuthoringBundleBuild(args MutationRetireAuthoringBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRetireAuthoringBundle({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9141,6 +9418,43 @@ func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) 
 	return b.String()
 }
 
+// MutationSetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by mutationRetireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
+//
+// Bound concept: bundle.
+type MutationSetAuthoringBundleStatusArgs struct {
+	BundleId string
+	// Enum: draft | paused | active | failed
+	Status        string
+	FailureReason string
+}
+
+// MutationSetAuthoringBundleStatus calls the engine mutation mutationSetAuthoringBundleStatus.
+func (qc *QueryClient) MutationSetAuthoringBundleStatus(ctx context.Context, args MutationSetAuthoringBundleStatusArgs) (*Result, error) {
+	call := MutationSetAuthoringBundleStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationSetAuthoringBundleStatus", call)
+}
+
+func MutationSetAuthoringBundleStatusBuild(args MutationSetAuthoringBundleStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetAuthoringBundleStatus({")
+	b.WriteString("bundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.BundleId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
+	if args.FailureReason != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failureReason: ")
+		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationSetBudget -- Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.
 //
 // Bound concept: budget.
@@ -9210,6 +9524,63 @@ func MutationSetBudgetBuild(args MutationSetBudgetArgs) string {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSetConstructCompiledForm -- Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse.
+//
+// Bound concept: construct.
+type MutationSetConstructCompiledFormArgs struct {
+	ConstructId  string
+	CompiledForm map[string]any
+}
+
+// MutationSetConstructCompiledForm calls the engine mutation mutationSetConstructCompiledForm.
+func (qc *QueryClient) MutationSetConstructCompiledForm(ctx context.Context, args MutationSetConstructCompiledFormArgs) (*Result, error) {
+	call := MutationSetConstructCompiledFormBuild(args)
+	return qc.executeNamed(ctx, "mutationSetConstructCompiledForm", call)
+}
+
+func MutationSetConstructCompiledFormBuild(args MutationSetConstructCompiledFormArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetConstructCompiledForm({")
+	b.WriteString("constructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("compiledForm: ")
+	b.WriteString(renderMemQLValue(args.CompiledForm))
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationSetConstructStatus -- Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.
+//
+// Bound concept: construct.
+type MutationSetConstructStatusArgs struct {
+	ConstructId string
+	// Enum: draft | active | retired
+	Status string
+}
+
+// MutationSetConstructStatus calls the engine mutation mutationSetConstructStatus.
+func (qc *QueryClient) MutationSetConstructStatus(ctx context.Context, args MutationSetConstructStatusArgs) (*Result, error) {
+	call := MutationSetConstructStatusBuild(args)
+	return qc.executeNamed(ctx, "mutationSetConstructStatus", call)
+}
+
+func MutationSetConstructStatusBuild(args MutationSetConstructStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetConstructStatus({")
+	b.WriteString("constructId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(fmt.Sprintf("%q", args.Status))
 	b.WriteString("})")
 	return b.String()
 }
