@@ -159,6 +159,15 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 	// the cheap tier still runs to completion.
 	escalationProvider := r.resolveBackgroundEscalation(prep.routerReq, resolved.ProviderName)
 
+	// Mirror the acting-agent role + id (self-resolved in prepareTurn) onto
+	// the ctx that drives the tool loop, so ExecuteTool's agent-only gate
+	// admits this turn's tools. This is THE produceArtifact path: the planner
+	// dispatches with execution_lane=background and a nil ActingAgent, so
+	// without this re-stamp every workbenchHost call is rejected with "tools
+	// are agent-only -- no acting agent on context" and no file is written.
+	// Must be on THIS ctx, not inside prepareTurn (which discards it). (memql#938)
+	ctx = stampActingAgentRoleIfMissing(ctx, msg)
+
 	result, err := r.runNonStreamingToolLoop(ctx, provider, escalationProvider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
 	if err != nil {
 		return result, err
