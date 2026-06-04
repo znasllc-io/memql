@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Merge queue (Tier 3, #858): run on the queue's merge candidate too,
+  # so a required secret-scan check is reported for the batched tree.
+  merge_group:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 

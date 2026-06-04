@@ -13,7 +13,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/livekit/media-sdk v0.0.0-20260424094251-1e21ae1138de
 	github.com/livekit/protocol v1.46.5
-	github.com/livekit/server-sdk-go/v2 v2.16.4
+	github.com/livekit/server-sdk-go/v2 v2.16.6
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pion/webrtc/v4 v4.2.14
 	github.com/robfig/cron/v3 v3.0.1

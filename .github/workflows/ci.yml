@@ -5,10 +5,19 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Merge queue (Tier 3, #858). Once the queue is enabled on main, each
+  # batched merge candidate builds on a temporary `gh-readonly-queue/*`
+  # ref and this event fires against it -- so the FULL suite runs once on
+  # the exact tree that will land, instead of re-running on every PR push.
+  # Affected-lane routing only narrows `pull_request`; a merge_group event
+  # (like push to main) runs every lane for full pre-merge coverage.
+  merge_group:
 
 # Cancel a superseded run when a new commit is pushed to the same PR
 # (or the same ref). On main we key off the commit SHA so each push to
-# main gets its own non-cancellable run.
+# main gets its own non-cancellable run. A merge_group candidate has no
+# pull_request.number, so it keys off github.sha (the unique queue merge
+# commit) and runs to completion.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
