@@ -36,6 +36,28 @@ func QueryAccessRequestByIdBuild(args QueryAccessRequestByIdArgs) string {
 	return b.String()
 }
 
+// QueryAccountEntitlement -- The account's task-concurrency entitlement row (zero or one current row). Backs the admission controller (#904) and Tasks UX (#909). Filters on accountId only; classifies as 'other' in the per-row-authz audit. No-row => unlimited is enforced in the Go resolver.
+//
+// Bound concept: accountEntitlement.
+type QueryAccountEntitlementArgs struct {
+	AccountId string
+}
+
+// QueryAccountEntitlement calls the engine query queryAccountEntitlement.
+func (qc *QueryClient) QueryAccountEntitlement(ctx context.Context, args QueryAccountEntitlementArgs) (*Result, error) {
+	call := QueryAccountEntitlementBuild(args)
+	return qc.executeNamed(ctx, "queryAccountEntitlement", call)
+}
+
+func QueryAccountEntitlementBuild(args QueryAccountEntitlementArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAccountEntitlement({")
+	b.WriteString("accountId: ")
+	b.WriteString(fmt.Sprintf("%q", args.AccountId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveAgentRoles -- List every active agentRole row. Backs the role picker on the cockpit's agent-creation surface and on the role-management view. predefined rows render with a lock icon; user-created rows are fully editable.
 //
 // Bound concept: agentRole.
