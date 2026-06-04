@@ -31,15 +31,7 @@ var allowedQueryAnnotations = map[string]bool{
 	"description": true,
 	"enabled":     true,
 	"disabled":    true,
-	"deprecated":  true,
 	"internal":    true,
-	"cacheTTL":    true,
-	"timeout":     true,
-	"rateLimit":   true,
-	"retry":       true,
-	"audit":       true,
-	"role":        true,
-	"permission":  true,
 	// `@public` is a parse-only marker introduced by issue #54
 	// (per-row authorization audit). It carries no runtime
 	// semantics; the validator treats it as the author's explicit
@@ -51,21 +43,11 @@ var allowedQueryAnnotations = map[string]bool{
 }
 
 var allowedMutationAnnotations = map[string]bool{
-	"description":          true,
-	"enabled":              true,
-	"disabled":             true,
-	"deprecated":           true,
-	"internal":             true,
-	"idempotent":           true,
-	"destructive":          true,
-	"requiresConfirmation": true,
-	"actor":                true,
-	"timeout":              true,
-	"rateLimit":            true,
-	"retry":                true,
-	"audit":                true,
-	"role":                 true,
-	"permission":           true,
+	"description": true,
+	"enabled":     true,
+	"disabled":    true,
+	"internal":    true,
+	"actor":       true,
 	// `@public` is a parse-only marker introduced by issue #54
 	// (per-row authorization audit). It carries no runtime
 	// semantics; the validator treats it as the author's explicit
@@ -80,16 +62,12 @@ var allowedLogicAnnotations = map[string]bool{
 	"description": true,
 	"enabled":     true,
 	"disabled":    true,
-	"deprecated":  true,
 }
 
 var allowedAutomationAnnotations = map[string]bool{
 	"description": true,
 	"enabled":     true,
 	"disabled":    true,
-	"deprecated":  true,
 	"trigger":     true,
-	"schedule":    true,
-	"async":       true,
 	"filter":      true,
 }

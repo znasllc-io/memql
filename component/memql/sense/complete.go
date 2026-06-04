@@ -101,11 +101,6 @@ func (s *Service) completeAnnotationArgs(ctx CursorContext) []CompletionItem {
 			CompletionItem{Label: "event", Kind: "field", Detail: "string", Documentation: "Event pattern to trigger on.", InsertText: "event=", SortPriority: 1},
 			CompletionItem{Label: "schedule", Kind: "field", Detail: "string", Documentation: "Cron schedule.", InsertText: "schedule=", SortPriority: 2},
 		)
-	case "rateLimit":
-		items = append(items,
-			CompletionItem{Label: "requests", Kind: "field", Detail: "int", Documentation: "Maximum requests.", InsertText: "requests=", SortPriority: 1},
-			CompletionItem{Label: "per", Kind: "field", Detail: "string", Documentation: "Time window (e.g., \"1h\").", InsertText: "per=", SortPriority: 2},
-		)
 	case "cache":
 		items = append(items,
 			CompletionItem{Label: "ttl", Kind: "field", Detail: "int", Documentation: "Cache TTL in seconds.", InsertText: "ttl=", SortPriority: 1},
@@ -114,10 +109,6 @@ func (s *Service) completeAnnotationArgs(ctx CursorContext) []CompletionItem {
 		items = append(items,
 			CompletionItem{Label: "type", Kind: "field", Detail: "string", Documentation: "Handler type: query, webhook, or function.", InsertText: "type=", SortPriority: 1},
 			CompletionItem{Label: "query", Kind: "field", Detail: "string", Documentation: "MemQL query expression.", InsertText: "query=", SortPriority: 2},
-		)
-	case "assert":
-		items = append(items,
-			CompletionItem{Label: "args", Kind: "field", Detail: "object", Documentation: "Argument type assertions.", InsertText: "args=", SortPriority: 1},
 		)
 	case "defaultProvider":
 		// Suggest provider names.
@@ -321,9 +312,8 @@ func allAnnotationNames() []string {
 // annotationTakesArgs returns true if the annotation expects arguments.
 func annotationTakesArgs(name string) bool {
 	switch name {
-	case "description", "deprecated", "version", "role", "permission",
-		"timeout", "cacheTTL", "rateLimit", "trigger", "filter", "schedule",
-		"assert", "handler", "executionTime", "executor", "args",
+	case "description", "version", "trigger", "filter",
+		"handler", "executionTime", "executor", "args",
 		"defaultProvider", "templateFile", "type", "model", "extends",
 		"cache", "defaultFilter", "concepts", "default":
 		return true

@@ -227,37 +227,31 @@ var BuiltinFunctions = map[string]BuiltinDef{
 // AnnotationsByReceiver maps receiver types to their valid annotations.
 var AnnotationsByReceiver = map[string][]string{
 	"Query": {
-		"enabled", "description", "assert", "deprecated", "version",
-		"internal", "role", "permission", "timeout", "cacheTTL", "rateLimit",
+		"enabled", "description", "version", "internal",
 	},
 	"Mutation": {
-		"enabled", "description", "assert", "deprecated", "version",
-		"internal", "role", "permission", "timeout", "rateLimit",
-		"retry", "idempotent", "audit", "destructive", "requiresConfirmation",
+		"enabled", "description", "version", "internal",
 	},
 	"Automation": {
-		"enabled", "description", "trigger", "filter", "schedule", "async",
-		"assert", "deprecated", "version", "timeout", "retry",
+		"enabled", "description", "trigger", "filter", "version",
 	},
 	"Spec": {
-		"enabled", "description", "deprecated", "version",
+		"enabled", "description", "version",
 	},
 	"Tool": {
 		"enabled", "description", "handler", "executionTime",
-		"destructive", "requiresConfirmation", "rateLimit",
 	},
 	"Builtin": {
-		"enabled", "description", "executor", "args", "deprecated", "version", "internal",
+		"enabled", "description", "executor", "args", "version", "internal",
 	},
 	"Prompt": {
-		"enabled", "description", "defaultProvider", "templateFile",
-		"deprecated", "version",
+		"enabled", "description", "defaultProvider", "templateFile", "version",
 	},
 	"Provider": {
 		"type", "model", "extends", "description",
 	},
 	"Shape": {
-		"enabled", "description", "concepts", "deprecated", "version",
+		"enabled", "description", "concepts", "version",
 	},
 	"": { // top-level (concept definitions)
 		"description", "version", "namespace", "scope", "visibility", "type",
@@ -266,39 +260,25 @@ var AnnotationsByReceiver = map[string][]string{
 
 // AnnotationDocs maps annotation names to documentation strings.
 var AnnotationDocs = map[string]string{
-	"enabled":              "Enable or disable this definition. Functions are disabled by default.",
-	"description":          "Human-readable description of this definition.",
-	"assert":               "RETIRED. Use an `args { ... }` block instead (body sub-block in struct form; file-top for procedural form).",
-	"deprecated":           "Mark as deprecated with a migration message.",
-	"version":              "Version tag for this definition.",
-	"internal":             "Hide from external API discovery.",
-	"role":                 "Required user role to invoke (e.g., \"admin\").",
-	"permission":           "Required permission to invoke.",
-	"timeout":              "Maximum execution time (e.g., \"30s\").",
-	"cacheTTL":             "Cache query results for this duration (e.g., \"5m\").",
-	"rateLimit":            "Rate limiting. Format: @rateLimit(requests=100, per=\"1h\")",
-	"retry":                "Number of retry attempts on failure.",
-	"idempotent":           "Mark mutation as safe to retry.",
-	"audit":                "Log all invocations for audit trail.",
-	"destructive":          "Mark as a destructive operation (deletes data).",
-	"requiresConfirmation": "Require explicit user confirmation before execution.",
-	"trigger":              "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*\")",
-	"filter":               "Filter expression for automation triggers.",
-	"schedule":             "Cron schedule for periodic automations. Format: @schedule(\"0 */15 * * * *\")",
-	"async":                "Execute automation asynchronously.",
-	"handler":              "Tool handler configuration. Format: @handler(type=\"query\", query=\"concept==\")",
-	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
-	"executor":             "Go executor name for builtin functions.",
-	"args":                 "Parse-time argument contract for builtin functions.",
-	"defaultProvider":      "Default SI provider for prompt execution.",
-	"templateFile":         "External template file path for prompts.",
-	"type":                 "Provider type (e.g., \"OpenAI\", \"Anthropic\").",
-	"model":                "Model identifier (e.g., \"gpt-5-mini\", \"claude-sonnet-4-6\").",
-	"extends":              "Inherit configuration from a base provider.",
-	"namespace":            "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",
-	"scope":                "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
-	"visibility":           "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
-	"concepts":             "List of concepts this shape applies to.",
+	"enabled":         "Enable or disable this definition. Functions are disabled by default.",
+	"description":     "Human-readable description of this definition.",
+	"version":         "Version tag for this definition.",
+	"internal":        "Hide from external API discovery.",
+	"trigger":         "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*\")",
+	"filter":          "Filter expression for automation triggers.",
+	"handler":         "Tool handler configuration. Format: @handler(type=\"query\", query=\"concept==\")",
+	"executionTime":   "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
+	"executor":        "Go executor name for builtin functions.",
+	"args":            "Parse-time argument contract for builtin functions.",
+	"defaultProvider": "Default SI provider for prompt execution.",
+	"templateFile":    "External template file path for prompts.",
+	"type":            "Provider type (e.g., \"OpenAI\", \"Anthropic\").",
+	"model":           "Model identifier (e.g., \"gpt-5-mini\", \"claude-sonnet-4-6\").",
+	"extends":         "Inherit configuration from a base provider.",
+	"namespace":       "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",
+	"scope":           "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
+	"visibility":      "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
+	"concepts":        "List of concepts this shape applies to.",
 }
 
 // KeywordDocs maps keywords to documentation strings.
