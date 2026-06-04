@@ -1,12 +1,20 @@
 name: govulncheck
 
+# govulncheck is a non-blocking advisory scanner: a newly-disclosed
+# CVE in a dependency is not introduced by the PR under review, so
+# gating every PR on it adds runner time without catching regressions
+# the author can act on. It runs on every push to main and weekly on a
+# schedule (Tier 0, #855); the merge queue (#858) re-runs it on the
+# batched merge candidate.
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

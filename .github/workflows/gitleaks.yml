@@ -5,6 +5,14 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
+
+# Cancel a superseded gitleaks run when a new commit is pushed to the
+# same PR; main pushes key off the commit SHA so they never cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -14,15 +22,29 @@ permissions:
 # any private repo in an org. The CLI is free everywhere; we use the same
 # workflow shape across memql, memql-cockpit, and memql-bff-copresent for
 # consistency.
+#
+# Two scan modes (Tier 0, #855):
+#   - Pull requests run a FAST working-tree scan (`gitleaks dir .`) on a
+#     shallow checkout -- it inspects the current file contents the PR
+#     would merge, with no full-history clone or history walk.
+#   - Pushes to main and the weekly schedule run the heavy FULL-HISTORY
+#     scan (`gitleaks git .`) on a fetch-depth:0 checkout, the
+#     authoritative pass that also catches secrets added-then-removed
+#     across commits.
 
 jobs:
   scan:
     name: scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      # PR lane: shallow checkout (default fetch-depth: 1) -- fast.
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      # main / schedule lane: full history required for `gitleaks git .`.
+      - if: github.event_name != 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          fetch-depth: 0  # full history required for `gitleaks git .`
+          fetch-depth: 0
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26.4'
@@ -31,5 +53,9 @@ jobs:
         # The GitHub org moved to gitleaks/gitleaks but the Go module path
         # is still the original zricethezav/gitleaks namespace.
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
-      - name: scan
+      - name: scan working tree (PR, fast incremental)
+        if: github.event_name == 'pull_request'
+        run: gitleaks dir . --no-banner
+      - name: scan full history (main / schedule)
+        if: github.event_name != 'pull_request'
         run: gitleaks git . --no-banner

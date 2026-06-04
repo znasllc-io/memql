@@ -8,6 +8,12 @@ on:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 
+# Cancel a superseded CodeQL run when a new commit is pushed to the
+# same PR; main pushes key off the commit SHA so they never cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 # Least-privilege at the workflow level: every step that doesn't
 # need to write security-events gets read-only. security-events:
 # write is hoisted INTO the analyze job only -- the only place
