@@ -938,10 +938,18 @@ func (e *Evaluator) EvaluateCondition(condition string) (bool, error) {
 		return true, nil // Empty condition is always true
 	}
 
-	// Support common boolean operators as aliases:
-	// - && (AND) behaves like ';'
-	// - || (OR) behaves like ','
+	// Canonical boolean operators (#973): `&&` is AND, `||` is OR. They
+	// normalise to the legacy `;` / `,` separators below. The infix English
+	// words `and` / `or` are NOT supported -- they never were (the normaliser
+	// only ever rewrote `&&` / `||`), so a condition written with the words
+	// fell through to a malformed single comparison. The DSL uses `&&` / `||`
+	// everywhere; a conformance test rejects the word forms.
 	condition = normalizeConditionOperators(condition)
+
+	// Strip a redundant fully-wrapping paren pair so a parenthesised group
+	// like `(a || b || c)` recurses into its OR-split instead of reaching the
+	// atomic evaluator as one un-splittable comparison.
+	condition = stripRedundantOuterParens(condition)
 
 	// Handle OR conditions first (lower precedence)
 	// Split on comma, but be careful not to split inside quoted strings
@@ -1013,12 +1021,16 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	return isTruthy(val), nil
 }
 
-// splitConditionParts splits a condition on a delimiter, respecting quoted strings.
+// splitConditionParts splits a condition on a delimiter, respecting quoted
+// strings and parenthesisation -- a delimiter only splits at paren depth 0, so
+// `(a , b , c) ; d` splits on `;` into `(a , b , c)` and `d` (the inner commas
+// stay grouped).
 func splitConditionParts(condition string, delimiter rune) []string {
 	var parts []string
 	var current strings.Builder
 	inDoubleQuote := false
 	inSingleQuote := false
+	parenDepth := 0
 
 	for _, r := range condition {
 		switch r {
@@ -1032,8 +1044,18 @@ func splitConditionParts(condition string, delimiter rune) []string {
 				inSingleQuote = !inSingleQuote
 			}
 			current.WriteRune(r)
-		case delimiter:
+		case '(':
 			if !inDoubleQuote && !inSingleQuote {
+				parenDepth++
+			}
+			current.WriteRune(r)
+		case ')':
+			if !inDoubleQuote && !inSingleQuote && parenDepth > 0 {
+				parenDepth--
+			}
+			current.WriteRune(r)
+		case delimiter:
+			if !inDoubleQuote && !inSingleQuote && parenDepth == 0 {
 				part := strings.TrimSpace(current.String())
 				if part != "" {
 					parts = append(parts, part)
@@ -1054,6 +1076,52 @@ func splitConditionParts(condition string, delimiter rune) []string {
 	}
 
 	return parts
+}
+
+// stripRedundantOuterParens removes a single fully-wrapping parenthesis pair
+// (e.g. `(a || b)` -> `a || b`). It only strips when the leading `(` matches
+// the trailing `)` -- `(a) && (b)` is left untouched because its outer parens
+// don't wrap the whole expression. Quotes are respected.
+func stripRedundantOuterParens(condition string) string {
+	for {
+		condition = strings.TrimSpace(condition)
+		if len(condition) < 2 || condition[0] != '(' || condition[len(condition)-1] != ')' {
+			return condition
+		}
+		depth := 0
+		inDoubleQuote := false
+		inSingleQuote := false
+		wraps := true
+		for i, r := range condition {
+			switch r {
+			case '"':
+				if !inSingleQuote {
+					inDoubleQuote = !inDoubleQuote
+				}
+			case '\'':
+				if !inDoubleQuote {
+					inSingleQuote = !inSingleQuote
+				}
+			case '(':
+				if !inDoubleQuote && !inSingleQuote {
+					depth++
+				}
+			case ')':
+				if !inDoubleQuote && !inSingleQuote {
+					depth--
+					// If we return to depth 0 before the final char, the
+					// leading `(` does not wrap the whole expression.
+					if depth == 0 && i != len(condition)-1 {
+						wraps = false
+					}
+				}
+			}
+		}
+		if !wraps || depth != 0 {
+			return condition
+		}
+		condition = condition[1 : len(condition)-1]
+	}
 }
 
 func normalizeConditionOperators(condition string) string {

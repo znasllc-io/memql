@@ -32,7 +32,7 @@ logic logicKillSwitchSuspendsRunningPlans {
   userId := coalesce(args.event.node.id, "")
   plans := queryRunningPlansForUser({ userId: userId })
   for item := range plans.Nodes() {
-    suspend := if !enabled and item.payload.computerUseScope != "" {
+    suspend := if !enabled && item.payload.computerUseScope != "" {
       mutationUpdatePlanStatus({
         planId: item.id,
         status: "awaitingFeedback",

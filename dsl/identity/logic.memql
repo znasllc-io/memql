@@ -87,7 +87,7 @@ logic logicAccountDeletionReminder25Days {
   candidates := queryUsersInDeletionCooldown({})
 
   for item := range candidates.Nodes() {
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < timestamp() and addDuration(item.payload.deletionScheduledAt, "P26D") >= timestamp() {
+    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < timestamp() && addDuration(item.payload.deletionScheduledAt, "P26D") >= timestamp() {
       publishEvent({
         topic: "identity.deletion.reminder",
         payload: {
@@ -149,7 +149,7 @@ logic logicAccountDeletionReminder7Days {
   for item := range candidates.Nodes() {
     // Window: deletionScheduledAt is between 7 and 8 days ago.
     // Equivalent: scheduledAt + P7D < now AND scheduledAt + P8D >= now.
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < timestamp() and addDuration(item.payload.deletionScheduledAt, "P8D") >= timestamp() {
+    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < timestamp() && addDuration(item.payload.deletionScheduledAt, "P8D") >= timestamp() {
       publishEvent({
         topic: "identity.deletion.reminder",
         payload: {
