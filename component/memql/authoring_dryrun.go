@@ -33,7 +33,11 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -245,4 +249,121 @@ func RunBundleDryRun(ctx context.Context, engine *MemQLEngine, req DryRunRequest
 		req.Mode = DryRunModeIsolated
 	}
 	return run(ctx, engine, req)
+}
+
+// dryRunBundleStatus maps a report to the bundle status mutationRecordBundleDryRun
+// transitions to: dryRunPassed on a clean run, failed otherwise.
+func dryRunBundleStatus(report BundleDryRunReport) string {
+	if report.OK {
+		return "dryRunPassed"
+	}
+	return "failed"
+}
+
+// BuildDryRunMutationCall renders the mutationRecordBundleDryRun(...) call that
+// persists a dry-run report as the Gate-3 approval artifact. The report rides on
+// the `dryRunReport` object arg; status is dryRunPassed / failed; failureReason
+// carries the headline on a failed run. Exposed (and pure) so the report ->
+// mutation-args mapping is testable without a live DB.
+func BuildDryRunMutationCall(bundleId string, report BundleDryRunReport) (string, error) {
+	if bundleId == "" {
+		return "", fmt.Errorf("bundleId is required to persist a dry-run report")
+	}
+	reportObj, err := reportToObject(report)
+	if err != nil {
+		return "", err
+	}
+	args := map[string]any{
+		"bundleId":     bundleId,
+		"status":       dryRunBundleStatus(report),
+		"dryRunReport": reportObj,
+	}
+	if report.FailureReason != "" {
+		args["failureReason"] = report.FailureReason
+	}
+	return "mutationRecordBundleDryRun(" + renderDryRunMemQLValue(args) + ")", nil
+}
+
+// PersistDryRunReport records a dry-run report on its bundle via
+// mutationRecordBundleDryRun (the Gate-2 persist path referenced by
+// dsl/authoring/mutations.memql). It transitions the bundle to dryRunPassed /
+// failed and stores the trace + side-effect manifest + cost estimate as the
+// approval artifact. Requires a live engine DB (the mutation writes a row).
+func PersistDryRunReport(ctx context.Context, engine *MemQLEngine, bundleId string, report BundleDryRunReport) error {
+	if engine == nil {
+		return fmt.Errorf("PersistDryRunReport requires an engine")
+	}
+	call, err := BuildDryRunMutationCall(bundleId, report)
+	if err != nil {
+		return err
+	}
+	if _, err := engine.Execute(ctx, call); err != nil {
+		return fmt.Errorf("persist dry-run report for bundle %q: %w", bundleId, err)
+	}
+	return nil
+}
+
+// reportToObject round-trips the report through JSON into a map[string]any so it
+// can be rendered as a MemQL object literal. Using the JSON tags keeps the
+// persisted object shape identical to the v1:authoring:bundle.dryRunReport
+// contract documented in dsl/authoring/concepts.memql.
+func reportToObject(report BundleDryRunReport) (map[string]any, error) {
+	b, err := json.Marshal(report)
+	if err != nil {
+		return nil, fmt.Errorf("marshal dry-run report: %w", err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return nil, fmt.Errorf("unmarshal dry-run report: %w", err)
+	}
+	return obj, nil
+}
+
+// renderDryRunMemQLValue renders a Go value (from a JSON round-trip: string,
+// float64, bool, nil, []any, map[string]any) as a MemQL literal. Self-contained
+// so the persist path does not depend on the automations-side renderer.
+func renderDryRunMemQLValue(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case string:
+		b, _ := json.Marshal(val) // JSON string escaping is valid MemQL string syntax.
+		return string(b)
+	case float64:
+		// JSON numbers decode to float64; render integers without a trailing .0.
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10)
+		}
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case []any:
+		parts := make([]string, 0, len(val))
+		for _, item := range val {
+			parts = append(parts, renderDryRunMemQLValue(item))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]any:
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			kb, _ := json.Marshal(k)
+			parts = append(parts, string(kb)+": "+renderDryRunMemQLValue(val[k]))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	default:
+		b, _ := json.Marshal(val)
+		return string(b)
+	}
 }

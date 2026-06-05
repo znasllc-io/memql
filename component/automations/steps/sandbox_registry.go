@@ -17,14 +17,16 @@ package steps
 //     webhook and a synthetic success result is returned. Nothing is dispatched
 //     under the isolated tier.
 //   - READ / pure compute (queries, si(), similarTo, webSearch, fetchUrl, logic,
-//     shape, switch, ...): DELEGATED to the real executor -> real engine.Execute
-//     -> real + metered.
+//     shape, switch, ...): the read is METERED into the manifest (an si() call
+//     -> aiCalls + a cost estimate; a similarTo / webSearch / fetchUrl call ->
+//     webCalls) and then DELEGATED to the real executor -> real engine.Execute
+//     -> real read.
 //
-// AI/web read METERING + cost (increment 2) and full-sandbox-live webhook
-// routing (increment 3) layer onto this same structure.
+// Full-sandbox-live webhook routing (increment 3) layers onto this structure.
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -80,8 +82,10 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 			// are intercepted too, instead of escaping to engine.Execute.
 			return s.interceptLogicFunction(ctx, step, stepCtx)
 		default:
-			// A query / si() / web-read builtin is a real + metered read --
-			// delegate to the real executor.
+			// A read (si() / similarTo / webSearch / fetchUrl) or a plain
+			// query: meter the read into the manifest (real + metered), then
+			// delegate to the real executor so it runs for real.
+			s.meterRead(step, stepCtx)
 			return s.real.Execute(ctx, step, stepCtx)
 		}
 	default:
@@ -286,6 +290,148 @@ func (s *sandboxStepRegistry) recordBlockedWebhook(rec memql.BlockedWebhook) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.blockedWebhooks = append(s.blockedWebhooks, rec)
+}
+
+// webReadFunctions is the set of read-builtin names that touch external surfaces
+// (the web reads from the issue's tiered list). A function step targeting one of
+// these is metered into webCalls.
+var webReadFunctions = map[string]bool{
+	"similarTo": true,
+	"webSearch": true,
+	"fetchUrl":  true,
+}
+
+// meterRead records a read step into the manifest before it is delegated to the
+// real executor. An si() call (the SI read) lands in aiCalls with a heuristic
+// token + cost estimate; a similarTo / webSearch / fetchUrl call lands in
+// webCalls with the resolved target. Plain query reads carry no external cost
+// and are not metered. Recording happens up-front so the manifest reflects the
+// read intent even if the real delegate later fails (e.g. no provider wired).
+func (s *sandboxStepRegistry) meterRead(step *automations.Step, stepCtx *automations.StepContext) {
+	if step.Function == nil {
+		return
+	}
+	name := strings.TrimSpace(step.Function.Name)
+	switch {
+	case name == "si":
+		s.meterAiCall(step, stepCtx)
+	case webReadFunctions[name]:
+		s.meterWebCall(step, name, stepCtx)
+	}
+}
+
+// meterAiCall records an si() read with a heuristic prompt-token estimate (from
+// the resolved-arg size) and the corresponding USD cost. Exact provider token
+// usage is not surfaced through the step boundary, so the estimate is a
+// documented heuristic the approver reads as an upper-bound order of magnitude,
+// not a billed figure.
+func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *automations.StepContext) {
+	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
+	promptTokens := estimateTokens(resolved)
+	outputTokens := defaultSiOutputTokens
+	cost := estimateSiCostUsd(promptTokens, outputTokens)
+	s.mu.Lock()
+	s.aiCalls = append(s.aiCalls, memql.RecordedAiCall{
+		StepId:        step.ID,
+		Function:      "si",
+		PromptTokens:  promptTokens,
+		OutputTokens:  outputTokens,
+		EstimatedCost: cost,
+	})
+	s.mu.Unlock()
+	s.note(step.ID, "si() metered (real read)")
+}
+
+// meterWebCall records a web read (similarTo / webSearch / fetchUrl) with the
+// resolved target where one is discernible from the args (a url / query field).
+func (s *sandboxStepRegistry) meterWebCall(step *automations.Step, name string, stepCtx *automations.StepContext) {
+	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
+	target := webCallTarget(resolved)
+	s.mu.Lock()
+	s.webCalls = append(s.webCalls, memql.RecordedWebCall{
+		StepId:   step.ID,
+		Function: name,
+		Target:   target,
+	})
+	s.mu.Unlock()
+	s.note(step.ID, name+"() metered (real read)")
+}
+
+// webCallTarget pulls a human-readable target (url / query / chunk text) out of
+// a web-read call's resolved args. Returns "" when no obvious target field is
+// present.
+func webCallTarget(resolved map[string]any) string {
+	// A single positional object arg ({"0": {...}}) is the common shape.
+	obj := resolved
+	if len(resolved) == 1 {
+		if inner, ok := resolved["0"].(map[string]any); ok {
+			obj = inner
+		}
+	}
+	for _, key := range []string{"url", "query", "text", "chunkId"} {
+		if v, ok := obj[key]; ok {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// Cost-estimate heuristics. Exact provider token usage is not surfaced through
+// the step-execution boundary, so the dry-run reports an estimate the approver
+// reads as an order-of-magnitude upper bound, not a billed figure.
+const (
+	// charsPerToken is the rough chars-per-token ratio used to estimate prompt
+	// size from the resolved-arg JSON length (~4 chars/token for English).
+	charsPerToken = 4
+	// defaultSiOutputTokens is the assumed completion size for one si() call
+	// when actual usage is unknown.
+	defaultSiOutputTokens = 512
+	// siInputUsdPerMillion / siOutputUsdPerMillion are conservative default
+	// rates (a mid-tier chat model) for the estimate. They are intentionally a
+	// fixed heuristic, not a per-provider lookup -- the dry-run cannot know
+	// which provider a given si() template will resolve to at run time.
+	siInputUsdPerMillion  = 0.50
+	siOutputUsdPerMillion = 1.50
+)
+
+// estimateTokens estimates the prompt-token count for a resolved arg map from
+// its JSON-serialized length. Returns a small floor so an empty-arg si() call
+// still reports a non-zero estimate.
+func estimateTokens(resolved map[string]any) int {
+	if len(resolved) == 0 {
+		return 1
+	}
+	b, err := json.Marshal(resolved)
+	if err != nil {
+		return 1
+	}
+	n := len(b) / charsPerToken
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// estimateSiCostUsd applies the default per-million rates to an estimated
+// prompt/output token split.
+func estimateSiCostUsd(promptTokens, outputTokens int) float64 {
+	return siInputUsdPerMillion*float64(promptTokens)/1_000_000 +
+		siOutputUsdPerMillion*float64(outputTokens)/1_000_000
+}
+
+// costEstimate aggregates the metered AI calls into the report's cost estimate
+// (total tokens + USD). Web reads carry no token cost.
+func (s *sandboxStepRegistry) costEstimate() memql.CostEstimate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	est := memql.CostEstimate{}
+	for _, c := range s.aiCalls {
+		est.Tokens += c.PromptTokens + c.OutputTokens
+		est.Usd += c.EstimatedCost
+	}
+	return est
 }
 
 // manifest returns the collected side-effect manifest. Slices are normalised to
