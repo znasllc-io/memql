@@ -580,12 +580,14 @@ func MutationCancelScheduledDeletionBuild(args MutationCancelScheduledDeletionAr
 	return b.String()
 }
 
-// MutationCatalogueConstruct -- Promote a construct into the owner's reusable catalog (#957): catalogued -> true and catalogKey set to the match signature so the compose-first matcher finds it for later bundles.
+// MutationCatalogueConstruct -- Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.
 //
 // Bound concept: construct.
 type MutationCatalogueConstructArgs struct {
-	ConstructId string
-	CatalogKey  string
+	ConstructId      string
+	CatalogKey       string
+	CatalogMatchText string
+	FromBundleId     string
 }
 
 // MutationCatalogueConstruct calls the engine mutation mutationCatalogueConstruct.
@@ -604,6 +606,16 @@ func MutationCatalogueConstructBuild(args MutationCatalogueConstructArgs) string
 	}
 	b.WriteString("catalogKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("catalogMatchText: ")
+	b.WriteString(fmt.Sprintf("%q", args.CatalogMatchText))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fromBundleId: ")
+	b.WriteString(fmt.Sprintf("%q", args.FromBundleId))
 	b.WriteString("})")
 	return b.String()
 }

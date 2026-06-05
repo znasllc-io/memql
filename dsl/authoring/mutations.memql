@@ -167,17 +167,22 @@ mutation construct mutationSetConstructCompiledForm {
 }
 
 @enabled
-@description("Promote a construct into the owner's reusable catalog (#957): catalogued -> true and catalogKey set to the match signature so the compose-first matcher finds it for later bundles.")
+@description("Promote a construct into the owner's reusable catalog with provenance (#957): catalogued -> true, catalogKey set to the dedup signature, catalogMatchText set to the embedded near-match text, and the provenance pair (catalogedAt + catalogedFromBundleId) stamped so later bundles that compose it inherit where it came from. The embedding itself is written separately into node_vectors by the Go catalog-write path (PromoteConstructToCatalog). Called post-activation as the catalog-write path.")
 mutation construct mutationCatalogueConstruct {
   args {
-    constructId  string  @required
-    catalogKey   string  @required
+    constructId       string  @required
+    catalogKey        string  @required
+    catalogMatchText  string  @required
+    fromBundleId      string  @required
   }
   update {
     id: args.constructId
     ownerUserId: actor.userId
     catalogued: true
     args.catalogKey
+    args.catalogMatchText
+    catalogedAt: now
+    catalogedFromBundleId: args.fromBundleId
   }
 }
 
