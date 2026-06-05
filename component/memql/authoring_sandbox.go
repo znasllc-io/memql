@@ -15,18 +15,23 @@ package memql
 // registry, never mutates the global concept registry, and cannot fail the
 // core engine -- so it is safe to call against a running engine.
 //
-// Scope of this pass: query / mutation / logic / spec / trait / shape --
-// the construct kinds with a clean single-construct parse path. Automations
-// (which compile through the separate component/automations subsystem),
-// candidate-defined NEW concepts (which need an isolated concept-registry
-// clone), and cross-construct reference resolution within the bundle are
-// tracked as #956 follow-ups; unsupported kinds are reported as `skipped`
-// rather than silently passing.
+// Scope of this pass: concept / query / mutation / logic / spec / trait /
+// shape -- the construct kinds with a clean single-construct parse path,
+// plus candidate-defined NEW concepts. Candidate concepts are parsed first
+// and overlaid onto an ISOLATED clone of the live concept registry
+// (CloneDefaultRegistry); every other construct then compiles + binds
+// against that clone, so a bundle that declares a concept and a construct
+// referencing it is self-consistent at Gate 1 without ever mutating the
+// global default registry. Automations (which compile through the separate
+// component/automations subsystem) and cross-construct reference resolution
+// within the bundle are tracked as #956 follow-ups; unsupported kinds are
+// reported as `skipped` rather than silently passing.
 
 import (
 	"fmt"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -63,6 +68,7 @@ type SandboxReport struct {
 // sandboxSupportedKinds is the set this pass compiles. Kept as a map so the
 // caller (and tests) can introspect coverage.
 var sandboxSupportedKinds = map[string]bool{
+	"concept":  true,
 	"query":    true,
 	"mutation": true,
 	"logic":    true,
@@ -72,13 +78,17 @@ var sandboxSupportedKinds = map[string]bool{
 }
 
 // SandboxCompileBundle compiles + binds each candidate construct in
-// ISOLATION against the live concept registry (read-only). It mutates no
-// engine state -- the concept registry is only read for binding context,
-// and nothing is registered into any live registry. Returns a per-construct
-// diagnostic report; the bundle is OK only if every non-skipped construct
-// compiled.
+// ISOLATION against an isolated clone of the live concept registry. Candidate
+// concepts in the bundle are parsed first and overlaid onto the clone so
+// later constructs bind against them; the global default registry is never
+// mutated. Nothing is registered into any live registry, so it is safe to
+// call against a running engine. Returns a per-construct diagnostic report;
+// the bundle is OK only if every non-skipped construct compiled.
 func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
-	concepts := memoryNodes.DefaultRegistry()
+	// Overlay registry: an isolated clone seeded from the global default.
+	// Candidate concepts are merged into THIS, never the global default, so
+	// the live engine's concept registry stays provably unmutated.
+	concepts := memoryNodes.CloneDefaultRegistry()
 	rep := SandboxReport{OK: true}
 
 	// Pre-pass: a bundle that declares two constructs with the same
@@ -90,15 +100,51 @@ func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
 	}
 	seenSoFar := map[string]int{}
 
-	for _, c := range constructs {
+	// dup reports whether this occurrence of the construct is a duplicate
+	// (a later repeat of a (kind, name) seen earlier in the bundle); the
+	// first occurrence is allowed and the repeats are hard failures.
+	dup := func(c SandboxConstruct) bool {
 		key := c.Kind + "/" + c.Name
 		seenSoFar[key]++
-		if total[key] > 1 && seenSoFar[key] > 1 {
+		return total[key] > 1 && seenSoFar[key] > 1
+	}
+	dupDiag := func(c SandboxConstruct) SandboxDiagnostic {
+		return SandboxDiagnostic{
+			Name: c.Name, Kind: c.Kind, OK: false,
+			Error: fmt.Sprintf("duplicate construct: %s %q is declared %d times in the bundle", c.Kind, c.Name, total[c.Kind+"/"+c.Name]),
+		}
+	}
+
+	// First pass: concepts. Parse + build each candidate concept and overlay
+	// it onto the clone BEFORE any other construct compiles, so a construct
+	// that binds against a bundle-defined concept resolves it. Concept
+	// diagnostics are appended in declaration order; the second pass appends
+	// the rest, preserving overall bundle order for concept-free bundles.
+	for _, c := range constructs {
+		if c.Kind != "concept" {
+			continue
+		}
+		if dup(c) {
 			rep.OK = false
-			rep.Diagnostics = append(rep.Diagnostics, SandboxDiagnostic{
-				Name: c.Name, Kind: c.Kind, OK: false,
-				Error: fmt.Sprintf("duplicate construct: %s %q is declared %d times in the bundle", c.Kind, c.Name, total[key]),
-			})
+			rep.Diagnostics = append(rep.Diagnostics, dupDiag(c))
+			continue
+		}
+		d := sandboxCompileConcept(c, concepts)
+		if !d.OK {
+			rep.OK = false
+		}
+		rep.Diagnostics = append(rep.Diagnostics, d)
+	}
+
+	// Second pass: every non-concept construct, compiled against the clone
+	// (now carrying any candidate concepts the first pass overlaid).
+	for _, c := range constructs {
+		if c.Kind == "concept" {
+			continue
+		}
+		if dup(c) {
+			rep.OK = false
+			rep.Diagnostics = append(rep.Diagnostics, dupDiag(c))
 			continue
 		}
 		d := sandboxCompileOne(c, concepts)
@@ -108,6 +154,54 @@ func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
 		rep.Diagnostics = append(rep.Diagnostics, d)
 	}
 	return rep
+}
+
+// sandboxCompileConcept parses a candidate concept, validates its name +
+// derivable id, builds the *Concept the engine would register, and overlays
+// it onto the isolated clone so later constructs in the same bundle bind
+// against it. The global default registry is never touched.
+func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegistry) SandboxDiagnostic {
+	d := SandboxDiagnostic{Name: c.Name, Kind: c.Kind, OK: true}
+	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+
+	decls := ExtractConceptDecls(c.Source)
+	if len(decls) == 0 {
+		return fail(d, fmt.Sprintf("%s: no concept declaration found in source", origin))
+	}
+	// Pick the decl matching the declared name when the source carries more
+	// than one; otherwise the sole decl.
+	decl := decls[0]
+	for _, dd := range decls {
+		if dd.Name == c.Name {
+			decl = dd
+			break
+		}
+	}
+
+	// Name-mismatch: the construct row's declared name must equal the
+	// declaration name in its source.
+	if decl.Name != c.Name {
+		return fail(d, fmt.Sprintf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name))
+	}
+
+	// The concept's canonical id is assembled from @version + @namespace +
+	// declaration name. A candidate concept must carry both so the authored
+	// runtime can register it under a real id.
+	id, err := languageAst.AssembleConceptIdFromDecl(decl)
+	if err != nil {
+		return fail(d, fmt.Sprintf("%s: %v", origin, err))
+	}
+	if id == "" {
+		return fail(d, fmt.Sprintf("%s: concept %q is missing @version and/or @namespace -- cannot assemble a canonical concept id", origin, c.Name))
+	}
+
+	concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)
+	if buildErr != nil {
+		return fail(d, fmt.Sprintf("%s: %v", origin, buildErr))
+	}
+
+	overlay.MergeAll(map[string]*memoryNodes.Concept{id: concept})
+	return d
 }
 
 // sandboxCompileOne routes a single construct to the matching per-construct
@@ -167,7 +261,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 
 	default:
 		// Not yet handled by this pass (automation / prompt / policy /
-		// provider / builtin / concept). Reported, not silently passed.
+		// provider / builtin). Reported, not silently passed.
 		d.OK = false
 		d.Skipped = true
 		d.Error = fmt.Sprintf("kind %q is not yet compiled by the sandbox (follow-up #956)", c.Kind)
