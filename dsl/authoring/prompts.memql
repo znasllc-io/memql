@@ -20,3 +20,40 @@ prompt authoringDesign {
   catalog         []object           @description("Summary of the caller's reusable catalog -- [{name, kind}] of constructs already promoted for reuse (#957). The model uses this to PREFER describing a dependency that matches an existing catalog entry (so the matcher reuses it) over inventing a novel one. Empty when the owner has no catalog yet.")
   now             string   @required @description("RFC3339 wall-clock at invocation. Lets the design reason about time-relative triggers/schedules without hardcoding a clock.")
 }
+
+// authoringEmit is the EMISSION PASS (#960 increment 2): given the design pass'
+// resolved plan -- the headline automation, the dependencies to AUTHOR (with
+// their candidate sketches), and the REAL names of the dependencies being
+// REUSED from the catalog -- it emits the final, compiling `.memql` source for
+// each authored construct plus the automation. Grounded so it references the
+// reused construct names verbatim (no hallucinated symbols). Output is fed
+// straight into Gate 1 (the isolated compile-and-bind harness).
+
+@defaultProvider("streamClaudeSonnet")
+@templateFile("prompts/authoringEmit.tmpl")
+@description("Authoring EMISSION PASS (epic #954, #960). Renders the design pass' resolved plan into the final compiling .memql source for a bundle: the headline automation plus every AUTHORED member construct, grounded so it references the REAL names of the REUSED catalog constructs verbatim (no hallucinated symbols). Sonnet, not Opus: structured rendering against a fixed grammar + a resolved plan, not novel reasoning. Hard rule baked into the prompt: NEVER emit @shape or @enabled on a spec (Gate 1 + the live spec loader both reject them). Output contract: {constructs: [{kind, name, source}]}. kind in {automation, query, mutation, logic, spec, trait, shape}. source is the self-contained, compilable .memql for ONE construct.")
+prompt authoringEmit {
+  responsibility    string   @required @description("The originating Responsibility, carried through for grounding so the emitted constructs stay faithful to the user's intent.")
+  automationName    string   @required @description("The headline automation name the design pass chose -- emit one automation construct under this name.")
+  automationPurpose string             @description("One-line description of what the automation does, for the @description annotation.")
+  authored          []object           @description("The dependencies to AUTHOR net-new -- [{kind, name, purpose, candidateSource}]. Emit a compiling construct for each, refining the candidateSource sketch into valid, bindable .memql.")
+  reused            []object           @description("The dependencies being REUSED from the catalog -- [{name, kind, namespace}]. Do NOT author these; reference them by their real name where the automation / authored constructs need them, and `use` them from their namespace.")
+  now               string   @required @description("RFC3339 wall-clock at invocation.")
+}
+
+// authoringRepair is the REPAIR PASS (#960 increment 2): when Gate 1 rejects
+// one or more emitted constructs, this prompt takes the failing constructs plus
+// their compile/bind diagnostics and re-emits CORRECTED source for only those
+// constructs. The planner re-runs Gate 1 on the spliced bundle and repeats,
+// bounded by a hard repair-attempt cap + the planner's cumulative LLM ceiling.
+
+@defaultProvider("streamClaudeSonnet")
+@templateFile("prompts/authoringRepair.tmpl")
+@description("Authoring REPAIR PASS (epic #954, #960). Given the Gate-1 diagnostics for a set of failing constructs, re-emits CORRECTED .memql source for ONLY those constructs so the bundle recompiles. Sonnet: targeted error-driven correction against the same grammar as the emit pass. Same hard rule: NEVER emit @shape or @enabled on a spec. Output contract: {constructs: [{kind, name, source}]} -- the corrected versions keyed by the same (kind, name) so the planner splices them back into the bundle. May add a missing construct a diagnostic revealed.")
+prompt authoringRepair {
+  responsibility  string   @required @description("The originating Responsibility, for grounding.")
+  automationName  string             @description("The bundle's headline automation name, for context.")
+  failing         []object @required @description("The constructs Gate 1 rejected -- [{kind, name, source}]. Re-emit a corrected version for each.")
+  diagnostics     []object @required @description("The per-construct Gate-1 compile/bind failures -- [{kind, name, error}]. The error is the exact diagnostic to fix; address it precisely rather than rewriting from scratch.")
+  now             string   @required @description("RFC3339 wall-clock at invocation.")
+}
