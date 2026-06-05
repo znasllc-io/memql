@@ -124,8 +124,7 @@ func isServiceAccountPayload(payload any) bool {
 		*memqlv1.MemqlClientMessage_Subscribe,
 		*memqlv1.MemqlClientMessage_ConceptsList,
 		*memqlv1.MemqlClientMessage_ConceptsSubscribe,
-		*memqlv1.MemqlClientMessage_MyAccess,
-		*memqlv1.MemqlClientMessage_EvaluatePolicy:
+		*memqlv1.MemqlClientMessage_MyAccess:
 		return true
 	// The deep gate fans BFF -> cognition/agent: a single synthetic agent turn
 	// proves the authenticated app path end to end.

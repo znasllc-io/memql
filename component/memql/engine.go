@@ -34,14 +34,8 @@ type MemQLEngine struct {
 	seedMaterializer *SeedMaterializer
 	providers        *ProviderRegistry
 	policies         *PolicyRegistry
-	// policyFunctions holds parsed `func (Policy)` definitions
-	// (cross-cutting decision policies under dsl/v1/policies/
-	// {core,bff}/...). Separate from `policies` which holds the
-	// older SI Router routing-policy block syntax under
-	// dsl/v1/policies/v1/.
-	policyFunctions *PolicyFunctionRegistry
 	// configSnapshot is the bus-distributed ConfigSnapshot that
-	// backs ctx.config.* inside policy bodies. Optional; nil
+	// backs ctx.config.* inside spec bodies. Optional; nil
 	// resolves every allow-listed key to its zero value (sensitive
 	// -> false, non-sensitive -> ""). Wired via SetConfigSnapshot
 	// from app bootstrap.

@@ -439,16 +439,6 @@ func (e *MemQLEngine) Policies() *PolicyRegistry {
 	return e.policies
 }
 
-// PolicyFunctions returns the registry of cross-cutting decision
-// policies loaded from dsl/v1/policies/{core,bff}/...*.memql.
-// Distinct from Policies() above (which holds SI Router routing
-// policies). Phase 3 ships engine.EvaluatePolicy for runtime
-// evaluation; this accessor is the test + introspection surface
-// until then.
-func (e *MemQLEngine) PolicyFunctions() *PolicyFunctionRegistry {
-	return e.policyFunctions
-}
-
 // SetConfigSnapshot stashes the bus-distributed ConfigSnapshot used
 // to build ctx.config inside policy bodies. The engine accepts the
 // snapshot as an opaque any to avoid a static dependency on the

@@ -1033,11 +1033,6 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// Access / authorization -- caller's own ACL
 	case *memqlv1.MemqlClientMessage_MyAccess:
 		return s.handleMyAccess(envelope, payload.MyAccess)
-	// Cross-cutting decision policies -- runtime invocation of a
-	// `func (Policy)` registered under dsl/v1/policies/bff/...
-	// (core policies are server-internal and never reachable here).
-	case *memqlv1.MemqlClientMessage_EvaluatePolicy:
-		return s.handleEvaluatePolicy(envelope, payload.EvaluatePolicy)
 	// In-stream bearer rotation -- swap the session's identity
 	// without dropping the stream. Lives next to the
 	// other control-plane handlers so long-lived clients (cockpit)

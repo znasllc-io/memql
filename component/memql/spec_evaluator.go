@@ -14,13 +14,14 @@ import (
 // EvaluateSpec runs a context-spec (Kind == SpecKindContext) and
 // returns its boolean result. Row-specs (Kind == SpecKindRow) are
 // rejected here — they belong in a SQL filter expression, not as a
-// callable predicate. Callable from policy bodies via the `spec(...)`
-// builtin (see policy_evaluator.go), and from Go callers that want
-// to gate behaviour on an atomic caller-context check.
+// callable predicate. Callable from another spec body via the
+// `spec(...)` builtin (see expression_evaluator.go), and from Go
+// callers that want to gate behaviour on an atomic caller-context
+// check.
 //
-// The evaluation reuses the policy ctx envelope: actor + partition +
-// now + config are stamped onto ctx automatically. Specs don't take
-// args (no input schema); if you need parameters, write a policy.
+// The evaluation stamps a small ctx envelope: actor + partition +
+// now + config are placed onto ctx automatically. Specs don't take
+// args (no input schema); they are atomic boolean predicates.
 //
 // Errors:
 //   - unknown spec
@@ -46,16 +47,17 @@ func (e *MemQLEngine) EvaluateSpec(ctx context.Context, name string) (bool, erro
 	}
 
 	effective := buildSpecCtx(ctx, e)
-	val, err := evaluatePolicyExpressionWithCtx(ctx, e, spec.Expr, effective)
+	val, err := evaluateSpecExpression(ctx, e, spec.Expr, effective)
 	if err != nil {
 		return false, fmt.Errorf("evaluate spec %q: %w", name, err)
 	}
-	return policyTruthy(val), nil
+	return specTruthy(val), nil
 }
 
 // buildSpecCtx assembles the evaluation envelope a context-spec body
-// sees. Same shape as buildPolicyCtx minus the input/output/error
-// fields — specs don't carry args or produce output.
+// sees: the resolved actor, the active partition, the engine
+// timestamp, and the allow-listed config surface. Specs don't carry
+// args or produce output.
 func buildSpecCtx(ctx context.Context, engine *MemQLEngine) map[string]any {
 	out := make(map[string]any, 6)
 	actor := map[string]any{}

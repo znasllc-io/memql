@@ -1,8 +1,7 @@
 // Mock-dispatcher tests for the identity surface: guest invites
-// (5 ops), session revoke (2 ops), worker tokens (2 ops), and
-// evaluatePolicy. Covers happy-path, input validation, QueryError
-// surfacing, AbortSignal cancellation, and the json-decode path
-// on evaluatePolicy.
+// (5 ops), session revoke (2 ops), and worker tokens (2 ops).
+// Covers happy-path, input validation, QueryError surfacing, and
+// AbortSignal cancellation.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +15,6 @@ import {
 } from "../src/identity/guest.js";
 import { revokeCurrentSession, revokeAllSessions } from "../src/identity/session.js";
 import { createWorkerToken, revokeWorkerToken } from "../src/identity/workerToken.js";
-import { evaluatePolicy } from "../src/identity/evaluatePolicy.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
@@ -414,76 +412,3 @@ test("revokeWorkerToken -- happy path", async () => {
   assert.equal(r.success, true);
 });
 
-// ---------------------------------------------------------------------
-// evaluatePolicy
-// ---------------------------------------------------------------------
-
-test("evaluatePolicy -- serializes args + decodes result_json", async () => {
-  const mock = new MockDispatcher();
-  const promise = evaluatePolicy(mock.asDispatcher(), {
-    policyName: "canArchiveSpace",
-    args: { spaceId: "spc-1" },
-    returnTrace: true,
-  });
-  const sent = mock.lastSent() as unknown as {
-    evaluatePolicy?: { policyName?: string; argsJson?: string; returnTrace?: boolean };
-  };
-  assert.equal(sent.evaluatePolicy?.policyName, "canArchiveSpace");
-  assert.equal(sent.evaluatePolicy?.argsJson, JSON.stringify({ spaceId: "spc-1" }));
-  assert.equal(sent.evaluatePolicy?.returnTrace, true);
-
-  mock.reply({
-    evaluatePolicyResult: {
-      requestId: mock.lastRequestId(),
-      resultJson: JSON.stringify({ allowed: true, reason: "owner" }),
-      traceJson: JSON.stringify({ root: "ok" }),
-    },
-  });
-  const r = await promise;
-  assert.deepEqual(r.result, { allowed: true, reason: "owner" });
-  assert.deepEqual(r.trace, { root: "ok" });
-  assert.equal(r.errorCode, "");
-});
-
-test("evaluatePolicy -- args undefined sends empty argsJson", async () => {
-  const mock = new MockDispatcher();
-  const promise = evaluatePolicy(mock.asDispatcher(), {
-    policyName: "myPolicy",
-  });
-  const sent = mock.lastSent() as unknown as {
-    evaluatePolicy?: { argsJson?: string };
-  };
-  assert.equal(sent.evaluatePolicy?.argsJson, "");
-  mock.reply({
-    evaluatePolicyResult: { requestId: mock.lastRequestId(), resultJson: "true" },
-  });
-  const r = await promise;
-  assert.equal(r.result, true);
-});
-
-test("evaluatePolicy -- typed errorCode rides the result", async () => {
-  const mock = new MockDispatcher();
-  const promise = evaluatePolicy(mock.asDispatcher(), { policyName: "coreSecret" });
-  mock.reply({
-    evaluatePolicyResult: {
-      requestId: mock.lastRequestId(),
-      errorCode: "POLICY_NOT_FRONTEND_VISIBLE",
-      errorMessage: "policy is registered but lacks @frontend_visible",
-    },
-  });
-  const r = await promise;
-  assert.equal(r.errorCode, "POLICY_NOT_FRONTEND_VISIBLE");
-  assert.equal(r.result, null);
-  assert.equal(r.trace, null);
-});
-
-test("evaluatePolicy -- AbortSignal propagates", async () => {
-  const mock = new MockDispatcher();
-  const ac = new AbortController();
-  const promise = evaluatePolicy(mock.asDispatcher(), {
-    policyName: "x",
-    signal: ac.signal,
-  });
-  ac.abort();
-  await assert.rejects(promise);
-});

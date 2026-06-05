@@ -6,12 +6,9 @@ import "strings"
 // the Decision the Gate will honour. The default implementation
 // (DefaultDecisionPolicy) encodes the risk × scope × categories
 // matrix from issue #231; app boot can override via
-// `GateOptions.DecisionPolicy` -- the expected production swap is a
-// thin wrapper that delegates to a DSL-authored `commandRiskDecision`
-// policy via `engine.EvaluatePolicy`, once the procedural-policy DSL
-// path is exercised end-to-end (today no procedural policy exists in
-// the tree, so #231 ships the matrix in Go and the DSL migration is
-// a follow-up).
+// `GateOptions.DecisionPolicy` with a custom Go impl. (This is the
+// command-risk decision surface for computer-use / workbench, and is
+// unrelated to the retired DSL decision-policy tier, #984.)
 //
 // The interface is intentionally narrow + stateless so a custom
 // impl can be a single struct + one Decide call -- no lifecycle, no
