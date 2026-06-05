@@ -50,6 +50,12 @@ type AuthoredSchedulerOptions struct {
 	EventBus *events.Bus
 	// Run executes a compiled authored automation. Required.
 	Run RunAutomationFunc
+	// Breaker, when set, fault-isolates each authored automation: a run that
+	// errors increments that automation's breaker, and on trip the scheduler
+	// auto-pauses ONLY that automation (the others, and core, keep running).
+	// nil = no breaker (every run fires regardless of prior faults). The app
+	// wires a breaker whose onTrip surfaces the trip; tests supply their own.
+	Breaker *AuthoredBreaker
 }
 
 // authoredEntry is one live authored automation's subscription bookkeeping:
@@ -71,6 +77,7 @@ type AuthoredScheduler struct {
 	loader   *Loader
 	eventBus *events.Bus
 	run      RunAutomationFunc
+	breaker  *AuthoredBreaker
 
 	mu      sync.Mutex
 	cron    *cron.Cron
@@ -100,6 +107,7 @@ func NewAuthoredScheduler(opts AuthoredSchedulerOptions) (*AuthoredScheduler, er
 		loader:   opts.Loader,
 		eventBus: opts.EventBus,
 		run:      opts.Run,
+		breaker:  opts.Breaker,
 		cron:     c,
 		entries:  make(map[string]*authoredEntry),
 	}, nil
@@ -138,6 +146,12 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 
 	// Replace any prior subscription for this (owner, name) before re-wiring.
 	s.Deactivate(construct.OwnerUserId, construct.Name)
+
+	// A (re-)activation is a fresh start: clear any tripped breaker so a
+	// just-edited automation runs again instead of staying fault-paused.
+	if s.breaker != nil {
+		s.breaker.Reset(construct.OwnerUserId, construct.Name)
+	}
 
 	entry := &authoredEntry{owner: construct.OwnerUserId, automation: automation}
 
@@ -250,9 +264,39 @@ func (s *AuthoredScheduler) scheduleCron(owner string, automation *Automation) (
 // authz that gates the author's interactive calls gates this run. It can never
 // act as a cluster owner or the system actor.
 func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
+	// Circuit breaker gate: a tripped automation is suppressed (belt-and-
+	// suspenders -- the trip already paused its subscription, but a late
+	// in-flight firing might still reach here).
+	if s.breaker != nil && !s.breaker.Allow(owner, automation.Name) {
+		return
+	}
+
 	ctx := AuthorContext(context.Background(), owner)
-	if err := s.run(ctx, automation, event); err != nil {
-		if s.logger != nil {
+	err := s.run(ctx, automation, event)
+
+	if s.breaker == nil {
+		if err != nil && s.logger != nil {
+			s.logger.Error("authored automation run failed",
+				"owner", owner, "automation", automation.Name, "error", err)
+		}
+		return
+	}
+
+	if err == nil {
+		s.breaker.RecordSuccess(owner, automation.Name)
+		return
+	}
+
+	// A faulting run increments only THIS automation's breaker. On the
+	// tripping call the breaker's onTrip fires (the app pauses + surfaces it);
+	// other owners' automations and the same owner's other automations are
+	// untouched -- fault isolation, no cascade.
+	tripped := s.breaker.RecordFailure(owner, automation.Name, err.Error())
+	if s.logger != nil {
+		if tripped {
+			s.logger.Warn("authored automation breaker tripped -- auto-pausing",
+				"owner", owner, "automation", automation.Name, "error", err)
+		} else {
 			s.logger.Error("authored automation run failed",
 				"owner", owner, "automation", automation.Name, "error", err)
 		}
