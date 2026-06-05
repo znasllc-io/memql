@@ -104,7 +104,7 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 
 	// The sandbox registry wraps the real one: it intercepts write-bearing +
 	// webhook steps and delegates reads. It collects the manifest as it runs.
-	sandbox := newSandboxStepRegistry(NewRegistry(), engine, partition, req.Mode)
+	sandbox := newSandboxStepRegistry(NewRegistry(), engine, partition, req.Mode, req.CaptureSinkUrl)
 
 	// Drive the run through the real Executor. Chain tracking + dedup are off:
 	// a dry-run is a one-shot, and dedup would skip a re-run of the same
