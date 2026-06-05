@@ -1037,93 +1037,40 @@ etc.).
 
 ## Policies
 
-memQL ships a **Policy** DSL construct for cross-cutting decision
-logic — authorization checks, vendor selection, feature flagging,
-UI gating. Policies are pure functions (read context, call
-sub-policies, return a value) consolidated in
-`dsl/policies/policies.memql`.
-
-### Layering
-
-Policies split into two tiers (by naming / annotation within the
-consolidated file):
-
-- **core** policies are platform invariants — auth interceptors call
-  only `core` policies.
-- **bff** policies are product decisions — they can call `core`
-  (downward delegation allowed) but `core` MUST NOT call `bff`. The
-  lint at registration time enforces this.
-
-### Authoring shape
+The live `policy` construct is an **SI provider-selection record**:
+empty-bodied, annotated with `@primary` / `@fallback` /
+`@maxLatencyMs` / `@preferredRole`, consolidated in
+`dsl/policies/policies.memql` and consumed by the SI Router to pick
+chat/voice/embedding providers. That is the only policy surface with
+live constructs.
 
 ```memql
-@tier("bff")                                 // must match directory
-@frontend_visible                            // bff-only; opt-in surface
-@cacheable                                   // result cacheable by (name, ctx-hash)
-@audited                                     // emit v1:identity:auditEvent
-@traces_persisted                            // write v1:platform:policyTrace row
-@description("...")
-func (Policy) myDecision(ctx any) <return-type> {
-  if policy("subPolicy", { x: ctx.x }) {     // direct call composition
-    return "anam"
-  }
-  if spec("requiresAdmin") {                 // delegate to a context-spec
-    return "premium"
-  }
-  return "simli"
-}
+@primary("streamClaudeSonnet")
+@fallback("stream54Pro")
+@description("Default chat policy for non-operator agents.")
+policy balancedChat { }
 ```
 
-`ctx` is the unified parameter (Phase 1 of the policies+DSL initiative
-landed this across every DSL construct). The engine automatically
-populates standard fields: `ctx.actor.{userId,role,identityId,
-isClusterOwner,partitions}`, `ctx.partition`, `ctx.now`, plus
-`ctx.config.<key>` for the allow-listed entries declared in
-`component/config/policy_exposable.go`. Unused parameter must be
-`_` (Go-idiomatic).
+**Decision-policy tier — RETIRED (#984).** The cross-cutting
+decision model (`func (Policy) { @tier / @audited / @traces_persisted
+... if policy(...){} if spec(...){} }`, `engine.EvaluatePolicy`,
+core/bff tiering) was documented + wired but carried **zero live
+constructs** across the entire tree, so it has been retired. Auth /
+feature-gating / vendor decisions live in Go (`component/safety`
+ships the #231 risk×scope decision matrix) and in **specs** — use
+`spec("name")` for caller-based boolean checks (admin / owner /
+permission), which run as in-process context-specs and compile to
+SQL or evaluate against the auth envelope.
 
-**`spec("name")` vs `policy("name")`.** A policy can call either.
-Use `spec("name")` for pure caller-based booleans (admin / owner /
-permission checks) — these run as in-process context-specs and
-can't recurse. Use `policy("name")` for composite decisions that
-combine multiple sub-checks, branch on config, or need to be
-@audited / @traces_persisted in their own right. The loader
-rejects policies whose body is a pure caller-only boolean with no
-policy-only annotations and points the author at the spec form.
-
-### Evaluation paths
-
-- **Go-side:** `engine.EvaluatePolicy(ctx, name, args, opts)` returns
-  `(result, *PolicyTrace, error)`. Pass `opts.RequiredTier` to
-  restrict the surface (auth interceptors pass `"core"`, gRPC
-  handlers pass `"bff"`).
-- **DSL-side:** `policy("name", { ... })` from any DSL function
-  body. Recurses through `EvaluatePolicy`, propagating cycle
-  detection and the parent trace.
-- **Frontend-side:** `client.evaluatePolicy({ policyName, args,
-  returnTrace })` from the copresent stream client. Server-side
-  the handler enforces `@frontend_visible` AND `tier=bff`; core
-  policies are unreachable from a browser.
-
-### Persistence + retention
-
-- `@audited` → small `v1:identity:auditEvent` row per eval (forever,
-  per audit-log policy).
-- `@traces_persisted` → full trace tree on `v1:platform:policyTrace`,
-  90-day default retention (`MEMQL_POLICYTRACE_RETENTION_DAYS`,
-  purged daily 02:30 UTC by the `purgeExpiredPolicyTraces` cron).
-- Ephemeral (default): trace tree returned to the caller when
-  `@returns_trace` or `opts.ReturnTrace`, otherwise discarded.
-
-### Lint + debug
-
-- `make policies-lint` — runs the loader against the on-disk tree
-  and surfaces every check the engine would do at startup (tier
-  matches directory, downward-only delegation, `@frontend_visible`
-  only on bff, filename matches function name).
-- `make policies-trace POLICY=<name> ARGS='{...}'` — debug helper
-  that evaluates a policy with sample args and prints the trace
-  tree.
+> Cleanup status: the dead tooling (`make policies-lint` /
+> `policies-trace` + `scripts/policies/`) and the stale docs are
+> removed here. Removing the dormant Go machinery
+> (`policy_evaluator.go` / `policy_function_loader.go` /
+> `EvaluatePolicy` / the `EvaluatePolicyMsg` gRPC handler + proto)
+> is a careful follow-up: `policy_evaluator.go` shares expression-
+> evaluation helpers with the live spec evaluator, and the
+> `EvaluatePolicyMsg` proto is a cross-repo wire the copresent client
+> depends on — both must be untangled before deletion.
 
 ## Key Concepts
 
