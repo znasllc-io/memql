@@ -326,7 +326,7 @@ db:
 # Test targets
 # ---------------------------------------------------------------------------
 
-.PHONY: test test-v test-cover test-polyphon policies-lint policies-trace sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -384,24 +384,6 @@ sdk-ts-test:
 ## Run all tests
 test:
 	$(GO) test ./...
-
-## Lint the policies tree -- validates @tier annotation matches directory
-## placement, downward-only delegation across the bff -> core boundary,
-## and that no policy file declares an annotation it doesn't own. Phase 0
-## ships the placeholder target; Phase 6 of the policies feature
-## fills in the real checks.
-policies-lint:
-	@bash scripts/policies/lint.sh
-
-## Evaluate a single policy with a JSON args literal and dump the
-## structured trace tree. Useful for debugging policy decisions
-## without booting the full cluster. Phase 0 ships the placeholder
-## target; Phase 6 of the policies feature fills in the real
-## debug runner.
-##
-## Usage: make policies-trace POLICY=avatarVendorChoice ARGS='{"expectedDurationMinutes":30}'
-policies-trace:
-	@bash scripts/policies/trace.sh "$(POLICY)" '$(ARGS)'
 
 ## Run all tests with verbose output
 test-v:
