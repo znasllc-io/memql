@@ -1,5 +1,7 @@
 package sense
 
+import "github.com/znasllc-io/memql/component/language/annotations"
+
 // BuiltinDef describes a built-in function's signature for completion and hover.
 type BuiltinDef struct {
 	Signature  string
@@ -224,49 +226,15 @@ var BuiltinFunctions = map[string]BuiltinDef{
 	},
 }
 
-// AnnotationsByReceiver maps receiver types to their valid annotations. This is
-// the editor projection of the per-construct annotation surface; for the four
-// function constructs (Query / Mutation / Logic / Automation) it is held
-// identical to the parser gate (`constructAnnotationAllowLists`) by
-// TestAnnotationReceiverGateConsistency (#991), which fails if they drift. The
-// other constructs mirror their per-construct parser/converter accepted sets.
-var AnnotationsByReceiver = map[string][]string{
-	"Query": {
-		"description", "enabled", "disabled", "internal", "public",
-	},
-	"Mutation": {
-		"description", "enabled", "disabled", "internal", "actor", "public",
-	},
-	"Logic": {
-		"description", "enabled", "disabled",
-	},
-	"Automation": {
-		"description", "enabled", "disabled", "trigger", "filter",
-	},
-	"Spec": {
-		"description", "enabled", "disabled", "shape",
-	},
-	"Tool": {
-		"description", "enabled", "disabled", "handler", "executionTime",
-		"destructive", "requiresConfirmation", "rateLimit",
-		"clientExecution", "allowedRoles", "scopes",
-	},
-	"Builtin": {
-		"description", "enabled", "disabled", "internal", "executor", "alias", "args", "sdk",
-	},
-	"Prompt": {
-		"description", "enabled", "disabled", "defaultProvider", "templateFile",
-	},
-	"Provider": {
-		"description", "type", "model", "modality", "default", "base", "extends",
-	},
-	"Shape": {
-		"description", "row", "actor",
-	},
-	"": { // top-level (concept definitions)
-		"description", "version", "namespace", "scope", "visibility", "type", "cache", "relationship",
-	},
-}
+// AnnotationsByReceiver is the editor projection of the single
+// annotation registry (component/language/annotations, #991),
+// re-exported under its historic name so the sense complete / diagnose
+// / hover code keeps referring to a package-local symbol. For the four
+// function constructs (Query / Mutation / Logic / Automation) the same
+// registry backs the parser-side load gate (constructAnnotationAllowLists),
+// so they cannot drift; TestAnnotationReceiverGateConsistency (#991)
+// guards that the derived views still agree.
+var AnnotationsByReceiver = annotations.ByReceiver
 
 // AnnotationDocs maps annotation names to documentation strings. Note that a
 // few names are deliberately per-construct overloaded (resolved by which
@@ -274,53 +242,10 @@ var AnnotationsByReceiver = map[string][]string{
 // kind ("object" / "collection" / "reference"); `@default` is a provider
 // default-flag AND an args/concept field default. The doc below states the
 // common meaning.
-var AnnotationDocs = map[string]string{
-	// Lifecycle / shared.
-	"enabled":     "Enable this definition. Functions are disabled by default.",
-	"disabled":    "Disable this definition.",
-	"description": "Human-readable description of this definition.",
-	"internal":    "Hide from external API discovery.",
-	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/auth/per-row-authz-audit.md.",
-	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
-	// Query / spec.
-	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",
-	// Automation.
-	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
-	"filter":  "Filter expression for automation triggers.",
-	// Tool.
-	"handler":              "Tool handler configuration. Format: @handler(type=\"query\", query=\"...\") / @handler(type=\"function\", name=\"...\").",
-	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
-	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
-	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
-	"rateLimit":            "Tool rate limiting. Format: @rateLimit(maxCalls=100, periodSeconds=3600).",
-	"clientExecution":      "Mark a tool as client-executed (runs in the browser, relayed agent->browser).",
-	"allowedRoles":         "Restrict the tool to a set of agent roles.",
-	"scopes":               "Authorization scopes the tool requires.",
-	// Builtin.
-	"executor": "Go executor name for builtin functions (integration.X.Y).",
-	"args":     "Parse-time argument contract for builtin functions.",
-	"alias":    "Additional name the builtin is registered under.",
-	"sdk":      "Generator marker (sdk/gen reads from source); no engine effect.",
-	// Prompt.
-	"defaultProvider": "Default SI provider for prompt execution.",
-	"templateFile":    "External template file path for prompts.",
-	// Provider.
-	"type":     "Provider vendor type (e.g., \"OpenAI\", \"Anthropic\"); on a concept, the row kind (\"object\"/\"collection\"/\"reference\").",
-	"model":    "Model identifier (e.g., \"gpt-5.4-mini\", \"claude-sonnet-4-6\").",
-	"modality": "Provider modality (e.g., \"chat\", \"audio\", \"image\", \"embedding\").",
-	"default":  "Mark this provider as the default for its modality; on a field, the value used when the caller omits it.",
-	"base":     "Mark a vendor-level base provider (auth + type only).",
-	"extends":  "Inherit configuration from a base provider.",
-	// Shape.
-	"row": "Shape kind: projects a concept's payload + row intrinsics (concept bound via the `shape <Concept> <name>` signature).",
-	// Concept.
-	"version":      "Version tag for a concept.",
-	"namespace":    "Concept namespace. Colon-separated lowercase identifiers (e.g., \"cognition\" or \"cognition:client:tool\").",
-	"scope":        "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
-	"visibility":   "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
-	"cache":        "Concept query result caching. Format: @cache(ttl=\"5m\").",
-	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=\"v1:ns:concept\", direction=\"outgoing\").",
-}
+// AnnotationDocs is the per-annotation hover/completion doc map, re-
+// exported from the single annotation registry
+// (component/language/annotations, #991) under its historic name.
+var AnnotationDocs = annotations.Docs
 
 // KeywordDocs maps keywords to documentation strings.
 var KeywordDocs = map[string]string{

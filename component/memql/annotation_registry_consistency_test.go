@@ -9,11 +9,12 @@ import (
 
 // TestAnnotationReceiverGateConsistency is the #991 anti-drift guard: for the
 // four function constructs the editor's annotation surface
-// (sense.AnnotationsByReceiver) must be identical to the parser's load-time
-// allow-list gate (constructAnnotationAllowLists). The three annotation tiers
-// the audit (#964) flagged drifted repeatedly (the post-#989/#990 Tool/Query
-// drift was the latest); this test makes a divergence a hard failure instead of
-// a silent editor-vs-loader mismatch.
+// (sense.AnnotationsByReceiver) must be identical to the load-time allow-list
+// gate (constructAnnotationAllowLists). Both now derive from the single
+// physical registry (component/language/annotations), so they cannot drift by
+// construction; this test holds that property — it fails the moment either
+// side is re-hardcoded away from the shared registry (the audit in #964 flagged
+// these tiers drifting repeatedly before they were unified).
 func TestAnnotationReceiverGateConsistency(t *testing.T) {
 	cases := []struct {
 		receiver string
