@@ -85,6 +85,16 @@ var sandboxSupportedKinds = map[string]bool{
 // call against a running engine. Returns a per-construct diagnostic report;
 // the bundle is OK only if every non-skipped construct compiled.
 func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
+	rep, _ := compileBundle(constructs)
+	return rep
+}
+
+// compileBundle runs the per-construct compile pass and returns the report
+// alongside the isolated overlay registry (core concepts + bundle-defined
+// concepts). The overlay is returned so the engine-backed entry point
+// (SandboxCompileBundleWithEngine) can run cross-reference resolution against
+// exactly the concept set the constructs bound against.
+func compileBundle(constructs []SandboxConstruct) (SandboxReport, *memoryNodes.MemoryRegistry) {
 	// Overlay registry: an isolated clone seeded from the global default.
 	// Candidate concepts are merged into THIS, never the global default, so
 	// the live engine's concept registry stays provably unmutated.
@@ -153,7 +163,7 @@ func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
 		}
 		rep.Diagnostics = append(rep.Diagnostics, d)
 	}
-	return rep
+	return rep, concepts
 }
 
 // sandboxCompileConcept parses a candidate concept, validates its name +
@@ -239,8 +249,12 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 
 	case "spec", "trait":
-		// Specs + traits share the dedicated spec parser + converter.
-		decl, err := languageParser.ParseSpecDecl(c.Source)
+		// Specs + traits share the dedicated spec parser + converter. The
+		// parser consumes a single declaration with no file-top `use` lines
+		// (the unified loader slices those off before calling it), so strip
+		// the candidate row's imports first -- cross-reference resolution
+		// validates them separately.
+		decl, err := languageParser.ParseSpecDecl(stripUseDeclarations(c.Source))
 		if err != nil {
 			return fail(d, fmt.Sprintf("%s: %v", origin, err))
 		}
@@ -250,7 +264,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 
 	case "shape":
-		decl, err := languageParser.ParseShapeDecl(c.Source)
+		decl, err := languageParser.ParseShapeDecl(stripUseDeclarations(c.Source))
 		if err != nil {
 			return fail(d, fmt.Sprintf("%s: %v", origin, err))
 		}
@@ -274,11 +288,20 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			d.Error = fmt.Sprintf("kind %q cannot be compiled: the automation compiler is not registered in this binary", c.Kind)
 			return d
 		}
-		name, err := compile(c.Source, origin, concepts)
+		res, err := compile(c.Source, origin, concepts)
 		if err != nil {
 			return fail(d, fmt.Sprintf("%s: %v", origin, err))
 		}
-		actualName = name
+		actualName = res.Name
+		// Event-trigger pattern must name a REAL concept (#956 follow-up
+		// 3/3). A graph-CDC trigger keyed off a concept absent from the
+		// overlay registry (core + bundle-defined) would never fire -- catch
+		// it at Gate 1 rather than shipping a dead automation.
+		if res.TriggerConcept != "" {
+			if _, gErr := concepts.Get(res.TriggerConcept); gErr != nil {
+				return fail(d, fmt.Sprintf("%s: @trigger references concept %q, which is not defined by the core registry or this bundle", origin, res.TriggerConcept))
+			}
+		}
 
 	default:
 		// Not yet handled by this pass (prompt / policy / provider /
