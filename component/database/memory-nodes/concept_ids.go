@@ -35,6 +35,15 @@ const (
 	ConceptHarnessObservation = "v1:harness:observation"
 )
 
+// Authoring domain concepts (v1:authoring:*) -- the graph-stored
+// substrate for planner-authored DSL bundles (epic #954). The construct
+// row is the per-construct member of a bundle and the catalog's reuse
+// unit (#957): a promoted construct grows a content vector in
+// node_vectors keyed by its id so similarTo can rank near-matches.
+const (
+	ConceptAuthoringConstruct = "v1:authoring:construct"
+)
+
 // Platform domain concepts (v1:platform:*)
 const (
 	ConceptPlatformGlobalSecret      = "v1:platform:globalSecret"

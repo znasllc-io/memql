@@ -41,6 +41,7 @@ shape construct constructFull {
   payload.status
   payload.catalogued
   payload.catalogKey
+  payload.catalogMatchText
   row.createdAt
   row.createdBy
 }
