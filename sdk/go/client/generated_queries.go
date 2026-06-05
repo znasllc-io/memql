@@ -3426,6 +3426,23 @@ func QuerySpreadsheetRowsForDocumentBuild(args QuerySpreadsheetRowsForDocumentAr
 	return b.String()
 }
 
+// QuerySystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
+//
+// Bound concept: bundle.
+type QuerySystemActiveAuthoringBundlesArgs struct {
+}
+
+// QuerySystemActiveAuthoringBundles calls the engine query querySystemActiveAuthoringBundles.
+func (qc *QueryClient) QuerySystemActiveAuthoringBundles(ctx context.Context, args QuerySystemActiveAuthoringBundlesArgs) (*Result, error) {
+	call := QuerySystemActiveAuthoringBundlesBuild(args)
+	return qc.executeNamed(ctx, "querySystemActiveAuthoringBundles", call)
+}
+
+func QuerySystemActiveAuthoringBundlesBuild(args QuerySystemActiveAuthoringBundlesArgs) string {
+	_ = args
+	return "querySystemActiveAuthoringBundles({})"
+}
+
 // QueryTaskStateById -- Latest persisted state for a Task (planner reads this on resume).
 //
 // Bound concept: plan.
