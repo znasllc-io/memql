@@ -17,7 +17,7 @@ import (
 // evaluatorWithArgs builds an automations.Evaluator seeded so the metering
 // arg-resolver can resolve the function step's literal args.
 func newMeterRegistry() *sandboxStepRegistry {
-	return newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", memql.DryRunModeIsolated)
+	return newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", memql.DryRunModeIsolated, "")
 }
 
 // TestMeterRead_SiCallRecordsAiCallAndCost: a function step named "si" records

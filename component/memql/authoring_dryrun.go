@@ -79,6 +79,19 @@ type DryRunRequest struct {
 
 	// Mode selects the side-effect tier. Empty defaults to DryRunModeIsolated.
 	Mode DryRunMode `json:"mode,omitempty"`
+
+	// FullLiveApproved is the SEPARATE gate for DryRunModeFullSandboxLive. The
+	// full-sandbox-live tier (webhooks delivered to a capture sink instead of
+	// blocked) is a riskier final staging pass; RunBundleDryRun refuses to run
+	// it unless this is explicitly set, so a caller can never fall into live
+	// webhook delivery by default. Ignored for the isolated tier.
+	FullLiveApproved bool `json:"fullLiveApproved,omitempty"`
+
+	// CaptureSinkUrl is where webhooks are delivered under the full-sandbox-live
+	// tier. When empty, full-live webhooks are recorded to the manifest with the
+	// configured default sink marker but not dispatched (the sandbox never POSTs
+	// to the automation's real webhook target -- only to the capture sink).
+	CaptureSinkUrl string `json:"captureSinkUrl,omitempty"`
 }
 
 // DryRunTriggerEvent is the synthetic / replayed event that drives a dry-run.
@@ -141,14 +154,19 @@ type RecordedWebCall struct {
 }
 
 // BlockedWebhook is one external POST (a webhook step) the side-effect layer
-// RECORDED-AND-BLOCKED. The request is captured (method + url + body) so the
-// approver sees exactly what would be sent, but it is never dispatched under the
-// isolated tier.
+// captured. The request (method + url + body) is recorded so the approver sees
+// exactly what would be sent. Under the isolated tier it is RECORDED-AND-BLOCKED
+// (Sink empty). Under the full-sandbox-live tier it is delivered to a capture
+// sink instead of the automation's real target, and Sink records where -- the
+// automation's real webhook target is NEVER POSTed to.
 type BlockedWebhook struct {
 	StepId string         `json:"stepId"`
 	Method string         `json:"method"`
 	Url    string         `json:"url"`
 	Body   map[string]any `json:"body,omitempty"`
+	// Sink is set when the webhook was delivered to a capture sink under the
+	// full-sandbox-live tier; empty means recorded-and-blocked (isolated tier).
+	Sink string `json:"sink,omitempty"`
 }
 
 // SideEffectManifest is the tiered catalog of everything the automation did.
@@ -247,6 +265,13 @@ func RunBundleDryRun(ctx context.Context, engine *MemQLEngine, req DryRunRequest
 	}
 	if req.Mode == "" {
 		req.Mode = DryRunModeIsolated
+	}
+	// Full-sandbox-live is gated SEPARATELY: it delivers webhooks to a capture
+	// sink (real, in-sandbox) rather than blocking them, so it must be opted into
+	// explicitly. Refuse it without FullLiveApproved so a caller never falls into
+	// live webhook delivery by defaulting the mode.
+	if req.Mode == DryRunModeFullSandboxLive && !req.FullLiveApproved {
+		return BundleDryRunReport{}, fmt.Errorf("full-sandbox-live dry-run is gated separately: set DryRunRequest.FullLiveApproved to run it (it delivers webhooks to a capture sink instead of blocking them)")
 	}
 	return run(ctx, engine, req)
 }

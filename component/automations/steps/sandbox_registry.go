@@ -37,10 +37,11 @@ import (
 
 // sandboxStepRegistry intercepts side-effecting steps and delegates reads.
 type sandboxStepRegistry struct {
-	real      *Registry
-	engine    *memql.MemQLEngine
-	partition string
-	mode      memql.DryRunMode
+	real        *Registry
+	engine      *memql.MemQLEngine
+	partition   string
+	mode        memql.DryRunMode
+	captureSink string
 
 	mu              sync.Mutex
 	mutations       []memql.RecordedMutation
@@ -53,12 +54,15 @@ type sandboxStepRegistry struct {
 }
 
 // newSandboxStepRegistry builds a sandbox registry wrapping the real one.
-func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition string, mode memql.DryRunMode) *sandboxStepRegistry {
+// captureSink is the full-sandbox-live webhook capture sink URL (ignored under
+// the isolated tier).
+func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition string, mode memql.DryRunMode, captureSink string) *sandboxStepRegistry {
 	return &sandboxStepRegistry{
 		real:        real,
 		engine:      engine,
 		partition:   partition,
 		mode:        mode,
+		captureSink: captureSink,
 		intercepted: map[string]string{},
 	}
 }
@@ -232,36 +236,50 @@ func (s *sandboxStepRegistry) resolveFunctionArgs(fn *automations.FunctionStepCo
 	return resolved
 }
 
-// interceptWebhook records a webhook step's request as a blocked external POST
-// and returns a synthetic success. Nothing is dispatched under the isolated
-// tier; full-sandbox-live routing (increment 3) re-routes to a capture sink.
+// interceptWebhook captures a webhook step's request and returns a synthetic
+// success. Under the isolated tier it is recorded-and-blocked (nothing
+// dispatched). Under the full-sandbox-live tier it is re-routed to the capture
+// sink (Sink recorded) -- the automation's REAL webhook target is never POSTed
+// to under either tier.
 func (s *sandboxStepRegistry) interceptWebhook(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	started := time.Now()
-	blocked := memql.BlockedWebhook{StepId: step.ID, Method: "POST"}
+	captured := memql.BlockedWebhook{StepId: step.ID, Method: "POST"}
 	if step.Webhook != nil {
 		if url, err := stepCtx.Evaluator.EvaluateString(step.Webhook.URL); err == nil {
-			blocked.Url = url
+			captured.Url = url
 		} else {
-			blocked.Url = step.Webhook.URL
+			captured.Url = step.Webhook.URL
 		}
 		if m := strings.ToUpper(strings.TrimSpace(step.Webhook.Method)); m != "" {
-			blocked.Method = m
+			captured.Method = m
 		}
 		if step.Webhook.Body != nil {
 			if body, err := stepCtx.Evaluator.EvaluateMap(step.Webhook.Body); err == nil {
-				blocked.Body = body
+				captured.Body = body
 			} else {
-				blocked.Body = step.Webhook.Body
+				captured.Body = step.Webhook.Body
 			}
 		}
 	}
-	s.recordBlockedWebhook(blocked)
-	s.note(step.ID, "webhook recorded and blocked")
+
+	live := s.mode == memql.DryRunModeFullSandboxLive
+	noteMsg := "webhook recorded and blocked"
+	if live {
+		captured.Sink = s.captureSink
+		if captured.Sink == "" {
+			captured.Sink = "default-capture-sink"
+		}
+		noteMsg = "webhook re-routed to capture sink " + captured.Sink + " (real target not called)"
+	}
+
+	s.recordBlockedWebhook(captured)
+	s.note(step.ID, noteMsg)
 	return s.syntheticSuccess(step.ID, started, map[string]any{
 		"dryRun":  true,
-		"blocked": true,
-		"url":     blocked.Url,
-		"method":  blocked.Method,
+		"blocked": !live,
+		"sink":    captured.Sink,
+		"url":     captured.Url,
+		"method":  captured.Method,
 	}), nil
 }
 
