@@ -95,6 +95,35 @@ func (a *App) wireAuthoredRuntime() {
 	a.authoredScheduler = scheduler
 
 	a.Logger.Info("authored-construct runtime initialized (registry + scheduler + breaker)")
+
+	// Boot re-arm (#1039): re-register every already-active bundle across all
+	// owners so their automations fire again after a restart, with no manual
+	// re-approval. The scheduler still enforces the global kill switch (#1034)
+	// and the cluster owner gate (#1030) at fire time, so a restart neither
+	// double-fires nor bypasses governance -- re-arm only re-establishes the
+	// registrations. A re-arm failure degrades gracefully (the core engine keeps
+	// serving; only the authored surface that failed to restore is affected).
+	a.rearmActiveAuthoredBundles()
+}
+
+// rearmActiveAuthoredBundles re-registers the persisted active authored bundles
+// into the just-constructed runtime + scheduler. Called at the tail of
+// wireAuthoredRuntime once the registry + scheduler exist. Best-effort: a
+// failure is logged, not fatal.
+func (a *App) rearmActiveAuthoredBundles() {
+	if a.engine == nil || a.authoredRuntime == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := a.engine.RearmActiveBundles(ctx, a.AuthoredRuntimeDeps())
+	if err != nil {
+		a.Logger.Warn("authored bundle boot re-arm failed -- active automations may not fire until re-activated",
+			"error", err)
+		return
+	}
+	a.Logger.Info("authored bundles re-armed on boot",
+		"seen", res.Seen, "rearmed", res.Rearmed, "failed", len(res.FailedIds))
 }
 
 // authoredAutomationsEnabledFlag reads the cluster-wide global kill switch from

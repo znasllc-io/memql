@@ -142,16 +142,11 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 
 	// 3. Register the closure into the owner-scoped authored runtime. The
 	// registry registration makes every construct resolvable; the automation
-	// constructs additionally go to the scheduler so their triggers fire.
-	for _, c := range plan.Register {
-		if err := deps.Registry.Register(c); err != nil {
-			return ActivationResult{}, fmt.Errorf("authoring: register %s/%s into runtime: %w", c.Kind, c.Name, err)
-		}
-		if c.Kind == "automation" && deps.RegisterHook != nil {
-			if err := deps.RegisterHook(c); err != nil {
-				return ActivationResult{}, fmt.Errorf("authoring: schedule automation %s: %w", c.Name, err)
-			}
-		}
+	// constructs additionally go to the scheduler so their triggers fire. The
+	// boot re-arm (authoring_rearm.go) reuses this same step so a restart
+	// restores identical runtime state.
+	if err := registerBundleConstructs(plan.Register, deps); err != nil {
+		return ActivationResult{}, err
 	}
 
 	// 4. Promote net-new deps into the owner's reusable catalog. Best-effort per

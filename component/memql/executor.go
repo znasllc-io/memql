@@ -363,14 +363,18 @@ func resolveActorPath(ctx context.Context, path string, op ComparisonOperator) (
 			return "", nil
 		}
 		return ac.PrimaryEmail, nil
-	case "isOwner":
+	case "isOwner", "isClusterOwner":
+		// `isClusterOwner` is the canonical name the actorEnvelope @actor
+		// shape exposes (dsl/common/shapes.memql) and the form admin queries
+		// gate on (e.g. querySystemActiveAuthoringBundles, #1039); `isOwner`
+		// is the legacy alias. Both resolve to the cluster-owner bit.
 		if ac == nil {
 			// No auth context (dev mode) -- treat as owner.
 			return true, nil
 		}
 		return ac.IsClusterOwner(), nil
 	default:
-		return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner)", path)
+		return nil, fmt.Errorf("unsupported actor reference path %q (valid: userId, identityId, role, primaryEmail, isOwner, isClusterOwner)", path)
 	}
 }
 
