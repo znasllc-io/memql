@@ -1,0 +1,22 @@
+// prompts.memql
+//
+// Authoring-namespace prompt declarations for the planner's design/repair
+// loop (epic memql#954, issue #960). Bodies live in prompts/<name>.tmpl.
+//
+// authoringDesign is the DESIGN PASS: given a natural-language Responsibility
+// and a summary of the caller's reusable catalog, it decomposes the
+// Responsibility into the dependency closure a v1:authoring:bundle needs --
+// the headline automation plus each supporting construct -- and emits a
+// candidate `.memql` source SKETCH per dependency. The planner's Go side
+// (agent_loop_authoring.go) keys each sketch through the deterministic +
+// fuzzy catalog matchers (DecideReuse / CatalogNearMatches, #957) to decide
+// reuse-or-author per dependency. The model proposes; the engine matches.
+
+@defaultProvider("streamClaudeSonnet")
+@templateFile("prompts/authoringDesign.tmpl")
+@description("Authoring DESIGN PASS (epic #954, #960). Decomposes a natural-language Responsibility into the dependency closure a planner-authored bundle needs: the headline automation plus each supporting construct (query / mutation / logic / spec / trait / shape), with a candidate .memql source sketch per dependency that the deterministic + fuzzy catalog matchers key for the reuse-or-author decision. Sonnet, not Opus: the workload is grounded decomposition against a known catalog + construct grammar, not novel chain-of-thought. The model proposes candidate constructs; the planner's Go side runs the actual reuse-or-author math (DecideReuse / CatalogNearMatches) -- so the model must NOT claim a construct is reused, only describe the construct it needs. Output contract: {automationName, automationPurpose, dependencies: [{kind, name, purpose, candidateSource}]}. kind in {query, mutation, logic, spec, trait, shape}. candidateSource is a self-contained .memql sketch of ONE construct of that kind.")
+prompt authoringDesign {
+  responsibility  string   @required @description("The user's standing Responsibility in natural language -- the duty the authored bundle must fulfill. The single most important input; the dependency closure is decomposed from it.")
+  catalog         []object           @description("Summary of the caller's reusable catalog -- [{name, kind}] of constructs already promoted for reuse (#957). The model uses this to PREFER describing a dependency that matches an existing catalog entry (so the matcher reuses it) over inventing a novel one. Empty when the owner has no catalog yet.")
+  now             string   @required @description("RFC3339 wall-clock at invocation. Lets the design reason about time-relative triggers/schedules without hardcoding a clock.")
+}
