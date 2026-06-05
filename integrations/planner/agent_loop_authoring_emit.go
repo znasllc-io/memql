@@ -26,15 +26,14 @@ package planner
 // can park the Plan with the outstanding diagnostics rather than ship a
 // broken bundle.
 //
-// KNOWN GATE-1 QUIRK (#956 follow-up): the sandbox spec compile path rejects
-// @shape AND @enabled on specs -- and so does the live spec loader
-// (specDeclToSpec is shared), so this is NOT a sandbox/loader divergence: a
-// real DSL spec carrying @shape (e.g. dsl/deployment/specs.memql's
-// requiresOwnerOrAdmin) is silently skipped at boot too. Rather than diverge
-// the sandbox from the loader, the authoringEmit/authoringRepair prompts
-// instruct the model to NEVER emit @shape / @enabled on a spec, so generated
-// bundles compile cleanly. The latent live-loader skip of @shape specs is
-// noted as a separate follow-up.
+// SPEC ANNOTATIONS: @shape (an optional pin documenting the shape a predicate
+// reads) and @enabled / @disabled are accepted no-ops on specs -- the sandbox
+// and the live spec loader both accept them (specDeclToSpec is shared). The
+// earlier latent boot-time skip of @shape-bearing specs was fixed in #1031
+// (the converter now derives its annotation surface from the single
+// component/language/annotations registry). The authoringEmit / authoringRepair
+// prompts keep generated specs minimal (body + @description), but @shape is no
+// longer a compile hazard, so a reused spec that carries one is fine.
 
 import (
 	"context"

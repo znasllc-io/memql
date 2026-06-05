@@ -38,12 +38,12 @@ Gate-1 diagnostics (the exact error per construct):
 - Mutations: exactly one `insert` OR `update` block. Owner-stamped
   writes + owner-filtered reads for per-row authz.
 
-# HARD RULE -- specs
+# Specs
 
-NEVER emit `@shape(...)` or `@enabled` / `@disabled` on a `spec`; the
-engine rejects them. A spec carries only an optional `@description`.
-If a diagnostic is "unknown spec annotation @shape" or "spec must not
-carry @enabled", the fix is to DELETE that annotation.
+A spec carries `@description` and MAY carry an optional `@shape("name")`
+pin; the engine derives the eval strategy from the body. Fix a spec
+diagnostic by grounding the body in real concept fields + correct
+grammar, not by stripping a valid annotation.
 
 # Output contract
 

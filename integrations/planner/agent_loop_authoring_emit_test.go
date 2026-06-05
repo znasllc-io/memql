@@ -159,7 +159,7 @@ func TestEmitAndRepair_CleanFirstPass(t *testing.T) {
 // compiles after one repair re-emit. Acceptance: Responsibility -> Gate-1-clean
 // bundle WITHIN the repair budget.
 func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
-	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "spec specDigestItemActive {\n  @shape(\"x\")\n}"}
+	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "@bogus(\"x\")\nspec specDigestItemActive {\n  payload.active == true\n}"}
 	fixedSpec := specCon
 
 	fe := emitFakeEngine(
@@ -169,7 +169,7 @@ func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
 	)
 	l := newDesignLoop(fe)
 	sb := &fakeSandbox{reports: []memql.SandboxReport{
-		failReport("spec", "specDigestItemActive", "unknown spec annotation @shape", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "unknown spec annotation @bogus", automationCon, brokenSpec),
 		okReport(automationCon, fixedSpec),
 	}}
 
@@ -186,8 +186,8 @@ func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
 	}
 	// The repaired spec replaced the broken one in place (same kind/name).
 	for _, c := range bundle.Constructs {
-		if c.Kind == "spec" && c.Name == "specDigestItemActive" && strings.Contains(c.Source, "@shape") {
-			t.Fatalf("repaired bundle still carries the broken @shape spec source")
+		if c.Kind == "spec" && c.Name == "specDigestItemActive" && strings.Contains(c.Source, "@bogus") {
+			t.Fatalf("repaired bundle still carries the broken @bogus spec source")
 		}
 	}
 	_, si, _ := fe.snapshot()
@@ -319,9 +319,9 @@ func (realSandbox) CompileBundle(constructs []memql.SandboxConstruct) memql.Sand
 
 // TestEmitAndRepair_RealGate1_RepairsToClean is the acceptance demonstration:
 // a representative Responsibility flows design -> emit -> REAL Gate 1, where the
-// first emit is a genuinely broken spec (carries the forbidden @shape, which
-// the real sandbox rejects) and the single repair re-emits a clean spec the
-// real sandbox accepts. Proves the loop drives a Responsibility to a
+// first emit is a genuinely broken spec (carries an unknown annotation @bogus,
+// which the real sandbox rejects) and the single repair re-emits a clean spec
+// the real sandbox accepts. Proves the loop drives a Responsibility to a
 // Gate-1-clean bundle within the repair budget against the actual compiler --
 // no live DB needed (the registry-only pass binds against the embedded core
 // concept registry).
@@ -329,7 +329,7 @@ func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	auto := memql.SandboxConstruct{Kind: "logic", Name: "logicDigest",
 		Source: "logic logicDigest {\n  args { userId string @required }\n  body { return args.userId }\n}"}
 	broken := memql.SandboxConstruct{Kind: "spec", Name: "specDigestActive",
-		Source: "@shape(\"activeRowTrait\")\nspec specDigestActive {\n  payload.active == true\n}"}
+		Source: "@bogus(\"x\")\nspec specDigestActive {\n  payload.active == true\n}"}
 	fixed := memql.SandboxConstruct{Kind: "spec", Name: "specDigestActive",
 		Source: "spec specDigestActive {\n  payload.active == true\n}"}
 
@@ -357,10 +357,10 @@ func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 		}
 		t.Fatalf("real Gate-1 bundle should be clean after one repair; clean=%v errs=%v", clean, errs)
 	}
-	// Final bundle's spec must be the clean (no-@shape) source.
+	// Final bundle's spec must be the clean (repaired) source.
 	for _, c := range bundle.Constructs {
-		if c.Kind == "spec" && strings.Contains(c.Source, "@shape") {
-			t.Fatalf("final bundle still carries a @shape spec the real sandbox rejects")
+		if c.Kind == "spec" && strings.Contains(c.Source, "@bogus") {
+			t.Fatalf("final bundle still carries the broken @bogus spec the real sandbox rejects")
 		}
 	}
 	_, si, _ := fe.snapshot()

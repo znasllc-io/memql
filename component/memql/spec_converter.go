@@ -6,14 +6,22 @@ package memql
 // (spec_parser.go) is unreferenced from production after this child
 // lands but kept for its tests until sub-epic #329's cleanup PR.
 //
-// Semantics mirror parseSpecMemQL one-for-one:
+// Semantics mirror parseSpecMemQL one-for-one, except the annotation
+// surface now derives from the single source of truth in
+// component/language/annotations (the same registry the function
+// load-gate + editor derive from) so the converter, the load gate, and
+// the editor can never drift (#1031):
 //
-//   * Annotation surface: specs allow @description only; traits also
-//     allow @enabled / @disabled (no-op flags -- the engine controls
-//     spec lifecycle, not the author surface). The retired
-//     @useConcept / @useShape annotations are rejected as unknown
-//     (sub-epic #301 retired them; specs + traits now bind their
-//     concept context via the file-top `use ...` import).
+//   * Annotation surface: specs + traits accept @description (carries a
+//     value), @shape (optionally pins the shape the predicate reads -- a
+//     no-op, since the eval strategy is derived from the body's field
+//     references, not the pin), and @enabled / @disabled (author-surface
+//     lifecycle no-ops -- the engine controls spec lifecycle). Anything
+//     else is a hard error so a typo'd or stale annotation surfaces
+//     instead of the construct being silently dropped at load. The
+//     retired @useConcept / @useShape annotations keep an explicit
+//     migration hint (sub-epic #301 retired them; specs + traits now
+//     bind their concept context via the file-top `use ...` import).
 //   * Body conversion: NewASTConverter().ConvertExpression on the
 //     pre-parsed ast.ExpressionNode -> normalizeSpecCallsToReferences
 //     -> ensureBooleanExpression -> classifySpecKind.
@@ -26,6 +34,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -46,10 +55,23 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		kindLabel = "trait"
 	}
 
-	var description string
-	var sawEnabled, sawDisabled bool
+	// The accepted annotation surface for specs + traits is the single
+	// physical registry (component/language/annotations), the same source
+	// the function load-gate + editor derive from. Spec and trait share the
+	// "Spec" receiver set: description / enabled / disabled / shape.
+	allowed := annotations.Set("Spec")
 
+	var description string
 	for _, attr := range decl.Attributes {
+		// The retired @use* family keeps an explicit migration hint (it is
+		// absent from the registry, so it would otherwise read as a generic
+		// unknown annotation).
+		if attr.Name == "useConcept" || attr.Name == "useShape" {
+			return nil, fmt.Errorf("%s: @%s is retired (#301) -- bind via file-top `use <namespace>.{ %s }` imports", origin, attr.Name, decl.Name)
+		}
+		if !allowed[attr.Name] {
+			return nil, fmt.Errorf("%s: unknown %s annotation @%s (supported: %s)", origin, kindLabel, attr.Name, strings.Join(annotations.ByReceiver["Spec"], " / "))
+		}
 		switch attr.Name {
 		case "description":
 			val, ok := attr.Value.(string)
@@ -57,27 +79,15 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 				return nil, fmt.Errorf("%s: @description expects a string value", origin)
 			}
 			description = val
-		case "enabled":
-			sawEnabled = true
-		case "disabled":
-			sawDisabled = true
-		case "useConcept", "useShape":
-			// Retired in #301 -- specs + traits bind via file-top
-			// `use ...` imports + the signature.
-			return nil, fmt.Errorf("%s: @%s is retired (#301) -- bind via file-top `use <namespace>.{ %s }` imports", origin, attr.Name, decl.Name)
-		default:
-			return nil, fmt.Errorf("%s: unknown %s annotation @%s (supported: @description for specs; @description / @enabled / @disabled for traits)", origin, kindLabel, attr.Name)
-		}
-	}
-
-	// Lifecycle annotations: rejected on specs, accepted (no-op) on
-	// traits. Mirrors the parseSpecMemQL contract.
-	if !decl.IsTrait {
-		if sawEnabled {
-			return nil, fmt.Errorf("%s: spec %q must not carry @enabled (the engine controls spec lifecycle; remove the annotation)", origin, decl.Name)
-		}
-		if sawDisabled {
-			return nil, fmt.Errorf("%s: spec %q must not carry @disabled (the engine controls spec lifecycle; delete the spec instead)", origin, decl.Name)
+		case "shape":
+			if _, ok := attr.Value.(string); !ok {
+				return nil, fmt.Errorf("%s: @shape expects a string value (the pinned shape name)", origin)
+			}
+			// No-op pin: documents the shape the predicate reads; the eval
+			// strategy is derived from the body, not this annotation.
+		case "enabled", "disabled":
+			// Author-surface lifecycle no-ops; the engine controls spec
+			// lifecycle.
 		}
 	}
 

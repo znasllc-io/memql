@@ -46,13 +46,13 @@ Dependencies to REUSE (reference by name, do NOT author):
   `ownerUserId: actor.userId`) and owner-filtered reads
   (`payload.ownerUserId == actor.userId`) for per-row authz.
 
-# HARD RULE -- specs
+# Specs
 
-NEVER put `@shape(...)` or `@enabled` / `@disabled` on a `spec`. The
-engine controls spec lifecycle and derives the shape from the body's
-field references. A spec carries only an optional `@description`. (This
-is a real compile gate -- a spec with `@shape` or `@enabled` is
-rejected.) Traits MAY carry `@enabled` / `@disabled`.
+A spec body is a single boolean expression; the engine derives the eval
+strategy (SQL row-spec vs in-process context-spec) from the body's field
+references. A spec carries `@description` and MAY carry an optional
+`@shape("name")` pin documenting the shape it reads -- the pin is not
+required. Keep authored specs minimal: prefer body + `@description`.
 
 # Output contract
 
