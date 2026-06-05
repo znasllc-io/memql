@@ -99,3 +99,30 @@ func parseArgsSafe(src string) (*ArgsSchema, error) {
 	}
 	return p.parseFileTopArgsBlock()
 }
+
+// TestParseArgsBlockField_RejectsDefault locks in the #991 de-overload: an
+// `@default` on an args-block field is rejected (it was silently discarded and
+// never applied; authors use coalesce(args.X, <default>) or a concept-field
+// @default instead). @default thus means one thing -- a honored field default.
+func TestParseArgsBlockField_RejectsDefault(t *testing.T) {
+	_, err := parseArgsSafe(`args { kind string @default("a") }`)
+	if err == nil {
+		t.Fatal("expected @default on an args field to be rejected, got nil")
+	}
+	if !contains(err.Error(), "retired") || !contains(err.Error(), "coalesce") {
+		t.Fatalf("error should explain the migration to coalesce; got %q", err.Error())
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}

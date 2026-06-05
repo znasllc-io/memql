@@ -1245,7 +1245,11 @@ name collides with one of those is rejected at load time.
 **Annotations** in the args block:
 - `@required` — non-optional
 - `@enum("a", "b", "c")` — restricts to a value set
-- `@default(<expr>)` — supplies a default when the caller omits the field (legacy form)
+- `@description("...")`, `@maxLength(N)`, `@pattern("re")`
+- `@default` is **not** valid on an args field (it was never applied —
+  rejected at load, #991). Apply a default in the body via
+  `coalesce(args.X, <default>)`, or use a concept-field `@default`
+  (those ARE honored on insert).
 
 Queries:
 ```memql

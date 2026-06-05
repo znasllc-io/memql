@@ -9,7 +9,11 @@ import (
 // parseFileTopArgsBlock parses a file-level `args { ... }` declaration.
 // Each non-blank line declares one field:
 //
-//	<name> <type> [@required] [@enum("a", "b", ...)] [@default(<value>)]
+//	<name> <type> [@required] [@enum("a", "b", ...)] [@description("...")]
+//	               [@maxLength(N)] [@pattern("re")]
+//
+// (`@default` is NOT a valid args-field annotation -- it was never applied
+// and is rejected; apply defaults in the body via `coalesce(args.X, <v>)`.)
 //
 // Returns an *ArgsSchema populated with the field list. Caller stores it
 // on the parser and attaches to the next definition.
@@ -93,6 +97,15 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	for p.check(TokenAt) {
 		p.advance() // consume `@`
 		if !p.check(TokenIdentifier) {
+			// `default` lexes as a keyword token, not an identifier, so an
+			// `@default` on an args field lands here. It is retired (#991):
+			// it was never applied at arg resolution (a silent footgun).
+			// Apply the default explicitly in the body via
+			// `coalesce(args.X, <default>)`, or use a concept-field @default
+			// (those ARE honored on insert). @default thus means one thing.
+			if p.current.Literal == "default" {
+				return nil, newParseErrorf(&p.current, "@default on an args field %q is retired -- it is never applied; use `coalesce(args.%s, <default>)` in the body, or a concept-field @default", name, name)
+			}
 			return nil, newParseErrorf(&p.current, "expected annotation name after `@` on args field %q", name)
 		}
 		ann := p.current.Literal
@@ -118,18 +131,6 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			}
 			p.advance() // consume `)`
 			field.Enum = values
-		case "default":
-			// @default(<literal>) -- accepted but no AST slot today;
-			// caller can read via the field's default-via-coalesce in
-			// the body. Silently consume the value.
-			if err := p.expect(TokenParenOpen); err != nil {
-				return nil, err
-			}
-			p.advance()
-			if !p.check(TokenParenClose) {
-				return nil, newParseErrorf(&p.current, "expected `)` after @default value on args field %q", name)
-			}
-			p.advance()
 		case "description":
 			// @description("...") -- silently accepted (no AST slot)
 			if err := p.expect(TokenParenOpen); err != nil {
@@ -185,7 +186,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			}
 			p.advance()
 		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @default, @description, @maxLength, @pattern)", ann, name)
+			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @description, @maxLength, @pattern)", ann, name)
 		}
 	}
 	return field, nil
