@@ -171,6 +171,22 @@ func (l *Loader) LoadAll() ([]*Automation, error) {
 	return automations, nil
 }
 
+// CompileSource compiles a SINGLE automation from an in-memory .memql
+// source string, against the loader's registry, WITHOUT touching any
+// filesystem or live engine state. It runs the exact same parse ->
+// concept-resolution -> trigger-normalization -> compile -> validate
+// pipeline the bootstrap loader uses for on-disk automation files, so a
+// caller (e.g. the authoring sandbox's Gate 1) gets identical parse/bind
+// diagnostics. `origin` is a synthetic path used only for error context
+// and version derivation; it never has to exist on disk.
+//
+// The registry is consulted read-only for `use`-import concept
+// resolution; nothing is registered into it. Pass an isolated registry
+// clone to bind candidate constructs in isolation.
+func (l *Loader) CompileSource(source, origin string) (*Automation, error) {
+	return l.compileMemQL(source, origin)
+}
+
 // LoadByName loads a specific automation by name.
 func (l *Loader) LoadByName(name string) (*Automation, error) {
 	automations, err := l.LoadAll()

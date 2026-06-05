@@ -259,9 +259,30 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			return fail(d, err.Error())
 		}
 
+	case "automation":
+		// Automations compile through the separate component/automations
+		// subsystem, which imports component/memql -- so we cannot import it
+		// back here without a cycle. The automations package registers its
+		// read-only single-source compiler via SetSandboxAutomationCompiler
+		// at init; the sandbox calls it through that hook. When the hook is
+		// unregistered (an automations-free binary), the kind is skipped
+		// rather than silently passed.
+		compile := sandboxAutomationCompiler()
+		if compile == nil {
+			d.OK = false
+			d.Skipped = true
+			d.Error = fmt.Sprintf("kind %q cannot be compiled: the automation compiler is not registered in this binary", c.Kind)
+			return d
+		}
+		name, err := compile(c.Source, origin, concepts)
+		if err != nil {
+			return fail(d, fmt.Sprintf("%s: %v", origin, err))
+		}
+		actualName = name
+
 	default:
-		// Not yet handled by this pass (automation / prompt / policy /
-		// provider / builtin). Reported, not silently passed.
+		// Not yet handled by this pass (prompt / policy / provider /
+		// builtin). Reported, not silently passed.
 		d.OK = false
 		d.Skipped = true
 		d.Error = fmt.Sprintf("kind %q is not yet compiled by the sandbox (follow-up #956)", c.Kind)

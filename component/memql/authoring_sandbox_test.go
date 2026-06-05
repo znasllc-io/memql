@@ -84,13 +84,15 @@ shape shapeBroken {
 }
 
 // TestSandboxCompileBundle_UnsupportedKindSkipped: a kind this pass doesn't
-// handle is reported as skipped and does NOT fail the bundle.
+// handle is reported as skipped and does NOT fail the bundle. `prompt` is a
+// still-unhandled kind (automation now routes through the registered
+// compiler hook; see authoring_sandbox_automation_test.go).
 func TestSandboxCompileBundle_UnsupportedKindSkipped(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
 		{
-			Kind:   "automation",
-			Name:   "autoSandbox",
-			Source: `automation autoSandbox { step run { logic noop { event: event } } }`,
+			Kind:   "prompt",
+			Name:   "sandboxPrompt",
+			Source: `@templateFile("x.tmpl")` + "\nprompt sandboxPrompt {\n  space object\n}",
 		},
 	})
 
@@ -102,7 +104,7 @@ func TestSandboxCompileBundle_UnsupportedKindSkipped(t *testing.T) {
 	}
 	d := rep.Diagnostics[0]
 	if !d.Skipped || d.OK {
-		t.Errorf("expected skipped+!OK for automation, got %+v", d)
+		t.Errorf("expected skipped+!OK for prompt, got %+v", d)
 	}
 	if d.Error == "" {
 		t.Errorf("skipped construct should carry a skip reason")
