@@ -19,12 +19,22 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
+// SandboxAutomationResult carries the facts the sandbox needs from a
+// compiled candidate automation: its name (for the name-mismatch check) and
+// the concept its graph-CDC trigger keys off (for the event-trigger
+// concept-existence check, #956 follow-up 3/3). TriggerConcept is empty when
+// the automation is schedule-driven or its trigger does not name a single
+// concept (system.* / cognition.* events, wildcards).
+type SandboxAutomationResult struct {
+	Name           string
+	TriggerConcept string
+}
+
 // SandboxAutomationCompiler compiles a single candidate automation from its
 // .memql source, READ-ONLY against the supplied concept registry, and
-// returns the compiled automation's name (for the sandbox's name-mismatch
-// check) or a parse/bind error. It must not mutate engine or registry
-// state.
-type SandboxAutomationCompiler func(source, origin string, registry memoryNodes.Registry) (name string, err error)
+// returns the compiled facts (name + trigger concept) or a parse/bind error.
+// It must not mutate engine or registry state.
+type SandboxAutomationCompiler func(source, origin string, registry memoryNodes.Registry) (SandboxAutomationResult, error)
 
 var (
 	sandboxAutomationCompilerMu sync.RWMutex
