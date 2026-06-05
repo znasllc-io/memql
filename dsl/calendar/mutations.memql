@@ -24,7 +24,7 @@ mutation calendarEvent mutationCreateCalendarEvent {
     notes        string
     recurrence   string
   }
-  insert calendarEvent {
+  insert {
     id:          args.eventId
     ownerUserId: actor.userId
     args.title
@@ -48,7 +48,7 @@ mutation calendarEvent mutationUpdateCalendarEvent {
     eventId  string  @required
     payload  object  @required
   }
-  update calendarEvent {
+  update {
     id: args.eventId
     args.payload
   }
@@ -60,7 +60,7 @@ mutation calendarEvent mutationDeleteCalendarEvent {
   args {
     eventId  string  @required
   }
-  update calendarEvent {
+  update {
     id: args.eventId
     deleted: true
   }

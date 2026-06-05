@@ -48,7 +48,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 					spaceId  string  @required
 					payload  object  @required
 				}
-				insert space {
+				insert {
 					id: args.spaceId
 					ownerUserId: actor.userId
 					args.payload
@@ -62,7 +62,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 					spaceId  string  @required
 					payload  object  @required
 				}
-				insert space {
+				insert {
 					id: args.spaceId
 					ownerUserId: actor.userId
 					args.payload
@@ -76,7 +76,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 					spaceId  string  @required
 					payload  object  @required
 				}
-				insert space {
+				insert {
 					id: args.spaceId
 					ownerUserId: actor.userId
 					args.payload
@@ -90,7 +90,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 					spaceId  string  @required
 					payload  object  @required
 				}
-				insert space {
+				insert {
 					id: args.spaceId
 					ownerUserId: actor.userId
 					args.payload
@@ -104,7 +104,7 @@ func TestSpaceLifecycleMutations_StampOwnerUserId(t *testing.T) {
 					spaceId  string  @required
 					payload  object  @required
 				}
-				insert space {
+				insert {
 					id: args.spaceId
 					ownerUserId: actor.userId
 					args.payload
@@ -176,7 +176,7 @@ func TestSpaceLifecycleMutations_ActorStampOverridesCallerPayload(t *testing.T) 
 			spaceId  string  @required
 			payload  object  @required
 		}
-		insert space {
+		insert {
 			id: args.spaceId
 			ownerUserId: actor.userId
 			args.payload

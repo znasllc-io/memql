@@ -36,7 +36,7 @@ mutation call mutationRecordRouterCall {
     errorMessage        string
     fallbackFromModel   string
   }
-  insert call {
+  insert {
     id: args.requestId
     args.requestId
     args.agentId
@@ -88,7 +88,7 @@ mutation budget mutationSetBudget {
     resetAt            string
     active             bool
   }
-  insert budget {
+  insert {
     args.id
     args.scope
     args.scopeId

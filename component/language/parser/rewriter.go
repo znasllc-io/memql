@@ -475,17 +475,12 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// signature); its tree-wide migration to the bare form + hard
 	// rejection is the codemod child #988.
 	scanWrite := func(keyword string) (name, raw string, found bool, err error) {
-		// Named form first: `<keyword> <conceptName> { ... }`.
+		// Named form `<keyword> <conceptName> { ... }` is retired (#988) --
+		// the write target comes from the `mutation <Concept> <name>`
+		// signature, so restating it in the body is rejected.
 		named := regexp.MustCompile(`(^|[\n\r])[ \t]*` + keyword + `[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 		if loc := named.FindStringSubmatchIndex(body); loc != nil {
-			name = body[loc[4]:loc[5]]
-			openOffset := strings.LastIndex(body[loc[0]:loc[1]], "{")
-			open := loc[0] + openOffset
-			close := findMatchingCloseBrace(body, open)
-			if close < 0 {
-				return "", "", false, fmt.Errorf("`%s %s { ... }` block missing closing brace", keyword, name)
-			}
-			return name, body[open+1 : close], true, nil
+			return "", "", false, fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation <Concept> <name>` signature)", keyword, body[loc[4]:loc[5]], keyword)
 		}
 		// Bare form (canonical): `<keyword> { ... }`. Target derived from
 		// the signature; name is left empty to signal "derive".

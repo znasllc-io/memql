@@ -5785,8 +5785,15 @@ func (p *Parser) parseCanonicalIdFunction() (ExpressionNode, error) {
 	if err := p.expect(TokenComma); err != nil {
 		return nil, err
 	}
-	if !p.check(TokenString) {
-		return nil, newParseErrorf(&p.current, "canonicalId(): second argument must be a quoted concept name (e.g. \"v1:identity:user\")")
+	// The second argument names the concept. Two forms (#987):
+	//   - typed short-name (canonical): `canonicalId(x, space)` -- an imported
+	//     concept short-name. The component/memql loader resolves it to the
+	//     canonical-id string before parse; registry-less structural parse
+	//     paths (e.g. dslimports.Load) see the bare identifier here and accept
+	//     it verbatim.
+	//   - quoted canonical-id string (retired): `canonicalId(x, "v1:ns:name")`.
+	if !p.check(TokenString) && !p.check(TokenIdentifier) {
+		return nil, newParseErrorf(&p.current, "canonicalId(): second argument must be an imported concept short-name (e.g. `user`) or a quoted canonical-id string")
 	}
 	concept := strings.TrimSpace(p.current.Literal)
 	p.advance()

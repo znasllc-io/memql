@@ -14,7 +14,7 @@ mutation accessRequest mutationApproveAccessRequest {
     invitationId  string  @required
     reviewerNote  string
   }
-  update accessRequest {
+  update {
     id: args.requestId
     status: "approved"
     args.reviewedBy
@@ -49,7 +49,7 @@ mutation identity mutationBumpPATLastUsedAt {
     usableByAgents  bool
     lastUsedAt      string  @required
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "api_key"
@@ -85,7 +85,7 @@ mutation user mutationBumpUserDataExport {
   args {
     userId  string  @required
   }
-  update user {
+  update {
     id: args.userId
     dataExportLastAt: timestamp()
   }
@@ -126,7 +126,7 @@ mutation user mutationBumpUserRevocationEpoch {
     userId    string  @required
     newEpoch  int     @required
   }
-  update user {
+  update {
     id: args.userId
     revocationEpoch: args.newEpoch
   }
@@ -164,7 +164,7 @@ mutation user mutationCancelScheduledDeletion {
   args {
     userId  string  @required
   }
-  update user {
+  update {
     id: args.userId
     deletionScheduledAt: ""
   }
@@ -200,7 +200,7 @@ mutation authCode mutationConsumeAuthCode {
     codeId          string  @required
     consumedFromIP  string
   }
-  update authCode {
+  update {
     id: args.codeId
     consumedAt: timestamp()
     consumedFromIP: coalesce(args.consumedFromIP, "")
@@ -235,7 +235,7 @@ mutation magicLinkRequest mutationConsumeMagicLinkRequest {
     requestId       string  @required
     consumedFromIP  string
   }
-  update magicLinkRequest {
+  update {
     id: args.requestId
     consumedAt: timestamp()
     consumedFromIP: coalesce(args.consumedFromIP, "")
@@ -281,7 +281,7 @@ mutation accessRequest mutationCreateAccessRequest {
     sourceIP           string
     userAgent          string
   }
-  insert accessRequest {
+  insert {
     id: args.requestId
     args.email
     name: coalesce(args.name, "")
@@ -354,7 +354,7 @@ mutation auditEvent mutationCreateAuditEvent {
     failureReason    string
     prevEventHash    string
   }
-  insert auditEvent {
+  insert {
     id: args.eventId
     args.occurredAt
     args.category
@@ -418,7 +418,7 @@ mutation authCode mutationCreateAuthCode {
     magicLinkRequestId  string  @required
     expiresAt           string  @required
   }
-  insert authCode {
+  insert {
     id: args.codeId
     args.code
     args.codeHash
@@ -472,7 +472,7 @@ mutation authSession mutationCreateAuthSession {
     clientLabel  string
     expiresAt    string  @required
   }
-  insert authSession {
+  insert {
     id: args.sessionId
     userId: coalesce(args.userId, "")
     identityId: coalesce(args.identityId, "")
@@ -553,7 +553,7 @@ mutation clusterSettings mutationCreateClusterSettings {
     invitationTTLDays          int
     refreshCookieSameSite      string
   }
-  insert clusterSettings {
+  insert {
     args.id
     clusterDomain: coalesce(args.clusterDomain, "")
     brandName: coalesce(args.brandName, "")
@@ -606,7 +606,7 @@ mutation delegation mutationCreateDelegation {
     expiresAt        string
     note             string
   }
-  insert delegation {
+  insert {
     id: args.delegationId
     args.identityId
     args.identitySubject
@@ -659,7 +659,7 @@ mutation identity mutationCreateIdentity {
     label           string
     usableByAgents  bool
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     args.identityType
@@ -708,7 +708,7 @@ mutation magicLinkRequest mutationCreateMagicLinkRequest {
     oauthCtxJSON  string
     invitationId  string
   }
-  insert magicLinkRequest {
+  insert {
     id: args.requestId
     args.email
     args.tokenHash
@@ -748,7 +748,7 @@ mutation identity mutationCreatePATIdentity {
     keyHash         string  @required
     usableByAgents  bool
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "api_key"
@@ -790,7 +790,7 @@ mutation user mutationCreateUser {
     groupIds      object
     preferences   object
   }
-  insert user {
+  insert {
     id: args.userId
     args.displayName
     args.primaryEmail
@@ -853,7 +853,7 @@ mutation user mutationCreateUserOnFirstLogin {
     groupIds      object
     preferences   object
   }
-  insert user {
+  insert {
     id: args.userId
     args.displayName
     firstName: coalesce(args.firstName, "")
@@ -898,7 +898,7 @@ mutation workerPairingCode mutationCreateWorkerPairingCode {
     expiresAt    string  @required
     sourceIP     string
   }
-  insert workerPairingCode {
+  insert {
     id: args.pairingId
     args.ownerUserId
     args.codeHash
@@ -942,7 +942,7 @@ mutation identity mutationCreateWorkerTokenIdentity {
     labelsAdvertised        object
     expiresAt               string
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "worker_token"
@@ -999,7 +999,7 @@ mutation identity mutationCreateNodeTokenIdentity {
     bootstrappedAt    string
     bootstrappedFrom  string
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "node_token"
@@ -1047,7 +1047,7 @@ mutation identity mutationStampNodeTokenBootstrap {
     bootstrappedAt    string  @required
     bootstrappedFrom  string  @required
   }
-  update identity {
+  update {
     id: args.identityId
     args.userId
     identityType: "node_token"
@@ -1106,7 +1106,7 @@ mutation identity mutationRevokeNodeTokenIdentity {
     bootstrappedAt    string  @required
     bootstrappedFrom  string  @required
   }
-  update identity {
+  update {
     id: args.identityId
     args.userId
     identityType: "node_token"
@@ -1160,7 +1160,7 @@ mutation identity mutationCreateVoiceAgentTokenIdentity {
     expiresAt   string
     label       string
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "voice_agent_token"
@@ -1215,7 +1215,7 @@ mutation user mutationDeleteUserHard {
   args {
     userId  string  @required
   }
-  update user {
+  update {
     id: args.userId
     active: false
     displayName: ""
@@ -1247,7 +1247,7 @@ mutation accessRequest mutationExpireAccessRequest {
   args {
     requestId  string  @required
   }
-  update accessRequest {
+  update {
     id: args.requestId
     status: "expired"
   }
@@ -1287,7 +1287,7 @@ mutation user mutationRecordLegalAcceptance {
     userId           string  @required
     legalAcceptance  object  @required
   }
-  update user {
+  update {
     id: args.userId
     args.legalAcceptance
   }
@@ -1319,7 +1319,7 @@ mutation workerPairingCode mutationRedeemWorkerPairingCode {
     redeemedBy      string  @required
     redeemedFromIP  string
   }
-  update workerPairingCode {
+  update {
     id: args.pairingId
     args.redeemedAt
     args.redeemedBy
@@ -1355,7 +1355,7 @@ mutation accessRequest mutationRejectAccessRequest {
     reviewedBy    string  @required
     reviewerNote  string
   }
-  update accessRequest {
+  update {
     id: args.requestId
     status: "rejected"
     args.reviewedBy
@@ -1403,7 +1403,7 @@ mutation authSession mutationRevokeAuthSession {
     revokedReason  string  @required  @enum("user_action", "all_sessions", "admin")
     userId         string
   }
-  insert authSession {
+  insert {
     id: args.sessionId
     userId: coalesce(args.userId, "")
     args.subject
@@ -1430,7 +1430,7 @@ mutation delegation mutationRevokeDelegation {
     delegationId  string  @required
     payload       object  @required
   }
-  insert delegation {
+  insert {
     id: args.delegationId
     args.payload
   }
@@ -1461,7 +1461,7 @@ mutation identity mutationRevokePATIdentity {
     keyHash         string  @required
     usableByAgents  bool
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.userId
     identityType: "api_key"
@@ -1492,7 +1492,7 @@ mutation identity mutationRevokeWorkerTokenIdentity {
   args {
     identityId  string  @required
   }
-  update identity {
+  update {
     id: args.identityId
     active: false
   }
@@ -1536,7 +1536,7 @@ mutation authSession mutationRotateAuthSession {
     previousRefreshTokenHash  string  @required
     newExpiresAt              string  @required
   }
-  update authSession {
+  update {
     id: args.sessionId
     refreshTokenHash: args.newRefreshTokenHash
     args.previousRefreshTokenHash
@@ -1571,7 +1571,7 @@ mutation user mutationScheduleAccountDeletion {
   args {
     userId  string  @required
   }
-  update user {
+  update {
     id: args.userId
     deletionScheduledAt: timestamp()
   }
@@ -1611,7 +1611,7 @@ mutation user mutationSetUserActiveSpace {
     userId   string  @required
     spaceId  string
   }
-  update user {
+  update {
     id: args.userId
     activeSpaceId: coalesce(args.spaceId, "")
   }
@@ -1667,7 +1667,7 @@ mutation clusterSettings mutationUpdateClusterSettings {
     invitationTTLDays          int
     refreshCookieSameSite      string
   }
-  insert clusterSettings {
+  insert {
     args.id
     clusterDomain: coalesce(args.clusterDomain, "")
     brandName: coalesce(args.brandName, "")
@@ -1712,7 +1712,7 @@ mutation identity mutationUpdateIdentity {
     identityId  string  @required
     payload     object  @required
   }
-  insert identity {
+  insert {
     id: args.identityId
     args.payload
   }
@@ -1758,7 +1758,7 @@ mutation user mutationUpdateUser {
     userId   string  @required
     payload  object  @required
   }
-  update user {
+  update {
     id: args.userId
     args.payload
   }
@@ -1786,7 +1786,7 @@ mutation accountEntitlement mutationSetAccountEntitlement {
     accountKind        string  @enum("user", "org")
     note               string
   }
-  insert accountEntitlement {
+  insert {
     id: concat("accountEntitlement-", hash(args.accountId))
     args.accountId
     args.tier

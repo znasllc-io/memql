@@ -16,7 +16,7 @@ mutation cluster mutationCreateCluster {
     identityProviderId  string
     version             string
   }
-  insert cluster {
+  insert {
     args.name
     args.region
     args.environment
@@ -40,7 +40,7 @@ mutation database mutationCreateDatabase {
     dbName   string  @required
     sslMode  string
   }
-  insert database {
+  insert {
     args.host
     port: 5432
     args.dbName
@@ -63,7 +63,7 @@ mutation identityProvider mutationCreateIdentityProvider {
     clientIdPrefix  string
     redirectUrl     string
   }
-  insert identityProvider {
+  insert {
     args.name
     providerType: "oidc"
     args.issuerUrl
@@ -90,7 +90,7 @@ mutation node mutationCreateNode {
     health    string
     lastSeen  string
   }
-  insert node {
+  insert {
     id: coalesce(args.id, concat("node-", hash(concat(args.nodeType, ":", timestamp()))))
     args.nodeType
     address: coalesce(args.address, "")
@@ -115,7 +115,7 @@ mutation spawnEvent mutationCreateSpawnEvent {
     action    string  @required
     reason    string
   }
-  insert spawnEvent {
+  insert {
     args.nodeId
     args.nodeType
     args.action
@@ -146,7 +146,7 @@ mutation node mutationUpdateNodeHealth {
     health    string  @required
     lastSeen  string  @required
   }
-  insert node {
+  insert {
     args.id
     args.nodeType
     address: coalesce(args.address, "")

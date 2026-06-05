@@ -51,50 +51,34 @@ func TestNormaliseMutationSource_AcceptsBareUpdate(t *testing.T) {
 	}
 }
 
-func TestNormaliseMutationSource_RejectsMismatchedInsertTarget(t *testing.T) {
-	src := `mutation space createSpace {
-  insert participant {
-    id: "x"
-    name: "untitled"
-  }
-}`
-	_, err := NormaliseMutationSource(src)
-	if err == nil {
-		t.Fatal("expected error: insert target must match the concept binding")
-	}
-	if !strings.Contains(err.Error(), "participant") || !strings.Contains(err.Error(), "space") {
-		t.Fatalf("error should name both the offered target and the expected one; got %q", err.Error())
-	}
-}
-
-func TestNormaliseMutationSource_AcceptsMatchingInsertTarget(t *testing.T) {
-	src := `mutation space createSpace {
-  insert space {
-    id: "x"
-    name: "untitled"
-  }
-}`
-	out, err := NormaliseMutationSource(src)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "func (Mutation) createSpace") {
-		t.Fatalf("rewriter should produce the legacy procedural form; got %q", out)
+// The named write form `insert <concept> { ... }` is retired (#988) -- even
+// when the restated concept matches the signature. The target always comes
+// from the `mutation <Concept> <name>` signature now.
+func TestNormaliseMutationSource_RejectsNamedInsert(t *testing.T) {
+	for _, target := range []string{"participant", "space"} {
+		src := "mutation space createSpace {\n  insert " + target + " {\n    id: \"x\"\n    name: \"untitled\"\n  }\n}"
+		_, err := NormaliseMutationSource(src)
+		if err == nil {
+			t.Fatalf("expected the named form `insert %s {` to be rejected", target)
+		}
+		if !strings.Contains(err.Error(), "retired") || !strings.Contains(err.Error(), target) {
+			t.Fatalf("error should name the retired form + the restated concept; got %q", err.Error())
+		}
 	}
 }
 
-func TestNormaliseMutationSource_RejectsMismatchedUpdateTarget(t *testing.T) {
+func TestNormaliseMutationSource_RejectsNamedUpdate(t *testing.T) {
 	src := `mutation space renameSpace {
-  update participant {
+  update space {
     id: "x"
     name: "new"
   }
 }`
 	_, err := NormaliseMutationSource(src)
 	if err == nil {
-		t.Fatal("expected error: update target must match the concept binding")
+		t.Fatal("expected the named form `update space {` to be rejected")
 	}
-	if !strings.Contains(err.Error(), "participant") {
-		t.Fatalf("error should name the offered target; got %q", err.Error())
+	if !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("error should explain the migration; got %q", err.Error())
 	}
 }

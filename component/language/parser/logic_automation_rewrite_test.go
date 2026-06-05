@@ -112,7 +112,7 @@ automation foo {
 		},
 		{
 			name:   "no automation in source",
-			source: `mutation foo { insert thing { id: "x" } }`,
+			source: `mutation foo { insert { id: "x" } }`,
 			want:   false,
 		},
 	}

@@ -32,7 +32,7 @@ mutation agent mutationCreateAgent {
     active           bool
     deleted          bool
   }
-  insert agent {
+  insert {
     id: args.agentId
     args.ownerUserId
     args.name
@@ -68,7 +68,7 @@ mutation agentAuthorization mutationCreateAgentAuthorization {
     expiresAt         string
     computerUseScope  string
   }
-  insert agentAuthorization {
+  insert {
     id: args.authId
     args.agentId
     args.userId
@@ -87,7 +87,7 @@ mutation agent mutationDeleteAgent {
   args {
     agentId  string  @required
   }
-  insert agent {
+  insert {
     id: args.agentId
     active: false
     deleted: true
@@ -100,7 +100,7 @@ mutation agentAuthorization mutationRevokeAgentAuthorization {
   args {
     authId  string  @required
   }
-  insert agentAuthorization {
+  insert {
     id: args.authId
     active: false
   }
@@ -113,7 +113,7 @@ mutation agent mutationUpdateAgent {
     agentId  string  @required
     payload  object  @required
   }
-  update agent {
+  update {
     id: args.agentId
     args.payload
   }
@@ -126,7 +126,7 @@ mutation agentAuthorization mutationUpdateAgentAuthorization {
     authId   string  @required
     payload  object  @required
   }
-  update agentAuthorization {
+  update {
     id: args.authId
     args.payload
   }
@@ -149,7 +149,7 @@ mutation skill mutationMintSkill {
     originatingPlanId  string
     mintedByAgentId    string
   }
-  insert skill {
+  insert {
     id: coalesce(args.skillId, args.slug)
     args.slug
     args.name
@@ -184,7 +184,7 @@ mutation skill mutationCreateSkill {
     predefined     bool
     active         bool
   }
-  insert skill {
+  insert {
     id: coalesce(args.skillId, args.slug)
     args.slug
     args.name
@@ -214,7 +214,7 @@ mutation skillChangeEvent mutationCreateSkillChangeEvent {
     actorUserId         string
     planId              string
   }
-  insert skillChangeEvent {
+  insert {
     id: args.skillChangeEventId
     args.targetAgentId
     args.skillId
@@ -248,7 +248,7 @@ mutation agentRole mutationCreateAgentRole {
     active                  bool
     predefined              bool
   }
-  insert agentRole {
+  insert {
     id: coalesce(args.agentRoleId, args.slug)
     args.slug
     args.name
@@ -281,7 +281,7 @@ mutation avatarPersona mutationCreateAvatarPersona {
     previewRef       string
     active           bool
   }
-  insert avatarPersona {
+  insert {
     id: coalesce(args.avatarPersonaId, args.personaId)
     args.vendor
     args.personaId

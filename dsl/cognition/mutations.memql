@@ -4,6 +4,8 @@
 // files cover the other construct kinds.
 
 use cognition.concepts.{ audioOverride, chunk, request, response, greetSuppression, micState, misrouteFeedback, participant, presence, privateUtterance, session, space, utterance, videoOverride }
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
 
 @enabled
 @description("Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.")
@@ -14,10 +16,10 @@ mutation participant mutationAddAgentToSpace {
     displayName          string  @required
     capabilityOverrides  object
   }
-  insert participant {
+  insert {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, "v1:agents:agent"), ":",
-      canonicalId(args.spaceId, "v1:cognition:space")
+      canonicalId(args.agentId, agent), ":",
+      canonicalId(args.spaceId, space)
     )))
     args.spaceId
     args.agentId
@@ -46,7 +48,7 @@ mutation space mutationArchiveSpace {
     spaceId  string  @required
     payload  object  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -118,7 +120,7 @@ mutation space mutationCreateDailySpace {
     dailyDateKey  string  @required
     ownerUserId   string  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     args.ownerUserId
     args.name
@@ -175,7 +177,7 @@ mutation utterance mutationCreateGreetingUtterance {
     text           string  @required
     greetingKind   string  @required
   }
-  insert utterance {
+  insert {
     args.spaceId
     args.participantId
     participantType: "si"
@@ -206,7 +208,7 @@ mutation session mutationCreateSessionForParticipant {
     aiOutput       object
     streams        object
   }
-  insert session {
+  insert {
     id: args.sessionId
     args.spaceId
     args.participantId
@@ -247,7 +249,7 @@ mutation space mutationCreateSpace {
     maxHumans         int
     maxAgents         int
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.name
@@ -289,7 +291,7 @@ mutation space mutationSetSpaceGoal {
     spaceId  string  @required
     goal     object  @required
   }
-  update space {
+  update {
     id: args.spaceId
     ownerUserId: actor.userId
     args.goal
@@ -323,7 +325,7 @@ mutation space mutationDeleteSpaceNow {
     spaceId  string  @required
     payload  object  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -355,7 +357,7 @@ mutation request mutationEmitClientToolRequest {
     agentId        string
     expiresAt      string
   }
-  insert request {
+  insert {
     id: args.requestId
     args.callId
     args.toolName
@@ -390,7 +392,7 @@ mutation response mutationEmitClientToolResponse {
     errorMessage  string
     spaceId       string
   }
-  insert response {
+  insert {
     id: args.responseId
     args.callId
     args.contentJSON
@@ -421,7 +423,7 @@ mutation chunk mutationEmitTextChunk {
     index          number   @required
     done           boolean  @required
   }
-  insert chunk {
+  insert {
     id: concat("text-chunk-", args.chunkId)
     args.spaceId
     args.participantId
@@ -468,13 +470,13 @@ mutation participant mutationJoinSpaceAsHuman {
     joinedAt             string
     capabilityOverrides  object
   }
-  insert participant {
+  insert {
     // Idempotent: content-addressed on (space, user) so repeat joins
     // land on the same participant id. The caller does not supply the
     // id (memql#213 dropped the ignored participantId arg).
     id: concat("participant-", hash(concat(
-      canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.userId, "v1:identity:user")
+      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.userId, user)
     )))
     args.spaceId
     args.userId
@@ -524,13 +526,13 @@ mutation participant mutationJoinSpaceAsSI {
     forUserId            string
     isGroupGA            bool
   }
-  insert participant {
+  insert {
     // Idempotent: content-addressed on (agent, space), matching the
     // other SI-join mutations. The caller does not supply the id
     // (memql#213 dropped the ignored participantId arg).
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, "v1:agents:agent"), ":",
-      canonicalId(args.spaceId, "v1:cognition:space")
+      canonicalId(args.agentId, agent), ":",
+      canonicalId(args.spaceId, space)
     )))
     args.spaceId
     args.agentId
@@ -560,7 +562,7 @@ mutation participant mutationLeaveSpace {
     participantId  string  @required
     payload        object  @required
   }
-  insert participant {
+  insert {
     id: args.participantId
     args.payload
   }
@@ -596,10 +598,10 @@ mutation participant mutationRemoveAgentFromSpace {
     spaceId  string  @required
     agentId  string  @required
   }
-  insert participant {
+  insert {
     id: concat("si-", hash(concat(
-      canonicalId(args.agentId, "v1:agents:agent"), ":",
-      canonicalId(args.spaceId, "v1:cognition:space")
+      canonicalId(args.agentId, agent), ":",
+      canonicalId(args.spaceId, space)
     )))
     args.spaceId
     args.agentId
@@ -624,7 +626,7 @@ mutation space mutationRenameSpace {
     spaceId  string  @required
     payload  object  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -652,7 +654,7 @@ mutation space mutationRestoreSpace {
     spaceId  string  @required
     payload  object  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -684,7 +686,7 @@ mutation space mutationSaveSpace {
     spaceId  string  @required
     payload  object  @required
   }
-  insert space {
+  insert {
     id: args.spaceId
     ownerUserId: actor.userId
     args.payload
@@ -718,19 +720,19 @@ mutation utterance mutationSendActionUtterance {
     createdAt        string
     action           object  @required
   }
-  insert utterance {
+  insert {
     id: coalesce(
       args.utteranceId,
       cond(
         args.action.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, "v1:cognition:space"), ":",
-          canonicalId(args.participantId, "v1:cognition:participant"), ":",
+          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.participantId, participant), ":",
           args.action.type, ":", args.action.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, "v1:cognition:space"), ":",
-          canonicalId(args.participantId, "v1:cognition:participant"), ":",
+          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.participantId, participant), ":",
           coalesce(args.createdAt, timestamp()), ":", args.action.type
         )))
       )
@@ -776,19 +778,19 @@ mutation utterance mutationSendRealtimeTranscriptUtterance {
     timestamps       object
     source           object
   }
-  insert utterance {
+  insert {
     id: coalesce(
       args.utteranceId,
       cond(
         args.idempotencyKey,
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, "v1:cognition:space"), ":",
-          canonicalId(args.participantId, "v1:cognition:participant"), ":",
+          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.participantId, participant), ":",
           args.idempotencyKey
         ))),
         concat("utt-", hash(concat(
-          canonicalId(args.spaceId, "v1:cognition:space"), ":",
-          canonicalId(args.participantId, "v1:cognition:participant"), ":",
+          canonicalId(args.spaceId, space), ":",
+          canonicalId(args.participantId, participant), ":",
           timestamp(), ":", coalesce(args.text, "")
         )))
       )
@@ -838,12 +840,12 @@ mutation utterance mutationSendSpeechUtterance {
     timestamps       object
     source           object
   }
-  insert utterance {
+  insert {
     id: coalesce(
       args.utteranceId,
       concat("utt-", hash(concat(
-        canonicalId(args.spaceId, "v1:cognition:space"), ":",
-        canonicalId(args.participantId, "v1:cognition:participant"), ":",
+        canonicalId(args.spaceId, space), ":",
+        canonicalId(args.participantId, participant), ":",
         timestamp()
       )))
     )
@@ -880,7 +882,7 @@ mutation utterance mutationSendTextUtterance {
     source           object
     citations        []object
   }
-  insert utterance {
+  insert {
     id: args.utteranceId
     args.spaceId
     args.participantId
@@ -927,10 +929,10 @@ mutation audioOverride mutationSetAgentAudioOverride {
     setBy    string
     active   bool
   }
-  insert audioOverride {
+  insert {
     id: concat("audioOverride-", hash(concat(
-      canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.agentId, "v1:agents:agent")
+      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.agentId, agent)
     )))
     args.spaceId
     args.agentId
@@ -949,9 +951,9 @@ mutation greetSuppression mutationSuppressGreetOnJoin {
     spaceId    string  @required
     expiresAt  string  @required
   }
-  insert greetSuppression {
-    id: concat("greetSuppression-", hash(canonicalId(args.spaceId, "v1:cognition:space")))
-    spaceId: canonicalId(args.spaceId, "v1:cognition:space")
+  insert {
+    id: concat("greetSuppression-", hash(canonicalId(args.spaceId, space)))
+    spaceId: canonicalId(args.spaceId, space)
     armedBy: actor.userId
     args.expiresAt
     active: true
@@ -996,10 +998,10 @@ mutation videoOverride mutationSetAgentVideoOverride {
     setBy    string
     active   bool
   }
-  insert videoOverride {
+  insert {
     id: concat("videoOverride-", hash(concat(
-      canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.agentId, "v1:agents:agent")
+      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.agentId, agent)
     )))
     args.spaceId
     args.agentId
@@ -1032,10 +1034,10 @@ mutation micState mutationSetUserMicState {
     userId   string  @required
     muted    bool    @required
   }
-  insert micState {
+  insert {
     id: concat("micState-", hash(concat(
-      canonicalId(args.spaceId, "v1:cognition:space"), ":",
-      canonicalId(args.userId, "v1:identity:user")
+      canonicalId(args.spaceId, space), ":",
+      canonicalId(args.userId, user)
     )))
     args.spaceId
     args.userId
@@ -1059,7 +1061,7 @@ mutation session mutationTouchSession {
     sessionId  string  @required
     payload    object  @required
   }
-  insert session {
+  insert {
     id: args.sessionId
     args.payload
   }
@@ -1089,7 +1091,7 @@ mutation presence mutationUpdateParticipantPresence {
     lastError        string
     intent           object
   }
-  insert presence {
+  insert {
     id: coalesce(
       args.presenceId,
       concat("presence-", args.participantId)
@@ -1122,7 +1124,7 @@ mutation participant mutationUpdateParticipantStatus {
     participantId  string  @required
     payload        object  @required
   }
-  insert participant {
+  insert {
     id: args.participantId
     args.payload
   }
@@ -1143,7 +1145,7 @@ mutation session mutationUpdateSessionDevices {
     sessionId  string  @required
     payload    object  @required
   }
-  insert session {
+  insert {
     id: args.sessionId
     args.payload
   }
@@ -1164,7 +1166,7 @@ mutation session mutationUpdateSessionStreams {
     sessionId  string  @required
     payload    object  @required
   }
-  insert session {
+  insert {
     id: args.sessionId
     args.payload
   }
@@ -1184,7 +1186,7 @@ mutation privateUtterance mutationSendPrivateUtterance {
     replyToId        string
     source           object
   }
-  insert privateUtterance {
+  insert {
     id: args.utteranceId
     forUserId:       actor.userId
     args.spaceId
@@ -1212,7 +1214,7 @@ mutation utterance mutationMovePrivateToGroup {
     text               string  @required
     source             object
   }
-  insert utterance {
+  insert {
     id: args.newUtteranceId
     args.spaceId
     args.participantId
@@ -1236,7 +1238,7 @@ mutation privateUtterance mutationMoveGroupToPrivate {
     text               string  @required
     source             object
   }
-  insert privateUtterance {
+  insert {
     id: args.newUtteranceId
     forUserId:       actor.userId
     args.spaceId
@@ -1267,7 +1269,7 @@ mutation misrouteFeedback mutationRecordMisrouteFeedback {
     movedToId        string
     userAction       string  @required
   }
-  insert misrouteFeedback {
+  insert {
     id: args.feedbackId
     forUserId:       actor.userId
     args.spaceId

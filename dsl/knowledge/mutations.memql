@@ -12,7 +12,7 @@ mutation document mutationAttachDocumentToDomain {
     documentId       string  @required
     attachedDomains  object  @required
   }
-  insert document {
+  insert {
     id: args.documentId
     args.attachedDomains
   }
@@ -41,7 +41,7 @@ mutation document mutationCreateDocument {
     domainHints   object
     uploadedBy    string  @required
   }
-  insert document {
+  insert {
     id: args.documentId
     args.attachmentId
     args.planId
@@ -74,7 +74,7 @@ mutation documentChunk mutationCreateDocumentChunk {
     sourceAgentId      string
     sourceTopic        string
   }
-  insert documentChunk {
+  insert {
     id: args.chunkId
     args.domainId
     args.text
@@ -102,7 +102,7 @@ mutation domainEntitySchema mutationCreateDomainEntitySchema {
     confirmedBy             string
     confirmedAt             string
   }
-  insert domainEntitySchema {
+  insert {
     id: args.schemaId
     args.domainId
     args.entityKind
@@ -130,7 +130,7 @@ mutation entityIndex mutationCreateEntityIndexEntry {
     forceAdded         bool
     dedupOverrideNote  string
   }
-  insert entityIndex {
+  insert {
     id: args.entryId
     args.domainId
     args.entityKind
@@ -154,7 +154,7 @@ mutation imageRegion mutationCreateImageRegion {
     caption      string  @required
     domainHints  object
   }
-  insert imageRegion {
+  insert {
     id: args.regionId
     args.documentId
     args.regionSeq
@@ -178,7 +178,7 @@ mutation knowledgeBridge mutationCreateKnowledgeBridge {
     recipeVersion   string
     generatedAt     string
   }
-  insert knowledgeBridge {
+  insert {
     id: args.bridgeId
     args.bridgeId
     args.roleSlug
@@ -212,7 +212,7 @@ mutation knowledgeDomain mutationCreateKnowledgeDomain {
     refreshCadenceDays   int
     predefined           bool
   }
-  insert knowledgeDomain {
+  insert {
     id: args.domainId
     args.name
     args.description
@@ -242,7 +242,7 @@ mutation spreadsheetRow mutationCreateSpreadsheetRow {
     data         object  @required
     domainHints  object
   }
-  insert spreadsheetRow {
+  insert {
     id: args.rowId
     args.documentId
     args.rowSeq
@@ -266,7 +266,7 @@ mutation validationEvent mutationCreateValidationEvent {
     reason             string
     note               string
   }
-  insert validationEvent {
+  insert {
     id: args.eventId
     args.targetConceptType
     args.targetId
@@ -289,7 +289,7 @@ mutation knowledgeDomain mutationDeleteKnowledgeDomain {
     relevantForRoles     array
     requiredByToolSlugs  array
   }
-  insert knowledgeDomain {
+  insert {
     id: args.domainId
     args.name
     args.description
@@ -321,7 +321,7 @@ mutation knowledgeDomain mutationMarkKnowledgeDomainSeeded {
     lastSeededAt         string  @required
     seederRecipeVersion  string  @required
   }
-  update knowledgeDomain {
+  update {
     id: args.domainId
     args.lastSeededAt
     args.seederRecipeVersion
@@ -344,7 +344,7 @@ mutation document mutationUpdateDocumentValidation {
     validatedBy       string
     validatedAt       string
   }
-  insert document {
+  insert {
     id: args.documentId
     args.validationStatus
     args.validatedBy
@@ -370,7 +370,7 @@ mutation document mutationUpdateDocumentEmbeddingStatus {
     embeddingStatus    string  @required
     embeddedItemCount  int
   }
-  update document {
+  update {
     id: args.documentId
     args.embeddingStatus
     embeddedItemCount: coalesce(args.embeddedItemCount, 0)
@@ -390,7 +390,7 @@ mutation spreadsheetRow mutationUpdateSpreadsheetRow {
     diffFromMatched       object
     embeddedAsChunkId     string
   }
-  insert spreadsheetRow {
+  insert {
     id: args.rowId
     args.validationStatus
     args.validatedBy
@@ -409,7 +409,7 @@ mutation knowledgeDomain mutationMarkKnowledgeDomainStale {
     domainId           string  @required
     staleSignalCount   int     @required
   }
-  update knowledgeDomain {
+  update {
     id: args.domainId
     args.staleSignalCount
   }
@@ -422,7 +422,7 @@ mutation knowledgeDomain mutationResetStaleAfterRefresh {
     domainId       string  @required
     lastSeededAt   string  @required
   }
-  update knowledgeDomain {
+  update {
     id: args.domainId
     args.lastSeededAt
     staleSignalCount: 0
@@ -452,7 +452,7 @@ mutation documentChunk mutationWriteKnowledgeChunk {
     tokenCount   int
     sourceTopic  string
   }
-  insert documentChunk {
+  insert {
     id: args.chunkId
     args.domainId
     args.text
@@ -484,7 +484,7 @@ mutation documentChunk mutationMarkChunkSuperseded {
     supersededAt      string  @required
     supersededReason  string
   }
-  update documentChunk {
+  update {
     id: args.chunkId
     superseded: true
     args.supersededAt

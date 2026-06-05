@@ -19,7 +19,7 @@ mutation workspace mutationProvisionWorkspace {
     planId       string  @required
     storageRoot  string  @required
   }
-  insert workspace {
+  insert {
     id: args.workspaceId
     args.planId
     status: "provisioned"
@@ -37,7 +37,7 @@ mutation workspace mutationTouchWorkspace {
   args {
     workspaceId  string  @required
   }
-  update workspace {
+  update {
     id: args.workspaceId
     lastUsedAt: now
   }
@@ -50,7 +50,7 @@ mutation workspace mutationReleaseWorkspace {
     workspaceId  string  @required
     reason       string  @required @enum("plan_terminal", "explicit", "ttl_expired") @description("Why the workspace was released. Drives the released-row audit trail.")
   }
-  update workspace {
+  update {
     id: args.workspaceId
     status: "released"
     releasedAt: now

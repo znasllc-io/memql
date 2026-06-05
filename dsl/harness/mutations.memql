@@ -41,7 +41,7 @@ mutation plan mutationCreateHarnessPlan {
     goal    string  @required
     input   object
   }
-  insert plan {
+  insert {
     id: args.planId
     ownerUserId: actor.userId
     args.goal
@@ -69,7 +69,7 @@ mutation step mutationAddHarnessStep {
     dependsOn       []string
     input           object
   }
-  insert step {
+  insert {
     id: args.stepId
     ownerUserId: actor.userId
     args.planId
@@ -96,7 +96,7 @@ mutation step mutationStartHarnessStep {
     stepId         string  @required
     assignedAgent  string
   }
-  update step {
+  update {
     id: args.stepId
     status: "running"
     args.assignedAgent
@@ -116,7 +116,7 @@ mutation step mutationCompleteHarnessStep {
     stepId  string  @required
     result  object
   }
-  update step {
+  update {
     id: args.stepId
     status: "done"
     args.result
@@ -138,7 +138,7 @@ mutation step mutationFailHarnessStep {
     stepId        string  @required
     errorMessage  string
   }
-  update step {
+  update {
     id: args.stepId
     status: "failed"
     args.errorMessage
@@ -165,7 +165,7 @@ mutation observation mutationRecordHarnessObservation {
     content        string  @required
     data           object
   }
-  insert observation {
+  insert {
     id: args.observationId
     ownerUserId: actor.userId
     args.stepId
@@ -228,7 +228,7 @@ mutation semanticMemory mutationCreateHarnessSemanticMemory {
     confidence      float
     lastReinforced  datetime
   }
-  insert semanticMemory {
+  insert {
     id: args.memoryId
     ownerUserId: actor.userId
     args.kind
@@ -263,7 +263,7 @@ mutation semanticMemory mutationReinforceHarnessSemanticMemory {
     reinforceCount  int       @required
     sourceEpisodes  []string  @required
   }
-  update semanticMemory {
+  update {
     id: args.memoryId
     ownerUserId: actor.userId
     args.confidence
@@ -289,7 +289,7 @@ mutation semanticMemory mutationDecayHarnessSemanticMemory {
     memoryId    string  @required
     confidence  float   @required
   }
-  update semanticMemory {
+  update {
     id: args.memoryId
     ownerUserId: actor.userId
     args.confidence
@@ -311,7 +311,7 @@ mutation semanticMemory mutationPruneHarnessSemanticMemory {
   args {
     memoryId  string  @required
   }
-  update semanticMemory {
+  update {
     id: args.memoryId
     ownerUserId: actor.userId
     status: "pruned"
@@ -337,7 +337,7 @@ mutation consolidationCursor mutationAdvanceHarnessConsolidationCursor {
     watermark     datetime  @required
     episodesSeen  int
   }
-  insert consolidationCursor {
+  insert {
     id: args.cursorId
     ownerUserId: actor.userId
     args.watermark

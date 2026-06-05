@@ -33,7 +33,7 @@ mutation invocation mutationCreateWorkerInvocation {
     bytesOut       int
     outputPreview  string
   }
-  insert invocation {
+  insert {
     id: args.invocationId
     args.ownerUserId
     args.workerId
@@ -94,7 +94,7 @@ mutation registration mutationCreateWorkerRegistration {
     lastSeenAt           string
     lastConnectedFromIP  string
   }
-  insert registration {
+  insert {
     id: args.registrationId
     args.ownerUserId
     args.identityId
@@ -131,7 +131,7 @@ mutation registration mutationRevokeWorker {
     revokedBy       string
     revokeReason    string
   }
-  update registration {
+  update {
     id: args.registrationId
     args.revokedAt
     revokedBy: coalesce(args.revokedBy, "")
@@ -158,7 +158,7 @@ mutation invocation mutationSoftDeleteWorkerInvocation {
   args {
     invocationId  string  @required
   }
-  update invocation {
+  update {
     id: args.invocationId
     deleted: true
   }
@@ -171,7 +171,7 @@ mutation user mutationToggleComputerUseEnabled {
     userId   string  @required
     enabled  bool    @required
   }
-  update user {
+  update {
     id: args.userId
     preferences: {
         computerUseEnabled: args.enabled
@@ -186,7 +186,7 @@ mutation agentAuthorization mutationUpdateAgentAuthScope {
     authorizationId   string  @required
     computerUseScope  string  @required
   }
-  update agentAuthorization {
+  update {
     id: args.authorizationId
     args.computerUseScope
   }
@@ -211,7 +211,7 @@ mutation registration mutationUpdateWorkerLastSeen {
     lastSeenAt           string  @required
     lastConnectedFromIP  string
   }
-  update registration {
+  update {
     id: args.registrationId
     args.lastSeenAt
     lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
