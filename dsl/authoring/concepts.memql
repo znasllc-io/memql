@@ -52,6 +52,7 @@ concept construct {
   status            enum("draft", "active", "retired") @required @default("draft") @description("Follows the parent bundle's lifecycle at a construct grain: draft while the bundle is pre-activation, active once the bundle activates, retired when the bundle retires. Lets a cataloged construct outlive a single bundle.")
   catalogued        bool    @default("false") @description("True once this construct has been promoted into the owner's reusable catalog (post-activation), so later bundles can compose it instead of re-authoring. Drives the compose-first reuse path (#957).")
   catalogKey        string  @description("Dedup / match key for the catalog (#957): a stable signature of what this construct does (e.g. kind + bound concept + normalized predicate), used by the similarTo-backed matcher to find an existing construct before authoring a new one. Empty until catalogued.")
+  catalogMatchText  string  @description("The name-independent semantic text (kind + @description intent + canonicalized body) that was embedded for the near-match retrieval tier (#957). Computed by CatalogMatchText at promotion time and stored alongside the embedding (the vector itself lives in node_vectors keyed by this construct's id, vector_field='content') so similarTo can rank close-but-not-identical constructs for a stated need, and a re-embed can backfill from it. Empty until catalogued.")
 }
 
 @version("1.0.0")
