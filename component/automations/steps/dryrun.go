@@ -124,6 +124,7 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// registry's interception annotations.
 	report.Trace = sandbox.buildTrace(automation, exec)
 	report.SideEffectManifest = sandbox.manifest()
+	report.CostEstimate = sandbox.costEstimate()
 
 	if runErr != nil {
 		report.OK = false
