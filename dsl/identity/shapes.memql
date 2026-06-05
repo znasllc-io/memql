@@ -116,6 +116,7 @@ shape clusterSettings clusterSettingsFull {
   payload.accessRequestNotifyThrottleMins
   payload.bootstrapEmail
   payload.bootstrappedAt
+  payload.authoredAutomationsEnabled
   row.createdAt
 }
 

@@ -552,6 +552,7 @@ mutation clusterSettings mutationCreateClusterSettings {
     magicLinkTTLSeconds        int
     invitationTTLDays          int
     refreshCookieSameSite      string
+    authoredAutomationsEnabled bool
   }
   insert {
     args.id
@@ -580,6 +581,19 @@ mutation clusterSettings mutationCreateClusterSettings {
     magicLinkTTLSeconds: coalesce(args.magicLinkTTLSeconds, 0)
     invitationTTLDays: coalesce(args.invitationTTLDays, 0)
     refreshCookieSameSite: coalesce(args.refreshCookieSameSite, "")
+    authoredAutomationsEnabled: coalesce(args.authoredAutomationsEnabled, true)
+  }
+}
+
+@enabled
+@description("Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through queryClusterSettingsCurrent on its global gate.")
+mutation clusterSettings mutationSetAuthoredAutomationsEnabled {
+  args {
+    enabled  bool  @required
+  }
+  update {
+    id: "cluster"
+    authoredAutomationsEnabled: args.enabled
   }
 }
 
@@ -1666,6 +1680,7 @@ mutation clusterSettings mutationUpdateClusterSettings {
     magicLinkTTLSeconds        int
     invitationTTLDays          int
     refreshCookieSameSite      string
+    authoredAutomationsEnabled bool
   }
   insert {
     args.id
@@ -1694,6 +1709,7 @@ mutation clusterSettings mutationUpdateClusterSettings {
     magicLinkTTLSeconds: coalesce(args.magicLinkTTLSeconds, 0)
     invitationTTLDays: coalesce(args.invitationTTLDays, 0)
     refreshCookieSameSite: coalesce(args.refreshCookieSameSite, "")
+    authoredAutomationsEnabled: coalesce(args.authoredAutomationsEnabled, true)
   }
 }
 
