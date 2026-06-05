@@ -34,6 +34,40 @@ func DefaultRegistry() Registry {
 	return defaultRegistry
 }
 
+// CloneDefaultRegistry returns an ISOLATED *MemoryRegistry seeded from a
+// snapshot of the global default registry. Mutating the clone (via
+// MergeAll / ReplaceAll) never touches the global default, and later
+// registrations into the default never leak into a previously-taken
+// clone -- the two share no underlying map.
+//
+// This backs the authoring sandbox's candidate-defined-concept path
+// (issue #956): a planner-authored bundle can declare NEW concepts and
+// overlay them onto the clone so later constructs in the same bundle
+// bind against them, all without ever mutating the live engine's
+// concept registry.
+//
+// Note the *Concept pointers are shared with the default (a shallow
+// copy of the name->pointer map). That is intentional: the clone exists
+// to ADD candidate concepts, not to rewrite existing ones, and Concept
+// values are treated as immutable once registered.
+func CloneDefaultRegistry() *MemoryRegistry {
+	return defaultRegistry.Clone()
+}
+
+// Clone returns an isolated copy of this registry. The returned registry
+// has its own concept map seeded from the receiver's current contents;
+// subsequent mutations on either side are independent.
+func (r *MemoryRegistry) Clone() *MemoryRegistry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	next := make(map[string]*Concept, len(r.concepts))
+	for name, concept := range r.concepts {
+		next[name] = concept
+	}
+	return &MemoryRegistry{concepts: next}
+}
+
 // ReplaceAll swaps the existing registry contents with the provided concepts.
 func ReplaceAll(concepts map[string]*Concept) {
 	defaultRegistry.ReplaceAll(concepts)
