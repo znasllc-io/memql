@@ -74,10 +74,9 @@ A successful upload returns a URL of the form:
 https://<account>.blob.core.windows.net/<container>/<objectName>
 ```
 
-This URL is stored on the `v1:common:attachment` row (the
-`gcsURL` field — legacy name, pending rename in #805). The attachment
-download endpoint (`GET /spaces/{spaceId}/attachments/{attachmentId}`,
-tracked in #804) serves bytes back by calling
+This URL is stored on the `v1:common:attachment.blobUrl` field. The
+attachment download endpoint (`GET /spaces/{spaceId}/attachments/{attachmentId}`,
+shipped in #804) serves bytes back by calling
 `integrations/azureblob.DownloadURL()` against this stored URL.
 
 ## 3. Environment topology (decisions locked #805)
@@ -235,9 +234,6 @@ Items deliberately deferred; revisit at production cutover:
   surface workbench contents. Add a Plan-level "Workbench outputs"
   panel when there is user demand. (Workspaces are agent-private by
   design; surfacing is optional.)
-- **Attachment field rename.** The stored blob URL lives on the
-  `v1:common:attachment.gcsURL` field — a legacy name from the GCS
-  era. Rename to `blobUrl` tracked in #805.
 
 ## 8. Rollback plan
 
