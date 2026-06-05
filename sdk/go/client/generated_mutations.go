@@ -2241,22 +2241,24 @@ type MutationCreateClusterSettingsArgs struct {
 	RegistrationDomains string
 	InternalDomains     string
 	// Enum: owner | admin | writer | reader
-	InternalDefaultRole       string
-	RegisteredClientsJSON     string
-	AccessRequestNotifyEmails string
-	BootstrapEmail            string
-	BootstrapFirstName        string
-	BootstrapLastName         string
-	BootstrapPhone            string
-	BootstrapPrimaryRole      string
-	BootstrapGender           string
-	BootstrapBirthdate        string
-	BootstrappedAt            string
-	AccessTokenTTLSeconds     int
-	RefreshTokenTTLSeconds    int
-	MagicLinkTTLSeconds       int
-	InvitationTTLDays         int
-	RefreshCookieSameSite     string
+	InternalDefaultRole           string
+	RegisteredClientsJSON         string
+	AccessRequestNotifyEmails     string
+	BootstrapEmail                string
+	BootstrapFirstName            string
+	BootstrapLastName             string
+	BootstrapPhone                string
+	BootstrapPrimaryRole          string
+	BootstrapGender               string
+	BootstrapBirthdate            string
+	BootstrappedAt                string
+	AccessTokenTTLSeconds         int
+	RefreshTokenTTLSeconds        int
+	MagicLinkTTLSeconds           int
+	InvitationTTLDays             int
+	RefreshCookieSameSite         string
+	AuthoredAutomationsEnabled    bool
+	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
 }
 
 // MutationCreateClusterSettings calls the engine mutation mutationCreateClusterSettings.
@@ -2433,6 +2435,13 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
+	}
+	if args.AuthoredAutomationsEnabledSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authoredAutomationsEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
 	b.WriteString("})")
 	return b.String()
@@ -9491,6 +9500,28 @@ func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) 
 	return b.String()
 }
 
+// MutationSetAuthoredAutomationsEnabled -- Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through queryClusterSettingsCurrent on its global gate.
+//
+// Bound concept: clusterSettings.
+type MutationSetAuthoredAutomationsEnabledArgs struct {
+	Enabled bool
+}
+
+// MutationSetAuthoredAutomationsEnabled calls the engine mutation mutationSetAuthoredAutomationsEnabled.
+func (qc *QueryClient) MutationSetAuthoredAutomationsEnabled(ctx context.Context, args MutationSetAuthoredAutomationsEnabledArgs) (*Result, error) {
+	call := MutationSetAuthoredAutomationsEnabledBuild(args)
+	return qc.executeNamed(ctx, "mutationSetAuthoredAutomationsEnabled", call)
+}
+
+func MutationSetAuthoredAutomationsEnabledBuild(args MutationSetAuthoredAutomationsEnabledArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationSetAuthoredAutomationsEnabled({")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationSetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by mutationRetireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
 //
 // Bound concept: bundle.
@@ -10473,22 +10504,24 @@ type MutationUpdateClusterSettingsArgs struct {
 	RegistrationDomains string
 	InternalDomains     string
 	// Enum: owner | admin | writer | reader
-	InternalDefaultRole       string
-	RegisteredClientsJSON     string
-	AccessRequestNotifyEmails string
-	BootstrapEmail            string
-	BootstrapFirstName        string
-	BootstrapLastName         string
-	BootstrapPhone            string
-	BootstrapPrimaryRole      string
-	BootstrapGender           string
-	BootstrapBirthdate        string
-	BootstrappedAt            string
-	AccessTokenTTLSeconds     int
-	RefreshTokenTTLSeconds    int
-	MagicLinkTTLSeconds       int
-	InvitationTTLDays         int
-	RefreshCookieSameSite     string
+	InternalDefaultRole           string
+	RegisteredClientsJSON         string
+	AccessRequestNotifyEmails     string
+	BootstrapEmail                string
+	BootstrapFirstName            string
+	BootstrapLastName             string
+	BootstrapPhone                string
+	BootstrapPrimaryRole          string
+	BootstrapGender               string
+	BootstrapBirthdate            string
+	BootstrappedAt                string
+	AccessTokenTTLSeconds         int
+	RefreshTokenTTLSeconds        int
+	MagicLinkTTLSeconds           int
+	InvitationTTLDays             int
+	RefreshCookieSameSite         string
+	AuthoredAutomationsEnabled    bool
+	AuthoredAutomationsEnabledSet bool // set true to send authoredAutomationsEnabled; required because zero-value bool is ambiguous
 }
 
 // MutationUpdateClusterSettings calls the engine mutation mutationUpdateClusterSettings.
@@ -10665,6 +10698,13 @@ func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) 
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
+	}
+	if args.AuthoredAutomationsEnabledSet {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authoredAutomationsEnabled: ")
+		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
 	}
 	b.WriteString("})")
 	return b.String()

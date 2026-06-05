@@ -63,6 +63,13 @@ type AuthoredSchedulerOptions struct {
 	// owner's automations -- the single-node / dev default). Typically
 	// AuthoredOwnerGate.OwnsOwner.
 	OwnerGate func(ownerUserId string) bool
+	// GlobalGate, when set, is the cluster-wide GLOBAL KILL SWITCH for authored
+	// automations (epic memql#954, issue #961): it returns false when the
+	// v1:identity:clusterSettings.authoredAutomationsEnabled flag is off, and the
+	// scheduler then suppresses EVERY firing for EVERY owner -- the governance
+	// hard stop. Checked before owner-gating + the breaker so a globally-halted
+	// cluster runs nothing. nil = always enabled (no global switch wired).
+	GlobalGate func() bool
 }
 
 // authoredEntry is one live authored automation's subscription bookkeeping:
@@ -80,12 +87,13 @@ type authoredEntry struct {
 // triggers and runs them under the author's authz envelope. It is thread-safe
 // and mutable after startup (activations arrive at runtime).
 type AuthoredScheduler struct {
-	logger    *slog.Logger
-	loader    *Loader
-	eventBus  *events.Bus
-	run       RunAutomationFunc
-	breaker   *AuthoredBreaker
-	ownerGate func(ownerUserId string) bool
+	logger     *slog.Logger
+	loader     *Loader
+	eventBus   *events.Bus
+	run        RunAutomationFunc
+	breaker    *AuthoredBreaker
+	ownerGate  func(ownerUserId string) bool
+	globalGate func() bool
 
 	mu      sync.Mutex
 	cron    *cron.Cron
@@ -111,15 +119,26 @@ func NewAuthoredScheduler(opts AuthoredSchedulerOptions) (*AuthoredScheduler, er
 	c := cron.New(cron.WithSeconds())
 	c.Start()
 	return &AuthoredScheduler{
-		logger:    logger,
-		loader:    opts.Loader,
-		eventBus:  opts.EventBus,
-		run:       opts.Run,
-		breaker:   opts.Breaker,
-		ownerGate: opts.OwnerGate,
-		cron:      c,
-		entries:   make(map[string]*authoredEntry),
+		logger:     logger,
+		loader:     opts.Loader,
+		eventBus:   opts.EventBus,
+		run:        opts.Run,
+		breaker:    opts.Breaker,
+		ownerGate:  opts.OwnerGate,
+		globalGate: opts.GlobalGate,
+		cron:       c,
+		entries:    make(map[string]*authoredEntry),
 	}, nil
+}
+
+// SetGlobalGate installs (or replaces) the cluster-wide global kill switch
+// after construction -- the app wires it once the engine is live so the gate
+// can read v1:identity:clusterSettings.authoredAutomationsEnabled. Safe to call
+// against a running scheduler.
+func (s *AuthoredScheduler) SetGlobalGate(gate func() bool) {
+	s.mu.Lock()
+	s.globalGate = gate
+	s.mu.Unlock()
 }
 
 // authoredEntryKey scopes a live entry by owner + automation name so two
@@ -273,6 +292,23 @@ func (s *AuthoredScheduler) scheduleCron(owner string, automation *Automation) (
 // authz that gates the author's interactive calls gates this run. It can never
 // act as a cluster owner or the system actor.
 func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
+	// GLOBAL KILL SWITCH (#961): a cluster-wide hard stop. When the global gate
+	// reports the authored runtime disabled, NO authored automation fires for
+	// ANY owner -- checked first so a halted cluster does no owner-gating,
+	// breaker work, or run. The flag lives on
+	// v1:identity:clusterSettings.authoredAutomationsEnabled and is read live, so
+	// flipping it halts (or resumes) every node without a restart.
+	s.mu.Lock()
+	gate := s.globalGate
+	s.mu.Unlock()
+	if gate != nil && !gate() {
+		if s.logger != nil {
+			s.logger.Debug("authored automation suppressed by global kill switch",
+				"owner", owner, "automation", automation.Name)
+		}
+		return
+	}
+
 	// Cluster leader gate (#561 analogue, owner-scoped): only the node that
 	// owns this owner's authored automations runs the firing, so it fires once
 	// cluster-wide instead of once per replica. Checked BEFORE the breaker so a
