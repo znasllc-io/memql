@@ -85,6 +85,21 @@ func (a *CognitionEngineAdapter) InvokeSIChatWithFilteredTools(
 	return a.Engine.InvokeSIChatWithFilteredTools(ctx, templateId, data, toolNames)
 }
 
+// RunBundleDryRun delegates to the engine's Gate-2 behavioral dry-run entry
+// point (memql#958). Used by the planner authoring loop's Gate-2 handoff
+// (#960): it runs a Gate-1-clean bundle's automation under the tiered
+// side-effect interception layer (reads real + metered, mutations isolated to
+// an ephemeral sandbox partition, webhooks recorded-and-blocked) and returns
+// the approval artifact. The adapter exists because RunBundleDryRun needs the
+// concrete *MemQLEngine, which the planner's narrow Engine interface does not
+// expose.
+func (a *CognitionEngineAdapter) RunBundleDryRun(ctx context.Context, req memql.DryRunRequest) (memql.BundleDryRunReport, error) {
+	if a == nil || a.Engine == nil {
+		return memql.BundleDryRunReport{}, fmt.Errorf("memql engine not configured")
+	}
+	return memql.RunBundleDryRun(ctx, a.Engine, req)
+}
+
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
