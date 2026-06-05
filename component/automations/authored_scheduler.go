@@ -56,6 +56,13 @@ type AuthoredSchedulerOptions struct {
 	// nil = no breaker (every run fires regardless of prior faults). The app
 	// wires a breaker whose onTrip surfaces the trip; tests supply their own.
 	Breaker *AuthoredBreaker
+	// OwnerGate, when set, leader-gates owner-scoped authored automations in a
+	// cluster: a firing for owner O runs only on the node OwnerGate(O) returns
+	// true for, so an owner's authored automation fires once cluster-wide
+	// rather than once per replica. nil = ungated (every node runs every
+	// owner's automations -- the single-node / dev default). Typically
+	// AuthoredOwnerGate.OwnsOwner.
+	OwnerGate func(ownerUserId string) bool
 }
 
 // authoredEntry is one live authored automation's subscription bookkeeping:
@@ -73,11 +80,12 @@ type authoredEntry struct {
 // triggers and runs them under the author's authz envelope. It is thread-safe
 // and mutable after startup (activations arrive at runtime).
 type AuthoredScheduler struct {
-	logger   *slog.Logger
-	loader   *Loader
-	eventBus *events.Bus
-	run      RunAutomationFunc
-	breaker  *AuthoredBreaker
+	logger    *slog.Logger
+	loader    *Loader
+	eventBus  *events.Bus
+	run       RunAutomationFunc
+	breaker   *AuthoredBreaker
+	ownerGate func(ownerUserId string) bool
 
 	mu      sync.Mutex
 	cron    *cron.Cron
@@ -103,13 +111,14 @@ func NewAuthoredScheduler(opts AuthoredSchedulerOptions) (*AuthoredScheduler, er
 	c := cron.New(cron.WithSeconds())
 	c.Start()
 	return &AuthoredScheduler{
-		logger:   logger,
-		loader:   opts.Loader,
-		eventBus: opts.EventBus,
-		run:      opts.Run,
-		breaker:  opts.Breaker,
-		cron:     c,
-		entries:  make(map[string]*authoredEntry),
+		logger:    logger,
+		loader:    opts.Loader,
+		eventBus:  opts.EventBus,
+		run:       opts.Run,
+		breaker:   opts.Breaker,
+		ownerGate: opts.OwnerGate,
+		cron:      c,
+		entries:   make(map[string]*authoredEntry),
 	}, nil
 }
 
@@ -264,6 +273,15 @@ func (s *AuthoredScheduler) scheduleCron(owner string, automation *Automation) (
 // authz that gates the author's interactive calls gates this run. It can never
 // act as a cluster owner or the system actor.
 func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
+	// Cluster leader gate (#561 analogue, owner-scoped): only the node that
+	// owns this owner's authored automations runs the firing, so it fires once
+	// cluster-wide instead of once per replica. Checked BEFORE the breaker so a
+	// non-owning node neither runs nor records faults for an owner it does not
+	// own. nil gate = ungated (single-node / dev).
+	if s.ownerGate != nil && !s.ownerGate(owner) {
+		return
+	}
+
 	// Circuit breaker gate: a tripped automation is suppressed (belt-and-
 	// suspenders -- the trip already paused its subscription, but a late
 	// in-flight firing might still reach here).
