@@ -141,6 +141,17 @@ func (s *AuthoredScheduler) SetGlobalGate(gate func() bool) {
 	s.mu.Unlock()
 }
 
+// SetOwnerGate installs (or replaces) the cluster owner gate after
+// construction. The app wires it during the cluster phase once the peer mesh is
+// available so an owner's authored automations fire on exactly one node
+// cluster-wide. nil restores the single-node default (this node owns every
+// owner). Safe to call against a running scheduler.
+func (s *AuthoredScheduler) SetOwnerGate(gate func(ownerUserId string) bool) {
+	s.mu.Lock()
+	s.ownerGate = gate
+	s.mu.Unlock()
+}
+
 // authoredEntryKey scopes a live entry by owner + automation name so two
 // owners' identically-named authored automations never collide.
 func authoredEntryKey(owner, name string) string {
@@ -300,6 +311,7 @@ func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation,
 	// flipping it halts (or resumes) every node without a restart.
 	s.mu.Lock()
 	gate := s.globalGate
+	ownerGate := s.ownerGate
 	s.mu.Unlock()
 	if gate != nil && !gate() {
 		if s.logger != nil {
@@ -314,7 +326,7 @@ func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation,
 	// cluster-wide instead of once per replica. Checked BEFORE the breaker so a
 	// non-owning node neither runs nor records faults for an owner it does not
 	// own. nil gate = ungated (single-node / dev).
-	if s.ownerGate != nil && !s.ownerGate(owner) {
+	if ownerGate != nil && !ownerGate(owner) {
 		return
 	}
 

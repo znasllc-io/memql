@@ -158,6 +158,13 @@ func (a *App) engineAndBus() {
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 
+	// Stand up the owner-scoped authored-construct runtime (epic memql#954,
+	// #961 / #959 live glue): registry + per-owner scheduler (run hook -> the
+	// live Executor) + per-automation breaker (onTrip -> Deactivate +
+	// registry-pause) + the cluster-wide global kill switch. The cluster owner
+	// gate is wired later in the cluster phase.
+	a.wireAuthoredRuntime()
+
 	// Kick off the seed materializer in the background, but only AFTER
 	// the engine's Ready channel closes -- the engine's database
 	// getter (SetDatabaseGetter) is wired by its PrepareHook during

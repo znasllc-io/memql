@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
@@ -158,6 +159,26 @@ func (a *App) cluster() {
 			}
 		}
 		nodeServer.SetAuthInterceptor(node.NodeClassStreamInterceptorWithRevocation(a.identityVerifier, revCheck, a.Logger))
+	}
+
+	// Wire the authored-runtime cluster owner gate (epic memql#954, #961 / #959):
+	// distribute owners across the live mesh so an owner's authored automations
+	// fire on exactly one node cluster-wide rather than once per replica. The
+	// membership view is self + the live peer set, read live so a membership
+	// change rebalances without a restart. Single-node (peerMgr nil or empty
+	// mesh) keeps the default where this node owns every owner.
+	if a.authoredScheduler != nil && peerMgr != nil {
+		ownerGate := automations.NewAuthoredOwnerGate(nodeIdentity.ID, func() []string {
+			ids := []string{nodeIdentity.ID}
+			for _, p := range peerMgr.AllPeers() {
+				if p != nil && p.Info != nil && p.Info.NodeId != "" {
+					ids = append(ids, p.Info.NodeId)
+				}
+			}
+			return ids
+		})
+		a.authoredScheduler.SetOwnerGate(ownerGate.OwnsOwner)
+		a.Logger.Info("authored runtime cluster owner gate wired", "self_node", nodeIdentity.ID)
 	}
 
 	if peerMgr != nil {
@@ -432,4 +453,3 @@ func firstNonEmptyStr(vals ...string) string {
 	}
 	return ""
 }
-

@@ -73,6 +73,15 @@ type App struct {
 	automationLoader    *automations.Loader
 	stepRegistry        *automationSteps.Registry
 
+	// Phase 3d: the owner-scoped authored-construct runtime (epic memql#954,
+	// #961 / #959 live glue): the registry activated bundles register into,
+	// plus the per-owner authored scheduler that fires their automations under
+	// the author's envelope. Constructed in wireAuthoredRuntime during the
+	// engine phase; the cluster owner gate is wired later (cluster phase).
+	authoredRuntime   *memql.AuthoredRuntimeRegistry
+	authoredScheduler *automations.AuthoredScheduler
+	authoredBreaker   *automations.AuthoredBreaker
+
 	// Phase 3c: SI Router -- the single point every SI call flows through.
 	// Constructed after the engine is initialized so it can read the
 	// provider registry. Embedded in every node that calls SI; it is
