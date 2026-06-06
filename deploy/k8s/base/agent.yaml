@@ -52,6 +52,10 @@ spec:
             - { name: SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "agent" }
             - { name: MEMQL_NODE_ADDRESS, value: "agent:50055" }
+            # Unique per-pod mesh identity (#1042). Overrides the shared genesis
+            # MEMQL_NODE_ID=bff-local (set-if-absent) so PeerManager keys each
+            # node distinctly and cross-node event forwarding works.
+            - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50055" }
             - { name: MEMQL_PARENT_ADDRESS, value: "bff:50058" }
             - { name: MEMQL_WORKBENCH_REMOTE, value: "1" }
