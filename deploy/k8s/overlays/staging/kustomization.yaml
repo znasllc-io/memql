@@ -24,3 +24,7 @@ images:
     digest: sha256:83d6806ca395f4e8151776d7856cabf884e3abff7db5c0460c5734c74ee57498
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:9f48a4ba4c07a0d1247d8ba9d0bd8a802754b0c5d7a8a673697b4baa10d4917c
+  # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
+  - name: livekit/livekit-server
+    newName: livekit/livekit-server
+    digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
