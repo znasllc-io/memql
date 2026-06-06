@@ -69,9 +69,9 @@ export interface SITranscribeStreamEndPayload {
   cancel?: boolean;
 }
 
-// Identity + access envelopes. Guest invites, worker tokens, session
-// revoke, and EvaluatePolicy. Mirror MemqlClientMessage oneof slots
-// 46..54 + 70 (proto schema: component/grpc/memql.proto).
+// Identity + access envelopes. Guest invites, worker tokens, and
+// session revoke. Mirror MemqlClientMessage oneof slots 46..54
+// (proto schema: component/grpc/memql.proto).
 
 export interface SendGuestInvitePayload {
   requestId: string;
@@ -124,13 +124,6 @@ export interface CreateWorkerTokenPayload {
 export interface RevokeWorkerTokenPayload {
   requestId: string;
   identityId: string;
-}
-
-export interface EvaluatePolicyPayload {
-  requestId: string;
-  policyName: string;
-  argsJson: string; // JSON-encoded args object; empty string = "{}"
-  returnTrace?: boolean;
 }
 
 // Polyphon -- LiveKit room token request. The room name + LiveKit
@@ -248,7 +241,6 @@ type ClientPayload =
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { createWorkerToken: CreateWorkerTokenPayload }
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
-  | { evaluatePolicy: EvaluatePolicyPayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
@@ -465,20 +457,6 @@ export interface RevokeWorkerTokenResultPayload {
   errorMessage?: string;
 }
 
-// EvaluatePolicyResult carries the policy's return value as a
-// JSON-encoded string (the engine's canonical wire form). The SDK
-// helper decodes it to unknown for the caller. traceJson is empty
-// unless the caller passed returnTrace=true OR the policy carries
-// @returns_trace.
-export interface EvaluatePolicyResultPayload {
-  requestId: string;
-  resultJson?: string;
-  traceJson?: string;
-  // POLICY_UNKNOWN | POLICY_NOT_FRONTEND_VISIBLE | POLICY_TIER_MISMATCH | POLICY_RUNTIME_ERROR
-  errorCode?: string;
-  errorMessage?: string;
-}
-
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -598,7 +576,6 @@ type ServerPayload =
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { createWorkerTokenResult: CreateWorkerTokenResultPayload }
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
-  | { evaluatePolicyResult: EvaluatePolicyResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
@@ -632,7 +609,6 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
   | { kind: "createWorkerTokenResult"; value: CreateWorkerTokenResultPayload }
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
-  | { kind: "evaluatePolicyResult"; value: EvaluatePolicyResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
@@ -694,8 +670,6 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "createWorkerTokenResult", value: m.createWorkerTokenResult as CreateWorkerTokenResultPayload };
   if (m.revokeWorkerTokenResult)
     return { kind: "revokeWorkerTokenResult", value: m.revokeWorkerTokenResult as RevokeWorkerTokenResultPayload };
-  if (m.evaluatePolicyResult)
-    return { kind: "evaluatePolicyResult", value: m.evaluatePolicyResult as EvaluatePolicyResultPayload };
   if (m.polyphonRoomTokenResult)
     return {
       kind: "polyphonRoomTokenResult",

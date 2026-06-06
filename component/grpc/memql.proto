@@ -43,6 +43,9 @@ message MemqlClientMessage {
   map<string, string> metadata = 3;
   reserved 4;
   reserved "partition";
+  // 70 (evaluate_policy) retired with the decision-policy tier, #984.
+  reserved 70;
+  reserved "evaluate_policy";
   // Caller-stamped provenance for cross-node propagation. When set,
   // the receiver re-hydrates ctx so any rows the request writes are
   // attributed to the originator, not the receiver's default. When
@@ -188,12 +191,8 @@ message MemqlClientMessage {
     // parity (same shape as a text/cascade reply). See
     // handleVoiceAgentRealtimeOutput.
     VoiceAgentRealtimeOutput voice_agent_realtime_output = 65;
-    // EvaluatePolicy -- runtime invocation of a `func (Policy)`
-    // declared under dsl/v1/policies/{core,bff}/...  The handler
-    // requires the policy to carry @frontend_visible AND tier=bff;
-    // anything else is rejected with POLICY_NOT_FRONTEND_VISIBLE so
-    // a UI cannot reach into core/auth or core/partition decisions.
-    EvaluatePolicyMsg evaluate_policy = 70;
+    // 70 (evaluate_policy) retired with the decision-policy tier, #984;
+    // the number is reserved at the message level below.
     // RotateAuth -- swap the bearer token on a live stream without
     // tearing it down. Long-lived stream clients (memql-cockpit
     // most notably) call this from their background token-refresh
@@ -219,6 +218,10 @@ message MemqlServerMessage {
   string message_id = 1;
   string correlate_to = 2;
   map<string, string> metadata = 3;
+  // 110 (evaluate_policy_result) retired with the decision-policy
+  // tier, #984.
+  reserved 110;
+  reserved "evaluate_policy_result";
 
   oneof payload {
     ServerHello server_hello = 10;
@@ -301,11 +304,8 @@ message MemqlServerMessage {
     // insert for a realtime assistant turn and returns the canonical
     // utterance id so the voice-agent can correlate + audit.
     VoiceAgentRealtimeOutputAck voice_agent_realtime_output_ack = 101;
-    // EvaluatePolicy reply -- carries the policy result, the
-    // structured trace tree (when requested), and a typed error
-    // string for the typical rejection cases (unknown policy, not
-    // frontend-visible, tier mismatch, runtime error).
-    EvaluatePolicyResult evaluate_policy_result = 110;
+    // 110 (evaluate_policy_result) retired with the decision-policy
+    // tier, #984; the number is reserved at the message level below.
     // RotateAuth reply (see RotateAuthMsg). `ok=true` means the new
     // bearer was accepted; subsequent envelopes on this stream are
     // checked against the rotated identity. `ok=false` carries an
@@ -1924,48 +1924,9 @@ message VoiceAgentRealtimeOutputAck {
   string error_message = 5;
 }
 
-// -----------------------------------------------------------------------------
-// EvaluatePolicy (cross-cutting decision policies)
-// -----------------------------------------------------------------------------
-
-// EvaluatePolicyMsg invokes a `func (Policy)` registered under
-// dsl/v1/policies/bff/...  The handler enforces:
-//   - the named policy exists
-//   - the policy carries @frontend_visible (otherwise reject)
-//   - the policy is tier=bff (core policies are server-internal)
-//
-// args carries the caller-passed JSON object; the engine merges in
-// standard ctx fields (actor, partition, now) automatically.
-message EvaluatePolicyMsg {
-  string request_id = 1;
-  string policy_name = 2;
-  // JSON-encoded args object (canonical wire form; the handler
-  // decodes into map[string]any). Empty string is equivalent to {}.
-  string args_json = 3;
-  // When true the trace tree is always included in the reply; when
-  // false the trace tree is included only if the policy carries
-  // @returns_trace.
-  bool return_trace = 4;
-}
-
-// EvaluatePolicyResult carries the policy's return value plus the
-// structured trace tree (when requested or when @returns_trace is
-// set). result_json is the JSON-encoded return value (canonical
-// wire form); trace_json is the JSON-encoded PolicyTrace tree
-// (empty when no trace is returned).
-message EvaluatePolicyResult {
-  string request_id = 1;
-  string result_json = 2;
-  string trace_json = 3;
-  // Typed error_code values:
-  //   POLICY_UNKNOWN              -- policy_name does not resolve
-  //   POLICY_NOT_FRONTEND_VISIBLE -- policy is registered but lacks
-  //                                  @frontend_visible
-  //   POLICY_TIER_MISMATCH        -- policy is not tier=bff
-  //   POLICY_RUNTIME_ERROR        -- evaluation errored
-  string error_code = 4;
-  string error_message = 5;
-}
+// EvaluatePolicyMsg / EvaluatePolicyResult retired with the
+// decision-policy tier (#984). The oneof field numbers (70 / 110)
+// are reserved above so they are never reused.
 
 // -----------------------------------------------------------------------------
 // In-stream bearer rotation

@@ -27,8 +27,3 @@ export {
   type CreateWorkerTokenResult,
   type RevokeWorkerTokenResult,
 } from "./workerToken.js";
-export {
-  evaluatePolicy,
-  type EvaluatePolicyArgs,
-  type EvaluatePolicyResult,
-} from "./evaluatePolicy.js";

@@ -94,7 +94,7 @@ memQL/
 | `dsl/<ns>/prompts.memql` | SI prompt schemas (+ `prompts/*.tmpl`) | MemQL | — |
 | `dsl/providers/providers.memql` | SI provider configurations | MemQL | — |
 | `dsl/<ns>/shapes.memql` | Reusable shape templates | MemQL | — |
-| `dsl/policies/policies.memql` | Cross-cutting decision policies | MemQL | — |
+| `dsl/policies/policies.memql` | SI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
@@ -923,8 +923,8 @@ How the DSL constructs lean on each other. Each layer can only depend
                  ▼
            ┌────────────┐
            │  Policies  │
-           │ cross-cut. │
-           │ decisions  │
+           │ provider-  │
+           │ selection  │
            └────────────┘
 ```
 
@@ -967,11 +967,12 @@ How the DSL constructs lean on each other. Each layer can only depend
 - **Tools** are the SI-facing surface of queries + mutations +
   builtins. The tool loop binds tool-call args to handler args and
   forwards.
-- **Policies** are top-of-stack: caller-based decisions for
-  authorization, vendor selection, feature flagging, UI gating.
-  A policy body that compiles to a pure context-spec is rejected at
-  load time (Phase C migration nudge -- move it to `specs/` and
-  call it via `spec("name")`).
+- **Policies** are empty-bodied SI provider-selection records
+  (`@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`),
+  consumed by the SI Router to resolve a provider chain. (The
+  retired decision-policy tier — caller-based authz / feature-gating
+  decisions — is gone, #984; use **specs** via `spec("name")` for
+  caller-context boolean checks.)
 
 **Construct files live under `dsl/<namespace>/<construct>s.memql`**
 (concepts, specs, shapes, mutations, queries, builtins, providers,
@@ -1062,15 +1063,18 @@ ships the #231 risk×scope decision matrix) and in **specs** — use
 permission), which run as in-process context-specs and compile to
 SQL or evaluate against the auth envelope.
 
-> Cleanup status: the dead tooling (`make policies-lint` /
-> `policies-trace` + `scripts/policies/`) and the stale docs are
-> removed here. Removing the dormant Go machinery
-> (`policy_evaluator.go` / `policy_function_loader.go` /
-> `EvaluatePolicy` / the `EvaluatePolicyMsg` gRPC handler + proto)
-> is a careful follow-up: `policy_evaluator.go` shares expression-
-> evaluation helpers with the live spec evaluator, and the
-> `EvaluatePolicyMsg` proto is a cross-repo wire the copresent client
-> depends on — both must be untangled before deletion.
+> Cleanup status: fully removed. The dead tooling (`make
+> policies-lint` / `policies-trace` + `scripts/policies/`) went in the
+> first pass; the Go machinery, gRPC handler, proto messages, and TS
+> SDK helper went in the second (#984 Phase 2). The shared expression-
+> evaluation helpers the live spec evaluator depended on were lifted
+> into `component/memql/expression_evaluator.go`; `policy_evaluator.go`
+> / `policy_function_loader.go` / the `EvaluatePolicy` RPC handler /
+> the `EvaluatePolicyMsg` + `EvaluatePolicyResult` proto messages (oneof
+> 70 / 110, now `reserved`) / the TS `evaluatePolicy` helper are gone.
+> Verified end-to-end: zero `func (Policy)` constructs in the tree and
+> zero `EvaluatePolicy` callers across copresent, the bff, cockpit, and
+> the SDK.
 
 ## Key Concepts
 
@@ -1448,12 +1452,11 @@ no parameter. The legacy
 `func (Spec) name(ctx any) bool { return <expr> }` form is retired
 and rejected at parse time.
 
-**Policy → spec migration nudge.** A policy whose body is a pure
-caller-only boolean with no policy-only annotations gets rejected at
-load time. The engine emits a message pointing at the migration
-target (move the predicate into `dsl/<namespace>/specs.memql`, switch the receiver
-to `spec`, and have any caller use `spec("name")` instead of
-`policy("name")`).
+**Caller-context checks use specs, not policies.** The decision-policy
+tier that once hosted caller-based boolean predicates is retired
+(#984). Author the predicate as a context-spec in
+`dsl/<namespace>/specs.memql` and call it via `spec("name")`; the live
+`policy` construct is provider-selection only.
 
 ### Tools
 SI-callable tool definitions — struct form, mirrors how concepts +

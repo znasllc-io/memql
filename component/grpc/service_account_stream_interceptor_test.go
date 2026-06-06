@@ -24,7 +24,6 @@ func TestIsServiceAccountPayload_Allowlist(t *testing.T) {
 		&memqlv1.MemqlClientMessage_ConceptsList{},
 		&memqlv1.MemqlClientMessage_ConceptsSubscribe{},
 		&memqlv1.MemqlClientMessage_MyAccess{},
-		&memqlv1.MemqlClientMessage_EvaluatePolicy{},
 		&memqlv1.MemqlClientMessage_AgentGenerateTurn{},
 	}
 	for _, p := range allowed {

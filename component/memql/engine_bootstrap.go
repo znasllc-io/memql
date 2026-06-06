@@ -291,18 +291,9 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		e.Logger.Warn("unified policy loader returned an error; legacy stub covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
-	policyFunctionRegistry, err := loadPolicyFunctions(e.Logger)
-	if err != nil {
-		return err
-	}
-	if _, ulErr := LoadUnifiedPolicyFunctions(e.Logger, policyFunctionRegistry); ulErr != nil {
-		e.Logger.Warn("unified policy-function loader returned an error; legacy stub covers gap",
-			"component", "memql.engine", "error", ulErr)
-	}
 	e.prompts = promptRegistry
 	e.providers = providerRegistry
 	e.policies = policyRegistry
-	e.policyFunctions = policyFunctionRegistry
 	e.siRuntime = newSIRuntime(e.Logger, promptRegistry, providerRegistry, e.siCacheConfig)
 
 	// ReloadSIProviders is exposed below so dev workflows that wipe
