@@ -65,9 +65,22 @@ public IP, which LiveKit advertises directly via ICE:
 kubectl get svc livekit-rtc -n memql -o wide   # EXTERNAL-IP = media endpoint
 ```
 
-If browsers behind restrictive NATs can't establish media, pin
-`rtc.node_ip` in the ConfigMap to the `livekit-rtc` EXTERNAL-IP (instead of
-relying on `use_external_ip` STUN discovery) and/or add a TURN server.
+**Important — the advertised media IP is pinned per-env, not auto-discovered.**
+On AKS, `use_external_ip` (STUN) discovers the node's *egress* IP, which is NOT
+the inbound LoadBalancer IP browsers must reach, so ICE fails. The base config
+sets `use_external_ip: false`; each overlay sets a `NODE_IP` env on the livekit
+container = its `livekit-rtc` LoadBalancer EXTERNAL-IP
+(`deploy/k8s/overlays/<env>/kustomization.yaml`).
+
+So after first standing up LiveKit in a new env (or if the `livekit-rtc`
+Service is recreated and Azure assigns a new IP): read the EXTERNAL-IP above and
+set `NODE_IP` in the overlay to match, then let it roll. For a fully stable
+value, reserve a static Azure public IP for the service (`loadBalancerIP` +
+`azure-load-balancer-resource-group` annotation) and pin `NODE_IP` to it.
+
+If browsers behind restrictive NATs still can't establish media (UDP blocked),
+TCP 7881 is already exposed as fallback; add a TURN server for the strictest
+networks.
 
 ## Verify end-to-end
 

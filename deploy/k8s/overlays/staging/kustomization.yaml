@@ -7,6 +7,21 @@ namespace: memql
 resources:
   - ../../base
 
+# Pin the media IP LiveKit advertises to the livekit-rtc LoadBalancer's public
+# IP (#1043). Per-env because the LB IP differs by cluster. If the livekit-rtc
+# Service is ever recreated and Azure assigns a new IP, update this value (or
+# reserve a static IP — see docs/deploy/livekit-provision.md).
+patches:
+  - target:
+      kind: Deployment
+      name: livekit
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: NODE_IP
+          value: "20.246.247.180"
+
 images:
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:7a83161b4e0b216023e5a450bf9984b709d3e5cd41c3469a0813d7ef7ae302c2

@@ -30,7 +30,11 @@ data:
     rtc:
       tcp_port: 7881
       udp_port: 7882
-      use_external_ip: true
+      # The advertised media IP is set per-env via the NODE_IP env on the
+      # container (the livekit-rtc LoadBalancer's public IP), NOT STUN: on AKS
+      # use_external_ip discovers the node's *egress* IP, which is not the
+      # inbound LoadBalancer IP browsers must reach, so ICE fails (#1043).
+      use_external_ip: false
       enable_loopback_candidate: false
     # keys come from the LIVEKIT_KEYS env (ESO-synced secret), not this file.
     logging:
