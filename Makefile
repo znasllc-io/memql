@@ -609,7 +609,7 @@ deploy-setup:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-.PHONY: db-provision blob-provision deploy deploy-rollback
+.PHONY: db-provision blob-provision livekit-provision deploy deploy-rollback
 
 ## Provision (create-or-verify) a dedicated Azure Storage account + blob
 ## container for ENV and print the connection string for inclusion in the
@@ -640,6 +640,23 @@ blob-provision:
 ##   make db-provision ENV=production DRY_RUN=1
 db-provision:
 	@bash scripts/deploy/tiger-provision.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Provision the self-hosted LiveKit shared-secret pair into the per-env Key
+## Vault (znasllc-io/memql#1043). The committed ExternalSecret then syncs the
+## livekit-secrets k8s Secret. Idempotent: re-runs REUSE the existing pair;
+## --rotate generates a fresh one. Implementation lives in
+## scripts/deploy/livekit-provision.sh per the function-based shell convention.
+## NOTE: requires `az login`. DNS (livekit.<env>.copresent.ai) is a manual
+## registrar step -- see docs/deploy/livekit-provision.md.
+##   make livekit-provision                       # staging
+##   make livekit-provision DRY_RUN=1             # staging, plan only
+##   make livekit-provision ARGS=--rotate         # rotate the key/secret
+##   make livekit-provision ENV=production DRY_RUN=1
+livekit-provision:
+	@bash scripts/deploy/livekit-provision.sh \
 		--env=$${ENV:-staging} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)

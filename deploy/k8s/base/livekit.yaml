@@ -1,0 +1,157 @@
+# Self-hosted LiveKit server for staging voice/video (memql#1043).
+#
+# Open-source livekit-server (Apache 2.0) — no LiveKit Cloud. The API
+# key/secret is a self-chosen shared-secret pair synced from Key Vault via ESO
+# (deploy/external-secrets/externalsecret-livekit.yaml -> Secret `livekit-secrets`),
+# matching the memql-secrets pattern. The same key/secret is handed to the BFF
+# (POLYPHON_LIVEKIT_API_KEY/SECRET) so the tokens it mints validate here.
+#
+# Two planes:
+#   - Signaling (wss): browser -> ingress-nginx (TLS) -> livekit:7880. WebSocket.
+#   - Media (WebRTC):  browser <-> livekit-rtc LoadBalancer (UDP 7882 + TCP 7881).
+#     use_external_ip=true so LiveKit advertises the LB's public IP via ICE.
+#
+# DNS (owner action): A record livekit.staging.copresent.ai -> ingress LB
+# 57.162.162.149 (signaling). Media rides the livekit-rtc LB's own public IP,
+# advertised by ICE — no DNS needed for it.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: livekit-config
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit
+    app.kubernetes.io/part-of: memql
+data:
+  livekit.yaml: |
+    port: 7880
+    bind_addresses: ["0.0.0.0"]
+    rtc:
+      tcp_port: 7881
+      udp_port: 7882
+      use_external_ip: true
+      enable_loopback_candidate: false
+    # keys come from the LIVEKIT_KEYS env (ESO-synced secret), not this file.
+    logging:
+      level: info
+      json: true
+    turn:
+      enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit
+    app.kubernetes.io/part-of: memql
+spec:
+  # Single replica: no Redis configured, so this is a standalone node. Scaling
+  # past 1 requires the Redis-backed multi-node setup (future work).
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: livekit
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: livekit
+        app.kubernetes.io/part-of: memql
+    spec:
+      volumes:
+        - name: config
+          configMap:
+            name: livekit-config
+      containers:
+        - name: livekit
+          image: livekit/livekit-server:v1.8.0
+          args: ["--config", "/etc/livekit/livekit.yaml"]
+          ports:
+            - { name: signaling, containerPort: 7880, protocol: TCP }
+            - { name: rtc-tcp, containerPort: 7881, protocol: TCP }
+            - { name: rtc-udp, containerPort: 7882, protocol: UDP }
+          env:
+            # "<apiKey>: <secret>" map, ESO-synced from Key Vault.
+            - name: LIVEKIT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-secrets
+                  key: LIVEKIT_KEYS
+          volumeMounts:
+            - { name: config, mountPath: /etc/livekit, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /, port: 7880 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 7880 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 1Gi }
+---
+# Signaling Service (ClusterIP) — fronted by the ingress for wss.
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: livekit
+  ports:
+    - { name: signaling, port: 7880, targetPort: 7880, protocol: TCP }
+---
+# Media Service (LoadBalancer) — public WebRTC transport. Mixed UDP+TCP on one
+# Azure LB IP; externalTrafficPolicy=Local preserves the client source path.
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-rtc
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: livekit
+    app.kubernetes.io/part-of: memql
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-mixed-protocols: "true"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: livekit
+  ports:
+    - { name: rtc-udp, port: 7882, targetPort: 7882, protocol: UDP }
+    - { name: rtc-tcp, port: 7881, targetPort: 7881, protocol: TCP }
+---
+# wss://livekit.staging.copresent.ai -> livekit:7880 (WebSocket signaling).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: livekit
+  namespace: memql
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [livekit.staging.copresent.ai]
+      secretName: livekit-staging-copresent-tls
+  rules:
+    - host: livekit.staging.copresent.ai
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: livekit, port: { number: 7880 } } } }

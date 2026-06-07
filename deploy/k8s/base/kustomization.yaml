@@ -40,6 +40,9 @@ resources:
   # Public HTTPS entry (needs ingress-nginx + cert-manager installed first;
   # see README-public-entry.md).
   - public-entry.yaml
+  # Self-hosted LiveKit server + its ESO-synced secret (memql#1043).
+  - livekit.yaml
+  - externalsecret-livekit.yaml
 
 labels:
   - pairs:
