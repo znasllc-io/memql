@@ -1,4 +1,8 @@
-# Promoted from releases/0.9.9.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
+# Placeholder overlay -> 0.9.19 (digest copy of releases/0.9.19.yaml). PROD IS A
+# PLACEHOLDER: there is no prod cluster / Argo CD app yet, so this overlay is
+# declarative-only (kept coherent with staging at the same version). When prod
+# is stood up for real, set prod-specific values (livekit NODE_IP = prod
+# livekit-rtc LB IP, etc.) before pointing an Argo CD app at it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -9,21 +13,21 @@ resources:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:5c5ced82097f8d1248081b4054a72f4f7c51265e5efde25fc07135c9cf3da5da
+    digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:c3e3dd89fe052842e13d563731ec9b5a4d0d46f8f5416aae6c47122ffa86fa0a
+    digest: sha256:725e700fa7a83218c235c557fc77639ed1fff42f791e8026f7e301ffa23d3e9c
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:3d3eae79e9f97b2bc334410b07f340b6e279bb13b750401e5f11da8469313003
+    digest: sha256:becf5f4855a3a526c68dda597af5da0ec154c9b0c767c1f2c49197b9ca056d93
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:bc858386a975e37ee74f212a58e6b6399b50c49c8c342ffdaf5919fdc0a6aca1
+    digest: sha256:aff90e206e3e37facc0c0f5e9079a815cd08b6e06a3aefde495182e36a2d2b9a
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:36418df78e1ecd587ed1e195d8ea9ccc5a2cb07556a1ad9bc8b923dbcc00cb3c
+    digest: sha256:5bc43bd99d0734525c879f5e80c47b97323f275e181319ad26649e9c05101b87
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:350ea124a7a57b9d9bce2bbac50ed673bcfe6c53e4355aa62d4c32a4b98f793f
+    digest: sha256:779602205c82ddf0dd86da65b4e0c543199b50f9c5253a3fe4e2b3bd76bcf5e3
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:45dd55a955351eb569b337802bec91706cb8929293c2407d31ee9903e0a887c0
+    digest: sha256:fa6ca5d5fcfa5f5a8088454dcca3e85439f6a4c6fb843bf79bcbc3eb8f33a9ae
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
+    digest: sha256:7b670c7e209cfa1f404b4ca695e3aca0f6bad06112e85160867a29e96d4e01d4
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server

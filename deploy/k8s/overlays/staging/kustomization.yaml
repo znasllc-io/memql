@@ -1,4 +1,4 @@
-# Staging overlay -> 0.9.18 (memql@0d3d7d1 + carrier@f805d3d, the tested commits). Built local, pinned by digest.
+# Staging overlay -> 0.9.19 (memql@3e661ee + carrier@bba722f + copresent@7e302e5, built local from main). Pinned by digest; see releases/0.9.19.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -24,21 +24,21 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:7a83161b4e0b216023e5a450bf9984b709d3e5cd41c3469a0813d7ef7ae302c2
+    digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:f17da4b546cf3daf37500a2c819cfd2f6ee008ef5ca93e5bb5c7072bf3bbec4f
+    digest: sha256:725e700fa7a83218c235c557fc77639ed1fff42f791e8026f7e301ffa23d3e9c
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:662253ac7db70f9fe3645f4d38fc1653cea5db87f58b5158a2d4471daa1b7a6a
+    digest: sha256:becf5f4855a3a526c68dda597af5da0ec154c9b0c767c1f2c49197b9ca056d93
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:7a3d436a22e3c2b4dad2df7d4e1e04d6f53df40196149454b875c598ef35c54c
+    digest: sha256:aff90e206e3e37facc0c0f5e9079a815cd08b6e06a3aefde495182e36a2d2b9a
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:fc15faad395bd3e627cae65dd4f89265a30b1daf9ced0aec9d22a6fceaed0eeb
+    digest: sha256:5bc43bd99d0734525c879f5e80c47b97323f275e181319ad26649e9c05101b87
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:c3a297bd5aa73faa6bca02e7a75871fdb07070400ea1d955b2006ec131d85e34
+    digest: sha256:779602205c82ddf0dd86da65b4e0c543199b50f9c5253a3fe4e2b3bd76bcf5e3
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:83d6806ca395f4e8151776d7856cabf884e3abff7db5c0460c5734c74ee57498
+    digest: sha256:fa6ca5d5fcfa5f5a8088454dcca3e85439f6a4c6fb843bf79bcbc3eb8f33a9ae
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:9f48a4ba4c07a0d1247d8ba9d0bd8a802754b0c5d7a8a673697b4baa10d4917c
+    digest: sha256:7b670c7e209cfa1f404b4ca695e3aca0f6bad06112e85160867a29e96d4e01d4
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
