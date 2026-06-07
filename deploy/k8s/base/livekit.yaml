@@ -65,6 +65,11 @@ spec:
         app.kubernetes.io/name: livekit
         app.kubernetes.io/part-of: memql
     spec:
+      # k8s auto-injects <SVC>_PORT env vars for every Service in the namespace;
+      # the `livekit` Service produces LIVEKIT_PORT=tcp://<clusterIP>:7880, which
+      # collides with livekit-server's own LIVEKIT_PORT config flag (expects a
+      # uint) and crashes it. Disable service-link env injection (#1043).
+      enableServiceLinks: false
       volumes:
         - name: config
           configMap:
