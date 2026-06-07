@@ -47,7 +47,10 @@ spec:
       containers:
         - name: voice-agent
           image: acrmemql.azurecr.io/memql-voice:0.9.9
-          command: ["voice-agent"]
+          # args (NOT command): the image ENTRYPOINT is /app/memql; "voice-agent"
+          # is its subcommand. `command` would REPLACE the entrypoint (k8s != the
+          # compose `command:` which appends), causing exec "voice-agent" not found.
+          args: ["voice-agent"]
           envFrom:
             # MEMQL_MASTER_KEY + MEMQL_GENESIS_B64 (genesis autoload) +
             # MEMORY_NODES_DATABASE_DSN (unused here, harmless).
