@@ -42,8 +42,11 @@ services:
   # BFF node -- backend for frontend (domain-specific), primary API surface
   bff:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      # Carrier-built (engine + CoPresent DSL), same source as staging (#1053):
+      # the carrier Dockerfile with context = workspace parent (memql +
+      # memql-bff-copresent as siblings, per the `replace ../memql` directive).
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: bff
     container_name: memql-bff
@@ -114,8 +117,9 @@ services:
   # Cognition node -- conversation intelligence (scoring, response generation)
   cognition:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: cognition
     container_name: memql-cognition
@@ -244,8 +248,9 @@ services:
   # Agent node -- task execution and AI work
   agent:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: agent
     container_name: memql-agent
@@ -306,8 +311,9 @@ services:
   # via the workbench_workspaces named volume.
   workbench:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: workbench
     container_name: memql-workbench
@@ -355,8 +361,9 @@ services:
   # Planner node -- task planning and orchestration
   planner:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
+      context: ../..
+      dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: planner
     container_name: memql-planner

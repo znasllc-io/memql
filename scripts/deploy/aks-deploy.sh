@@ -68,9 +68,21 @@ SECRET_NAME="memql-secrets"
 ACR_NAME="${ACR_NAME:-acrmemql}"
 ACR_LOGIN_SERVER="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}"
 
-# Engine node-types built from THIS repo (each its own build-tag image).
-# bff (carrier) + copresent (SPA) come from sibling repos -- not built here.
+# Node-types built here (each its own build-tag image). bff (carrier) +
+# copresent (SPA) come from sibling repos -- not built here.
+#
+# Architecture (#1053): nodes that execute CoPresent DSL (agentReply etc.) MUST
+# be CARRIER-built (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>, context =
+# workspace parent) so they carry the CoPresent DSL -- same as the bff carrier
+# and the local cluster (docker-compose.cluster.yml). voice (CGO voice-runtime,
+# transport-only) + identity (auth) have no CoPresent refs and stay engine-built.
 readonly ENGINE_NODE_TYPES=(identity cognition voice agent planner workbench)
+# Subset of ENGINE_NODE_TYPES that must be carrier-built (CoPresent DSL).
+readonly CARRIER_NODE_TYPES=(cognition agent planner workbench)
+# Carrier build context = the workspace parent (memql + memql-bff-copresent
+# siblings, per the `replace ../memql` directive) + its Dockerfile.
+readonly WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+readonly CARRIER_DOCKERFILE="$WORKSPACE_ROOT/memql-bff-copresent/Dockerfile"
 
 # Every Deployment this script rolls -- the rollback target set when the
 # post-deploy smoke gate fails (engine nodes + the bff carrier + the SPA).
@@ -329,17 +341,30 @@ function ensure_tag_immutable() {
     fi
 }
 
+# is_carrier_node -- true when this node-type must be carrier-built (#1053).
+function is_carrier_node() {
+    local nt="$1" c
+    for c in "${CARRIER_NODE_TYPES[@]}"; do [ "$c" = "$nt" ] && return 0; done
+    return 1
+}
+
 function build_one() {
     local nt="$1" tag="$2"
     ensure_tag_immutable "$nt" "$tag"
     local image="memql-${nt}:${tag}"
+    # Carrier nodes (CoPresent DSL) build from the carrier Dockerfile with the
+    # workspace parent as context; engine nodes (voice/identity) from this repo.
+    local dockerfile="$REPO_ROOT/Dockerfile" context="$REPO_ROOT" kind="engine"
+    if is_carrier_node "$nt"; then
+        dockerfile="$CARRIER_DOCKERFILE"; context="$WORKSPACE_ROOT"; kind="carrier"
+    fi
     local -a args=(acr build --registry "$ACR_NAME" --image "$image"
-        --platform linux/amd64 --build-arg "BUILD_TAGS=${nt}" -f "$REPO_ROOT/Dockerfile")
+        --platform linux/amd64 --build-arg "BUILD_TAGS=${nt}" -f "$dockerfile")
     if [ "$nt" = "voice" ]; then
         args+=(--build-arg "CGO_ENABLED=1" --target voice-runtime)
     fi
-    info "building ${ACR_LOGIN_SERVER}/${image} (BUILD_TAGS=${nt})..."
-    run_or_plan az "${args[@]}" "$REPO_ROOT"
+    info "building ${ACR_LOGIN_SERVER}/${image} (BUILD_TAGS=${nt}, ${kind} build)..."
+    run_or_plan az "${args[@]}" "$context"
 }
 
 function build_and_push() {
