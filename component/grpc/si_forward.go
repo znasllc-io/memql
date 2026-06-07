@@ -288,9 +288,15 @@ func (r *SIForwardRouter) selectPeer(targetType node.NodeType) (*node.PeerEntry,
 	if len(peers) == 0 {
 		return nil, fmt.Errorf("no %s node available", targetType)
 	}
+	// Only peers with a LIVE outbound connection are dispatchable. Stale peers
+	// -- dead pods left in the table after a rollout -- keep a HEALTHY status
+	// from their last DB heartbeat but have Connection==nil; selecting one
+	// fails downstream with "no active connection". Require Connection!=nil so
+	// routing is robust against stale-peer accumulation; prefer HEALTHY, fall
+	// back to DEGRADED/UNSPECIFIED among the connected set (#1056).
 	var degraded *node.PeerEntry
 	for _, p := range peers {
-		if p.Info == nil {
+		if p == nil || p.Info == nil || p.Connection == nil {
 			continue
 		}
 		switch p.Info.GetHealth() {
@@ -305,7 +311,7 @@ func (r *SIForwardRouter) selectPeer(targetType node.NodeType) (*node.PeerEntry,
 	if degraded != nil {
 		return degraded, nil
 	}
-	return nil, fmt.Errorf("no healthy %s node available", targetType)
+	return nil, fmt.Errorf("no connected %s node available", targetType)
 }
 
 // -----------------------------------------------------------------------------
