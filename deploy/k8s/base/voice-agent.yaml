@@ -1,0 +1,88 @@
+# Go voice-agent -- the assistant's voice+video participant in LiveKit rooms
+# (memql#1049). Runs the `voice-agent` subcommand of the memql-voice image
+# (same image as the voice node). It is an OUTBOUND client: it dials the BFF
+# (MemqlService.Stream, VoiceAgent* contract) and LiveKit (room media), so it
+# exposes no Service/ports.
+#
+# Auto-join (MEMQL_VOICE_AUTOJOIN=true, the default): with no --room it watches
+# LiveKit for active polyphon-<spaceId> rooms and joins one. Single replica for
+# staging; concurrent multi-room dispatch is a follow-up (see dispatcher_voice.go).
+#
+# Secrets: MEMQL_DEEPGRAM_API_KEY / OPENAI_API_KEY / MEMQL_NODE_BOOTSTRAP_TOKEN
+# come from the genesis envelope (autoload, via memql-secrets). The LiveKit
+# api key/secret come from the ESO-synced livekit-secrets (the same pair the
+# BFF mints tokens with). Auth: VOICE_AGENT_TOKEN empty -> self-bootstrap mints
+# a class="voice_agent" JWT via MEMQL_NODE_BOOTSTRAP_TOKEN + identity verifier.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-agent
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: voice-agent
+    app.kubernetes.io/part-of: memql
+    memql/node-type: voice-agent
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: voice-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: voice-agent
+        app.kubernetes.io/part-of: memql
+        memql/node-type: voice-agent
+    spec:
+      volumes:
+        - name: memql-ca
+          secret:
+            secretName: memql-ca
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: voice-agent
+          image: acrmemql.azurecr.io/memql-voice:0.9.9
+          command: ["voice-agent"]
+          envFrom:
+            # MEMQL_MASTER_KEY + MEMQL_GENESIS_B64 (genesis autoload) +
+            # MEMORY_NODES_DATABASE_DSN (unused here, harmless).
+            - secretRef:
+                name: memql-secrets
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            # LiveKit (internal cluster signaling for the agent; the same
+            # self-chosen key/secret the BFF mints with). Note the agent reads
+            # the non-POLYPHON_-prefixed names.
+            - { name: LIVEKIT_URL, value: "ws://livekit:7880" }
+            - { name: LIVEKIT_API_KEY, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_KEY } } }
+            - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_SECRET } } }
+            # The memql gRPC surface the agent speaks VoiceAgent* on.
+            - { name: MEMQL_GRPC_ADDR, value: "bff:50051" }
+            # Deepgram cascade (STT Nova-3 -> cognition -> TTS Aura-2).
+            - { name: MEMQL_VOICE_EXECUTOR, value: "cascade" }
+            # Auto-join active polyphon rooms (no fixed room).
+            - { name: MEMQL_VOICE_AUTOJOIN, value: "true" }
+            # Voice-only first; avatar wiring (anam/simli) is a follow-up.
+            - { name: MEMQL_AVATAR_VENDOR, value: "none" }
+            # Per-pod instance id for the self-bootstrapped voice_agent JWT.
+            - { name: MEMQL_VOICE_AGENT_INSTANCE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            # Self-bootstrap: VOICE_AGENT_TOKEN empty -> mint via the genesis
+            # MEMQL_NODE_BOOTSTRAP_TOKEN against the identity verifier.
+            - { name: VOICE_AGENT_TOKEN, value: "" }
+            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            # Trust the internal cluster CA when calling https://identity:8085.
+            - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
+            - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
+          volumeMounts:
+            - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 1Gi }

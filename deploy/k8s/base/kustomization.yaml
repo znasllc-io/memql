@@ -43,6 +43,8 @@ resources:
   # Self-hosted LiveKit server + its ESO-synced secret (memql#1043).
   - livekit.yaml
   - externalsecret-livekit.yaml
+  # Go voice-agent -- assistant's voice participant in LiveKit rooms (memql#1049).
+  - voice-agent.yaml
 
 labels:
   - pairs:
