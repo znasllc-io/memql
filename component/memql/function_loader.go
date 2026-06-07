@@ -101,6 +101,21 @@ func extractLeadingCommentBlock(content string) string {
 	return joined
 }
 
+// withRewriteCause augments a legacy-parser failure with the struct-form
+// rewrite error that produced the un-normalised source, when there is
+// one. The legacy parser rejects an un-rewritten struct construct with a
+// generic "unexpected token <keyword>" that hides the real cause (e.g. a
+// retired `insert <Concept> { ... }` named-write form -- memql#1055). The
+// rewrite error names the exact construct and the migration, so callers
+// (and the unifiedFunctionLoader's skip-slice warning) see why the slice
+// failed rather than a misleading token complaint.
+func withRewriteCause(parseErr, rewriteErr error) error {
+	if rewriteErr == nil {
+		return parseErr
+	}
+	return fmt.Errorf("%w (struct-form rewrite failed: %v)", parseErr, rewriteErr)
+}
+
 // tryParseNewFunctionSyntax attempts to parse a function .memql file using the new syntax:
 // @enabled
 // @description("...")
@@ -130,10 +145,17 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// Apply every struct-form rewriter defensively here too -- callers
 	// that don't go through loadFlatFunctionFile (tests, ad-hoc uses)
 	// would otherwise see a raw struct-form shape the legacy parser
-	// doesn't grok. Per-stage errors are swallowed (best-effort
-	// normalisation; the eventual parse failure is the actual signal).
+	// doesn't grok. A per-stage rewrite error leaves `content` as the
+	// un-normalised struct form, which then fails the legacy parser
+	// below with a cryptic "unexpected token <keyword>" -- the rewrite
+	// error is the ACTUAL cause (e.g. a retired `insert <Concept> { ... }`
+	// named-write form, memql#1055). Keep it and attach it to the parse
+	// failure so the real reason surfaces instead of being swallowed.
+	var rewriteErr error
 	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
 		content = rewritten
+	} else {
+		rewriteErr = rerr
 	}
 
 	// Keep the pre-translation source for the declared-usage validator
@@ -173,13 +195,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	lexer := languageParser.NewLexer(content)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
-		return nil, err
+		return nil, withRewriteCause(err, rewriteErr)
 	}
 
 	p := languageParser.NewParser(tokens)
 	ast, err := p.Parse()
 	if err != nil {
-		return nil, err
+		return nil, withRewriteCause(err, rewriteErr)
 	}
 
 	// Check if we got a File with definitions
