@@ -318,6 +318,29 @@ Nodes discover each other via mesh. All nodes share a single
 PostgreSQL + TimescaleDB database. Inter-node communication uses `NodeService` gRPC
 bidirectional stream. Events bridge across nodes with dedup and TTL.
 
+#### Node image source: carrier-built vs engine-built (#1053) -- ENFORCED RULE
+
+A node that executes **CoPresent DSL** (the `agentReply` prompt, copresent
+tools/concepts -- consumed by the agent/cognition/planner integrations) MUST be
+**carrier-built**: compiled from `memql-bff-copresent/Dockerfile` with
+`BUILD_TAGS=<type>` and the workspace parent as build context, so the CoPresent
+DSL subtree is mounted at compile time via `RegisterTree`. The pure-engine
+`memql-<type>` image (this repo's `Dockerfile`) does NOT carry the CoPresent DSL
+and will fail with `unknown prompt template "agentReply"`.
+
+| Node | Build source |
+|------|--------------|
+| **bff, cognition, agent, planner, workbench** | **carrier** (`memql-bff-copresent/Dockerfile` + `BUILD_TAGS=<type>`, CGO=0) |
+| **voice** | engine voice-runtime (CGO; transport/forwarding only, no CoPresent refs) |
+| **identity** | engine (auth service, no CoPresent refs) |
+
+This MUST be identical in every environment -- local cluster
+(`docker-compose.cluster.yml`), staging, prod, and client deploys. The build
+pipeline enforces it: `scripts/deploy/aks-deploy.sh` (`CARRIER_NODE_TYPES`)
+carrier-builds the set; the cluster compose builds the same nodes from the
+carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
+memQL-standalone (no CoPresent) deployment.
+
 **Build tag reference:** [docs/core/build-tags.md](docs/core/build-tags.md)
 **Local cluster:** `make dev-cluster-restart` / `make dev-cluster-restart-purge` (uses docker-compose.cluster.yml).
 **Local single-node:** `docker compose -f docker/docker-compose.full.yml up --build` -- spins up Postgres + bff + voice (so transcription works end-to-end on the basic dev path; previously the full compose had no voice node and `AiTranscribeStreamStart` had nowhere to forward to).
