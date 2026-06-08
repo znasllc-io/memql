@@ -1,0 +1,43 @@
+name: publish-releases
+
+# znasllc-io/memql#1097. When a new release lockfile (releases/<X.Y.Z>.yaml)
+# lands on main, publish the matching GitHub Release so the Releases page never
+# drifts from the lockfiles.
+#
+# This job publishes the **memql** Releases only -- that needs nothing but git
+# history + the default GITHUB_TOKEN (contents: write). The script is
+# idempotent (existing Releases are skipped), so a re-run or a multi-lockfile
+# push is safe.
+#
+# The **component** Releases (visionarys-io/memql-bff-copresent + copresent,
+# deduplicated by image digest) additionally need `az` (ACR build-time, for the
+# commit anchor) and a cross-org token, so they are NOT done here. Run them
+# after a release from the primary checkout (where az is authenticated):
+#
+#     bash scripts/release/publish-releases.sh --repo=components
+#
+# To automate the component half too, add a second job with Azure OIDC
+# (azure/login) + a RELEASE_PUBLISH_TOKEN PAT that can write Releases in the
+# visionarys-io repos, and run the script with --repo=components.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'releases/**'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-memql:
+    name: publish GitHub Releases (memql)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0 # need full history to find each lockfile's introducing commit
+      - name: publish memql Releases (idempotent)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release/publish-releases.sh --repo=memql
