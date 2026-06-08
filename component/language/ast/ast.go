@@ -1509,8 +1509,17 @@ type ProviderDecl struct {
 	IsDefault   bool   // @default flag
 	IsBase      bool   // @base flag
 	Extends     string // @extends("parentName") -- parent provider name
-	Params      map[string]any
-	Auth        map[string]string
+	// Disabled is the @disabled lifecycle flag (engine-side). A
+	// disabled provider is skipped at load -- not registered, no auth
+	// resolution attempted -- and a disabled @base disables every
+	// child that @extends it. @enabled is the explicit-on form and a
+	// no-op default (mirrors functions/builtins/prompts). @disabled
+	// means "not loaded/active right now"; it does NOT mean
+	// deprecated/abandoned/exempt from maintenance -- it is a
+	// reversible on/off switch.
+	Disabled bool
+	Params   map[string]any
+	Auth     map[string]string
 }
 
 func (*ProviderDecl) node() {}

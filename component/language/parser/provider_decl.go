@@ -64,8 +64,16 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			decl.IsBase = true
 		case "extends":
 			decl.Extends = attrStringValue(attr)
+		case ast.AttrEnabled:
+			// @enabled is the explicit-on form -- a no-op default,
+			// kept for symmetry with functions/builtins/prompts.
+		case ast.AttrDisabled:
+			// @disabled skips the provider at load (loader does not
+			// register it or resolve auth); on a @base it propagates
+			// to every @extends child.
+			decl.Disabled = true
 		default:
-			return nil, newParseErrorf(&p.current, "provider %q: unknown annotation @%s -- supported: @base, @default, @description, @extends, @modality, @model, @type", decl.Name, attr.Name)
+			return nil, newParseErrorf(&p.current, "provider %q: unknown annotation @%s -- supported: @base, @default, @description, @disabled, @enabled, @extends, @modality, @model, @type", decl.Name, attr.Name)
 		}
 	}
 
