@@ -105,7 +105,15 @@ var kindFromString = map[string]languageParser.FunctionType{
 // queries into a real comparison) can't determine which concept the
 // function targets.
 func ExtractFunctionSlices(source string) []FunctionSlice {
-	matches := functionDeclHeader.FindAllStringSubmatchIndex(source, -1)
+	// Detect headers on a comment-blanked view so a `func (Receiver)
+	// ...` or `<kind> <name> {` token that only appears inside a `//`
+	// or `/* */` comment is never extracted as a standalone construct
+	// (memql#1074). BlankComments preserves byte offsets, so every
+	// capture-group index below maps 1:1 onto the original `source`,
+	// which is what the keyword/name/body slices read from -- keeping
+	// authored comments in the emitted slice text.
+	scan := languageParser.BlankComments(source)
+	matches := functionDeclHeader.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -126,7 +134,7 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 		// Without this guard those get mis-extracted as bogus slices that
 		// then fail to parse (issue #212). `use ...{ ... }` preambles have
 		// balanced braces so they net to depth 0 and don't shift it.
-		if braceDepthBefore(source, headerStart) != 0 {
+		if braceDepthBefore(scan, headerStart) != 0 {
 			continue
 		}
 
@@ -156,18 +164,21 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 		// opening `{` is at headerEnd-1. For procedural the body
 		// opens after the (...) signature -- find the first `{` at
 		// or after headerEnd.
+		// Brace location + matching runs on the comment-blanked `scan`
+		// (offset-identical to `source`) so braces inside a comment in
+		// the body don't perturb the depth count (memql#1074).
 		openIdx := -1
 		if kindStr == "query" || kindStr == "mutation" || kindStr == "logic" {
 			openIdx = headerEnd - 1
 		} else {
 			// Procedural: scan from headerEnd for the first `{`.
-			rel := strings.IndexByte(source[headerEnd:], '{')
+			rel := strings.IndexByte(scan[headerEnd:], '{')
 			if rel < 0 {
 				continue
 			}
 			openIdx = headerEnd + rel
 		}
-		closeIdx := findMatchingCloseBraceRune(source, openIdx)
+		closeIdx := findMatchingCloseBraceRune(scan, openIdx)
 		if closeIdx < 0 {
 			continue
 		}
