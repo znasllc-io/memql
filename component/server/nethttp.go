@@ -666,6 +666,24 @@ func ReadyzPaths() []string {
 	return paths
 }
 
+// LivezPaths returns the public path(s) for the pure process-liveness probe
+// (#1117), honoring SERVER_PUBLIC_PATH the same way HealthzPaths does. The
+// k8s livenessProbe targets /livez so a transient dependency/mesh blip never
+// liveness-kills an otherwise-alive pod (readiness stays on /healthz).
+func LivezPaths() []string {
+	base := sanitizeBaseURLFromEnv()
+	paths := []string{"/livez"}
+
+	if base != "" {
+		livePath := base + "/livez"
+		if livePath != "/livez" {
+			paths = append(paths, livePath)
+		}
+	}
+
+	return paths
+}
+
 // AuthPaths returns paths for the identity-service auth endpoints
 // proxied through this binary. They're listed as public so the
 // verifier's HTTP middleware doesn't gate the unauthenticated
@@ -714,6 +732,7 @@ func JWKSPaths() []string {
 func PublicPaths() []string {
 	paths := HealthzPaths()
 	paths = append(paths, ReadyzPaths()...) // schema-assertion readiness probe (#657)
+	paths = append(paths, LivezPaths()...)  // pure process-liveness probe (#1117)
 	paths = append(paths, JWKSPaths()...)  // public keyset (cross-node verifier fetch)
 	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
 	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)

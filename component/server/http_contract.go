@@ -222,6 +222,10 @@ func HandlerWithOptions(handler ServerInterface, options StdHTTPServerOptions) h
 	// /readyz asserts critical schema presence (#657); plain handler, outside
 	// the OpenAPI strict surface, public + unauthenticated (see PublicPaths).
 	registerRoute(baseRouter, http.MethodGet, joinPath(basePath, "/readyz"), ReadyzHandler())
+	// /livez is a pure process-liveness probe (#1117): 200 while the process
+	// can serve HTTP, independent of dependency health AND draining, so a
+	// transient mesh/dep blip never liveness-kills an otherwise-alive pod.
+	registerRoute(baseRouter, http.MethodGet, joinPath(basePath, "/livez"), LivezHandler())
 	registerAutomationTriggerRoute(baseRouter, basePath, handler.postAutomationTrigger(basePath))
 	registerRoute(baseRouter, http.MethodPost, joinPath(basePath, "/automations/resume"), handler.postAutomationResume())
 
