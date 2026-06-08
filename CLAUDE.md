@@ -1348,6 +1348,39 @@ provider openai {
 The legacy `func (Provider) name { ... }` form is retired; the
 parser rejects it with a migration hint.
 
+**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept
+the same lifecycle flags as functions / builtins / prompts / specs /
+seeds. `@enabled` is the explicit-on default (a no-op). `@disabled`
+skips the provider at load -- it is **not registered and no auth
+resolution is attempted**, so it emits zero "registered as unavailable"
+warnings while staying in the tree for a future re-enable. `@disabled`
+on a `@base` **propagates**: every child that `@extends` it is skipped
+too. Use it to turn a keyless vendor lane off cleanly (e.g. mark the
+`google` / `groq` / `mistral` `@base` `@disabled` until their
+`MEMQL_SI_*_API_KEY` is seeded). Dependents degrade gracefully -- a
+policy whose `@primary` is disabled routes via its `@fallback`; a prompt
+whose `@defaultProvider` is disabled falls back to the default.
+
+```memql
+@disabled
+@base
+@type("Google")
+provider google {
+  auth { apiKey env("MEMQL_SI_GOOGLE_API_KEY") }
+}
+```
+
+> **Semantics of `@disabled` (shared across every construct that takes
+> it).** `@disabled` means the construct is **not loaded/active at
+> runtime right now**. It does NOT mean the construct is deprecated,
+> abandoned, exempt from updates / maintenance / refactors /
+> conformance, or that it will not be used in the future. It is a
+> reversible on/off switch; disabled constructs are still maintained and
+> may be re-enabled at any time. ("Deprecated / abandoned" is a separate
+> axis carried by `@deprecated`.) The canonical statement lives in
+> `component/language/ast/ast.go` at the `AttrEnabled` / `AttrDisabled`
+> const definition.
+
 ### Shapes
 Reusable data projections — declared in struct form. Each shape
 declares its **kind** (where its fields come from) via `@row` and/or

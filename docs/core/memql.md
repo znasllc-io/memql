@@ -1455,17 +1455,44 @@ With `shape()`, the response contains only `result.data`—the bundle is omitted
 
 MemQL's SI integration is intentionally scoped so that language models can only influence projected output—filters, joins, sorts, and grouping remain deterministic.
 
-- **Providers** live in `providers/v1/**/*.memql`. Each `.memql` file defines a single provider using the `func (Provider)` receiver. Every provider specifies a name (the function name), `@type` attribute, `@model` attribute, `auth` block, and optional `params` block. The first provider with `@default` becomes the fallback (unless `MEMQL_DEFAULT_PROVIDER` is set). Example:
+- **Providers** live in `dsl/providers/providers.memql`. Each is declared in **struct form** (`provider NAME { ... }`); the legacy `func (Provider)` receiver form is retired and rejected at parse time. Every provider specifies a name, `@type` attribute, `@model` attribute, `auth` block, and optional `params` block. The first provider with `@default` becomes the fallback (unless `MEMQL_DEFAULT_PROVIDER` is set). Example:
 
   ```memql
   @extends("openai")
   @model("gpt-5.4-mini")
-  func (Provider) chat54Mini {
+  provider chat54Mini {
     params {
       maxCompletionTokens  16384
     }
   }
   ```
+
+  **Lifecycle (`@enabled` / `@disabled`).** Providers accept the lifecycle
+  flags. `@enabled` is the explicit-on default (no-op); `@disabled` skips
+  the provider at load -- **not registered, no auth resolution** -- so it
+  emits zero "registered as unavailable" warnings while staying in the
+  tree for a future re-enable. `@disabled` on a `@base` **propagates** to
+  every child that `@extends` it, turning the whole vendor lane off:
+
+  ```memql
+  @disabled
+  @base
+  @type("Google")
+  provider google {
+    auth { apiKey env("MEMQL_SI_GOOGLE_API_KEY") }
+  }
+  ```
+
+  Dependents degrade gracefully: a policy whose `@primary` is disabled
+  routes via its `@fallback`; a prompt whose `@defaultProvider` is
+  disabled falls back to the default structured provider.
+
+  > **Semantics.** `@disabled` means the construct is **not loaded/active
+  > at runtime right now**. It does NOT mean deprecated, abandoned, or
+  > exempt from maintenance / refactors / conformance -- it is a reversible
+  > on/off switch (a separate axis from `@deprecated`). This applies to
+  > every construct that takes the flag (functions / builtins / prompts /
+  > specs / seeds / providers).
   
   **Provider types** (registered in `component/memql/si_providers.go`):
   - `OpenAI` / `OpenAIChat` — chat completions (non-streaming)

@@ -721,7 +721,23 @@ func (a *Attribute) UseTargets() []string {
 
 // Common attribute names (used in @name syntax)
 const (
-	// Lifecycle attributes
+	// Lifecycle attributes.
+	//
+	// CANONICAL SEMANTICS of @enabled / @disabled (applies to every
+	// construct that accepts them -- functions/builtins/prompts/specs/
+	// seeds/providers; see the per-decl "lifecycle (engine-side flags)"
+	// notes on BuiltinDecl / PromptDecl / ProviderDecl):
+	//
+	//	@disabled means the construct is NOT loaded/active at runtime
+	//	right now. It does NOT mean the construct is deprecated,
+	//	abandoned, exempt from updates / maintenance / refactors /
+	//	conformance, or that it will not be used in the future. It is a
+	//	reversible on/off switch; disabled constructs are still
+	//	maintained and may be re-enabled at any time. @enabled is the
+	//	explicit-on form -- the default, kept for symmetry.
+	//
+	// "Deprecated / abandoned" is a separate axis carried by
+	// @deprecated (AttrDeprecated), not @disabled.
 	AttrEnabled    = "enabled"
 	AttrDisabled   = "disabled"
 	AttrDeprecated = "deprecated"
@@ -1468,6 +1484,19 @@ type RelationshipDecl struct {
 // this typed node so the per-construct loader
 // (component/memql.LoadUnifiedProviders) can consume it without
 // running its own hand-rolled parser.
+//
+// Annotation surface (validated by the parser's allowed-annotation
+// switch):
+//
+//	@enabled / @disabled              lifecycle (engine-side flags) -- see
+//	                                  AttrEnabled/AttrDisabled for the
+//	                                  canonical semantics; @disabled on a
+//	                                  @base propagates to its @extends children
+//	@base                             vendor-level metadata (no @model)
+//	@type("OpenAI") / @model("...")   provider type + concrete model
+//	@modality("text"|"tts"|"stt")     defaults to text
+//	@default                          first @default wins the runtime default
+//	@extends("parent") @description   inheritance + docs
 //
 // Authoring shape:
 //
