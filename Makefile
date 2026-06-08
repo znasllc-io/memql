@@ -452,7 +452,7 @@ setup-tls:
 # Docker image targets
 # ---------------------------------------------------------------------------
 
-.PHONY: docker docker-bff docker-voice docker-cognition docker-agent docker-planner release
+.PHONY: docker docker-bff docker-voice docker-cognition docker-agent docker-planner release publish-releases
 
 ## Cut an immutable release image memql:<VERSION> from VERSION + the short
 ## git SHA (znasllc-io/memql#493, epic #491). memQL is the upstream module;
@@ -472,6 +472,23 @@ release:
 		$${ACR:+--acr=$$ACR} \
 		$${PUSH:+--push} \
 		$${ALLOW_OVERWRITE:+--allow-overwrite} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Publish GitHub Releases for stack versions from the release lockfiles
+## (znasllc-io/memql#1097). Idempotent -- existing Releases are skipped.
+## The memql Releases are also published automatically by CI on push
+## (.github/workflows/publish-releases.yml); the component Releases
+## (bff-copresent, copresent) need `az` + a cross-org token, so run this
+## from the primary checkout after a release.
+##   make publish-releases                       # memql + components (all)
+##   make publish-releases REPO=memql            # memql only
+##   make publish-releases REPO=components        # bff-copresent + copresent
+##   make publish-releases DRY_RUN=1              # plan only
+publish-releases:
+	@bash scripts/release/publish-releases.sh \
+		$${REPO:+--repo=$$REPO} \
+		$${VERSION:+--version=$$VERSION} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
