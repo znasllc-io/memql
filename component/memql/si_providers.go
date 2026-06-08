@@ -70,6 +70,7 @@ type ProviderConfig struct {
 	Description string            `json:"description,omitempty"`
 	Base        bool              `json:"-"` // true for base provider definitions (not registered as providers)
 	Extends     string            `json:"-"` // name of base provider to inherit auth/type from
+	Disabled    bool              `json:"-"` // @disabled lifecycle flag: skipped at load (not registered, no auth resolution); on a @base it propagates to @extends children
 }
 
 // ContextWindow returns the context window size from provider params,

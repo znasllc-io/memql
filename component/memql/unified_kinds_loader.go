@@ -115,11 +115,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	// land at lines 27..) because the resolver runs before the base
 	// is in the registry.
 	files := baseloader.ReadAll(logger)
-	type parsedProvider struct {
-		cfg    *ProviderConfig
-		origin string
-	}
-	all := make([]parsedProvider, 0, 64)
+	all := make([]parsedProviderConfig, 0, 64)
 	for _, raw := range files {
 		for _, slice := range extractAdapter(raw.Content, "provider") {
 			origin := raw.Path + ":" + slice.Name
@@ -142,14 +138,71 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 			if cfg == nil {
 				continue
 			}
-			all = append(all, parsedProvider{cfg: cfg, origin: origin})
+			all = append(all, parsedProviderConfig{cfg: cfg, origin: origin})
+		}
+	}
+
+	total := registerParsedProviders(logger, registry, all)
+	if logger != nil {
+		logger.Info("memql.unifiedProviderLoader: registered",
+			"keyword", "provider", "count", total)
+	}
+	return total, nil
+}
+
+// parsedProviderConfig pairs a converted *ProviderConfig with its
+// source origin (file:name) for diagnostics. registerParsedProviders
+// consumes a slice of these.
+type parsedProviderConfig struct {
+	cfg    *ProviderConfig
+	origin string
+}
+
+// registerParsedProviders runs the two-pass registration that turns a
+// slice of parsed provider configs into registry entries, and returns
+// the count actually registered. Split out of LoadUnifiedProviders so
+// the @disabled skip + @base->child propagation rules are unit-testable
+// without touching the on-disk DSL tree.
+//
+// Pass 1 registers every enabled @base (Available=false on purpose --
+// bases are @extends targets, not callable). Pass 2 walks the children,
+// resolves @extends inheritance, instantiates the SDK client, and
+// registers each.
+//
+// @disabled handling (provider-lifecycle epic #1078):
+//   - A @disabled @base is never registered, and every child that
+//     @extends it is skipped (propagation) -- so a keyless vendor lane
+//     turns off cleanly with no "registered as unavailable" warnings.
+//   - An individually @disabled child is skipped on its own.
+//
+// Skipped providers emit no auth resolution and no warning -- only a
+// debug line -- which is the whole point: they stay in the tree for a
+// future re-enable without polluting boot logs.
+func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig) int {
+	// Collect the @disabled @base names up front so pass 2 can
+	// propagate the disable to every child that @extends one. A
+	// disabled base is never registered, so a child extending it
+	// would otherwise boot with Type="" / no auth and warn -- the
+	// explicit set lets us skip the child cleanly instead.
+	disabledBases := make(map[string]bool)
+	for _, p := range all {
+		if p.cfg.Base && p.cfg.Disabled {
+			disabledBases[strings.TrimSpace(p.cfg.Name)] = true
 		}
 	}
 
 	// Pass 1: register bases. Available=false on purpose; their only
-	// role is to be the target of @extends inheritance.
+	// role is to be the target of @extends inheritance. A @disabled
+	// base is skipped entirely (not registered) -- its lane is off.
 	for _, p := range all {
 		if !p.cfg.Base {
+			continue
+		}
+		if p.cfg.Disabled {
+			if logger != nil {
+				logger.Debug("memql.unifiedProviderLoader: skipping @disabled base provider",
+					"provider", p.cfg.Name)
+			}
 			continue
 		}
 		registry.setEntry(&ProviderConfigEntry{Config: *p.cfg})
@@ -159,7 +212,27 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 	total := 0
 	for _, p := range all {
 		if p.cfg.Base {
-			total++ // bases count toward "registered" even though they're not callable
+			if !p.cfg.Disabled {
+				total++ // enabled bases count toward "registered" even though they're not callable
+			}
+			continue
+		}
+		// Skip a disabled provider: an individually @disabled child,
+		// or one whose @extends base is @disabled (propagation). No
+		// register, no auth resolution -> zero "registered as
+		// unavailable" warnings for the disabled lane.
+		if p.cfg.Disabled {
+			if logger != nil {
+				logger.Debug("memql.unifiedProviderLoader: skipping @disabled provider",
+					"provider", p.cfg.Name)
+			}
+			continue
+		}
+		if base := strings.TrimSpace(p.cfg.Extends); base != "" && disabledBases[base] {
+			if logger != nil {
+				logger.Debug("memql.unifiedProviderLoader: skipping provider; its @extends base is @disabled",
+					"provider", p.cfg.Name, "base", base)
+			}
 			continue
 		}
 		entry := &ProviderConfigEntry{Config: *p.cfg}
@@ -191,11 +264,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry) (int,
 		total++
 	}
 
-	if logger != nil {
-		logger.Info("memql.unifiedProviderLoader: registered",
-			"keyword", "provider", "count", total)
-	}
-	return total, nil
+	return total
 }
 
 // LoadUnifiedTools walks the new tree, parses every `tool NAME
@@ -612,6 +681,7 @@ func providerDeclToProviderConfig(decl *ast.ProviderDecl) (*ProviderConfig, erro
 		Description: decl.Description,
 		Base:        decl.IsBase,
 		Extends:     decl.Extends,
+		Disabled:    decl.Disabled,
 	}, nil
 }
 
