@@ -320,6 +320,29 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
 	exec := NewExecution(automation.Name, triggeredBy)
+
+	// Global execution budget (memql#1142). The storm WARN above is a
+	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
+	// (total + per-automation executions/window) hard-skips the execution
+	// once a storm blows past it, so a misfiring automation can't re-fire
+	// hundreds of times a minute and drive unbounded plan/LLM churn. Checked
+	// here (after the concurrency slot, before any step work) so a skipped
+	// run is cheap; the deferred concurrency-slot release still fires.
+	if allowed, reason := sharedAutomationBudget.admit(automation.Name); !allowed {
+		if reason != "" && e.logger != nil {
+			e.logger.Error("automation execution budget exceeded -- SKIPPING executions to stop a storm (memql#1142)",
+				"component", ComponentName,
+				"automation", automation.Name,
+				"dimension", reason,
+			)
+		}
+		exec.Status = "skipped"
+		exec.Error = "automation execution budget exceeded (memql#1142)"
+		exec.CompletedAt = time.Now()
+		exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+		return exec, nil
+	}
+
 	evaluator := NewEvaluator()
 
 	// Wire variable resolver for $var.X expressions
