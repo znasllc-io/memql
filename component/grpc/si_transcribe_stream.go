@@ -30,6 +30,11 @@ type transcribeStream struct {
 	// called from Chunk handlers; Finalize from End; Close from cancel.
 	sttSession stt.StreamingSession
 
+	// filter drops hallucinated / low-confidence / junk transcripts before
+	// they're emitted as deltas. Provider-agnostic: it runs at the
+	// pumpDeltas chokepoint so it covers whichever STT provider is active.
+	filter stt.TranscriptFilter
+
 	// send captures the outbound wire at Start time. On the
 	// direct-client path this is streamSession.sendServerMessage wrapped
 	// in a function that preserves correlate_to; on the forwarded path
@@ -92,11 +97,19 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 			"streaming transcription already open for request_id")
 	}
 
+	// Hard-pin the language from the single server-side knob
+	// (MEMQL_STT_LANGUAGE, default "en"). This intentionally OVERRIDES any
+	// client-supplied LanguageHint: an unpinned / locale-driven / "multi"
+	// language is the classic cause of the wrong-language + short-word
+	// hallucination failure mode (gpt-4o-transcribe/whisper and Deepgram
+	// Nova-3 auto-detect and drift on noisy/short audio). One knob drives
+	// BOTH providers -- the Deepgram stream URL (en-US) and the OpenAI
+	// Realtime session config (en).
 	sttCfg := stt.StreamConfig{
 		Format:       pickNonEmpty(msg.GetFormat(), "pcm16"),
 		SampleRate:   pickPositiveInt(int(msg.GetSampleRate()), 16000),
 		Channels:     pickPositiveInt(int(msg.GetChannels()), 1),
-		LanguageHint: msg.GetLanguageHint(),
+		LanguageHint: stt.ResolveLanguage(),
 	}
 
 	// Use a long-lived context so the STT provider's goroutines outlive
@@ -118,6 +131,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 		provider:   s.service.sttProvider.Name(),
 		startTime:  time.Now(),
 		sttSession: sttSess,
+		filter:     stt.NewTranscriptFilter(),
 		send: func(m *memqlv1.MemqlServerMessage) error {
 			return s.stream.Send(m)
 		},
@@ -328,6 +342,15 @@ func (ts *transcribeStream) pumpDeltas(logger interface {
 	for result := range ts.sttSession.Receive() {
 		text := strings.TrimSpace(result.Text)
 		if text == "" {
+			continue
+		}
+
+		// Hallucination / junk filter. Drops empty (already handled
+		// above), low-confidence FINALs, and no-speech-gated silence
+		// hallucinations ("thank you", "okay" from noise) before they
+		// reach the client. Interim deltas pass through so the UI still
+		// renders word-by-word; the gate applies to committed finals.
+		if !ts.filter.Keep(text, result.IsFinal, result.Confidence) {
 			continue
 		}
 

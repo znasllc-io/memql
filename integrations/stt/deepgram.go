@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/integrations/deepgram"
@@ -46,13 +47,12 @@ func (p *DeepgramProvider) StartStream(ctx context.Context, config StreamConfig)
 	if asrCfg.SampleRate == 0 {
 		asrCfg.SampleRate = 16000
 	}
-	// Deepgram accepts BCP-47 tags (en-US, es-MX, ...). The polyphon
-	// default of "en-US" matches what the Bridge Agent passes; the
-	// empty-language fall-through keeps the default sane when the
-	// gRPC stream caller doesn't specify one.
-	if asrCfg.Language == "" {
-		asrCfg.Language = "en-US"
-	}
+	// Deepgram accepts BCP-47 tags (en-US, es-MX, ...). The single
+	// MEMQL_STT_LANGUAGE knob carries the bare ISO-639-1 form ("en") so
+	// one setting drives both providers; expand it to Deepgram's
+	// region-qualified default here. The empty fall-through keeps the
+	// default sane when no language is pinned.
+	asrCfg.Language = deepgramLanguage(asrCfg.Language)
 
 	asrStream, err := p.inner.StartStream(ctx, asrCfg)
 	if err != nil {
@@ -60,4 +60,20 @@ func (p *DeepgramProvider) StartStream(ctx context.Context, config StreamConfig)
 	}
 
 	return newPolyphonASRSession(asrStream, "deepgram", p.logger), nil
+}
+
+// deepgramLanguage maps the shared MEMQL_STT_LANGUAGE knob to the BCP-47
+// tag Deepgram expects. Bare "en" is expanded to "en-US" (Deepgram's
+// English default); an already-region-qualified tag (en-GB, es-MX) is
+// passed through; an empty value defaults to "en-US".
+func deepgramLanguage(lang string) string {
+	lang = strings.TrimSpace(lang)
+	switch lang {
+	case "":
+		return "en-US"
+	case "en":
+		return "en-US"
+	default:
+		return lang
+	}
 }

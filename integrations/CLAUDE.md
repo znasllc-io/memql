@@ -246,6 +246,8 @@ Key files:
 
 **Environment Variables:**
 - `MEMQL_STT_PROVIDER` -- `deepgram` (default when key present), `openai-realtime`, or `openai-whisper`
+- `MEMQL_STT_LANGUAGE` -- hard-pinned streaming transcription language (default `en`). One knob drives both providers (expanded to `en-US` for Deepgram, `en` for OpenAI Realtime); overrides the client `language_hint`. Prevents wrong/mixed-language drift + short-word hallucination on noisy/short audio.
+- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Drops noise/silence hallucination finals on Deepgram (real confidence) and gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/si_transcribe_stream.go`.
 - `MEMQL_DEEPGRAM_API_KEY` -- required for the Deepgram path
 - `MEMQL_WHISPER_MODEL` -- OpenAI model name; defaults to `whisper-1`
 

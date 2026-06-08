@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/polyphon"
 	openaivoice "github.com/znasllc-io/memql/integrations/openai"
@@ -48,11 +49,11 @@ func (p *OpenAIRealtimeProvider) StartStream(ctx context.Context, config StreamC
 	if asrCfg.SampleRate == 0 {
 		asrCfg.SampleRate = 16000
 	}
-	if asrCfg.Language == "" {
-		// OpenAI Realtime expects ISO-639-1 ("en"); "en-US" works too but
-		// the shorter form matches what the Polyphon default uses.
-		asrCfg.Language = "en"
-	}
+	// OpenAI Realtime / gpt-4o-transcribe / whisper want a bare ISO-639-1
+	// code ("en"). The shared MEMQL_STT_LANGUAGE knob may carry a
+	// region-qualified tag ("en-US") -- strip the region so the pinned
+	// language lands in input_audio_transcription.language correctly.
+	asrCfg.Language = openaiLanguage(asrCfg.Language)
 
 	asrStream, err := p.inner.StartStream(ctx, asrCfg)
 	if err != nil {
@@ -60,4 +61,19 @@ func (p *OpenAIRealtimeProvider) StartStream(ctx context.Context, config StreamC
 	}
 
 	return newPolyphonASRSession(asrStream, "openai-realtime", p.logger), nil
+}
+
+// openaiLanguage maps the shared MEMQL_STT_LANGUAGE knob to the bare
+// ISO-639-1 code OpenAI Realtime expects. A region-qualified tag
+// ("en-US", "es-MX") is reduced to its primary subtag ("en", "es"); an
+// empty value defaults to "en".
+func openaiLanguage(lang string) string {
+	lang = strings.TrimSpace(lang)
+	if lang == "" {
+		return "en"
+	}
+	if i := strings.IndexByte(lang, '-'); i > 0 {
+		return lang[:i]
+	}
+	return lang
 }
