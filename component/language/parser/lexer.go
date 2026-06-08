@@ -556,14 +556,21 @@ func (l *Lexer) scanIdentifier(start, startLine, startColumn int) (Token, error)
 
 	for !l.eof() {
 		ch := l.peek()
-		// Handle colon specially - only include if followed by alphanumeric (for concept names like v1:crm:lead)
+		// Handle colon specially - include only when the NEXT char starts a new
+		// identifier segment, i.e. a LETTER (concept names like v1:crm:lead).
+		// A ':' followed by a DIGIT is an object-key separator before a numeric
+		// value -- e.g. the hand-built literal `{tokenBudget:300000}` -- and was
+		// previously mis-lexed as a single valueless key `tokenBudget:300000`,
+		// failing the parser at `}` (#1118). Concept-id segments in DSL source
+		// always start with a letter (a node id's UUID shortId carries hyphens
+		// that already terminate the scan), so this never splits a real concept id.
 		if ch == ':' {
-			if l.hasNext() && (unicode.IsLetter(l.peekNext()) || unicode.IsDigit(l.peekNext())) {
+			if l.hasNext() && unicode.IsLetter(l.peekNext()) {
 				builder.WriteRune(ch)
 				l.advance()
 				continue
 			}
-			// Colon followed by non-alphanumeric is a separator, stop here
+			// Colon followed by a non-letter is a separator, stop here.
 			break
 		}
 		// Handle dot specially - only include if followed by an alnum/`_` (for
