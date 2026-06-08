@@ -153,6 +153,54 @@ func TestTrainSpecialistDispatcher_RunsTrainerAndCompletes(t *testing.T) {
 	}
 }
 
+// TestTrainSpecialistDispatcher_ConcurrentCreatedUpdatedDispatchesOnce
+// hammers the created + updated handlers concurrently for the SAME plan
+// from many goroutines and asserts the Trainer is dispatched exactly
+// once. This locks in the #1084 fix: the claim is an atomic, once-ever
+// check-and-set, so no interleaving of racing events can produce a
+// second trainerAgent invocation.
+func TestTrainSpecialistDispatcher_ConcurrentCreatedUpdatedDispatchesOnce(t *testing.T) {
+	eng := &fakeEngine{
+		toolResult: "wrote 5 chunks",
+		execResponder: func(q string) (any, error) {
+			if strings.Contains(q, "queryPlanById") {
+				return trainPlanRow("plan-race", "initial", "physics_qm"), nil
+			}
+			return nil, nil
+		},
+	}
+	d := NewTrainSpecialistDispatcher(eng, nil)
+
+	ev := events.Event{Payload: map[string]any{
+		"id": "plan-race",
+		"payload": map[string]any{
+			"kind":   "trainSpecialist",
+			"status": "planning",
+		},
+	}}
+
+	const fanout = 32
+	var wg sync.WaitGroup
+	wg.Add(fanout * 2)
+	for i := 0; i < fanout; i++ {
+		go func() { defer wg.Done(); d.HandlePlanCreated(ev) }()
+		go func() { defer wg.Done(); d.HandlePlanUpdated(ev) }()
+	}
+	wg.Wait()
+
+	waitFor(t, func() bool {
+		_, _, tool := eng.snapshot()
+		return countContains(tool, "trainerAgent") >= 1
+	})
+	// Give any erroneous second run a beat to surface.
+	time.Sleep(50 * time.Millisecond)
+
+	_, _, tool := eng.snapshot()
+	if got := countContains(tool, "trainerAgent"); got != 1 {
+		t.Fatalf("trainerAgent invoked %d times under concurrent created/updated; want exactly 1", got)
+	}
+}
+
 // TestTrainSpecialistDispatcher_RefreshResetsStale verifies mode=refresh
 // loads the existing corpus + resets the stale state on completion.
 func TestTrainSpecialistDispatcher_RefreshResetsStale(t *testing.T) {
