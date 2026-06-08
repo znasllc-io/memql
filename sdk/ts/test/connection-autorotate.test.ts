@@ -149,7 +149,9 @@ async function replyTo(
   build: (messageId: string) => ServerMessage,
   sinceIndex = 0,
 ): Promise<number> {
-  for (let i = 0; i < 200; i++) {
+  // Poll generously (~3s, bounded by the test's 8s timeout) so the auto-rotation
+  // timer + async rotateAuth round-trip is reliably observed even under slow CI.
+  for (let i = 0; i < 3000; i++) {
     for (let j = sinceIndex; j < socket.outbound.length; j++) {
       const msg = JSON.parse(socket.outbound[j]!) as Frame;
       if (predicate(msg)) {
