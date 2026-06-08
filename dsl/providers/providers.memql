@@ -262,6 +262,12 @@ provider geminiPro {
   }
 }
 
+// @disabled: no MEMQL_SI_GOOGLE_API_KEY is seeded, so this whole vendor
+// lane (geminiFlash / geminiPro / streamGemini*) is turned off at load
+// to avoid "registered as unavailable" warnings. Definitions are kept;
+// re-enable by seeding the key (already in the secrets/genesis manifest
+// per #1069) and removing @disabled. See provider-lifecycle epic #1078.
+@disabled
 @base
 @type("Google")
 provider google {
@@ -271,6 +277,11 @@ provider google {
   }
 }
 
+// @disabled: no MEMQL_SI_GROQ_API_KEY is seeded, so this whole vendor
+// lane (groqLlama70B / streamGroqLlama70B) is turned off at load to
+// avoid "registered as unavailable" warnings. Re-enable by seeding the
+// key and removing @disabled. See provider-lifecycle epic #1078.
+@disabled
 @base
 @type("Groq")
 provider groq {
@@ -323,6 +334,12 @@ provider image1Mini {
   }
 }
 
+// @disabled: no MEMQL_SI_MISTRAL_API_KEY is seeded, so this whole vendor
+// lane (codestral / mistralLarge / streamCodestral / streamMistralLarge)
+// is turned off at load to avoid "registered as unavailable" warnings.
+// Re-enable by seeding the key and removing @disabled. See provider-
+// lifecycle epic #1078.
+@disabled
 @base
 @type("Mistral")
 provider mistral {
