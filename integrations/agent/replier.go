@@ -678,6 +678,12 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		AgentId:     msg.AgentId,
 		OwnerUserId: resolvedOwner,
 		SpaceId:     msg.SpaceId,
+		// memql#1133: a produceArtifact executor turn (deliverable_surface=
+		// workbench) is already running inside a kind=produceArtifact plan; the
+		// tool loop REFUSES a produceArtifact re-delegation on this turn so the
+		// plan-level runaway can't form. The same hint that scopes canvasPublish
+		// out (memql#950) is the authoritative "I am the executor" marker.
+		IsProduceArtifactExecution: IsProduceArtifactExecutionTurn(msg.Hints),
 	}
 	// On a post-approval execution turn the planner forwards
 	// hints["plan_id"] alongside hints["trigger"]="plan_approved".

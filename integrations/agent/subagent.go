@@ -159,6 +159,38 @@ func ScopeToolsForDeliverableSurface(hints map[string]string, toolNames []string
 	return out
 }
 
+// produceArtifactToolName is the delegation tool the Assistant calls to mint a
+// new produceArtifact plan (integrations/agents/integration.go,
+// produceArtifactKind). A produceArtifact EXECUTOR turn must never call it again
+// (that re-delegates and produces nothing -- memql#1133).
+const produceArtifactToolName = "produceArtifact"
+
+// IsProduceArtifactExecutionTurn reports whether THIS turn is itself the
+// produceArtifact deliverable-execution turn -- i.e. the planner dispatched it
+// to write the file directly to the workbench (hints[deliverable_surface]=
+// workbench). On such a turn the acting plan IS already a kind=produceArtifact
+// plan, so calling the produceArtifact delegation tool would spawn ANOTHER
+// produceArtifact plan -> another executor turn -> the plan-level re-delegation
+// loop that burned ~$13 in failed agentReply turns (memql#1133). This is the
+// lineage signal the per-turn breaker (memql#1128) can't see: each iteration is
+// a fresh plan/turn, so the breaker never observes a repeated failure within one
+// turn. The same workbench-surface hint that scopes canvasPublish out (memql#950)
+// is the authoritative "I am the executor" marker.
+func IsProduceArtifactExecutionTurn(hints map[string]string) bool {
+	if hints == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(hints[DeliverableSurfaceHintKey]), DeliverableSurfaceWorkbench)
+}
+
+// produceArtifactRedelegationError is the typed message fed back to the model in
+// place of dispatching a produceArtifact tool call on a produceArtifact executor
+// turn. It tells the model to do the work directly (write the file to the
+// workbench) rather than re-delegate. No plan is minted. (memql#1133)
+const produceArtifactRedelegationError = "you are already executing this produceArtifact deliverable -- " +
+	"write the file directly to your workbench with the workbenchHost tool (action \"fs_write\") " +
+	"and end your turn; do NOT call produceArtifact (re-delegating spawns another plan and produces nothing)"
+
 // IsBackgroundLane reports whether a turn's hints select the background
 // (non-streaming) execution lane.
 func IsBackgroundLane(hints map[string]string) bool {

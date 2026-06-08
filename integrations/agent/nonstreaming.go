@@ -468,6 +468,24 @@ BackgroundLoop:
 			if args == nil {
 				args = make(map[string]any)
 			}
+			// memql#1133: refuse a produceArtifact re-delegation from within a
+			// produceArtifact executor turn BEFORE dispatch -- no new plan is
+			// minted; the model is told to write the file directly. This is THE
+			// lane the produceArtifact direct turn runs on (background), so the
+			// cap matters most here.
+			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				r.logger.Warn("agent background: refusing produceArtifact re-delegation",
+					"tool", tc.Name, "requestId", requestId)
+				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
+				messages = append(messages, common.ChatMessage{
+					Role:       "tool",
+					Name:       tc.Name,
+					ToolCallId: tc.ID,
+					Content:    se.JSON(),
+				})
+				sink.ToolResult(tc.ID, "", refuse)
+				continue
+			}
 			injectAgentContext(tc.Name, args, turnCtx)
 			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)
 			var content string

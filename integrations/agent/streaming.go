@@ -258,6 +258,29 @@ type turnContext struct {
 	// canvasPublish args alongside visibility so private cards land on
 	// the dispatching user's canvas, not on every viewer's.
 	ForUserId string
+	// IsProduceArtifactExecution is true when THIS turn is the
+	// produceArtifact deliverable-execution turn (the planner dispatched
+	// it with hints[deliverable_surface]=workbench). On such a turn the
+	// acting plan is already kind=produceArtifact, so the produceArtifact
+	// delegation tool is REFUSED before dispatch (the loop guard below):
+	// re-delegating would mint another produceArtifact plan -> another
+	// executor turn -> the plan-level re-delegation runaway (memql#1133).
+	// The per-turn repeat-failure breaker (memql#1128) can't catch this
+	// because each iteration is a fresh plan/turn.
+	IsProduceArtifactExecution bool
+}
+
+// guardProduceArtifactRedelegation reports whether a tool call should be
+// REFUSED before dispatch because it is a produceArtifact re-delegation from
+// within a produceArtifact executor turn. Returns the model-facing error string
+// when refused; empty string means "dispatch normally". Caps re-delegation at
+// depth 1 -- a produceArtifact turn cannot spawn another produceArtifact plan
+// (memql#1133). Shared by the streaming + non-streaming tool loops.
+func guardProduceArtifactRedelegation(toolName string, turnCtx turnContext) string {
+	if toolName == produceArtifactToolName && turnCtx.IsProduceArtifactExecution {
+		return produceArtifactRedelegationError
+	}
+	return ""
 }
 
 func (r *Replier) runStreamingToolLoop(
@@ -535,6 +558,23 @@ StreamLoop:
 			// even when the worker was clearly connected.
 			if args == nil {
 				args = make(map[string]any)
+			}
+			// memql#1133: refuse a produceArtifact re-delegation from within a
+			// produceArtifact executor turn BEFORE dispatch -- no new plan is
+			// minted; the model is told to write the file directly. Caps
+			// re-delegation at depth 1 and stops the plan-level runaway.
+			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				r.logger.Warn("agent streaming: refusing produceArtifact re-delegation",
+					"tool", tc.Name, "requestId", requestId)
+				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
+				messages = append(messages, common.ChatMessage{
+					Role:       "tool",
+					Name:       tc.Name,
+					ToolCallId: tc.ID,
+					Content:    se.JSON(),
+				})
+				sink.ToolResult(tc.ID, "", refuse)
+				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
 			result, execErr := r.stamper.ExecuteToolByName(ctx, tc.Name, args)

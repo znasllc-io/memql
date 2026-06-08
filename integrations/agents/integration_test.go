@@ -96,6 +96,54 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 // requestUserFeedback). The success path (mints a Plan via mutationCreatePlan)
 // needs a wired engine + database and is exercised by the cluster, not here.
 
+// recordingEngine embeds IntegrationEngineAccess (so the few methods the
+// handler doesn't touch are nil and would panic on use, surfacing any
+// accidental new dependency) and records every Execute call. Used to assert
+// the produceArtifact mint path issues EXACTLY ONE mutationCreatePlan from a
+// normal (non-produceArtifact) context (memql#1133 FIX-2 contract).
+type recordingEngine struct {
+	memql.IntegrationEngineAccess
+	calls []string
+}
+
+func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
+	e.calls = append(e.calls, query)
+	return &memql.ExecuteResult{}, nil
+}
+
+// TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan is the memql#1133
+// FIX-2 counterpart to the agent-side re-delegation guard: a produceArtifact
+// invocation from a NORMAL context still mints exactly one v1:planner:plan
+// (kind=produceArtifact) via the single mutationCreatePlan write path. The
+// depth-1 cap lives on the agent turn loop (it refuses a SECOND produceArtifact
+// from within a produceArtifact executor turn), so the mint path itself is
+// unconditional -- this pins that the first delegation is unaffected.
+func TestHandleProduceArtifact_NormalContextMintsExactlyOnePlan(t *testing.T) {
+	eng := &recordingEngine{}
+	i := New(memql.NewAgentRegistry(), eng)
+	nodes, err := i.handleProduceArtifact(context.Background(), map[string]any{
+		"goal":        "A markdown file listing 10 beautiful birds",
+		"ownerUserId": "u1",
+		"spaceId":     "s1",
+	}, 0)
+	if err != nil {
+		t.Fatalf("handleProduceArtifact (normal context): unexpected error: %v", err)
+	}
+	if len(eng.calls) != 1 {
+		t.Fatalf("expected EXACTLY ONE engine Execute (mutationCreatePlan), got %d: %v", len(eng.calls), eng.calls)
+	}
+	if !strings.HasPrefix(eng.calls[0], "mutationCreatePlan(") {
+		t.Fatalf("the single write must be mutationCreatePlan, got: %q", eng.calls[0])
+	}
+	if !strings.Contains(eng.calls[0], `kind: "produceArtifact"`) {
+		t.Fatalf("minted plan must be kind=produceArtifact, got: %q", eng.calls[0])
+	}
+	// The handler returns the delegation ack envelope.
+	if len(nodes) != 1 {
+		t.Fatalf("expected one ack envelope node, got %d", len(nodes))
+	}
+}
+
 func TestHandleProduceArtifact_RequiresGoal(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
