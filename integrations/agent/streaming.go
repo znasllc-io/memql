@@ -339,6 +339,13 @@ func (r *Replier) runStreamingToolLoop(
 	// the exact shape of the produceArtifact workbench-write runaway, where a
 	// trivial interleaved success kept the all-errored guard from ever firing.
 	failBreaker := newRepeatFailureBreaker()
+	// produceArtifact re-delegation refusals (memql#1138). The #1134 guard
+	// only fed back a corrective tool-result and continued, so the model could
+	// re-call produceArtifact every iteration to maxIterations. An executor
+	// turn calling produceArtifact is always wrong; count refusals per turn and
+	// abort after a small N so the plan fails cleanly instead of looping.
+	produceArtifactRefusals := 0
+	const maxProduceArtifactRefusals = 2
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := maxTurnWallclock()
@@ -564,8 +571,22 @@ StreamLoop:
 			// minted; the model is told to write the file directly. Caps
 			// re-delegation at depth 1 and stops the plan-level runaway.
 			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				produceArtifactRefusals++
 				r.logger.Warn("agent streaming: refusing produceArtifact re-delegation",
-					"tool", tc.Name, "requestId", requestId)
+					"tool", tc.Name, "refusals", produceArtifactRefusals, "requestId", requestId)
+				if produceArtifactRefusals >= maxProduceArtifactRefusals {
+					// Model keeps re-delegating instead of writing the file --
+					// ABORT the turn (plan fails cleanly) instead of looping to
+					// maxIterations (memql#1138).
+					r.logger.Warn("agent streaming: aborting turn -- repeated produceArtifact re-delegation",
+						"count", produceArtifactRefusals, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, fmt.Errorf("produceArtifact re-delegation refused %d times -- aborting turn to avoid a runaway", produceArtifactRefusals)
+				}
 				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
 				messages = append(messages, common.ChatMessage{
 					Role:       "tool",

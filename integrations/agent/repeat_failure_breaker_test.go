@@ -290,3 +290,59 @@ func TestStreamingLoop_BreakerAbortsOnIdenticalFailures(t *testing.T) {
 		t.Fatalf("stream provider called %d times, want 3 (abort on the 3rd identical failure)", prov.calls)
 	}
 }
+
+// produceArtifactStep emits a produceArtifact tool call -- the re-delegation
+// the guard refuses on an executor turn.
+func produceArtifactStep() scriptStep {
+	return scriptStep{result: &common.ToolCallingChatResult{
+		ToolCalls: []common.ToolCall{{ID: "t1", Name: produceArtifactToolName, Arguments: `{"filename":"x.md"}`}},
+	}}
+}
+
+// TestNonStreamingLoop_ProduceArtifactRedelegationAborts (memql#1138): a
+// produceArtifact EXECUTOR turn whose model keeps re-calling produceArtifact
+// must ABORT after maxProduceArtifactRefusals (2), NOT loop to maxIterations.
+// The #1134 guard refused-but-continued -- it fed a corrective tool-result and
+// `continue`d without counting -- so the model re-called every iteration to the
+// cap (~$13). This is the background lane the runaway actually ran on.
+func TestNonStreamingLoop_ProduceArtifactRedelegationAborts(t *testing.T) {
+	r := testReplier()
+	r.stamper = taskstamp.New(
+		&scriptedExecutor{fn: func(_ int, _ string) (string, error) { return "{}", nil }},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	// Far more produceArtifact steps than the refusal ceiling -- if the abort
+	// didn't fire, the loop would consume them all.
+	prov := &scriptedToolProvider{steps: []scriptStep{
+		produceArtifactStep(), produceArtifactStep(), produceArtifactStep(),
+		produceArtifactStep(), produceArtifactStep(), produceArtifactStep(),
+	}}
+	sink := &captureSink{}
+	_, err := r.runNonStreamingToolLoop(context.Background(), prov, nil, nil, nil, sink, time.Now(), "req-pa-bg",
+		turnContext{IsProduceArtifactExecution: true})
+	if err == nil {
+		t.Fatal("expected the turn to abort on repeated produceArtifact re-delegation, got nil")
+	}
+	if prov.calls != 2 {
+		t.Fatalf("provider called %d times, want 2 (abort on the 2nd refusal, not the iteration cap)", prov.calls)
+	}
+}
+
+// Streaming-lane parity for memql#1138.
+func TestStreamingLoop_ProduceArtifactRedelegationAborts(t *testing.T) {
+	r := testReplier()
+	r.stamper = taskstamp.New(
+		&scriptedExecutor{fn: func(_ int, _ string) (string, error) { return "{}", nil }},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	prov := &fakeStreamProvider{toolName: produceArtifactToolName, rawArgs: `{"filename":"x.md"}`}
+	sink := &captureSink{}
+	_, err := r.runStreamingToolLoop(context.Background(), prov, nil, nil, sink, time.Now(), "req-pa-stream",
+		turnContext{IsProduceArtifactExecution: true})
+	if err == nil {
+		t.Fatal("expected the streaming turn to abort on repeated produceArtifact re-delegation, got nil")
+	}
+	if prov.calls != 2 {
+		t.Fatalf("stream provider called %d times, want 2 (abort on the 2nd refusal)", prov.calls)
+	}
+}

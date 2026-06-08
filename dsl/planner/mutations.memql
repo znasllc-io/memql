@@ -30,10 +30,13 @@ mutation plan mutationCreateAdHocPlan {
   insert {
     id: args.planId
     args.spaceId
-    args.ownerUserId
     kind: "adHocAction"
     status: "running"
     args.goal
+    // The owning user rides on requestedBy + authorizedBy (the fields the
+    // v1:planner:plan concept actually defines). A bare `ownerUserId` field
+    // was rejected by additionalProperties:false and failed EVERY ad-hoc
+    // (daily-space) plan insert -> "dispatching without stamping" (memql#1138).
     requestedBy: args.ownerUserId
     ownerAgentId: args.agentId
     triggerSource: "user.implicit"

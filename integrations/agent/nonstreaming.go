@@ -270,6 +270,15 @@ func (r *Replier) runNonStreamingToolLoop(
 	// the all-errored guard resets on any interleaved success, but this breaker
 	// trips on the SAME tool failing the SAME way N times regardless.
 	failBreaker := newRepeatFailureBreaker()
+	// produceArtifact re-delegation refusals (memql#1138). The #1134 guard
+	// returns a corrective tool-result and continued, which let the model
+	// re-call produceArtifact every iteration up to maxIterations (the guard
+	// never fed the #1128 breaker -- it short-circuits before the exec path).
+	// An executor turn calling produceArtifact is ALWAYS wrong; count refusals
+	// per turn (tool-name keyed, args-independent) and ABORT after a small N so
+	// the plan fails cleanly instead of burning the whole iteration budget.
+	produceArtifactRefusals := 0
+	const maxProduceArtifactRefusals = 2
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -474,8 +483,24 @@ BackgroundLoop:
 			// lane the produceArtifact direct turn runs on (background), so the
 			// cap matters most here.
 			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				produceArtifactRefusals++
 				r.logger.Warn("agent background: refusing produceArtifact re-delegation",
-					"tool", tc.Name, "requestId", requestId)
+					"tool", tc.Name, "refusals", produceArtifactRefusals, "requestId", requestId)
+				if produceArtifactRefusals >= maxProduceArtifactRefusals {
+					// The model keeps trying to re-delegate instead of writing
+					// the deliverable -- ABORT the turn (the plan fails cleanly)
+					// rather than spin to maxIterations. The earlier guard only
+					// fed back a corrective result and continued, which is the
+					// runaway #1138 fixes.
+					r.logger.Warn("agent background: aborting turn -- repeated produceArtifact re-delegation",
+						"count", produceArtifactRefusals, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, fmt.Errorf("produceArtifact re-delegation refused %d times -- aborting turn to avoid a runaway", produceArtifactRefusals)
+				}
 				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
 				messages = append(messages, common.ChatMessage{
 					Role:       "tool",
