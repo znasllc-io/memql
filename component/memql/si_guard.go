@@ -31,6 +31,24 @@
 // every call and sails past the loop breaker -- but it cannot outrun
 // the global call counter. With a generous default (20 calls / 10s) it
 // is invisible to real traffic and lethal to a spend loop.
+//
+// Tertiary guard -- the KILL-SWITCH (memql#1145). Both guards above
+// SELF-HEAL: the loop breaker resets its fingerprint state after the
+// cooldown, and the rate ceiling drains its window and re-admits. That
+// is correct for a transient spike, but it means a genuinely STUCK loop
+// (varying body, paced just under the rate ceiling) trickles spend
+// FOREVER -- you see `429 ... rate ceiling ... blocked` repeat
+// indefinitely while money keeps leaving. The kill-switch is the piece a
+// rate limiter cannot be: a CUMULATIVE, LATCHING total-call / total-cost
+// breaker. It counts every admitted guarded call (and an upper-bound $
+// estimate of it) cumulatively for the life of the process and, once a
+// configured cap is crossed, latches OPEN PERMANENTLY -- every further
+// guarded call is hard-stopped with a terminal 402 and makes NO vendor
+// request. It does not drain. Because it lives at this one shared
+// chokepoint and is path-agnostic (it counts calls, not callers), a
+// brand-new runaway path nobody anticipated is bounded automatically.
+// Process scope here; per-(space, plan-lineage) scopes ride the same
+// mechanism in memql#1144.
 package memql
 
 import (
@@ -38,6 +56,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,6 +120,20 @@ const (
 	// fan-out path (memql#899) and nobody is waiting on its first token.
 	defaultBgRateMaxCalls      = 40
 	defaultBgRateWindowSeconds = 10
+
+	// Kill-switch cost-estimate defaults (memql#1145). At the
+	// RoundTripper we only ever see the REQUEST, never the response usage,
+	// so the cumulative $ tally is a deliberately CONSERVATIVE upper bound:
+	// input tokens approximated from the request byte size (~4 bytes/token),
+	// output tokens from the body's max_tokens, both priced at an Opus-tier
+	// per-million rate. Over-estimating is the safe direction for a kill-
+	// switch -- it latches sooner, never later. Both rates are env-tunable
+	// (MEMQL_LLM_COST_INPUT_PER_MILLION / _OUTPUT_PER_MILLION) for operators
+	// who want the tally tracked against their actual model mix.
+	defaultCostInputPerMillion  = 15.0
+	defaultCostOutputPerMillion = 75.0
+	// Fallback output-token estimate when a request omits max_tokens.
+	defaultEstOutputTokens = 4096
 )
 
 // llmGuard is the process-global circuit breaker shared by every
@@ -147,6 +180,27 @@ type llmGuard struct {
 	bgRateHits      []time.Time
 	bgLastRateAlert time.Time
 
+	// Cumulative, LATCHING kill-switch (memql#1145). Unlike the loop
+	// breaker and rate ceiling above -- both of which self-heal -- these
+	// counters accumulate for the whole process lifetime and never drain.
+	// killSwitchEnabled gates the whole mechanism. A cap of 0 means
+	// "unlimited" for that dimension. costIn/costOutPerMillion price the
+	// per-call estimate. totalCalls / totalCostUSD are the running tallies;
+	// once a cap is crossed, latched flips true PERMANENTLY (until
+	// resetLatch / process restart), latchReason records why, and
+	// latchAlerted ensures the loud alert fires exactly once.
+	killSwitchEnabled bool
+	maxTotalCalls     int     // 0 = unlimited
+	maxTotalCostUSD   float64 // 0 = unlimited
+	costInPerMillion  float64
+	costOutPerMillion float64
+
+	totalCalls   int64
+	totalCostUSD float64
+	latched      bool
+	latchReason  string
+	latchAlerted bool
+
 	// now is injectable for tests; defaults to time.Now.
 	now func() time.Time
 
@@ -179,6 +233,21 @@ func newLLMGuardFromEnv() *llmGuard {
 		bgRateEnabled: envBoolDefault("MEMQL_LLM_BG_RATE_GUARD_ENABLED", true),
 		bgRateMax:     envIntDefault("MEMQL_LLM_BG_MAX_CALLS_PER_WINDOW", defaultBgRateMaxCalls),
 		bgRateWindow:  time.Duration(envIntDefault("MEMQL_LLM_BG_RATE_WINDOW_SECONDS", defaultBgRateWindowSeconds)) * time.Second,
+
+		// Kill-switch (memql#1145). The MECHANISM is on by default, but the
+		// process-scope caps default to 0 (unlimited) -- a since-boot
+		// cumulative latch has no single value that is safe for both a tiny
+		// local dev run and a long-lived multi-tenant production node, so
+		// the process backstop is opt-in (local repro / paranoid prod set
+		// it; e.g. MEMQL_LLM_MAX_TOTAL_CALLS=20). The conservative
+		// ON-by-default protection is the per-(space, plan-lineage) latch in
+		// memql#1144, where "one conversation/plan" is a well-defined unit of
+		// work and a runaway within one scope is unambiguous.
+		killSwitchEnabled: envBoolDefault("MEMQL_LLM_KILL_SWITCH_ENABLED", true),
+		maxTotalCalls:     envIntDefault("MEMQL_LLM_MAX_TOTAL_CALLS", 0),
+		maxTotalCostUSD:   envFloatDefault("MEMQL_LLM_MAX_TOTAL_COST_USD", 0),
+		costInPerMillion:  envFloatDefault("MEMQL_LLM_COST_INPUT_PER_MILLION", defaultCostInputPerMillion),
+		costOutPerMillion: envFloatDefault("MEMQL_LLM_COST_OUTPUT_PER_MILLION", defaultCostOutputPerMillion),
 
 		hits:    map[string][]time.Time{},
 		tripped: map[string]time.Time{},
@@ -324,6 +393,125 @@ func (g *llmGuard) admitRate(background bool) (open bool, count int) {
 	return false, len(*hits)
 }
 
+// killed is the cheap read checked FIRST on every guarded call: once the
+// kill-switch has latched, no further work (fingerprinting, rate
+// accounting, vendor request) should happen -- return the terminal reason
+// straight away. Self-gates on killSwitchEnabled.
+func (g *llmGuard) killed() (reason string, dead bool) {
+	if g == nil || !g.killSwitchEnabled {
+		return "", false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.latchReason, g.latched
+}
+
+// recordAndMaybeLatch is the cumulative kill-switch accounting, called
+// LAST -- only for a call that has already cleared the loop breaker and the
+// rate ceiling and is therefore about to reach the vendor. If admitting
+// this call would push the cumulative tally past a configured cap, it
+// LATCHES the breaker open permanently and BLOCKS this call (so the total
+// number of calls that actually reach the vendor stays <= the cap).
+// Otherwise it records the call + its estimated cost and admits it.
+//
+// Counting here (post loop+rate, pre-vendor) is what keeps the tally honest:
+// calls the cheaper guards already blocked never reached the vendor, so they
+// must not count against the cumulative budget.
+func (g *llmGuard) recordAndMaybeLatch(body []byte) (reason string, blocked bool) {
+	if g == nil || !g.killSwitchEnabled {
+		return "", false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Already latched (e.g. another goroutine tripped it between killed()
+	// and here) -> hard stop.
+	if g.latched {
+		return g.latchReason, true
+	}
+
+	if g.maxTotalCalls > 0 && g.totalCalls >= int64(g.maxTotalCalls) {
+		return g.tripLocked(fmt.Sprintf(
+			"cumulative LLM call ceiling reached: %d calls admitted this process (MEMQL_LLM_MAX_TOTAL_CALLS=%d)",
+			g.totalCalls, g.maxTotalCalls)), true
+	}
+	if g.maxTotalCostUSD > 0 && g.totalCostUSD >= g.maxTotalCostUSD {
+		return g.tripLocked(fmt.Sprintf(
+			"cumulative LLM cost ceiling reached: est $%.2f spent this process (MEMQL_LLM_MAX_TOTAL_COST_USD=$%.2f)",
+			g.totalCostUSD, g.maxTotalCostUSD)), true
+	}
+
+	// Admit: record the call + its upper-bound cost estimate.
+	g.totalCalls++
+	g.totalCostUSD += estimateRequestCostUSD(body, g.costInPerMillion, g.costOutPerMillion)
+	return "", false
+}
+
+// tripLocked latches the breaker open permanently and logs ONE loud alert.
+// The caller must hold g.mu. Returns the latch reason for convenience.
+func (g *llmGuard) tripLocked(reason string) string {
+	g.latched = true
+	g.latchReason = reason
+	if !g.latchAlerted {
+		g.latchAlerted = true
+		g.log().Error("LLM KILL-SWITCH LATCHED -- cumulative LLM budget exhausted; HARD-STOPPING all further LLM calls process-wide to stop a runaway spend loop. This does NOT drain; it stays latched until the process restarts (or the guard is reset).",
+			"reason", reason,
+			"total_calls", g.totalCalls,
+			"est_total_cost_usd", g.totalCostUSD,
+		)
+	}
+	return reason
+}
+
+// resetLatch clears the latch and the cumulative tallies. Used by tests
+// and available as the seam for a future operator/admin reset lever.
+func (g *llmGuard) resetLatch() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.latched = false
+	g.latchReason = ""
+	g.latchAlerted = false
+	g.totalCalls = 0
+	g.totalCostUSD = 0
+}
+
+// estimateRequestCostUSD returns a deliberately CONSERVATIVE (upper-bound)
+// dollar estimate for one chat/messages request, derived only from the
+// request bytes we can see at the RoundTripper (the response usage is never
+// visible here). Input tokens are approximated from the request size
+// (~4 bytes/token); output tokens from the body's max_tokens (a high
+// fallback when absent). Over-estimating is the safe direction for a kill-
+// switch: it latches sooner.
+func estimateRequestCostUSD(body []byte, inPerMillion, outPerMillion float64) float64 {
+	inputTokens := float64(len(body)) / 4.0
+	outputTokens := float64(parseMaxOutputTokens(body))
+	return inputTokens/1_000_000.0*inPerMillion + outputTokens/1_000_000.0*outPerMillion
+}
+
+// parseMaxOutputTokens pulls the output-token cap from a chat/messages
+// request body (Anthropic `max_tokens`, OpenAI `max_tokens` /
+// `max_completion_tokens`). Falls back to defaultEstOutputTokens when the
+// body omits it or can't be parsed. Bodies are small JSON payloads, so a
+// best-effort unmarshal is cheap relative to the LLM call it gates.
+func parseMaxOutputTokens(body []byte) int {
+	var p struct {
+		MaxTokens           *int `json:"max_tokens"`
+		MaxCompletionTokens *int `json:"max_completion_tokens"`
+	}
+	if err := json.Unmarshal(body, &p); err == nil {
+		if p.MaxTokens != nil && *p.MaxTokens > 0 {
+			return *p.MaxTokens
+		}
+		if p.MaxCompletionTokens != nil && *p.MaxCompletionTokens > 0 {
+			return *p.MaxCompletionTokens
+		}
+	}
+	return defaultEstOutputTokens
+}
+
 // fingerprintRequest derives the loop-breaker key from a request:
 // method + URL path + a hash of the (buffered) body. Returns ("", body,
 // false) when the request is not a chat/messages call we want to guard
@@ -366,7 +554,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		base = http.DefaultTransport
 	}
 	g := t.guard
-	if g == nil || (!g.enabled && !g.rateEnabled) {
+	if g == nil || (!g.enabled && !g.rateEnabled && !g.killSwitchEnabled) {
 		return base.RoundTrip(req)
 	}
 
@@ -392,20 +580,34 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	fp, guarded := fingerprintRequest(req.Method, req.URL.Path, bodyBytes)
 	if guarded {
-		// Per-fingerprint loop breaker first (catches byte-identical
-		// loops cheaply). admit() self-gates on g.enabled.
+		// 0. KILL-SWITCH first (memql#1145). If the cumulative breaker has
+		// already latched, hard-stop immediately with a terminal 402 -- no
+		// fingerprinting, no rate accounting, no vendor request. This is the
+		// process-wide budget being exhausted; it does not drain.
+		if reason, dead := g.killed(); dead {
+			return killSwitchResponse(req, reason), nil
+		}
+		// 1. Per-fingerprint loop breaker (catches byte-identical loops
+		// cheaply). admit() self-gates on g.enabled.
 		if open, repeats := g.admit(fp); open {
 			return loopBreakerResponse(req, repeats), nil
 		}
-		// Then the per-lane, content-independent rate ceiling -- the
-		// backstop that catches loops varying their request body. The lane
-		// is read off the request context (memql#897): background-executor
-		// calls count against the background bucket, everything else against
-		// the interactive bucket. admitRate self-gates on the lane's enable
-		// flag.
+		// 2. The per-lane, content-independent rate ceiling -- the backstop
+		// that catches loops varying their request body. The lane is read
+		// off the request context (memql#897): background-executor calls
+		// count against the background bucket, everything else against the
+		// interactive bucket. admitRate self-gates on the lane's enable flag.
 		background := backgroundLaneFromContext(req.Context())
 		if open, calls := g.admitRate(background); open {
 			return rateCeilingResponse(req, calls), nil
+		}
+		// 3. Cumulative kill-switch ACCOUNTING last -- this call has cleared
+		// the cheaper guards and is about to reach the vendor, so it counts
+		// against the cumulative budget. If it pushes the tally past a cap,
+		// the breaker latches and THIS call is hard-stopped too, keeping the
+		// total number of vendor calls <= the cap.
+		if reason, blocked := g.recordAndMaybeLatch(bodyBytes); blocked {
+			return killSwitchResponse(req, reason), nil
 		}
 	}
 	return base.RoundTrip(req)
@@ -464,6 +666,35 @@ func rateCeilingResponse(req *http.Request, calls int) *http.Response {
 	}
 }
 
+// killSwitchResponse builds the TERMINAL synthetic response returned once
+// the cumulative kill-switch (memql#1145) has latched. Unlike the 429s the
+// loop breaker and rate ceiling return -- which both vendor SDKs treat as
+// retryable rate limits and back off on -- this is a 402 Payment Required,
+// which neither the Anthropic nor the OpenAI SDK retries. That is
+// deliberate: the budget is exhausted, so the call must surface as a clear
+// TERMINAL error to the agent/planner loop (ending the turn), not as a
+// transient limit it will keep retrying against.
+func killSwitchResponse(req *http.Request, reason string) *http.Response {
+	msg := fmt.Sprintf(
+		"memql LLM kill-switch: %s. This call was HARD-STOPPED locally to prevent a runaway spend loop; it is terminal, not a retryable provider rate limit. The process-wide LLM budget stays latched until the process restarts (or the guard is reset).",
+		reason,
+	)
+	body := fmt.Sprintf(`{"type":"error","error":{"type":"budget_exceeded_error","message":%q}}`, msg)
+	return &http.Response{
+		StatusCode: http.StatusPaymentRequired,
+		Status:     "402 Payment Required",
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+	}
+}
+
 // guardedHTTPClient returns an *http.Client whose transport is fronted
 // by the shared circuit breaker. base may be nil (uses
 // http.DefaultTransport). Both vendor SDKs accept an *http.Client, so
@@ -503,6 +734,17 @@ func envIntDefault(key string, def int) int {
 	}
 	if n, err := strconv.Atoi(v); err == nil {
 		return n
+	}
+	return def
+}
+
+func envFloatDefault(key string, def float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil {
+		return f
 	}
 	return def
 }
