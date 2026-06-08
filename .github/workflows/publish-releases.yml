@@ -26,13 +26,18 @@ on:
     paths:
       - 'releases/**'
 
+# Least-privilege default (Scorecard Token-Permissions, alert #277): the
+# top-level token is read-only; only the job that publishes Releases is granted
+# contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish-memql:
     name: publish GitHub Releases (memql)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create GitHub Releases via gh / GITHUB_TOKEN
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
