@@ -28,24 +28,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:11d8b46c7c32956d2461498b1709e856e3e7ccdf03500aa93665c71d08b8cceb
+    digest: sha256:c25cd24fb420f9fbf03b20e530ffdc5c8195d76754b69e2eb0d0ffcc494e52ab
   # Carrier-built; 0.9.21 carries the SI-forward connected-peer fix (#1056).
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:ddeafc22c97093176dade3019d2ffeb60bf9a733e879bd56ba1645a4a94e2e5d
+    digest: sha256:b7a458fcc9d5552faa073322c4fba31b3b7fec965baf70f41fd11a79ba129a99
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:b47bc1412bdec5f5370ceed5a6f4dcd8dac2744383e7f67c587eaf02e0cc7560
+    digest: sha256:d4cf43ddb4eb9b9159852f07076a8856801a8ba44f158d64cc8d780a47376fd4
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:c77d3357f5d2a264f2d99cf60d0db1eda58cc15533d20add69064997c34ff0ca
+    digest: sha256:e36c84cb4d1b0d2bd7a8a6197d3034038943ab27692e48a4d93f88c98848faae
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:1401593538f1ef64784d0209cbe2051ec559b6cb98f8978f5b07edf8cf3b134a
+    digest: sha256:9be453a7deef73c2dc4c24982a807534aeaace070fdbcd653e1baf981749a3c6
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:2643308887f9e41f0e1792baa7f1cb3db6661020e0e12d907f70fc717434f49a
+    digest: sha256:380b468f2387c1ce5d7414ef744177f83250a07f43f03f4bc1fe9972828942a5
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:53b70bd0e1f0a992f8ba377c2cc087be1cbb4f524a5987aa5819a79e62dfdb97
+    digest: sha256:62a1cea060120f5fd0a6626a591acc01474aad1e0bffdebaa6d044613879aa36
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:7b670c7e209cfa1f404b4ca695e3aca0f6bad06112e85160867a29e96d4e01d4
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
