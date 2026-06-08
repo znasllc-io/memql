@@ -123,6 +123,7 @@ memQL/
 - [Events](docs/core/events.md)
 - [Node Identifier Conventions](docs/core/identifiers.md) -- canonical id format, who composes it, anti-patterns
 - [MemQL Authoring Rules & Gotchas](docs/core/memql-authoring-rules.md) -- read before writing `.memql` files
+- [LLM cost control (defense in depth)](docs/core/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `si_guard.go`, an LLM loop, or an automation that drives model calls.
 - [Tool ↔ Knowledge Domain Pattern](docs/architecture/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**

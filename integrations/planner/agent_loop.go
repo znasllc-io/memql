@@ -30,6 +30,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -287,7 +289,7 @@ func systemActorContext(ctx context.Context) context.Context {
 	})
 }
 
-// maxPlannerIterations caps how many times we'll re-invoke the
+// defaultMaxPlannerIterations caps how many times we'll re-invoke the
 // plannerAgent for a single Plan inside one event-driven cycle.
 // Loop-style actions (decompose, createSpecialist, extendSpecialist)
 // transition the Plan to a new state and then re-enter the loop so
@@ -295,7 +297,24 @@ func systemActorContext(ctx context.Context) context.Context {
 // The cap stops a misbehaving model from spinning forever; in
 // practice an end-to-end run is "decompose -> createSpecialist (maybe)
 // -> dispatchTask" which is 2-3 iterations.
-const maxPlannerIterations = 5
+const defaultMaxPlannerIterations = 5
+
+// maxPlannerIterationsPerCycle resolves the per-cycle iteration cap from
+// MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE (defaulting to
+// defaultMaxPlannerIterations). This was the lone hard-coded loop bound in
+// the cost-control audit (memql#1143); making it env-tunable lets an
+// operator tighten it without a rebuild. A value < 1 falls back to the
+// default. It is the per-cycle terminal condition that sits UNDER the
+// cumulative per-plan invocation/token budget (memql#819) and the
+// process-wide LLM kill-switch (memql#1145) -- defense in depth.
+func maxPlannerIterationsPerCycle() int {
+	if v := os.Getenv("MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return defaultMaxPlannerIterations
+}
 
 // invokeAndDispatch performs one or more loop iterations: load Plan
 // state, call the plannerAgent prompt, parse the decision, dispatch.
@@ -328,14 +347,15 @@ func (l *PlannerAgentLoop) invokeAndDispatch(ctx context.Context, planId string)
 }
 
 func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId string, iter int, conv *convTracker) error {
-	if iter >= maxPlannerIterations {
+	perCycleCap := maxPlannerIterationsPerCycle()
+	if iter >= perCycleCap {
 		// Park the plan rather than fail it -- the user can resume on
 		// the next trigger. Keeps a stuck LLM from killing a Plan
 		// outright when it might just need a fresh context.
 		l.logger.Warn("planner agent loop: iteration cap reached; escalating",
-			"planId", planId, "iter", iter)
+			"planId", planId, "iter", iter, "cap", perCycleCap)
 		return l.escalateAwaitingFeedback(ctx, planId, "feedback_required",
-			fmt.Sprintf("Planner reached the per-cycle iteration cap (%d) without converging. Resume to retry.", maxPlannerIterations))
+			fmt.Sprintf("Planner reached the per-cycle iteration cap (%d) without converging. Resume to retry.", perCycleCap))
 	}
 
 	plan, err := l.loadPlan(ctx, planId)
@@ -387,7 +407,7 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 	// On exceed we park the Plan to awaitingFeedback and NEVER make
 	// another LLM call -- this is what makes unbounded spend
 	// structurally impossible, independent of the per-cycle
-	// maxPlannerIterations cap above.
+	// maxPlannerIterationsPerCycle cap above.
 	estTokens := estimatePlannerCallTokens(data)
 	if gate := evaluatePlannerCallGate(plan, estTokens, maxPlannerInvocationsPerPlan(), plannerDefaultTokenBudget()); gate.Blocked {
 		l.logger.Warn("planner agent loop: per-plan LLM ceiling reached; parking",
