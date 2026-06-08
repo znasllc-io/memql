@@ -7,6 +7,104 @@ import (
 	"testing"
 )
 
+// TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory is the
+// memql#1102 regression: a benign "create a document about X" produceArtifact
+// turn must put the SYSTEM's trusted produce-flow scaffolding on a hint
+// (rendered OUTSIDE the agent prompt's untrusted history block), and leave the
+// user-role history message as the raw goal only. When the directive leaked
+// into the history message the agent's injection guard refused it as an
+// embedded "abandon the produce flow" instruction and the deliverable never
+// landed.
+func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T) {
+	const planId = "v1:planner:plan:p1"
+	const goal = "create a list of the top 10 most beautiful birds"
+	const owner = "v1:identity:user:u1"
+
+	t.Run("produceArtifact: directive on hint, history is raw goal", func(t *testing.T) {
+		plan := planExecutionRow{
+			ID:           planId,
+			Kind:         produceArtifactPlanKind,
+			Goal:         goal,
+			SpaceId:      "v1:cognition:space:s1",
+			OwnerAgentId: "v1:agents:agent:a1",
+			RequestedBy:  owner,
+		}
+		history, hints := buildExecutionTurn(planId, plan)
+
+		// History is exactly the raw user goal -- nothing else. This is the
+		// content the agent renders inside [[BEGIN UNTRUSTED CONVERSATION
+		// HISTORY]], so it must carry ONLY genuine user content.
+		if len(history) != 1 {
+			t.Fatalf("want 1 history message, got %d", len(history))
+		}
+		if history[0].Role != "user" {
+			t.Fatalf("history role = %q, want user", history[0].Role)
+		}
+		if history[0].Content != goal {
+			t.Fatalf("history content = %q, want the raw goal %q", history[0].Content, goal)
+		}
+		// The trusted scaffolding markers must NOT appear in the (untrusted)
+		// history message.
+		for _, marker := range []string{"PRODUCE THIS DELIVERABLE NOW", "do NOT call produceArtifact", "workbenchHost"} {
+			if strings.Contains(history[0].Content, marker) {
+				t.Fatalf("trusted scaffolding %q leaked into the untrusted history message: %q", marker, history[0].Content)
+			}
+		}
+
+		// The directive rides as a hint, rendered as a trusted block by the
+		// agent prompt.
+		pd, ok := hints["production_directive"]
+		if !ok || strings.TrimSpace(pd) == "" {
+			t.Fatalf("produceArtifact must set hints[production_directive], got %q (present=%v)", pd, ok)
+		}
+		if !strings.Contains(pd, "PRODUCE THIS DELIVERABLE NOW") || !strings.Contains(pd, "do NOT call produceArtifact") {
+			t.Fatalf("production_directive missing expected scaffolding: %q", pd)
+		}
+		// Plumbing that must still be present on the produce path.
+		if hints["deliverable_surface"] != "workbench" {
+			t.Fatalf("deliverable_surface = %q, want workbench", hints["deliverable_surface"])
+		}
+		if hints["trigger"] != "plan_approved" {
+			t.Fatalf("trigger = %q, want plan_approved", hints["trigger"])
+		}
+		if hints["owner_user_id"] != owner {
+			t.Fatalf("owner_user_id = %q, want %q", hints["owner_user_id"], owner)
+		}
+	})
+
+	t.Run("scopeElevation: no production directive, raw goal in history", func(t *testing.T) {
+		plan := planExecutionRow{
+			ID:           planId,
+			Kind:         "scopeElevation",
+			Goal:         goal,
+			SpaceId:      "v1:cognition:space:s1",
+			OwnerAgentId: "v1:agents:agent:a1",
+			RequestedBy:  owner,
+		}
+		history, hints := buildExecutionTurn(planId, plan)
+		if history[0].Content != goal {
+			t.Fatalf("history content = %q, want raw goal", history[0].Content)
+		}
+		if _, ok := hints["production_directive"]; ok {
+			t.Fatalf("scopeElevation must NOT carry a production_directive hint")
+		}
+		if _, ok := hints["deliverable_surface"]; ok {
+			t.Fatalf("scopeElevation must NOT carry a deliverable_surface hint")
+		}
+	})
+
+	t.Run("watchExecution flips the lane", func(t *testing.T) {
+		plan := planExecutionRow{
+			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
+			SpaceId: "s", OwnerAgentId: "a", RequestedBy: owner, WatchExecution: true,
+		}
+		_, hints := buildExecutionTurn(planId, plan)
+		if hints["execution_lane"] != "interactive" {
+			t.Fatalf("watchExecution should set execution_lane=interactive, got %q", hints["execution_lane"])
+		}
+	})
+}
+
 // TestGeneratedOutputCountFromExecuteResult covers the three shape() output
 // shapes the planner can get back from queryGeneratedOutputsForPlan:
 // single-row -> bare map, multi-row -> []any, empty/absent -> 0.

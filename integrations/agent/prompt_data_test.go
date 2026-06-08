@@ -49,6 +49,51 @@ func TestBuildPromptData_AssistantFromContract(t *testing.T) {
 		assistant["identityBlock"])
 }
 
+// TestBuildPromptData_ProductionDirectiveTrusted is the agent-side half of the
+// memql#1102 regression: the planner forwards the trusted produce-flow
+// scaffolding via hints["production_directive"] and the genuine user goal as a
+// user-role history message. buildPromptData must surface the directive as the
+// top-level `productionDirective` field (rendered by agentReply.tmpl as a
+// TRUSTED, un-bracketed block) and keep the history message untouched (it's
+// rendered inside the untrusted history block). The two must never be conflated.
+func TestBuildPromptData_ProductionDirectiveTrusted(t *testing.T) {
+	const directive = "PRODUCE THIS DELIVERABLE NOW. ... do NOT call produceArtifact ..."
+	const goal = "create a list of the top 10 most beautiful birds"
+	msg := &memqlv1.AgentGenerateTurnMsg{
+		AgentId: "v1:agents:agent/ga",
+		History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: goal}},
+		Hints: map[string]string{
+			"trigger":              "plan_approved",
+			"plan_id":              "v1:planner:plan:p1",
+			"production_directive": directive,
+		},
+	}
+
+	data := buildPromptData(msg)
+
+	// Directive surfaced as a trusted top-level field.
+	assert.Equal(t, directive, data["productionDirective"],
+		"production_directive hint must surface as the trusted productionDirective field")
+	assert.Equal(t, true, data["planApprovedTrigger"])
+
+	// The untrusted history message stays the raw user goal -- the directive
+	// must NOT have been folded into it.
+	history, ok := data["history"].([]map[string]any)
+	assert.True(t, ok, "history must be present")
+	assert.Len(t, history, 1)
+	assert.Equal(t, goal, history[0]["content"])
+	assert.NotContains(t, history[0]["content"], "PRODUCE THIS DELIVERABLE NOW")
+}
+
+// TestBuildPromptData_NoProductionDirectiveByDefault asserts a normal turn
+// (no hint) carries no productionDirective field, so the trusted block stays
+// off for non-produce turns.
+func TestBuildPromptData_NoProductionDirectiveByDefault(t *testing.T) {
+	data := buildPromptData(&memqlv1.AgentGenerateTurnMsg{AgentId: "v1:agents:agent/ga"})
+	_, has := data["productionDirective"]
+	assert.False(t, has, "no production_directive hint -> no productionDirective field")
+}
+
 // TestBuildPromptData_NoActingAgentFallsBack asserts the minimal-routing path
 // (no ActingAgent) still falls back to the agent id as name and renders no
 // identity block -- unchanged from before the contract projection.
