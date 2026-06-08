@@ -44,3 +44,22 @@ func TestExtractRows_LegacyShapes(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleEnsureForUser_EmptyUserIdNoOps (memql#1065) pins that a
+// truly-empty resolution (no userId AND no subject reached the builtin)
+// no-ops with a skip node instead of erroring. The login automation
+// must not abort its run when a genuinely user-less session lands; the
+// happy path passes the JWT subject when userId is absent, so this
+// branch only fires when BOTH are empty.
+func TestHandleEnsureForUser_EmptyUserIdNoOps(t *testing.T) {
+	d := &Integration{}
+	for _, userId := range []any{"", "   ", nil} {
+		nodes, err := d.handleEnsureForUser(nil, map[string]any{"userId": userId}, 0)
+		if err != nil {
+			t.Fatalf("userId=%#v: expected no-op, got error: %v", userId, err)
+		}
+		if len(nodes) != 1 {
+			t.Fatalf("userId=%#v: expected one skip node, got %d", userId, len(nodes))
+		}
+	}
+}

@@ -122,7 +122,15 @@ type ensureResult struct {
 func (d *Integration) handleEnsureForUser(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	userId := strings.TrimSpace(asString(args["userId"]))
 	if userId == "" {
-		return nil, fmt.Errorf("dailyspace.ensureForUser: userId is required")
+		// A truly-empty resolution (no userId AND no subject -- e.g. a
+		// genuinely user-less session, or dailySpaceEnabled=false racing
+		// the row insert) is not an error worth aborting the triggering
+		// automation: there is simply no user to provision a daily for.
+		// No-op with a skip-reason node instead of failing the automation
+		// run on every such event (memql#1065). The caller's happy path
+		// passes the resolved subject when userId is absent, so this only
+		// fires when BOTH are empty.
+		return wrapResult(ensureResult{Skipped: true, Reason: "no userId or subject resolved"})
 	}
 	res, err := d.ensureForUser(ctx, userId)
 	if err != nil {

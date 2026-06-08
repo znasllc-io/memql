@@ -194,3 +194,55 @@ func TestEvent_Clone_PreservesOriginNodeId(t *testing.T) {
 		t.Errorf("Clone should preserve OriginNodeId, got %q", cloned.OriginNodeId)
 	}
 }
+
+// TestEventBridge_PayloadSurvivesCrossNodeRoundTrip (memql#1065 diagnostic)
+//
+// On every login the IDENTITY node inserts a v1:identity:authSession row;
+// executeInsert publishes graph.node.created with the flattened payload
+// (subject at the top level AND under the nested "payload" key). The
+// ensureDailySpaceOnAuthSession automation runs on the cognition/BFF node,
+// so the event has to ride the EventBridge structpb serialization to get
+// there. This test mirrors that exact payload shape and proves the nested
+// "payload.subject" the logic reads survives the structpb.NewStruct ->
+// AsMap round-trip the bridge performs.
+func TestEventBridge_PayloadSurvivesCrossNodeRoundTrip(t *testing.T) {
+	const subject = "v1:identity:user:11111111-2222-3333-4444-555555555555"
+	// Exactly the eventPayload shape executor_mutation.go builds for an
+	// authSession node.created: top-level flattened fields + nested payload.
+	nestedPayload := map[string]any{
+		"userId":   "", // optional, raced ahead of user-row insert
+		"subject":  subject,
+		"source":   "bff_exchange",
+		"revoked?": false,
+	}
+	eventPayload := map[string]any{
+		"id":        "v1:identity:authSession:abc",
+		"nodeId":    "v1:identity:authSession:abc",
+		"concept":   "v1:identity:authSession",
+		"actor":     "system:identity",
+		"nodeType":  "authSession",
+		"createdAt": "2026-06-08T00:00:00Z",
+		"subject":   subject,
+		"userId":    "",
+		"payload":   nestedPayload,
+	}
+
+	// The bridge serializes via structpb.NewStruct on the producer node.
+	st, err := structpb.NewStruct(eventPayload)
+	if err != nil {
+		t.Fatalf("structpb.NewStruct dropped the whole payload: %v", err)
+	}
+	// ... and rehydrates via AsMap on the consumer node.
+	got := st.AsMap()
+
+	nested, ok := got["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested payload missing after round-trip; got %#v", got["payload"])
+	}
+	if nested["subject"] != subject {
+		t.Fatalf("payload.subject did not survive cross-node hop: got %#v, want %q", nested["subject"], subject)
+	}
+	if got["subject"] != subject {
+		t.Fatalf("top-level subject did not survive cross-node hop: got %#v", got["subject"])
+	}
+}

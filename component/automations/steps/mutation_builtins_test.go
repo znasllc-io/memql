@@ -159,3 +159,145 @@ func TestEvaluateHash_StableAcrossCalls(t *testing.T) {
 		t.Errorf("hash not deterministic: first=%s second=%s", first, second)
 	}
 }
+
+// --- memql#1065 reproduction --------------------------------------
+//
+// ensureDailySpaceOnAuthSession's logic body returns
+//   ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+// which the compiler renders to the function-arg expression
+//   coalesce($args.event.payload.userId, $args.event.payload.subject)
+// (see automation_generator.go convertArgReferences). authSession's
+// userId field is OPTIONAL and frequently stored as "" while subject
+// (the JWT sub, v1:identity:user:<uuid>) is @required and always set.
+//
+// The coalesce MUST skip the empty-string userId and fall through to
+// subject. If it returns "" the dailyspace.ensureForUser builtin errors
+// with "userId is required" on every login (#1065).
+func TestCoalesce_AuthSessionEmptyUserIdFallsBackToSubject(t *testing.T) {
+	const subject = "v1:identity:user:11111111-2222-3333-4444-555555555555"
+	// Seed the evaluator the way LogicRunner.newEvaluatorForLogic does:
+	// the whole caller-args map under "args".
+	eval := automations.NewEvaluator()
+	args := map[string]any{
+		"event": map[string]any{
+			"payload": map[string]any{
+				"userId":  "", // optional, raced ahead of user-row insert
+				"subject": subject,
+			},
+		},
+	}
+	eval.SetCustom("args", args)
+
+	exec := &MutationExecutor{}
+	got, err := exec.evaluateCoalesce(eval,
+		`coalesce($args.event.payload.userId, $args.event.payload.subject)`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != subject {
+		t.Fatalf("coalesce resolved userId = %#v, want subject %q (empty userId must fall through)", got, subject)
+	}
+}
+
+// Happy path: when userId IS present, coalesce returns it (not subject).
+func TestCoalesce_AuthSessionPrefersUserIdWhenPresent(t *testing.T) {
+	const userId = "v1:identity:user:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	const subject = "v1:identity:user:11111111-2222-3333-4444-555555555555"
+	eval := automations.NewEvaluator()
+	eval.SetCustom("args", map[string]any{
+		"event": map[string]any{
+			"payload": map[string]any{"userId": userId, "subject": subject},
+		},
+	})
+	exec := &MutationExecutor{}
+	got, err := exec.evaluateCoalesce(eval,
+		`coalesce($args.event.payload.userId, $args.event.payload.subject)`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != userId {
+		t.Fatalf("coalesce = %#v, want userId %q", got, userId)
+	}
+}
+
+// memql#1065 diagnostic: when BOTH userId is "" and subject is ABSENT
+// from the event payload (the cross-node payload-drop hypothesis),
+// coalesce must NOT return the raw expression text. It returns nil,
+// which the dailyspace builtin then rejects -- this is the observed
+// "userId is required" failure.
+func TestCoalesce_AuthSessionMissingSubjectYieldsNil(t *testing.T) {
+	eval := automations.NewEvaluator()
+	eval.SetCustom("args", map[string]any{
+		"event": map[string]any{
+			"payload": map[string]any{"userId": ""}, // subject absent
+		},
+	})
+	exec := &MutationExecutor{}
+	got, err := exec.evaluateCoalesce(eval,
+		`coalesce($args.event.payload.userId, $args.event.payload.subject)`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Logf("coalesce with missing subject => %#v (type %T)", got, got)
+	if s, ok := got.(string); ok && s == "$args.event.payload.subject" {
+		t.Fatalf("coalesce leaked raw expression text: %q", s)
+	}
+}
+
+// TestResolveArgValueRef_CoalesceInObjectFallsBackToSubject (memql#1065 fix)
+//
+// The fix reshapes logicEnsureDailySpaceOnAuthSession into a function step
+// whose object arg carries the coalesce expression in the $args form:
+//   { userId: coalesce($args.event.payload.userId, $args.event.payload.subject) }
+// The FunctionExecutor resolves these args (resolveArgsRefs -> resolveArgValueRef)
+// BEFORE rendering the engine query, so the builtin receives the resolved
+// subject -- never the empty userId, never the raw arg() text. This locks
+// that resolution: empty userId must fall through to subject.
+func TestResolveArgValueRef_CoalesceInObjectFallsBackToSubject(t *testing.T) {
+	const subject = "v1:identity:user:11111111-2222-3333-4444-555555555555"
+	eval := automations.NewEvaluator()
+	args := map[string]any{
+		"event": map[string]any{
+			"payload": map[string]any{"userId": "", "subject": subject},
+		},
+	}
+	eval.SetCustom("args", args)
+	eval.SetCustom("event", args["event"])
+
+	objArg := map[string]any{
+		"userId": `coalesce($args.event.payload.userId, $args.event.payload.subject)`,
+	}
+	got, err := resolveArgValueRef(objArg, eval)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("resolved arg is %T, want map", got)
+	}
+	if m["userId"] != subject {
+		t.Fatalf("resolved userId = %#v, want subject %q (empty userId must fall through)", m["userId"], subject)
+	}
+}
+
+// Happy path: userId present wins over subject.
+func TestResolveArgValueRef_CoalesceInObjectPrefersUserId(t *testing.T) {
+	const userId = "v1:identity:user:aaaaaaaa"
+	const subject = "v1:identity:user:11111111"
+	eval := automations.NewEvaluator()
+	args := map[string]any{
+		"event": map[string]any{"payload": map[string]any{"userId": userId, "subject": subject}},
+	}
+	eval.SetCustom("args", args)
+	eval.SetCustom("event", args["event"])
+
+	got, err := resolveArgValueRef(map[string]any{
+		"userId": `coalesce($args.event.payload.userId, $args.event.payload.subject)`,
+	}, eval)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.(map[string]any)["userId"] != userId {
+		t.Fatalf("resolved userId = %#v, want %q", got.(map[string]any)["userId"], userId)
+	}
+}
