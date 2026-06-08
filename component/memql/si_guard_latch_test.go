@@ -48,12 +48,12 @@ func TestKillSwitch_CallCeiling_AdmitsExactlyNThenLatches(t *testing.T) {
 	g := newTestKillSwitch(3, 0)
 	// First 3 admitted.
 	for i := 1; i <= 3; i++ {
-		if _, blocked := g.recordAndMaybeLatch([]byte(`{}`)); blocked {
+		if _, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); blocked {
 			t.Fatalf("call %d should be admitted (<= maxTotalCalls 3)", i)
 		}
 	}
 	// The 4th latches and is blocked.
-	if _, blocked := g.recordAndMaybeLatch([]byte(`{}`)); !blocked {
+	if _, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); !blocked {
 		t.Fatalf("the 4th call must latch the kill-switch")
 	}
 	if !g.latched {
@@ -65,15 +65,15 @@ func TestKillSwitch_CallCeiling_AdmitsExactlyNThenLatches(t *testing.T) {
 // latched. No amount of further calls (or simulated time) re-admits.
 func TestKillSwitch_Latched_NeverReadmits(t *testing.T) {
 	g := newTestKillSwitch(2, 0)
-	g.recordAndMaybeLatch([]byte(`{}`))
-	g.recordAndMaybeLatch([]byte(`{}`))
+	g.recordAndMaybeLatch(nil, []byte(`{}`))
+	g.recordAndMaybeLatch(nil, []byte(`{}`))
 	// Trip it.
-	if _, blocked := g.recordAndMaybeLatch([]byte(`{}`)); !blocked {
+	if _, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); !blocked {
 		t.Fatalf("3rd call must latch")
 	}
 	// 1000 more calls -- every single one stays blocked. There is no drain.
 	for i := 0; i < 1000; i++ {
-		if reason, blocked := g.recordAndMaybeLatch([]byte(`{}`)); !blocked || reason == "" {
+		if reason, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); !blocked || reason == "" {
 			t.Fatalf("latched kill-switch must block call %d permanently", i)
 		}
 	}
@@ -85,10 +85,10 @@ func TestKillSwitch_CostCeiling_Latches(t *testing.T) {
 	// estimated output cost per call, so the 2nd call crosses a $5 cap.
 	g := newTestKillSwitch(0, 5.0)
 	body := `{"model":"claude","max_tokens":100000,"messages":[]}`
-	if _, blocked := g.recordAndMaybeLatch([]byte(body)); blocked {
+	if _, blocked := g.recordAndMaybeLatch(nil, []byte(body)); blocked {
 		t.Fatalf("first call must be admitted before any cost accrued")
 	}
-	if _, blocked := g.recordAndMaybeLatch([]byte(body)); !blocked {
+	if _, blocked := g.recordAndMaybeLatch(nil, []byte(body)); !blocked {
 		t.Fatalf("second call must latch once the cumulative cost estimate crosses the cap")
 	}
 	if !g.latched {
@@ -100,7 +100,7 @@ func TestKillSwitch_Disabled_NeverLatches(t *testing.T) {
 	g := newTestKillSwitch(1, 0)
 	g.killSwitchEnabled = false
 	for i := 0; i < 100; i++ {
-		if _, blocked := g.recordAndMaybeLatch([]byte(`{}`)); blocked {
+		if _, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); blocked {
 			t.Fatalf("disabled kill-switch must never block (call %d)", i)
 		}
 	}
@@ -111,8 +111,8 @@ func TestKillSwitch_Disabled_NeverLatches(t *testing.T) {
 
 func TestKillSwitch_ResetLatch_Clears(t *testing.T) {
 	g := newTestKillSwitch(1, 0)
-	g.recordAndMaybeLatch([]byte(`{}`))
-	g.recordAndMaybeLatch([]byte(`{}`)) // latches
+	g.recordAndMaybeLatch(nil, []byte(`{}`))
+	g.recordAndMaybeLatch(nil, []byte(`{}`)) // latches
 	if !g.latched {
 		t.Fatalf("precondition: must be latched")
 	}
@@ -120,7 +120,7 @@ func TestKillSwitch_ResetLatch_Clears(t *testing.T) {
 	if g.latched || g.totalCalls != 0 || g.totalCostUSD != 0 {
 		t.Fatalf("resetLatch must clear latch + cumulative tallies")
 	}
-	if _, blocked := g.recordAndMaybeLatch([]byte(`{}`)); blocked {
+	if _, blocked := g.recordAndMaybeLatch(nil, []byte(`{}`)); blocked {
 		t.Fatalf("after reset the next call must be admitted again")
 	}
 }

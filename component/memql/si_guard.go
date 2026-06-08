@@ -98,6 +98,67 @@ func backgroundLaneFromContext(ctx context.Context) bool {
 	return v
 }
 
+// budgetScopeCtxKey tags a context with the budget scopes a downstream LLM
+// call should be charged against (memql#1144). Like the background lane, the
+// vendor SDKs thread the call context to the HTTP request, where
+// guardedTransport reads the scopes off req.Context() and charges the call's
+// cumulative per-scope budget. A scope is an opaque id; callers stamp e.g.
+// "space:<id>" + "plan:<id>" so a single conversation or plan-lineage gets
+// its own cumulative latch independent of every other.
+type budgetScopeCtxKey struct{}
+
+// ContextWithBudgetScope stamps ctx with one or more budget scope ids so
+// downstream LLM calls count against each scope's cumulative budget
+// (memql#1144). Empty ids are dropped. Scopes COMPOSE: stamping again merges
+// the new ids with any already on the context (deduped), so an agent turn
+// nested inside a plan charges both the space scope and the plan scope.
+// No-op-safe on a nil ctx; returns ctx unchanged when no non-empty id is given.
+func ContextWithBudgetScope(ctx context.Context, scopeIds ...string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	merged := append([]string{}, budgetScopesFromContext(ctx)...)
+	for _, s := range scopeIds {
+		if s == "" {
+			continue
+		}
+		dup := false
+		for _, e := range merged {
+			if e == s {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			merged = append(merged, s)
+		}
+	}
+	if len(merged) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, budgetScopeCtxKey{}, merged)
+}
+
+// budgetScopesFromContext returns the budget scopes stamped on ctx, or nil.
+func budgetScopesFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	v, _ := ctx.Value(budgetScopeCtxKey{}).([]string)
+	return v
+}
+
+// BudgetScopeId formats a "<kind>:<id>" budget scope id for
+// ContextWithBudgetScope, returning "" (which the stamp drops) when id is
+// empty -- so callers can stamp optional ids (a turn with no Plan, say)
+// unconditionally without building the string defensively.
+func BudgetScopeId(kind, id string) string {
+	if id == "" {
+		return ""
+	}
+	return kind + ":" + id
+}
+
 const (
 	defaultLoopGuardMaxRepeat      = 8
 	defaultLoopGuardWindowSeconds  = 60
@@ -134,6 +195,23 @@ const (
 	defaultCostOutputPerMillion = 75.0
 	// Fallback output-token estimate when a request omits max_tokens.
 	defaultEstOutputTokens = 4096
+
+	// Per-scope budget defaults (memql#1144). Unlike the process-scope caps
+	// (which default to 0/unlimited because a since-boot latch has no safe
+	// universal value for a long-lived node), the per-scope latch is ON by
+	// default: a scope is ONE conversation/space or plan-lineage, a
+	// well-defined unit of work, so a runaway WITHIN a scope is unambiguous
+	// and latching it kills just that loop without touching other
+	// conversations or needing a restart. The caps sit well ABOVE the
+	// per-turn iteration cap (120) so a single legitimately-deep turn never
+	// trips them; a loop that spans turns/plan-cycles does. Conservative +
+	// env-tunable; raise per deployment.
+	defaultScopeMaxCalls   = 600
+	defaultScopeMaxCostUSD = 20.0
+	// Scopes idle longer than this are pruned so the map can't grow
+	// unbounded across many short-lived conversations. A runaway is never
+	// idle, so it stays latched; a finished conversation's scope ages out.
+	scopeIdleTTLSeconds = 3600
 )
 
 // llmGuard is the process-global circuit breaker shared by every
@@ -201,10 +279,30 @@ type llmGuard struct {
 	latchReason  string
 	latchAlerted bool
 
+	// Per-scope cumulative latch (memql#1144). Same latching semantics as
+	// the process kill-switch above, but keyed per scope id (a conversation/
+	// space or plan-lineage) read off the request context. scopeEnabled gates
+	// it; a cap of 0 means unlimited for that dimension. scopes holds the
+	// live per-scope tallies; idle ones are pruned past scopeIdleTTL.
+	scopeEnabled    bool
+	scopeMaxCalls   int
+	scopeMaxCostUSD float64
+	scopeIdleTTL    time.Duration
+	scopes          map[string]*scopeBudget
+
 	// now is injectable for tests; defaults to time.Now.
 	now func() time.Time
 
 	logger *slog.Logger
+}
+
+// scopeBudget is one scope's cumulative tally + latch state (memql#1144).
+type scopeBudget struct {
+	calls    int64
+	costUSD  float64
+	latched  bool
+	reason   string
+	lastSeen time.Time
 }
 
 // loggerOrDefault guards against a nil logger in tests that build the
@@ -249,6 +347,15 @@ func newLLMGuardFromEnv() *llmGuard {
 		costInPerMillion:  envFloatDefault("MEMQL_LLM_COST_INPUT_PER_MILLION", defaultCostInputPerMillion),
 		costOutPerMillion: envFloatDefault("MEMQL_LLM_COST_OUTPUT_PER_MILLION", defaultCostOutputPerMillion),
 
+		// Per-scope latch (memql#1144) -- ON by default with conservative caps
+		// (see the const comments). The scope is a conversation/space or
+		// plan-lineage stamped on the request context.
+		scopeEnabled:    envBoolDefault("MEMQL_LLM_SCOPE_GUARD_ENABLED", true),
+		scopeMaxCalls:   envIntDefault("MEMQL_LLM_SCOPE_MAX_CALLS", defaultScopeMaxCalls),
+		scopeMaxCostUSD: envFloatDefault("MEMQL_LLM_SCOPE_MAX_COST_USD", defaultScopeMaxCostUSD),
+		scopeIdleTTL:    time.Duration(envIntDefault("MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS", scopeIdleTTLSeconds)) * time.Second,
+		scopes:          map[string]*scopeBudget{},
+
 		hits:    map[string][]time.Time{},
 		tripped: map[string]time.Time{},
 		now:     time.Now,
@@ -271,6 +378,9 @@ func newLLMGuardFromEnv() *llmGuard {
 	}
 	if g.bgRateWindow <= 0 {
 		g.bgRateWindow = defaultBgRateWindowSeconds * time.Second
+	}
+	if g.scopeIdleTTL <= 0 {
+		g.scopeIdleTTL = scopeIdleTTLSeconds * time.Second
 	}
 	return g
 }
@@ -408,42 +518,83 @@ func (g *llmGuard) killed() (reason string, dead bool) {
 
 // recordAndMaybeLatch is the cumulative kill-switch accounting, called
 // LAST -- only for a call that has already cleared the loop breaker and the
-// rate ceiling and is therefore about to reach the vendor. If admitting
-// this call would push the cumulative tally past a configured cap, it
-// LATCHES the breaker open permanently and BLOCKS this call (so the total
-// number of calls that actually reach the vendor stays <= the cap).
-// Otherwise it records the call + its estimated cost and admits it.
+// rate ceiling and is therefore about to reach the vendor. It charges the
+// call against BOTH the process-wide budget and every per-scope budget named
+// by scopeIds (memql#1144). If admitting the call would push ANY of those
+// cumulative tallies past its cap, it LATCHES that breaker open permanently
+// and BLOCKS this call WITHOUT charging anything (so a blocked call never
+// pollutes a tally). Otherwise it charges the call against the process budget
+// and every scope and admits it.
 //
-// Counting here (post loop+rate, pre-vendor) is what keeps the tally honest:
-// calls the cheaper guards already blocked never reached the vendor, so they
-// must not count against the cumulative budget.
-func (g *llmGuard) recordAndMaybeLatch(body []byte) (reason string, blocked bool) {
-	if g == nil || !g.killSwitchEnabled {
+// Counting here (post loop+rate, pre-vendor) keeps the tallies honest: calls
+// the cheaper guards already blocked never reached the vendor, so they must
+// not count against any cumulative budget.
+func (g *llmGuard) recordAndMaybeLatch(scopeIds []string, body []byte) (reason string, blocked bool) {
+	if g == nil || (!g.killSwitchEnabled && !g.scopeEnabled) {
 		return "", false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	now := g.now()
+	cost := estimateRequestCostUSD(body, g.costInPerMillion, g.costOutPerMillion)
 
-	// Already latched (e.g. another goroutine tripped it between killed()
-	// and here) -> hard stop.
-	if g.latched {
-		return g.latchReason, true
+	// --- process-wide kill-switch (check, no charge yet) ---
+	if g.killSwitchEnabled {
+		if g.latched { // tripped by another goroutine between killed() and here
+			return g.latchReason, true
+		}
+		if g.maxTotalCalls > 0 && g.totalCalls >= int64(g.maxTotalCalls) {
+			return g.tripLocked(fmt.Sprintf(
+				"cumulative LLM call ceiling reached: %d calls admitted this process (MEMQL_LLM_MAX_TOTAL_CALLS=%d)",
+				g.totalCalls, g.maxTotalCalls)), true
+		}
+		if g.maxTotalCostUSD > 0 && g.totalCostUSD >= g.maxTotalCostUSD {
+			return g.tripLocked(fmt.Sprintf(
+				"cumulative LLM cost ceiling reached: est $%.2f spent this process (MEMQL_LLM_MAX_TOTAL_COST_USD=$%.2f)",
+				g.totalCostUSD, g.maxTotalCostUSD)), true
+		}
 	}
 
-	if g.maxTotalCalls > 0 && g.totalCalls >= int64(g.maxTotalCalls) {
-		return g.tripLocked(fmt.Sprintf(
-			"cumulative LLM call ceiling reached: %d calls admitted this process (MEMQL_LLM_MAX_TOTAL_CALLS=%d)",
-			g.totalCalls, g.maxTotalCalls)), true
-	}
-	if g.maxTotalCostUSD > 0 && g.totalCostUSD >= g.maxTotalCostUSD {
-		return g.tripLocked(fmt.Sprintf(
-			"cumulative LLM cost ceiling reached: est $%.2f spent this process (MEMQL_LLM_MAX_TOTAL_COST_USD=$%.2f)",
-			g.totalCostUSD, g.maxTotalCostUSD)), true
+	// --- per-scope budgets (check, no charge yet) ---
+	var charge []*scopeBudget
+	if g.scopeEnabled {
+		for _, sid := range scopeIds {
+			if sid == "" {
+				continue
+			}
+			sb := g.scopes[sid]
+			if sb == nil {
+				sb = &scopeBudget{lastSeen: now}
+				g.scopes[sid] = sb
+			}
+			if sb.latched {
+				return sb.reason, true
+			}
+			if g.scopeMaxCalls > 0 && sb.calls >= int64(g.scopeMaxCalls) {
+				return g.tripScopeLocked(sid, sb, fmt.Sprintf(
+					"per-scope LLM call ceiling reached for scope %q: %d cumulative calls (MEMQL_LLM_SCOPE_MAX_CALLS=%d)",
+					sid, sb.calls, g.scopeMaxCalls)), true
+			}
+			if g.scopeMaxCostUSD > 0 && sb.costUSD >= g.scopeMaxCostUSD {
+				return g.tripScopeLocked(sid, sb, fmt.Sprintf(
+					"per-scope LLM cost ceiling reached for scope %q: est $%.2f cumulative (MEMQL_LLM_SCOPE_MAX_COST_USD=$%.2f)",
+					sid, sb.costUSD, g.scopeMaxCostUSD)), true
+			}
+			charge = append(charge, sb)
+		}
 	}
 
-	// Admit: record the call + its upper-bound cost estimate.
-	g.totalCalls++
-	g.totalCostUSD += estimateRequestCostUSD(body, g.costInPerMillion, g.costOutPerMillion)
+	// Admit: charge the process budget and every scope its cost.
+	if g.killSwitchEnabled {
+		g.totalCalls++
+		g.totalCostUSD += cost
+	}
+	for _, sb := range charge {
+		sb.calls++
+		sb.costUSD += cost
+		sb.lastSeen = now
+	}
+	g.pruneIdleScopesLocked(now)
 	return "", false
 }
 
@@ -463,8 +614,41 @@ func (g *llmGuard) tripLocked(reason string) string {
 	return reason
 }
 
-// resetLatch clears the latch and the cumulative tallies. Used by tests
-// and available as the seam for a future operator/admin reset lever.
+// tripScopeLocked latches ONE scope's breaker open permanently and logs the
+// alert (once -- after latching, the scope short-circuits on its next call).
+// The caller must hold g.mu. Returns the reason for convenience.
+func (g *llmGuard) tripScopeLocked(scopeId string, sb *scopeBudget, reason string) string {
+	sb.latched = true
+	sb.reason = reason
+	g.log().Error("LLM PER-SCOPE KILL-SWITCH LATCHED -- one conversation/plan-lineage exhausted its cumulative LLM budget; HARD-STOPPING further LLM calls for THIS scope only. Other conversations are unaffected; this does NOT drain.",
+		"scope", scopeId,
+		"scope_calls", sb.calls,
+		"est_scope_cost_usd", sb.costUSD,
+		"reason", reason,
+	)
+	return reason
+}
+
+// pruneIdleScopesLocked drops scope budgets untouched for longer than
+// scopeIdleTTL so the map can't grow unbounded across many short-lived
+// conversations. Only sweeps when the map is non-trivial to keep the hot path
+// cheap. A runaway scope is never idle, so it is never pruned. Caller holds
+// g.mu.
+func (g *llmGuard) pruneIdleScopesLocked(now time.Time) {
+	if len(g.scopes) <= 256 {
+		return
+	}
+	cutoff := now.Add(-g.scopeIdleTTL)
+	for id, sb := range g.scopes {
+		if sb.lastSeen.Before(cutoff) {
+			delete(g.scopes, id)
+		}
+	}
+}
+
+// resetLatch clears the latch, the cumulative tallies, and every per-scope
+// budget. Used by tests and available as the seam for a future operator/admin
+// reset lever.
 func (g *llmGuard) resetLatch() {
 	if g == nil {
 		return
@@ -476,6 +660,7 @@ func (g *llmGuard) resetLatch() {
 	g.latchAlerted = false
 	g.totalCalls = 0
 	g.totalCostUSD = 0
+	g.scopes = map[string]*scopeBudget{}
 }
 
 // estimateRequestCostUSD returns a deliberately CONSERVATIVE (upper-bound)
@@ -554,7 +739,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		base = http.DefaultTransport
 	}
 	g := t.guard
-	if g == nil || (!g.enabled && !g.rateEnabled && !g.killSwitchEnabled) {
+	if g == nil || (!g.enabled && !g.rateEnabled && !g.killSwitchEnabled && !g.scopeEnabled) {
 		return base.RoundTrip(req)
 	}
 
@@ -603,10 +788,13 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		}
 		// 3. Cumulative kill-switch ACCOUNTING last -- this call has cleared
 		// the cheaper guards and is about to reach the vendor, so it counts
-		// against the cumulative budget. If it pushes the tally past a cap,
-		// the breaker latches and THIS call is hard-stopped too, keeping the
-		// total number of vendor calls <= the cap.
-		if reason, blocked := g.recordAndMaybeLatch(bodyBytes); blocked {
+		// against the cumulative budgets: the process-wide one AND every
+		// per-scope budget (space / plan-lineage) stamped on the request
+		// context (memql#1144). If it pushes any tally past a cap, that
+		// breaker latches and THIS call is hard-stopped too, keeping the
+		// number of vendor calls <= the cap for every scope it belongs to.
+		scopes := budgetScopesFromContext(req.Context())
+		if reason, blocked := g.recordAndMaybeLatch(scopes, bodyBytes); blocked {
 			return killSwitchResponse(req, reason), nil
 		}
 	}

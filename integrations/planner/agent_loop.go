@@ -425,6 +425,10 @@ func (l *PlannerAgentLoop) invokeAndDispatchIter(ctx context.Context, planId str
 	// trivial/moderate plan converges in 1-2 iterations and so makes ZERO
 	// Opus+thinking calls.
 	siCtx := systemActorContext(ctx)
+	// Charge the plannerAgent decompose calls against this Plan's cumulative
+	// per-scope budget (memql#1144) so a Plan whose loop spans cycles is
+	// latched on its own, on top of the per-plan invocation/token ceiling.
+	siCtx = memql.ContextWithBudgetScope(siCtx, memql.BudgetScopeId("plan", planId))
 	if provider, reasoning := selectPlannerProvider(iter); reasoning {
 		l.logger.Info("planner agent loop: escalating to reasoning tier (cheap tier not converging)",
 			"planId", planId, "iter", iter, "provider", provider)

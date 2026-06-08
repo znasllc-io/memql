@@ -249,6 +249,13 @@ func (r *Replier) runNonStreamingToolLoop(
 	// ceiling without starving live chat/voice of the interactive budget.
 	ctx = memql.ContextWithBackgroundLane(ctx)
 
+	// Charge this turn's LLM calls against the per-conversation + per-plan
+	// cumulative budgets (memql#1144) so a single space or plan-lineage that
+	// loops is latched on its own, without touching other conversations.
+	ctx = memql.ContextWithBudgetScope(ctx,
+		memql.BudgetScopeId("space", turnCtx.SpaceId),
+		memql.BudgetScopeId("plan", turnCtx.PlanId))
+
 	// Cooperative preemption (memql#906): clear any pause flag for this
 	// turn's requestId on exit so a stale "pass" can never leak into a later
 	// turn that reuses the id.

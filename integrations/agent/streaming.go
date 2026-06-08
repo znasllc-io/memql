@@ -308,6 +308,13 @@ func (r *Replier) runStreamingToolLoop(
 		SpaceId:     turnCtx.SpaceId,
 	})
 
+	// Charge this turn's LLM calls against the per-conversation + per-plan
+	// cumulative budgets (memql#1144) so a single space or plan-lineage that
+	// loops is latched on its own, without touching other conversations.
+	ctx = memql.ContextWithBudgetScope(ctx,
+		memql.BudgetScopeId("space", turnCtx.SpaceId),
+		memql.BudgetScopeId("plan", turnCtx.PlanId))
+
 	start := time.Now()
 
 	var fullText strings.Builder
@@ -1053,9 +1060,9 @@ type agentContextStamp struct {
 // tool that needs runtime context: pick which fields its @input
 // declares, set the matching flags + space-field name here.
 var agentContextStamps = map[string]agentContextStamp{
-	"workerHost":              {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
-	"workerComputer":          {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
-	"workerStatus":            {StampAgentId: true, StampOwnerUserId: true},
+	"workerHost":     {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
+	"workerComputer": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
+	"workerStatus":   {StampAgentId: true, StampOwnerUserId: true},
 	// workbenchHost runs HEADLESS work in the per-Plan sandbox. planId is
 	// REQUIRED -- it keys the workspace AND is the producedByPlanId stamped
 	// on the promoted v1:library:generatedOutput row; without it the
@@ -1064,7 +1071,7 @@ var agentContextStamps = map[string]agentContextStamp{
 	// attributes the output and overwrites any value the LLM hallucinated
 	// (the schema marks both @autoInjected -- LLM-supplied values are not
 	// trusted). taskId stays optional (invocation filing only).
-	"workbenchHost": {StampAgentId: true, StampPlanId: true},
+	"workbenchHost":           {StampAgentId: true, StampPlanId: true},
 	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
 	// requestUserFeedback parks the ACTIVE Plan, so it needs the
 	// turn-context planId stamped (the LLM never knows its own Plan id);
