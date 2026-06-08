@@ -105,12 +105,36 @@ logic logicAutoJoinSI {
   // navigates it, rather than getGA collapsing to a literal step name.
   getGA := coalesce(getActiveGA, getFallbackGA)
 
+  // memql#1044: guard the join on a POSITIVE id presence check, not on
+  // `!getGA.Empty()`.
+  //
+  // When the space owner has NO assistant agent, getActiveGA is skipped
+  // and getFallbackGA returns 0 rows, so coalesce(...) yields an empty
+  // (0-node) ExecuteResult -- non-nil, but with nothing to navigate.
+  // The old guard `!getGA.Empty()` could never close that gap: the
+  // automation condition evaluator does not apply the leading `!`
+  // negation operator (and never resolved the raw `getGA.Empty()`
+  // method-call form either), so `!getGA.Empty()` evaluated truthy
+  // unconditionally and the join branch fired even with no GA. That
+  // branch then resolved coalesce(getGA.First().id, "") to nil (the
+  // #580 safety net drops the unresolved nav rather than passing raw
+  // source text through), which queryParticipantByAgentSpace rejected
+  // as a missing required `agentId` -- ~86 failures/48h on staging.
+  //
+  // `first(getGA).id != ""` sidesteps both evaluator gaps: the compiler
+  // rewrites `first(getGA).id` to a fully-resolvable
+  // `$steps.getGA.result.Bundle.nodes.0.id` path, and the `!=` form is
+  // evaluated correctly. It is FALSE (clean no-op -- "owner has no
+  // assistant to join") when getGA is empty and TRUE (join) when the
+  // owner has an assistant. The unresolved-nav-to-nil case can no
+  // longer reach the mutation.
+  //
   // Existence check on the participant uses the SAME agent id the
-  // mutation below will write, so re-fires of this automation see
-  // the existing row and short-circuit. queryParticipantByAgentSpace
-  // returns 0 or 1 rows; the mutation's content-addressed id keeps
-  // duplicates collapsed even if this check ever misses.
-  checkExistingGA := if !getGA.Empty() {
+  // mutation below will write, so re-fires of this automation see the
+  // existing row. queryParticipantByAgentSpace returns 0 or 1 rows; the
+  // mutation's content-addressed id keeps duplicates collapsed even if
+  // this check ever misses.
+  checkExistingGA := if first(getGA).id != "" {
     queryParticipantByAgentSpace({
       spaceId: args.event.payload.id,
       agentId: coalesce(getGA.First().id, "")
@@ -129,7 +153,13 @@ logic logicAutoJoinSI {
   // Both fields ride through unchanged because autoJoinSI runs as a
   // system actor (system:automation:autoJoinSI), which the participant
   // guard treats as elevated and trusts the explicit forUserId on.
-  insertGA := if !getGA.Empty() && checkExistingGA.Empty() {
+  // Same positive-presence guard as checkExistingGA above (memql#1044).
+  // Dedupe on re-fire is carried by mutationJoinSpaceAsSI's
+  // content-addressed id (one row per (space, agentId)); the prior
+  // `checkExistingGA.Empty()` clause was a no-op in practice because the
+  // raw `.Empty()` method-call form never resolved in the condition
+  // evaluator, so dropping it changes nothing about idempotency.
+  insertGA := if first(getGA).id != "" {
     mutationJoinSpaceAsSI({
       spaceId: args.event.payload.id,
       agentId: coalesce(getGA.First().id, ""),
