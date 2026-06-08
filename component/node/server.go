@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
@@ -17,6 +18,19 @@ const (
 	NodeServerComponentName = common.ComponentName("nodeServer")
 	nodeServerOrder         = 48
 	defaultNodeAddress      = ":50052"
+
+	// nodeServerGracefulStopTimeout bounds how long shutdown waits for
+	// grpcServer.GracefulStop before forcing grpcServer.Stop (#1119).
+	// GracefulStop blocks until every in-flight RPC returns, and the
+	// NodeService.Stream is a long-lived inter-node stream that does NOT
+	// end on its own -- so an unbounded GracefulStop consumed the entire
+	// shared shutdown budget, starving every later dependency's Stop
+	// (they then failed with "context deadline exceeded") and leaving the
+	// dying pod a registered-but-dead mesh peer for the full 30-45s grace
+	// (the source of the "skipped peers (nil Connection)" flood). Bounding
+	// it to a few seconds + a forceful fallback makes the node leave the
+	// mesh promptly and frees the budget for the rest of the sweep.
+	nodeServerGracefulStopTimeout = 5 * time.Second
 )
 
 // NodeServer implements the NodeService gRPC server for inter-node
@@ -255,14 +269,57 @@ func (s *NodeServer) run(ctx context.Context, markStarted func()) error {
 		return fmt.Errorf("node server not initialized")
 	}
 
+	// Serve blocks until the server stops, so run it in a goroutine and
+	// let this lifecycle loop own the ctx-driven shutdown (#1119). Without
+	// this, Serve ignored ctx cancellation entirely: the only GracefulStop
+	// lived in the OnStop hook, which never ran because the Run hook never
+	// returned -- so Stop just timed out the shared shutdown budget.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- s.grpcServer.Serve(s.listener) }()
+
 	markStarted()
-	return s.grpcServer.Serve(s.listener)
+
+	select {
+	case err := <-serveErr:
+		// Server exited on its own (listener error, etc.).
+		return err
+	case <-ctx.Done():
+		s.stopGRPC()
+		return nil
+	}
+}
+
+// stopGRPC bounds GracefulStop with a forceful Stop fallback so a
+// long-lived inter-node stream can't wedge shutdown (#1119). Safe to call
+// once from the run loop on ctx cancellation.
+func (s *NodeServer) stopGRPC() {
+	if s.grpcServer == nil {
+		return
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		s.grpcServer.GracefulStop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(nodeServerGracefulStopTimeout):
+		// Inter-node streams didn't drain in time; force them closed so
+		// the node leaves the mesh now instead of lingering as a dead peer.
+		s.logger.Warn("node server: graceful stop timed out; forcing stop",
+			"timeout", nodeServerGracefulStopTimeout.String())
+		s.grpcServer.Stop()
+		<-stopped
+	}
 }
 
 func (s *NodeServer) cleanup() {
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-	}
+	// run() already stopped the gRPC server (which closes the listener) via
+	// stopGRPC on ctx cancellation; this hook just clears references. The
+	// listener.Close is retained as a defensive no-op for the rare path
+	// where Serve returned before any client connected.
 	if s.listener != nil {
 		_ = s.listener.Close()
 	}
