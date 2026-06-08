@@ -56,3 +56,24 @@ func TestNodeServer_StopReturnsPromptlyOnCtxCancel(t *testing.T) {
 
 	assert.False(t, srv.IsRunning(), "server should not be running after Stop")
 }
+
+// TestNodeServer_FastStartStopNoPanic exercises the race the goroutine-based
+// run() can hit: if Stop fires before the Serve goroutine is scheduled, the
+// OnStop cleanup hook nils grpcServer/listener while that goroutine is about
+// to read them. run() captures both into locals to stay immune; this test
+// drives the Start->immediate-Stop path repeatedly under -race to pin it.
+func TestNodeServer_FastStartStopNoPanic(t *testing.T) {
+	t.Setenv("MEMQL_NODE_SERVICE_ADDRESS", "127.0.0.1:0")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	for i := 0; i < 20; i++ {
+		identity := NewIdentity("test")
+		pm := NewPeerManager(identity, logger)
+		srv := NewNodeServer(identity, pm, logger)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		srv.Start(ctx)
+		cancel() // cancel immediately, often before the Serve goroutine runs
+		srv.Stop(context.Background())
+	}
+}
