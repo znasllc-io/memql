@@ -89,10 +89,11 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
-            # /livez is pure process-liveness (#1117): a transient dependency/mesh
-            # blip never liveness-kills an otherwise-alive pod. Decoupled from
-            # /healthz to stop rollout-triggered restart storms.
-            httpGet: { path: /livez, port: 8085 }
+            # TEMP rollback (#1117 image/manifest split, #1115): liveness stays on
+            # /healthz until node images carrying the /livez endpoint are built +
+            # digest-pinned. The /livez manifest flip WITHOUT the image 401s ->
+            # cluster-wide crashloop. Re-flip liveness to /livez once images ship.
+            httpGet: { path: /healthz, port: 8085 }
             initialDelaySeconds: 15
             periodSeconds: 20
             timeoutSeconds: 3
