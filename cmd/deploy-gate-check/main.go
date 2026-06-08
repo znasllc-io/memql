@@ -16,10 +16,14 @@
 //     query-level QueryError both prove the authenticated
 //     BFF->engine path is live.
 //
-// The query string is incidental -- the gate proves the authenticated PATH, so
-// even a query-level error counts as auth-success (it means the engine
-// processed the request). Mirrors the in-process client in
-// component/grpc/gateway.go (which dials the same surface insecurely in-cluster).
+// The gate proves the authenticated PATH, so even a query-level (execution)
+// error counts as auth-success (it means the engine processed the request).
+// The query string must still be a WELL-FORMED MemQL query, though: a parse
+// failure makes the engine log a `memql query execution failed` ERROR on the
+// node on every gate run, which is pure log noise (znasllc-io/memql#1130). The
+// default is queryActiveSpaceIds (a real cognition-concept read) for that
+// reason. Mirrors the in-process client in component/grpc/gateway.go (which
+// dials the same surface insecurely in-cluster).
 package main
 
 import (
@@ -43,10 +47,19 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
+// defaultGateQuery is the MemQL query the gate runs by default. It MUST be a
+// well-formed query: the gate proves the authenticated BFF->engine path, but a
+// parse error makes the engine log a `memql query execution failed` ERROR on
+// the node on every gate run (znasllc-io/memql#1130). queryActiveSpaceIds is the
+// id-only projection of active v1:cognition:space rows (dsl/cognition/queries.memql)
+// -- a real cognition-concept read that also exercises the BFF->cognition fan.
+// TestDefaultGateQueryParses pins that this stays parseable.
+const defaultGateQuery = "queryActiveSpaceIds({})"
+
 func main() {
 	addr := flag.String("addr", "bff:50051", "node gRPC address (host:port) to run the authenticated query against")
 	jwt := flag.String("jwt", "", "class=service_account JWT bearer (#691). Falls back to $MEMQL_SVC_JWT.")
-	query := flag.String("query", "count v1:cognition:space", "MemQL query to run (its validity is incidental; the gate proves the authenticated path)")
+	query := flag.String("query", defaultGateQuery, "MemQL query to run. Must be a well-formed query: the gate proves the authenticated BFF->engine path, and a parse error would emit a spurious `memql query execution failed` ERROR on the node every gate run (znasllc-io/memql#1130). queryActiveSpaceIds is the id-only projection of active v1:cognition:space rows (dsl/cognition/queries.memql) -- a real cognition-concept read that also exercises the BFF->cognition fan.")
 	readyzURL := flag.String("readyz-url", "", "override the /readyz URL (default: derive http://<addr-host>:8085/readyz)")
 	fanAgent := flag.Bool("fan-agent", false, "reserved: the ExecuteQuery already fans BFF->cognition for cognition-concept reads; logged for parity with the AnalysisTemplate")
 	timeout := flag.Duration("timeout", 60*time.Second, "overall deadline")

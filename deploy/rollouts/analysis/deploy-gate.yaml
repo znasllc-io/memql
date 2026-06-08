@@ -71,7 +71,12 @@ spec:
                             key: MEMQL_SVC_JWT
                     args:
                       - "--addr={{args.service}}:50051"
-                      - "--query=count v1:cognition:space"
+                      # Must be a well-formed MemQL query: a parse error makes the
+                      # engine log a `memql query execution failed` ERROR on the node
+                      # on every gate run (znasllc-io/memql#1130). queryActiveSpaceIds
+                      # is the id-only projection of active v1:cognition:space rows
+                      # -- a real cognition-concept read that exercises BFF->cognition.
+                      - "--query=queryActiveSpaceIds({})"
 ---
 # ---- 3: optional SLO gate (Prometheus) --------------------------------------
 # Enabled by referencing this template too in the Rollout's analysis block and
