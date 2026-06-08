@@ -137,6 +137,86 @@ func TestCanonicalIdExpr_ParsesAsTypedNode(t *testing.T) {
 	require.Equal(t, "v1:identity:user", cid.Concept)
 }
 
+// TestResolveCanonicalIdComparisons is the #1109 regression: an inlined
+// canonicalId(...) on a comparison RHS must be resolved to its canonical
+// string in the filter pre-walk. Without the fix the typed
+// *ast.CanonicalIdExpr survives to the literal evaluator and fails the
+// query with "unsupported literal type *ast.CanonicalIdExpr".
+func TestResolveCanonicalIdComparisons(t *testing.T) {
+	engine := newTestEngineWithConcepts(t, map[string]*memoryNodes.Concept{
+		"v1:identity:user":   {Name: "v1:identity:user"},
+		"v1:cognition:space": {Name: "v1:cognition:space"},
+	})
+	ctx := context.Background()
+
+	t.Run("bare slug literal RHS resolves to canonical id", func(t *testing.T) {
+		expr := &ComparisonExpression{
+			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Operator: OpEq,
+			Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "daily-abc"}, Concept: "v1:cognition:space"},
+		}
+		out := engine.resolveCanonicalIdComparisons(ctx, expr)
+		got, ok := out.(*ComparisonExpression)
+		require.Truef(t, ok, "expected *ComparisonExpression, got %T", out)
+		require.Equal(t, "v1:cognition:space:daily-abc", got.Value)
+		// Original is left untouched (cached-plan invariant).
+		_, stillExpr := expr.Value.(*ast.CanonicalIdExpr)
+		require.True(t, stillExpr, "original comparison value must not be mutated")
+	})
+
+	t.Run("already-canonical literal RHS resolves to itself", func(t *testing.T) {
+		expr := &ComparisonExpression{
+			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Operator: OpEq,
+			Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "v1:cognition:space:daily-abc"}, Concept: "v1:cognition:space"},
+		}
+		out := engine.resolveCanonicalIdComparisons(ctx, expr).(*ComparisonExpression)
+		require.Equal(t, "v1:cognition:space:daily-abc", out.Value)
+	})
+
+	t.Run("intrinsic id field with canonicalId RHS resolves to canonical", func(t *testing.T) {
+		expr := &ComparisonExpression{
+			Field:    FieldReference{Parts: []string{"id"}, Raw: "id"},
+			Operator: OpEq,
+			Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "user-abc"}, Concept: "v1:identity:user"},
+		}
+		out := engine.resolveCanonicalIdComparisons(ctx, expr).(*ComparisonExpression)
+		require.Equal(t, "v1:identity:user:user-abc", out.Value)
+	})
+
+	t.Run("canonicalId RHS resolves inside a logical AND alongside a bool comparison", func(t *testing.T) {
+		// The exact shape from the staging repro: a canonicalId RHS in
+		// one arm and a bool comparison in the other. Pre-fix this tree
+		// reached normalizeScalarValue with the typed node.
+		expr := &LogicalExpression{
+			Op: LogicalAnd,
+			Left: &ComparisonExpression{
+				Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+				Operator: OpEq,
+				Value:    &ast.CanonicalIdExpr{Value: &ast.LiteralExpr{Value: "daily-abc"}, Concept: "v1:cognition:space"},
+			},
+			Right: &ComparisonExpression{
+				Field:    FieldReference{Parts: []string{"payload", "active"}, Raw: "payload.active"},
+				Operator: OpEq,
+				Value:    true,
+			},
+		}
+		out := engine.resolveCanonicalIdComparisons(ctx, expr).(*LogicalExpression)
+		require.Equal(t, "v1:cognition:space:daily-abc", out.Left.(*ComparisonExpression).Value)
+		require.Equal(t, true, out.Right.(*ComparisonExpression).Value)
+	})
+
+	t.Run("non-canonicalId comparison passes through untouched", func(t *testing.T) {
+		expr := &ComparisonExpression{
+			Field:    FieldReference{Parts: []string{"payload", "spaceId"}, Raw: "payload.spaceId"},
+			Operator: OpEq,
+			Value:    "plain-string",
+		}
+		out := engine.resolveCanonicalIdComparisons(ctx, expr)
+		require.Same(t, expr, out)
+	})
+}
+
 // newTestEngineWithConcepts builds a minimal engine seeded with the
 // given concept definitions. Used by canonicalId + auto-canon tests
 // that need the engine to resolve scope + relationship metadata.

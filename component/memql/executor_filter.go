@@ -383,6 +383,109 @@ func (e *MemQLEngine) canonicalizeRelationshipComparisons(ctx context.Context, e
 	}
 }
 
+// resolveCanonicalIdComparisons walks an expression tree and replaces
+// any comparison RHS that is still an unresolved `*ast.CanonicalIdExpr`
+// (i.e. an inlined `canonicalId(<value>, "<concept>")` in a query
+// filter) with its resolved canonical-id string. Returns a NEW tree
+// when anything was rewritten (mutating the caller's tree would corrupt
+// cached query plans); otherwise the original node is returned.
+//
+// Why this pass exists (#1109): when a `.memql` query filter inlines
+// `canonicalId(...)` on a comparison RHS and the WHERE chain also
+// includes a bool comparison, the typed `*ast.CanonicalIdExpr` survives
+// all the way to the literal evaluator (normalizeScalarValue /
+// compareEquality), which has no case for it and fails the whole query
+// with `unsupported literal type *ast.CanonicalIdExpr`. The mutation /
+// automation runtime already resolves the same node via
+// canonicalizeIdValue (mutation_templates.go), and the `now()` /
+// `*ast.TimestampExprFunc` literal gets the analogous lazy substitution
+// in the three comparison branches -- this is the query-filter
+// counterpart for canonicalId. Runs before SQL compile + post-filter so
+// both paths see the same resolved string.
+//
+// A node whose inner value can't be resolved to a non-empty string is
+// passed through unchanged so the downstream evaluator surfaces the
+// original (well-understood) error instead of a partially-rewritten tree.
+func (e *MemQLEngine) resolveCanonicalIdComparisons(ctx context.Context, expr ExpressionNode) ExpressionNode {
+	if expr == nil || e == nil {
+		return expr
+	}
+	switch n := expr.(type) {
+	case *ComparisonExpression:
+		if n == nil {
+			return expr
+		}
+		cid, ok := n.Value.(*ast.CanonicalIdExpr)
+		if !ok {
+			return expr
+		}
+		canon, ok := e.resolveCanonicalIdExprValue(ctx, cid)
+		if !ok {
+			return expr
+		}
+		rewritten := *n
+		rewritten.Value = canon
+		return &rewritten
+	case *LogicalExpression:
+		if n == nil {
+			return expr
+		}
+		left := e.resolveCanonicalIdComparisons(ctx, n.Left)
+		right := e.resolveCanonicalIdComparisons(ctx, n.Right)
+		if left == n.Left && right == n.Right {
+			return expr
+		}
+		clone := *n
+		clone.Left = left
+		clone.Right = right
+		return &clone
+	case *RelationshipExpression:
+		if n == nil {
+			return expr
+		}
+		target := e.resolveCanonicalIdComparisons(ctx, n.Target)
+		if target == n.Target {
+			return expr
+		}
+		return &RelationshipExpression{Function: n.Function, Target: target}
+	default:
+		return expr
+	}
+}
+
+// resolveCanonicalIdExprValue evaluates a `*ast.CanonicalIdExpr` node to
+// its canonical-id string. Returns (value, true) on success; (_, false)
+// when the inner value expression isn't a plain literal we can resolve
+// here or canonicalization fails, so the caller leaves the tree alone.
+func (e *MemQLEngine) resolveCanonicalIdExprValue(ctx context.Context, cid *ast.CanonicalIdExpr) (string, bool) {
+	if cid == nil {
+		return "", false
+	}
+	concept := strings.TrimSpace(cid.Concept)
+	if concept == "" {
+		return "", false
+	}
+	// In a query filter the inner Value arg is an already-inlined
+	// literal (query construction substitutes concrete arg values
+	// before the filter is built), so a *ast.LiteralExpr covers the
+	// live shapes. Anything more exotic (a nested expression) is left
+	// for the existing evaluator/error path rather than re-implementing
+	// the full expression interpreter in this pre-walk.
+	lit, ok := cid.Value.(*ast.LiteralExpr)
+	if !ok {
+		return "", false
+	}
+	str := strings.TrimSpace(fmt.Sprintf("%v", lit.Value))
+	if str == "" {
+		return "", false
+	}
+	canon, err := e.canonicalizeIdValue(ctx, str, concept)
+	if err != nil || canon == "" {
+		return "", false
+	}
+	return canon, true
+}
+
 // canonicalizeRelationshipFieldValue is the leaf helper for
 // canonicalizeRelationshipComparisons. Returns (newValue, true) when
 // the field has an outgoing @relationship and the value can be
