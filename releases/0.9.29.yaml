@@ -1,0 +1,38 @@
+# Release lockfile (deployment-v2 Phase 4, #702). Assembled by
+# scripts/release/assemble-lockfile.sh from per-repo CI digests.
+# 0.9.29 = 0.9.28 (engine/DSL bundle + #1099 timescaledb + #1102 produceArtifact
+# guard, all in the 0.9.28 engine/bff images) with copresent rebuilt from
+# current main (bd507b5) to carry #1066 WS-reauth instrumentation + #909 Tasks
+# queue + dep-security bumps + attachment/UI fixes. engineVersion 0.9.28
+# (engine source unchanged; only the copresent SPA image changed).
+version: "0.9.29"
+validatedAt: "2026-06-08T16:30:18Z"
+gate: "manual-0.9.29-copresent-rebuild-1066-on-0.9.28"
+engineVersion: "0.9.28"
+components:
+  memql-identity:
+    repo: znasllc-io/memql
+    digest: sha256:2942d366aa3789d423b4323acaa610bd5ab6c1f99d07a0195b425c8665a822a3
+  memql-cognition:
+    repo: znasllc-io/memql
+    digest: sha256:5dcda14f1d5783544aec0f899f3607812bd79eefba7e0aecf25d5cdd7ffe7d1a
+  memql-voice:
+    repo: znasllc-io/memql
+    digest: sha256:162396b88a3cb5fb04884eab69a83aece247dc8f9941b4a8dff71c20c61c35b1
+  memql-agent:
+    repo: znasllc-io/memql
+    digest: sha256:7e96dbebaa1d66b65f21d1bba6acced348cde2817fe05990fd3ed026a6c07e9c
+  memql-planner:
+    repo: znasllc-io/memql
+    digest: sha256:bb426d1fd9a6473dbe33f0af0f6557c7d5ac18f98f41420e6eb3db75c6395d8a
+  memql-workbench:
+    repo: znasllc-io/memql
+    digest: sha256:e30042137d5e2dcb77865de1f21fbb881391bbe2d4b5d1a60c3396d425720802
+  memql-bff-copresent:
+    repo: visionarys-io/memql-bff-copresent
+    digest: sha256:c065ec01cd3736e00f7a75415f3fd46b439226485b078174c70cb70fa851813e
+    builtAgainstEngine: "0.9.28"
+  copresent:
+    repo: visionarys-io/copresent
+    digest: sha256:024dfdd2849302fdb91b06d33fef29f50c7fcbc3c5fa2e92cf038b284c108e8a
+    builtAgainstEngine: "0.9.28"
