@@ -175,7 +175,10 @@ test(
     const nowSec = Math.floor(Date.now() / 1000);
     // exp ~200ms out -> computeRotateDelayMs fires at ~140ms.
     const shortLivedBearer = jwtWithExp(nowSec + 0.2);
-    const rotatedBearer = jwtWithExp(nowSec + 3600);
+    // Rotated token is intentionally exp-less so scheduleAutoRotate arms NO
+    // further timer after the rotation -- keeps the test free of any lingering
+    // handle regardless of timing.
+    const rotatedBearer = `${b64urlJson({ alg: "none" })}.${b64urlJson({ sub: "u1" })}.`;
 
     let onTokenExpiredCalls = 0;
     let conn: Connection | undefined;

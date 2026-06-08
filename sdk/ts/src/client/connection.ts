@@ -125,6 +125,7 @@ export class Connection {
 
   private scheduleAutoRotate(bearer: string): void {
     this.clearRotateTimer();
+    if (this.closed) return; // never arm a timer on a closed connection
     this.currentBearer = bearer;
     const exp = decodeJwtExp(bearer);
     if (exp == null) return; // no exp -> nothing to schedule against (skip)
@@ -154,7 +155,9 @@ export class Connection {
     const trimmed = next?.trim();
     if (trimmed) {
       try {
-        if (await this.rotateAuth(trimmed)) {
+        const ok = await this.rotateAuth(trimmed);
+        if (this.closed) return; // closed during the rotate round-trip
+        if (ok) {
           this.scheduleAutoRotate(trimmed); // reschedule on the fresh token
           return;
         }
