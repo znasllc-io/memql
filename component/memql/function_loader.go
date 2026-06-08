@@ -582,7 +582,10 @@ var signatureConceptRe = regexp.MustCompile(
 // `query <Concept> <name> {`, etc.) and returns the distinct concept
 // names in declaration order.
 func extractAllSignatureConceptNames(source string) []string {
-	matches := signatureConceptRe.FindAllStringSubmatch(source, -1)
+	// Scan a comment-blanked view so a `<kind> <Concept> <name> {`
+	// shape inside a `//` / `/* */` comment isn't captured as a real
+	// signature binding (memql#1074).
+	matches := signatureConceptRe.FindAllStringSubmatch(languageParser.BlankComments(source), -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -788,11 +791,17 @@ func validateStrictFunctionContract(funcDef *languageParser.FunctionDef, expecte
 }
 
 func functionBodyStartsWithReturn(content string) bool {
-	funcIdx := strings.Index(content, "func ")
+	// Locate the procedural `func (...)` header on a comment-blanked
+	// view so a `func (Query)` token inside a `//` / `/* */` comment in
+	// the construct's leading docblock isn't mistaken for the real
+	// header (memql#1074). Offsets are preserved, so the indices index
+	// straight back into the original `content`.
+	scan := languageParser.BlankComments(content)
+	funcIdx := strings.Index(scan, "func ")
 	if funcIdx < 0 {
 		return false
 	}
-	start := strings.Index(content[funcIdx:], "{")
+	start := strings.Index(scan[funcIdx:], "{")
 	if start < 0 {
 		return false
 	}

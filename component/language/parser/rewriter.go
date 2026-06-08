@@ -89,7 +89,13 @@ func rewriteEachBlock(
 	needsConcept bool,
 	emit func(name, conceptId, body string) (string, error),
 ) (string, error) {
-	matches := header.FindAllStringIndex(source, -1)
+	// Detect headers against a comment-blanked view so a `<kind> <name>
+	// {` (or `func (Receiver) ...`) token inside a `//` / `/* */`
+	// comment is never matched as a real construct header (memql#1074).
+	// BlankComments preserves byte offsets, so every index below maps
+	// 1:1 onto the original `source`, which is what we splice into.
+	scan := BlankComments(source)
+	matches := header.FindAllStringIndex(scan, -1)
 	if len(matches) == 0 {
 		return source, nil
 	}
@@ -211,7 +217,10 @@ var legacyProceduralAuthorForm = regexp.MustCompile(`(?m)^func \((Query|Mutation
 // legacyProceduralAuthorForm for why this isn't wired into
 // NormaliseAll directly.
 func RejectLegacyProceduralAuthorForm(source string) error {
-	m := legacyProceduralAuthorForm.FindStringSubmatch(source)
+	// Scan a comment-blanked view so a `func (Receiver) ...` token that
+	// only appears inside a `//` or `/* */` comment never trips the
+	// rejection gate (memql#1074).
+	m := legacyProceduralAuthorForm.FindStringSubmatch(BlankComments(source))
 	if m == nil {
 		return nil
 	}
