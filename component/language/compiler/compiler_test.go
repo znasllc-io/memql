@@ -902,3 +902,89 @@ func TestCompileStepHelperValue_ArgsShorthandRawString(t *testing.T) {
 		t.Errorf("compileStepHelperValue(event.X) = %v, want $event.X", got)
 	}
 }
+
+// TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs (memql#1065)
+//
+// A logic body that ends with a BARE `return <builtin>({field:
+// coalesce(args.X, args.Y)})` compiles the whole call into the
+// `_return` STRING, with the arg refs serialized as `arg("X")`. At
+// runtime that string is handed to engine.Execute with no caller-args
+// bound, so the refs resolve to empty -- the dailyspace builtin then
+// errors "userId is required" on every login.
+//
+// The fix evaluates the coalesce inside an intermediate function STEP
+// (`ensured := <builtin>({field: coalesce(args.X, args.Y)})`) whose
+// args the function-step executor resolves against the local evaluator
+// BEFORE building the engine query. This test pins that the compiled
+// step carries the coalesce in the $args form the resolver understands,
+// and that the `_return` is a bare step reference (resolved locally),
+// not a re-parsed builtin call string.
+func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
+	source := `
+use common.builtins.{ ensureDailySpaceForUser }
+@enabled
+logic logicEnsureDailySpaceOnAuthSession {
+  args { event object @required }
+  body {
+    ensured := ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+    return ensured
+  }
+}`
+	normalised, err := parser.NormaliseAll(source)
+	if err != nil {
+		t.Fatalf("NormaliseAll: %v", err)
+	}
+	lexer := parser.NewLexer(normalised)
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		t.Fatalf("Tokenize: %v", err)
+	}
+	ast, err := parser.NewParser(tokens).Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	file := ast.(*parser.File)
+	var body *parser.AutomationDef
+	for _, def := range file.Definitions {
+		if fd, ok := def.(*parser.FunctionDef); ok && fd.Type == parser.FunctionTypeLogic {
+			body = fd.Body.(*parser.AutomationDef)
+		}
+	}
+	if body == nil {
+		t.Fatal("no logic body parsed")
+	}
+	fakeFunc := &parser.FunctionDef{Name: "logicEnsureDailySpaceOnAuthSession", Type: parser.FunctionTypeAutomation, Body: body}
+	c := New(Config{})
+	result, err := c.CompileFile(&parser.File{Definitions: []parser.Node{fakeFunc}})
+	if err != nil {
+		t.Fatalf("CompileFile: %v", err)
+	}
+	compiled := result.Automations[0].JSON
+
+	// _return must be the BARE step reference, not a re-parsed builtin call.
+	ret, _ := compiled["_return"].(string)
+	if strings.TrimSpace(ret) != "ensured" {
+		t.Fatalf("_return = %q, want bare step ref %q (a builtin-call _return string can't resolve arg() refs)", ret, "ensured")
+	}
+
+	steps, _ := compiled["steps"].([]map[string]any)
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 function step, got %d", len(steps))
+	}
+	fn, _ := steps[0]["function"].(map[string]any)
+	if fn == nil || fn["name"] != "ensureDailySpaceForUser" {
+		t.Fatalf("step 0 is not the ensureDailySpaceForUser function step: %#v", steps[0])
+	}
+	argsMap, _ := fn["args"].(map[string]any)
+	obj, _ := argsMap["0"].(map[string]any)
+	userIdExpr, _ := obj["userId"].(string)
+	// The function-step arg carries the $args form the resolver understands
+	// (resolveArgValueRef -> evaluateCoalesce skips the empty userId and
+	// falls through to subject), NOT the engine-unresolvable arg("...") form.
+	if !strings.Contains(userIdExpr, "$args.event.payload.subject") {
+		t.Fatalf("userId arg = %q, want a coalesce carrying $args.event.payload.subject", userIdExpr)
+	}
+	if strings.Contains(userIdExpr, `arg("`) {
+		t.Fatalf("userId arg still carries engine-unresolvable arg(\"...\") form: %q", userIdExpr)
+	}
+}

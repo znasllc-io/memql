@@ -484,7 +484,19 @@ logic logicEnsureDailySpaceOnAuthSession {
     // (v1:identity:user:<uuid>) -- is the canonical, always-present key, so
     // fall back to it; otherwise login provisions no daily space and the SPA
     // lands the user in an empty app.
-    return ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+    //
+    // The coalesce MUST be evaluated inside an intermediate function STEP
+    // (not as the bare `return <call>(...)` expression). A function step's
+    // args are resolved against the logic's local evaluator BEFORE the
+    // engine query is built -- so `coalesce($args.event.payload.userId,
+    // $args.event.payload.subject)` resolves to the subject (empty userId
+    // skipped) and the builtin receives the real id. A bare `return
+    // <call>(...)` instead serializes the body to a `_return` string that
+    // the engine re-parses with no caller-args bound, so the arg refs
+    // resolve to empty and ensureForUser errors with "userId is required"
+    // on every login (memql#1065).
+    ensured := ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+    return ensured
   }
 }
 
