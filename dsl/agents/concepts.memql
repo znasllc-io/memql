@@ -7,6 +7,8 @@
 // providers) and dsl/worker/ which holds workers that EXECUTE on the
 // user's machine.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("agents")
 @description("System-level AI assistant templates with configurable capabilities, personalities, and provider settings. Global-scoped: lives in _system alongside v1:identity:user, since per-user platform agents (assistant, plannerAgent, trainerAgent) are infrastructure that every tenant sees the same way -- keyed by ownerUserId payload field, addressed canonically as _system:v1:agents:agent:<seedName>-<userShortId>.")
@@ -95,7 +97,7 @@ concept agent {
 
   roleEmbedding      []float @description("Embedding of (role + roleSlug + description + the resolved domain union across capabilities.skillIds[]) used by the layered dedupe (Q10) similarity check. Recomputed on insert/update of any of those fields by the agentRoleEmbed automation. Empty for legacy agents until the backfill runs. Stored on the row rather than a sidecar concept for v1 simplicity; can be moved to v1:agents:agentEmbedding later if row width becomes a concern.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -180,7 +182,7 @@ concept operatorMemory {
 
   lastUpdatedAt  datetime  @description("Timestamp of the most recent entry. Convenience field; the authoritative order is entries[].ts.")
 
-  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")

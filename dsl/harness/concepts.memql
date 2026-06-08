@@ -19,6 +19,9 @@
 // isolation per workspace. No separate task table, no separate state
 // store, no separate audit log.
 
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("harness")
 @description("The desired state of a unit of agent work -- the spine the reconciler (#583) drives and everything else reads. A Plan is the user/agent mental anchor (the goal); Steps are the executable decomposition that hang off it via step.plan. Lifecycle: open -> running -> done/failed/cancelled. ownerUserId is the per-row authorization key (owned tier): stamped from actor.userId at create time so only the owner reaches the plan's reads/writes. Provenance is automatic -- the engine stamps createdBy from the authenticated actor on every inserted version; provenanceMutation records WHICH mutation produced this version so the audit trail names the transition, not just the actor.")
@@ -35,8 +38,8 @@ concept plan {
   completedAt  datetime  @description("When the plan reached a terminal status.")
   provenanceMutation  string  @description("Name of the mutation that produced this plan version (createPlan / startPlan / completePlan / ...). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="owns", field="rootStepId", target="v1:harness:step", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="owns", field="rootStepId", target=step, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -59,10 +62,10 @@ concept step {
   completedAt    datetime  @description("When the step reached a terminal status (done / failed).")
   provenanceMutation  string  @description("Name of the mutation that produced this step version (addStep / startStep / completeStep / failStep / ...). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="planId", target="v1:harness:plan", direction="outgoing")
-  @relationship(type="dependsOn", field="dependsOn", target="v1:harness:step", direction="outgoing")
-  @relationship(type="interactsWith", field="assignedAgent", target="v1:agents:agent", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
+  @relationship(type="dependsOn", field="dependsOn", target=step, direction="outgoing")
+  @relationship(type="interactsWith", field="assignedAgent", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -78,9 +81,9 @@ concept observation {
   content      string  @required  @description("The text rendering of this observation -- the embedding source, so observations are recall-able. The harness embedding loop stores this into node_vectors keyed by the observation id (integration.embedding.store, vectorField='content') so the observation is semantically recall-able (#585): the agent can search its own history. Mirrors the v1:common:documentChunk content-as-embedding pattern -- the vector lives in node_vectors keyed by node id, not inline on the row.")
   embedding    []float  @description("The semantic embedding vector for `content`, populated lazily by the harness embedding loop when an inline copy is wanted alongside the canonical node_vectors entry. Until set, recall reads the node_vectors row keyed by this observation's id directly. Carried on the concept so observations are recall-able (per the #582 sketch's embedding field).")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="stepId", target="v1:harness:step", direction="outgoing")
-  @relationship(type="parent", field="planId", target="v1:harness:plan", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="stepId", target=step, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
 }
 
 // =====================================================================
@@ -120,8 +123,8 @@ concept semanticMemory {
   status         enum("active", "pruned")  @required  @default("active")  @description("Belief lifecycle. active = a live belief the recall path returns. pruned = decayed below the confidence floor and retired; the row is kept (append-only model) but filtered out of recall and dedup. Soft-delete because MemQL has no row-removal mutation -- mirrors the safety / platform retention crons.")
   provenanceMutation  string  @description("Name of the mutation that produced this semanticMemory version (mutationCreateHarnessSemanticMemory / mutationReinforceHarnessSemanticMemory / mutationDecayHarnessSemanticMemory / mutationPruneHarnessSemanticMemory). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="formedFrom", field="sourceEpisodes", target="v1:harness:observation", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="formedFrom", field="sourceEpisodes", target=observation, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -135,5 +138,5 @@ concept consolidationCursor {
   episodesSeen int     @description("Running count of episodic nodes consolidated for this owner across all runs. Diagnostic only -- lets an operator see consolidation throughput per owner. The reinforce/advance mutation takes the bumped value (computed engine-side, since the parser has no arithmetic).")
   provenanceMutation  string  @description("Name of the mutation that produced this cursor version (mutationAdvanceHarnessConsolidationCursor). Pairs with the engine-stamped createdBy intrinsic to name the transition in the audit trail.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

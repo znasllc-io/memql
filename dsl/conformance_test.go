@@ -242,6 +242,70 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 	}
 }
 
+// TestRelationshipTargetsUseImports pins memql#1067: a concept's
+// @relationship target must reference an imported concept by its bare name
+// (resolved through a file-top `use <ns>.concepts.{ name }` import, or from
+// the owning file for same-namespace targets) -- NOT a hardcoded canonical-ID
+// string. The canonical-string form (`target="v1:..."`) is retired; this gate
+// hard-fails any reintroduction so relationships stay on the same import model
+// as mutations/queries/shapes. The engine resolves the bare name to the
+// canonical id at load time (component/memql.LoadUnifiedConcepts).
+func TestRelationshipTargetsUseImports(t *testing.T) {
+	type violation struct {
+		file string
+		line int
+		text string
+	}
+	var violations []violation
+
+	tree := Tree()
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		t.Fatalf("WalkMemqlFiles: %v", err)
+	}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "_reference/") {
+			continue
+		}
+		file, openErr := tree.Open(p)
+		if openErr != nil {
+			t.Fatalf("open %s: %v", p, openErr)
+		}
+		raw, readErr := io.ReadAll(file)
+		file.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", p, readErr)
+		}
+		for lineno, line := range strings.Split(string(raw), "\n") {
+			trimmed := strings.TrimLeft(line, " \t")
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			if !strings.Contains(line, "@relationship") {
+				continue
+			}
+			// Retired form: a quoted canonical-ID target (target="v1:...").
+			if strings.Contains(line, `target="`) {
+				violations = append(violations, violation{
+					file: p,
+					line: lineno + 1,
+					text: strings.TrimSpace(line),
+				})
+			}
+		}
+	}
+	if len(violations) > 0 {
+		t.Errorf("found %d @relationship target(s) using the retired canonical-ID string form (memql#1067):", len(violations))
+		for _, v := range violations {
+			t.Errorf("  %s:%d  %s", v.file, v.line, v.text)
+		}
+		t.Logf("\nUse the bare imported concept name instead of a canonical-ID string:\n" +
+			"  use identity.concepts.{ user }\n" +
+			"  @relationship(type=\"parent\", field=\"ownerUserId\", target=user, direction=\"outgoing\")\n" +
+			"Same-namespace targets resolve from the owning file (no import needed).")
+	}
+}
+
 // TestPerRowAuthzClassification scans every query / mutation in the
 // tree and classifies it into one of four buckets:
 //

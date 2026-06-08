@@ -18,6 +18,8 @@
 // This concept tracks the workspace lifetime. Compute (container)
 // state is in-process on the agent node and not persisted.
 
+use planner.concepts.{ plan }
+
 @version("1.0.0")
 @namespace("workbench")
 @description("Per-Plan workbench workspace. Tracks the persistent filesystem mounted into every per-Task container running under the Plan. Created lazily on first workbenchHost call; released when the parent Plan transitions to a terminal status (succeeded / failed / cancelled). Universal authorization -- no scope grants, no kill switch, no per-agent gating; the workbench is sandboxed inside the cluster and the blast radius is contained to the per-Plan directory tree.")
@@ -33,5 +35,5 @@ concept workspace {
   releasedAt      datetime @description("When the workspace was released and the directory torn down. Empty for status=provisioned.")
   releasedReason  enum("", "plan_terminal", "explicit", "ttl_expired") @default("") @description("Discriminator for status=released rows. plan_terminal = the releaseWorkbenchOnPlanTerminal automation fired. explicit = an admin / mutation explicitly released. ttl_expired = future ttl-driven sweep.")
 
-  @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
 }

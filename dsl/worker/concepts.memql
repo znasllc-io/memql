@@ -3,6 +3,10 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use agents.concepts.{ agent }
+use identity.concepts.{ identity, user }
+use planner.concepts.{ plan }
+
 @version("1.0.0")
 @namespace("worker")
 @description("Per-call telemetry for worker tool invocations. Written once on call completion (success / failure / cancelled / timeout / denied). Operator reads these for plan debugging; auditor reads identity:auditEvent for the security timeline. Linkage between the two layers is via correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the workerInvocationRetentionSweep cron soft-deletes rows past their TTL.")
@@ -28,10 +32,10 @@ concept invocation {
   bytesOut       int  @description("Bytes the worker streamed out (stdout + stderr + fs_read body, etc).")
   outputPreview  string  @description("First 1024 chars of stdout/data, for quick debugging without fetching the full body. Sensitive tokens are NOT scrubbed here -- preview is for owner eyes, audit-log readers don't see this field.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="workerId", target="v1:worker:registration", direction="outgoing")
-  @relationship(type="parent", field="agentId", target="v1:agents:agent", direction="outgoing")
-  @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
+  @relationship(type="parent", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -55,7 +59,7 @@ concept registration {
   revokedBy      string  @description("v1:identity:user.id who revoked the worker. Empty for self-revocation.")
   revokeReason   string  @description("Free text; surfaced in audit + the worker's offline-row tooltip.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="identityId", target="v1:identity:identity", direction="outgoing")
-  @relationship(type="parent", field="revokedBy", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
+  @relationship(type="parent", field="revokedBy", target=user, direction="outgoing")
 }

@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.concepts.{ space }
+
 @version("1.0.0")
 @namespace("data")
 @description("Audit log entry for validation state transitions. Tracks who performed each check, confirm, or revert action, when, and why.")
@@ -17,7 +19,7 @@ concept log {
   spaceId       string  @required  @description("Space ID for scoped log queries")
   note          string  @description("Optional reason, especially useful for reverts")
 
-  @relationship(type="parent", field="recordId", target="v1:data:record", direction="outgoing")
+  @relationship(type="parent", field="recordId", target=record, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -32,7 +34,7 @@ concept policy {
   checkedDataUsable     bool    @default("false")  @description("Whether checked (not yet confirmed) records are usable live")
   revertMinRole         enum("owner", "admin", "writer", "reader")  @default("admin")  @description("Minimum role required to revert records")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -58,5 +60,5 @@ concept record {
   lastConfirmedBy     string    @description("Identity ID of last human confirmer")
   lastConfirmedAt     datetime  @description("When last confirmed by a human identity")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }

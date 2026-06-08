@@ -2,6 +2,8 @@
 //
 // Concepts in the common namespace.
 
+use cognition.concepts.{ space }
+
 @version("1.0.0")
 @namespace("common")
 @description("A file attachment uploaded to a space, with extracted transcription.")
@@ -16,7 +18,7 @@ concept attachment {
   transcription  string  @description("Extracted plain text from the file, or image description for images.")
   uploadedBy  string  @required  @description("Actor identifier of the user who uploaded the file.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -40,5 +42,5 @@ concept media {
   }
   url  string  @required  @description("Storage URL for the asset.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }

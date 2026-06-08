@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use cognition.concepts.{ space }
+
 @version("1.0.0")
 @namespace("identity")
 @description("Self-service access request placed on the waitlist queue. Created when an unknown email submits the registration form while IDENTITY_REGISTRATION_MODE=approval. Admins triage rows in the admin console: approval mints a v1:identity:invitation and emails a magic link; rejection stamps the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in any partition (typically owners of the cluster) can review the queue.")
@@ -20,8 +22,8 @@ concept accessRequest {
   reviewerNote      string  @description("Free-text rationale recorded by the admin. Required by UX convention for rejections; optional but encouraged for approvals. Stored verbatim for audit -- never edited.")
   invitationId      string  @description("Set on approval to the v1:identity:invitation row that was minted to deliver the magic link. Empty for pending / rejected / expired rows.")
 
-  @relationship(type="parent", field="reviewedBy", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="invitationId", target="v1:identity:invitation", direction="outgoing")
+  @relationship(type="parent", field="reviewedBy", target=user, direction="outgoing")
+  @relationship(type="parent", field="invitationId", target=invitation, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -52,8 +54,8 @@ concept auditEvent {
 
   prevEventHash   string  @description("Reserved for future hash-chain tamper-resistance. SHA-256 hex digest of the previous event's full payload. Written from day one; chain validation enabled by a follow-up iteration.")
 
-  @relationship(type="parent", field="actorUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="actorIdentityId", target="v1:identity:identity", direction="outgoing")
+  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="actorIdentityId", target=identity, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -72,9 +74,9 @@ concept authCode {
   consumedAt          datetime  @description("Set atomically on the first successful /oauth/token redemption. Non-nil = the code is spent and any further redemption attempt is rejected and audited as code_replay. Single-use enforcement is the load-bearing security property of OAuth auth codes.")
   consumedFromIP      string  @description("IP the redemption request came from. Captured for audit and anomaly detection.")
 
-  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="identityId", target="v1:identity:identity", direction="outgoing")
-  @relationship(type="parent", field="magicLinkRequestId", target="v1:identity:magicLinkRequest", direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
+  @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
+  @relationship(type="parent", field="magicLinkRequestId", target=magicLinkRequest, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -97,8 +99,8 @@ concept authSession {
   revokedAt       datetime  @description("Set when the user revokes the session. Non-nil = middleware rejects the bearer token.")
   revokedReason   enum("user_action", "all_sessions", "admin", "")  @default("")  @description("Why the session was revoked. user_action = the per-device sign-out. all_sessions = the cross-device revoke. admin = staff-initiated.")
 
-  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="identityId", target="v1:identity:identity", direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
+  @relationship(type="parent", field="identityId", target=identity, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -228,9 +230,9 @@ concept invitation {
   tokenHash             string                                                                @description("SHA-256 hex digest of the current guest invite token (guest kind only). Primary lookup key in the guest-auth interceptor and on the /join/<token> resolve path. The plaintext token is delivered in the email and never persisted server-side (see memql#108).")
   previousTokenHash     string                                                                @description("SHA-256 hex digest of the token this row carried before the most-recent resend rotation, when there was one. Used by the resolve handler to return a UX-friendly `superseded` status for an older link instead of a generic `invalid`. Carries only ONE generation of history -- the rotation before last drops off. Always empty before any resend has rotated the row.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="parent", field="inviterId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="inviteeId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="inviterId", target=user, direction="outgoing")
+  @relationship(type="parent", field="inviteeId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -247,7 +249,7 @@ concept magicLinkRequest {
   userAgent       string  @description("User-Agent header at issuance time. Captured for audit and for the consume-time UA-mismatch check (loose; a different browser is allowed).")
   invitationId    string  @description("Set when the magic link was issued in response to an admin-approved access-request invitation. Empty for self-service login attempts. Lets the consume handler stamp the inviting context on the new user record.")
 
-  @relationship(type="parent", field="invitationId", target="v1:identity:invitation", direction="outgoing")
+  @relationship(type="parent", field="invitationId", target=invitation, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -305,8 +307,8 @@ concept workerPairingCode {
   redeemedFromIP  string  @description("Source IP the redeem call came from. Audit signal -- helps detect 'someone else redeemed my code' fraud.")
   sourceIP     string  @description("IP the create-pairing-code request came from. Audit + abuse signal.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="parent", field="redeemedBy", target="v1:identity:identity", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="redeemedBy", target=identity, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -333,5 +335,5 @@ concept accountEntitlement {
   maxConcurrentTasks int     @default("0") @description("The cap: the maximum number of Plans this account may have running concurrently across all of its spaces. SOURCE OF TRUTH for the number (billing writes it), so a tier's cap changes without a code change. A value <= 0 means UNLIMITED (the default). Ignored when tier='enterprise' (always unlimited). E.g. set to 5 to cap a pro account at five concurrent running tasks; the 6th and beyond wait for a freed slot (#905).")
   note               string  @description("Free-text operator / billing note about why this entitlement was set (e.g. 'pro plan', 'temporary bump during migration'). Audit aid only; the resolver ignores it.")
 
-  @relationship(type="parent", field="accountId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="accountId", target=user, direction="outgoing")
 }

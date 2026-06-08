@@ -3,6 +3,9 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use common.concepts.{ attachment, knowledgeDomain }
+use planner.concepts.{ plan }
+
 @version("1.0.0")
 @namespace("knowledge")
 @description("A user-uploaded file (or chat-promoted segment) that's been analyzed and structured into queryable items. Container concept that owns metadata + back-references; the actual structured content lives in per-format item concepts (v1:knowledge:spreadsheetRow for tabular, v1:knowledge:imageRegion for visual, v1:common:documentChunk for text-style breakdowns of PDFs / markdown / plain text). Per the v1 brainstorm Q8 hybrid model: one Document container query gives the Knowledge page its listing, typed per-format item queries give analytic surfaces (e.g. spreadsheet row column-filters) without JSON-path indirection.")
@@ -29,8 +32,8 @@ concept document {
   embeddedItemCount int     @default("0") @description("Count of items that have been embedded. itemCount - embeddedItemCount = remaining work for the embedDomainItems Plan.")
   uploadedBy        string  @required @description("v1:identity:user.id of the uploader. Owner-only operations (delete, re-validate, attach) check against this.")
 
-  @relationship(type="parent", field="attachmentId", target="v1:common:attachment", direction="outgoing")
-  @relationship(type="parent", field="planId", target="v1:planner:plan", direction="outgoing")
+  @relationship(type="parent", field="attachmentId", target=attachment, direction="outgoing")
+  @relationship(type="parent", field="planId", target=plan, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -52,7 +55,7 @@ concept documentChunk {
   supersededAt  datetime @description("When this chunk transitioned to superseded. Set alongside superseded=true by markChunkSuperseded.")
   supersededReason  string  @description("The Trainer Agent's stated reason for marking the chunk outdated (e.g. 'superseded by 2026 figures', 'source page removed'). Surfaced in the Knowledge panel's chunk-history view.")
 
-  @relationship(type="parent", field="domainId", target="v1:common:knowledgeDomain", direction="outgoing")
+  @relationship(type="parent", field="domainId", target=knowledgeDomain, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -69,7 +72,7 @@ concept domainEntitySchema {
   confirmedAt             datetime @description("When the user confirmed the schema.")
   active                  bool @default("true") @description("Soft-delete flag. Schema changes after lock-in trigger a re-index of historical items; setting active=false skips dedup entirely for the domain.")
 
-  @relationship(type="parent", field="domainId", target="v1:common:knowledgeDomain", direction="outgoing")
+  @relationship(type="parent", field="domainId", target=knowledgeDomain, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -102,7 +105,7 @@ concept imageRegion {
   matchesEntityIndexId  string
   embeddedAsChunkId string  @description("Once lazy-embedded into v1:common:documentChunk (caption text), this points to the chunk id.")
 
-  @relationship(type="parent", field="documentId", target="v1:knowledge:document", direction="outgoing")
+  @relationship(type="parent", field="documentId", target=document, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -162,7 +165,7 @@ concept spreadsheetRow {
   diffFromMatched     object  @description("For dedupStatus='update': map of column-name -> {old, new} for fields that differ from the matched entity. Drives the side-by-side diff view.")
   embeddedAsChunkId   string  @description("Once lazy-embedded into v1:common:documentChunk for semantic retrieval, this points to the embedded chunk's id. Lets retrieval avoid double-counting structured + embedded representations of the same row.")
 
-  @relationship(type="parent", field="documentId", target="v1:knowledge:document", direction="outgoing")
+  @relationship(type="parent", field="documentId", target=document, direction="outgoing")
 }
 
 // ---- concepts/v1/knowledge/validationEvent/concept.memql ----
@@ -229,5 +232,5 @@ concept liveSnapshot {
   expiresAt       datetime @required @description("When this snapshot becomes stale per the source's refreshSeconds. Reads after this auto-refetch.")
   citationLabel   string  @description("Human-readable label the agent can use when citing this snapshot ('inventory snapshot @ 12s ago'). Computed at materialize time so citation rendering doesn't have to recompute.")
 
-  @relationship(type="parent", field="liveSourceId", target="v1:knowledge:liveSource", direction="outgoing")
+  @relationship(type="parent", field="liveSourceId", target=liveSource, direction="outgoing")
 }

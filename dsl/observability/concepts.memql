@@ -7,6 +7,8 @@
 // against these concepts and docs/architecture/observability.md
 // (forthcoming) for the end-to-end picture.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("observability")
 @description("Live per-function observability configuration. Created on demand: a function only has a codeProfile row when someone wanted to set a non-default level on it (incident response, hot path under investigation, etc.). Resolution at call time is codeProfile -> MEMQL_OBSERVE_LEVEL default -> off. Keyed by codeReference, which matches the model.Node.ID for the Method or Func node in topology.model.json (e.g. 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). Cockpit writes these from the drill-down 'bump verbosity for this method' control; the observe runtime reads them through a CDC-driven cache.")
@@ -20,7 +22,7 @@ concept codeProfile {
   setBy          string  @description("v1:identity:user.id of the user who applied this profile. Empty for env-bootstrapped rows.")
   expiresAt      datetime  @description("Optional automatic-off timestamp. The codeProfileExpiry cron flips level back to 'off' when now > expiresAt. Lets the cockpit say 'bump to verbose for the next hour' without leaking a hot-path tap into the steady state.")
 
-  @relationship(type="parent", field="setBy", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="setBy", target=user, direction="outgoing")
 }
 
 @version("1.0.0")

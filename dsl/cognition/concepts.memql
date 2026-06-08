@@ -3,6 +3,9 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("cognition")
 @description("Per-(spaceId, agentId) audio control override. Lets a user dial a single agent's TTS publication on / off / mirror_user inside one space without changing the agent's own default (audioControl on v1:agents:agent). Written by the orb-corner overlay in PresencePanel + the canvas presence widget. Read by the cognition handler before forwarding TTS to the Bridge Agent: an active override beats the agent default; absence falls through to the agent default. id is the deterministic audioOverride:<spaceId>:<agentId> so re-toggling on the same orb hits the same row instead of growing a per-click history.")
@@ -13,8 +16,8 @@ concept audioOverride {
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -28,8 +31,8 @@ concept chunk {
   spaceId  string  @required  @description("Space where the text is being generated.")
   text  string  @required  @description("The text content of this chunk.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="createdBy", field="participantId", target="v1:cognition:participant", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="createdBy", field="participantId", target=participant, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -105,7 +108,7 @@ concept context {
   }
   spaceId  string  @required  @description("ID of the space this context snapshot belongs to.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/micState/concept.memql ----
@@ -119,8 +122,8 @@ concept micState {
   muted      bool    @required @description("True when the user's LiveKit mic is muted (track.enabled=false). False when actively publishing audio.")
   updatedAt  datetime @required @description("Wall-clock time the toggle landed -- used for staleness checks (e.g. ignore rows older than 30s when picking the effective state).")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -146,10 +149,10 @@ concept participant {
   userId  string  @description("External user ID (for human participants).")
   hidden  bool  @default(false)  @description("When true, the participant is present in the space for routing purposes but is never rendered in participant-facing UI (PresencePanel, invite lists, etc.).")
 
-  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="parent", field="userId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="interactsWith", field="forUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="forUserId", target=user, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/participant/presence/concept.memql ----
@@ -174,8 +177,8 @@ concept presence {
   spaceId  string  @required  @description("ID of the space this presence snapshot belongs to.")
   state  enum("idle", "listening", "thinking", "responding", "typing", "waiting", "needs_clarification", "needs_human", "paused", "error", "working", "using_tool", "researching", "investigating")  @required  @description("High-level, user-friendly state for UI rendering.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="parent", field="participantId", target="v1:cognition:participant", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -198,8 +201,8 @@ concept session {
   startedAt  datetime  @description("When the session started.")
   streams  string  @description("Active stream and session identifiers for external services.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="parent", field="participantId", target="v1:cognition:participant", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -237,10 +240,10 @@ concept space {
   turnStateId  string  @description("ID of the turn state owned by this space.")
   utteranceIds  []string  @description("IDs of utterances in this space.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
-  @relationship(type="contains", field="participantIds", target="v1:cognition:participant", direction="outgoing")
-  @relationship(type="owns", field="turnStateId", target="v1:cognition:turn:state", direction="outgoing")
-  @relationship(type="contains", field="utteranceIds", target="v1:cognition:utterance", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="contains", field="participantIds", target=participant, direction="outgoing")
+  @relationship(type="owns", field="turnStateId", target=state, direction="outgoing")
+  @relationship(type="contains", field="utteranceIds", target=utterance, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -271,7 +274,7 @@ concept state {
   spaceId  string  @required  @description("ID of the space this turn state belongs to.")
   trigger  string  @description("Why this turn state version was produced (e.g., utterance, silence_nudge, init).")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -314,9 +317,9 @@ concept utterance {
   utteranceType  enum("speech", "text", "action", "system")  @required  @description("Type of utterance.")
   videoId  string  @description("ID of associated video media asset.")
 
-  @relationship(type="interactsWith", field="participantId", target="v1:cognition:participant", direction="outgoing")
-  @relationship(type="interactsWith", field="replyToId", target="v1:cognition:utterance", direction="outgoing")
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
+  @relationship(type="interactsWith", field="replyToId", target=utterance, direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/videoOverride/concept.memql ----
@@ -331,8 +334,8 @@ concept videoOverride {
   mode      enum("always_on", "always_off", "mirror_user")  @required @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="agentId", target="v1:agents:agent", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
 }
 
 @version("1.0.0")
@@ -382,7 +385,7 @@ concept unmetCapability {
   rosterSnapshot   string  @description("JSON-serialized snapshot of the space's agent roster at decision time (id/name/role/domains/keywords). Used by the rollup to cluster missing domains.")
   reason           string  @description("Router's short explanation of why no agent fit.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/privateUtterance/concept.memql ----
@@ -402,8 +405,8 @@ concept privateUtterance {
   active           bool    @default("true") @description("Soft-deactivate flag.")
   deleted          bool    @default("false") @description("Soft-delete flag.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
-  @relationship(type="interactsWith", field="participantId", target="v1:cognition:participant", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/misrouteFeedback/concept.memql ----
@@ -423,7 +426,7 @@ concept misrouteFeedback {
   movedToId        string  @description("Destination utterance id when userAction='moved'. Empty otherwise.")
   userAction       enum("moved", "dismissed", "timeout", "blocked") @required @description("How the user responded. 'moved' = clicked Move, classifier won; 'dismissed' = clicked Send anyway; 'timeout' = warning auto-collapsed; 'blocked' = hard-block prevented send entirely.")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/greetSuppression/concept.memql ----
@@ -437,5 +440,5 @@ concept greetSuppression {
   expiresAt  string  @required @description("RFC3339; the suppression is ignored once now > expiresAt.")
   active     bool    @default("true") @description("Soft-revoke flag (mirrors the override concepts).")
 
-  @relationship(type="parent", field="spaceId", target="v1:cognition:space", direction="outgoing")
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 }

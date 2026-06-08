@@ -11,6 +11,8 @@
 // from actor.userId server-side so a caller can never create or
 // mutate another user's notes.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("notes")
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
@@ -22,5 +24,5 @@ concept note {
   tags         []string  @description("Optional list of user-supplied tags for grouping / filtering. The frontend renders these as chips; the search tool can narrow by a single tag.")
   updatedAt    datetime  @description("RFC3339 watermark of the most recent edit. Stamped to `now` on every create / update so the frontend can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for the most-recent version.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
