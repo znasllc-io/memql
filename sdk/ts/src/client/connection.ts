@@ -22,9 +22,14 @@ export interface ConnectionAuth {
   guestToken?: string;
   // Worker token (mql_wkr_<...>) for worker-paired flows.
   workerToken?: string;
-  // Called when the server reports the current bearer is no longer
-  // valid (e.g. rotateAuth returns ok=false). The hook should return
-  // a fresh bearer (or null to give up). Resolution is awaited.
+  // Called when a fresh bearer is needed. The hook should return a
+  // fresh bearer (or null to give up); resolution is awaited. Invoked
+  // (a) proactively by the SDK's auto-rotation timer shortly before the
+  // current bearer expires, and (b) reactively if the server reports the
+  // current bearer is no longer valid. Supplying this hook is all a
+  // consumer needs for in-place WS re-auth -- the SDK owns the expiry
+  // timer + rotateAuth round-trip (#1110); consumers no longer reimplement
+  // it. Guest/worker tokens don't carry an exp and are never auto-rotated.
   onTokenExpired?: () => Promise<string | null>;
 }
 
@@ -61,6 +66,12 @@ export class Connection {
   private readonly logger: DispatcherOptions["logger"];
   private readonly auth: ConnectionAuth | undefined;
   private closed = false;
+  // Auto-rotation (#1110): the SDK decodes the bearer's exp and rotates
+  // in place shortly before TTL so a steady-state stream is never torn
+  // down + redialed on token refresh. Null when there's nothing to rotate
+  // (guest/worker token, no onTokenExpired hook, or a bearer with no exp).
+  private rotateTimer: ReturnType<typeof setTimeout> | null = null;
+  private currentBearer: string | undefined;
 
   private constructor(socket: WebSocket, opts: ConnectOptions) {
     this.socket = socket;
@@ -83,6 +94,7 @@ export class Connection {
       conn.close();
       throw err;
     }
+    conn.startAutoRotate();
     return conn;
   }
 
@@ -103,10 +115,81 @@ export class Connection {
     return payload.value.ok === true;
   }
 
+  // startAutoRotate arms the in-place re-auth timer (#1110). No-op unless a
+  // bearer (with a decodable exp) AND an onTokenExpired hook are present --
+  // guest/worker tokens and exp-less bearers are left alone.
+  private startAutoRotate(): void {
+    if (!this.auth?.onTokenExpired || !this.auth.bearer) return;
+    this.scheduleAutoRotate(this.auth.bearer);
+  }
+
+  private scheduleAutoRotate(bearer: string): void {
+    this.clearRotateTimer();
+    this.currentBearer = bearer;
+    const exp = decodeJwtExp(bearer);
+    if (exp == null) return; // no exp -> nothing to schedule against (skip)
+    const delay = computeRotateDelayMs(exp, Date.now());
+    this.rotateTimer = setTimeout(() => {
+      void this.performAutoRotate();
+    }, delay);
+  }
+
+  // performAutoRotate fetches a fresh bearer via onTokenExpired and rotates it
+  // in place. On success it reschedules against the new token's exp; on
+  // failure it retries within the remaining TTL window so a transient refresh
+  // hiccup doesn't fall through to a reconnect.
+  private async performAutoRotate(retriesLeft = 2): Promise<void> {
+    if (this.closed) return;
+    const hook = this.auth?.onTokenExpired;
+    if (!hook) return;
+
+    let next: string | null = null;
+    try {
+      next = await hook();
+    } catch (err) {
+      this.logger?.warn?.("memql sdk: onTokenExpired threw during auto-rotate", err);
+    }
+    if (this.closed) return;
+
+    const trimmed = next?.trim();
+    if (trimmed) {
+      try {
+        if (await this.rotateAuth(trimmed)) {
+          this.scheduleAutoRotate(trimmed); // reschedule on the fresh token
+          return;
+        }
+        this.logger?.warn?.("memql sdk: rotateAuth refused the rotated bearer");
+      } catch (err) {
+        this.logger?.warn?.("memql sdk: rotateAuth threw during auto-rotate", err);
+      }
+    }
+
+    // Failed to rotate: retry partway through whatever TTL remains, so we get
+    // another shot before the bearer actually expires.
+    if (retriesLeft > 0 && !this.closed) {
+      const exp = this.currentBearer ? decodeJwtExp(this.currentBearer) : null;
+      const remainingMs = exp != null ? exp * 1000 - Date.now() : 0;
+      if (remainingMs > 0) {
+        const retryDelay = Math.max(1_000, Math.floor(remainingMs / (retriesLeft + 1)));
+        this.rotateTimer = setTimeout(() => {
+          void this.performAutoRotate(retriesLeft - 1);
+        }, retryDelay);
+      }
+    }
+  }
+
+  private clearRotateTimer(): void {
+    if (this.rotateTimer != null) {
+      clearTimeout(this.rotateTimer);
+      this.rotateTimer = null;
+    }
+  }
+
   // close shuts down the stream + subscriptions. Idempotent.
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.clearRotateTimer();
     this.subscriptions.stop();
     this.dispatcher.stop();
     try {
@@ -146,6 +229,56 @@ export class Connection {
       clearTimeout(timer);
     }
   }
+}
+
+// computeRotateDelayMs returns how long to wait before rotating a bearer that
+// expires at `expSeconds` (unix seconds), given `nowMs`. It fires at `fraction`
+// of the remaining TTL (default 70%) so there's headroom to retry before the
+// hard expiry; never negative, and 0 when the token is already past that point.
+export function computeRotateDelayMs(
+  expSeconds: number,
+  nowMs: number,
+  fraction = 0.7,
+): number {
+  const ttlMs = expSeconds * 1000 - nowMs;
+  if (ttlMs <= 0) return 0;
+  return Math.max(0, Math.floor(ttlMs * fraction));
+}
+
+// decodeJwtExp reads the `exp` (unix seconds) claim from a JWT WITHOUT
+// verifying the signature -- it only needs the expiry to schedule rotation.
+// Returns null for a non-JWT, an unparseable payload, or a missing/non-numeric
+// exp (callers treat null as "don't auto-rotate this token").
+export function decodeJwtExp(jwt: string): number | null {
+  const payload = jwt.split(".")[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(base64UrlDecode(payload)) as { exp?: unknown };
+    return typeof claims.exp === "number" && Number.isFinite(claims.exp)
+      ? claims.exp
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function base64UrlDecode(segment: string): string {
+  let b64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = b64.length % 4;
+  if (pad) b64 += "=".repeat(4 - pad);
+  // Prefer atob (browsers + Node 16+); decode bytes as UTF-8.
+  if (typeof atob === "function") {
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+  // Node fallback without an @types/node dependency -- probe globalThis for
+  // Buffer rather than referencing the bare identifier (mirrors src/si/speech.ts).
+  const g = globalThis as {
+    Buffer?: { from(s: string, enc: string): { toString(enc: string): string } };
+  };
+  if (g.Buffer) return g.Buffer.from(b64, "base64").toString("utf-8");
+  throw new Error("memql sdk: no base64 decoder available (need atob or Buffer)");
 }
 
 function defaultWebSocketFactory(url: string): WebSocket {
