@@ -180,6 +180,12 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	if err != nil {
 		return nil, err
 	}
+	// Resolve any inlined canonicalId(...) comparison RHS values to their
+	// canonical-id string before compile/eval. A typed *ast.CanonicalIdExpr
+	// left in a comparison RHS otherwise reaches the literal evaluator,
+	// which has no case for it and fails the query with "unsupported
+	// literal type *ast.CanonicalIdExpr" (#1109).
+	resolved = e.resolveCanonicalIdComparisons(ctx, resolved)
 	// Extract concept context from the entire expression tree once at the top level.
 	// This allows short IDs to be resolved when concept is specified anywhere in the query.
 	conceptContext := extractConceptFromExpression(resolved)
