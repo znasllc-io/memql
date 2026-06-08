@@ -140,6 +140,53 @@ provider testProvider {
 	}
 }
 
+// TestParseProviderDecl_Disabled locks the @disabled lifecycle flag:
+// a provider annotated @disabled parses and surfaces Disabled == true.
+// The loader uses this to skip the provider at load (no register, no
+// auth resolution) -- see component/memql LoadUnifiedProviders.
+func TestParseProviderDecl_Disabled(t *testing.T) {
+	source := `@disabled
+@base
+@type("Google")
+provider google {
+  auth {
+    apiKey  env("MEMQL_SI_GOOGLE_API_KEY")
+  }
+}`
+
+	got, err := ParseProviderDecl(source)
+	if err != nil {
+		t.Fatalf("ParseProviderDecl: %v", err)
+	}
+	if !got.Disabled {
+		t.Error("Disabled = false, want true (@disabled present)")
+	}
+	if !got.IsBase {
+		t.Error("IsBase = false, want true")
+	}
+}
+
+// TestParseProviderDecl_Enabled locks @enabled as an explicit-on
+// no-op: it parses cleanly and leaves Disabled == false.
+func TestParseProviderDecl_Enabled(t *testing.T) {
+	source := `@enabled
+@type("OpenAI")
+@model("gpt-5-mini")
+provider chat5Mini {
+  auth {
+    apiKey  env("MEMQL_SI_OPENAI_API_KEY")
+  }
+}`
+
+	got, err := ParseProviderDecl(source)
+	if err != nil {
+		t.Fatalf("ParseProviderDecl: %v", err)
+	}
+	if got.Disabled {
+		t.Error("Disabled = true, want false (@enabled is a no-op)")
+	}
+}
+
 // TestParseProviderDecl_RejectsUnknownSubBlock locks the body
 // grammar: only `auth` and `params` are accepted.
 func TestParseProviderDecl_RejectsUnknownSubBlock(t *testing.T) {
