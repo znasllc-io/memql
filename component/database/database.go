@@ -284,12 +284,19 @@ func defaultConfig() *config {
 				}
 			}
 
-			db := sql.OpenDB(connector)
+			// Wrap the connector so Connect() retries transient Postgres
+			// connection-slot exhaustion (SQLSTATE 53300) with jittered
+			// backoff instead of failing the query outright (memql#1076).
+			db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
 
-			// Configure connection pool limits to prevent exhaustion
-			// These are sensible defaults; can be overridden via environment variables
-			db.SetMaxOpenConns(25)                  // Max 25 concurrent connections
-			db.SetMaxIdleConns(5)                   // Keep 5 idle connections warm
+			// Configure connection pool limits to prevent exhaustion.
+			// Defaults are conservative so steady+rollout-surge demand across
+			// every node stays under the instance's max_connections (memql#1076:
+			// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
+			// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
+			// budget = (max_connections - reserved) / max_pods(steady+surge).
+			db.SetMaxOpenConns(10)                  // Max concurrent connections per node
+			db.SetMaxIdleConns(3)                   // Keep a few idle connections warm
 			db.SetConnMaxLifetime(1 * time.Hour)    // Rotate connections hourly
 			db.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
 
