@@ -106,10 +106,10 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            # TEMP rollback (#1117 image/manifest split, #1115): liveness stays on
-            # /healthz until images carry the /livez endpoint (else 401/404 ->
-            # crashloop). Re-flip to /livez once those images ship.
-            httpGet: { path: /healthz, port: 8085, scheme: HTTPS }
+            # /livez is pure process-liveness (#1117): decoupled from /healthz so a
+            # transient dependency blip never liveness-kills an otherwise-alive pod.
+            # Live now that the 0.9.31 images serve /livez (#1115; canary #1149 OK).
+            httpGet: { path: /livez, port: 8085, scheme: HTTPS }
             initialDelaySeconds: 20
             periodSeconds: 20
             timeoutSeconds: 3
