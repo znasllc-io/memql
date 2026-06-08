@@ -261,6 +261,19 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 				data["planApprovedPlanId"] = pid
 			}
 		}
+		// production_directive (memql#1102) carries the planner's TRUSTED
+		// produce-flow scaffolding for a produceArtifact post-approval turn
+		// (e.g. "PRODUCE THIS DELIVERABLE NOW ... write the file with the
+		// workbench tool, do NOT call produceArtifact"). It is the SYSTEM's
+		// own instruction -- the template renders it as an un-bracketed,
+		// authoritative block, NOT inside the untrusted history. Folding it
+		// into the user-role history message instead made the injection
+		// guard refuse it as an embedded "abandon the produce flow"
+		// directive, so the deliverable never landed. Surfacing it here, out
+		// of band, keeps it trusted.
+		if pd := strings.TrimSpace(msg.Hints["production_directive"]); pd != "" {
+			data["productionDirective"] = pd
+		}
 	}
 
 	// Conductor directive (phase 1 transmits via hints, phase 2

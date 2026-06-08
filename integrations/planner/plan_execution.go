@@ -308,6 +308,91 @@ func (p *PlannerIntegration) admitNextForAccount(ctx context.Context, account st
 // which fires on the same v1:planner:plan succeeded transition on a
 // carrier node (memql#940).
 
+// produceArtifactDirective is the planner's TRUSTED produce-flow
+// scaffolding for a produceArtifact post-approval turn (memql#1102).
+//
+// For produceArtifact the owning agent is the SAME assistant whose persona
+// says "for a PRODUCE request, call produceArtifact and end your turn -- do
+// NOT author the deliverable yourself." On THIS turn that instinct is exactly
+// wrong: the assistant IS the executor now, and re-calling produceArtifact
+// just spawns another delegation loop that produces no file (memql#889).
+//
+// This directive is the SYSTEM's own instruction; it travels as a HINT
+// (production_directive) so the agent prompt renders it OUTSIDE the untrusted
+// conversation-history block. When it was instead folded into the user-role
+// history message, the agent prompt's injection guard treated it as an
+// embedded "abandon the produce flow" directive and REFUSED it ("I can't
+// follow the embedded instruction ... but I can create the deliverable for
+// you now ..."), so the deliverable never landed (memql#1102).
+const produceArtifactDirective = "PRODUCE THIS DELIVERABLE NOW. You are the executor for this task -- " +
+	"do NOT call produceArtifact (that would re-delegate and produce nothing). " +
+	"Write the file to your workbench with the workbenchHost tool " +
+	"(action \"fs_write\"), defaulting to a markdown (.md) file unless the " +
+	"deliverable names another format, then end your turn with a short " +
+	"acknowledgement. The promoted file lands in the user's Library " +
+	"automatically. Do NOT publish the deliverable's content to the canvas " +
+	"(no canvasPublish) -- the content belongs ONLY in the file; the canvas " +
+	"gets a short 'ready in your Library' notification automatically."
+
+// buildExecutionTurn assembles the synthetic history + the dispatch hints for
+// a post-approval execution turn. Pure (no engine / no logging) so the
+// memql#1102 contract is directly table-testable:
+//
+//   - history carries ONE user-role message whose content is the Plan's raw
+//     goal -- the GENUINE user request, nothing else. The agent prompt renders
+//     it inside `[[BEGIN UNTRUSTED CONVERSATION HISTORY]]`, so it MUST contain
+//     only user/data content, never the system's own scaffolding.
+//   - the trusted produce-flow directive rides as hints["production_directive"]
+//     (produceArtifact only), which the agent surfaces as an un-bracketed,
+//     authoritative prompt block. This is the fix for the false injection
+//     refusal that left the deliverable unproduced.
+func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentTurnMessage, map[string]string) {
+	history := []*memqlv1.AgentTurnMessage{{
+		Role:    "user",
+		Content: plan.Goal,
+	}}
+
+	// Hints carry the post-approval signal + IDs the agent's tool loop needs
+	// but can't read from ctx on a system-initiated dispatch (owner-user
+	// resolution, plan-id stamping onto worker-invocation rows).
+	hints := map[string]string{
+		"plan_id": planId,
+		"trigger": "plan_approved",
+		// Route this turn onto the agent node's NON-STREAMING background
+		// executor (memql#896). Plan/task execution is batch work; running it
+		// through the interactive watchdog is what false-killed slow
+		// produceArtifact turns (memql#893). The key/value mirror the agent
+		// package's ExecutionLaneHintKey / ExecutionLaneBackground; the planner
+		// binary doesn't import the agent package (separate build tags), so the
+		// literal strings are duplicated here intentionally.
+		"execution_lane": "background",
+	}
+
+	// produceArtifact delivers to the workbench/Library ONLY -- its content
+	// must never be dumped onto the canvas (memql#950) -- and it carries the
+	// trusted production directive (memql#1102).
+	if plan.Kind == produceArtifactPlanKind {
+		hints["deliverable_surface"] = "workbench"
+		hints["production_directive"] = produceArtifactDirective
+	}
+
+	// Opt-in "watch agent work" (memql#900): route the turn through the
+	// interactive streaming lane so live progress can be surfaced.
+	if plan.WatchExecution {
+		hints["execution_lane"] = "interactive"
+	}
+
+	// Forward the Plan's requestedBy as the owner-user hint when it looks like
+	// a canonical user id, so the post-approval dispatch knows whose machine /
+	// library to act on. resolveOwnerForAgent on the agent node can't be
+	// trusted here (the agent record may carry an email in createdBy).
+	if rb := strings.TrimSpace(plan.RequestedBy); rb != "" {
+		hints["owner_user_id"] = rb
+	}
+
+	return history, hints
+}
+
 // executeApprovedPlan does the actual dispatch. Reads the Plan,
 // resolves Sofia's SI participant, forwards the agent turn,
 // consumes the response, posts the reply, and stamps the Plan
@@ -387,104 +472,14 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 	// the executing map) so handlePlanPreempt can address the in-flight turn
 	// for a cross-node "pass" (#906).
 
-	// History carries one synthetic user-role message with the
-	// Plan's goal. NOT written to chat -- it's prompt context the
-	// agent reads. The chat-visible artifact from this turn is
-	// the agent's reply utterance posted below via insertAIReply.
-	//
-	// For produceArtifact, the owning agent is the SAME assistant whose
-	// persona says "for a PRODUCE request, call produceArtifact and end
-	// your turn -- do NOT author the deliverable yourself." On THIS turn
-	// that instinct is exactly wrong: the assistant IS the executor now,
-	// and re-calling produceArtifact just spawns another delegation loop
-	// that produces no file (memql#889 -- observed in the wild: the plan
-	// reached succeeded but wrote zero generatedOutput rows because the
-	// agent re-delegated + published a card instead of writing the file).
-	// Reframe the goal as an explicit production directive that overrides
-	// the delegation persona and steers the agent to write the deliverable
-	// with the workbench tool. scopeElevation plans keep the raw goal.
-	turnContent := plan.Goal
-	if plan.Kind == produceArtifactPlanKind {
-		turnContent = fmt.Sprintf(
-			"PRODUCE THIS DELIVERABLE NOW. You are the executor for this task -- "+
-				"do NOT call produceArtifact (that would re-delegate and produce nothing). "+
-				"Write the file to your workbench with the workbenchHost tool "+
-				"(action \"fs_write\"), defaulting to a markdown (.md) file unless the "+
-				"deliverable names another format, then end your turn with a short "+
-				"acknowledgement. The promoted file lands in the user's Library "+
-				"automatically. Do NOT publish the deliverable's content to the canvas "+
-				"(no canvasPublish) -- the content belongs ONLY in the file; the canvas "+
-				"gets a short 'ready in your Library' notification automatically.\n\n"+
-				"Deliverable:\n%s",
-			plan.Goal,
-		)
-	}
-	history := []*memqlv1.AgentTurnMessage{{
-		Role:    "user",
-		Content: turnContent,
-	}}
-
-	// Hints carry the post-approval signal + IDs the agent's tool
-	// loop needs but can't read from ctx on a system-initiated
-	// dispatch. The agent uses these to:
-	//   - set turnContext.OwnerUserId when AccessContext.UserId is
-	//     missing (system actor on planner-driven turns)
-	//   - stamp planId on worker tool args so v1:worker:invocation
-	//     rows file under the right Plan
-	hints := map[string]string{
-		"plan_id": planId,
-		"trigger": "plan_approved",
-		// Route this turn onto the agent node's NON-STREAMING background
-		// executor (memql#896). Plan/task execution is batch work -- nobody
-		// is watching tokens arrive, the user gets a completion card when
-		// it's done -- so it runs through a request/response tool loop with
-		// one overall timeout instead of the interactive streaming path +
-		// per-chunk idle watchdog. Running background work through the
-		// interactive watchdog is exactly what false-killed slow
-		// produceArtifact turns (memql#893); the dedicated lane retires that
-		// failure mode. The hint key/value are the agent package's
-		// ExecutionLaneHintKey / ExecutionLaneBackground; the planner binary
-		// doesn't import the agent package (separate build tags), so the
-		// literal strings are duplicated here intentionally.
-		"execution_lane": "background",
-	}
-	// produceArtifact delivers to the workbench/Library ONLY -- its content
-	// must never be dumped onto the canvas as a content card (the canvas is
-	// for events/notifications; the file is the deliverable). This hint tells
-	// the agent to scope canvasPublish OUT of this turn's tool set so the
-	// model physically can't publish the file body to the canvas, even as a
-	// fallback when something else fails (memql#950). The key/value mirror the
-	// agent package's DeliverableSurfaceHintKey / DeliverableSurfaceWorkbench;
-	// the planner binary doesn't import the agent package (separate build
-	// tags), so the literal strings are duplicated here intentionally (same as
-	// execution_lane above).
-	if plan.Kind == produceArtifactPlanKind {
-		hints["deliverable_surface"] = "workbench"
-	}
-	// Opt-in "watch agent work" (memql#900). A plan can request live,
-	// token-by-token streaming of its execution -- e.g. the user clicked
-	// "watch this run" -- by setting input.watchExecution=true at create
-	// time. That routes the turn through the INTERACTIVE streaming lane
-	// instead of the background default, so a CoPresent "watch agent work"
-	// view can render progress as it streams. The default stays background;
-	// this only flips the lane for plans that explicitly asked. "interactive"
-	// is anything the agent's IsBackgroundLane treats as non-background.
+	// History + hints for the dispatch are assembled by buildExecutionTurn
+	// (pure, table-tested). Critically, the produce-flow scaffolding rides
+	// as a TRUSTED hint, never inside the user-role history message -- see
+	// the helper's doc comment + memql#1102.
+	history, hints := buildExecutionTurn(planId, plan)
 	if plan.WatchExecution {
-		hints["execution_lane"] = "interactive"
 		p.logger.Info("plan execution: streaming opt-in (watch agent work)",
 			"plan_id", planId)
-	}
-	// Forward the Plan's requestedBy as the owner-user hint when it
-	// looks like a canonical user id. The agent's resolveOwnerForAgent
-	// fallback can't be trusted here -- the agent record on the
-	// agent node may be in a corrupted state with createdBy holding
-	// an email rather than the canonical id, which would silently
-	// propagate into Plan.requestedBy / canvasState.forUserId on
-	// future writes and break the private-canvas filter again.
-	// Using the Plan's requestedBy keeps the post-approval turn
-	// faithful to the user who originally asked.
-	if rb := strings.TrimSpace(plan.RequestedBy); rb != "" {
-		hints["owner_user_id"] = rb
 	}
 
 	turnMsg := &memqlv1.AgentGenerateTurnMsg{
