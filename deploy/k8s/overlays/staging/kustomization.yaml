@@ -1,8 +1,11 @@
-# Staging overlay -> 0.9.21 (SI-forward connected-peer fix #1056 on bff/cognition/
-# planner, carrier-built; carrier-node architecture fix #1053). cognition/agent/
-# planner/workbench are now CARRIER-built (memql-bff-copresent/Dockerfile +
-# BUILD_TAGS=<type>) so they carry the CoPresent DSL (agentReply etc.); voice +
-# identity stay engine builds. memql@3e661ee + carrier@bba722f. See releases/0.9.20.yaml.
+# Staging overlay -> 0.9.27 (provider-lifecycle #1078: identity/cognition/agent
+# rebuilt from main so the @disabled google/groq/mistral lanes take effect on
+# every provider-loading node -- 0.9.26 caught the change only on bff/planner/
+# workbench due to a build-time race vs the E merge). engineVersion 0.9.26
+# (engine source unchanged; coherent rebuild). voice/planner/workbench/bff/
+# copresent reuse their 0.9.26 digests. cognition/agent/planner/workbench are
+# CARRIER-built (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>); voice +
+# identity stay engine builds. See releases/0.9.27.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -28,18 +31,18 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:c25cd24fb420f9fbf03b20e530ffdc5c8195d76754b69e2eb0d0ffcc494e52ab
+    digest: sha256:56c080f48af75c5649211f83bdbdd63034aca1191865aa7aee064626c47c2216
   # Carrier-built; 0.9.21 carries the SI-forward connected-peer fix (#1056).
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:b7a458fcc9d5552faa073322c4fba31b3b7fec965baf70f41fd11a79ba129a99
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:d4cf43ddb4eb9b9159852f07076a8856801a8ba44f158d64cc8d780a47376fd4
+    digest: sha256:59d8b8907eb11ba4e262c9c370e9c8aa5f92785fbf80cdc650386e0f7a8c0c10
   - name: acrmemql.azurecr.io/memql-voice
     digest: sha256:e36c84cb4d1b0d2bd7a8a6197d3034038943ab27692e48a4d93f88c98848faae
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:9be453a7deef73c2dc4c24982a807534aeaace070fdbcd653e1baf981749a3c6
+    digest: sha256:8c9fb8f5f01c5eb193770a0870ce6a1435a3616b7d62dacb36d97c017f02d735
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-planner
     digest: sha256:380b468f2387c1ce5d7414ef744177f83250a07f43f03f4bc1fe9972828942a5
