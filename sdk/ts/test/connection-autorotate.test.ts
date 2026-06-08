@@ -162,53 +162,63 @@ async function replyTo(
   throw new Error("replyTo: matching client frame never arrived");
 }
 
-test("Connection auto-rotates in place shortly before the bearer expires (#1110)", async () => {
-  let socket!: FakeWebSocket;
-  const nowSec = Math.floor(Date.now() / 1000);
-  // exp ~200ms out -> computeRotateDelayMs fires at ~140ms.
-  const shortLivedBearer = jwtWithExp(nowSec + 0.2);
-  const rotatedBearer = jwtWithExp(nowSec + 3600);
+// `timeout` bounds the test so a leaked timer can never hang the CI runner;
+// the finally-close clears the post-rotation reschedule timer (which is armed
+// at ~70% of the rotated token's TTL) even if an assertion throws first.
+test(
+  "Connection auto-rotates in place shortly before the bearer expires (#1110)",
+  { timeout: 8000 },
+  async () => {
+    let socket!: FakeWebSocket;
+    const nowSec = Math.floor(Date.now() / 1000);
+    // exp ~200ms out -> computeRotateDelayMs fires at ~140ms.
+    const shortLivedBearer = jwtWithExp(nowSec + 0.2);
+    const rotatedBearer = jwtWithExp(nowSec + 3600);
 
-  let onTokenExpiredCalls = 0;
+    let onTokenExpiredCalls = 0;
+    let conn: Connection | undefined;
+    try {
+      const dialP = Connection.dial({
+        endpoint: "wss://test.local/memql/ws",
+        auth: {
+          bearer: shortLivedBearer,
+          onTokenExpired: async () => {
+            onTokenExpiredCalls++;
+            return rotatedBearer;
+          },
+        },
+        webSocketFactory: (url) => {
+          socket = new FakeWebSocket(url);
+          return socket as unknown as WebSocket;
+        },
+      });
 
-  const dialP = Connection.dial({
-    endpoint: "wss://test.local/memql/ws",
-    auth: {
-      bearer: shortLivedBearer,
-      onTokenExpired: async () => {
-        onTokenExpiredCalls++;
-        return rotatedBearer;
-      },
-    },
-    webSocketFactory: (url) => {
-      socket = new FakeWebSocket(url);
-      return socket as unknown as WebSocket;
-    },
-  });
+      // Complete the ClientHello/ServerHello handshake.
+      const next = await replyTo(
+        socket,
+        (m) => m.clientHello !== undefined,
+        (id) =>
+          ({ correlateTo: id, serverHello: { nodeId: "n1", version: "test" } }) as unknown as ServerMessage,
+      );
+      conn = await dialP;
 
-  // Complete the ClientHello/ServerHello handshake.
-  const next = await replyTo(
-    socket,
-    (m) => m.clientHello !== undefined,
-    (id) => ({ correlateTo: id, serverHello: { nodeId: "n1", version: "test" } }) as unknown as ServerMessage,
-  );
-  const conn = await dialP;
+      // The auto-rotation timer should fire, call onTokenExpired, and send a
+      // rotateAuth frame which we ack with ok:true.
+      await replyTo(
+        socket,
+        (m) => m.rotateAuth !== undefined,
+        (id) =>
+          ({ correlateTo: id, rotateAuthResult: { ok: true } }) as unknown as ServerMessage,
+        next,
+      );
 
-  // The auto-rotation timer should fire, call onTokenExpired, and send a
-  // rotateAuth frame which we ack with ok:true.
-  await replyTo(
-    socket,
-    (m) => m.rotateAuth !== undefined,
-    (id) =>
-      ({ correlateTo: id, rotateAuthResult: { ok: true } }) as unknown as ServerMessage,
-    next,
-  );
-
-  assert.equal(onTokenExpiredCalls, 1, "onTokenExpired should have been invoked once");
-  const sentRotate = socket.outbound.some(
-    (f) => (JSON.parse(f) as { rotateAuth?: unknown }).rotateAuth !== undefined,
-  );
-  assert.ok(sentRotate, "SDK should have sent a rotateAuth frame on the timer");
-
-  conn.close();
-});
+      assert.equal(onTokenExpiredCalls, 1, "onTokenExpired should have been invoked once");
+      const sentRotate = socket.outbound.some(
+        (f) => (JSON.parse(f) as { rotateAuth?: unknown }).rotateAuth !== undefined,
+      );
+      assert.ok(sentRotate, "SDK should have sent a rotateAuth frame on the timer");
+    } finally {
+      conn?.close();
+    }
+  },
+);
