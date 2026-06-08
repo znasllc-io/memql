@@ -111,7 +111,7 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 
 		var activationErr error
 		if available {
-			if _, err := bunDB.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS timescaledb"); err != nil {
+			if err := createTimescaleExtensionLocked(ctx, bunDB.DB); err != nil {
 				activationErr = err
 				logger.Error("failed to create TimescaleDB extension", "error", err)
 			}
@@ -306,12 +306,50 @@ func timescaleExtensionInitHook(fallbackLogger *slog.Logger) InitHook {
 			return nil
 		}
 
-		if _, err := sqlDB.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS timescaledb"); err != nil {
+		if err := createTimescaleExtensionLocked(ctx, sqlDB); err != nil {
 			logger.Error("failed to create TimescaleDB extension during init", "error", err)
 		}
 
 		return nil
 	}
+}
+
+// timescaleExtensionAdvisoryLockKey is an arbitrary fixed 64-bit key shared by
+// every pod's extension-create path so they all contend on the same lock. The
+// value is the ASCII bytes "tmsldbex" — only its stability across pods matters.
+const timescaleExtensionAdvisoryLockKey int64 = 0x746d736c64626578
+
+// createTimescaleExtensionLocked runs `CREATE EXTENSION IF NOT EXISTS
+// timescaledb` while holding a transaction-scoped Postgres advisory lock, so
+// that pods booting simultaneously during a rollout serialize on the catalog
+// write instead of racing into `tuple concurrently updated` (XX000) (#1099).
+//
+// The lock is transaction-scoped (`pg_advisory_xact_lock`) rather than
+// session-scoped on purpose: it is bound to this transaction's single
+// connection and auto-releases at COMMIT/ROLLBACK. A session-level lock would
+// break here because the surrounding hooks issue their statements through a
+// connection pool, so a separate `pg_advisory_unlock` could land on a
+// different connection than the one that acquired the lock.
+func createTimescaleExtensionLocked(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds; best-effort on the error path
+
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", timescaleExtensionAdvisoryLockKey); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS timescaledb"); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (db *TimescaleDBDatabase) Migrator() (*migrate.Migrator, error) {
