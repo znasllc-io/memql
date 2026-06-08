@@ -1,6 +1,51 @@
 package planner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/znasllc-io/memql/component/language/parser"
+)
+
+// --- tokenBudget stamp (#1108: malformed object literal) ------------------
+
+// TestBuildStampTokenBudgetQuery_Parses guards the approval gate's
+// tokenBudget stamp against the #1108 regression: a bare
+// `tokenBudget:%d` field (unquoted key + bare numeric value, no space)
+// was mis-lexed by the engine DSL -- the lexer folds the colon into the
+// identifier, so `{tokenBudget:300000}` became a single key with no value
+// and the parser rejected it with `expected ':' ... got "}"`. The stamp
+// must now serialize to a well-formed object literal that the engine DSL
+// parser accepts, for every budget value (0, small, large).
+func TestBuildStampTokenBudgetQuery_Parses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		planId string
+		budget int
+	}{
+		{"over-threshold", "v1:planner:plan:abcd1234", 300_000},
+		{"small", "v1:planner:plan:abcd1234", 30},
+		{"zero", "v1:planner:plan:abcd1234", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := buildStampTokenBudgetQuery(tc.planId, tc.budget)
+			if err != nil {
+				t.Fatalf("buildStampTokenBudgetQuery returned error: %v", err)
+			}
+			// It must parse through the real engine DSL parser -- the
+			// pre-fix hand-concatenated form failed here with
+			// `expected ':' or '=' after object key, got "}"`.
+			if _, perr := parser.ParseExpression(q); perr != nil {
+				t.Fatalf("stamp query must parse, got error: %v\nquery: %s", perr, q)
+			}
+			// And it must actually carry the budget (guards against a
+			// "fix" that drops the field to dodge the parse error).
+			if !strings.Contains(q, "tokenBudget") {
+				t.Fatalf("stamp query lost the tokenBudget field: %s", q)
+			}
+		})
+	}
+}
 
 // --- estimate (acceptance: unit-test the estimate) ------------------------
 

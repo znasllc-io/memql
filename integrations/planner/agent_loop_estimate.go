@@ -188,9 +188,37 @@ func (l *PlannerAgentLoop) gatePlanApprovalIfNeeded(ctx context.Context, planId 
 	return true, nil
 }
 
+// buildStampTokenBudgetQuery serializes the tokenBudget stamp mutation
+// from a map via json.Marshal rather than hand-concatenating the object
+// literal.
+//
+// A bare `tokenBudget:%d` field (unquoted key, bare numeric value, no
+// space) is mis-lexed by the engine DSL: the lexer folds the colon into
+// the identifier, so `{tokenBudget:300000}` tokenizes as a single
+// identifier `tokenBudget:300000` with no value -- the parser then fails
+// with `expected ':' or '=' after object key, got "}"` (#1108).
+// json.Marshal emits a quoted key (`"tokenBudget":300000`); the closing
+// quote terminates the identifier scan, so the object is always
+// well-formed regardless of the budget value.
+func buildStampTokenBudgetQuery(planId string, budget int) (string, error) {
+	argsJSON, err := json.Marshal(map[string]any{
+		"planId":      planId,
+		"status":      "planning",
+		"tokenBudget": budget,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`mutationUpdatePlanStatus(%s)`, string(argsJSON)), nil
+}
+
 // stampPlanTokenBudget sets Plan.tokenBudget (best-effort).
 func (l *PlannerAgentLoop) stampPlanTokenBudget(ctx context.Context, planId string, budget int) {
-	q := fmt.Sprintf(`mutationUpdatePlanStatus({planId:%q, status:"planning", tokenBudget:%d})`, planId, budget)
+	q, err := buildStampTokenBudgetQuery(planId, budget)
+	if err != nil {
+		l.logger.Warn("planner approval gate: stamp tokenBudget marshal failed", "planId", planId, "error", err)
+		return
+	}
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner approval gate: stamp tokenBudget failed", "planId", planId, "error", err)
 	}
