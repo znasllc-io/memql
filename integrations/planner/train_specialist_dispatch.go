@@ -79,11 +79,18 @@ type TrainSpecialistDispatcher struct {
 
 	// claimed guards against double-dispatch: created + updated events
 	// for the same Plan both fire, and in cluster mode multiple planner
-	// nodes may see the same event. A best-effort in-process set keeps
-	// one node from running the Trainer twice for a Plan it already
-	// picked up. (Cross-node dedup relies on the Plan's running-status
-	// transition being observed before a second node claims; the
-	// in-process guard covers the common single-node double-fire.)
+	// nodes may see the same event. The claim is a once-ever, atomic
+	// check-and-set under mu: the FIRST event to reach claim() for a
+	// given Plan id wins and runs the Trainer; every subsequent event
+	// for that id (whether it races the in-flight run or arrives after
+	// it completes) is dropped. The claim is never released, because a
+	// Plan id is minted once per training cycle (refresh:<domain>:<ns>
+	// from the cron, train:<parentPlanId> from the approval mint) and is
+	// never reused for a fresh cycle -- so there is nothing to re-pick-up
+	// under the same id. Releasing the claim once a run finished was the
+	// source of the created/updated double-dispatch race (#1084): a
+	// duplicate event arriving after the goroutine completed found the id
+	// already evicted and re-ran the Trainer.
 	mu      sync.Mutex
 	claimed map[string]struct{}
 }
@@ -150,7 +157,6 @@ func (d *TrainSpecialistDispatcher) handle(ev events.Event) {
 					"planId", planId, "recover", fmt.Sprintf("%v", r))
 				_ = d.markFailed(context.Background(), planId,
 					fmt.Sprintf("trainSpecialist dispatch panic: %v", r))
-				d.release(planId)
 			}
 		}()
 		if err := d.runTrainer(context.Background(), planId); err != nil {
@@ -158,17 +164,20 @@ func (d *TrainSpecialistDispatcher) handle(ev events.Event) {
 				"planId", planId, "error", err)
 			_ = d.markFailed(context.Background(), planId, err.Error())
 		}
-		// Release the claim once the run is fully terminal so a later
-		// re-submission of the same Plan id can be picked up again. (We
-		// don't release on the happy path until after markSucceeded /
-		// markFailed has run, so a stray duplicate event during the run
-		// is dropped.)
-		d.release(planId)
+		// The claim is intentionally NOT released. A trainSpecialist Plan
+		// id is minted exactly once per training cycle and never reused,
+		// so the once-ever claim is the correct guarantee: it makes the
+		// created/updated double-fire (and any post-completion duplicate
+		// event) idempotent, dispatching the Trainer exactly once.
 	}()
 }
 
-// claim returns true if this dispatcher should run the Plan (it wasn't
-// already claimed). Best-effort in-process dedup.
+// claim atomically checks-and-sets the per-Plan claim under mu and
+// returns true only for the FIRST caller for a given Plan id. The
+// membership check and the insert happen under the same lock, so there
+// is no check-then-act window: two events racing through claim() for
+// the same id can never both observe an empty set. The claim is never
+// released (see the struct doc), so this is a once-ever guard.
 func (d *TrainSpecialistDispatcher) claim(planId string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -177,12 +186,6 @@ func (d *TrainSpecialistDispatcher) claim(planId string) bool {
 	}
 	d.claimed[planId] = struct{}{}
 	return true
-}
-
-func (d *TrainSpecialistDispatcher) release(planId string) {
-	d.mu.Lock()
-	delete(d.claimed, planId)
-	d.mu.Unlock()
 }
 
 // runTrainer is the core dispatch: mark running, load context, invoke
