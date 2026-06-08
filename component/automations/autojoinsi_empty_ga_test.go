@@ -91,30 +91,54 @@ func TestAutoJoinSI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 	}
 }
 
-// Pins the bug shape itself: the old `!getGA.Empty()` guard is broken --
-// the condition evaluator ignores the leading `!`, so it fires even when
-// getGA is empty. This documents WHY the DSL was changed to the positive
-// `first(getGA).id != ""` form and guards against anyone "simplifying" it
-// back.
-func TestAutoJoinSI_BangEmptyGuard_IsBroken(t *testing.T) {
-	eval := NewEvaluator()
-	eval.SetStepResult("getGA", &StepResult{
-		StepId: "getGA",
-		Status: "success",
-		Result: autoJoinResult(), // empty -- a correct guard would be FALSE here
-	})
+// Pins the now-FIXED negation semantics behind the original #1044 bug.
+//
+// memql#1096 taught the condition evaluator to honour a leading `!`, so the
+// `! $steps.getGA.Empty` form the compiler emits for `!getGA.Empty()` now
+// correctly evaluates to FALSE on an empty result (Empty=true, !Empty=false)
+// and TRUE on a non-empty one. The #1044 DSL guard was rewritten to the
+// positive `first(getGA).id != ""` form before the evaluator was fixed; that
+// form stays as belt-and-suspenders (see
+// TestAutoJoinSI_JoinGuard_NoOpsWithoutAssistant), but the `!`-negation form
+// it replaced is no longer broken -- this test pins that fix.
+func TestAutoJoinSI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
+	// `! ...` is the form the compiler emits for `!getGA.Empty()`.
+	const guard = "! $steps.getGA.Empty"
 
-	// `! ...` is the form the compiler emits for `!getGA.Empty()`. The
-	// evaluator does not negate, so it evaluates truthy even though getGA
-	// is empty. If a future change teaches the evaluator to honour `!`,
-	// this expectation flips and the DSL may switch back -- the failure
-	// is the signal to re-evaluate, not silently wrong behaviour.
-	got, err := eval.EvaluateCondition("! $steps.getGA.Empty")
-	if err != nil {
-		t.Fatalf("EvaluateCondition: %v", err)
+	cases := []struct {
+		name  string
+		getGA *memqlengine.ExecuteResult
+		want  bool
+	}{
+		{
+			name:  "empty getGA -> Empty=true -> !Empty is false (guard no-ops)",
+			getGA: autoJoinResult(),
+			want:  false,
+		},
+		{
+			name:  "non-empty getGA -> Empty=false -> !Empty is true (guard fires)",
+			getGA: autoJoinResult("v1:agents:agent:assistant-REAL"),
+			want:  true,
+		},
 	}
-	if !got {
-		t.Fatalf("`! $steps.getGA.Empty` on an empty result = %v; the broken-negation premise no longer holds -- revisit the #1044 DSL guard", got)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eval := NewEvaluator()
+			eval.SetStepResult("getGA", &StepResult{
+				StepId: "getGA",
+				Status: "success",
+				Result: tc.getGA,
+			})
+
+			got, err := eval.EvaluateCondition(guard)
+			if err != nil {
+				t.Fatalf("EvaluateCondition(%q): %v", guard, err)
+			}
+			if got != tc.want {
+				t.Fatalf("`%s` = %v, want %v (#1096 fixed leading-! negation)", guard, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -993,6 +993,24 @@ func (e *Evaluator) EvaluateCondition(condition string) (bool, error) {
 func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 	condition = strings.TrimSpace(condition)
 
+	// Unary `!` (NOT) -- a leading `!` negates the boolean value of the
+	// operand/group that follows (#1096). It only applies when the `!` is a
+	// PREFIX of an operand/group, never when it is the `!=` comparison
+	// operator: `!=` always has a left operand, so a depth-0 leading `!`
+	// (whitespace after it allowed, e.g. the compiler's `! $steps.x.Empty`)
+	// can never be a `!=`. Recurse through EvaluateCondition so the remainder
+	// re-enters the OR/AND/paren machinery -- this composes with `&&`/`||`
+	// (which already split above this point, so `!a && b` arrives here as the
+	// bare atom `!a`), handles parenthesised groups (`!(a == b)`, `!(a || b)`),
+	// and collapses double negation (`!!x` -> negate(negate(x)) -> x).
+	if rest, ok := stripLeadingBang(condition); ok {
+		result, err := e.EvaluateCondition(rest)
+		if err != nil {
+			return false, err
+		}
+		return !result, nil
+	}
+
 	// Handle comparison operators
 	if strings.Contains(condition, "==") {
 		return e.evaluateComparison(condition, "==")
@@ -1122,6 +1140,30 @@ func stripRedundantOuterParens(condition string) string {
 		}
 		condition = condition[1 : len(condition)-1]
 	}
+}
+
+// stripLeadingBang reports whether condition begins with a unary `!` (NOT)
+// prefix and, if so, returns the trimmed remainder after it. A depth-0
+// leading `!` is always the NOT operator and never the `!=` comparison: `!=`
+// requires a left operand, so it can never begin a (trimmed) condition. The
+// one ambiguity is `!=` written with no left operand, which is malformed
+// anyway; we still avoid mis-stripping it by refusing when the very next
+// non-space character is `=`. Whitespace after the `!` is allowed (the
+// compiler emits the method-truthiness form as `! $steps.x.Empty`).
+func stripLeadingBang(condition string) (string, bool) {
+	condition = strings.TrimSpace(condition)
+	if len(condition) == 0 || condition[0] != '!' {
+		return "", false
+	}
+	rest := strings.TrimSpace(condition[1:])
+	// `!=` (or a stray `! =`) is a comparison, not a unary NOT.
+	if strings.HasPrefix(rest, "=") {
+		return "", false
+	}
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
 }
 
 func normalizeConditionOperators(condition string) string {
