@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use cluster.logic.{ logicBootstrapCluster, logicDeregisterNode, logicRegisterNode }
+use cluster.logic.{ logicBootstrapCluster, logicDeregisterNode, logicPruneStaleClusterNodes, logicRegisterNode }
 
 @enabled
 @trigger(event="system.startup")
@@ -42,5 +42,24 @@ automation deregisterNode {
 automation registerNode {
   step run {
     logic registerNode { event: event }
+  }
+}
+
+// ---- automations/v1/cluster/pruneStaleClusterNodes/automation.memql ----
+
+// Heartbeat-based prune of departed cluster nodes (#1061). Every 10
+// minutes, marks v1:cluster:node rows whose latest lastSeen is older
+// than MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) as health="stopped"
+// so topology / CLI / WorkerDialer stop treating dead pods (left behind
+// by K8s rollovers) as live. Env-agnostic: identical in local cluster
+// compose and staging -- only the window config differs per env.
+//
+// Six-field cron (sec min hour dom mon dow): minute 0,10,20,30,40,50.
+@enabled
+@trigger(schedule="0 */10 * * * *")
+@description("Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES, default 30) as health='stopped'.")
+automation pruneStaleClusterNodes {
+  step run {
+    logic pruneStaleClusterNodes { event: event }
   }
 }

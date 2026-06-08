@@ -227,6 +227,90 @@ func TestPeerManager_CheckLiveness(t *testing.T) {
 // transition (register -> healthy -> degraded -> offline -> recovery) is
 // delivered to the handler exactly once, in the right order. This is the
 // seam NodeStatusWriter hooks to persist health to the concept store.
+// TestPeerManager_ReapsStaleUnmonitoredPeers verifies the #1061 hygiene
+// fix: an UNMONITORED peer with Connection==nil whose LastSeen is older
+// than the stale-gossip window is reaped by checkLiveness, while
+//   - a MONITORED peer (subject to the normal transition logic), and
+//   - a CONNECTED unmonitored peer (Connection != nil)
+//
+// are NOT reaped. The reap must NOT fire a status-change handler -- this
+// node never monitored the gossiped peer, so it must not author a DB
+// health row for it.
+func TestPeerManager_ReapsStaleUnmonitoredPeers(t *testing.T) {
+	pm := NewPeerManager(testIdentity(), testLogger())
+	// Long offline/liveness windows so the monitored peer does NOT trip;
+	// tiny stale-gossip window so the unmonitored reap path is the only
+	// thing that fires in this test.
+	pm.SetTimings(time.Hour, time.Hour, time.Hour)
+	pm.SetStaleGossipTimeout(5 * time.Millisecond)
+
+	var fired int
+	var mu sync.Mutex
+	pm.SetStatusChangeHandler(func(_ context.Context, p *nodev1.PeerInfo, _, _ nodev1.NodeHealthStatus, _ time.Time) {
+		if p.NodeId == "stale-gossip" {
+			mu.Lock()
+			fired++
+			mu.Unlock()
+		}
+	})
+
+	// (1) Stale, unmonitored, no connection -> should be reaped.
+	pm.Register(&nodev1.PeerInfo{
+		NodeId:   "stale-gossip",
+		NodeType: string(NodeTypeCognition),
+		Address:  "stale:50052",
+		Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
+	})
+	// (2) Monitored -> liveness logic owns it, must NOT be reaped by the
+	// gossip path even when stale.
+	pm.RegisterMonitored(&nodev1.PeerInfo{
+		NodeId:   "monitored",
+		NodeType: string(NodeTypeAgent),
+		Address:  "mon:50052",
+		Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
+	})
+	// (3) Unmonitored but with a live connection -> must NOT be reaped.
+	pm.Register(&nodev1.PeerInfo{
+		NodeId:   "connected-gossip",
+		NodeType: string(NodeTypePlanner),
+		Address:  "conn:50052",
+		Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
+	})
+	pm.AttachConnection("connected-gossip", &peerConnection{})
+
+	// Clear the register-time transitions (UNSPECIFIED -> CONNECTING etc.);
+	// we only want to assert on what the reap path emits.
+	mu.Lock()
+	fired = 0
+	mu.Unlock()
+
+	// Let LastSeen age past the stale-gossip window.
+	time.Sleep(10 * time.Millisecond)
+	pm.checkLiveness()
+
+	if pm.Get("stale-gossip") != nil {
+		t.Error("stale unmonitored peer with no connection should be reaped")
+	}
+	if pm.Get("monitored") == nil {
+		t.Error("monitored peer must NOT be reaped by the stale-gossip path")
+	}
+	if pm.Get("connected-gossip") == nil {
+		t.Error("connected unmonitored peer must NOT be reaped")
+	}
+
+	// The reap must not be observable as a health transition.
+	mu.Lock()
+	defer mu.Unlock()
+	if fired != 0 {
+		t.Errorf("reaping an unmonitored peer must NOT fire a status change; fired %d times", fired)
+	}
+
+	// Type index must be cleaned up too (no dangling byType entry).
+	if got := pm.ByType(NodeTypeCognition); len(got) != 0 {
+		t.Errorf("expected byType cognition cleared after reap, got %d entries", len(got))
+	}
+}
+
 func TestPeerManager_StatusChangeHandler(t *testing.T) {
 	pm := NewPeerManager(testIdentity(), testLogger())
 	pm.SetTimings(5*time.Millisecond, 20*time.Millisecond, 40*time.Millisecond)

@@ -3426,6 +3426,23 @@ func QuerySpreadsheetRowsForDocumentBuild(args QuerySpreadsheetRowsForDocumentAr
 	return b.String()
 }
 
+// QueryStaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. Drives the stale-node prune cron.
+//
+// Bound concept: node.
+type QueryStaleClusterNodesArgs struct {
+}
+
+// QueryStaleClusterNodes calls the engine query queryStaleClusterNodes.
+func (qc *QueryClient) QueryStaleClusterNodes(ctx context.Context, args QueryStaleClusterNodesArgs) (*Result, error) {
+	call := QueryStaleClusterNodesBuild(args)
+	return qc.executeNamed(ctx, "queryStaleClusterNodes", call)
+}
+
+func QueryStaleClusterNodesBuild(args QueryStaleClusterNodesArgs) string {
+	_ = args
+	return "queryStaleClusterNodes({})"
+}
+
 // QuerySystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
 // Bound concept: bundle.

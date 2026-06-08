@@ -509,6 +509,26 @@ func LogicProvisionDailySpaceOnUserCreateBuild(args LogicProvisionDailySpaceOnUs
 	return b.String()
 }
 
+// LogicPruneStaleClusterNodes -- Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (queryStaleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via mutationUpdateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.
+type LogicPruneStaleClusterNodesArgs struct {
+	Event map[string]any
+}
+
+// LogicPruneStaleClusterNodes calls the engine logic logicPruneStaleClusterNodes.
+func (qc *QueryClient) LogicPruneStaleClusterNodes(ctx context.Context, args LogicPruneStaleClusterNodesArgs) (*Result, error) {
+	call := LogicPruneStaleClusterNodesBuild(args)
+	return qc.executeNamed(ctx, "logicPruneStaleClusterNodes", call)
+}
+
+func LogicPruneStaleClusterNodesBuild(args LogicPruneStaleClusterNodesArgs) string {
+	var b strings.Builder
+	b.WriteString("logicPruneStaleClusterNodes({")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString("})")
+	return b.String()
+}
+
 // LogicPurgeExpiredArchivedSpaces -- Daily 02:00 UTC sweep that hard-deletes archived v1:cognition:space rows whose payload.expiresAt has passed (deadline pre-computed at archive time as archivedAt + retentionDays). Defensive: only acts on rows where status='archived' AND active=true AND expiresAt<now. Saved/scheduled/active spaces are untouched.
 type LogicPurgeExpiredArchivedSpacesArgs struct {
 	Event map[string]any
