@@ -264,6 +264,12 @@ func (r *Replier) runNonStreamingToolLoop(
 	var terminalEnvelope *Envelope
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
+	// Per-turn circuit breaker on repeated IDENTICAL tool failures
+	// (memql#1128). This is the lane the produceArtifact direct turn runs on
+	// (background), so it is the primary site of the workbench-write runaway:
+	// the all-errored guard resets on any interleaved success, but this breaker
+	// trips on the SAME tool failing the SAME way N times regardless.
+	failBreaker := newRepeatFailureBreaker()
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -476,9 +482,22 @@ BackgroundLoop:
 				if strings.Contains(execErr.Error(), wheelContestedMarker) {
 					wheelContested = true
 				}
+				// Repeated-identical-failure breaker (memql#1128): abort the
+				// turn rather than spin to maxIterations on a stuck call.
+				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
+					r.logger.Warn("agent background: aborting turn -- repeated identical tool failure",
+						"tool", tc.Name, "count", count, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, repeatFailureAbortError(tc.Name, count)
+				}
 			} else {
 				content = result
 				hadSuccess = true
+				failBreaker.observeSuccess()
 				sink.ToolResult(tc.ID, result, "")
 				// Library promotion (memql#722): mirror published canvas
 				// cards into the user's Library as a generatedOutput.
