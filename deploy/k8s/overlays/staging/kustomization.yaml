@@ -31,21 +31,21 @@ images:
     digest: sha256:11d8b46c7c32956d2461498b1709e856e3e7ccdf03500aa93665c71d08b8cceb
   # Carrier-built; 0.9.21 carries the SI-forward connected-peer fix (#1056).
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:b72b3f03f8c41f2155117af1f22e6eb232d333e61cde5227c7c9787452415da0
+    digest: sha256:ddeafc22c97093176dade3019d2ffeb60bf9a733e879bd56ba1645a4a94e2e5d
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:4fccd2779935f10323daa879b3ab87e675776979406040864f9e4567863838e0
+    digest: sha256:b47bc1412bdec5f5370ceed5a6f4dcd8dac2744383e7f67c587eaf02e0cc7560
   - name: acrmemql.azurecr.io/memql-voice
     digest: sha256:c77d3357f5d2a264f2d99cf60d0db1eda58cc15533d20add69064997c34ff0ca
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:1a64fa840f70d466d1b616c196f58b87366946bb9af6a75e26fd6469f48da3bf
+    digest: sha256:1401593538f1ef64784d0209cbe2051ec559b6cb98f8978f5b07edf8cf3b134a
   # Carrier-built (engine + CoPresent DSL #1053); 0.9.21 SI-forward fix (#1056).
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:899d94dc66f806bb1d17210252d0bca7584ea046c2b7c0627f34364374545dd4
+    digest: sha256:2643308887f9e41f0e1792baa7f1cb3db6661020e0e12d907f70fc717434f49a
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:0b6bf45c5e92d9db9b48ea6e81904e7d27fe46b6f9ad8bda311fe2d7bc7eff02
+    digest: sha256:53b70bd0e1f0a992f8ba377c2cc087be1cbb4f524a5987aa5819a79e62dfdb97
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:7b670c7e209cfa1f404b4ca695e3aca0f6bad06112e85160867a29e96d4e01d4
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
