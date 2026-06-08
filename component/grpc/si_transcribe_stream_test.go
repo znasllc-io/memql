@@ -183,6 +183,64 @@ func TestTranscribeStream_PumpSkipsEmptyText(t *testing.T) {
 	}
 }
 
+func TestTranscribeStream_PumpFiltersHallucinatedAndLowConfidenceFinals(t *testing.T) {
+	cap := &capturingSend{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sess := newFakeStreamingSession("")
+	ts := &transcribeStream{
+		requestId:  "req-filter",
+		correlate:  "corr-filter",
+		sttSession: sess,
+		// Same threshold the live path resolves (0.6 default).
+		filter:    stt.TranscriptFilter{MinConfidence: 0.6},
+		send:      cap.Send,
+		ctx:       ctx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		startTime: time.Now(),
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	go ts.pumpDeltas(logger)
+
+	// Interim (low confidence) -- kept so the UI renders word-by-word.
+	sess.results <- stt.TranscriptionResult{Text: "okay so", IsFinal: false, Confidence: 0.1}
+	// Low-confidence final (e.g. wrong-language drift from noise) -- dropped.
+	sess.results <- stt.TranscriptionResult{Text: "schön guten tag", IsFinal: true, Confidence: 0.3}
+	// No-speech-gated hallucination on a low-confidence final -- dropped.
+	sess.results <- stt.TranscriptionResult{Text: "Thank you.", IsFinal: true, Confidence: 0.2}
+	// Genuine high-confidence final -- kept.
+	sess.results <- stt.TranscriptionResult{Text: "let us begin the meeting", IsFinal: true, Confidence: 0.93}
+	// Genuine high-confidence short "okay" (denylist must NOT blanket-drop) -- kept.
+	sess.results <- stt.TranscriptionResult{Text: "okay", IsFinal: true, Confidence: 0.88}
+
+	close(sess.results)
+	<-ts.done
+
+	msgs := cap.snapshot()
+	if len(msgs) != 3 {
+		var texts []string
+		for _, m := range msgs {
+			texts = append(texts, m.GetSiTranscribeStreamDelta().GetText())
+		}
+		t.Fatalf("expected 3 deltas (interim + 2 high-conf finals), got %d: %v", len(msgs), texts)
+	}
+
+	got := []string{
+		msgs[0].GetSiTranscribeStreamDelta().GetText(),
+		msgs[1].GetSiTranscribeStreamDelta().GetText(),
+		msgs[2].GetSiTranscribeStreamDelta().GetText(),
+	}
+	want := []string{"okay so", "let us begin the meeting", "okay"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("delta %d: got %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestTranscribeStream_CloseSilentlyIdempotent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sess := newFakeStreamingSession("done")
