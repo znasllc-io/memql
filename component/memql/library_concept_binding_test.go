@@ -17,9 +17,6 @@ func TestLibraryQueriesRegister(t *testing.T) {
 	// DEBUG logger to stderr so a failing run surfaces the per-slice
 	// "skipping slice that failed to parse" Warn with the real error.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	if err := memoryNodes.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts: %v", err)
-	}
 	if _, err := LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}

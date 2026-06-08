@@ -31,9 +31,6 @@ import (
 // and fail on the missing DB, so a clean run proves the write was isolated.
 func newDryRunEngine(t *testing.T) *memql.MemQLEngine {
 	t.Helper()
-	if err := concept.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts (legacy embedded tree): %v", err)
-	}
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
 	}

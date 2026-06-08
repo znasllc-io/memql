@@ -24,20 +24,17 @@ import (
 // that class crashes every node at boot; this test turns it into a unit-test
 // failure instead.
 func TestEngineInitLoadsFullDSL(t *testing.T) {
-	// Mirror the app's concept-load sequence (app/database.go): the
-	// legacy embedded tree first, then the unified domain-first tree
-	// (dsl/<domain>/concepts.memql) where the harness concepts -- and
-	// the #597 `dependsOn` relationship -- actually live.
-	if err := concept.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts (legacy embedded tree): %v", err)
-	}
+	// Mirror the app's concept-load sequence (app/database.go): load
+	// the unified domain-first tree (dsl/<domain>/concepts.memql)
+	// where the harness concepts -- and the #597 `dependsOn`
+	// relationship -- actually live.
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
 	}
 
 	registry := concept.DefaultRegistry()
 	if registry == nil || len(registry.List()) == 0 {
-		t.Fatal("concept registry is empty after LoadConcepts; embedded DSL tree did not load")
+		t.Fatal("concept registry is empty after LoadUnifiedConcepts; DSL tree did not load")
 	}
 
 	eng, err := New(nil)

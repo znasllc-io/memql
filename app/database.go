@@ -22,20 +22,12 @@ func (a *App) databaseAndConcepts() {
 	}
 	a.db = mnd
 
-	if err := memoryNodesDatabase.LoadConcepts(a.Logger); err != nil {
-		a.fatal("failed to load memory node concepts", "error", err)
-	}
-
-	// Pass 2 of the DSL restructure migration: load concepts from
-	// the unified domain-first tree (dsl/<domain>/*.memql) and merge
-	// them into the same registry. During the transitional state
-	// both loaders run; their concept IDs assemble identically so
-	// the duplicate registration is a no-op. When the legacy tree
-	// is retired (Pass 3), the LoadConcepts call above goes away.
+	// Load concepts from the unified domain-first tree
+	// (dsl/<domain>/concepts.memql) into the global registry. This is
+	// the sole concept loader; the legacy version-directory walk
+	// (LoadConcepts) was retired once the embedded concept FS emptied.
 	if _, err := memql.LoadUnifiedConcepts(a.Logger); err != nil {
-		a.Logger.Warn("unified concept loader returned diagnostics; legacy loader covers the gap",
-			"component", "app.database",
-			"error", err)
+		a.fatal("failed to load unified concepts", "error", err)
 	}
 
 	a.registry = memoryNodesDatabase.DefaultRegistry()

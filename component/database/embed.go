@@ -5,11 +5,10 @@ import (
 	"testing/fstest"
 )
 
-// Concepts was the active concept-schema FS. Pass 3 of the DSL
-// restructure migration retired the legacy walk over
-// dsl/v1/concepts/; concepts now load via LoadUnifiedConcepts in
-// component/memql (reading from dsl/<domain>/<entity>.memql) and
-// merge into the global registry. This variable stays as a typed
-// empty FS so any code path still referencing it returns no
-// content (the legacy walk effectively no-ops).
+// Concepts was the active concept-schema FS for the legacy
+// version-directory walk, which has been deleted (concepts now load
+// exclusively via LoadUnifiedConcepts in component/memql, reading
+// from dsl/<domain>/concepts.memql). The variable stays as a typed
+// empty FS only because the concept seeder still walks it for
+// legacy seed.memql sidecars; that walk no-ops over the empty FS.
 var Concepts fs.FS = fstest.MapFS{}

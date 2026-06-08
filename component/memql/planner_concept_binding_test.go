@@ -19,9 +19,6 @@ import (
 // training poll + the frontend plan queries).
 func TestPlannerPlanQueriesBindConcept(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := memoryNodes.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts: %v", err)
-	}
 	if _, err := LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
@@ -52,9 +49,6 @@ func TestPlannerPlanQueriesBindConcept(t *testing.T) {
 // guard for the disambiguation rule: a trailing segment shared across two
 // namespaces resolves with a namespace hint and stays ambiguous without one.
 func TestResolveBareConceptName_NamespaceHintDisambiguates(t *testing.T) {
-	if err := memoryNodes.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts: %v", err)
-	}
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
