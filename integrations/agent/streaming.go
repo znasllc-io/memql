@@ -309,6 +309,13 @@ func (r *Replier) runStreamingToolLoop(
 	// retry instructions (e.g. uiSelect: "Available: a, b, c").
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
+	// Per-turn circuit breaker on repeated IDENTICAL tool failures
+	// (memql#1128). Unlike consecutiveAllErrored (which resets the moment ANY
+	// tool call in a round succeeds), this trips when the SAME tool fails the
+	// SAME way N times in a row regardless of what else happens around it --
+	// the exact shape of the produceArtifact workbench-write runaway, where a
+	// trivial interleaved success kept the all-errored guard from ever firing.
+	failBreaker := newRepeatFailureBreaker()
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := maxTurnWallclock()
@@ -547,9 +554,23 @@ StreamLoop:
 				if strings.Contains(execErr.Error(), wheelContestedMarker) {
 					wheelContested = true
 				}
+				// Repeated-identical-failure breaker (memql#1128): abort the
+				// whole turn rather than loop to maxIterations when the model
+				// is stuck re-issuing the same failing call.
+				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
+					r.logger.Warn("agent streaming: aborting turn -- repeated identical tool failure",
+						"tool", tc.Name, "count", count, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, repeatFailureAbortError(tc.Name, count)
+				}
 			} else {
 				content = result
 				hadSuccess = true
+				failBreaker.observeSuccess()
 				sink.ToolResult(tc.ID, result, "")
 				// Library promotion (memql#722): publishing a canvas card
 				// is a standalone deliverable the agent emits, so mirror

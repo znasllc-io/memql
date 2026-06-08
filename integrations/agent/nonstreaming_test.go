@@ -203,8 +203,12 @@ func TestRunNonStreamingToolLoop_EscalatesToStrongerTierWhenStuck(t *testing.T) 
 	}
 }
 
-// Without an escalation provider, a stuck cheap tier just breaks after the
-// hard all-errored cap -- no panic, no escalation.
+// Without an escalation provider, a stuck cheap tier that keeps issuing the
+// SAME failing call hits the repeated-identical-failure breaker (memql#1128)
+// and the turn aborts with a diagnostic error at the default ceiling of 3 --
+// bounding the workbench-write runaway to a few cents instead of letting it
+// spin to maxIterations. (The all-errored guard also caps at 3, but the
+// breaker fires first inside the per-tool exec block, with a clearer error.)
 func TestRunNonStreamingToolLoop_NoEscalationProviderBreaksOnStuck(t *testing.T) {
 	r := testReplier()
 	r.stamper = taskstamp.New(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -216,15 +220,16 @@ func TestRunNonStreamingToolLoop_NoEscalationProviderBreaksOnStuck(t *testing.T)
 	sink := &captureSink{}
 
 	res, err := r.runNonStreamingToolLoop(context.Background(), cheap, nil, nil, nil, sink, time.Now(), "req-noesc", turnContext{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected the repeated-failure breaker to abort the turn, got nil error")
 	}
-	// Hard break after maxConsecutiveAllErrored (3) rounds with no escalation.
+	// Tripped on the 3rd identical failure (the default ceiling), not at
+	// maxIterations.
 	if cheap.calls != 3 {
-		t.Fatalf("cheap provider called %d times, want 3 (hard all-errored break)", cheap.calls)
+		t.Fatalf("cheap provider called %d times, want 3 (breaker abort on the 3rd identical failure)", cheap.calls)
 	}
 	if res == nil {
-		t.Fatal("expected a (best-effort) result, got nil")
+		t.Fatal("expected a (best-effort) result alongside the abort error, got nil")
 	}
 }
 
