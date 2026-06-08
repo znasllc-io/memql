@@ -135,6 +135,12 @@ class FakeWebSocket {
   }
 }
 
+// Install a global WebSocket shim so the SDK's readyState/OPEN constant
+// references resolve on Node runtimes without a built-in global WebSocket
+// (mirrors test/realtime.test.ts). The Connection still dials through the
+// explicit webSocketFactory below; this just keeps `WebSocket` defined.
+(globalThis as unknown as { WebSocket: typeof FakeWebSocket }).WebSocket = FakeWebSocket;
+
 // Reply to whatever request is currently waiting (matched by messageId) with
 // the given server payload. Polls the outbound queue until the frame appears.
 async function replyTo(
