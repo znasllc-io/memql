@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
@@ -167,11 +168,24 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	// behaved historically -- silently fanned cross-tenant work into
 	// "default" or whatever the agent node happened to default to.
 	partition := memqlengine.PartitionFromContext(ctx)
+	// Forward an auth principal so the agent node's ctx carries an actor.
+	// The agent's downstream tool dispatch runs the taskstamp Stamper and
+	// the safety DecisionRecorder, both of which persist via the engine's
+	// mutation path -- and that path requires an actor in context to stamp
+	// createdBy. The post-approval Plan dispatch (plan_execution.go) already
+	// forwards system-actor claims for exactly this reason; the ad-hoc
+	// chat-driven path (no plan_id) was passing nil here, so a deliverable
+	// running in a daily space with no Plan hit "no actor found in context"
+	// on taskstamp.createAdHocPlan and on the safety recorder's persist.
+	// Mirror the Plan path: forward the originating user's identity when ctx
+	// carries one, falling back to the cognition system-actor so the actor
+	// is never empty. (memql#1107)
+	authClaims := forwardedAuthClaimsForTurn(ctx)
 	respCh, err := c.agentForwarder.Forward(
 		ctx,
 		requestId,
 		node.NodeTypeAgent,
-		nil, // auth claims -- cognition-originated, no end-user principal
+		authClaims,
 		partition,
 		envelope,
 	)
@@ -190,6 +204,33 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 		relayAgentId = strings.TrimSpace(agent.Name)
 	}
 	return c.consumeAgentTurnStream(ctx, requestId, spaceId, participantId, relayAgentId, respCh)
+}
+
+// forwardedAuthClaimsForTurn builds the auth-claims map forwarded
+// alongside an AgentGenerateTurnMsg so the receiving agent node
+// reconstructs an actor on its ctx (via auth.ContextWithForwardedClaims).
+// Without an actor the agent's tool-dispatch persistence -- the taskstamp
+// Stamper's ad-hoc Plan/Task creation and the safety DecisionRecorder --
+// fails with "no actor found in context".
+//
+// Preference: the originating user's identity (BFF -> cognition forwards
+// it on the inbound stream, so it rides this ctx). When ctx carries no
+// usable principal -- e.g. greet-on-join or other cognition-initiated
+// turns with no end-user behind them -- fall back to the cognition
+// system-actor so the forwarded map is never empty. Mirrors the
+// system-actor claims the post-approval Plan dispatch forwards in
+// integrations/planner/plan_execution.go. (memql#1107)
+func forwardedAuthClaimsForTurn(ctx context.Context) map[string]string {
+	if identity, err := auth.UserIdentityFromContext(ctx); err == nil {
+		if claims := auth.ForwardedClaimsFromIdentity(identity); len(claims) > 0 {
+			return claims
+		}
+	}
+	return map[string]string{
+		"sub":   systemActorId,
+		"email": systemActorId,
+		"role":  "system",
+	}
 }
 
 // agentReplyResult is the outcome of a forwarded agent turn: the
