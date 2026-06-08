@@ -30,10 +30,13 @@ mutation plan mutationCreateAdHocPlan {
   insert {
     id: args.planId
     args.spaceId
-    args.ownerUserId
     kind: "adHocAction"
     status: "running"
     args.goal
+    // The actor is threaded via requestedBy + authorizedBy (both = the owner).
+    // v1:planner:plan has no `ownerUserId` field (additionalProperties:false),
+    // so DO NOT write a bare `args.ownerUserId` here -- #1113 did and every
+    // ad-hoc (daily-space) plan insert then failed concept validation (#1138).
     requestedBy: args.ownerUserId
     ownerAgentId: args.agentId
     triggerSource: "user.implicit"

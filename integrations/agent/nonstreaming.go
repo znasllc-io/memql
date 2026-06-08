@@ -270,6 +270,11 @@ func (r *Replier) runNonStreamingToolLoop(
 	// the all-errored guard resets on any interleaved success, but this breaker
 	// trips on the SAME tool failing the SAME way N times regardless.
 	failBreaker := newRepeatFailureBreaker()
+	// Per-turn produceArtifact re-delegation refusal breaker (memql#1138): the
+	// guard refusal path appends a tool-result and continues, which the
+	// args-keyed failBreaker never counts -- so a refused re-delegation could
+	// loop to the iteration cap. This aborts after N refusals.
+	refusalBreaker := newRedelegationRefusalBreaker()
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -474,8 +479,9 @@ BackgroundLoop:
 			// lane the produceArtifact direct turn runs on (background), so the
 			// cap matters most here.
 			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				trip, count := refusalBreaker.observeRefusal(tc.Name)
 				r.logger.Warn("agent background: refusing produceArtifact re-delegation",
-					"tool", tc.Name, "requestId", requestId)
+					"tool", tc.Name, "count", count, "requestId", requestId)
 				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
 				messages = append(messages, common.ChatMessage{
 					Role:       "tool",
@@ -484,6 +490,19 @@ BackgroundLoop:
 					Content:    se.JSON(),
 				})
 				sink.ToolResult(tc.ID, "", refuse)
+				// memql#1138: abort after N refusals so a refused re-delegation
+				// can't spin to the iteration cap (the args-keyed failBreaker
+				// never sees these guard refusals).
+				if trip {
+					r.logger.Warn("agent background: aborting turn -- repeated produceArtifact re-delegation refusals",
+						"tool", tc.Name, "count", count, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, redelegationRefusalAbortError(tc.Name, count)
+				}
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)

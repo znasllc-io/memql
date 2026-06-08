@@ -339,6 +339,10 @@ func (r *Replier) runStreamingToolLoop(
 	// the exact shape of the produceArtifact workbench-write runaway, where a
 	// trivial interleaved success kept the all-errored guard from ever firing.
 	failBreaker := newRepeatFailureBreaker()
+	// Per-turn produceArtifact re-delegation refusal breaker (memql#1138):
+	// aborts after N guard refusals so a refused re-delegation can't loop to
+	// the iteration cap (the args-keyed failBreaker never counts these).
+	refusalBreaker := newRedelegationRefusalBreaker()
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := maxTurnWallclock()
@@ -564,8 +568,9 @@ StreamLoop:
 			// minted; the model is told to write the file directly. Caps
 			// re-delegation at depth 1 and stops the plan-level runaway.
 			if refuse := guardProduceArtifactRedelegation(tc.Name, turnCtx); refuse != "" {
+				trip, count := refusalBreaker.observeRefusal(tc.Name)
 				r.logger.Warn("agent streaming: refusing produceArtifact re-delegation",
-					"tool", tc.Name, "requestId", requestId)
+					"tool", tc.Name, "count", count, "requestId", requestId)
 				se := memql.ClassifyToolError(fmt.Errorf("%s", refuse))
 				messages = append(messages, common.ChatMessage{
 					Role:       "tool",
@@ -574,6 +579,18 @@ StreamLoop:
 					Content:    se.JSON(),
 				})
 				sink.ToolResult(tc.ID, "", refuse)
+				// memql#1138: abort after N refusals so a refused re-delegation
+				// can't spin to the iteration cap.
+				if trip {
+					r.logger.Warn("agent streaming: aborting turn -- repeated produceArtifact re-delegation refusals",
+						"tool", tc.Name, "count", count, "requestId", requestId)
+					return &TurnResult{
+						FinalText:  strings.TrimSpace(fullText.String()),
+						TextChunks: textChunks,
+						ToolCalls:  allToolCalls,
+						Iterations: iterations,
+					}, redelegationRefusalAbortError(tc.Name, count)
+				}
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
@@ -1032,9 +1049,9 @@ type agentContextStamp struct {
 // tool that needs runtime context: pick which fields its @input
 // declares, set the matching flags + space-field name here.
 var agentContextStamps = map[string]agentContextStamp{
-	"workerHost":              {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
-	"workerComputer":          {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
-	"workerStatus":            {StampAgentId: true, StampOwnerUserId: true},
+	"workerHost":     {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
+	"workerComputer": {StampAgentId: true, StampOwnerUserId: true, StampPlanId: true},
+	"workerStatus":   {StampAgentId: true, StampOwnerUserId: true},
 	// workbenchHost runs HEADLESS work in the per-Plan sandbox. planId is
 	// REQUIRED -- it keys the workspace AND is the producedByPlanId stamped
 	// on the promoted v1:library:generatedOutput row; without it the
@@ -1043,7 +1060,7 @@ var agentContextStamps = map[string]agentContextStamp{
 	// attributes the output and overwrites any value the LLM hallucinated
 	// (the schema marks both @autoInjected -- LLM-supplied values are not
 	// trusted). taskId stays optional (invocation filing only).
-	"workbenchHost": {StampAgentId: true, StampPlanId: true},
+	"workbenchHost":           {StampAgentId: true, StampPlanId: true},
 	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "spaceId"},
 	// requestUserFeedback parks the ACTIVE Plan, so it needs the
 	// turn-context planId stamped (the LLM never knows its own Plan id);
