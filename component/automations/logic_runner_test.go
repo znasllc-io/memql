@@ -826,3 +826,119 @@ logic logicSeedKnowledgeDomains {
 		t.Errorf("dispatched steps = %v, want exactly [seed] (the literal return must bypass the engine)", registry.dispatched)
 	}
 }
+
+// emptyQueryStepRegistry is a step-registry stub whose every dispatched step
+// returns a result with zero rows, so a downstream `existing.Empty()` guard
+// evaluates true (the first-boot path where the seeded records do not yet
+// exist and the conditional mutation steps must fire). It records each
+// dispatched step ID so a test can assert exactly which steps reached the
+// engine.
+type emptyQueryStepRegistry struct {
+	dispatched []string
+}
+
+func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	r.dispatched = append(r.dispatched, step.ID)
+	now := time.Now()
+	return &StepResult{
+		StepId:      step.ID,
+		Status:      "success",
+		StartedAt:   now,
+		CompletedAt: now,
+		// Empty Bundle -> GetStepNodes returns zero nodes -> .Empty() == true.
+		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
+	}, nil
+}
+
+// TestLogicRunner_RunLogic_WelcomeCurriculumShape reproduces the second
+// staging seed automation that failed at boot with the SAME filterless-query
+// guard error -- `logicSeedWelcomeCurriculum` (memql#1129). Its body has a
+// distinct shape from logicSeedKnowledgeDomains: a lookup query, then several
+// CONDITIONAL mutation steps gated on `existing.Empty()`, then a bare literal
+// `return 1` --
+//
+//	logic logicSeedWelcomeCurriculum {
+//	  body {
+//	    existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
+//	    insertCurriculum := if existing.Empty() { mutationCreateCurriculum({...}) }
+//	    insertGreeting    := if existing.Empty() { mutationCreateSegment({...}) }
+//	    return 1
+//	  }
+//	}
+//
+// memql#1090 fixed the literal-return guard but only regression-pinned the
+// simpler logicSeedKnowledgeDomains shape (`seed := <builtin>; return 1`). The
+// welcome curriculum -- query + conditional mutations + literal return -- was
+// never covered, yet it tripped the identical "query must include at least one
+// filter or relationship expression" ERROR on staging because the trailing
+// `return 1` was dispatched through engine.Execute. This pins that the whole
+// shape resolves cleanly: the conditionals fire on the empty-query first-boot
+// path, and the literal return is resolved locally (never reaching the
+// unbounded-query guard).
+func TestLogicRunner_RunLogic_WelcomeCurriculumShape(t *testing.T) {
+	src := `@enabled
+@description("repro of logicSeedWelcomeCurriculum shape")
+logic logicSeedWelcomeCurriculum {
+  args {
+    event object @required
+  }
+  body {
+    existing := queryCurriculumBySlug({ slug: "copresent.welcome.v1" })
+    insertCurriculum := if existing.Empty() {
+      mutationCreateCurriculum({
+        curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
+        slug: "copresent.welcome.v1",
+        name: "Welcome to CoPresent",
+        version: 1,
+        active: true
+      })
+    }
+    insertGreeting := if existing.Empty() {
+      mutationCreateSegment({
+        segmentId: "v1:curriculum:segment:copresent-welcome-v1-greeting",
+        curriculumId: "v1:curriculum:curriculum:copresent-welcome-v1",
+        slug: "greeting",
+        recommendedSteps: "[{\"name\":\"uiHighlight\",\"arguments\":{\"target\":null}}]",
+        orderHint: 1
+      })
+    }
+    return 1
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &emptyQueryStepRegistry{}
+	// A zero-value engine is enough: the lookup + conditional mutation steps
+	// are served by the stub registry, and the literal `return 1` is resolved
+	// locally before any engine.Execute call.
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "logicSeedWelcomeCurriculum", body, map[string]any{
+		"event": map[string]any{"payload": map[string]any{"id": "u1"}},
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (memql#1129 regression -- filterless-query guard must not trip on the welcome-curriculum shape): %v", err)
+	}
+	if out != int64(1) {
+		t.Errorf("RunLogic return = %#v, want int64(1)", out)
+	}
+	// The lookup + BOTH conditional mutations must have reached the registry
+	// (the empty-query first-boot path fires the guards); the literal `return
+	// 1` must NOT have been dispatched -- it is resolved locally.
+	want := []string{"existing", "insertCurriculum", "insertGreeting"}
+	if len(registry.dispatched) != len(want) {
+		t.Fatalf("dispatched steps = %v, want %v (literal return must bypass the engine; conditionals must fire on empty query)", registry.dispatched, want)
+	}
+	got := map[string]bool{}
+	for _, id := range registry.dispatched {
+		got[id] = true
+		if id == "_return" {
+			t.Errorf("the literal `return 1` step reached the engine (memql#1090/#1129 regression); it must resolve locally")
+		}
+	}
+	for _, id := range want {
+		if !got[id] {
+			t.Errorf("expected step %q to be dispatched; got %v", id, registry.dispatched)
+		}
+	}
+}
