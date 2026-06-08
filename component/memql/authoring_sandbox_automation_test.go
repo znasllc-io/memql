@@ -26,9 +26,6 @@ import (
 // real concepts can resolve. Safe to call repeatedly (idempotent merge).
 func loadConceptsForSandbox(t *testing.T) {
 	t.Helper()
-	if err := memoryNodes.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts (legacy embedded tree): %v", err)
-	}
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
 	}

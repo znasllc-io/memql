@@ -2,7 +2,6 @@ package memoryNodes
 
 import (
 	"encoding/json"
-	"log/slog"
 	"testing"
 )
 
@@ -232,14 +231,5 @@ concept Test {
 	}
 	if _, ok := props["age"]; !ok {
 		t.Error("missing 'age' property")
-	}
-}
-
-// TestLoadAllConcepts verifies that all concept definitions in the embedded
-// concepts/ directory parse and validate without errors (e.g. no reserved field names).
-func TestLoadAllConcepts(t *testing.T) {
-	logger := slog.Default()
-	if _, err := loadAllConcepts(logger); err != nil {
-		t.Fatalf("loadAllConcepts failed: %v", err)
 	}
 }

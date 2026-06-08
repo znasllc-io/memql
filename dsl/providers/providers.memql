@@ -271,21 +271,6 @@ provider google {
   }
 }
 
-// ---- providers/v1/xai/grok2.memql ----
-
-@extends("xai")
-@model("grok-2-latest")
-@description("xAI Grok-2 -- flagship reasoning model with real-time knowledge integration")
-provider grok2 {
-  params {
-    contextWindow              131072
-    maxCompletionTokens        8192
-    inputCostPerMillion        2.00
-    outputCostPerMillion       10.00
-    cachedInputCostPerMillion  0.0
-  }
-}
-
 @base
 @type("Groq")
 provider groq {
@@ -754,22 +739,6 @@ provider streamGeminiPro {
   }
 }
 
-// ---- providers/v1/xai/streamGrok2.memql ----
-
-@extends("xai")
-@type("xAIStream")
-@model("grok-2-latest")
-@description("xAI Grok-2 (streaming) -- flagship reasoning with real-time knowledge")
-provider streamGrok2 {
-  params {
-    contextWindow              131072
-    maxCompletionTokens        8192
-    inputCostPerMillion        2.00
-    outputCostPerMillion       10.00
-    cachedInputCostPerMillion  0.0
-  }
-}
-
 // ---- providers/v1/groq/streamGroqLlama70B.memql ----
 
 @extends("groq")
@@ -870,14 +839,5 @@ provider whisper1 {
   params {
     format    "wav"
     sampleRate 16000
-  }
-}
-
-@base
-@type("xAI")
-provider xai {
-  auth {
-    apiKey   env("MEMQL_SI_XAI_API_KEY")
-    baseURL  "https://api.x.ai/v1"
   }
 }

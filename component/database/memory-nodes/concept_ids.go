@@ -118,8 +118,8 @@ func AllFilesystemConcepts() []string {
 }
 
 // ValidateConceptConstants checks that every filesystem-backed concept constant
-// has a corresponding entry in the registry. Call after LoadConcepts to catch
-// drift between constants and the concepts/ directory at startup.
+// has a corresponding entry in the registry. Call after the concepts are
+// loaded to catch drift between constants and the concept tree at startup.
 func ValidateConceptConstants(registry Registry) error {
 	var missing []string
 	for _, id := range AllFilesystemConcepts() {

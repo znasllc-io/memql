@@ -3,7 +3,13 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-prompt cognitionCompaction {}
+@defaultProvider("chat54Mini")
+@templateFile("prompts/cognitionCompaction.tmpl")
+@description("Summarize older conversation messages into a concise rolling summary so the live transcript window stays bounded. Incorporates and extends any previous summary; focuses on facts, decisions, questions asked/answered, and action items. Used by Polyphon context compaction (component/polyphon/context_builder.go).")
+prompt cognitionCompaction {
+  entries         []object  @required @description("Conversation messages to summarize, oldest first; each {speakerName, speakerType, text}.")
+  previousSummary string              @description("Prior rolling summary to incorporate and extend; empty on the first compaction.")
+}
 
 @defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionDiscussionDispatch.tmpl")

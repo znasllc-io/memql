@@ -28,9 +28,6 @@ import (
 
 func loadConceptsForAuthored(t *testing.T) {
 	t.Helper()
-	if err := concept.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts: %v", err)
-	}
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}

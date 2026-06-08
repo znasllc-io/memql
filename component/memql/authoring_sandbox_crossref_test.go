@@ -33,9 +33,6 @@ var (
 func crossRefTestEngine(t *testing.T) *memql.MemQLEngine {
 	t.Helper()
 	crossRefEngineOnce.Do(func() {
-		if err := memoryNodes.LoadConcepts(nil); err != nil {
-			t.Fatalf("LoadConcepts: %v", err)
-		}
 		if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 			t.Fatalf("LoadUnifiedConcepts: %v", err)
 		}

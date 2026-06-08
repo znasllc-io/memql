@@ -235,9 +235,6 @@ func TestResolveConstruct_AuthoredFillsCoreGap(t *testing.T) {
 // name must report core; an owner's authored construct of that same name must
 // be shadowed; an owner-only name must fall through to authored.
 func TestResolveConstruct_EngineCoreHas(t *testing.T) {
-	if err := concept.LoadConcepts(nil); err != nil {
-		t.Fatalf("LoadConcepts: %v", err)
-	}
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
