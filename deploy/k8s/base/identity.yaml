@@ -106,9 +106,13 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /healthz, port: 8085, scheme: HTTPS }
+            # /livez is pure process-liveness (#1117): decoupled from /healthz so a
+            # transient dependency blip never liveness-kills an otherwise-alive pod.
+            httpGet: { path: /livez, port: 8085, scheme: HTTPS }
             initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests: { cpu: 200m, memory: 256Mi }
 ---

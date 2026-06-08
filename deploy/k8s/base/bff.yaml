@@ -94,14 +94,28 @@ spec:
             - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+          # Slow boot (DSL load + mesh connect) must not trip liveness/readiness (#1117).
+          startupProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            failureThreshold: 30
+            periodSeconds: 10
           readinessProbe:
+            # /healthz is dependency- + drain-aware: a degraded/draining pod leaves
+            # the Service WITHOUT being killed (#1117).
             httpGet: { path: /healthz, port: 8085 }
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
-            httpGet: { path: /healthz, port: 8085 }
+            # /livez is pure process-liveness (#1117): a transient dependency/mesh
+            # blip never liveness-kills an otherwise-alive pod. Decoupled from
+            # /healthz to stop rollout-triggered restart storms.
+            httpGet: { path: /livez, port: 8085 }
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests: { cpu: 200m, memory: 256Mi }
 ---
