@@ -1,12 +1,12 @@
-# Staging overlay -> 0.9.29 (releases/0.9.29.yaml). 0.9.29 = the 0.9.28
-# engine/DSL bundle (carries #1099 timescaledb advisory lock + #1102
-# produceArtifact false-refusal guard, both baked into the 0.9.28 engine/bff
-# images) with the copresent SPA rebuilt from current main (bd507b5) to carry
-# #1066 WS-reauth instrumentation + #909 Tasks queue + dep-security bumps +
-# attachment/UI fixes. engineVersion 0.9.28 (engine source unchanged; only the
-# copresent image changed). cognition/agent/planner/workbench/bff are
-# CARRIER-built (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>); voice +
-# identity stay engine builds. livekit pin (#1043) preserved across the bump.
+# Staging overlay -> 0.9.30 (releases/0.9.30.yaml). 0.9.30 = a full rebuild of
+# all 7 memql images from current main, carrying the produce-path fixes #1107
+# (actor threaded onto the ad-hoc produce dispatch), #1108 (planner tokenBudget
+# stamp parse), #1109 (CanonicalId query-literal resolution) on top of the
+# 0.9.29 content (#1099/#1102/#1066). Core engine changed (#1109), so
+# engineVersion is 0.9.30. copresent SPA image is unchanged from 0.9.29.
+# cognition/agent/planner/workbench/bff are CARRIER-built
+# (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>); voice + identity stay
+# engine builds. livekit pin (#1043) preserved across the bump.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -32,25 +32,25 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:2942d366aa3789d423b4323acaa610bd5ab6c1f99d07a0195b425c8665a822a3
-  # Carrier-built; 0.9.28 engine/DSL bug-fix bundle + #1102 produceArtifact guard.
+    digest: sha256:7e05acb8a384f5c8072878c2fae6d39ea4cd90e77b44fb6b8bedd137c0580341
+  # Carrier-built; 0.9.30 full rebuild from main (produce-path fixes #1107/#1108/#1109).
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:c065ec01cd3736e00f7a75415f3fd46b439226485b078174c70cb70fa851813e
-  # Carrier-built (engine + CoPresent DSL #1053); 0.9.28 engine/DSL bundle + #1099.
+    digest: sha256:5566a4b9e42ff63dc6813d635cdda2112fc5d0f102dd5cb90e242c943b7a7412
+  # Carrier-built (engine + CoPresent DSL #1053); 0.9.30 -- #1109 core-engine literal fix.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:5dcda14f1d5783544aec0f899f3607812bd79eefba7e0aecf25d5cdd7ffe7d1a
+    digest: sha256:b912061021631410fb26cf389dc7f0cc60c7de78294095ad00d633c84269437c
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:162396b88a3cb5fb04884eab69a83aece247dc8f9941b4a8dff71c20c61c35b1
-  # Carrier-built (engine + CoPresent DSL) -- #1053.
+    digest: sha256:13dbfa9d0652f1d4f3413f314f3c7a3626429b31ed25a9657121326cb6938d14
+  # Carrier-built (engine + CoPresent DSL) -- #1053; 0.9.30 -- #1107 actor-on-ad-hoc-produce.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:7e96dbebaa1d66b65f21d1bba6acced348cde2817fe05990fd3ed026a6c07e9c
-  # Carrier-built (engine + CoPresent DSL #1053); 0.9.28 engine/DSL bundle.
+    digest: sha256:570dd40451f0765545b3c7d8c3876b347935d285b7b470846e22c16588505a1a
+  # Carrier-built (engine + CoPresent DSL #1053); 0.9.30 -- #1108 tokenBudget stamp fix.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:bb426d1fd9a6473dbe33f0af0f6557c7d5ac18f98f41420e6eb3db75c6395d8a
-  # Carrier-built (engine + CoPresent DSL) -- #1053.
+    digest: sha256:424057cc23813274d939335adf701a5346c7f9424c592d7d98be90c33edf4bce
+  # Carrier-built (engine + CoPresent DSL) -- #1053; 0.9.30 full rebuild from main.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:e30042137d5e2dcb77865de1f21fbb881391bbe2d4b5d1a60c3396d425720802
-  # SPA rebuilt from copresent main (bd507b5) -- #1066 WS-reauth instrumentation + #909 Tasks + dep bumps.
+    digest: sha256:2311dd7ee380a70843184701a042ba8c078ed48697ba5e74b7e87f32e5ae8915
+  # SPA unchanged from 0.9.29 (bd507b5) -- #1066 WS-reauth instrumentation + #909 Tasks + dep bumps.
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:024dfdd2849302fdb91b06d33fef29f50c7fcbc3c5fa2e92cf038b284c108e8a
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
