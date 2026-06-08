@@ -93,5 +93,5 @@ concept scene {
 
   successCondition  string  @description("Optional natural-language description of when this Scene is 'done', used by the agent's judgment to decide when to advance. Example: 'The user has seen the Spaces panel open.' Null = advance when the narration + Canvas actions complete.")
 
-  @relationship(type="parent", field="guideId", target="v1:guide:guide", direction="outgoing")
+  @relationship(type="parent", field="guideId", target=guide, direction="outgoing")
 }

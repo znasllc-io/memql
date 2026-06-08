@@ -11,6 +11,8 @@
 // ownerUserId from actor.userId server-side so a caller can never
 // create or mutate another user's to-dos.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("todos")
 @displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
@@ -23,5 +25,5 @@ concept todo {
   priority     enum("low", "medium", "high")  @description("Optional priority bucket. Absence means unprioritized; the frontend sorts high > medium > low > unset.")
   sourceResponsibilityId  string  @description("Optional back-pointer to the responsibility (or plan / automation) that spawned this to-do. Empty for user-created to-dos. Lets the frontend group app-generated tasks under their originating responsibility and lets a responsibility reconcile the to-dos it created.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

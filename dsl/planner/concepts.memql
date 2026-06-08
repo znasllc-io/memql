@@ -97,7 +97,7 @@ concept task {
   parkedAt          datetime @description("Per Q18: set when the Task hits a checkpoint while parent is paused / awaitingFeedback. The runner exits cleanly; on resume the planner re-invokes from the parkedAtCheckpoint marker + persisted TaskState.")
   parkedAtCheckpoint  string @description("Task-kind-specific resume marker. fileProcessor: 'between-pages'; llmAnalyze: 'between-calls'; runCommand: 'between-commands'. The agent's resume code path knows what each marker means.")
 
-  @relationship(type="parent", field="parentTaskId", target="v1:planner:task", direction="outgoing")
+  @relationship(type="parent", field="parentTaskId", target=task, direction="outgoing")
 }
 
 @version("1.0.0")

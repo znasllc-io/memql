@@ -47,5 +47,5 @@ concept segment {
 
   orderHint  int  @description("Optional ordering hint for authoring UIs and progress indicators. Not used at runtime for routing (that's the option graph).")
 
-  @relationship(type="parent", field="curriculumId", target="v1:curriculum:curriculum", direction="outgoing")
+  @relationship(type="parent", field="curriculumId", target=curriculum, direction="outgoing")
 }

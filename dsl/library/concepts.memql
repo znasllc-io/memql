@@ -22,6 +22,8 @@
 // from actor.userId server-side so a caller can never see or mutate
 // another user's index rows.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("library")
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
@@ -63,7 +65,7 @@ concept artifact {
 
   updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
 // ---- generatedOutput: the home concept for app-produced deliverables ----
@@ -101,7 +103,7 @@ concept generatedOutput {
   producedByWorkerId   string  @description("v1:worker:registration.id of the worker MACHINE that produced this output, when source=computer_use. Empty otherwise. Copied onto the artifact index row.")
   producedByWorkerName string  @description("Human-readable name of the producing worker machine, copied from the worker registration at production time. Empty unless producedByWorkerId is set.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
 // ---- memory: user-facing assistant (LLM) memory ----
@@ -129,5 +131,5 @@ concept memory {
   spaceId           string  @description("v1:cognition:space.id this memory was formed in, when space-scoped.")
   sourceUtteranceId string  @description("Optional back-reference to the v1:cognition:utterance that produced this memory -- provenance for 'where did the assistant learn this'.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

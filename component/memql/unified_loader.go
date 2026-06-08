@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -58,7 +60,21 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 		return 0, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
-	concepts := make(map[string]*memoryNodes.Concept)
+	// Pass 1: read + parse every concept file, cache its decls + `use`
+	// imports, and build a global index dir -> { conceptName -> canonicalId }.
+	// The index is what resolves @relationship targets written as
+	// `use`-imported bare concept names (#1067): a target's canonical id
+	// can carry a sub-namespace (e.g. `state` -> v1:cognition:turn:state),
+	// so it must be looked up from the target concept's own assembled id,
+	// not derived from the import path.
+	type conceptFile struct {
+		path  string
+		dir   string
+		decls []*languageAst.ConceptDecl
+		uses  []*languageParser.UseDeclaration
+	}
+	var files []conceptFile
+	index := make(map[string]map[string]string) // dir -> conceptName -> canonicalId
 
 	for _, p := range paths {
 		file, openErr := tree.Open(p)
@@ -77,13 +93,41 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 			continue
 		}
 
-		for _, decl := range ExtractConceptDecls(string(raw)) {
+		decls := ExtractConceptDecls(string(raw))
+		if len(decls) == 0 {
+			continue
+		}
+		// Concept files are pure schema today, so `use` imports are new
+		// to them (#1067). Best-effort: a parse failure just yields no
+		// imports and cross-namespace targets fall through to the warning.
+		uses, _ := parsedUseDeclarations(string(raw))
+		dir := firstPathSegment(p)
+		files = append(files, conceptFile{path: p, dir: dir, decls: decls, uses: uses})
+
+		for _, decl := range decls {
+			id, idErr := languageAst.AssembleConceptIdFromDecl(decl)
+			if idErr != nil || id == "" {
+				continue
+			}
+			if index[dir] == nil {
+				index[dir] = make(map[string]string)
+			}
+			index[dir][decl.Name] = id
+		}
+	}
+
+	// Pass 2: resolve relationship targets through the index, then build +
+	// register each concept.
+	concepts := make(map[string]*memoryNodes.Concept)
+
+	for _, cf := range files {
+		for _, decl := range cf.decls {
 			id, idErr := languageAst.AssembleConceptIdFromDecl(decl)
 			if idErr != nil {
 				if logger != nil {
 					logger.Warn("unified loader: skipping concept with bad ID",
 						"component", "memql.unifiedLoader",
-						"file", p,
+						"file", cf.path,
 						"concept", decl.Name,
 						"error", idErr)
 				}
@@ -95,12 +139,14 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 				continue
 			}
 
+			resolveRelationshipTargets(decl, cf.dir, cf.uses, index, id, logger)
+
 			concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)
 			if buildErr != nil {
 				if logger != nil {
 					logger.Warn("unified loader: skipping concept that failed to build",
 						"component", "memql.unifiedLoader",
-						"file", p,
+						"file", cf.path,
 						"concept", id,
 						"error", buildErr)
 				}
@@ -123,6 +169,89 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 	}
 
 	return len(concepts), nil
+}
+
+// firstPathSegment returns the leading path component of a unified-tree
+// path ("cognition/concepts.memql" -> "cognition", "copresent/concepts.memql"
+// -> "copresent"). This is the namespace directory, which matches the first
+// segment of a `use <dir>.concepts.{ ... }` import's dotted path.
+func firstPathSegment(p string) string {
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
+// resolveRelationshipTargets rewrites every @relationship target that is
+// written as a `use`-imported bare concept name (#1067) into its canonical
+// id, in place on the decl, BEFORE the concept is built. A target already in
+// canonical form (contains ':') is left untouched -- the engine resolves both
+// forms so the memql and copresent trees can migrate independently; the
+// authored form is pinned to the bare-name form by each repo's conformance
+// test. An unresolved bare name is logged with a migration hint and left as
+// written (engine bootstrap then warns that the target concept is unknown).
+func resolveRelationshipTargets(
+	decl *languageAst.ConceptDecl,
+	dir string,
+	uses []*languageParser.UseDeclaration,
+	index map[string]map[string]string,
+	conceptId string,
+	logger *slog.Logger,
+) {
+	for i := range decl.Relationships {
+		t := decl.Relationships[i].Target
+		if t == "" || strings.Contains(t, ":") {
+			continue
+		}
+		if resolved := resolveRelationshipTargetName(t, dir, uses, index); resolved != "" {
+			decl.Relationships[i].Target = resolved
+			continue
+		}
+		if logger != nil {
+			logger.Warn("unified loader: unresolved @relationship target -- add a `use <ns>.concepts.{ "+t+" }` import",
+				"component", "memql.unifiedLoader",
+				"concept", conceptId,
+				"target", t)
+		}
+	}
+}
+
+// resolveRelationshipTargetName resolves a bare concept name to its canonical
+// id: first against the owning file's own concepts (same-namespace, no import
+// needed), then through the file's `use <ns>.concepts.{ name }` imports
+// (cross-namespace). Returns "" when neither resolves it.
+func resolveRelationshipTargetName(
+	name string,
+	dir string,
+	uses []*languageParser.UseDeclaration,
+	index map[string]map[string]string,
+) string {
+	if m, ok := index[dir]; ok {
+		if id, ok := m[name]; ok {
+			return id
+		}
+	}
+	for _, u := range uses {
+		if u == nil || len(u.Parts) < 2 || u.Parts[1] != "concepts" {
+			continue
+		}
+		imported := false
+		for _, n := range u.Names {
+			if n == name {
+				imported = true
+				break
+			}
+		}
+		if !imported {
+			continue
+		}
+		if m, ok := index[u.Parts[0]]; ok {
+			if id, ok := m[name]; ok {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // Ensure the standard library + memql packages are referenced so go

@@ -11,6 +11,8 @@
 // self-scope on actor.userId, mutations stamp ownerUserId from
 // actor.userId. A caller can never read or write another user's events.
 
+use identity.concepts.{ user }
+
 @version("1.0.0")
 @namespace("calendar")
 @description("A single calendar event owned by one user. The app-native source of truth for that user's schedule (#642): the reactive harness's reminder triggers read queryUpcomingEvents over these rows ('remind me the day before X'), and the calendar tool/skill lets agents create + list + edit them. source discriminates native (first-party, the only writer in v1) from externalSync (a future Google/CalDAV sync via knowledge:liveConnector, which stamps externalRef back to the upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 -- expansion into concrete occurrences is a downstream concern, not stored here.")
@@ -28,5 +30,5 @@ concept calendarEvent {
   externalRef  string  @description("When source=externalSync: the upstream event id (e.g. the Google Calendar event id) this row mirrors. Used by the future sync reconciler for idempotent upsert + deletion-propagation. Empty for native events.")
   deleted      bool    @default("false") @description("Soft-delete flag. The calendar delete action stamps this true rather than hard-deleting so the time-series history survives and a future external-sync reconciler can propagate the deletion upstream. Queries filter it out via traitIsNotDeleted.")
 
-  @relationship(type="parent", field="ownerUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
