@@ -128,6 +128,22 @@ loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 | `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET` | 2000000 |
 | `MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS` | 2 |
 
+### Layer 4 — per-scope budget
+| env | default | meaning |
+|---|---|---|
+| `MEMQL_LLM_SCOPE_GUARD_ENABLED` | true | per-(space, plan-lineage) latch |
+| `MEMQL_LLM_SCOPE_MAX_CALLS` | 600 | cumulative calls per scope |
+| `MEMQL_LLM_SCOPE_MAX_COST_USD` | 20.0 | cumulative est-$ per scope |
+| `MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS` | 3600 | prune scopes idle this long |
+
+The per-scope latch is **on by default** (unlike the process caps): a scope is
+one conversation/space or plan-lineage, so a runaway within one scope is
+unambiguous and latching it kills just that loop — other conversations are
+unaffected and no restart is needed. Caps sit above the 120-iteration per-turn
+cap so a single deep turn never trips them. Scopes are stamped via
+`ContextWithBudgetScope` at the streaming + non-streaming agent loops and the
+planner decompose loop.
+
 ## Reproducing a runaway safely (local)
 
 Set tight caps in the cluster env, then trigger any loop and confirm spend is
