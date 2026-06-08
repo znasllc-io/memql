@@ -18,6 +18,18 @@ const (
 	defaultHeartbeatInterval = 5 * time.Second
 	defaultLivenessTimeout   = 15 * time.Second // 3 missed heartbeats
 	defaultOfflineTimeout    = 25 * time.Second // 5 missed heartbeats
+
+	// defaultStaleGossipTimeout bounds how long an UNMONITORED peer
+	// (learned via PeerIntroduction / NodeWelcome, Connection == nil --
+	// this node never receives its heartbeats) may linger in the peer
+	// table before it is reaped. Such entries are never subject to the
+	// healthy->degraded->offline transition logic (that's monitored-only),
+	// so without this window they would accumulate forever across K8s
+	// rollouts (peers keyed by pod name, #1042). Set to a small multiple of
+	// offlineTimeout (~2.4x) so a transiently-quiet sibling that is still
+	// being re-advertised by the mesh is not reaped prematurely, while dead
+	// pods are cleared within ~1 minute.
+	defaultStaleGossipTimeout = 60 * time.Second
 )
 
 // StatusChangeHandler is invoked whenever a peer's health status transitions.
@@ -63,9 +75,10 @@ type PeerManager struct {
 	childMu    sync.RWMutex
 	childConns map[string]*peerConnection
 
-	heartbeatInterval time.Duration
-	livenessTimeout   time.Duration
-	offlineTimeout    time.Duration
+	heartbeatInterval  time.Duration
+	livenessTimeout    time.Duration
+	offlineTimeout     time.Duration
+	staleGossipTimeout time.Duration
 
 	// onStatusChange is invoked on every actual health transition. Set via
 	// SetStatusChangeHandler during bootstrap. nil handler == no-op.
@@ -81,15 +94,16 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 	comp, _ := component.New(PeerManagerComponentName)
 
 	pm := &PeerManager{
-		Component:         comp,
-		identity:          identity,
-		peers:             make(map[string]*PeerEntry),
-		byType:            make(map[NodeType]map[string]*PeerEntry),
-		childConns:        make(map[string]*peerConnection),
-		heartbeatInterval: defaultHeartbeatInterval,
-		livenessTimeout:   defaultLivenessTimeout,
-		offlineTimeout:    defaultOfflineTimeout,
-		logger:            logger,
+		Component:          comp,
+		identity:           identity,
+		peers:              make(map[string]*PeerEntry),
+		byType:             make(map[NodeType]map[string]*PeerEntry),
+		childConns:         make(map[string]*peerConnection),
+		heartbeatInterval:  defaultHeartbeatInterval,
+		livenessTimeout:    defaultLivenessTimeout,
+		offlineTimeout:     defaultOfflineTimeout,
+		staleGossipTimeout: defaultStaleGossipTimeout,
+		logger:             logger,
 	}
 
 	pm.ConfigureLifecycle(
@@ -112,6 +126,17 @@ func (pm *PeerManager) SetTimings(heartbeat, liveness, offline time.Duration) {
 	}
 	if offline > 0 {
 		pm.offlineTimeout = offline
+	}
+}
+
+// SetStaleGossipTimeout overrides the window after which an unmonitored,
+// unconnected peer (learned via gossip) is reaped from the peer table. A
+// zero or negative value leaves the current value unchanged. Must be
+// called before Start. Kept separate from SetTimings so the existing
+// 3-arg timing contract (and its callers) stays stable.
+func (pm *PeerManager) SetStaleGossipTimeout(d time.Duration) {
+	if d > 0 {
+		pm.staleGossipTimeout = d
 	}
 }
 
@@ -533,10 +558,41 @@ func (pm *PeerManager) checkLiveness() {
 	pm.mu.Lock()
 	for nodeId, entry := range pm.peers {
 		// Only peers whose heartbeats this node directly receives are
-		// subject to liveness tripping. Peers advertised via
-		// PeerIntroduction (siblings) are visible for routing but not
-		// owned by this PeerManager.
+		// subject to liveness *tripping* (the healthy->degraded->offline
+		// transitions below). Peers advertised via PeerIntroduction /
+		// NodeWelcome (siblings) are visible for routing but not owned by
+		// this PeerManager -- this node never receives their heartbeats, so
+		// it cannot author a health transition for them.
+		//
+		// They still need to be *reaped* once they go stale, though:
+		// otherwise gossiped entries for dead pods accumulate in the table
+		// forever across K8s rollouts (peers keyed by pod name, #1042). An
+		// unmonitored entry with no live outbound connection that hasn't
+		// been re-advertised within staleGossipTimeout is treated as gone
+		// and removed. This is a pure table reap, NOT a health transition:
+		// we do not emit a status change (no spurious "offline" DB health
+		// row for a pod this node never monitored). selectPeer
+		// (component/grpc/si_forward.go) already requires Connection != nil,
+		// so these Connection==nil entries are already unroutable -- removing
+		// them cannot change routing results, it only frees memory and keeps
+		// the gossip/topology view accurate.
 		if !entry.Monitored {
+			if entry.Connection == nil && now.Sub(entry.LastSeen) > pm.staleGossipTimeout {
+				nodeType := NodeType(entry.Info.NodeType)
+				if typeMap, ok := pm.byType[nodeType]; ok {
+					delete(typeMap, nodeId)
+					if len(typeMap) == 0 {
+						delete(pm.byType, nodeType)
+					}
+				}
+				delete(pm.peers, nodeId)
+
+				pm.logger.Info("stale unmonitored peer reaped from peer table",
+					"peer_id", nodeId,
+					"last_seen", entry.LastSeen,
+					"elapsed", now.Sub(entry.LastSeen),
+				)
+			}
 			continue
 		}
 		elapsed := now.Sub(entry.LastSeen)

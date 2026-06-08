@@ -530,6 +530,47 @@ func TestRuntimeEvaluator_AddDuration(t *testing.T) {
 	}
 }
 
+// TestClusterNodeStalePruneWindow models the per-row staleness guard the
+// pruneStaleClusterNodes cron uses (#1061):
+//
+//	if addDuration(item.payload.lastSeen, "PT{N}M") < now { ...mark stopped... }
+//
+// It pins the selection boundary: a node whose lastSeen is older than the
+// MEMQL_NODE_STALE_PRUNE_MINUTES window is pruned; one inside the window
+// is left alone. Uses the same EvaluateAddDuration builtin the logic body
+// resolves at runtime, so the unit test exercises the real comparison.
+func TestClusterNodeStalePruneWindow(t *testing.T) {
+	eval := NewRuntimeEvaluator(&RuntimeContext{})
+	now := "2026-06-07T12:00:00Z"
+	const windowDuration = "PT30M" // MEMQL_NODE_STALE_PRUNE_MINUTES default 30
+
+	cases := []struct {
+		name       string
+		lastSeen   string
+		wantPruned bool
+	}{
+		{"fresh heartbeat 1m ago -> keep", "2026-06-07T11:59:00Z", false},
+		{"inside window 29m ago -> keep", "2026-06-07T11:31:00Z", false},
+		{"just past window 31m ago -> prune", "2026-06-07T11:29:00Z", true},
+		{"long departed 3h ago -> prune", "2026-06-07T09:00:00Z", true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			deadline, err := eval.EvaluateAddDuration(c.lastSeen, windowDuration)
+			if err != nil {
+				t.Fatalf("EvaluateAddDuration: %v", err)
+			}
+			// The logic guard fires (prunes) when deadline < now.
+			pruned := deadline < now
+			if pruned != c.wantPruned {
+				t.Errorf("lastSeen=%s deadline=%s now=%s: pruned=%v, want %v",
+					c.lastSeen, deadline, now, pruned, c.wantPruned)
+			}
+		})
+	}
+}
+
 func TestRuntimeEvaluator_DaysBetween(t *testing.T) {
 	eval := NewRuntimeEvaluator(&RuntimeContext{})
 

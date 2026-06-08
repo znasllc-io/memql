@@ -8,8 +8,9 @@
 // Bootstrap the cluster's self-representation in the database on first startup.
 // Creates records for the cluster, its database, and its identity provider.
 // Only BFF nodes run this. Idempotent: skips if cluster already exists.
-use cluster.mutations.{ mutationCreateCluster, mutationCreateDatabase, mutationCreateIdentityProvider, mutationCreateNode, mutationCreateSpawnEvent }
-use cluster.queries.{ queryExistingCluster }
+use cluster.mutations.{ mutationCreateCluster, mutationCreateDatabase, mutationCreateIdentityProvider, mutationCreateNode, mutationCreateSpawnEvent, mutationUpdateNodeHealth }
+use cluster.queries.{ queryExistingCluster, queryStaleClusterNodes }
+use platform.queries.{ queryGlobalVariable }
 
 @description("Bootstraps the cluster's self-representation on first startup. Creates v1:cluster:cluster + v1:cluster:database + v1:cluster:identityProvider rows when no cluster row exists. Only BFF nodes run the create path. Idempotent: skips entirely if a cluster row already exists.")
 logic logicBootstrapCluster {
@@ -112,6 +113,71 @@ logic logicRegisterNode {
   })
 
   return nodeRecord
+  }
+}
+
+// ---- logic/v1/cluster/pruneStaleClusterNodes.memql ----
+
+// pruneStaleClusterNodes
+// ======================
+//
+// Heartbeat-based prune of departed cluster nodes (#1061). The
+// v1:cluster:node store is append-only: NodeStatusWriter appends a row
+// on every liveness transition, and across K8s rollouts (nodes keyed by
+// pod name, #1042) rows for long-gone pods accumulate forever. This cron
+// marks those rows terminal so topology / CLI / WorkerDialer stop
+// treating dead pods as live.
+//
+// Mechanism (mirrors logicPurgeExpiredArchivedSpaces /
+// logicAccessRequestExpirySweep):
+//   1. queryStaleClusterNodes returns the LATEST row per id whose health
+//      is not already "stopped" (asOf latest -> idempotent + reflects
+//      current state).
+//   2. The stale window is read from the global variable registry
+//      (MEMQL_NODE_STALE_PRUNE_MINUTES), so only CONFIG differs per env
+//      -- the code/architecture is identical local-cluster and staging.
+//      Default 30 minutes via coalesce: comfortably longer than the
+//      in-memory peer windows (offline=25s, stale-gossip=60s) so a node
+//      that is merely mid-restart is not pruned, but short enough that a
+//      genuinely-departed pod clears within an hour. Set
+//      `make variable-set NAME=MEMQL_NODE_STALE_PRUNE_MINUTES VALUE=...
+//      SCOPE=global` (or the process env) to override per environment.
+//   3. Per-row windowing: skip rows whose lastSeen + window is still in
+//      the future. addDuration only accepts positive ISO-8601 durations
+//      and the planner rejects function-call literals in filters, so the
+//      "lastSeen + N minutes < now" math lives in the `if` guard here.
+//   4. Prune == write a terminal health="stopped" row (append-only; we
+//      don't hard-delete). cluster:node has no `deleted`/`active` field
+//      and no soft-delete trait, and consumers already treat "stopped"
+//      as gone: WorkerDialer skips offline/stopped rows, and the CLI /
+//      topology dedupe to latest-per-id so the stopped marker hides the
+//      node from the live set.
+//
+// Runs every 10 minutes. The cluster node table is small (one row-stream
+// per pod ever seen), so a frequent walk is cheap and keeps topology
+// fresh shortly after a rollover.
+@description("Every 10 min: mark departed cluster nodes terminal. Reads the LATEST non-stopped row per id (queryStaleClusterNodes, asOf latest -> idempotent), and for each whose lastSeen + MEMQL_NODE_STALE_PRUNE_MINUTES (default 30) has passed, appends a health='stopped' row via mutationUpdateNodeHealth. Append-only prune (cluster:node has no deleted field); consumers treat stopped as gone (WorkerDialer skips it, CLI/topology dedupe latest-per-id). Per-row windowing in the if guard since MemQL filters can't push the duration math down.")
+logic logicPruneStaleClusterNodes {
+  args {
+    event object @required
+  }
+  body {
+  stale := queryStaleClusterNodes({})
+  windowMinutes := queryGlobalVariable({ name: "MEMQL_NODE_STALE_PRUNE_MINUTES" })
+
+  for item := range stale.Nodes() {
+    pruneStep := if addDuration(item.payload.lastSeen, concat("PT", coalesce(windowMinutes.First().payload.value, "30"), "M")) < timestamp() {
+      mutationUpdateNodeHealth({
+        id:       item.id,
+        nodeType: item.payload.nodeType,
+        address:  coalesce(item.payload.address, ""),
+        health:   "stopped",
+        lastSeen: timestamp()
+      })
+    }
+  }
+
+  return stale.Len()
   }
 }
 

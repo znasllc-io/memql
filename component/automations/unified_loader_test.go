@@ -32,4 +32,25 @@ func TestLoadFromUnifiedTree(t *testing.T) {
 	// at this layer just skip the entry, they don't blank the list).
 	// The exact count depends on which concepts are registered when the
 	// test runs in isolation.
+
+	// #1061: the heartbeat-based cluster-node prune cron must load with
+	// its 10-minute six-field cron schedule. This proves the new
+	// automation + its logic + queryStaleClusterNodes parse and register
+	// from the unified tree.
+	var prune *Automation
+	for _, a := range automations {
+		if a.Name == "pruneStaleClusterNodes" {
+			prune = a
+			break
+		}
+	}
+	if prune == nil {
+		t.Fatal("pruneStaleClusterNodes automation did not load from the unified tree (#1061)")
+	}
+	if prune.Schedule != "0 */10 * * * *" {
+		t.Errorf("pruneStaleClusterNodes: expected cron schedule %q, got %q", "0 */10 * * * *", prune.Schedule)
+	}
+	if len(prune.Steps) == 0 {
+		t.Error("pruneStaleClusterNodes: expected at least one step")
+	}
 }

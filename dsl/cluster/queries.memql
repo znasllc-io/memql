@@ -43,3 +43,38 @@ query spawnEvent queryClusterSpawnEvents {
 @description("Returns the existing cluster record, if any")
 query cluster queryExistingCluster {
 }
+
+// ---- queries/v1/cluster/staleClusterNodes.memql ----
+
+// queryStaleClusterNodes
+// ======================
+//
+// Returns the LATEST row per node id whose health is not already a
+// terminal "stopped" marker. Used by the pruneStaleClusterNodes cron
+// (#1061) to find departed pods whose v1:cluster:node rows are still
+// hanging around after a K8s rollover.
+//
+// Why `asOf latest`: the v1:cluster:node store is append-only -- every
+// liveness transition (mutationUpdateNodeHealth) appends a new row under
+// the same id, so a plain scan would return every historical row. The
+// struct-form `asOf latest` directive collapses to one row per id (the
+// most recent), which is exactly what the prune needs:
+//   - it makes the cron idempotent -- once a node's latest row is
+//     "stopped" it's excluded, so we never re-stop the same id and never
+//     grow the table unbounded; and
+//   - it reflects the node's CURRENT state, so a node that recovered
+//     (latest row healthy again) is re-evaluated on its fresh lastSeen.
+//
+// The staleness comparison (lastSeen + window < now) is NOT done here:
+// the MemQL query planner rejects function-call literals (addDuration /
+// timestamp) inside filter comparisons, and addDuration accepts only
+// positive ISO-8601 durations. So the windowing math lives on the
+// per-row side in logicPruneStaleClusterNodes, mirroring
+// logicAccessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
+
+@enabled
+@description("Latest-per-id cluster node rows whose health is not already 'stopped'. Drives the stale-node prune cron.")
+query node queryStaleClusterNodes {
+  filter  payload.health!="stopped"
+  asOf    latest
+}
