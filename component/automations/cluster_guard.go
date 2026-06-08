@@ -3,6 +3,7 @@ package automations
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,6 +44,13 @@ const (
 
 	clusterGuardDefaultRetention = time.Hour
 	clusterGuardPruneInterval    = 10 * time.Minute
+
+	// Fail-open bound defaults (memql#1142). When the DB is unreachable the
+	// guard fails OPEN so it never drops legitimate work -- but unbounded
+	// fail-open during a DB outage is itself a double-fire multiplier. Admit
+	// at most this many unguarded executions per window, then fail CLOSED.
+	defaultUnguardedMaxPerWindow = 50
+	defaultUnguardedWindowSecs   = 60
 )
 
 // ClusterExecutionGuard implements executionClaimer.
@@ -57,6 +65,17 @@ type ClusterExecutionGuard struct {
 	claimed   atomic.Int64
 	prevented atomic.Int64
 	errors    atomic.Int64
+
+	// Fail-open bound (memql#1142): a windowed cap on how many unguarded
+	// executions the fail-open path admits, so a DB outage degrades to
+	// "fail open but BOUNDED" rather than an unbounded double-fire
+	// multiplier. unguardedMax of 0 means unlimited (the pre-#1142 pure
+	// fail-open behavior). now is injectable for tests.
+	unguardedMu     sync.Mutex
+	unguarded       windowCount
+	unguardedMax    int
+	unguardedWindow time.Duration
+	now             func() time.Time
 }
 
 // Logger is the minimal logging surface the guard needs (satisfied by
@@ -75,11 +94,17 @@ func NewClusterExecutionGuard(dbGetter func() *bun.DB, logger Logger) *ClusterEx
 		host = "unknown"
 	}
 	g := &ClusterExecutionGuard{
-		Component: comp,
-		dbGetter:  dbGetter,
-		nodeId:    host,
-		logger:    logger,
-		retention: clusterGuardDefaultRetention,
+		Component:       comp,
+		dbGetter:        dbGetter,
+		nodeId:          host,
+		logger:          logger,
+		retention:       clusterGuardDefaultRetention,
+		unguardedMax:    envIntDefault("MEMQL_MAX_UNGUARDED_AUTOMATION_EXECUTIONS_PER_WINDOW", defaultUnguardedMaxPerWindow),
+		unguardedWindow: time.Duration(envIntDefault("MEMQL_UNGUARDED_AUTOMATION_WINDOW_SECONDS", defaultUnguardedWindowSecs)) * time.Second,
+		now:             time.Now,
+	}
+	if g.unguardedWindow <= 0 {
+		g.unguardedWindow = defaultUnguardedWindowSecs * time.Second
 	}
 	_ = g.ConfigureLifecycle(component.WithRunHook(g.run))
 	return g
@@ -92,9 +117,14 @@ func (g *ClusterExecutionGuard) Claim(ctx context.Context, automationName, dedup
 	db := g.dbGetter()
 	if db == nil || db.DB == nil {
 		g.errors.Add(1)
+		if !g.allowUnguarded() {
+			g.warn("automation execution claim skipped -- no database AND the unguarded-execution budget is exhausted; failing CLOSED (skipping) to bound the double-fire window (memql#1142)",
+				"automation", automationName)
+			return false
+		}
 		g.warn("automation execution claim skipped -- no database; executing UNGUARDED (possible double-fire window)",
 			"automation", automationName)
-		return true // fail-open: never drop legitimate work
+		return true // fail-open (bounded): never drop legitimate work
 	}
 
 	res, err := db.DB.ExecContext(ctx,
@@ -104,9 +134,14 @@ func (g *ClusterExecutionGuard) Claim(ctx context.Context, automationName, dedup
 		automationName, dedupKey, g.nodeId)
 	if err != nil {
 		g.errors.Add(1)
+		if !g.allowUnguarded() {
+			g.warn("automation execution claim failed AND the unguarded-execution budget is exhausted; failing CLOSED (skipping) to bound the double-fire window (memql#1142)",
+				"automation", automationName, "dedupKey", dedupKey, "error", err)
+			return false
+		}
 		g.warn("automation execution claim failed -- executing UNGUARDED (possible double-fire window)",
 			"automation", automationName, "dedupKey", dedupKey, "error", err)
-		return true // fail-open
+		return true // fail-open (bounded)
 	}
 
 	n, _ := res.RowsAffected()
@@ -120,6 +155,30 @@ func (g *ClusterExecutionGuard) Claim(ctx context.Context, automationName, dedup
 
 	g.claimed.Add(1)
 	g.debug("automation execution claimed", "automation", automationName, "node", g.nodeId)
+	return true
+}
+
+// allowUnguarded bounds the fail-open path (memql#1142): it admits up to
+// unguardedMax unguarded executions per window and returns false past that,
+// so a DB outage degrades to "fail open but bounded" instead of an unbounded
+// double-fire multiplier. A cap of 0 means unlimited (pure fail-open).
+func (g *ClusterExecutionGuard) allowUnguarded() bool {
+	if g.unguardedMax <= 0 {
+		return true
+	}
+	g.unguardedMu.Lock()
+	defer g.unguardedMu.Unlock()
+	now := time.Now()
+	if g.now != nil {
+		now = g.now()
+	}
+	if now.Sub(g.unguarded.windowStart) > g.unguardedWindow {
+		g.unguarded = windowCount{windowStart: now}
+	}
+	if g.unguarded.count >= g.unguardedMax {
+		return false
+	}
+	g.unguarded.count++
 	return true
 }
 
