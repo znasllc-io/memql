@@ -194,6 +194,13 @@ func (r *Router) resolveChain(req ResolveRequest, mod providerModality) ([]strin
 			PolicyName:   policyName,
 		}, nil
 	}
+	// Every entry in the chain was unregistered, unavailable, or
+	// lacked the requested modality -- e.g. a policy whose @primary +
+	// every @fallback provider is @disabled. Name the policy (when the
+	// chain came from one) so the empty-chain error is actionable.
+	if policyName != "" {
+		return nil, Resolved{}, fmt.Errorf("router: policy %q resolved no available provider; every entry in its chain %v is disabled/unavailable for the requested modality", policyName, chain)
+	}
 	return nil, Resolved{}, fmt.Errorf("router: no provider in chain %v is available for the requested modality", chain)
 }
 

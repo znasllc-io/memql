@@ -170,8 +170,18 @@ func (e *MemQLEngine) InvokeSIStructured(
 	// Prefer the prompt's declared provider; fall back to the default
 	// structured-capable provider; last resort is the default chat
 	// provider with schema instructions in-prompt.
+	//
+	// Provider-lifecycle (#1081): a prompt whose @defaultProvider has
+	// been @disabled (so it is absent from the registry) resolves to
+	// nil here and falls through to the default cleanly. Emit a single
+	// log line so the fallback is observable rather than silent.
 	var result string
-	if structured := e.StructuredChatProviderByName(providerName); structured != nil {
+	structured := e.StructuredChatProviderByName(providerName)
+	if structured == nil && providerName != "" && e.Logger != nil {
+		e.Logger.Info("prompt @defaultProvider unavailable; falling back to default structured provider",
+			"template", templateId, "requestedProvider", providerName)
+	}
+	if structured != nil {
 		result, err = structured.CallChatStructured(ctx, messages, spec)
 	} else if structured := e.StructuredChatProvider(); structured != nil {
 		result, err = structured.CallChatStructured(ctx, messages, spec)
