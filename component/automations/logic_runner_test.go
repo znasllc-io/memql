@@ -1,11 +1,36 @@
 package automations
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 )
+
+// recordingStepRegistry is a minimal StepExecutorRegistry stub for the
+// logic-runner end-to-end tests. It records every dispatched step ID and
+// returns a canned success result, so a Logic body's intermediate
+// side-effect steps run without a live engine / DB. The `_return` step
+// is resolved by RunLogic's local-expression path before it ever reaches
+// the registry, so it never lands here for a literal return.
+type recordingStepRegistry struct {
+	dispatched []string
+}
+
+func (r *recordingStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	r.dispatched = append(r.dispatched, step.ID)
+	now := time.Now()
+	return &StepResult{
+		StepId:      step.ID,
+		Status:      "success",
+		StartedAt:   now,
+		CompletedAt: now,
+		Result:      map[string]any{"ok": true},
+	}, nil
+}
 
 // parseLogicBody is the test helper. Given a Logic source string, it
 // runs the struct-form normaliser + parser and returns the parsed
@@ -621,5 +646,183 @@ func TestLogicRunner_RejectsNilBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "logic body is nil") {
 		t.Errorf("expected `logic body is nil` error, got %v", err)
+	}
+}
+
+// TestLogicRunner_EvaluateLocalExpr_ScalarLiterals pins the memql#1090
+// fix: a Logic body whose trailing `return <expr>` is a bare scalar
+// literal must resolve to that literal's typed value through the
+// logic-time local resolver, WITHOUT routing the literal string into
+// engine.Execute. The staging-confirmed repro was the
+// `logicSeedKnowledgeDomains` body `seed := <builtin>; return 1`: the
+// "1" return string reached engine.Execute, where Parse produced a
+// LiteralValueNode root that cloneExpressionNode dropped to nil, and
+// the unbounded-query guard rejected the call with "query must include
+// at least one filter or relationship expression". EvaluateLocalExpr is
+// the convergence entry the LogicRunner return path drives (RunLogic
+// calls it on returnStep.Query.Query before falling back to the step
+// registry / engine.Execute), so asserting handled=true here proves the
+// literal never reaches the guard.
+func TestLogicRunner_EvaluateLocalExpr_ScalarLiterals(t *testing.T) {
+	evaluator := NewEvaluator()
+	tests := []struct {
+		name string
+		expr string
+		want any
+	}{
+		{"int literal (the seedKnowledgeDomains return)", "1", int64(1)},
+		{"zero", "0", int64(0)},
+		{"negative int", "-7", int64(-7)},
+		{"float literal", "3.14", 3.14},
+		{"double-quoted string", `"hello"`, "hello"},
+		{"single-quoted string", `'world'`, "world"},
+		{"empty string literal", `""`, ""},
+		{"bool true", "true", true},
+		{"bool false", "false", false},
+		{"null literal", "null", nil},
+		{"whitespace padded int", "  42  ", int64(42)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, handled, err := EvaluateLocalExpr(tt.expr, evaluator)
+			if err != nil {
+				t.Fatalf("EvaluateLocalExpr(%q) err = %v", tt.expr, err)
+			}
+			if !handled {
+				t.Fatalf("EvaluateLocalExpr(%q) handled=false; literal must resolve locally and never reach engine.Execute (memql#1090)", tt.expr)
+			}
+			if val != tt.want {
+				t.Errorf("EvaluateLocalExpr(%q) = %#v, want %#v", tt.expr, val, tt.want)
+			}
+		})
+	}
+}
+
+// TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals pins that the
+// memql#1090 literal short-circuit does NOT swallow genuine queries,
+// function calls, or other non-literal returns. A real concept query
+// (`return queryFoo({...})`) and a top-level mutation / builtin call
+// must report handled=false from the literal+step-ref+positional-builtin
+// resolver so the LogicRunner falls back to engine.Execute and the query
+// actually runs. Bare step refs / step-method calls / coalesce stay on
+// their existing local paths (handled=true) and are covered by their own
+// tests; here we focus on the "must reach the engine" set.
+func TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals(t *testing.T) {
+	evaluator := NewEvaluator()
+	fallThrough := []struct {
+		name string
+		expr string
+	}{
+		{"genuine concept query", `queryActiveSpaces({ownerUserId: "u1"})`},
+		{"top-level mutation call", `mutationCreateThing({name: "x"})`},
+		{"non-positional builtin call", `ensureDailySpaceForCaller({})`},
+		{"identifier that looks numeric-ish but isnt a literal", `v1abc`},
+		{"comparison filter", `payload.status=="active"`},
+	}
+	for _, tt := range fallThrough {
+		t.Run(tt.name, func(t *testing.T) {
+			val, handled, err := EvaluateLocalExpr(tt.expr, evaluator)
+			if err != nil {
+				t.Fatalf("EvaluateLocalExpr(%q) err = %v", tt.expr, err)
+			}
+			if handled {
+				t.Fatalf("EvaluateLocalExpr(%q) handled=true val=%#v; a real query/call must fall through to engine.Execute", tt.expr, val)
+			}
+		})
+	}
+}
+
+// TestTryEvaluateLiteralLocally_StrictMatching pins the literal matcher's
+// strictness directly: only number / quoted-string / true / false / null
+// match, so no genuine query, identifier, or call is misclassified as a
+// literal. Guards the memql#1090 fix against over-reach.
+func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
+	literals := map[string]any{
+		"1":       int64(1),
+		"1.5":     1.5,
+		`"x"`:     "x",
+		"true":    true,
+		"false":   false,
+		"null":    nil,
+	}
+	for expr, want := range literals {
+		val, ok := tryEvaluateLiteralLocally(expr)
+		if !ok {
+			t.Errorf("tryEvaluateLiteralLocally(%q) = (_, false), want literal match", expr)
+			continue
+		}
+		if val != want {
+			t.Errorf("tryEvaluateLiteralLocally(%q) = %#v, want %#v", expr, val, want)
+		}
+	}
+
+	nonLiterals := []string{
+		"",
+		"someStep",
+		"rows.Len()",
+		"coalesce(a, b)",
+		`queryFoo({id: "x"})`,
+		"payload.active==true",
+		`"unterminated`,
+		"v1:cluster:node",
+	}
+	for _, expr := range nonLiterals {
+		if _, ok := tryEvaluateLiteralLocally(expr); ok {
+			t.Errorf("tryEvaluateLiteralLocally(%q) matched as literal; should not", expr)
+		}
+	}
+}
+
+// TestLogicRunner_RunLogic_SeedThenLiteralReturn reproduces the exact
+// staging-confirmed memql#1090 shape end-to-end through RunLogic: a Logic
+// body with a side-effect step followed by `return 1` --
+//
+//	logic logicSeedKnowledgeDomains {
+//	  body {
+//	    seed := knowledgeSeedStandardDomains({})
+//	    return 1
+//	  }
+//	}
+//
+// Before the fix, the "1" return string was dispatched through the step
+// registry into engine.Execute, where the unbounded-query guard rejected
+// it ("query must include at least one filter or relationship
+// expression") -- the automation failed at boot. After the fix, RunLogic
+// resolves the literal locally and returns it, and ONLY the side-effect
+// step reaches the registry.
+func TestLogicRunner_RunLogic_SeedThenLiteralReturn(t *testing.T) {
+	src := `@enabled
+@description("repro of logicSeedKnowledgeDomains shape")
+logic logicSeedKnowledgeDomains {
+  args {
+    event object @required
+  }
+  body {
+    seed := knowledgeSeedStandardDomains({})
+    return 1
+  }
+}
+`
+	body := parseLogicBody(t, src)
+	registry := &recordingStepRegistry{}
+	// A zero-value engine is enough: the side-effect step is served by the
+	// stub registry, and the literal `return 1` is resolved locally before
+	// any engine.Execute call. EventBus() on a zero-value engine is nil,
+	// which RunLogic tolerates.
+	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
+
+	out, err := r.RunLogic(context.Background(), "logicSeedKnowledgeDomains", body, map[string]any{
+		"event": map[string]any{"payload": map[string]any{"id": "u1"}},
+	})
+	if err != nil {
+		t.Fatalf("RunLogic returned error (memql#1090 regression): %v", err)
+	}
+	if out != int64(1) {
+		t.Errorf("RunLogic return = %#v, want int64(1)", out)
+	}
+	// Only the side-effect step should have reached the registry; the
+	// literal return must NOT have been dispatched into engine.Execute.
+	if len(registry.dispatched) != 1 || registry.dispatched[0] != "seed" {
+		t.Errorf("dispatched steps = %v, want exactly [seed] (the literal return must bypass the engine)", registry.dispatched)
 	}
 }

@@ -245,6 +245,7 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 //
 // It handles exactly the shapes the engine's expression parser does NOT
 // recognise as a function call:
+//   - a scalar literal (`1`, `"x"`, `true`, `null`) -> its typed value,
 //   - a bare step reference (`getActiveGA`) -> the step's result,
 //   - a `stepName.method()` call (`rows.First()` / `rows.Len()` / ...),
 //   - a local positional builtin (`coalesce(...)`, #362).
@@ -254,10 +255,76 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 // the caller must run through the step registry, and (nil, false, err) on a
 // hard resolution error.
 func EvaluateLocalExpr(expr string, evaluator *Evaluator) (any, bool, error) {
+	if val, handled := tryEvaluateLiteralLocally(expr); handled {
+		return val, true, nil
+	}
 	if val, handled, err := tryEvaluateReturnLocally(expr, evaluator); err != nil || handled {
 		return val, handled, err
 	}
 	return tryEvaluateBuiltinLocally(expr, evaluator)
+}
+
+// tryEvaluateLiteralLocally resolves a return / step-RHS expression that is a
+// bare scalar literal -- a number (`1`, `3.14`), a quoted string (`"x"`,
+// `'x'`), or one of the keyword literals `true` / `false` / `null`.
+//
+// The engine's query path can't carry these: a Logic body terminating in
+// `return 1` (the common no-op-return shape, e.g. `seed := <builtin>; return
+// 1`) lands at engine.Execute as the raw string "1". Parse converts it to a
+// LiteralValueNode, but the plan-function-resolution pass clones the root
+// through cloneExpressionNode, which has no LiteralValueNode case and returns
+// nil -- so plan.Root goes nil and the unbounded-query guard rejects the call
+// with "query must include at least one filter or relationship expression".
+// memql#1090. Resolving the literal to its value here short-circuits that
+// round-trip entirely, the same way coalesce(...) and bare step refs already
+// bypass engine.Execute.
+//
+// Returns (value, true) when expr is a recognised scalar literal, and
+// (nil, false) for anything else -- a real query / function / step reference
+// the caller must resolve through its normal path. Intentionally strict: only
+// the four literal shapes match, so a genuine concept query is never swallowed.
+func tryEvaluateLiteralLocally(expr string) (any, bool) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil, false
+	}
+	// Double-quoted string literal -- strconv.Unquote handles escapes.
+	if len(expr) >= 2 && strings.HasPrefix(expr, "\"") && strings.HasSuffix(expr, "\"") {
+		if unquoted, err := strconv.Unquote(expr); err == nil {
+			return unquoted, true
+		}
+		return nil, false
+	}
+	// Single-quoted string literal -- the DSL's string form. strconv.Unquote
+	// only accepts single quotes around a single rune (Go char-literal
+	// semantics), so peel the quotes and take the inner text verbatim. A
+	// stray inner single-quote (`'a'b'`) is not a clean literal -> fall
+	// through.
+	if len(expr) >= 2 && strings.HasPrefix(expr, "'") && strings.HasSuffix(expr, "'") {
+		inner := expr[1 : len(expr)-1]
+		if !strings.Contains(inner, "'") {
+			return inner, true
+		}
+		return nil, false
+	}
+	// Keyword literals.
+	switch expr {
+	case "null":
+		return nil, true
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	// Integer literal.
+	if n, err := strconv.ParseInt(expr, 10, 64); err == nil {
+		return n, true
+	}
+	// Float literal.
+	if n, err := strconv.ParseFloat(expr, 64); err == nil {
+		return n, true
+	}
+	return nil, false
 }
 
 func tryEvaluateReturnLocally(expr string, evaluator *Evaluator) (any, bool, error) {
