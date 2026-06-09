@@ -113,10 +113,105 @@ func TestPromoteCanvasOutput_PromotesRealCard(t *testing.T) {
 		`producedByAgentId:"agent-1"`,
 		`producedByPlanId:"plan-1"`,
 		`spaceId:"space-1"`,
+		// memql#1207: the summary is derived from the markdown heading.
+		`summary:"Heading"`,
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("insert query missing %q\n  got: %s", want, q)
 		}
+	}
+}
+
+// TestPromoteCanvasOutput_EmitsDerivedSummary verifies the promotion path
+// stamps a derived summary (memql#1207) under each derivation branch.
+func TestPromoteCanvasOutput_EmitsDerivedSummary(t *testing.T) {
+	tc := turnContext{OwnerUserId: "user-1", SpaceId: "space-1"}
+	cases := []struct {
+		name string
+		data map[string]any
+		want string
+	}{
+		{
+			name: "explicit summary wins over body",
+			data: map[string]any{"title": "T", "source": "# Heading\nbody", "summary": "Explicit intent line"},
+			want: `summary:"Explicit intent line"`,
+		},
+		{
+			name: "intent used when no summary",
+			data: map[string]any{"title": "T", "source": "# Heading\nbody", "intent": "Make a budget"},
+			want: `summary:"Make a budget"`,
+		},
+		{
+			name: "first heading when no explicit",
+			data: map[string]any{"title": "T", "source": "## Quarterly Report\nlots of text"},
+			want: `summary:"Quarterly Report"`,
+		},
+		{
+			name: "first sentence when no heading",
+			data: map[string]any{"title": "T", "source": "This is the first sentence. And a second one."},
+			want: `summary:"This is the first sentence."`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ce := &captureEngine{}
+			r := newTestReplier(ce)
+			r.promoteCanvasOutput(context.Background(), tc, map[string]any{"data": c.data})
+			if len(ce.queries) != 1 {
+				t.Fatalf("expected one insert, got %d: %v", len(ce.queries), ce.queries)
+			}
+			if !strings.Contains(ce.queries[0], c.want) {
+				t.Errorf("insert query missing %q\n  got: %s", c.want, ce.queries[0])
+			}
+		})
+	}
+}
+
+// TestDeriveOutputSummary covers the pure derivation helper directly,
+// including truncation + whitespace collapse (memql#1207).
+func TestDeriveOutputSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		data map[string]any
+		body string
+		want string
+	}{
+		{"explicit summary", map[string]any{"summary": "  intent line  "}, "# H\nbody", "intent line"},
+		{"intent fallback", map[string]any{"intent": "do the thing"}, "# H\nbody", "do the thing"},
+		{"markdown heading", nil, "# Project Plan\nbody text", "Project Plan"},
+		{"heading strips multiple hashes", nil, "### Deep Heading", "Deep Heading"},
+		{"first sentence", nil, "Hello world. Next.", "Hello world."},
+		{"question terminator", nil, "What now? More.", "What now?"},
+		{"no terminator -> first line", nil, "just a phrase with no period\nsecond line", "just a phrase with no period"},
+		{"collapses newlines in explicit", map[string]any{"summary": "a\n\nb   c"}, "", "a b c"},
+		{"empty body and data", nil, "   ", ""},
+		{"skips blank lines before heading", nil, "\n\n# Real Heading\nbody", "Real Heading"},
+		{"non-heading first line falls to sentence", nil, "Intro line. Body.", "Intro line."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := deriveOutputSummary(c.data, c.body); got != c.want {
+				t.Errorf("deriveOutputSummary = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestTruncateSummary verifies the ~200-char cap with an ellipsis,
+// operating on runes (memql#1207).
+func TestTruncateSummary(t *testing.T) {
+	long := strings.Repeat("a", summaryMaxLen+50)
+	got := truncateSummary(long)
+	gotRunes := []rune(got)
+	if gotRunes[len(gotRunes)-1] != '…' {
+		t.Errorf("truncated summary should end with ellipsis, got %q", got)
+	}
+	if n := len(gotRunes); n != summaryMaxLen+1 {
+		t.Errorf("truncated rune length = %d, want %d", n, summaryMaxLen+1)
+	}
+	short := "fits fine"
+	if got := truncateSummary(short); got != short {
+		t.Errorf("short string should pass through, got %q", got)
 	}
 }
 
