@@ -66,8 +66,9 @@ func TestStamper_AdHoc_FinalizesWrapper(t *testing.T) {
 	ctx := WithPlanContext(context.Background(), PlanContext{
 		AgentId: "v1:agents:agent:a", OwnerUserId: "u", SpaceId: "v1:cognition:space:s",
 	})
-	out, err := s.ExecuteToolByName(ctx, "produceArtifact", map[string]any{"x": 1})
-	if err != nil || out != "ran produceArtifact" {
+	// A normal (non-self-planning) ad-hoc tool: it IS wrapped + finalized.
+	out, err := s.ExecuteToolByName(ctx, "webSearch", map[string]any{"x": 1})
+	if err != nil || out != "ran webSearch" {
 		t.Fatalf("tool passthrough broken: out=%q err=%v", out, err)
 	}
 
@@ -122,6 +123,60 @@ func TestStamper_RealPlan_NotFinalized(t *testing.T) {
 	// It still records the tool invocation.
 	if !fe.has("mutationCreateToolInvocationTask") {
 		t.Errorf("real-plan path should still stamp the toolInvocation; queries=%v", fe.queries)
+	}
+}
+
+// TestStamper_AdHoc_SelfPlanningTool_NotWrapped: an ad-hoc call to a
+// self-planning tool (produceArtifact) is NOT wrapped -- it spawns its own
+// Plan, so a synthetic adHocAction wrapper would be a duplicate task (#1192).
+// Zero rows stamped.
+func TestStamper_AdHoc_SelfPlanningTool_NotWrapped(t *testing.T) {
+	fe := &fakeExec{}
+	s := New(fe, nil)
+	ctx := WithPlanContext(context.Background(), PlanContext{AgentId: "a", OwnerUserId: "u", SpaceId: "s"})
+
+	out, err := s.ExecuteToolByName(ctx, "produceArtifact", map[string]any{"goal": "x"})
+	if err != nil || out != "ran produceArtifact" {
+		t.Fatalf("tool must still run: out=%q err=%v", out, err)
+	}
+	if len(fe.queries) != 0 {
+		t.Fatalf("self-planning ad-hoc tool must NOT be stamped/wrapped; got %v", fe.queries)
+	}
+}
+
+// TestStamper_RealPlan_SelfPlanningTool_StillStamped: under a REAL caller Plan,
+// even a self-planning tool is stamped (it's a genuine sub-step) -- the skip is
+// only for the ad-hoc duplicate-wrapper case.
+func TestStamper_RealPlan_SelfPlanningTool_StillStamped(t *testing.T) {
+	fe := &fakeExec{}
+	s := New(fe, nil)
+	ctx := WithPlanContext(context.Background(), PlanContext{
+		PlanId: "v1:planner:plan:real", SemanticTaskId: "v1:planner:task:real",
+		AgentId: "a", OwnerUserId: "u", SpaceId: "s",
+	})
+	if _, err := s.ExecuteToolByName(ctx, "produceArtifact", nil); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !fe.has("mutationCreateToolInvocationTask") {
+		t.Errorf("a self-planning tool under a real Plan should still stamp its toolInvocation; queries=%v", fe.queries)
+	}
+}
+
+// TestIsSelfPlanningTool: produceArtifact is always self-planning; env adds
+// more; unknown tools are not.
+func TestIsSelfPlanningTool(t *testing.T) {
+	if !isSelfPlanningTool("produceArtifact") {
+		t.Error("produceArtifact must be self-planning by default")
+	}
+	if isSelfPlanningTool("workbenchHost") {
+		t.Error("workbenchHost is not self-planning")
+	}
+	t.Setenv("MEMQL_TASKSTAMP_SELF_PLANNING_TOOLS", "fooTool, barTool")
+	if !isSelfPlanningTool("barTool") {
+		t.Error("env-added tool must count as self-planning")
+	}
+	if isSelfPlanningTool("") {
+		t.Error("empty tool name must never be self-planning")
 	}
 }
 
