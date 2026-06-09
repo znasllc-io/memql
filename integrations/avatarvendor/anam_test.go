@@ -107,6 +107,11 @@ func TestAnamClient_StartPersonaIDShape(t *testing.T) {
 	// maxSessionLengthSeconds holds the session open past Anam's short default
 	// (~27s self-leave -- memql#1209). JSON-decoded, so it's a float64.
 	assert.Equal(t, float64(anamDefaultMaxSessionSeconds), pc["maxSessionLengthSeconds"])
+	// silenceBeforeSessionEndSeconds keeps Anam from ending on conversational
+	// silence between the assistant's segmented audio (memql#1224).
+	vdo, ok := pc["voiceDetectionOptions"].(map[string]any)
+	require.True(t, ok, "voiceDetectionOptions present")
+	assert.Equal(t, float64(anamDefaultSilenceEndSeconds), vdo["silenceBeforeSessionEndSeconds"])
 	// avatarModel is omitted unless MEMQL_ANAM_AVATAR_MODEL is set (it's
 	// account/plan-specific -- see createSessionToken / memql#772).
 	assert.Nil(t, pc["avatarModel"])
