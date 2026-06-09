@@ -308,7 +308,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// provider auth resolution AFTER seeding completes -- without
 	// this hook, providers eager-load before secrets exist in
 	// concept storage and only the OS env fallback keeps them alive.
-	// See docs/guides/env-vars.md for the full bootstrap-order story.
+	// See docs/public/operate/env-vars.md for the full bootstrap-order story.
 
 	// Cross-registry CQS pass (Phase 2 hoist). Catches the
 	// cross-file violations the per-file ValidateCQS in

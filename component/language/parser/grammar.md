@@ -160,7 +160,7 @@ AnnotationValue = STRING | NUMBER | IDENT
 | `@skipDeleted` | none | Auto-filter soft-deleted rows. |
 | `@enforceRequired` | none | Validate required fields at write time. |
 | `@defaultFilter` | `"query"` | Default filter applied to all reads. |
-| `@scope` | `"partition" \| "global"` | Partition scope (see docs/core/memql-authoring-rules.md#3). |
+| `@scope` | `"partition" \| "global"` | Partition scope (see docs/public/language/authoring-rules.md#3). |
 
 **Property-level** (`applyPropertyAnnotation`, `concept_parser.go:567`):
 

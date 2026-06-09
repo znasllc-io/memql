@@ -86,7 +86,7 @@ func (a *App) transportBase() {
 		operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(guestChecked, a.Logger)
 		// Voice-agent: class="voice_agent" identity-issued JWT pinned
 		// to VoiceAgent* payload types (#109). See
-		// docs/auth/voice-agent-jwt.md.
+		// docs/public/operate/auth/voice-agent-jwt.md.
 		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
 		// Service-account: class="service_account" identity-issued JWT pinned
 		// to the read/query surface (#691, deployment-v2 Phase 3). Verified via

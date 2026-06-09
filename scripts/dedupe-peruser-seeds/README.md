@@ -53,7 +53,7 @@ to the env var.
    and prints per-concept row counts pointing at the doomed agent
    ids. The audit is informational only — those rows are NOT touched
    by either the dry-run or execute pass. See the runbook at
-   [`docs/migrations/dedupe-peruser-seeds.md`](../../docs/migrations/dedupe-peruser-seeds.md)
+   [`docs/internal/ops/migrations/dedupe-peruser-seeds.md`](../../docs/internal/ops/migrations/dedupe-peruser-seeds.md)
    for follow-up guidance on each audited concept.
 7. In `--execute` mode, runs both deletes (agent + participant rows)
    inside one transaction.

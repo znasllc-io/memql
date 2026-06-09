@@ -12,7 +12,7 @@ import "context"
 //	Role           cluster-wide role (owner / admin / writer / reader)
 //	IdentityId     which v1:identity:identity the caller authenticated with
 //
-// Per-row authorization (see docs/auth/per-row-authz-audit.md) is the
+// Per-row authorization (see docs/public/operate/auth/per-row-authz-audit.md) is the
 // only gate post-#56; the partition-ACL dimension that previously
 // lived here was retired in phase 4.
 type AccessContext struct {

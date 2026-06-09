@@ -90,7 +90,7 @@ func ValidateCQSAcrossRegistry(registry *FunctionRegistry) error {
 			}
 			if violatesCrossRegistryCQS(callerKind, calleeKind) {
 				return fmt.Errorf(
-					"CQS violation: %s %q calls %s %q -- the read path must stay side-effect-free, and a mutation must perform exactly one write. Refactor by moving the offending write into an automation triggered on the row landing (see docs/core/memql-authoring-rules.md Rule #1)",
+					"CQS violation: %s %q calls %s %q -- the read path must stay side-effect-free, and a mutation must perform exactly one write. Refactor by moving the offending write into an automation triggered on the row landing (see docs/public/language/authoring-rules.md Rule #1)",
 					callerKind, fn.Name, calleeKind, callee,
 				)
 			}

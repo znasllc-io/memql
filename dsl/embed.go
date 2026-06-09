@@ -2,7 +2,7 @@
 // .memql tree. It lives alongside the legacy per-kind embed packages
 // (dsl/v1/concepts/, dsl/v1/queries/, etc.) during the transitional
 // state of the file-restructure migration (see
-// docs/dsl-import-model-refactor.md).
+// docs/internal/design/dsl-import-model-refactor.md).
 //
 // The Tree fs.FS exposed here is what the new unified loader
 // (component/memql/unified_loader.go) walks. Each per-kind legacy

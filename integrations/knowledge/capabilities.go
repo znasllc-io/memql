@@ -109,7 +109,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			// Single-domain LLM-driven seeder. See
-			// docs/planning/knowledge-seeder.md for the full pipeline.
+			// docs/internal/planning/knowledge-seeder.md for the full pipeline.
 			// Useful for iterating on the recipe before paying for the
 			// full-catalog run.
 			Name:        "seedDomainContent",

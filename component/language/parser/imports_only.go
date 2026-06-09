@@ -6,7 +6,7 @@ package parser
 // parsers (component/memql/shape_parser.go, provider_loader.go, etc.)
 // and are not understood by the generic parser.
 //
-// For the new import-model validator (docs/dsl-import-model-refactor.md),
+// For the new import-model validator (docs/internal/design/dsl-import-model-refactor.md),
 // we still want to validate the `import (...)` block of every .memql
 // file -- across all construct kinds -- so the import graph is
 // complete and cycle/collision detection covers everything.

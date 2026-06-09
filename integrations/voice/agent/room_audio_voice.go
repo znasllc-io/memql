@@ -24,7 +24,7 @@ import (
 
 // room_audio_voice.go is the voice-tagged (CGO/libopus) glue that binds the
 // LiveKit room media plane to the pure-Go cascade orchestrator (cascade.go).
-// It is the implementation of docs/voice/451-livekit-go-room-participation.md
+// It is the implementation of docs/internal/design/voice-451-livekit-go-room-participation.md
 // sections 2b/2c: decode each remote human audio track to PCM16 via
 // NewPCMRemoteTrack and feed it to a Deepgram STT stream; publish the
 // assistant's TTS audio via NewPCMLocalTrack.

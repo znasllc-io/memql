@@ -9,7 +9,7 @@ import (
 )
 
 // Import-path resolution for the DSL import-model refactor
-// (docs/dsl-import-model-refactor.md). This file is the pure,
+// (docs/internal/design/dsl-import-model-refactor.md). This file is the pure,
 // filesystem-free piece: given the importing file's path, the raw
 // import string from source, and the DSL root, it returns the
 // canonical path of the imported file inside the root or a typed

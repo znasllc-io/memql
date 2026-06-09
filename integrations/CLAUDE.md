@@ -468,6 +468,6 @@ COGNITION_INTEGRATION_CAPABILITIES_LOGGING_LOG_LEVEL=debug
 ## See Also
 
 - [Architecture](arch.md) - integration system architecture
-- [Audio Streaming](../docs/api/audio-streaming.md) - audio WebSocket + streaming-transcription gRPC path
-- [Polyphon Architecture](../docs/polyphon-architecture.md) - voice pipeline architecture
-- [Authoring rules](../docs/core/memql-authoring-rules.md) - MemQL gotchas (read before extending the DSL surface)
+- [Audio Streaming](../docs/public/build/audio-streaming.md) - audio WebSocket + streaming-transcription gRPC path
+- [Polyphon Architecture](../docs/public/operate/voice-bringup-verification.md) - voice pipeline architecture
+- [Authoring rules](../docs/public/language/authoring-rules.md) - MemQL gotchas (read before extending the DSL surface)

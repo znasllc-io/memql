@@ -13,7 +13,7 @@ Each binary includes only the code relevant to its purpose. The node type is
 determined at compile time via `node.CompiledNodeType()`, with `MEMQL_NODE_TYPE`
 env var as a runtime fallback for the default (BFF) build.
 
-See [docs/core/build-tags.md](../../docs/core/build-tags.md) for full build tag documentation.
+See [docs/public/build/build-tags.md](../../docs/public/build/build-tags.md) for full build tag documentation.
 
 In the default build (no tags), BFF code is included.
 

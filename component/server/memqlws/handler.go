@@ -55,7 +55,7 @@ type Options struct {
 	// "fall back to the legacy wildcard". Production deployments should
 	// always supply an explicit list (e.g. via MEMQL_WEBSOCKET_ORIGIN_PATTERNS
 	// in the bootstrap config) so the upgrade can't be triggered from an
-	// arbitrary attacker page. See docs/auth/threat-model.md.
+	// arbitrary attacker page. See docs/internal/design/auth-threat-model.md.
 	OriginPatterns []string
 }
 

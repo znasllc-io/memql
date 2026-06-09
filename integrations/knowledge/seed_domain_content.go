@@ -4,7 +4,7 @@ package knowledge
 // for empty domain shells via the seedDomainContent prompt + embeds
 // each chunk + writes idempotent rows.
 //
-// See docs/planning/knowledge-seeder.md for the strategy. Two
+// See docs/internal/planning/knowledge-seeder.md for the strategy. Two
 // capabilities exposed:
 //
 //   seedDomainContent({domainId, recipeVersion?})
@@ -226,7 +226,7 @@ func (i *Integration) seedAllDomainContentHandler(ctx context.Context, args map[
 // On success, stamps lastSeededAt + seederRecipeVersion on the
 // domain row via mutationMarkKnowledgeDomainSeeded. The training
 // pipeline reads those fields to decide whether to re-seed a stale
-// domain on retrain (per docs/planning/knowledge-seeder.md, Phase 2).
+// domain on retrain (per docs/internal/planning/knowledge-seeder.md, Phase 2).
 //
 // Returns the number of chunks written (so the caller can summarise).
 func (i *Integration) runSeederForDomain(ctx context.Context, d StandardDomain, recipeVersion string) (int, error) {

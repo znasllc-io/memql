@@ -5,7 +5,7 @@
 // and therefore cannot drift in persona / knowledge / policy.
 //
 // This is the build of the converged-generation-contract spike (#476); see
-// docs/voice/476-converged-generation-contract.md. The keystone idea: there is
+// docs/internal/design/voice-476-converged-generation-contract.md. The keystone idea: there is
 // already exactly one place an agent is defined (v1:agents:agent), and the
 // drift the epic (#475) worries about comes from the two modalities reading
 // DIFFERENT subsets of that one row through different builders. The fix is one

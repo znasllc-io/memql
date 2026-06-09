@@ -4,7 +4,7 @@ EXPERIMENTAL scaffold for the CI-acceleration north star. This is NOT part
 of the build: nothing in `.github/workflows/**` or the `Makefile`
 references it, and no root-level Bazel files are committed to `main`.
 
-- Plan + decision record: [`docs/ci/tier4-build-graph.md`](../../docs/ci/tier4-build-graph.md)
+- Plan + decision record: [`docs/internal/ops/tier4-build-graph.md`](../../docs/internal/ops/tier4-build-graph.md)
 - `bootstrap.sh` — run on a scratch branch to generate the root Bazel
   files, run Gazelle, and attempt a first `bazel build`. It refuses to run
   on `main`.

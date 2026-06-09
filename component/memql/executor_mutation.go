@@ -211,7 +211,7 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 	// the payload on an insert() call bypasses that check. Without this
 	// guard, a caller could write insert("v1:foo", payload={partition: "_system"})
 	// and silently clobber engine-level storage fields. Fail closed.
-	// See docs/core/memql-authoring-rules.md entry #12 (partitionName
+	// See docs/public/language/authoring-rules.md entry #12 (partitionName
 	// convention) and component/database/memory-nodes/constants.go for
 	// the full reserved list.
 	for key := range payload {

@@ -1218,7 +1218,7 @@ func (u *UseDeclaration) LeafName() string {
 // ImportDecl represents a `import "./path" [as alias]` entry inside
 // an `import (...)` block at the top of a .memql file. This is the
 // Go-style file-import surface introduced by the DSL import-model
-// refactor (docs/dsl-import-model-refactor.md). Imports name files;
+// refactor (docs/internal/design/dsl-import-model-refactor.md). Imports name files;
 // symbols within an imported file are reached as `<alias>.<name>`.
 //
 // Path is the raw string from source ("./cognition/participant" or

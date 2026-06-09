@@ -1,7 +1,7 @@
 package sense
 
 // authoring_rules.go implements Sense diagnostics for the gotchas
-// catalogued in docs/core/memql-authoring-rules.md. Each rule fires at
+// catalogued in docs/public/language/authoring-rules.md. Each rule fires at
 // edit time so Cockpit surfaces the mistake before the engine refuses
 // to start.
 //
@@ -31,7 +31,7 @@ import (
 // function-loader validator treat them as references to unknown
 // functions and the engine refuses to start.
 //
-// See docs/core/memql-authoring-rules.md gotcha #1.
+// See docs/public/language/authoring-rules.md gotcha #1.
 var directiveNames = map[string]struct{}{
 	"sort":      {},
 	"paginate":  {},
@@ -73,7 +73,7 @@ func walkExpressionsForDirectives(funcDef *parser.FunctionDef, node parser.Node,
 					End:   Position{Line: pos.Line, Column: pos.Column + len(n.Name)},
 				},
 				Severity: SeverityError,
-				Message:  fmt.Sprintf("directive %q cannot appear inside a function body; the function-loader validator will reject it at engine init. Move it to the caller or inline the query at the call site. See docs/core/memql-authoring-rules.md gotcha #1.", n.Name),
+				Message:  fmt.Sprintf("directive %q cannot appear inside a function body; the function-loader validator will reject it at engine init. Move it to the caller or inline the query at the call site. See docs/public/language/authoring-rules.md gotcha #1.", n.Name),
 				Code:     "directive-in-body",
 			})
 		}
@@ -116,7 +116,7 @@ func reportDirectiveExpr(funcDef *parser.FunctionDef, name, source string, out *
 			End:   Position{Line: pos.Line, Column: pos.Column + len(name)},
 		},
 		Severity: SeverityError,
-		Message:  fmt.Sprintf("directive %q cannot appear inside a function body (function %q); see docs/core/memql-authoring-rules.md gotcha #1.", name, funcDef.Name),
+		Message:  fmt.Sprintf("directive %q cannot appear inside a function body (function %q); see docs/public/language/authoring-rules.md gotcha #1.", name, funcDef.Name),
 		Code:     "directive-in-body",
 	})
 }
@@ -129,7 +129,7 @@ func reportDirectiveExpr(funcDef *parser.FunctionDef, name, source string, out *
 // time so a malformed name doesn't silently propagate into event-
 // topic strings.
 //
-// See docs/core/memql-authoring-rules.md gotcha #6.
+// See docs/public/language/authoring-rules.md gotcha #6.
 //
 // We deliberately do not enforce the strict DNS-label regex here
 // (`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`) because Go-style camelCase

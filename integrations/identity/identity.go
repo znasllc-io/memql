@@ -16,7 +16,7 @@ import (
 // capabilities. Auth middleware (identity-issued JWT verification)
 // lives in component/identity/verifier/ and component/auth/.
 // Per-row authorization is enforced inside DSL queries + mutations;
-// see docs/auth/per-row-authz-audit.md.
+// see docs/public/operate/auth/per-row-authz-audit.md.
 type IdentityIntegration struct{}
 
 // NewIdentityIntegration creates an identity integration.

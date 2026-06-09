@@ -17,7 +17,7 @@ import (
 // Definitions). At the time of writing many consolidated files
 // fail the mutation/query struct-form rewriters because those
 // rewriters assume a single-concept-per-file binding (see
-// docs/dsl-import-model-refactor.md "Pass 2 blockers"). Until the
+// docs/internal/design/dsl-import-model-refactor.md "Pass 2 blockers"). Until the
 // rewriters get a multi-concept-aware code path, the unified
 // loader is best-effort -- the legacy loader covers the gap during
 // the transitional state.

@@ -3,7 +3,7 @@ package docs
 import _ "embed"
 
 var (
-	//go:embed core/memql.md
+	//go:embed public/language/memql.md
 	memqlGuide string
 )
 

@@ -20,8 +20,8 @@ import (
 // Deepgram TTS pipeline. It is the Go analog of
 // the Python voice-agent's realtime_executor.py + the realtime branch of
 // main.py, and implements the merged designs in
-// docs/voice/432-conductor-response-gate.md (conductor gate) and
-// docs/voice/433-multiparty-audio-routing.md (multi-party routing).
+// docs/internal/design/voice-432-conductor-response-gate.md (conductor gate) and
+// docs/internal/design/voice-433-multiparty-audio-routing.md (multi-party routing).
 //
 // It is pure Go and CGO-free: it depends only on small interfaces (the
 // realtimeSession seam below, the gRPC Client, the audioSink). The websocket
@@ -523,7 +523,7 @@ func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuth
 		e.logger.Warn("voice-agent realtime: final transcript send failed", "err", err)
 	}
 	// T0 (#484): the human turn is committed. The headline decision->first-audio
-	// window opens here; see docs/voice/484-latency-fidelity-measurement.md.
+	// window opens here; see docs/internal/design/voice-484-latency-fidelity-measurement.md.
 	if e.logger != nil {
 		e.logger.Info("voice trace: turntaking event",
 			"stage", "voice.final", "executor", "realtime",

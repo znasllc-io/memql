@@ -159,7 +159,7 @@ type (
 		// for user messages, with a hash-keyed in-memory TTL cache.
 		// Replaces the hardcoded affirmation/follow-up suppression
 		// guard. See message_classifier.go +
-		// docs/planning/llm-driven-decisions.md.
+		// docs/internal/planning/llm-driven-decisions.md.
 		classifier *messageClassifier
 
 		// profileEmbeddings caches agent profile embeddings in memory (keyed by agent ID).
@@ -469,7 +469,7 @@ func NewCognitionIntegration(baseIntegration *integrations.Integration, args ...
 	// classifier so the affirmation/follow-up suppression guard
 	// can ask the LLM (cached) instead of grep'ing for magic
 	// phrases. See message_classifier.go and
-	// docs/planning/llm-driven-decisions.md.
+	// docs/internal/planning/llm-driven-decisions.md.
 	c.classifier = newMessageClassifier(c.Logger, c.engine)
 
 	c.Logger.Info("cognition integration created")

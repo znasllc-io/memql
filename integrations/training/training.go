@@ -304,7 +304,7 @@ func (i *Integration) trainAgentHandler(
 		}
 
 		// Just-in-time seeding + freshness check (per
-		// docs/planning/knowledge-seeder.md, Phases 1 + 2):
+		// docs/internal/planning/knowledge-seeder.md, Phases 1 + 2):
 		//
 		//   - If the domain has zero chunks (empty shell from the
 		//     catalog), invoke the seeder inline.
@@ -509,7 +509,7 @@ func (i *Integration) trainAgentHandler(
 	// ---------------------------------------------------------------
 	// Step D (post-Task-2): cross-domain bridge generation.
 	//
-	// Per docs/planning/knowledge-seeder.md (v2 bridge chunks): when
+	// Per docs/internal/planning/knowledge-seeder.md (v2 bridge chunks): when
 	// the agent has 2+ knowledge domains, generate a small (~10
 	// chunk) cross-domain corpus tailored to (role, sortedDomains).
 	// Hash-keyed -- agents across the tenant with the same combo

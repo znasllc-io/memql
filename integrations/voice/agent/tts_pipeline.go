@@ -17,7 +17,7 @@ import (
 // (room_audio_voice.go) constructs the LiveKit PCMLocalTrack at the same
 // source sample rate, so no manual resampling lives here -- the media-sdk
 // encoder upsamples 16k PCM16 -> 48k Opus on publish (per
-// docs/voice/451-livekit-go-room-participation.md section 4).
+// docs/internal/design/voice-451-livekit-go-room-participation.md section 4).
 
 // ttsPCMSampleRate is the linear16 PCM rate the Deepgram TTS client emits
 // (deepgram.speakURL hardcodes sample_rate=16000 for linear16). The room

@@ -106,25 +106,25 @@ memQL/
 
 ## Documentation
 
-**Start here:** [QUICKSTART.md](QUICKSTART.md) - Get running in 5 minutes
+**Start here:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) - Get running in 5 minutes
 
 **Full index:** [GLOSSARY.md](GLOSSARY.md) - Find any documentation
 
 **Tech stack:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md) - Deployment practices
 
 **Operations:**
-- [Environment variables](docs/guides/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
-- [Auto-generated architecture diagrams](docs/architecture/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/genesis/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
+- [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
+- [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/genesis/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
 
 **Core concepts:**
-- [Architecture](docs/core/arch.md)
-- [MemQL Language](docs/core/memql.md)
-- [Functions](docs/core/memql-functions.md)
-- [Events](docs/core/events.md)
-- [Node Identifier Conventions](docs/core/identifiers.md) -- canonical id format, who composes it, anti-patterns
-- [MemQL Authoring Rules & Gotchas](docs/core/memql-authoring-rules.md) -- read before writing `.memql` files
-- [LLM cost control (defense in depth)](docs/core/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `si_guard.go`, an LLM loop, or an automation that drives model calls.
-- [Tool ↔ Knowledge Domain Pattern](docs/architecture/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
+- [Architecture](docs/public/concepts/architecture.md)
+- [MemQL Language](docs/public/language/memql.md)
+- [Functions](docs/public/language/functions.md)
+- [Events](docs/public/concepts/events.md)
+- [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical id format, who composes it, anti-patterns
+- [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
+- [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- the layered guardrails (kill-switch, rate ceiling, automation budget, loop caps) that make a runaway spend loop structurally impossible; every `MEMQL_LLM_*` / budget env var + how to repro safely. Read before touching `si_guard.go`, an LLM loop, or an automation that drives model calls.
+- [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (CoPresent Control, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**
 - **memql-cockpit** -- terminal-native IDE and operations console (display name "memQL Cockpit"). Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
@@ -342,7 +342,7 @@ carrier-builds the set; the cluster compose builds the same nodes from the
 carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
-**Build tag reference:** [docs/core/build-tags.md](docs/core/build-tags.md)
+**Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 **Local cluster:** `make dev-cluster-restart` / `make dev-cluster-restart-purge` (uses docker-compose.cluster.yml).
 **Local single-node:** `docker compose -f docker/docker-compose.full.yml up --build` -- spins up Postgres + bff + voice (so transcription works end-to-end on the basic dev path; previously the full compose had no voice node and `AiTranscribeStreamStart` had nowhere to forward to).
 
@@ -561,7 +561,7 @@ Env:
   (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
   (`make voice-agent-token`); or self-bootstrap via
   `MEMQL_NODE_BOOTSTRAP_TOKEN` + `IDENTITY_VERIFIER_BASE_URL` +
-  `MEMQL_VOICE_AGENT_INSTANCE_ID`. See `docs/auth/voice-agent-jwt.md`.
+  `MEMQL_VOICE_AGENT_INSTANCE_ID`. See `docs/public/operate/auth/voice-agent-jwt.md`.
 - `MEMQL_AVATAR_VENDOR` -- `anam` (default) or `simli` or `none`.
 - `ANAM_API_KEY` / `SIMLI_API_KEY` -- vendor keys.
 
@@ -696,7 +696,7 @@ The "workers" feature lets agents drive the user's own machine
 via a tool surface: shell exec, filesystem, HTTP fetch, and (under
 the GUI build) mouse + keyboard + screenshot. All seven phases of
 the implementation plan have shipped (see
-[docs/workers/runbook.md](docs/workers/runbook.md)); the plan
+[docs/public/operate/workers-runbook.md](docs/public/operate/workers-runbook.md)); the plan
 document itself is gone per the no-stale-docs convention.
 
 The legacy umbrella slug `computer_use` was split into two
@@ -773,8 +773,8 @@ is the FALLBACK for headless work the workbench cannot do
 (macOS-only tooling, GUI control, files already on the user's
 computer).
 
-See [docs/workbench/runbook.md](docs/workbench/runbook.md) for the
-MVP test path and [docs/workbench/production.md](docs/workbench/production.md)
+See [docs/public/operate/workbench-runbook.md](docs/public/operate/workbench-runbook.md) for the
+MVP test path and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-production.md)
 for the cluster-mode deployment plan (deferred until
 production cutover).
 
@@ -812,7 +812,7 @@ production cutover).
     (`WorkbenchForwardRequest` / `WorkbenchForwardResponse`).
     Toggle: `MEMQL_WORKBENCH_REMOTE=1` on agent nodes +
     `MEMQL_WORKER_PEERS=workbench=<addr>` for the dialer. See
-    `docs/workbench/production.md`.
+    `docs/internal/ops/workbench-production.md`.
 - **Routing preference:** the agent's prompt template
   (`dsl/copresent/prompts/agentReply.tmpl`) and the workbench
   knowledge domain (5 chunks in
@@ -852,17 +852,17 @@ headers. They never see the private key.
 
 `IDENTITY_VERIFIER_BASE_URL` configures the verifier;
 `IDENTITY_BASE_URL` configures the identity service itself. See
-[docs/auth/identity-service.md](docs/auth/identity-service.md) for
+[docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
 the operator-side narrative.
 
-See [docs/auth/](docs/auth/):
-- [access-model.md](docs/auth/access-model.md) -- enforcement
+See [docs/public/operate/auth/](docs/public/operate/auth/):
+- [access-model.md](docs/public/operate/auth/access-model.md) -- enforcement
   layers and role spectrum.
-- [user-provisioning.md](docs/auth/user-provisioning.md) --
+- [user-provisioning.md](docs/public/operate/auth/user-provisioning.md) --
   registration modes and magic-link flow.
-- [identity-service.md](docs/auth/identity-service.md) --
+- [identity-service.md](docs/public/operate/auth/identity-service.md) --
   operator-side env vars + key management.
-- [service-account-jwt.md](docs/auth/service-account-jwt.md) --
+- [service-account-jwt.md](docs/public/operate/auth/service-account-jwt.md) --
   the `class="service_account"` machine identity (#691): the deploy
   gate / automation credential that verifies on the BFF/mesh via
   JWKS (where a PAT can't), surface-pinned to the read/query path.
@@ -1105,7 +1105,7 @@ SQL or evaluate against the auth envelope.
 ### Authorization model
 
 Per-row authorization is the only gate (see
-[docs/auth/per-row-authz-audit.md](docs/auth/per-row-authz-audit.md)).
+[docs/public/operate/auth/per-row-authz-audit.md](docs/public/operate/auth/per-row-authz-audit.md)).
 Every query and mutation in the DSL classifies as **owned** (filter
 on `payload.ownerUserId == actor.userId`), **granted** (relationship
 predicate gates on actor.userId), **admin** (cluster-owner spec), or
@@ -1605,7 +1605,7 @@ Distributed node system metadata (dsl/cluster/concepts.memql)
 
 ### Observability Concepts
 Runtime side of the architecture framework (dsl/observability/, all `@scope("global")`).
-See [docs/architecture/auto-generated-diagrams.md](docs/architecture/auto-generated-diagrams.md) for the full design.
+See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
 - `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
 - `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
 - `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
@@ -1622,7 +1622,7 @@ Auth + access metadata (dsl/identity/concepts.memql, all `@scope("global")`)
 - `v1:identity:invitation` -- token-hashed invitation credential for guest/user flows
 - `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
 
-See [docs/auth/access-model.md](docs/auth/access-model.md) for the full model.
+See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-model.md) for the full model.
 
 ---
 
@@ -1965,7 +1965,7 @@ the analyzeFile case end-to-end.
 ## Need Help?
 
 1. **Documentation:** Check [GLOSSARY.md](GLOSSARY.md)
-2. **Quick start:** See [QUICKSTART.md](QUICKSTART.md)
+2. **Quick start:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
 3. **Logs:** `docker compose -f docker/docker-compose.full.yml logs -f`
 
 ---

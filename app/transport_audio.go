@@ -13,7 +13,7 @@ import (
 // setupAudioWebsocket registers the /memql/audio browser WebSocket
 // handler (in-space STT + Read-Aloud TTS). It is built into the voice
 // and agent nodes -- the two node types that carry an STT provider and
-// the audio handler per docs/core/build-tags.md. The voice node is the
+// the audio handler per docs/public/build/build-tags.md. The voice node is the
 // canonical browser audio terminus (nginx proxies /memql/audio there);
 // the agent keeps it for agent-originated audio.
 //

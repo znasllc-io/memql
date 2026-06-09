@@ -322,7 +322,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 
 	// Suppression decision: should this utterance dispatch at all,
 	// or stay silent? Phase 2 of the llm-driven-decisions plan
-	// (docs/planning/llm-driven-decisions.md) replaces the old
+	// (docs/internal/planning/llm-driven-decisions.md) replaces the old
 	// hardcoded affirmation/follow-up/farewell guard with an
 	// LLM-driven structured-output classification.
 	//

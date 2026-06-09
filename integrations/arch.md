@@ -216,13 +216,13 @@ vars -- `v1:platform:globalSecret` (encrypted) and
 `v1:platform:globalVariable` (plain), with per-tenant overrides on
 the `partition*` siblings. The full layout, naming convention, and
 operator workflow lives in
-[docs/guides/env-vars.md](../docs/guides/env-vars.md).
+[docs/public/operate/env-vars.md](../docs/public/operate/env-vars.md).
 
 ## Related
 
 - [CLAUDE.md](CLAUDE.md) -- integration contract, capability pattern,
   preference order for extension points
-- [docs/api/audio-streaming.md](../docs/api/audio-streaming.md) --
+- [docs/public/build/audio-streaming.md](../docs/public/build/audio-streaming.md) --
   audio WebSocket + streaming-transcription gRPC path
-- [docs/polyphon-architecture.md](../docs/polyphon-architecture.md) --
+- [docs/polyphon-architecture.md](../docs/public/operate/voice-bringup-verification.md) --
   Polyphon multi-agent voice architecture

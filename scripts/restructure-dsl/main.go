@@ -1,6 +1,6 @@
 // restructure-dsl emits the new domain-first DSL tree alongside the
 // old kind-first tree, per the 11 locked decisions in
-// docs/dsl-import-model-refactor.md.
+// docs/internal/design/dsl-import-model-refactor.md.
 //
 // This is Pass 1 of the restructure migration: additive emit. The
 // old tree at dsl/v1/<kind>/v1/<domain>/<name>.memql stays put;

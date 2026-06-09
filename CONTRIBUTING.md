@@ -12,7 +12,7 @@ memQL is pre-1.0. The DSL and engine API are still evolving, so the best contrib
 
 ## Development setup
 
-See [QUICKSTART.md](QUICKSTART.md) for the development environment (Docker Compose with PostgreSQL + TimescaleDB).
+See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for the development environment (Docker Compose with PostgreSQL + TimescaleDB).
 
 ## Code style
 

@@ -8,7 +8,7 @@ import (
 // turntaking.go is the Go turn-taking / endpointing state machine that
 // replaces the orchestration the Python LiveKit Agents AgentSession ran
 // for free. It is the implementation of the design in
-// docs/voice/452-turntaking-orchestration-go.md, section 3.
+// docs/internal/design/voice-452-turntaking-orchestration-go.md, section 3.
 //
 // It is pure Go (no LiveKit, no CGO, no media types): it consumes already-
 // decoded ASR turn-structure signals (start-of-speech / interim / final)
