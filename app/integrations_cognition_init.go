@@ -25,6 +25,10 @@ func (a *App) setupCognitionIntegration() {
 		cognition.WithProviderRegistry(&CognitionProviderAdapter{Engine: a.engine}),
 		cognition.WithEventBus(a.eventBus),
 		cognition.WithScoreEngine(polyphonScoreEng),
+		// Lazy *bun.DB getter for the dispatch gate's Postgres advisory lock
+		// (znasllc-io/memql#1217) -- the same getter the cron leader uses;
+		// nil-safe (the gate fails safe / no-ops when the DB isn't ready).
+		cognition.WithDBGetter(a.db.BunDB),
 		cognition.WithVariableResolver(func(ctx context.Context, name string) (string, error) {
 			return a.engine.ResolveVariable(ctx, name)
 		}),

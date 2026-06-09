@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/polyphon"
@@ -240,6 +242,17 @@ type (
 		// ForwardContinuation. Entries self-expire to bound memory if
 		// a browser never responds.
 		pendingClientToolCalls sync.Map // callId -> *pendingClientToolCall
+
+		// dispatchGate ensures exactly ONE cognition replica dispatches a
+		// given utterance's turn, via a Postgres advisory lock keyed by the
+		// utterance id (znasllc-io/memql#1217). The utterance-created event is
+		// broadcast to every cognition replica, so without this gate both
+		// replicas pass the read-before-write idempotency check and each emits
+		// its own reply -> a duplicate. Fails SAFE (proceeds on any DB/lock
+		// error) and is a no-op on single-replica. Built in the constructor;
+		// nil-tolerant (a nil gate proceeds, matching fail-safe). See
+		// dispatch_gate.go.
+		dispatchGate *dispatchGate
 	}
 
 	// profileEmbeddingEntry caches a single agent's profile embedding.
@@ -258,6 +271,11 @@ type (
 		providerRegistry SIProviderRegistry
 		eventBus         *events.Bus
 		scoreEngine      *polyphon.ScoreEngine
+		// dbGetter is a lazy *bun.DB accessor used by the dispatch gate's
+		// Postgres advisory lock (znasllc-io/memql#1217). Optional: when nil
+		// the gate fails safe (always proceeds), so single-binary / no-DB
+		// builds are unaffected.
+		dbGetter func() *bun.DB
 	}
 )
 
@@ -337,6 +355,16 @@ func WithEventBus(bus *events.Bus) CognitionArg {
 func WithScoreEngine(scoreEngine *polyphon.ScoreEngine) CognitionArg {
 	return RequiredCognitionArg("score_engine", func(c *cognitionConfig) {
 		c.scoreEngine = scoreEngine
+	})
+}
+
+// WithDBGetter sets the lazy *bun.DB accessor used by the dispatch gate's
+// Postgres advisory lock (znasllc-io/memql#1217). Optional -- the same lazy
+// getter the cron leader uses (a.db.BunDB); nil-safe (a nil getter or nil DB
+// makes the gate fail safe / no-op).
+func WithDBGetter(dbGetter func() *bun.DB) CognitionArg {
+	return OptionalCognitionArg("db_getter", func(c *cognitionConfig) {
+		c.dbGetter = dbGetter
 	})
 }
 
@@ -464,6 +492,12 @@ func NewCognitionIntegration(baseIntegration *integrations.Integration, args ...
 
 	// Update logger to use Cognition component name
 	c.Logger = logger.New(ComponentName, os.Stdout, resolveLoggerLevel())
+
+	// Dispatch gate: exactly-one-replica turn dispatch via a Postgres advisory
+	// lock keyed by utterance id (znasllc-io/memql#1217). dbGetter is optional
+	// -- a nil getter makes the gate fail safe (always proceeds), so
+	// single-binary / no-DB builds are unaffected. See dispatch_gate.go.
+	c.dispatchGate = newDispatchGate(cfg.dbGetter, c.Logger)
 
 	// Phase 2 of llm-driven-decisions: spin up the message
 	// classifier so the affirmation/follow-up suppression guard

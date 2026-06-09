@@ -736,6 +736,31 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
+	// Cross-replica dispatch gate (znasllc-io/memql#1217). The
+	// utterance-created event is broadcast to BOTH cognition replicas, so both
+	// reach this point. Acquire a Postgres advisory lock keyed by the utterance
+	// id: exactly one replica wins and proceeds, the loser bails immediately
+	// without dispatching (no second LLM turn, no duplicate row). The winner
+	// holds the lock until the handler returns (release deferred below), which
+	// spans the multi-second turn through insertSIResponse. Fails SAFE on any
+	// DB/lock error (proceeds, falling through to the read-before-write check
+	// just below) and is a no-op on single-replica. See dispatch_gate.go.
+	proceed, releaseGate, gateErr := c.dispatchGate.tryDispatch(ctx, utterance.ID)
+	if gateErr != nil {
+		c.Logger.Warn("cognition: dispatch gate errored; failing safe and proceeding",
+			"error", gateErr, "spaceId", spaceId, "utteranceId", utterance.ID)
+	}
+	if !proceed {
+		// Another cognition replica owns this utterance's turn. Bail without
+		// dispatching. Do NOT touch presence here -- the winning replica drives
+		// the winner's thinking/idle transitions; the loser staying silent
+		// avoids presence flicker from two writers.
+		c.Logger.Debug("cognition: another replica owns this utterance's dispatch, skipping",
+			"spaceId", spaceId, "utteranceId", utterance.ID)
+		return
+	}
+	defer releaseGate()
+
 	// Idempotency: skip if we've already responded to this utterance.
 	if c.queryHasSIResponseForReply(ctx, spaceId, winnerParticipant.ID, utterance.ID) {
 		c.Logger.Debug("cognition: SI response already exists, skipping",
