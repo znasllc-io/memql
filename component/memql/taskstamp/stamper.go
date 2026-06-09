@@ -5,10 +5,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/core/id"
 )
+
+// defaultSelfPlanningTools are tools whose invocation creates its OWN
+// v1:planner:plan (the real record of the work), so the taskstamp Stamper must
+// NOT also wrap an ad-hoc call to them in a synthetic adHocAction Plan -- that
+// produced a duplicate, empty wrapper task (memql#1192). produceArtifact is the
+// canonical case: the Assistant's produceArtifact tool spawns a produceArtifact
+// Plan that does the deliverable. Extendable via MEMQL_TASKSTAMP_SELF_PLANNING_TOOLS
+// (comma-separated, ADDED to this default set).
+var defaultSelfPlanningTools = map[string]bool{
+	"produceArtifact": true,
+}
+
+// isSelfPlanningTool reports whether a tool spawns its own Plan (so an ad-hoc
+// call to it should not be wrapped). The env override only ADDS names -- the
+// produceArtifact default is always present.
+func isSelfPlanningTool(toolName string) bool {
+	if defaultSelfPlanningTools[toolName] {
+		return true
+	}
+	for _, n := range strings.Split(os.Getenv("MEMQL_TASKSTAMP_SELF_PLANNING_TOOLS"), ",") {
+		if strings.TrimSpace(n) == toolName && toolName != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // Executor is the narrow interface the stamper depends on: the engine's
 // existing ExecuteToolByName plus an Execute escape hatch for issuing
@@ -73,6 +101,18 @@ func (s *Stamper) ExecuteToolByName(ctx context.Context, toolName string, args m
 	// A REAL caller-supplied Plan (PlanId set) is the planner's to finalize, so
 	// we never touch its status here.
 	createdSyntheticPlan := pc.PlanId == ""
+
+	// SELF-PLANNING tools spawn their OWN Plan (e.g. produceArtifact creates a
+	// produceArtifact Plan that does the real work). Wrapping such an ad-hoc
+	// call in a synthetic adHocAction Plan produced a confusing DUPLICATE task
+	// (one user request -> two tasks: the real produceArtifact Plan + an empty
+	// adHocAction wrapper). When the call is ad-hoc (no caller Plan) AND the
+	// tool self-plans, skip stamping entirely -- the tool's own Plan is the
+	// authoritative record (memql#1192). A call under a REAL caller Plan still
+	// stamps normally (it's a genuine sub-step of that Plan).
+	if createdSyntheticPlan && isSelfPlanningTool(toolName) {
+		return s.Engine.ExecuteToolByName(ctx, toolName, args)
+	}
 
 	ctx, pc, err := s.ensurePlanAndSemanticTask(ctx, pc)
 	if err != nil {
