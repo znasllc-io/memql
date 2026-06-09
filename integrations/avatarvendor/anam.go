@@ -24,8 +24,17 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
+
+// anamDefaultMaxSessionSeconds bounds the Anam engine session. Anam's ephemeral
+// session-token defaults to a short cap (~30s observed in the field) -- without
+// maxSessionLengthSeconds the engine self-leaves (CLIENT_REQUEST_LEAVE) mid-call
+// regardless of plan or API key (memql#1209). Mirrors Simli's maxSessionLength
+// (3600 = 1h); override with MEMQL_ANAM_MAX_SESSION_SECONDS for plan-specific
+// caps.
+const anamDefaultMaxSessionSeconds = 3600
 
 // anamClient is the CGO-free Anam REST integration for one resolved plan.
 type anamClient struct {
@@ -137,6 +146,16 @@ func (c *anamClient) createSessionToken(ctx context.Context, avatarID, livekitUR
 	if m := strings.TrimSpace(os.Getenv("MEMQL_ANAM_AVATAR_MODEL")); m != "" {
 		personaCfg["avatarModel"] = m
 	}
+	// Hold the session open. Without maxSessionLengthSeconds Anam caps the
+	// ephemeral session at a short default and self-leaves mid-call (~27s,
+	// plan/key-independent -- memql#1209). Default 1h; MEMQL_ANAM_MAX_SESSION_SECONDS overrides.
+	maxSec := anamDefaultMaxSessionSeconds
+	if v := strings.TrimSpace(os.Getenv("MEMQL_ANAM_MAX_SESSION_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxSec = n
+		}
+	}
+	personaCfg["maxSessionLengthSeconds"] = maxSec
 	payload := map[string]any{
 		"personaConfig": personaCfg,
 		"environment": map[string]any{

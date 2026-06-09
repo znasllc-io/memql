@@ -104,6 +104,9 @@ func TestAnamClient_StartPersonaIDShape(t *testing.T) {
 	assert.Equal(t, anamClientAudioLLM, pc["llmId"])
 	assert.Equal(t, "Sofia", pc["name"])
 	assert.Equal(t, true, pc["enableAudioPassthrough"])
+	// maxSessionLengthSeconds holds the session open past Anam's short default
+	// (~27s self-leave -- memql#1209). JSON-decoded, so it's a float64.
+	assert.Equal(t, float64(anamDefaultMaxSessionSeconds), pc["maxSessionLengthSeconds"])
 	// avatarModel is omitted unless MEMQL_ANAM_AVATAR_MODEL is set (it's
 	// account/plan-specific -- see createSessionToken / memql#772).
 	assert.Nil(t, pc["avatarModel"])
