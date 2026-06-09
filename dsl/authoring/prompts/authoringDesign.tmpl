@@ -70,17 +70,27 @@ Most Responsibilities are SINGLE-PHASE: one headline automation + a small
 closure. Emit those flat, via `dependencies` (below).
 
 When a Responsibility is genuinely a LONG, multi-step duty whose work
-happens in distinct ordered stages -- stage 0 must finish before stage 1
-can start, etc. (e.g. "gather the data, THEN summarize it, THEN file a
-report") -- decompose it into 2+ ordered `phases` instead. Each phase is
-itself "one sub-automation + its own minimal closure". The planner then
+happens in distinct stages, decompose it into 2+ `phases` instead. Each
+phase is itself "one sub-automation + its own minimal closure". The planner
 synthesizes a headline automation that triggers your phase sub-automations
-in order (phase 0 -> phase 1 -> ...), so you do NOT author the headline or
-the chaining yourself -- just name each phase and list its dependencies.
+honoring their dependencies, so you do NOT author the headline or the
+chaining yourself -- just name each phase, list its dependencies, and
+declare which earlier phases it waits on.
 
-Only decompose when the stages are truly SEQUENTIAL and each is
-non-trivial. Do not invent phases for a simple duty -- prefer the flat
-single-phase shape.
+Express ordering with each phase's `dependsOn`: the names of the phases
+that must FINISH before this phase may start.
+- A phase with NO dependsOn (or all phases omitting it) runs first.
+- Phases that are INDEPENDENT of each other (none depends on another) the
+  planner runs CONCURRENTLY. So model true fan-out: if "fetch sales" and
+  "fetch support" can run at the same time and "merge" needs both, give
+  merge `dependsOn: ["fetchSales", "fetchSupport"]` and leave the two
+  fetches' dependsOn empty -- they parallelize automatically.
+- If you OMIT dependsOn on every phase, the planner falls back to running
+  them strictly in listed order (phase 0 -> 1 -> ...). Prefer explicit
+  dependsOn so independent work parallelizes.
+
+Only decompose when the stages are genuinely distinct and non-trivial. Do
+not invent phases for a simple duty -- prefer the flat single-phase shape.
 
 # Output contract
 
@@ -113,6 +123,7 @@ with `phases` instead of a flat `dependencies`:
     {
       "name": "<camelCase phase sub-automation name>",
       "purpose": "<one line for this stage>",
+      "dependsOn": ["<name of an earlier phase this one waits on>"],
       "dependencies": [ { "kind": "...", "name": "...", "purpose": "...", "candidateSource": "..." } ]
     }
   ]

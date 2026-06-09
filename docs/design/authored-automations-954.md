@@ -297,5 +297,26 @@ automation … }` kind, not a real-world event -- which fits the capture path (a
 one-off task has no recurring trigger; the bundle is a replayable record). Gate
 1/repair, capture persistence, and `bundleAutomationSource` operate on the flat
 construct list, so a multi-phase bundle is just "more constructs, one of which
-is the headline" -- no downstream change. Concurrent (parallel-branch) execution
-of independent phases is the follow-up (#1164).
+is the headline" -- no downstream change.
+
+### Concurrent phases (issue #1164)
+
+Each phase carries an optional `dependsOn[]` (the earlier phases it waits on).
+The synthesizer (`buildPhaseLayers`, Kahn topological layering) groups phases
+into ordered LAYERS: layer 0 is every phase with no unmet dependency, layer k is
+every phase whose deps all sit in earlier layers. Phases in the same layer are
+mutually independent, so:
+
+- a layer with ONE phase emits a sequential `step`;
+- a layer with 2+ independent phases emits a `parallel { branches: […], wait:
+  "all" }` step -- they run CONCURRENTLY;
+- layer k>0 is gated on layer k-1's result, so layers run in order while phases
+  within a layer fan out.
+
+When NO phase declares `dependsOn` the synthesizer defaults to a strict
+sequential chain (the #1163 shape -- you can't assume two phases are independent
+without an explicit edge). A dependency cycle or unknown reference degrades to a
+by-index sequence rather than deadlocking. The synthesized parallel headline is
+proven to compile through the real Gate-1 sandbox. This is the authoring half of
+#1164; the planner's own task-DAG (`v1:planner:task.dependsOn[]` + concurrent
+task dispatch) remains a separate follow-up.
