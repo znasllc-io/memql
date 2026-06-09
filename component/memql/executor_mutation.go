@@ -101,6 +101,14 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	if err := json.Unmarshal(priorPayloadJSON, &mergedPayload); err != nil {
 		return nil, fmt.Errorf("update(): decode prior payload: %w", err)
 	}
+	// Capture the PRIOR status before the partial overwrites it (#1158), so the
+	// graph.node.updated event can carry oldStatus. Transition-only automations
+	// (e.g. releaseWorkspaceOnPlanTerminal) can then gate on
+	// `oldStatus != terminal && newStatus == terminal` and fire exactly once
+	// per transition instead of re-running on every update. Empty string when
+	// the concept has no `status` field -- additive, so the field is simply
+	// absent from the event for those concepts.
+	priorStatus, _ := mergedPayload["status"].(string)
 	for k, v := range partialPayload {
 		mergedPayload[k] = v
 	}
@@ -156,6 +164,13 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		if err := json.Unmarshal([]byte(mergedMutation.PayloadRaw), &payloadMap); err == nil {
 			maps.Copy(eventPayload, payloadMap)
 			eventPayload["payload"] = payloadMap
+		}
+		// #1158: surface the prior status as `oldStatus` (top-level, after the
+		// flatten so the new payload can't clobber it). Only when present, to
+		// keep the event additive for concepts without a status field. Lets
+		// .updated subscribers detect a real state transition vs a no-op rewrite.
+		if priorStatus != "" {
+			eventPayload["oldStatus"] = priorStatus
 		}
 		e.publishEvent(
 			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptMeta.Name),
