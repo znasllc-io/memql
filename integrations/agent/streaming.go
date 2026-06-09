@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -1054,6 +1055,19 @@ type agentContextStamp struct {
 	// unchanged until Phase 6's discussion-mode dispatcher populates
 	// the field).
 	StampThreadVisibility bool
+	// StampDataPlanId stamps producedByPlanId into the nested card
+	// `data` object (args["data"]["producedByPlanId"]) when the
+	// turnContext carries a plan id (memql#1207). canvasPublish's
+	// document card carries title/body/links in `data`; the frontend
+	// DocumentCard synthesizes a "View task" deep-link FROM
+	// data.producedByPlanId (copresent#393), but only when present.
+	// The agent knows the plan id authoritatively (post-approval
+	// execution turns); the LLM never does, so we stamp it server-side
+	// in the publish path. Distinct from the flat StampPlanId
+	// (args["planId"]) the worker tools use -- canvasPublish has no
+	// top-level planId in its schema, the provenance rides inside the
+	// card data.
+	StampDataPlanId bool
 }
 
 // agentContextStamps drives the per-tool injection. Adding a new
@@ -1089,7 +1103,7 @@ var agentContextStamps = map[string]agentContextStamp{
 	// rule: per-user Team-thread dispatches stamp visibility=private +
 	// forUserId; Group-thread dispatches leave them unset so the
 	// mutation's public default applies.
-	"canvasPublish": {SpaceField: "space", StampActor: true, StampThreadVisibility: true},
+	"canvasPublish": {SpaceField: "space", StampActor: true, StampThreadVisibility: true, StampDataPlanId: true},
 }
 
 // injectAgentContext stamps the runtime turnContext fields onto
@@ -1141,6 +1155,21 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 			args["forUserId"] = ctx.ForUserId
 		}
 	}
+	if stamp.StampDataPlanId && ctx.PlanId != "" {
+		// Stamp producedByPlanId onto the nested card `data` object so
+		// the published canvasState document card carries the plan
+		// provenance the frontend DocumentCard turns into a "View task"
+		// deep-link (memql#1207 / copresent#393). The card data is the
+		// LLM-supplied `data` map; create it if the model omitted one so
+		// the stamp always lands. Always overwrite -- the runtime
+		// turn-context plan id is the source of truth.
+		data, ok := args["data"].(map[string]any)
+		if !ok || data == nil {
+			data = map[string]any{}
+			args["data"] = data
+		}
+		data["producedByPlanId"] = ctx.PlanId
+	}
 }
 
 // promoteCanvasOutput records a v1:library:generatedOutput row for a
@@ -1177,12 +1206,23 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 		title = "Canvas card"
 	}
 
+	// Derive a one-line summary for the Library list (memql#1207). Prefer an
+	// explicit intent/summary the card data carries; otherwise derive from the
+	// markdown body (first heading, else first non-empty sentence/line),
+	// trimmed/truncated. dsl/library/logic.memql propagates
+	// generatedOutput.summary -> artifact.summary, so setting it here is all
+	// the Library list needs.
+	summary := deriveOutputSummary(data, body)
+
 	outputId := deriveGeneratedOutputId("agent_generated", ownerUserId, turnCtx.SpaceId+":"+title)
 
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
 	fmt.Fprintf(&b, `mutationCreateGeneratedOutput({outputId:%q, ownerUserId:%q, title:%q, body:%q, source:%q`,
 		outputId, ownerUserId, title, body, "agent_generated")
+	if summary != "" {
+		fmt.Fprintf(&b, `, summary:%q`, summary)
+	}
 	if turnCtx.AgentId != "" {
 		fmt.Fprintf(&b, `, producedByAgentId:%q`, turnCtx.AgentId)
 	}
@@ -1210,6 +1250,103 @@ func stringField(m map[string]any, key string) string {
 		return s
 	}
 	return ""
+}
+
+// summaryMaxLen bounds the derived one-line summary so the Library list
+// stays a glanceable line, not a paragraph.
+const summaryMaxLen = 200
+
+// deriveOutputSummary produces a one-line summary for a promoted
+// generatedOutput (memql#1207). Preference order:
+//  1. an explicit intent/summary the card `data` carries (`summary`,
+//     then `intent`) -- the agent told us what this deliverable is for;
+//  2. the body's first markdown heading (leading `#`s stripped);
+//  3. the body's first non-empty sentence (up to the first `.`/`!`/`?`),
+//     else the first non-empty line.
+//
+// The result is whitespace-collapsed and truncated to summaryMaxLen
+// (with an ellipsis). Returns "" only when there's nothing usable.
+func deriveOutputSummary(data map[string]any, body string) string {
+	if explicit := strings.TrimSpace(stringField(data, "summary")); explicit != "" {
+		return truncateSummary(collapseWhitespace(explicit))
+	}
+	if intent := strings.TrimSpace(stringField(data, "intent")); intent != "" {
+		return truncateSummary(collapseWhitespace(intent))
+	}
+	if heading := firstMarkdownHeading(body); heading != "" {
+		return truncateSummary(collapseWhitespace(heading))
+	}
+	if sentence := firstSentenceOrLine(body); sentence != "" {
+		return truncateSummary(collapseWhitespace(sentence))
+	}
+	return ""
+}
+
+// firstMarkdownHeading returns the text of the first ATX markdown
+// heading (a line whose first non-space rune is `#`), with the leading
+// `#`s and surrounding whitespace stripped. Returns "" when no heading
+// precedes the first body content -- callers fall back to a sentence.
+func firstMarkdownHeading(body string) string {
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			return strings.TrimSpace(strings.TrimLeft(line, "#"))
+		}
+		// First non-empty line isn't a heading -- there's no leading
+		// heading to use; let the sentence/line path handle it.
+		return ""
+	}
+	return ""
+}
+
+// firstSentenceOrLine returns the first sentence of the body (everything
+// up to and including the first `.`/`!`/`?` that is followed by a space
+// or end-of-text), falling back to the first non-empty line when no
+// sentence terminator is found.
+func firstSentenceOrLine(body string) string {
+	var firstLine string
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		firstLine = line
+		break
+	}
+	if firstLine == "" {
+		return ""
+	}
+	runes := []rune(firstLine)
+	for i, r := range runes {
+		if r == '.' || r == '!' || r == '?' {
+			// End-of-text or followed by whitespace = sentence boundary.
+			if i == len(runes)-1 || (i+1 < len(runes) && unicode.IsSpace(runes[i+1])) {
+				return strings.TrimSpace(string(runes[:i+1]))
+			}
+		}
+	}
+	return firstLine
+}
+
+// collapseWhitespace folds any run of whitespace (including newlines) to
+// a single space and trims the ends, so a multi-line snippet renders as
+// one tidy line.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// truncateSummary caps s at summaryMaxLen runes, appending an ellipsis
+// when it had to cut. Operates on runes so multi-byte text isn't split
+// mid-character.
+func truncateSummary(s string) string {
+	runes := []rune(s)
+	if len(runes) <= summaryMaxLen {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:summaryMaxLen])) + "…"
 }
 
 // genOutputIdEngine is the content-id engine used to derive deterministic
