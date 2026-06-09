@@ -55,6 +55,7 @@ shape task taskFull {
   payload.status
   payload.seq
   payload.phase
+  payload.dependsOn
   payload.executionSurface
   payload.executorBackend
   payload.input

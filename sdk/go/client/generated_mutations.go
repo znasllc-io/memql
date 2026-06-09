@@ -4652,6 +4652,7 @@ type MutationCreateSemanticTaskArgs struct {
 	LogicalStepId string
 	AttemptNumber int
 	Phase         string
+	DependsOn     []string
 	Input         map[string]any
 }
 
@@ -4702,6 +4703,11 @@ func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dependsOn: ")
+	b.WriteString(renderMemQLValue(args.DependsOn))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}

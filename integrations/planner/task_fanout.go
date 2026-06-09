@@ -197,13 +197,127 @@ func phaseHadFailure(phase []string, failed map[string]error) bool {
 	return false
 }
 
-// fanOutTaskRow is the slim projection groupTasksIntoPhases needs off a
+// fanOutTaskRow is the slim projection the wave builders need off a
 // v1:planner:task row.
 type fanOutTaskRow struct {
-	ID       string
-	Phase    string
-	Seq      int
-	Category string // "semantic" | "toolInvocation"
+	ID            string
+	Phase         string
+	Seq           int
+	Category      string   // "semantic" | "toolInvocation"
+	LogicalStepId string   // stable step id; the key dependsOn references
+	DependsOn     []string // logicalStepIds that must finish before this task
+}
+
+// buildTaskWaves orders a Plan's tasks into the execution waves
+// runPhasedFanOut consumes. It is the dependency-aware entry point (memql#1180):
+//   - if ANY semantic task declares dependsOn[], the tasks are layered by their
+//     full dependency DAG (groupTasksByDependsOn) -- finer-grained than phases;
+//   - otherwise it falls back to the coarse phase+seq grouping
+//     (groupTasksIntoPhases), preserving the pre-#1180 behavior exactly.
+//
+// Either way the result is the same shape (ordered waves of task ids, each wave
+// fanned out concurrently), so the fan-out executor is unchanged.
+func buildTaskWaves(phaseOrder []string, tasks []fanOutTaskRow) [][]string {
+	if anyTaskDependsOn(tasks) {
+		return groupTasksByDependsOn(tasks)
+	}
+	return groupTasksIntoPhases(phaseOrder, tasks)
+}
+
+// anyTaskDependsOn reports whether at least one semantic task declares a
+// dependsOn edge.
+func anyTaskDependsOn(tasks []fanOutTaskRow) bool {
+	for _, t := range tasks {
+		if (t.Category == "" || t.Category == "semantic") && len(t.DependsOn) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// groupTasksByDependsOn topologically layers a Plan's semantic tasks by their
+// dependsOn DAG (Kahn's algorithm) -- the full-DAG upgrade the task concept's
+// seq comment foretold (memql#1180). Layer 0 is every task whose dependencies
+// are all absent/unresolved (DAG roots); layer k is every task whose deps were
+// all placed in earlier layers. Tasks in the same layer are INDEPENDENT and run
+// concurrently. dependsOn references logicalStepId; an edge to an unknown step
+// is dropped (treated as satisfied). Within a layer, tasks are ordered by
+// (seq, id) for stable logging. A cycle / unsatisfiable state collapses the
+// leftover tasks into trailing singleton layers so it always terminates and
+// covers every task exactly once. Only category=="semantic" rows participate
+// (toolInvocation rows are mechanical per-call records). Pure + deterministic.
+func groupTasksByDependsOn(tasks []fanOutTaskRow) [][]string {
+	// Keep semantic tasks only, in a stable (seq, id) order.
+	sem := make([]fanOutTaskRow, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Category == "" || t.Category == "semantic" {
+			sem = append(sem, t)
+		}
+	}
+	sortRowsBySeq(sem)
+
+	// Resolve dependsOn (logicalStepIds) to task indices. A step id may map to
+	// several tasks (retry attempts); depending on a step means depending on
+	// every task that carries it. Self-edges are dropped.
+	idxByStep := make(map[string][]int)
+	for i, t := range sem {
+		if t.LogicalStepId != "" {
+			idxByStep[t.LogicalStepId] = append(idxByStep[t.LogicalStepId], i)
+		}
+	}
+	deps := make([][]int, len(sem))
+	for i, t := range sem {
+		seen := map[int]bool{}
+		for _, step := range t.DependsOn {
+			for _, j := range idxByStep[step] {
+				if j != i && !seen[j] {
+					seen[j] = true
+					deps[i] = append(deps[i], j)
+				}
+			}
+		}
+	}
+
+	placed := make([]bool, len(sem))
+	var layers [][]string
+	for remaining := len(sem); remaining > 0; {
+		var layer []int
+		for i := range sem {
+			if placed[i] {
+				continue
+			}
+			ready := true
+			for _, j := range deps[i] {
+				if !placed[j] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				layer = append(layer, i)
+			}
+		}
+		if len(layer) == 0 {
+			// Cycle / unsatisfiable -- flush every leftover task as its own
+			// trailing layer (by the stable seq order) so we always terminate.
+			for i := range sem {
+				if !placed[i] {
+					layers = append(layers, []string{sem[i].ID})
+					placed[i] = true
+					remaining--
+				}
+			}
+			break
+		}
+		ids := make([]string, 0, len(layer))
+		for _, i := range layer {
+			placed[i] = true
+			ids = append(ids, sem[i].ID)
+		}
+		layers = append(layers, ids)
+		remaining -= len(layer)
+	}
+	return layers
 }
 
 // groupTasksIntoPhases orders a Plan's tasks into the execution waves
