@@ -224,6 +224,11 @@ func (d *AuthoringCaptureDispatcher) runCapture(ctx context.Context, planId, kin
 	if err != nil {
 		return fmt.Errorf("design pass: %w", err)
 	}
+	// A captured one-off task is a SINGLE deliverable -- don't let the design
+	// over-decompose it into sequential phases (the live test saw a simple list
+	// become a 2-phase, 5-failure bundle). Flatten to one automation; phased
+	// composition stays for the genuinely-staged Responsibility path. (#1185)
+	designPlan = flattenToSingleDeliverable(designPlan)
 
 	bundle, report, clean, err := d.loop.emitAndRepairBundle(ctx, planId, statement, designPlan, ae)
 	if err != nil {
