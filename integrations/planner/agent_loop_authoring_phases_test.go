@@ -23,18 +23,22 @@ func TestSynthesizeHeadline_ChainsPhasesInOrder(t *testing.T) {
 			t.Errorf("headline must chain %s; source:\n%s", name, src)
 		}
 	}
-	// Phase 0 unconditional; phase 1 gated on phase 0; phase 2 on phase 1.
-	if !strings.Contains(src, "if steps.phase0.result") {
-		t.Errorf("phase 1 must be gated on phase 0's result:\n%s", src)
+	// Sequential chain: layer 0 unconditional; layer 1 gated on layer 0; layer
+	// 2 on layer 1 (steps are named by DAG layer).
+	if !strings.Contains(src, "if steps.layer0.result") {
+		t.Errorf("phase 1 must be gated on layer 0's result:\n%s", src)
 	}
-	if !strings.Contains(src, "if steps.phase1.result") {
-		t.Errorf("phase 2 must be gated on phase 1's result:\n%s", src)
+	if !strings.Contains(src, "if steps.layer1.result") {
+		t.Errorf("phase 2 must be gated on layer 1's result:\n%s", src)
 	}
-	// The ordering reference must point BACKWARD: phase0's step has no "if".
-	p0 := strings.Index(src, "step phase0")
-	p1 := strings.Index(src, "step phase1")
+	if strings.Contains(src, "parallel {") {
+		t.Errorf("a no-dependsOn chain must be sequential (no parallel):\n%s", src)
+	}
+	// Layer steps must appear in order layer0 < layer1.
+	p0 := strings.Index(src, "step layer0")
+	p1 := strings.Index(src, "step layer1")
 	if p0 < 0 || p1 < 0 || p0 > p1 {
-		t.Errorf("phase steps must appear in order phase0 < phase1:\n%s", src)
+		t.Errorf("layer steps must appear in order layer0 < layer1:\n%s", src)
 	}
 }
 
@@ -129,8 +133,8 @@ func TestEmitBundle_MultiPhase(t *testing.T) {
 	if !ok {
 		t.Fatal("bundleAutomationSource should resolve the headline")
 	}
-	if !strings.Contains(src, "step phase0") || !strings.Contains(src, "step phase1") {
-		t.Errorf("headline source should chain phase0 + phase1:\n%s", src)
+	if !strings.Contains(src, "step layer0") || !strings.Contains(src, "step layer1") {
+		t.Errorf("headline source should chain layer0 + layer1:\n%s", src)
 	}
 }
 

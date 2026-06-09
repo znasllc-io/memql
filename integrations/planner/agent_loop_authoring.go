@@ -127,6 +127,13 @@ type resolvedPhase struct {
 	Name         string               `json:"name"`
 	Purpose      string               `json:"purpose"`
 	Dependencies []resolvedDependency `json:"dependencies"`
+	// DependsOn names the phases that must COMPLETE before this phase may
+	// start (epic memql#1160, issue #1164). Empty for a phase that depends on
+	// nothing -- a DAG root. When NO phase declares dependsOn the emit falls
+	// back to a strict sequential chain (the #1163 shape); when dependsOn is
+	// present the synthesized headline runs independent phases (same DAG level)
+	// concurrently via a `parallel` step and dependent phases in order.
+	DependsOn []string `json:"dependsOn,omitempty"`
 }
 
 // designPlan is the full output of the design pass: the automation's own
@@ -221,8 +228,20 @@ func (l *PlannerAgentLoop) runDesignPass(ctx context.Context, statement, ownerUs
 	// reuse-or-author way. A phase with a blank name is given a deterministic
 	// fallback so the synthesized headline can reference it.
 	if raw.hasPhaseWork() {
+		// Map each phase's model-given name to the normalized sub-automation
+		// name first, so dependsOn references (which use the model's names) can
+		// be remapped to the normalized names the synthesized headline chains.
+		normalized := make([]string, len(raw.Phases))
+		byRawName := map[string]string{}
 		for i, ph := range raw.Phases {
-			rp := resolvedPhase{Name: phaseAutomationName(plan.AutomationName, ph.Name, i), Purpose: ph.Purpose}
+			n := phaseAutomationName(plan.AutomationName, ph.Name, i)
+			normalized[i] = n
+			if rn := strings.TrimSpace(ph.Name); rn != "" {
+				byRawName[rn] = n
+			}
+		}
+		for i, ph := range raw.Phases {
+			rp := resolvedPhase{Name: normalized[i], Purpose: ph.Purpose, DependsOn: remapDependsOn(ph.DependsOn, byRawName)}
 			for _, dep := range ph.Dependencies {
 				rp.Dependencies = append(rp.Dependencies, l.resolveDependency(ctx, dep, catalog, near))
 			}
@@ -245,6 +264,27 @@ func phaseAutomationName(headline, phaseName string, i int) string {
 		return fmt.Sprintf("%sPhase%d", headline, i)
 	}
 	return n
+}
+
+// remapDependsOn translates a phase's dependsOn references (the model's
+// phase names) to the normalized sub-automation names, dropping any that
+// don't resolve to a real phase (a hallucinated / self reference can't be a
+// dependency edge).
+func remapDependsOn(deps []string, byRawName map[string]string) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(deps))
+	seen := map[string]bool{}
+	for _, d := range deps {
+		n, ok := byRawName[strings.TrimSpace(d)]
+		if !ok || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 // resolveDependency runs the reuse-or-author decision for one emitted
@@ -359,6 +399,10 @@ type rawDesignPhase struct {
 	Name         string             `json:"name"`
 	Purpose      string             `json:"purpose"`
 	Dependencies []designDependency `json:"dependencies"`
+	// DependsOn names earlier phases that must finish first (#1164). Omit for
+	// a phase that can start immediately; phases with disjoint dependsOn run
+	// concurrently.
+	DependsOn []string `json:"dependsOn,omitempty"`
 }
 
 // designResult is the raw structured output of the authoringDesign prompt
