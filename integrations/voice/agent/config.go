@@ -87,6 +87,15 @@ type Config struct {
 	// RealtimeTranscriptionModel is the model id for the realtime session's
 	// native input-audio transcription on the native path (#478).
 	RealtimeTranscriptionModel string
+	// RealtimeAgentToolLoop routes every voice turn through cognition's full
+	// agent tool loop instead of letting the realtime model author natively
+	// (#1198, epic #1197 A2). When on, a 1-on-1 turn is forced through the gated
+	// path (create_response:false) so it round-trips to cognition; cognition runs
+	// the same tool loop as text chat (produceArtifact etc.) and the realtime
+	// model re-voices the authored reply. Off by default -- opt-in via
+	// MEMQL_VOICE_AGENT_TOOL_LOOP=true, pending live verification; flag off keeps
+	// today's native authorship unchanged. MUST match the cognition-side flag.
+	RealtimeAgentToolLoop bool
 
 	// Realtime lifecycle + cost guardrails (#439 / #459). Parsed here so the
 	// env surface matches the Python agent; enforcement lands in #459.
@@ -249,6 +258,9 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// #481 multi-party semantic_vad gate -- opt-in (default false), pending live
 	// validation in a >=2-human room.
 	cfg.RealtimeMultiPartySemanticVad = get("MEMQL_REALTIME_MULTIPARTY_SEMANTIC_VAD", "false") == "true"
+	// #1198 (epic #1197 A2): route voice through cognition's full agent tool loop.
+	// Off by default; flip on only once both slices are verified live.
+	cfg.RealtimeAgentToolLoop = get("MEMQL_VOICE_AGENT_TOOL_LOOP", "false") == "true"
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
 	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
 	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)
