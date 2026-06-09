@@ -1,14 +1,19 @@
-# Staging overlay -> 0.9.31. All 7 node images (identity, bff-copresent,
-# cognition, voice, agent, planner, workbench) REBUILT at main 995b8dd so they
-# carry #1117 (/livez pure-liveness endpoint) + #1119 (bounded NodeServer
-# shutdown) -- the #1115 re-ship that unblocks flipping liveness to /livez --
-# plus #1118/#1129/#1130/#1131/#1134/#1138 fixes merged since 0.9.30. The
-# copresent SPA + livekit pins are UNCHANGED (no /livez there; frontend
-# untouched). cognition/agent/planner/workbench/bff are CARRIER-built
+# Staging overlay -> 0.9.32. All 7 node images (identity, bff-copresent,
+# cognition, voice, agent, planner, workbench) + the copresent SPA REBUILT from
+# current main (memql c468081 / memql-bff-copresent 2fa2778 / copresent e670099)
+# so staging carries today's batch:
+#   - copresent UI: canvas newlines (#383), Share-to-group removal (#384),
+#     Gallery-only presence / no Spotlight + no camera takeover (#390),
+#     Library inline download (#392), deliverable "View task" link (#393),
+#     Library summary guard (#396), MemQL-on-task view (#1187)
+#   - memql backend: deliverable summary + producedByPlanId stamp (#1207),
+#     transcript re-runnable Gate-1 (#1195), adHocAction wrapper suppression
+#     (#1192/#1194) + finalize (#1186), authoring capture reliability (#1185),
+#     realtime-voice parity epic (#1197: #1198 one-brain tool loop, #1199
+#     transcript filter, #1200 faithful user utterances, #1203 server VAD)
+# cognition/agent/planner/workbench/bff are CARRIER-built
 # (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>); voice + identity are
-# engine builds. livekit pin (#1043) preserved. NOTE: liveness flips to /livez
-# in a FOLLOW-UP overlay change only AFTER these images are confirmed live --
-# the manifest + image must not split (the #1115 outage lesson).
+# engine builds. livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -34,27 +39,27 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:631abcf52ec6c9f5548a8cea6f5183d2eff25696224d1d46c2e5ff14f2a4eb1c
-  # Carrier-built; 0.9.28 engine/DSL bug-fix bundle + #1102 produceArtifact guard.
+    digest: sha256:be5640f4ec4eafa274042b2cf49510617c64f58c61adc3cfe3fdc8a0ec434e29
+  # Carrier-built; 0.9.32 full-main rebuild.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:bc7a094e71c97253c32ac764e8a2452354baec03a49448ad2a49570831c0e012
-  # Carrier-built (engine + CoPresent DSL #1053); 0.9.28 engine/DSL bundle + #1099.
+    digest: sha256:8bea507200d020d8ee2424da3913c284a22c3b3b5f5cfb8864ae0a889e250c26
+  # Carrier-built (engine + CoPresent DSL #1053); 0.9.32 full-main rebuild.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:67d833fbe9209f5b3171a5a21cca8a61b616576e41084fb0d5496bbc122dfcdc
+    digest: sha256:ca99343d416d2ed2d74c018bdce2eb41217ac1a8db18f3d6caa649953ea7b1e3
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:a3cc7cf30c623b4d97316e9ba2ff374ce2fe11f7ab94b5b4c7ccbbb2ebda73e6
+    digest: sha256:8d197eb003188fa4b020bbc2ab41328c85440e63862b88d43b826b116aa530c4
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:356fb7131aa12924436e1e620e203d81b7ec95299f4aa5aedb2f9f53eb5c9f05
-  # Carrier-built (engine + CoPresent DSL #1053); 0.9.28 engine/DSL bundle.
+    digest: sha256:d82a74d08d80bfb75139a51d7a9d01fa00cc02cfa0a115fb8850325e7ee3c242
+  # Carrier-built (engine + CoPresent DSL #1053); 0.9.32 full-main rebuild.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:37d2c1195a9730355b949a91dc6f5adb9b57fbc9ecd9360363473f3fec493a61
+    digest: sha256:04bf62d0585ab495a0ce391eded2fb8b872337ce4904c4e8615c6ae916b93df7
   # Carrier-built (engine + CoPresent DSL) -- #1053.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:c4723db1821915b1acda89ec8b16007a80ef6263212121477e3a42b32935ba03
-  # SPA rebuilt from copresent main (bd507b5) -- #1066 WS-reauth instrumentation + #909 Tasks + dep bumps.
+    digest: sha256:c40519b7ff434949ba64d3419c4c0f1dea293c091daddf116ed9ef6dae608c72
+  # SPA rebuilt from copresent main (e670099) -- #383/#384/#390/#392/#393/#396/#1187.
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:024dfdd2849302fdb91b06d33fef29f50c7fcbc3c5fa2e92cf038b284c108e8a
+    digest: sha256:de0b933a18f5105159da8c22728488810486cac3b71fabb756071dce4e31c36c
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
