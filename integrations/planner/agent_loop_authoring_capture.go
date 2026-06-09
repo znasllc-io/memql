@@ -161,9 +161,19 @@ func (d *AuthoringCaptureDispatcher) handle(ev events.Event) {
 					"planId", planId, "recover", fmt.Sprintf("%v", r))
 			}
 		}()
-		if err := d.runCapture(context.Background(), planId, kind); err != nil {
+		// Default: DETERMINISTIC transcription -- record the literal MemQL of
+		// what ran (#1188). The legacy LLM re-author path is kept behind
+		// MEMQL_AUTHORING_CAPTURE_MODE=author for experimentation; the live test
+		// proved it unreliable + costly, so it is no longer the default.
+		var rerr error
+		if captureMode() == "author" {
+			rerr = d.runCapture(context.Background(), planId, kind)
+		} else {
+			rerr = d.runCaptureTranscript(context.Background(), planId, kind)
+		}
+		if rerr != nil {
 			d.logger.Warn("authoring capture: run failed",
-				"planId", planId, "error", err)
+				"planId", planId, "mode", captureMode(), "error", rerr)
 		}
 		// Claim intentionally NOT released -- once-ever per Plan id.
 	}()

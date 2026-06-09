@@ -221,6 +221,9 @@ func TestHandlePlanUpdated_IgnoresNonCapturable(t *testing.T) {
 // bundle stamped with the source plan id.
 func TestHandlePlanUpdated_DispatchesOnSucceededTask(t *testing.T) {
 	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
+	// This test exercises the LLM author path's async dispatch; the default is
+	// now deterministic transcription (#1188), so pin the mode explicitly.
+	t.Setenv("MEMQL_AUTHORING_CAPTURE_MODE", "author")
 	plan := capturePlanRow("plan-async", "user-9", "Summarize the quarterly numbers")
 	ce, d := newCaptureFixture(t, plan, nil,
 		[]memql.SandboxReport{okReport(automationCon, specCon)},
