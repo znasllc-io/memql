@@ -19,8 +19,13 @@ const (
 	EventBridgeComponentName = common.ComponentName("nodeEventBridge")
 	eventBridgeOrder         = 46 // after PeerManager (45), before NodeServer (48)
 
-	defaultTTL       = 3
-	defaultDedupSize = 8192
+	defaultTTL = 3
+	// defaultDedupTTL is how long a forwarded event id is remembered so a
+	// re-delivered copy is suppressed (memql#1155). Time-windowed (not a
+	// fixed count) so high event volume can't evict an id and re-admit it
+	// mid-storm. The mesh re-circulation window is sub-second; 2 minutes is
+	// generous headroom and bounds memory to ~rate*ttl.
+	defaultDedupTTL = 2 * time.Minute
 )
 
 // EventBridge connects the local events.Bus to the distributed NodeService
@@ -51,7 +56,7 @@ func NewEventBridge(identity *Identity, localBus *events.Bus, peerManager *PeerM
 		peerManager: peerManager,
 		identity:    identity,
 		rules:       defaultRoutingRules(),
-		seen:        newEventDedup(defaultDedupSize),
+		seen:        newEventDedup(defaultDedupTTL),
 		logger:      logger,
 	}
 
