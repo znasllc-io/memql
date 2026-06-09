@@ -37,6 +37,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, 300, cfg.RealtimeIdleTimeoutSec)
 	assert.Equal(t, 1800, cfg.RealtimeMaxSessionSec)
 	assert.Equal(t, 1_000_000, cfg.RealtimeMaxAudioTokens)
+	// #1203 server_vad knobs default tightened over the OpenAI 0.5 baseline so
+	// noise/silence does not commit a phantom turn.
+	assert.Equal(t, 0.6, cfg.RealtimeVadThreshold)
+	assert.Equal(t, 300, cfg.RealtimeVadPrefixPaddingMs)
+	assert.Equal(t, 500, cfg.RealtimeVadSilenceDurationMs)
 	assert.Equal(t, "anam", cfg.AvatarVendor)
 	assert.True(t, cfg.AvatarEnabled())
 	assert.Equal(t, "nova-3", cfg.DGASRModel)
@@ -154,4 +159,28 @@ func TestLoadConfig_IntFallbackOnGarbage(t *testing.T) {
 	cfg, err := LoadConfig(envMap(env))
 	require.NoError(t, err)
 	assert.Equal(t, 1800, cfg.RealtimeMaxSessionSec) // falls back to default
+}
+
+// TestLoadConfig_VadOverrides: the #1203 server_vad knobs are env-tunable so a
+// noisy room can raise the energy gate further without a rebuild.
+func TestLoadConfig_VadOverrides(t *testing.T) {
+	env := baseEnv()
+	env["MEMQL_REALTIME_VAD_THRESHOLD"] = "0.8"
+	env["MEMQL_REALTIME_VAD_PREFIX_PADDING_MS"] = "200"
+	env["MEMQL_REALTIME_VAD_SILENCE_DURATION_MS"] = "700"
+	cfg, err := LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.Equal(t, 0.8, cfg.RealtimeVadThreshold)
+	assert.Equal(t, 200, cfg.RealtimeVadPrefixPaddingMs)
+	assert.Equal(t, 700, cfg.RealtimeVadSilenceDurationMs)
+}
+
+// TestLoadConfig_FloatFallbackOnGarbage: a non-numeric threshold falls back to
+// the tightened default rather than failing the session.
+func TestLoadConfig_FloatFallbackOnGarbage(t *testing.T) {
+	env := baseEnv()
+	env["MEMQL_REALTIME_VAD_THRESHOLD"] = "loud"
+	cfg, err := LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.Equal(t, 0.6, cfg.RealtimeVadThreshold) // falls back to default
 }
