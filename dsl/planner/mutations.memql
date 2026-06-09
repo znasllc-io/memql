@@ -56,6 +56,7 @@ mutation task mutationCreateSemanticTask {
     logicalStepId   string
     attemptNumber   int
     phase           string
+    dependsOn       []string
     input           object  @required
   }
   insert {
@@ -67,6 +68,7 @@ mutation task mutationCreateSemanticTask {
     args.seq
     args.phase
     args.logicalStepId
+    args.dependsOn
     attemptNumber: coalesce(args.attemptNumber, 1)
     executionSurface: "inProcess"
     args.input
