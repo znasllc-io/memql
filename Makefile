@@ -165,7 +165,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
+.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
@@ -242,6 +242,38 @@ dev-cluster-stop:
 ## Follow cluster logs (all nodes)
 dev-cluster-logs:
 	$(COMPOSE) $(COMPOSE_CLST) logs -f
+
+## Parity litmus check (memql#1212): show the running cluster's per-
+## REPLICA mesh node ids. Each mesh node runs `deploy.replicas: 2` with
+## NO static MEMQL_NODE_ID, so the id is derived from each replica's
+## container hostname (component/node/identity.go os.Hostname() fallback,
+## the compose equivalent of staging's fieldRef: metadata.name). If two
+## replicas of the same service show DISTINCT ids, per-replica identity is
+## working and the cross-replica fan-out path (which reproduces #1217) is
+## live. Identical ids = the static-id collision bug is back.
+dev-cluster-status:
+	@echo "[parity] container -> derived node id (one per replica):"
+	@for svc in bff cognition voice agent planner workbench; do \
+		ids=$$($(COMPOSE) $(COMPOSE_CLST) ps -q $$svc 2>/dev/null); \
+		for cid in $$ids; do \
+			name=$$(docker inspect --format '{{.Name}}' $$cid | sed 's:^/::'); \
+			host=$$(docker inspect --format '{{.Config.Hostname}}' $$cid); \
+			printf "  %-40s node_id=%s\n" "$$name" "$$host"; \
+		done; \
+	done
+	@echo ""
+	@echo "[parity] front door: http://localhost:8085  (SPA + /memql/ws + /memql/audio + same-origin auth)"
+	@echo "[parity] gRPC:       localhost:50050         (MemqlService/NodeService -> bff replicas)"
+	@echo "[parity] LiveKit:    ws://localhost:7880      (dev key 'devkey' / secret 'secret')"
+
+## Scale a single mesh node to N replicas on the running parity cluster
+## without a full restart. Useful to dial replica count up/down while
+## chasing a fan-out bug:  make dev-cluster-scale NODE=cognition N=3
+dev-cluster-scale:
+	@if [ -z "$(NODE)" ]; then echo "ERROR: set NODE=<bff|cognition|voice|agent|planner|workbench>"; exit 1; fi
+	@if [ -z "$(N)" ]; then echo "ERROR: set N=<replica count>"; exit 1; fi
+	$(COMPOSE) $(COMPOSE_CLST) up -d --no-recreate --scale $(NODE)=$(N) $(NODE)
+	@echo "[scale] $(NODE) -> $(N) replicas"
 
 ## Full rebuild — force Docker to rebuild images from scratch
 dev-rebuild:
@@ -804,11 +836,13 @@ help:
 	@echo "  make dev-bg       Start full dev stack in Docker (background)"
 	@echo "  make dev-polyphon Start dev stack with Polyphon voice pipeline"
 	@echo "  make dev-nemoclaw Start dev stack with NemoClaw coding agent"
-	@echo "  make dev-cluster               Start cluster mode (bff + cognition + planner)"
+	@echo "  make dev-cluster               Start staging-parity cluster (2 replicas/node + SPA + LiveKit)"
 	@echo "  make dev-cluster-restart       Restart cluster fresh (down + rebuild + up -d)"
 	@echo "  make dev-cluster-restart-purge Restart cluster AND wipe the database (down -v)"
 	@echo "  make dev-cluster-stop          Stop the cluster"
 	@echo "  make dev-cluster-logs          Follow cluster logs"
+	@echo "  make dev-cluster-status        Show per-replica node ids (parity litmus) + front-door URLs"
+	@echo "  make dev-cluster-scale NODE=x N=3  Scale one mesh node on the running cluster"
 	@echo "  make dev-stop            Stop all development services"
 	@echo "  make dev-logs            Follow development service logs"
 	@echo "  make dev-ps              Show running development services"

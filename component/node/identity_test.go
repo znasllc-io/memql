@@ -66,6 +66,27 @@ func TestNewIdentity_EnvVars(t *testing.T) {
 	}
 }
 
+func TestNewIdentity_HostnameFallback(t *testing.T) {
+	// When MEMQL_NODE_ID is unset, the node id falls back to the
+	// container/host hostname (the Docker-Compose equivalent of the k8s
+	// `fieldRef: metadata.name` override). Under `deploy.replicas: N`
+	// each compose replica gets a unique hostname, so this yields a
+	// per-replica id with no static config -- the parity fix for
+	// memql#1212/#1217 (cross-node fan-out reproduction).
+	os.Unsetenv("MEMQL_NODE_ID")
+
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		t.Skip("os.Hostname() unavailable on this platform; fallback is to a random short id")
+	}
+
+	id := NewIdentity("1.0.0")
+
+	if id.ID != host {
+		t.Errorf("expected node id to fall back to hostname %q, got %q", host, id.ID)
+	}
+}
+
 func TestNewIdentity_ExplicitNonWorkerTypeHonored(t *testing.T) {
 	// An explicit, non-empty MEMQL_NODE_TYPE that isn't a valid mesh
 	// worker/bff type (e.g. "identity" for the auth service) is honored
