@@ -11,6 +11,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/integrations/openai"
+	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // realtime_executor.go is the Go realtime voice loop: it slots BEHIND THE SAME
@@ -860,6 +861,21 @@ func (e *RealtimeExecutor) drainEvents() {
 				}
 				inputTranscript.Reset()
 				e.seq.Store(0)
+				if final != "" && !stt.NewTranscriptFilter().Keep(final, true, 0) {
+					// #1199: the realtime input transcription bypasses the cascade
+					// STT filter, so gpt-realtime's silence/non-speech
+					// hallucinations ("thank you for watching", denylisted stock
+					// phrases) + empty transcripts leak into chat. Apply the SAME
+					// filter here. The realtime path carries no real confidence
+					// signal, so confidence 0 -> the empty-drop + no-speech denylist
+					// fire while genuine content is kept. (Stopping the model from
+					// RESPONDING to silence is the deeper VAD fix, #481.)
+					if e.logger != nil {
+						e.logger.Info("voice-agent realtime: dropped hallucinated/empty input transcript (#1199)",
+							"space_id", e.cfg.SpaceID, "text", final)
+					}
+					final = ""
+				}
 				if final != "" {
 					if e.isGatedSemanticVad() {
 						// Multi-party gate (#481): the model detected turn-end +

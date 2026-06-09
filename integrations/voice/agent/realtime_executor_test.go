@@ -452,6 +452,34 @@ func TestRealtimeExecutor_NativeMode_InputTranscriptForwarded(t *testing.T) {
 	assert.False(t, hasTurnRequest(fs), "no conductor round-trip on the native path")
 }
 
+// TestRealtimeExecutor_InputTranscript_FiltersHallucination verifies #1199: a
+// stock silence-hallucination phrase the realtime model fabricates from
+// non-speech audio is DROPPED (not forwarded as a user utterance), while a real
+// utterance still forwards. The realtime path carries no confidence signal, so
+// the empty-drop + no-speech denylist do the work.
+func TestRealtimeExecutor_InputTranscript_FiltersHallucination(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	e.SetTurnMode(turnModeNative)
+
+	// A canonical silence-hallucination phrase -> filtered.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "thank you for watching"}
+	// An empty transcript -> filtered too.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "   "}
+	time.Sleep(150 * time.Millisecond)
+	assert.Nil(t, findFinalTranscript(fs), "hallucinated/empty input must not forward as a user utterance")
+
+	// A genuine utterance still forwards normally.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventInputTranscriptDone, Text: "list the ten most beautiful birds"}
+	var final *memqlv1.VoiceAgentFinalTranscript
+	require.Eventually(t, func() bool {
+		final = findFinalTranscript(fs)
+		return final != nil
+	}, 2*time.Second, 10*time.Millisecond, "real input must still forward")
+	assert.Equal(t, "list the ten most beautiful birds", final.GetFinalText())
+}
+
 // replyToTurnWithDirective makes the fake server reply to a VoiceAgentTurnRequest
 // with a conductor GATE directive (mode + brevity) instead of authored text --
 // the #479 "WHEN not WHAT" path.
