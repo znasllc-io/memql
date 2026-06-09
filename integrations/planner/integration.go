@@ -107,20 +107,21 @@ type PlannerIntegration struct {
 	// controller for per-account advisory locks + running-Plan counts
 	// (epic memql#902 / #904). Optional: when nil, admission fails open
 	// (no concurrency cap is enforced).
-	dbGetter       func() *bun.DB
-	entitlements   *EntitlementResolver
-	admission      *AdmissionController
-	agentLoop      *PlannerAgentLoop
-	trainDispatch  *TrainSpecialistDispatcher
-	embedDispatch  *EmbedDomainItemsDispatcher
-	intakeDispatch *ResponsibilityIntakeDispatcher
-	refreshCron    *RefreshCron
-	reactiveLoop   *ReactiveLoop
-	fairnessCron   *FairnessCron
-	logger         *slog.Logger
-	unsubscribes   []func()
-	started        atomic.Bool
-	mu             sync.Mutex
+	dbGetter        func() *bun.DB
+	entitlements    *EntitlementResolver
+	admission       *AdmissionController
+	agentLoop       *PlannerAgentLoop
+	trainDispatch   *TrainSpecialistDispatcher
+	embedDispatch   *EmbedDomainItemsDispatcher
+	intakeDispatch  *ResponsibilityIntakeDispatcher
+	captureDispatch *AuthoringCaptureDispatcher
+	refreshCron     *RefreshCron
+	reactiveLoop    *ReactiveLoop
+	fairnessCron    *FairnessCron
+	logger          *slog.Logger
+	unsubscribes    []func()
+	started         atomic.Bool
+	mu              sync.Mutex
 	// executing dedups the running-plan executor (handlePlanApprovedForExecution)
 	// so one plan can't be dispatched to its agent twice -- e.g. if more than
 	// one graph.node.updated event arrives while the plan is in "running".
@@ -188,6 +189,12 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
 	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
 	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
+	// Everyday-task authoring capture (epic memql#1160 / #1161): authors a
+	// stored, versioned v1:authoring:bundle for every user-facing one-off task
+	// that completes, capturing the reproducible MemQL behind it. Default-on,
+	// gated by MEMQL_AUTHORING_CAPTURE_ENABLED; a no-op on a binary whose engine
+	// carries no authoring Gate seams.
+	p.captureDispatch = NewAuthoringCaptureDispatcher(p.agentLoop, p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
 	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
 	// Fairness / anti-starvation sweep (memql#908). Needs the same lazy
@@ -330,6 +337,16 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.intakeDispatch.HandleResponsibilityUpdated,
 			events.WithSubscriberName("planner:responsibility-intake-updated"),
 		))
+		// Everyday-task authoring capture (#1161). A user-facing one-off Plan
+		// (produceArtifact / adHocAction) reaching succeeded triggers an async
+		// post-hoc capture: design -> emit/Gate-1 -> persist a versioned
+		// v1:authoring:bundle -> Gate-2 dry-run. Best-effort + default-on; never
+		// affects the already-delivered result.
+		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
+			"graph.node.updated.v1:planner:plan",
+			p.captureDispatch.HandlePlanUpdated,
+			events.WithSubscriberName("planner:authoring-capture-updated"),
+		))
 		p.mu.Unlock()
 		p.logger.Info("planner integration: subscriptions registered",
 			"patterns", []string{
@@ -342,6 +359,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 				"graph.node.updated.v1:planner:plan (embedDomainItems)",
 				"graph.node.created.v1:planner:responsibility (intake)",
 				"graph.node.updated.v1:planner:responsibility (intake)",
+				"graph.node.updated.v1:planner:plan (authoring capture)",
 			},
 		)
 		// Start the daily-refresh cron poller (#644). Polls

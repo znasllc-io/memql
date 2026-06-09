@@ -952,6 +952,28 @@ func QueryAuthoringBundleByIdBuild(args QueryAuthoringBundleByIdArgs) string {
 	return b.String()
 }
 
+// QueryAuthoringBundleForPlan -- The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).
+//
+// Bound concept: bundle.
+type QueryAuthoringBundleForPlanArgs struct {
+	SourcePlanId string
+}
+
+// QueryAuthoringBundleForPlan calls the engine query queryAuthoringBundleForPlan.
+func (qc *QueryClient) QueryAuthoringBundleForPlan(ctx context.Context, args QueryAuthoringBundleForPlanArgs) (*Result, error) {
+	call := QueryAuthoringBundleForPlanBuild(args)
+	return qc.executeNamed(ctx, "queryAuthoringBundleForPlan", call)
+}
+
+func QueryAuthoringBundleForPlanBuild(args QueryAuthoringBundleForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("queryAuthoringBundleForPlan({")
+	b.WriteString("sourcePlanId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryAuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
 //
 // Bound concept: bundle.

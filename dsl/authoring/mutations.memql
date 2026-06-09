@@ -18,6 +18,7 @@ mutation bundle mutationCreateAuthoringBundle {
     title               string  @required
     summary             string
     responsibilityId    string
+    sourcePlanId        string
     version             int
     supersedesBundleId  string
     reusedConstructRefs []object
@@ -28,6 +29,7 @@ mutation bundle mutationCreateAuthoringBundle {
     args.title
     args.summary
     args.responsibilityId
+    args.sourcePlanId
     args.supersedesBundleId
     args.reusedConstructRefs
     version: coalesce(args.version, 1)

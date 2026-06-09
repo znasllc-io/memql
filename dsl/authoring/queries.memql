@@ -69,6 +69,16 @@ query bundle queryAuthoringBundleForResponsibility {
 }
 
 @enabled
+@description("The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).")
+query bundle queryAuthoringBundleForPlan {
+  args {
+    sourcePlanId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId && payload.sourcePlanId==args.sourcePlanId
+  shape   bundleFull
+}
+
+@enabled
 @description("All authored constructs belonging to a bundle, scoped to the caller. Backs the gate runners (compile/bind the whole closure) + the runtime register/unregister path.")
 query construct queryAuthoringConstructsForBundle {
   args {
