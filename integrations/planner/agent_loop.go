@@ -46,6 +46,10 @@ import (
 type PlannerAgentLoop struct {
 	engine Engine
 	logger *slog.Logger
+	// handled dedups plan-created events per planId so a re-delivered created
+	// event (cross-node mesh re-delivery, memql#1155) does not re-run
+	// decompose/dispatch for the same plan and feed a storm.
+	handled *handledPlanSet
 }
 
 // NewPlannerAgentLoop constructs a loop pinned to the planner integration's
@@ -54,7 +58,11 @@ func NewPlannerAgentLoop(engine Engine, logger *slog.Logger) *PlannerAgentLoop {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &PlannerAgentLoop{engine: engine, logger: logger}
+	return &PlannerAgentLoop{
+		engine:  engine,
+		logger:  logger,
+		handled: newHandledPlanSet(defaultHandledPlanTTL),
+	}
 }
 
 // HandlePlanCreated is the event-bus subscriber for
@@ -132,6 +140,18 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		// both so a freshly-inserted plan in either status triggers
 		// the loop. Later transitions (running, awaitingFeedback,
 		// terminal) are driven by HandlePlanUpdated, not this path.
+		return
+	}
+	// Handle each plan EXACTLY ONCE (memql#1155). The plan-created event can
+	// be re-delivered to this subscriber (cross-node mesh re-delivery); a
+	// plan is created once, so a second created-event for the same id is
+	// always a duplicate. Without this guard a re-delivered event re-ran
+	// decompose/dispatch for the same plan thousands of times -- a CPU/event
+	// storm. This is the consumer-side backstop; the event bridge's
+	// time-windowed dedup (memql#1155) is the transport-side one.
+	if !l.handled.markIfNew(planId) {
+		l.logger.Debug("planner agent loop: plan-created event re-delivered; already handled this plan, skipping (memql#1155)",
+			"planId", planId)
 		return
 	}
 	l.logger.Info("planner agent loop: handling new plan",
