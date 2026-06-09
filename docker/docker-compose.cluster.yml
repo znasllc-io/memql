@@ -1,20 +1,48 @@
-# Docker Compose for memQL cluster mode (multi-node development).
+# Docker Compose for memQL cluster mode -- STAGING-PARITY topology.
 #
 # Usage:
-#   docker-compose -f docker/docker-compose.cluster.yml up --build
-#   docker-compose -f docker/docker-compose.cluster.yml down
+#   docker compose -f docker/docker-compose.cluster.yml up --build
+#   docker compose -f docker/docker-compose.cluster.yml down
 #
-# Or via the /deploy skill:
-#   /deploy development --cluster
+# Or via the make targets:
+#   make dev-cluster                 (foreground, build + up)
+#   make dev-cluster-restart         (fresh binaries, data preserved)
+#   make dev-cluster-restart-purge   (fresh binaries + fresh DB)
+#
+# PARITY GOAL (memql#1212). This compose is built to match the staging
+# AKS topology (deploy/k8s/base/*.yaml) so cluster-only bugs -- replica
+# fan-out, cross-node event double-delivery, leader/singleton races --
+# reproduce locally. Specifically:
+#
+#   - >=2 replicas per mesh node (memql#1213). bff/cognition/agent/
+#     planner/workbench/voice run `deploy.replicas: 2`, like staging.
+#   - per-replica UNIQUE node id (memql#1213). The static
+#     MEMQL_NODE_ID=<type>-local is REMOVED from replicated services;
+#     the binary derives its id from the container hostname
+#     (os.Hostname() in component/node/identity.go), the compose
+#     equivalent of staging's `fieldRef: metadata.name`. A static id
+#     would collide across replicas and break PeerManager keying (the
+#     memql#1042 chat-outage shape).
+#   - copresent SPA behind the front door (memql#1214).
+#   - LiveKit for the voice/video path (memql#1215).
+#
+# Because replicas need unique container hostnames, the replicated
+# services do NOT set `container_name` or `hostname` -- Compose assigns
+# each replica `<project>-<service>-<n>` automatically, which is exactly
+# the unique per-replica id we want. Address services by SERVICE NAME
+# (bff, cognition, ...); Docker DNS round-robins across the replica IPs.
+#
+# ONLY config differs from staging (DB endpoint = local Postgres, blob =
+# Azurite, secrets = dev defaults, LiveKit = dev keys). Topology + build
+# model are identical.
 
 # Compose project name -- distinct from full.yml's "memql-cluster" so
-# both topologies can coexist on the same host (rare in practice but
-# avoids a startup conflict if it happens). The "-multinode" suffix
-# hints at the per-node-type-binary deployment shape.
+# both topologies can coexist on the same host.
 name: memql-cluster-multinode
 
 services:
-  # Shared PostgreSQL + TimescaleDB (single instance for all nodes)
+  # Shared PostgreSQL + TimescaleDB (single instance for all nodes).
+  # Config-only difference from staging (Tiger Cloud).
   postgres:
     image: timescale/timescaledb:latest-pg16
     container_name: memql-db
@@ -39,7 +67,9 @@ services:
       - memql-cluster
     restart: unless-stopped
 
-  # BFF node -- backend for frontend (domain-specific), primary API surface
+  # BFF node -- backend for frontend, primary API surface + mesh parent.
+  # 2 replicas (staging parity). No container_name/hostname/static
+  # MEMQL_NODE_ID -> each replica gets a unique hostname-derived id.
   bff:
     build:
       # Carrier-built (engine + CoPresent DSL), same source as staging (#1053):
@@ -49,13 +79,12 @@ services:
       dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: bff
-    container_name: memql-bff
-    hostname: bff
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: bff
-      MEMQL_NODE_ID: bff-local
+      # MEMQL_NODE_ID intentionally UNSET -- derived from the container
+      # hostname per replica (memql#1213). Setting it would collide.
       MEMQL_NODE_ADDRESS: bff:50058
       MEMQL_NODE_SERVICE_ADDRESS: ":50058"
       MEMQL_NODE_FLAVOR: ""
@@ -71,6 +100,15 @@ services:
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8088"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Self-hosted LiveKit (memql#1215 / staging #1043). The BFF mints
+      # LiveKit room tokens, so it needs the URL + the dev key/secret
+      # pair (shared with the livekit service + the voice node). The
+      # public URL points at the local LiveKit port so a browser can
+      # reach the signaling WS same-host.
+      POLYPHON_LIVEKIT_URL: ${POLYPHON_LIVEKIT_URL:-ws://livekit:7880}
+      POLYPHON_LIVEKIT_PUBLIC_URL: ${POLYPHON_LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+      POLYPHON_LIVEKIT_API_KEY: ${POLYPHON_LIVEKIT_API_KEY:-devkey}
+      POLYPHON_LIVEKIT_API_SECRET: ${POLYPHON_LIVEKIT_API_SECRET:-secret}
       # Node-bootstrap secret (memql#338). When set on both this node
       # AND the identity service, a node that boots without an
       # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
@@ -79,6 +117,10 @@ services:
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    deploy:
+      # Staging parity (#1213): two replicas exercise the cross-replica
+      # fan-out path that single-replica local dev structurally cannot.
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,7 +139,10 @@ services:
     networks:
       - memql-cluster
 
-  # Nginx load balancer -- single stable entry point for clients.
+  # Nginx front door -- single stable entry point. Path-routed, single
+  # origin (mirrors staging's public-entry ingress); load-balances across
+  # the bff replicas via the resolver + variable-upstream trick. See
+  # docker/nginx/nginx.conf.
   nginx:
     image: nginx:alpine
     container_name: memql-lb
@@ -114,7 +159,49 @@ services:
       - memql-cluster
     restart: unless-stopped
 
-  # Cognition node -- conversation intelligence (scoring, response generation)
+  # CoPresent SPA (memql#1214) -- the actual app UI, built from the
+  # sibling copresent repo (../copresent) exactly like staging
+  # (deploy/k8s/base/copresent.yaml), NOT a Vite dev server. VITE_* args
+  # point the bundle at the LOCAL FRONT DOOR (http://localhost:8085) so
+  # auth + WS are SAME-ORIGIN, mirroring app.staging.copresent.ai.
+  #
+  # The private @visionarys-io/@znasllc-io SDKs need a GitHub Packages
+  # token at install time -- passed as a BuildKit secret (never baked
+  # into the image). Export MEMQL_PACKAGES_TOKEN (read:packages for both
+  # scopes) before `make dev-cluster`. 2 replicas (staging parity #551).
+  copresent:
+    build:
+      context: ../copresent
+      dockerfile: Dockerfile
+      args:
+        # Same-origin: the browser hits the nginx front door on :8085;
+        # nginx routes /memql/ws -> bff, /memql/audio -> voice,
+        # /auth + /oauth + /.well-known -> identity.
+        VITE_MEMQL_WS_URL: ${VITE_MEMQL_WS_URL:-ws://localhost:8085/memql/ws}
+        VITE_MEMQL_AUDIO_WS_URL: ${VITE_MEMQL_AUDIO_WS_URL:-ws://localhost:8085/memql/audio}
+        VITE_MEMQL_TOKEN_EXCHANGE_URL: ${VITE_MEMQL_TOKEN_EXCHANGE_URL:-http://localhost:8085/oauth/token}
+        VITE_IDENTITY_BASE_URL: ${VITE_IDENTITY_BASE_URL:-http://localhost:8085}
+        VITE_IDENTITY_CLIENT_ID: ${VITE_IDENTITY_CLIENT_ID:-copresent}
+      secrets:
+        - node_auth_token
+    environment:
+      NODE_ENV: production
+      APP_PORT: "8080"
+      FRONTEND_PORT: "8080"
+      CORS_ALLOWED_ORIGIN: "*"
+      # Server-side memQL URL for the Express /api/* endpoints (internal BFF).
+      VITE_MEMQL_API_URL: http://bff:8088
+    deploy:
+      replicas: 2
+    depends_on:
+      bff:
+        condition: service_healthy
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
+  # Cognition node -- conversation intelligence (scoring, response generation).
+  # 2 replicas (staging parity); per-replica hostname-derived node id.
   cognition:
     build:
       # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
@@ -122,13 +209,11 @@ services:
       dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: cognition
-    container_name: memql-cognition
-    hostname: cognition
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: cognition
-      MEMQL_NODE_ID: cognition-local
+      # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: cognition:50054
       MEMQL_NODE_SERVICE_ADDRESS: ":50054"
       # Inter-node peer auth (memql#338).
@@ -160,6 +245,8 @@ services:
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,6 +259,7 @@ services:
   # CGO + the voice-runtime stage because the Go voice-agent's LiveKit
   # server-sdk-go + media-sdk pull a CGO libopus/opusfile/soxr dependency
   # (docs/voice/451-livekit-go-room-participation.md, Caveat 1).
+  # 2 replicas (staging parity); per-replica hostname-derived node id.
   voice:
     build:
       context: ..
@@ -180,15 +268,13 @@ services:
       args:
         BUILD_TAGS: voice
         CGO_ENABLED: "1"
-    container_name: memql-voice
-    hostname: voice
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Inter-node peer auth (memql#338).
       MEMQL_NODE_TOKEN: ${MEMQL_VOICE_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: voice
-      MEMQL_NODE_ID: voice-local
+      # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: voice:50059
       MEMQL_NODE_SERVICE_ADDRESS: ":50059"
       MEMQL_PARENT_ADDRESS: bff:50058
@@ -196,6 +282,12 @@ services:
       MEMQL_GRPC_ADDRESS: ":50051"
       SERVER_ADDRESS: "0.0.0.0:8085"
       IDENTITY_VERIFIER_BASE_URL: ${IDENTITY_VERIFIER_BASE_URL:-http://identity:8081}
+      # Self-hosted LiveKit (memql#1215). The voice node joins LiveKit
+      # rooms as the assistant participant; same dev key/secret as the
+      # BFF (which mints the room tokens) + the livekit service.
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+      LIVEKIT_API_KEY: ${POLYPHON_LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${POLYPHON_LIVEKIT_API_SECRET:-secret}
       # Node-bootstrap secret (memql#338). When set on both this node
       # AND the identity service, a node that boots without an
       # operator-provisioned MEMQL_NODE_TOKEN self-mints a class="node"
@@ -237,6 +329,8 @@ services:
       # Used when explicit MEMQL_STT_PROVIDER selects whisper, or when
       # the Realtime path is unavailable at startup.
       MEMQL_WHISPER_MODEL: "${MEMQL_WHISPER_MODEL:-whisper-1}"
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -245,7 +339,8 @@ services:
     networks:
       - memql-cluster
 
-  # Agent node -- task execution and AI work
+  # Agent node -- task execution and AI work.
+  # 2 replicas (staging parity); per-replica hostname-derived node id.
   agent:
     build:
       # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
@@ -253,13 +348,11 @@ services:
       dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: agent
-    container_name: memql-agent
-    hostname: agent
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: agent
-      MEMQL_NODE_ID: agent-local
+      # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: agent:50055
       MEMQL_NODE_SERVICE_ADDRESS: ":50055"
       MEMQL_PARENT_ADDRESS: bff:50058
@@ -292,6 +385,8 @@ services:
       # both vars via genesis; dev works out of the box with no reseal.
       MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
       MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-attachments}
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -309,6 +404,14 @@ services:
   # integration's six action handlers. Workspaces live under
   # /var/lib/memql/workbenches and persist across container restarts
   # via the workbench_workspaces named volume.
+  #
+  # 2 replicas (staging parity). With replicas the per-Plan workspace is
+  # no longer pinned to one container (the agent dialer picks a replica
+  # via service-DNS / DB discovery) -- intentional parity surface that
+  # exposes the same cross-node workbench routing path staging sees. The
+  # named volume is shared across replicas on a single host, so a
+  # workspace provisioned by one replica is visible to the other on the
+  # same Docker engine.
   workbench:
     build:
       # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
@@ -316,13 +419,11 @@ services:
       dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: workbench
-    container_name: memql-workbench
-    hostname: workbench
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: workbench
-      MEMQL_NODE_ID: workbench-local
+      # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: workbench:50060
       MEMQL_NODE_SERVICE_ADDRESS: ":50060"
       MEMQL_PARENT_ADDRESS: bff:50058
@@ -346,6 +447,8 @@ services:
       # agent node so workbench-initiated uploads go to the same emulator.
       MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
       MEMQL_AZURE_BLOB_CONTAINER: ${MEMQL_AZURE_BLOB_CONTAINER:-attachments}
+    deploy:
+      replicas: 2
     volumes:
       - workbench_workspaces:/var/lib/memql/workbenches
     depends_on:
@@ -358,7 +461,8 @@ services:
     networks:
       - memql-cluster
 
-  # Planner node -- task planning and orchestration
+  # Planner node -- task planning and orchestration.
+  # 2 replicas (staging parity); per-replica hostname-derived node id.
   planner:
     build:
       # Carrier-built (engine + CoPresent DSL), same source as staging (#1053).
@@ -366,15 +470,13 @@ services:
       dockerfile: memql-bff-copresent/Dockerfile
       args:
         BUILD_TAGS: planner
-    container_name: memql-planner
-    hostname: planner
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       # Inter-node peer auth (memql#338).
       MEMQL_NODE_TOKEN: ${MEMQL_PLANNER_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: planner
-      MEMQL_NODE_ID: planner-local
+      # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: planner:50056
       MEMQL_NODE_SERVICE_ADDRESS: ":50056"
       MEMQL_PARENT_ADDRESS: bff:50058
@@ -391,6 +493,8 @@ services:
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -401,6 +505,13 @@ services:
 
   # Identity node -- in-house auth provider (magic-link, JWT issuance,
   # JWKS publishing, web UI, admin app, PAT management).
+  #
+  # SINGLE replica. Identity is the mesh ROOT + the migration owner; it
+  # is deliberately NOT scaled here (staging runs it as a singleton too
+  # for the same reasons -- it self-bootstraps nothing and owns the
+  # write-once key material in the named volume). Keeping it at 1 also
+  # lets it keep a stable `container_name`/`hostname` for the host
+  # port-map (8081) the other nodes' IDENTITY_VERIFIER_BASE_URL targets.
   identity:
     build:
       context: ..
@@ -444,11 +555,12 @@ services:
       # so the pair-redeem path also works under the in-cluster plain HTTP.
       MEMQL_IDENTITY_ALLOW_INSECURE_PAIR: ${MEMQL_IDENTITY_ALLOW_INSECURE_PAIR:-1}
       IDENTITY_KEY_ENCRYPTION_KEY: ""
-      # See docker-compose.full.yml for the full annotation on this
-      # registered-clients shape (cockpit + copresent + RFC 8252
-      # loopback rule).
-      IDENTITY_REGISTERED_CLIENTS: '[{"clientId":"copresent","redirectURIs":["http://localhost:8080/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
-      IDENTITY_CORS_ALLOWED_ORIGINS: "http://localhost:8080,http://localhost:5173"
+      # Registered OAuth clients. The copresent SPA (#1214) is served
+      # SAME-ORIGIN through the nginx front door on :8085, so its
+      # callback + the cockpit loopback rule both target that origin.
+      # See docker-compose.full.yml for the full annotation on this shape.
+      IDENTITY_REGISTERED_CLIENTS: '[{"clientId":"copresent","redirectURIs":["http://localhost:8085/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
+      IDENTITY_CORS_ALLOWED_ORIGINS: "http://localhost:8085,http://localhost:5173"
       MEMQL_DISCOVERY_GRPC_ENDPOINT: localhost:50050
       MEMQL_DISCOVERY_CLIENT_ID: cockpit
       MEMQL_DISCOVERY_CLUSTER_NAME: local
@@ -473,6 +585,42 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+    networks:
+      - memql-cluster
+    restart: unless-stopped
+
+  # LiveKit (memql#1215) -- self-hosted open-source livekit-server for
+  # the local voice/video path. Mirrors staging
+  # (deploy/k8s/base/livekit.yaml) but uses a single-host dev config:
+  # the dev key/secret pair (devkey / secret) is shared with the BFF
+  # (mints room tokens) and the voice node (joins rooms). Same major as
+  # staging (v1.8). Single replica -- no Redis, standalone node.
+  #
+  # Dev voice-agent token mint: the BFF mints LiveKit room tokens via
+  # PolyphonRoomTokenMsg using POLYPHON_LIVEKIT_API_KEY/SECRET; the voice
+  # node joins with LIVEKIT_API_KEY/SECRET (the same pair). No external
+  # key vault -- the dev pair is the source of truth locally. For a
+  # manual mint, `livekit-cli create-token --api-key devkey --api-secret
+  # secret --join --room <room> --identity <id>` against ws://localhost:7880.
+  livekit:
+    image: livekit/livekit-server:v1.8.0
+    container_name: memql-livekit
+    hostname: livekit
+    # --dev enables the built-in dev key pair (apiKey=devkey,
+    # secret=secret) AND relaxes the bind/ICE config for a single-host
+    # setup. The BFF + voice nodes default their key/secret to that SAME
+    # devkey/secret pair, so tokens minted by the BFF validate here out of
+    # the box. NOTE: in --dev mode livekit-server uses its built-in keys;
+    # a non-default POLYPHON_LIVEKIT_API_KEY/SECRET override on the BFF
+    # would NOT match (drop --dev and mount a config with explicit keys,
+    # mirroring deploy/k8s/base/livekit.yaml, if you need a custom pair).
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      # Signaling (ws) + media (WebRTC) on the host so a browser can
+      # reach ws://localhost:7880 same-host.
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
     networks:
       - memql-cluster
     restart: unless-stopped
@@ -520,6 +668,14 @@ services:
     profiles:
       - tools
     restart: unless-stopped
+
+# CoPresent SPA build needs the GitHub Packages token for the private
+# @visionarys-io/@znasllc-io SDKs (BuildKit secret, never baked in).
+# Export MEMQL_PACKAGES_TOKEN (read:packages for both scopes) before
+# `make dev-cluster`. The token resolves from that env var.
+secrets:
+  node_auth_token:
+    environment: MEMQL_PACKAGES_TOKEN
 
 volumes:
   cluster_postgres_data:

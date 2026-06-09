@@ -343,7 +343,7 @@ carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster:** `make dev-cluster-restart` / `make dev-cluster-restart-purge` (uses docker-compose.cluster.yml).
+**Local cluster (staging parity):** `make dev-cluster-restart` / `make dev-cluster-restart-purge` (uses docker-compose.cluster.yml). The cluster is built to be topologically identical to staging (memql#1212): >=2 replicas per mesh node with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind a single-origin nginx front door (http://localhost:8085). Only config differs from staging (local Postgres, Azurite blob, dev secrets/keys). `make dev-cluster-status` prints the per-replica node ids (parity litmus). Runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Local single-node:** `docker compose -f docker/docker-compose.full.yml up --build` -- spins up Postgres + bff + voice (so transcription works end-to-end on the basic dev path; previously the full compose had no voice node and `AiTranscribeStreamStart` had nowhere to forward to).
 
 #### Client-tool relay (agent → browser, across nodes)
