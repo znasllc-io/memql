@@ -855,7 +855,7 @@ headers. They never see the private key.
 [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
 the operator-side narrative.
 
-See [docs/auth/](docs/auth/):
+See [docs/public/operate/auth/](docs/public/operate/auth/):
 - [access-model.md](docs/public/operate/auth/access-model.md) -- enforcement
   layers and role spectrum.
 - [user-provisioning.md](docs/public/operate/auth/user-provisioning.md) --
