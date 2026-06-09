@@ -1,3 +1,12 @@
+---
+title: memQL Tech Stack & Deployment Practices
+audience: public
+status: stable
+area: overview
+sinceVersion: 0.9.0
+owner: znas
+---
+
 # memQL Tech Stack & Deployment Practices
 
 **Version:** 1.0
@@ -98,7 +107,7 @@ make deploy VERSION=X
 kubectl logs -n memql deployment/bff -f
 ```
 
-See [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) for the full deploy
+See [DEPLOYMENT_STRATEGY.md](../operate/deployment-strategy.md) for the full deploy
 flow and topology.
 
 **Developer Access:** [x] All developers
@@ -138,7 +147,7 @@ All environments use the in-house identity service
 - Centralized user + invitation management via the admin web app
   at `/admin/*`
 
-See [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md)
+See [docs/public/operate/auth/identity-service.md](../operate/auth/identity-service.md)
 for the operator-side narrative.
 
 ### Developer Access Levels
@@ -282,7 +291,7 @@ memQL/
 2. **Quick setup:** Read `docs/public/overview/quickstart.md`
 3. **Find topics:** Use `GLOSSARY.md`
 4. **Component details:** Check directory `CLAUDE.md` files
-5. **Commands:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for common development commands
+5. **Commands:** See [docs/public/overview/quickstart.md](quickstart.md) for common development commands
 
 ---
 
@@ -319,7 +328,7 @@ kubectl get deployments -n memql                            # Deployment status 
 
 **Managed via memQL concept storage** (`v1:platform:globalVariable` and
 `v1:platform:globalSecret`). Operators populate via Make targets backed by
-the dev-secrets workflow; see [docs/public/operate/env-vars.md](docs/public/operate/env-vars.md)
+the dev-secrets workflow; see [docs/public/operate/env-vars.md](../operate/env-vars.md)
 for the full design.
 
 **Development (Docker):**

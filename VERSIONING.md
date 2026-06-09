@@ -44,7 +44,7 @@ The version of a memQL build is the **git tag** it was cut from
 - A release is cut by tagging `main` (`git tag vX.Y.Z`), then
   `make release VERSION=X.Y.Z ...` builds the immutable
   `memql:X.Y.Z` image from that commit. See
-  [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md#release--versioning-semver-tag---immutable-image).
+  [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md#release--versioning-semver-tag---immutable-image).
 
 ## Pre-1.0 rules (today)
 
@@ -72,3 +72,23 @@ The 1.0.0 cut is a **coordinated platform train**: at the beta, every
 platform repo is tagged `1.0.0` together as a single coherent release.
 After that train, repos resume independent semver. The train concept
 is documented in [COMPATIBILITY.md](COMPATIBILITY.md).
+
+## Documentation versioning
+
+**Docs version == engine release.** There is no separate docs version
+line. Public documentation lives in `docs/public/` (the source of truth;
+see [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md)) and is published to
+memql.io per release:
+
+- On each `releases/<X.Y.Z>.yaml` lockfile, the release pipeline builds a
+  `docs-<X.Y.Z>.tgz` bundle (the `docs/public` markdown tree + generated
+  reference + a `manifest.json`) and attaches it to the GitHub Release.
+- memql.io consumes each bundle into a per-version snapshot and exposes a
+  version dropdown. `latest` tracks `main`'s `docs/public`.
+- Machine reference (DSL constructs, concept catalog, architecture
+  diagrams) is generated at release time, so it can never drift from the
+  engine the version was cut from.
+
+This rides the same lockfile-as-source-of-truth model as the image
+release flow above — a new engine version automatically yields a new docs
+version.

@@ -1,3 +1,12 @@
+---
+title: memQL + CoPresent Deployment Strategy (AKS)
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.9.0
+owner: znas
+---
+
 # memQL + CoPresent Deployment Strategy (AKS)
 
 Authoritative deploy + operations reference for the memQL node mesh and the
