@@ -452,6 +452,66 @@ func TestRealtimeExecutor_NativeMode_InputTranscriptForwarded(t *testing.T) {
 	assert.False(t, hasTurnRequest(fs), "no conductor round-trip on the native path")
 }
 
+// newRealtimeExecutorNoStart builds a realtime executor WITHOUT Start(), so
+// nothing drains transcriptCh -- letting a test saturate the forward queue to
+// exercise enqueueTranscript's drop/guarantee semantics directly.
+func newRealtimeExecutorNoStart(t *testing.T, fs *fakeStream, rt *fakeRealtimeSession) *RealtimeExecutor {
+	t.Helper()
+	c := newTestClient(t, fs)
+	sink := &recordingSink{}
+	e := NewRealtimeExecutor(context.Background(), CascadeConfig{
+		SpaceID:   "s1",
+		GaAgentID: "s1-ga",
+		Thread:    memqlv1.VoiceAgentTurnRequest_THREAD_CONTEXT_TEAM,
+	}, c, rt, sink, SessionPersona{Instructions: "be helpful", Voice: "marin"}, nil)
+	t.Cleanup(e.Close)
+	return e
+}
+
+// TestRealtimeExecutor_EnqueueFinal_NotDroppedUnderBackpressure verifies #1200:
+// a user FINAL is never silently dropped behind a backlog of partials. The burst
+// of input-transcription partials can saturate the forward queue right before the
+// final lands; a naive drop-on-full there loses the user's whole utterance ("DB
+// shows only assistant utterances"). A partial may still drop (cosmetic), but the
+// final must reach the queue once a slot frees.
+func TestRealtimeExecutor_EnqueueFinal_NotDroppedUnderBackpressure(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e := newRealtimeExecutorNoStart(t, fs, rt) // no consumer drains transcriptCh
+
+	// Saturate the queue with partials.
+	for i := 0; i < transcriptQueueDepth; i++ {
+		e.enqueueTranscript(transcriptJob{speaker: "user-1", text: "partial"})
+	}
+	require.Len(t, e.transcriptCh, transcriptQueueDepth, "queue saturated with partials")
+
+	// An extra partial drops on a full queue (cosmetic ghost-text only).
+	e.enqueueTranscript(transcriptJob{speaker: "user-1", text: "dropped partial"})
+	require.Len(t, e.transcriptCh, transcriptQueueDepth, "an extra partial drops on a full queue")
+
+	// A final on a full queue must NOT drop -- it parks until a slot frees.
+	e.enqueueTranscript(transcriptJob{speaker: "user-1", text: "cut the cloud spend", final: true, native: true})
+
+	// Free one slot; the parked final must then land.
+	<-e.transcriptCh
+	var final transcriptJob
+	require.Eventually(t, func() bool {
+		for {
+			select {
+			case j := <-e.transcriptCh:
+				if j.final {
+					final = j
+					return true
+				}
+			default:
+				return false
+			}
+		}
+	}, 2*time.Second, 10*time.Millisecond, "the user final must reach the queue, never dropped")
+	assert.Equal(t, "cut the cloud spend", final.text)
+	assert.True(t, final.native, "native-authored marking is preserved")
+}
+
 // TestRealtimeExecutor_InputTranscript_FiltersHallucination verifies #1199: a
 // stock silence-hallucination phrase the realtime model fabricates from
 // non-speech audio is DROPPED (not forwarded as a user utterance), while a real

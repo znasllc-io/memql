@@ -245,17 +245,35 @@ func (e *RealtimeExecutor) forwardTranscriptLoop() {
 }
 
 // enqueueTranscript hands a transcript forward to the parallel loop without ever
-// blocking the caller. On a full queue (sustained gRPC backpressure) it drops
-// the update: a dropped partial is invisible (cosmetic ghost-text) and a dropped
-// final only delays the chat row, never the voice conversation.
+// blocking the caller.
+//
+// Partials are drop-on-full: a dropped partial is invisible (cosmetic
+// ghost-text). A FINAL is the user's committed utterance, though -- dropping it
+// means the spoken turn never reaches chat (#1200: "DB shows only assistant
+// utterances"). A final can be the very job that overflows a queue saturated by
+// the burst of input-transcription partials that preceded it, so it must NEVER
+// be dropped. When the queue is full, a final parks on its own goroutine that
+// blocks until a slot frees (or the executor is torn down), so drainEvents still
+// never blocks while the chat insert is guaranteed to be attempted. The
+// forwardTranscriptLoop single consumer preserves enqueue order.
 func (e *RealtimeExecutor) enqueueTranscript(j transcriptJob) {
 	select {
 	case e.transcriptCh <- j:
+		return
 	default:
-		if e.logger != nil {
-			e.logger.Debug("voice-agent realtime: transcript forward dropped (backpressure)",
-				"final", j.final, "chars", len(j.text))
-		}
+	}
+	if j.final {
+		go func() {
+			select {
+			case e.transcriptCh <- j:
+			case <-e.ctx.Done():
+			}
+		}()
+		return
+	}
+	if e.logger != nil {
+		e.logger.Debug("voice-agent realtime: transcript forward dropped (backpressure)",
+			"final", j.final, "chars", len(j.text))
 	}
 }
 
