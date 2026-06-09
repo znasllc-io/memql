@@ -270,3 +270,32 @@ does not expose; they are reached through the app-level `CognitionEngineAdapter`
 and obtained by the orchestrator via a `captureEngine` type assertion, so a
 binary without the authoring seams linked simply skips capture (never a hard
 failure).
+
+## Multi-phase composition (issue #1163)
+
+A long, sequential Responsibility decomposes into ordered PHASES. The design
+pass (`authoringDesign`) optionally emits a `phases[]` array (each: name +
+purpose + its own dependency closure) instead of a flat `dependencies` list;
+single-phase duties stay flat (the common case, unchanged).
+
+The emit pass (`agent_loop_authoring_phases.go`) then:
+
+- emits one sub-automation + its authored closure PER PHASE, reusing the same
+  `authoringEmit` prompt the single-phase path uses (a phase IS "one automation
+  + its closure"), and
+- DETERMINISTICALLY synthesizes the headline automation in Go -- it chains the
+  phase sub-automations with ordered `step` blocks, each phase after the first
+  gated on the prior step's result (`if steps.phaseN.result { automation … }`).
+  The automation scheduler's inter-step dependency topo-sort turns that into a
+  real sequence (phase 0 -> phase 1 -> …, never concurrent). Synthesizing in Go
+  (not via the model) makes the chaining unverifiable-by-fumble and
+  unit-testable without an engine; the synthesized headline is proven to compile
+  through the real Gate-1 sandbox.
+
+The phase sub-automations + headline are trigger-less -- invoked via the `step {
+automation … }` kind, not a real-world event -- which fits the capture path (a
+one-off task has no recurring trigger; the bundle is a replayable record). Gate
+1/repair, capture persistence, and `bundleAutomationSource` operate on the flat
+construct list, so a multi-phase bundle is just "more constructs, one of which
+is the headline" -- no downstream change. Concurrent (parallel-branch) execution
+of independent phases is the follow-up (#1164).

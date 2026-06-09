@@ -158,6 +158,13 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, planId, stat
 // are NOT authored -- their real cataloged names are passed as grounding so
 // the automation + authored constructs reference real symbols.
 func (l *PlannerAgentLoop) emitBundle(ctx context.Context, statement string, plan designPlan) (authoringBundle, error) {
+	// Multi-phase decomposition (#1163): emit one sub-automation per phase and
+	// synthesize the headline that chains them in sequence. See
+	// agent_loop_authoring_phases.go.
+	if plan.isMultiPhase() {
+		return l.emitMultiPhaseBundle(ctx, statement, plan)
+	}
+
 	authored := make([]map[string]any, 0, len(plan.Dependencies))
 	reuse := make([]map[string]any, 0)
 	edges := make([]reuseEdge, 0)
