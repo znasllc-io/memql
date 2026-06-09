@@ -108,3 +108,10 @@ bin/tools/
 # committed.
 docker/nginx/certs/*.crt
 docker/nginx/certs/*.key
+
+# Generated docs reference (produced by cmd/docs-gen at bundle/release time)
+docs/public/reference/_generated/*
+!docs/public/reference/_generated/.gitkeep
+# Docs bundle staging + tarballs
+/docs-bundle/
+/docs-*.tgz
