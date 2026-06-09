@@ -66,6 +66,14 @@ func (s *Stamper) ExecuteToolByName(ctx context.Context, toolName string, args m
 		return s.Engine.ExecuteToolByName(ctx, toolName, args)
 	}
 
+	// Did THIS call materialize the synthetic ad-hoc Plan? (PlanId empty before
+	// ensure = the ad-hoc-chat-tool-call case.) If so we own its lifecycle and
+	// must drive it to terminal after dispatch -- otherwise the synthetic
+	// adHocAction Plan + callTool wrapper sit "running" forever (memql#1186).
+	// A REAL caller-supplied Plan (PlanId set) is the planner's to finalize, so
+	// we never touch its status here.
+	createdSyntheticPlan := pc.PlanId == ""
+
 	ctx, pc, err := s.ensurePlanAndSemanticTask(ctx, pc)
 	if err != nil {
 		// Synthetic-Plan / semantic-Task materialization failed. Log and
@@ -92,12 +100,56 @@ func (s *Stamper) ExecuteToolByName(ctx context.Context, toolName string, args m
 	if err := s.stampPost(ctx, taskId, result, execErr, completedAt); err != nil {
 		s.Logger.Warn("taskstamp: post-dispatch stamp failed",
 			"tool", toolName, "taskId", taskId, "error", err)
-		// Row will be stuck in 'running' status; observability surfaces
-		// can detect this as "stale running" rows and reconcile.
+		// toolInvocation row will be stuck in 'running'; observability
+		// surfaces can detect this as "stale running" and reconcile.
+	}
+
+	// Finalize the synthetic ad-hoc wrapper we created so it doesn't linger
+	// "running". The ad-hoc tool call is self-contained: its toolInvocation
+	// row already captured the outcome, so the wrapper Plan + semantic task
+	// reflect that outcome (succeeded, or failed if the tool errored). A
+	// best-effort write -- a finalize failure must never break the tool call.
+	if createdSyntheticPlan {
+		s.finalizeAdHocWrapper(ctx, pc, execErr, completedAt)
 	}
 	_ = startedAt // reserved for future per-call duration metrics
 
 	return result, execErr
+}
+
+// finalizeAdHocWrapper drives the synthetic adHocAction Plan + its callTool
+// semantic Task to a terminal status (succeeded, or failed when the wrapped
+// tool call errored) so they don't sit "running" forever (memql#1186). Both
+// writes are best-effort + logged: observability bookkeeping must never break
+// the user-facing tool call. Only ever called for stamper-materialized
+// synthetic plans -- never a caller-supplied real Plan.
+func (s *Stamper) finalizeAdHocWrapper(ctx context.Context, pc PlanContext, execErr error, completedAt time.Time) {
+	status := "succeeded"
+	if execErr != nil {
+		status = "failed"
+	}
+	ts := completedAt.UTC().Format(time.RFC3339)
+
+	if pc.SemanticTaskId != "" {
+		tq := fmt.Sprintf(
+			`mutationUpdateTaskStatus({"taskId": %q, "status": %q, "completedAt": %q})`,
+			pc.SemanticTaskId, status, ts,
+		)
+		if _, err := s.Engine.Execute(ctx, tq); err != nil {
+			s.Logger.Warn("taskstamp: finalize ad-hoc semantic task failed",
+				"taskId", pc.SemanticTaskId, "error", err)
+		}
+	}
+	if pc.PlanId != "" {
+		pq := fmt.Sprintf(
+			`mutationUpdatePlanStatus({"planId": %q, "status": %q, "completedAt": %q})`,
+			pc.PlanId, status, ts,
+		)
+		if _, err := s.Engine.Execute(ctx, pq); err != nil {
+			s.Logger.Warn("taskstamp: finalize ad-hoc plan failed",
+				"planId", pc.PlanId, "error", err)
+		}
+	}
 }
 
 // ensurePlanAndSemanticTask materializes the synthetic rows when the
