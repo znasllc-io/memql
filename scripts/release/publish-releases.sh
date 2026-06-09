@@ -129,6 +129,42 @@ function create_release() {
     fi
 }
 
+# attach_docs_bundle TAG -- build the per-version documentation bundle and
+# upload it as a release asset (znasllc-io/memql#1172), so memql.io can consume
+# a versioned docs snapshot per release. Best-effort + non-fatal: it needs `go`
+# (to run cmd/docs-gen); if go is absent or the build fails it warns and skips,
+# so a docs-tooling gap never blocks the Release itself. The bundle reflects the
+# current checkout's docs/public -- on the CI push that introduces a lockfile
+# that is the release commit, so the snapshot matches the release.
+function attach_docs_bundle() {
+    local tag="$1"
+    [ -n "$tag" ] || return 0
+    if [ "$DRY_RUN" = true ]; then
+        echo "PLAN: build + upload docs-${tag}.tgz to ${MEMQL_REPO} ${tag}"
+        return 0
+    fi
+    if ! command -v go >/dev/null 2>&1; then
+        warn "go not found; skipping docs bundle for ${tag} (run scripts/docs/build-docs-bundle.sh + 'gh release upload' manually)"
+        return 0
+    fi
+    if ! gh_release_exists "$tag" "$MEMQL_REPO"; then
+        warn "release ${tag} not present yet; skipping docs bundle"
+        return 0
+    fi
+    info "building docs bundle for ${tag}..."
+    if ! bash "$REPO_ROOT/scripts/docs/build-docs-bundle.sh" --version="$tag"; then
+        warn "docs bundle build failed for ${tag}; release left without a docs asset"
+        return 0
+    fi
+    local tarball="$REPO_ROOT/docs-${tag}.tgz"
+    [ -f "$tarball" ] || { warn "expected ${tarball} not produced; skipping upload"; return 0; }
+    if gh release upload "$tag" "$tarball" --repo "$MEMQL_REPO" --clobber >/dev/null 2>&1; then
+        info "uploaded docs-${tag}.tgz to ${MEMQL_REPO} ${tag}"
+    else
+        warn "failed to upload docs-${tag}.tgz to ${tag}"
+    fi
+}
+
 # publish_memql -- one Release per lockfile, anchored at its introducing commit.
 function publish_memql() {
     local versions; versions="$(lockfile_versions)"
@@ -150,6 +186,10 @@ function publish_memql() {
             "$subj" "$engine" "$gate" "$short" "$v" "$ACR_NAME" "$digests")"
         create_release "$MEMQL_REPO" "$v" "$sha" "$v" "$notes" "$latest"
     done
+    # Attach the versioned docs bundle to the latest release (#1172). Only the
+    # latest, since the bundle reflects the current tree -- backfilling old
+    # versions with current docs would be misleading.
+    [ -z "$ONLY_VERSION" ] && attach_docs_bundle "$latest_ver" || attach_docs_bundle "$ONLY_VERSION"
 }
 
 # publish_components -- dedup-by-digest, ACR-build-time anchored.

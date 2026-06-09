@@ -42,7 +42,15 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0 # need full history to find each lockfile's introducing commit
-      - name: publish memql Releases (idempotent)
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+          cache: false # one-shot run; build-cache restore not worth it here
+      - name: publish memql Releases + attach docs bundle (idempotent)
         env:
           GH_TOKEN: ${{ github.token }}
+        # Publishes the Release(s), then builds + attaches docs-<latest>.tgz via
+        # cmd/docs-gen + scripts/docs/build-docs-bundle.sh. The docs step is
+        # best-effort: a failure leaves the Release intact, just without the docs
+        # asset. memql.io consumes the per-release bundle (memql#1172).
         run: bash scripts/release/publish-releases.sh --repo=memql
