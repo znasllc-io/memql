@@ -36,6 +36,15 @@ import (
 // caps.
 const anamDefaultMaxSessionSeconds = 3600
 
+// anamDefaultSilenceEndSeconds keeps Anam from ending the session on
+// conversational silence. Anam's voiceDetectionOptions.silenceBeforeSessionEndSeconds
+// has a short default, and our avatar audio byte-stream is segmented (silent
+// between the assistant's utterances), so the default ended the session on the
+// first pause (~27s -- the real cause behind memql#1209/#1222, length-cap-
+// independent). 1h effectively means "never end on a normal pause"; clamp range
+// is 0..7200 per Anam. Override with MEMQL_ANAM_SILENCE_END_SECONDS.
+const anamDefaultSilenceEndSeconds = 3600
+
 // anamClient is the CGO-free Anam REST integration for one resolved plan.
 type anamClient struct {
 	plan AvatarPlan
@@ -156,6 +165,21 @@ func (c *anamClient) createSessionToken(ctx context.Context, avatarID, livekitUR
 		}
 	}
 	personaCfg["maxSessionLengthSeconds"] = maxSec
+	// THE actual ~27s-drop cause (memql#1224): Anam ends the session after
+	// voiceDetectionOptions.silenceBeforeSessionEndSeconds of silence. Our avatar
+	// audio byte-stream is segmented (silent between the assistant's utterances),
+	// so Anam's short default ended it on the first conversational pause -- which
+	// is why maxSessionLengthSeconds (a LENGTH cap) didn't help. Set it high
+	// (default 1h) so a normal pause never ends the avatar; MEMQL_ANAM_SILENCE_END_SECONDS overrides.
+	silenceEndSec := anamDefaultSilenceEndSeconds
+	if v := strings.TrimSpace(os.Getenv("MEMQL_ANAM_SILENCE_END_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			silenceEndSec = n
+		}
+	}
+	personaCfg["voiceDetectionOptions"] = map[string]any{
+		"silenceBeforeSessionEndSeconds": silenceEndSec,
+	}
 	payload := map[string]any{
 		"personaConfig": personaCfg,
 		"environment": map[string]any{
