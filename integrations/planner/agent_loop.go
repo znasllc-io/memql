@@ -1111,6 +1111,52 @@ func stripJSONFence(raw []byte) []byte {
 	return bytes.TrimSpace(rest[:len(rest)-3])
 }
 
+// extractJSONObject pulls the first balanced top-level JSON object out of a
+// model response, tolerating prose preamble/postamble the model wraps around it
+// (e.g. a repair pass that explains its reasoning -- "Looking at each
+// diagnostic: 1. ..." -- before/after the JSON, which broke strict
+// json.Unmarshal and aborted the authoring run, memql#1185). It strips a code
+// fence first, then scans from the first '{' to its matching '}', skipping
+// braces inside string literals (and their escapes). If no balanced object is
+// found it returns the fence-stripped input unchanged so the caller's
+// json.Unmarshal surfaces the original error.
+func extractJSONObject(raw []byte) []byte {
+	s := stripJSONFence(raw)
+	start := bytes.IndexByte(s, '{')
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	inStr := false
+	esc := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return s // unbalanced -- let the caller's unmarshal report the real error
+}
+
 // --- small helpers --------------------------------------------------------
 
 func extractPlanFields(ev events.Event) (planId, kind, status string, ok bool) {

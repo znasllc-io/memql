@@ -450,7 +450,7 @@ func parseDesignDependencies(resp any) (designResult, error) {
 		}
 		raw = b
 	}
-	raw = stripJSONFence(raw)
+	raw = extractJSONObject(raw)
 	var res designResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return designResult{}, fmt.Errorf("parse design JSON: %w (raw=%s)", err, truncate(string(raw), 200))

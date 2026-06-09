@@ -362,7 +362,7 @@ func parseEmittedConstructs(resp any) ([]memql.SandboxConstruct, error) {
 		}
 		raw = b
 	}
-	raw = stripJSONFence(raw)
+	raw = extractJSONObject(raw)
 	var res emitResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, fmt.Errorf("parse emitted constructs JSON: %w (raw=%s)", err, truncate(string(raw), 200))

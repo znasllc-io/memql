@@ -38,6 +38,43 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// flattenToSingleDeliverable collapses a multi-phase design plan into a single
+// flat automation (memql#1185). A one-off task capture (produceArtifact /
+// adHocAction) is a SINGLE deliverable -- decomposing "write an article" into
+// sequential phases is over-engineering that multiplies the constructs the emit
+// must get right (the live test saw a simple list become a 2-phase, 5-failure
+// bundle that never compiled). So for the capture path we merge every phase's
+// dependency closure into one flat list and drop the phases, emitting ONE
+// automation. Multi-phase composition stays available for genuinely staged work
+// (the Responsibility path); it just isn't forced onto single deliverables.
+// No-op when the plan is already single-phase.
+func flattenToSingleDeliverable(plan designPlan) designPlan {
+	if !plan.isMultiPhase() {
+		return plan
+	}
+	seen := map[string]bool{}
+	deps := make([]resolvedDependency, 0, len(plan.Dependencies))
+	add := func(d resolvedDependency) {
+		key := d.Kind + "/" + d.Name
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		deps = append(deps, d)
+	}
+	for _, d := range plan.Dependencies {
+		add(d)
+	}
+	for _, ph := range plan.Phases {
+		for _, d := range ph.Dependencies {
+			add(d)
+		}
+	}
+	plan.Dependencies = deps
+	plan.Phases = nil
+	return plan
+}
+
 // emitMultiPhaseBundle emits a phased bundle: one sub-automation (+ its
 // authored closure) per phase via the per-phase authoringEmit call, plus the
 // Go-synthesized headline that chains them in order. Reuse edges union across
