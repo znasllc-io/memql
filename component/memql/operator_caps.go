@@ -1,5 +1,7 @@
 package memql
 
+import "log/slog"
+
 // operatorCaps.go — Expansion of CoPresent Control capability slugs
 // into the concrete tool names the tool-calling loop understands.
 //
@@ -209,6 +211,51 @@ func ExpandCapabilitySlugs(raw []string) []string {
 		add(entry)
 	}
 	return out
+}
+
+// VerifyCapabilityToolsRegistered is a boot-time self-check (memql#1156).
+// It guards against the failure mode where a tool slice silently fails to
+// parse and is dropped from the registry (e.g. memql#1154's unrecognized
+// @requires annotation), so the agent only discovers the missing tool at
+// RUNTIME as "tool not in registry" -- by which point produceArtifact can
+// already be looping.
+//
+// For each capability slug, if ANY of its expanded tools is registered (i.e.
+// this node loads that capability surface) then ALL of them must be; a partial
+// set is the bug. This self-scopes cleanly: on a node that doesn't load the
+// carrier/agent tool tree at all (voice, identity), NONE of a slug's tools are
+// registered, so the slug is skipped -- no false alarm. It logs ONE loud ERROR
+// per incomplete slug (turning a silent-until-runtime failure into a loud-at-
+// boot one) and returns the full missing set so callers/tests can fail fast.
+//
+// `has` is the registry membership probe (pass toolRegistry.Has at boot).
+func VerifyCapabilityToolsRegistered(has func(string) bool, logger *slog.Logger) []string {
+	if has == nil {
+		return nil
+	}
+	var allMissing []string
+	for slug, tools := range capabilitySlugs {
+		anyPresent := false
+		var missing []string
+		for _, name := range tools {
+			if has(name) {
+				anyPresent = true
+			} else {
+				missing = append(missing, name)
+			}
+		}
+		if anyPresent && len(missing) > 0 {
+			if logger != nil {
+				logger.Error("capability tool(s) MISSING from the tool registry -- a tool slice likely failed to parse and was SILENTLY skipped by the loader; the agent will hit 'tool not in registry' at runtime and can loop. Fix the tool definition (memql#1156 / #1154).",
+					"capability", slug,
+					"missing", missing,
+					"expected", tools,
+				)
+			}
+			allMissing = append(allMissing, missing...)
+		}
+	}
+	return allMissing
 }
 
 // HasOperatorCapability reports whether the expanded tool list
