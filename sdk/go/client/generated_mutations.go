@@ -1907,6 +1907,7 @@ type MutationCreateAuthoringBundleArgs struct {
 	Title               string
 	Summary             string
 	ResponsibilityId    string
+	SourcePlanId        string
 	Version             int
 	SupersedesBundleId  string
 	ReusedConstructRefs []map[string]any
@@ -1941,6 +1942,13 @@ func MutationCreateAuthoringBundleBuild(args MutationCreateAuthoringBundleArgs) 
 		}
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
+	}
+	if args.SourcePlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourcePlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
 	}
 	if args.Version != 0 {
 		if b.Len() > 17 {
