@@ -289,15 +289,10 @@ func (b *realtimeRoomBridge) nativeSessionConfig() openai.SessionConfig {
 	// is far too conservative here), which also broke barge-in. server_vad is a
 	// deterministic energy gate -- it commits SilenceDurationMs after the user
 	// drops below Threshold, so end-of-turn is fast and predictable, and
-	// interrupt_response gives clean barge-in.
-	cfg.TurnDetection = &openai.TurnDetectionConfig{
-		Type:              "server_vad",
-		CreateResponse:    true,
-		InterruptResponse: true,
-		Threshold:         0.5,
-		PrefixPaddingMs:   300,
-		SilenceDurationMs: 500,
-	}
+	// interrupt_response gives clean barge-in. The knobs (Threshold raised off
+	// the OpenAI 0.5 default so noise/silence no longer commits a phantom turn)
+	// are tunable via MEMQL_REALTIME_VAD_* and built by realtimeServerVad (#1203).
+	cfg.TurnDetection = realtimeServerVad(b.cfg)
 	cfg.InputTranscription = &openai.InputTranscriptionConfig{
 		Model:    b.transcriptionModel,
 		Language: b.language,

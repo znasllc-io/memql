@@ -94,6 +94,22 @@ type Config struct {
 	RealtimeMaxSessionSec  int
 	RealtimeMaxAudioTokens int
 
+	// Realtime server_vad turn-detection knobs (#1203) for the native 1-on-1
+	// path. These tune the root-cause hallucination fix: silence/ambient noise
+	// must not cross the energy gate and commit a phantom turn the model then
+	// replies to. #1199 filters the bad transcript post-hoc; this stops the turn
+	// being detected at all.
+	//
+	// RealtimeVadThreshold is the speech-energy gate (0..1). Raised from the
+	// OpenAI 0.5 default to 0.6 so low-energy ambient noise no longer trips a
+	// turn; tunable up toward 0.9 for noisy rooms. RealtimeVadPrefixPaddingMs is
+	// how much audio before onset to keep; RealtimeVadSilenceDurationMs is how
+	// long input must stay below threshold before the turn commits (end-of-turn
+	// snappiness).
+	RealtimeVadThreshold         float64
+	RealtimeVadPrefixPaddingMs   int
+	RealtimeVadSilenceDurationMs int
+
 	// memQL gRPC.
 	MemqlGRPCAddr string
 	// Identity-issued class="voice_agent" JWT bearer presented on every
@@ -180,6 +196,18 @@ func LoadConfig(getenv Getenv) (Config, error) {
 		}
 		return n
 	}
+	getFloat := func(key string, def float64) float64 {
+		raw := strings.TrimSpace(getenv(key))
+		if raw == "" {
+			return def
+		}
+		f, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			// Warn-and-fall-back, matching getInt.
+			return def
+		}
+		return f
+	}
 
 	var cfg Config
 	var err error
@@ -224,6 +252,11 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
 	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
 	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)
+	// #1203 server_vad knobs. Defaults tightened over the OpenAI baseline
+	// (threshold 0.5) so silence/noise no longer commits a phantom turn.
+	cfg.RealtimeVadThreshold = getFloat("MEMQL_REALTIME_VAD_THRESHOLD", 0.6)
+	cfg.RealtimeVadPrefixPaddingMs = getInt("MEMQL_REALTIME_VAD_PREFIX_PADDING_MS", 300)
+	cfg.RealtimeVadSilenceDurationMs = getInt("MEMQL_REALTIME_VAD_SILENCE_DURATION_MS", 500)
 
 	cfg.AvatarVendor = strings.ToLower(get("MEMQL_AVATAR_VENDOR", "anam"))
 	cfg.AnamAPIKey = get("ANAM_API_KEY", "")
