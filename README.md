@@ -80,7 +80,7 @@ make deploy VERSION=X
 - **[CLAUDE.md](CLAUDE.md)** - Project overview and architecture
 - **[docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)** - 5-minute setup guide
 - **[GLOSSARY.md](GLOSSARY.md)** - Complete documentation index
-- **[TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)** - Tech stack and deployment practices
+- **[docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)** - Tech stack and deployment practices
 
 ---
 
@@ -118,9 +118,9 @@ make deploy VERSION=X
 - **Database:** TimescaleDB Cloud (Tiger Cloud) - separate instance
 - **Service:** Azure Kubernetes Service (AKS)
 - **Access:** Senior/Lead developers only
-- **Deploy:** Promote a validated version (see DEPLOYMENT_STRATEGY.md)
+- **Deploy:** Promote a validated version (see docs/public/operate/deployment-strategy.md)
 
-**Full details:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
+**Full details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
 ---
 
@@ -319,7 +319,7 @@ memQL runs on Azure Kubernetes Service (AKS). Deploy to staging with
 `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`); production
 promotes a validated version.
 
-See [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) for deploy/topology
+See [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md) for deploy/topology
 (cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`, Tiger Cloud DB,
 the migration + smoke gates, and the staging → prod promotion flow).
 
@@ -327,7 +327,7 @@ the migration + smoke gates, and the staging → prod promotion flow).
 
 ## Contributing
 
-1. Read [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
+1. Read [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 2. Make changes and test in development environment (`go test ./...`)
 3. Deploy to staging for integration testing
 4. Commit directly to `main` for focused changes, or open a PR when review is useful
@@ -348,7 +348,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 1. **Quick start:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
 2. **Find documentation:** [GLOSSARY.md](GLOSSARY.md)
-3. **Tech stack details:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
+3. **Tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 4. **Component docs:** Check directory `CLAUDE.md` files
 5. **Issues:** Create GitHub issue
 

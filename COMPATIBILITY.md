@@ -47,7 +47,7 @@ pinning:
    immutable backend image. Because the import graph is
    **carrier → memQL** (never the reverse), memQL carries no require on
    the carrier — see
-   [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md#dependency-direction-why-memql-carries-no-bff-require).
+   [docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md#dependency-direction-why-memql-carries-no-bff-require).
 
 3. **memql-cockpit → memql (declared minimum).** Cockpit is a gRPC
    client, not part of the backend image, so it is not in the build

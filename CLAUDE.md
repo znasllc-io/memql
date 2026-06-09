@@ -110,7 +110,7 @@ memQL/
 
 **Full index:** [GLOSSARY.md](GLOSSARY.md) - Find any documentation
 
-**Tech stack:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md) - Deployment practices
+**Tech stack:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md) - Deployment practices
 
 **Operations:**
 - [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
@@ -246,7 +246,7 @@ frontend coordination.
 - **Devices:** MacBook Pro or MacBook Air (M1/M2/M3 chips)
 - **Reason:** Standardized development environment
 
-**Full tech stack details:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
+**Full tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
 ### System Architecture
 ```

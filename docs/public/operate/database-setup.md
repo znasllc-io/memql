@@ -1,3 +1,12 @@
+---
+title: Database Setup
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.9.0
+owner: znas
+---
+
 # Database Setup
 
 **Last Updated**: February 21, 2026
@@ -22,7 +31,7 @@ memQL uses **separate databases** for each environment to ensure complete isolat
 
 ### Google Cloud Secret Manager
 
-**Note:** Development environment variables follow the bootstrap-envelope-plus-concept-storage model -- run `make bootstrap` for the small required env set, then `make secrets-init` + `make secrets-seed` to populate the rest in memQL's concept storage. See [docs/public/operate/env-vars.md](docs/public/operate/env-vars.md).
+**Note:** Development environment variables follow the bootstrap-envelope-plus-concept-storage model -- run `make bootstrap` for the small required env set, then `make secrets-init` + `make secrets-seed` to populate the rest in memQL's concept storage. See [docs/public/operate/env-vars.md](env-vars.md).
 
 | Secret Name | Environment | Database | Used By |
 |-------------|-------------|----------|---------|
@@ -373,7 +382,7 @@ psql "$(gcloud secrets versions access latest --secret='MEMORY_NODES_DATABASE_DS
 
 ## [NOTE] See Also
 
-- [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) - Deployment procedures
+- [DEPLOYMENT_STRATEGY.md](deployment-strategy.md) - Deployment procedures
 - [Tiger Cloud CLI Docs](https://docs.timescale.com/use-timescale/latest/services/cli/)
 - Tiger Cloud Dashboard: https://console.cloud.timescale.com/
 

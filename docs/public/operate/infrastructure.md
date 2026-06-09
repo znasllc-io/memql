@@ -1,3 +1,12 @@
+---
+title: Infrastructure Management Guide
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.9.0
+owner: znas
+---
+
 # Infrastructure Management Guide
 
 memQL + CoPresent run on **Azure Kubernetes Service** (cluster
@@ -9,11 +18,11 @@ The former Google Cloud Run / Cloud Build / Artifact Registry / Secret Manager
 infrastructure is retired. To avoid the doc drift that retirement caused, this
 guide is intentionally a pointer rather than a duplicate:
 
-- **[DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md)** — authoritative deploy +
+- **[DEPLOYMENT_STRATEGY.md](deployment-strategy.md)** — authoritative deploy +
   operations reference: topology, deploy flow, config precedence, secrets/
   re-seal, identity HA, the promotion gate, deep smoke, zero-downtime, recovery,
   and capacity.
-- **[deploy/k8s/README.md](deploy/k8s/README.md)** — manifest-level reference
+- **[../../../deploy/k8s/base/README.md](../../../deploy/k8s/base/README.md)** — manifest-level reference
   (per-node Deployments, HA, migrations-run-once, apply order, validation).
-- **[deploy/k8s/README-public-entry.md](deploy/k8s/README-public-entry.md)** —
+- **[../../../deploy/k8s/base/README-public-entry.md](../../../deploy/k8s/base/README-public-entry.md)** —
   ingress-nginx + cert-manager + internal TLS / public entry.
