@@ -180,11 +180,11 @@ Active planning docs only -- removed when work ships. Currently:
 Top-level docs that aren't handoffs, planning entries, or reference
 material. Listed here so the index is exhaustive.
 
-- [PLANNER_TODO.md](PLANNER_TODO.md) -- single-source-of-truth todo
+- PLANNER_TODO.md -- single-source-of-truth todo
   list for the remaining v1 planner build-out (Cognition triage
   wire-up, lazy embedding, container-executor work, real budget
   enforcement). Each item carries scope + dependencies + effort.
-- [dsl-import-model-refactor.md](dsl-import-model-refactor.md) --
+- [dsl-import-model-refactor.md](internal/design/dsl-import-model-refactor.md) --
   the import-model pivot landed via PRs #47 / #48 / #49 on 2026-05-19.
   File-top `use <module>.{ names }` imports + concept-in-signature
   signatures (`query <Concept> <name>`, etc.) replaced the legacy
@@ -199,7 +199,7 @@ material. Listed here so the index is exhaustive.
 Cross-session handoff notes for ongoing refactors. Removed when the
 work fully lands.
 
-- [handoff-prompt.md](handoff-prompt.md) -- meta-template: the briefing
+- handoff-prompt.md -- meta-template: the briefing
   prompt for onboarding a new implementer (agent or developer). Points
   at CLAUDE.md, the memory directory, and the active handoff list below.
 
@@ -207,7 +207,7 @@ work fully lands.
 
 ## Roadmap
 
-[ROADMAP.md](ROADMAP.md) -- future-work tracker. Items here are
+[ROADMAP.md](internal/planning/roadmap.md) -- future-work tracker. Items here are
 deliberately deferred, not abandoned. Update as scope clarifies or
 work moves into a `planning/` doc.
 

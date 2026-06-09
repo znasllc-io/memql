@@ -2,7 +2,7 @@ package knowledge
 
 // Tier-C authoritative-source ingest via Wikipedia.
 //
-// Per docs/planning/knowledge-seeder.md: Tier C domains (clinical
+// Per docs/internal/planning/knowledge-seeder.md: Tier C domains (clinical
 // medicine, surgical specialties, etc.) are deemed too high-stakes
 // for LLM-generated baseline content. The original design called
 // for them to ship with a single "upload your own authoritative

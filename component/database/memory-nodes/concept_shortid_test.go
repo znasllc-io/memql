@@ -6,7 +6,7 @@ import (
 )
 
 // TestValidateShortId pins the contract documented in
-// docs/core/identifiers.md ("Anti-patterns"). Post-#56 phase 6 the
+// docs/public/concepts/identifiers.md ("Anti-patterns"). Post-#56 phase 6 the
 // canonical form is `concept:shortId` (no partition segment); the
 // two landed bugs (seed materializer's "trainerAgent-_system:v1:..."
 // compound id, and the checkpoint writer's

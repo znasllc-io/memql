@@ -27,7 +27,7 @@ import "github.com/znasllc-io/memql/component/language/annotations"
 // from issue #54 — no runtime semantics, just the author's explicit
 // acknowledgement that the construct is intentionally callable without
 // a caller-scope filter (concept catalogs, pre-auth login paths). See
-// docs/auth/per-row-authz-audit.md.
+// docs/public/operate/auth/per-row-authz-audit.md.
 
 var (
 	allowedQueryAnnotations      = annotations.Set("Query")

@@ -12,7 +12,7 @@ import (
 )
 
 // realtime.go is the hand-rolled OpenAI gpt-realtime (speech-to-speech)
-// WebSocket client, built per docs/voice/453-gpt-realtime-go.md ("hand-roll a
+// WebSocket client, built per docs/internal/design/voice-453-gpt-realtime-go.md ("hand-roll a
 // thin client on nhooyr.io/websocket; do NOT use go-openai"). It is the same
 // client shape as asr.go (the in-production transcription-only realtime client)
 // with a wider event vocabulary and an audio-out channel.
@@ -22,7 +22,7 @@ import (
 // (room_realtime_voice.go, `//go:build voice`) is the only voice-tagged code;
 // this client is unit-tested in the default lane.
 //
-// Conductor-gate posture (docs/voice/432-conductor-response-gate.md, option A):
+// Conductor-gate posture (docs/internal/design/voice-432-conductor-response-gate.md, option A):
 // the session is configured with turn_detection:null. The model never runs
 // input VAD, never auto-commits the input buffer, and never self-creates a
 // response. Every response.create is driven explicitly by the caller (the Go

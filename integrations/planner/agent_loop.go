@@ -128,7 +128,7 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 		//   queued until the agents integration subscribes to plan-
 		//   created events (requires widening PluginContext to expose
 		//   the EventBus). Documented in
-		//   docs/planning/agent-role-catalog.md.
+		//   docs/internal/planning/agent-role-catalog.md.
 		return
 	}
 	if status != "planning" && status != "queued" {

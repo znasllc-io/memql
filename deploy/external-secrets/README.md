@@ -98,4 +98,4 @@ Key-Vault references do).
 ## DR
 
 Secret recovery + DB point-in-time recovery + the rollback rehearsal are in
-[../../docs/ops/dr-runbook.md](../../docs/ops/dr-runbook.md).
+[../../docs/internal/ops/dr-runbook.md](../../docs/internal/ops/dr-runbook.md).

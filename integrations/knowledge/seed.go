@@ -22,7 +22,7 @@ type StandardDomain struct {
 	RelevantForRoles    []string
 	RequiredByToolSlugs []string
 	// Tier drives the seeder's content strategy per
-	// docs/planning/knowledge-seeder.md:
+	// docs/internal/planning/knowledge-seeder.md:
 	//   "A" -- general knowledge, LLM-generated chunks ship as-is.
 	//   "B" -- safety-relevant; LLM-generated + a disclaimer chunk
 	//          ("general info, not professional advice") prepended.
@@ -404,7 +404,7 @@ var standardDomains = []StandardDomain{
 		Description: "Purchase contracts, earnest money, title search, title insurance, escrow, closing disclosure, closing costs breakdown, deed recording, walk-through checklist."},
 
 	// =========================================================================
-	// CATALOG EXPANSION (per docs/planning/knowledge-seeder.md)
+	// CATALOG EXPANSION (per docs/internal/planning/knowledge-seeder.md)
 	//
 	// Adds ~150 domains across science, medicine, humanities, arts, and
 	// specialized fields. Each entry carries a Tier:

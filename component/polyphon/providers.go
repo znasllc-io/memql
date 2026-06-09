@@ -56,7 +56,7 @@ func DefaultASRConfig() ASRConfig {
 
 // ASRResultKind discriminates the turn-structure role of an ASRResult.
 // It is an additive, backward-compatible enrichment of the stream
-// contract (see docs/voice/452-turntaking-orchestration-go.md, step 1):
+// contract (see docs/internal/design/voice-452-turntaking-orchestration-go.md, step 1):
 // the zero value (ASRKindTranscript) preserves the historical
 // interim/final-via-IsFinal behavior, so existing consumers that only
 // read Text/IsFinal are unaffected. The Go turn-taking machine (#455)

@@ -12,7 +12,7 @@ stable ReplicaSet — no `rollout undo`, no script.
 |---|---|
 | #680 — smoke hit the wrong public host (SPA catch-all) | The gate dials **in-cluster service DNS** (`bff-preview:8085`, `cognition-canary:50051`), never a public host. |
 | #682 — smoke raced rolling convergence (mixed-version pods) | Analysis runs as a **Rollout step** against the **preview/canary** ReplicaSet only, after its pods are Ready — never against a load-balanced public endpoint mid-converge. |
-| #691 — PAT rejected on the BFF | The auth check uses the **`class="service_account"` JWT** (verifies on the BFF via JWKS, no DB). See `docs/auth/service-account-jwt.md`. |
+| #691 — PAT rejected on the BFF | The auth check uses the **`class="service_account"` JWT** (verifies on the BFF via JWKS, no DB). See `docs/public/operate/auth/service-account-jwt.md`. |
 | firewall-coupled, untested shell | The gate is a **declarative, tested k8s artifact** running inside the mesh. |
 
 ## Files
@@ -71,7 +71,7 @@ kubectl -n memql create secret generic deploy-gate-jwt \
 ```
 
 Wire an identity-side `CronJob` to re-mint on the 1h TTL cadence. Full design:
-`docs/auth/service-account-jwt.md`.
+`docs/public/operate/auth/service-account-jwt.md`.
 
 ## Convert BFF → blue/green (SUPERVISED cutover)
 

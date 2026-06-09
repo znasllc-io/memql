@@ -363,7 +363,7 @@ func (s *deepgramASRStream) handleEvent(raw []byte) {
 		// this and the first non-empty Results event tells us
 		// Deepgram's first-partial latency. Surface it as a
 		// speech-started ASRResult (additive Kind discriminator, see
-		// docs/voice/452-turntaking-orchestration-go.md step 1) so the
+		// docs/internal/design/voice-452-turntaking-orchestration-go.md step 1) so the
 		// turn-taking machine can drive human-turn entry + barge-in
 		// onset. Transcript-only consumers ignore the kind and skip the
 		// empty-text result, so this is backward-compatible.

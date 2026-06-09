@@ -9,7 +9,7 @@ Quick access to all memQL documentation by topic.
 
 | Document | Description |
 |----------|-------------|
-| **[QUICKSTART](QUICKSTART.md)** | Get running in 5 minutes |
+| **[QUICKSTART](docs/public/overview/quickstart.md)** | Get running in 5 minutes |
 | **[CLAUDE.md](CLAUDE.md)** | Project overview for SI assistants |
 | **[Docker Setup](docker/README.md)** | Full Docker stack details |
 
@@ -19,23 +19,23 @@ Quick access to all memQL documentation by topic.
 
 | Topic | Document | Description |
 |-------|----------|-------------|
-| **Architecture** | [docs/core/arch.md](docs/core/arch.md) | System design and components (comprehensive) |
-| **MemQL Language** | [docs/core/memql.md](docs/core/memql.md) | Query language reference (comprehensive) |
-| **Functions** | [docs/core/memql-functions.md](docs/core/memql-functions.md) | Function system reference |
-| **Events** | [docs/core/events.md](docs/core/events.md) | Event system and subscriptions |
-| **Permissions** | [docs/core/permissions_and_access_control.md](docs/core/permissions_and_access_control.md) | Access control model |
-| **Attributes** | [docs/core/attribute-matrix.md](docs/core/attribute-matrix.md) | Attribute schema reference |
-| **Naming Conventions** | [docs/core/memql-naming-conventions.md](docs/core/memql-naming-conventions.md) | MemQL naming conventions |
-| **Reserved Names** | [docs/core/memql-reserved.md](docs/core/memql-reserved.md) | Single index of every reserved identifier (engine names, row intrinsics, caller envelope, keywords, annotations, import aliases) |
-| **Operator Capabilities** | [docs/core/operator-capabilities.md](docs/core/operator-capabilities.md) | Capability slugs (copresent_control, computer_use_headless, computer_use_embodied, workbench_use) and how they expand into concrete tools |
-| **Identifier Conventions** | [docs/core/identifiers.md](docs/core/identifiers.md) | Canonical node id format, dispatch-site composition, anti-patterns |
-| **Specifications** | [docs/core/memql-specifications.md](docs/core/memql-specifications.md) | MemQL specifications reference |
+| **Architecture** | [docs/public/concepts/architecture.md](docs/public/concepts/architecture.md) | System design and components (comprehensive) |
+| **MemQL Language** | [docs/public/language/memql.md](docs/public/language/memql.md) | Query language reference (comprehensive) |
+| **Functions** | [docs/public/language/functions.md](docs/public/language/functions.md) | Function system reference |
+| **Events** | [docs/public/concepts/events.md](docs/public/concepts/events.md) | Event system and subscriptions |
+| **Permissions** | [docs/public/concepts/permissions-and-access-control.md](docs/public/concepts/permissions-and-access-control.md) | Access control model |
+| **Attributes** | [docs/public/language/attribute-matrix.md](docs/public/language/attribute-matrix.md) | Attribute schema reference |
+| **Naming Conventions** | [docs/public/language/naming-conventions.md](docs/public/language/naming-conventions.md) | MemQL naming conventions |
+| **Reserved Names** | [docs/public/language/reserved.md](docs/public/language/reserved.md) | Single index of every reserved identifier (engine names, row intrinsics, caller envelope, keywords, annotations, import aliases) |
+| **Operator Capabilities** | [docs/public/ai/operator-capabilities.md](docs/public/ai/operator-capabilities.md) | Capability slugs (copresent_control, computer_use_headless, computer_use_embodied, workbench_use) and how they expand into concrete tools |
+| **Identifier Conventions** | [docs/public/concepts/identifiers.md](docs/public/concepts/identifiers.md) | Canonical node id format, dispatch-site composition, anti-patterns |
+| **Specifications** | [docs/public/language/specifications.md](docs/public/language/specifications.md) | MemQL specifications reference |
 | **Automations** | [automations/CLAUDE.md](automations/CLAUDE.md) | Event-driven workflows |
 | **Query Library** | [queries/CLAUDE.md](queries/CLAUDE.md) | Query function library |
 | **Integrations** | [integrations/CLAUDE.md](integrations/CLAUDE.md) | External services (SI, audio, voice) |
 | **Component Bus** | [component/bus/](component/bus/) | Channel-based inter-component communication (proto, channels, wiring) |
 | **Configuration** | [component/config/](component/config/) | Centralized env var loading into ConfigSnapshot proto |
-| **Data Validation** | [docs/core/data-validation.md](docs/core/data-validation.md) | Draft/checked/confirmed lifecycle, policies, identity requirements |
+| **Data Validation** | [docs/public/concepts/data-validation.md](docs/public/concepts/data-validation.md) | Draft/checked/confirmed lifecycle, policies, identity requirements |
 | **Partitions** | [CLAUDE.md](CLAUDE.md#partitions) | Data isolation boundaries, multi-tenant deployment, partition-qualified IDs and event topics |
 | **MemQL Sense** | [component/memql/sense/](component/memql/sense/) | Language intelligence service (tokenize, complete, diagnose, hover, signature) via gRPC |
 
@@ -45,8 +45,8 @@ Quick access to all memQL documentation by topic.
 
 | Topic | Document | Description |
 |-------|----------|-------------|
-| **Quick Start** | [QUICKSTART.md](QUICKSTART.md) | Get running in 5 minutes |
-| **Env Vars** | [docs/guides/env-vars.md](docs/guides/env-vars.md) | Bootstrap envelope + memQL concept storage for secrets/variables |
+| **Quick Start** | [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) | Get running in 5 minutes |
+| **Env Vars** | [docs/public/operate/env-vars.md](docs/public/operate/env-vars.md) | Bootstrap envelope + memQL concept storage for secrets/variables |
 | **Docker Setup** | [docker/README.md](docker/README.md) | Full local Docker stack |
 | **Tests** | `go test ./...` | Standard Go test suite (no separate harness) |
 
@@ -62,11 +62,11 @@ Quick access to all memQL documentation by topic.
 | **Prompt Templates** | [prompts/v1/](prompts/v1/) | MemQL prompt definitions (e.g., `agentReply.memql` on the agent node, `conductorTurn.memql` / `conductorCompaction.memql` on cognition) |
 | **Shape Templates** | [shapes/v1/](shapes/v1/) | MemQL shape definitions -- one per concept (e.g., `participantFull.memql`, `agentFull.memql`, `spaceFull.memql`) |
 | **Integrations Overview** | [integrations/CLAUDE.md](integrations/CLAUDE.md) | All integrations (SI, audio, voice) |
-| **Polyphon Architecture** | [docs/polyphon-architecture.md](docs/polyphon-architecture.md) | Multi-agent voice pipeline (LiveKit + ASR/TTS) |
+| **Polyphon Architecture** | [docs/public/operate/voice-bringup-verification.md](docs/public/operate/voice-bringup-verification.md) | Multi-agent voice pipeline (LiveKit + ASR/TTS) |
 | **Claw Tools** | [tools/v1/claw/](tools/v1/claw/) | OpenClaw/NemoClaw coding agent tools (.memql) |
 | **Claw Compose** | [docker/docker-compose.nemoclaw.yml](docker/docker-compose.nemoclaw.yml) | OpenClaw (hardened) Docker overlay for development |
 | **Space Concept** | [concepts/v1/cognition/space/concept.memql](concepts/v1/cognition/space/concept.memql) | Three-state lifecycle (active/saved/archived/scheduled) + daily-space kind |
-| **Audio Streaming** | [docs/api/audio-streaming.md](docs/api/audio-streaming.md) | Audio WebSocket + gRPC streaming transcription |
+| **Audio Streaming** | [docs/public/build/audio-streaming.md](docs/public/build/audio-streaming.md) | Audio WebSocket + gRPC streaming transcription |
 | **Cognition (Routing + Conductor)** | `integrations/cognition/cognition_handler.go` | Unified single-LLM-brain text dispatch (router lives only on the voice path) |
 
 ---
@@ -138,29 +138,29 @@ Quick access to directory-level documentation:
 ## Quick Search
 
 ### Authentication & Security
-- [Access Model](docs/auth/access-model.md) - Identity / user / partition-access data model + verifier middleware
-- [User Provisioning](docs/auth/user-provisioning.md) - Registration modes, magic-link flow, invitations
-- [Identity Service (Operator Guide)](docs/auth/identity-service.md) - Env vars, key management, anti-abuse tuning
+- [Access Model](docs/public/operate/auth/access-model.md) - Identity / user / partition-access data model + verifier middleware
+- [User Provisioning](docs/public/operate/auth/user-provisioning.md) - Registration modes, magic-link flow, invitations
+- [Identity Service (Operator Guide)](docs/public/operate/auth/identity-service.md) - Env vars, key management, anti-abuse tuning
 
 ### Workers (Computer Use)
-- [Workers Runbook](docs/workers/runbook.md) - Operator guide: install, permission model, audit, common ops, failure modes
+- [Workers Runbook](docs/public/operate/workers-runbook.md) - Operator guide: install, permission model, audit, common ops, failure modes
 
 ### CLI / TUI (memql-cockpit)
 - [cli/CLAUDE.md](cli/CLAUDE.md) - Canonical-TUI rule: every interactive subcommand uses `cli/ui` + `cli/canvas`. Multi-tab IDE + single-panel wizard layouts.
 
 ### Database & Data
-- [Architecture](docs/core/arch.md) - System architecture
-- [MemQL Language](docs/core/memql.md) - Query language reference
-- [Concept Seeding](docs/core/concept_seeding.md) - Seeding data
+- [Architecture](docs/public/concepts/architecture.md) - System architecture
+- [MemQL Language](docs/public/language/memql.md) - Query language reference
+- [Concept Seeding](docs/public/concepts/concept-seeding.md) - Seeding data
 - [TimescaleDB Setup](docker/README.md) - Local database
 
 ### Testing & Debugging
 - `go test ./...` -- standard Go test suite
-- [Troubleshooting](QUICKSTART.md#troubleshooting) - Common issues
+- [Troubleshooting](docs/public/overview/quickstart.md#troubleshooting) - Common issues
 
 ### Deployment & Infrastructure
 - [Deployment Strategy](DEPLOYMENT_STRATEGY.md) - Deploy to Azure AKS (topology, gates, promotion)
-- [Deployment Console](docs/ops/deployment-console.md) - Operator guide: admin/owner UI (identity portal + cockpit) to read deploy state and deploy/promote/rollback from the UI, with confirm + audit
+- [Deployment Console](docs/public/operate/deployment-console.md) - Operator guide: admin/owner UI (identity portal + cockpit) to read deploy state and deploy/promote/rollback from the UI, with confirm + audit
 - [Infrastructure Overview](INFRASTRUCTURE.md) - All environments
 - [Docker Setup](docker/README.md) - Local Docker stack
 

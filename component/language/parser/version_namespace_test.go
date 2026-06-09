@@ -6,7 +6,7 @@ import (
 
 // TestParser_VersionAttribute_OnConcept locks the new @version(N)
 // attribute parsing as an integer literal. Required for the
-// structural concept-ID assembly (docs/dsl-import-model-refactor.md
+// structural concept-ID assembly (docs/internal/design/dsl-import-model-refactor.md
 // decision #11).
 func TestParser_VersionAttribute_OnConcept(t *testing.T) {
 	source := `@version(1)

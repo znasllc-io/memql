@@ -253,7 +253,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// TLS opt-in via MEMQL_GRPC_TLS_CERT_FILE + KEY_FILE. When
 	// unset, the server stays insecure (the legacy default suitable
 	// for deployments behind a TLS-terminating proxy). See
-	// docs/auth/threat-model.md §6 + component/grpc/tls.go.
+	// docs/internal/design/auth-threat-model.md §6 + component/grpc/tls.go.
 	if tlsCfg, err := grpctls.LoadServerTLSConfig(s.logger); err != nil {
 		return ctx, nil, fmt.Errorf("grpc server: tls config: %w", err)
 	} else if tlsCfg != nil {
@@ -1117,7 +1117,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	}
 
 	// Authorization runs per-row inside the DSL (see
-	// docs/auth/per-row-authz-audit.md). Any authenticated role may
+	// docs/public/operate/auth/per-row-authz-audit.md). Any authenticated role may
 	// reach this handler; query/mutation bodies enforce ownership.
 
 	ctx, cancel := context.WithCancel(s.stream.Context())

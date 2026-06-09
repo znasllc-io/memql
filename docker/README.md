@@ -300,7 +300,7 @@ See [component/node/CLAUDE.md](../component/node/CLAUDE.md) for distributed arch
 
 ## DOCS See Also
 
-- [QUICKSTART.md](../QUICKSTART.md) - Quick start guide
+- [docs/public/overview/quickstart.md](../docs/public/overview/quickstart.md) - Quick start guide
 - [Local Development](../docs/guides/local-development.md) - Development guide
 - [CLAUDE.md](../CLAUDE.md) - Project overview
 

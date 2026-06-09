@@ -8,7 +8,7 @@ import (
 )
 
 // Cross-file symbol resolution for the new import model
-// (docs/dsl-import-model-refactor.md decision #4).
+// (docs/internal/design/dsl-import-model-refactor.md decision #4).
 //
 // When a file writes `cog.participant` in a query filter, in a
 // trigger's concept= field, or in a tool handler's query= field,

@@ -8,7 +8,7 @@ import (
 )
 
 // Concept-ID assembly for the DSL import-model refactor
-// (docs/dsl-import-model-refactor.md decision #11).
+// (docs/internal/design/dsl-import-model-refactor.md decision #11).
 //
 // Authors declare three things on a concept:
 //

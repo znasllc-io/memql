@@ -519,7 +519,7 @@ func (c *Concept) validate(variant string, payload any) error {
 // {partition}:{concept}:. Bugs landed twice (seed materializer +
 // checkpoint writer); this gate makes the next one fail loudly at
 // insert time instead of silently in the DB. See
-// docs/core/identifiers.md ("Anti-patterns").
+// docs/public/concepts/identifiers.md ("Anti-patterns").
 //
 // Two legitimate shapes for nodeId post-#56 phase 6:
 //
@@ -548,7 +548,7 @@ func (c *Concept) validateShortId(nodeId string) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"shortId %q must be a bare slug/UUID (no colons) or the concept-prefixed form (%q); got something else (see docs/core/identifiers.md)",
+		"shortId %q must be a bare slug/UUID (no colons) or the concept-prefixed form (%q); got something else (see docs/public/concepts/identifiers.md)",
 		trimmed, c.Name+":<short>",
 	)
 }

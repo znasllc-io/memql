@@ -138,7 +138,7 @@ All environments use the in-house identity service
 - Centralized user + invitation management via the admin web app
   at `/admin/*`
 
-See [docs/auth/identity-service.md](docs/auth/identity-service.md)
+See [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md)
 for the operator-side narrative.
 
 ### Developer Access Levels
@@ -265,7 +265,7 @@ for the operator-side narrative.
 ```
 memQL/
 ├── CLAUDE.md              # Project overview (read first)
-├── QUICKSTART.md          # 5-minute setup guide
+├── docs/public/overview/quickstart.md          # 5-minute setup guide
 ├── GLOSSARY.md            # Complete doc index
 ├── docs/
 │   ├── core/              # Architecture, language
@@ -279,10 +279,10 @@ memQL/
 ### Finding Documentation
 
 1. **Project overview:** Start with `CLAUDE.md`
-2. **Quick setup:** Read `QUICKSTART.md`
+2. **Quick setup:** Read `docs/public/overview/quickstart.md`
 3. **Find topics:** Use `GLOSSARY.md`
 4. **Component details:** Check directory `CLAUDE.md` files
-5. **Commands:** See [QUICKSTART.md](QUICKSTART.md) for common development commands
+5. **Commands:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for common development commands
 
 ---
 
@@ -319,7 +319,7 @@ kubectl get deployments -n memql                            # Deployment status 
 
 **Managed via memQL concept storage** (`v1:platform:globalVariable` and
 `v1:platform:globalSecret`). Operators populate via Make targets backed by
-the dev-secrets workflow; see [docs/guides/env-vars.md](docs/guides/env-vars.md)
+the dev-secrets workflow; see [docs/public/operate/env-vars.md](docs/public/operate/env-vars.md)
 for the full design.
 
 **Development (Docker):**
@@ -444,7 +444,7 @@ This document is a living standard. Update it when:
 ## Support & Questions
 
 - **Documentation:** Check `GLOSSARY.md` first
-- **Quick start:** See `QUICKSTART.md`
+- **Quick start:** See `docs/public/overview/quickstart.md`
 - **Team:** Ask in team chat or create GitHub issue
 
 ---

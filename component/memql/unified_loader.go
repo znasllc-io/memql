@@ -1,7 +1,7 @@
 package memql
 
 // unified_loader.go is Pass 2 of the DSL restructure migration
-// (docs/dsl-import-model-refactor.md). It walks the new domain-first
+// (docs/internal/design/dsl-import-model-refactor.md). It walks the new domain-first
 // tree at dsl.Tree(), parses each .memql file via dslimports.Load,
 // and dispatches every top-level declaration to its appropriate
 // per-kind registration function.

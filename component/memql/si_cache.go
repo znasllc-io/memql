@@ -18,7 +18,7 @@ import (
 //
 // Phase-0 instrumentation: atomic counters + a Stats() snapshot + a
 // background log emitter so we can baseline hit rates over a week
-// of dev usage. See docs/planning/cache-audit-phase-0.md.
+// of dev usage. See docs/internal/planning/cache-audit-phase-0.md.
 type siResponseCache struct {
 	mu      sync.RWMutex
 	entries map[string]siCacheEntry

@@ -195,7 +195,7 @@ type RegisteredClient struct {
 //
 // All fields are documented at the env-var name they're populated
 // from to keep the operator-facing surface and the developer-facing
-// surface aligned. See docs/auth/identity-service.md (added in a
+// surface aligned. See docs/public/operate/auth/identity-service.md (added in a
 // subsequent phase) for the operator-side narrative.
 
 // BootstrapConfig captures every value the first-run /setup wizard

@@ -994,7 +994,7 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// Phase 0 of the llm-driven-decisions plan: each cache logs its
 	// hit/miss/eviction stats every 5 minutes so we can baseline
 	// real-world cache effectiveness before migrating decisions to
-	// LLM+cache. See docs/planning/cache-audit-phase-0.md. Emitters
+	// LLM+cache. See docs/internal/planning/cache-audit-phase-0.md. Emitters
 	// stay silent when the cache hasn't been touched -- no log
 	// noise on a quiet system.
 	const statsInterval = 5 * time.Minute

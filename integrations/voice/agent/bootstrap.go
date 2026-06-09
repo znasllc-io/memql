@@ -77,7 +77,7 @@ func ResolveVoiceAgentToken(ctx context.Context, getenv Getenv, httpClient *http
 	}
 	return "", fmt.Errorf(
 		"required env var VOICE_AGENT_TOKEN is unset; either provision a " +
-			"voice-agent JWT out-of-band (see docs/auth/voice-agent-jwt.md) or " +
+			"voice-agent JWT out-of-band (see docs/public/operate/auth/voice-agent-jwt.md) or " +
 			"set MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL + " +
 			"MEMQL_VOICE_AGENT_INSTANCE_ID for the self-bootstrap path (memql#342)")
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // realtime_events.go is the pure-Go event vocabulary for the OpenAI
-// gpt-realtime speech-to-speech WebSocket protocol (docs/voice/453-gpt-realtime-go.md
+// gpt-realtime speech-to-speech WebSocket protocol (docs/internal/design/voice-453-gpt-realtime-go.md
 // section 3). It is deliberately CGO-free and free of any websocket / media
 // dependency so the encode/decode logic -- the load-bearing wire contract for
 // the conductor gate and multi-party routing -- is exhaustively unit-testable

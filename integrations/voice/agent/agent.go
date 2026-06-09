@@ -16,7 +16,7 @@ import (
 // this file compiles in every lane.
 //
 // In the cluster topology the voice-agent runs as the Voice node
-// (docs/voice/451-livekit-go-room-participation.md, Section 3c). The
+// (docs/internal/design/voice-451-livekit-go-room-participation.md, Section 3c). The
 // entrypoint is wired into the voice node binary as the `voice-agent`
 // subcommand (subcommand_voice_agent.go, `//go:build voice`).
 

@@ -149,7 +149,7 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 // TestNoShortIdConceptPrefix asserts that no .memql file constructs
 // a node-id shortId with a concept-name (or sub-type discriminator)
 // prefix. The canonical id format is `{partition}:{concept}:{shortId}`
-// (`docs/core/identifiers.md`); the shortId should be the bare unique
+// (`docs/public/concepts/identifiers.md`); the shortId should be the bare unique
 // part (uuid / hash / slug), never `concat("<conceptName>-", ...)`
 // or any equivalent string-concatenation pattern.
 //
@@ -429,7 +429,7 @@ func TestPerRowAuthzClassification(t *testing.T) {
 		domains = append(domains, d)
 	}
 	sort.Strings(domains)
-	t.Logf("\n=== Per-row authz classification (informational; see docs/auth/per-row-authz-audit.md) ===")
+	t.Logf("\n=== Per-row authz classification (informational; see docs/public/operate/auth/per-row-authz-audit.md) ===")
 	t.Logf("%-15s %5s %5s %5s %5s %5s",
 		"domain", "owned", "admin", "public", "FLAG", "other")
 	for _, d := range domains {
@@ -447,7 +447,7 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n" +
 			"  (2) add an admin gate: reference `actor.isClusterOwner` or a `requiresClusterOwner` spec\n" +
 			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n" +
-			"See docs/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
+			"See docs/public/operate/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
 	}
 }
 

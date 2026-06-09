@@ -74,7 +74,7 @@ var Docs = map[string]string{
 	"disabled":    "Disable this definition.",
 	"description": "Human-readable description of this definition.",
 	"internal":    "Hide from external API discovery.",
-	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/auth/per-row-authz-audit.md.",
+	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
 	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	// Query / spec.
 	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",

@@ -146,7 +146,7 @@ material that the gRPC suggest handler in `grpc/ai_handlers.go` imports:
 - Personal Access Token (PAT) issuance for CLI clients
 - Identity / role context propagation (auth package helpers)
 - Per-row authorization is enforced inside DSL queries + mutations
-  (see docs/auth/per-row-authz-audit.md)
+  (see docs/public/operate/auth/per-row-authz-audit.md)
 
 ### events/ - **Event Bus**
 **Purpose:** Publish/subscribe event system for automations
@@ -398,9 +398,9 @@ docker-compose logs memql | grep "query.*ms"
 ## DOCS See Also
 
 - [memql/arch.md](memql/arch.md) - MemQL engine architecture
-- [Architecture Overview](../docs/core/arch.md) - System architecture
-- [MemQL Language](../docs/core/memql.md) - Query language
-- [QUICKSTART.md](../QUICKSTART.md) -- Dev setup
+- [Architecture Overview](../docs/public/concepts/architecture.md) - System architecture
+- [MemQL Language](../docs/public/language/memql.md) - Query language
+- [docs/public/overview/quickstart.md](../docs/public/overview/quickstart.md) -- Dev setup
 
 ---
 

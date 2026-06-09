@@ -71,14 +71,14 @@ go test ./...
 make deploy VERSION=X
 ```
 
-**Full setup guide:** [QUICKSTART.md](QUICKSTART.md)
+**Full setup guide:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
 
 ---
 
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Project overview and architecture
-- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide
+- **[docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)** - 5-minute setup guide
 - **[GLOSSARY.md](GLOSSARY.md)** - Complete documentation index
 - **[TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)** - Tech stack and deployment practices
 
@@ -309,7 +309,7 @@ func (Automation) autoJoinSI() {
 }
 ```
 
-**Full reference:** [docs/core/memql.md](docs/core/memql.md)
+**Full reference:** [docs/public/language/memql.md](docs/public/language/memql.md)
 
 ---
 
@@ -346,7 +346,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ## Need Help?
 
-1. **Quick start:** [QUICKSTART.md](QUICKSTART.md)
+1. **Quick start:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
 2. **Find documentation:** [GLOSSARY.md](GLOSSARY.md)
 3. **Tech stack details:** [TECH_STACK_AND_PRACTICES.md](TECH_STACK_AND_PRACTICES.md)
 4. **Component docs:** Check directory `CLAUDE.md` files
