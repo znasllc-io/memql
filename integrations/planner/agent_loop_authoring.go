@@ -118,15 +118,39 @@ type resolvedDependency struct {
 	Similarity float64 `json:"similarity,omitempty"`
 }
 
+// resolvedPhase is one phase of a multi-phase bundle after the
+// reuse-or-author decision: its own sub-automation name + purpose + the
+// dependency closure that phase needs. The headline automation chains the
+// phases in slice order (phase 0 -> phase 1 -> ...). See
+// agent_loop_authoring_phases.go.
+type resolvedPhase struct {
+	Name         string               `json:"name"`
+	Purpose      string               `json:"purpose"`
+	Dependencies []resolvedDependency `json:"dependencies"`
+}
+
 // designPlan is the full output of the design pass: the automation's own
 // outline plus every dependency resolved to reuse-or-author.
 type designPlan struct {
 	// AutomationName / AutomationPurpose describe the bundle's headline
-	// automation (the construct that the dependency closure supports).
+	// automation (the construct that the dependency closure supports). On a
+	// multi-phase plan the headline is synthesized to chain the phases.
 	AutomationName    string               `json:"automationName"`
 	AutomationPurpose string               `json:"automationPurpose"`
 	Dependencies      []resolvedDependency `json:"dependencies"`
+	// Phases is the ordered phase decomposition for a long, multi-step
+	// Responsibility (epic memql#1160, issue #1163). Empty for a single-phase
+	// bundle (the common case) -- then AutomationName/Dependencies above are
+	// the whole bundle. When len(Phases) >= 2 the emit pass emits one
+	// sub-automation per phase + synthesizes a headline that triggers them in
+	// sequence; AutomationName names that headline.
+	Phases []resolvedPhase `json:"phases,omitempty"`
 }
+
+// isMultiPhase reports whether the plan decomposed into 2+ sequential
+// phases (the headline-chains-sub-automations shape). A 0/1-phase plan is
+// the flat single-automation bundle.
+func (p designPlan) isMultiPhase() bool { return len(p.Phases) >= 2 }
 
 // authorCount returns how many dependencies the emit pass must author net-new
 // (the genuine gaps). Reuse edges are composed, not authored.
@@ -135,6 +159,13 @@ func (p designPlan) authorCount() int {
 	for _, d := range p.Dependencies {
 		if d.Disposition == dispAuthor {
 			n++
+		}
+	}
+	for _, ph := range p.Phases {
+		for _, d := range ph.Dependencies {
+			if d.Disposition == dispAuthor {
+				n++
+			}
 		}
 	}
 	return n
@@ -186,10 +217,34 @@ func (l *PlannerAgentLoop) runDesignPass(ctx context.Context, statement, ownerUs
 		resolved := l.resolveDependency(ctx, dep, catalog, near)
 		plan.Dependencies = append(plan.Dependencies, resolved)
 	}
+	// Multi-phase decomposition (#1163): resolve each phase's closure the same
+	// reuse-or-author way. A phase with a blank name is given a deterministic
+	// fallback so the synthesized headline can reference it.
+	if raw.hasPhaseWork() {
+		for i, ph := range raw.Phases {
+			rp := resolvedPhase{Name: phaseAutomationName(plan.AutomationName, ph.Name, i), Purpose: ph.Purpose}
+			for _, dep := range ph.Dependencies {
+				rp.Dependencies = append(rp.Dependencies, l.resolveDependency(ctx, dep, catalog, near))
+			}
+			plan.Phases = append(plan.Phases, rp)
+		}
+	}
 	l.logger.Info("authoring design pass complete",
 		"automation", plan.AutomationName, "deps", len(plan.Dependencies),
-		"authorCount", plan.authorCount())
+		"phases", len(plan.Phases), "authorCount", plan.authorCount())
 	return plan, nil
+}
+
+// phaseAutomationName derives the sub-automation name for phase i. It
+// prefers the model's phase name (camelCased, deduped against a collision
+// with the headline), falling back to "<headline>PhaseN" so the synthesized
+// headline always has a real symbol to chain.
+func phaseAutomationName(headline, phaseName string, i int) string {
+	n := strings.TrimSpace(phaseName)
+	if n == "" || n == headline {
+		return fmt.Sprintf("%sPhase%d", headline, i)
+	}
+	return n
 }
 
 // resolveDependency runs the reuse-or-author decision for one emitted
@@ -297,12 +352,39 @@ func catalogSummary(catalog []memql.CatalogEntry) []map[string]any {
 
 // --- design-prompt output shape + parser ----------------------------------
 
+// rawDesignPhase is one phase the authoringDesign prompt emitted on the
+// multi-phase path: a named sub-automation + the dependency closure that
+// phase needs.
+type rawDesignPhase struct {
+	Name         string             `json:"name"`
+	Purpose      string             `json:"purpose"`
+	Dependencies []designDependency `json:"dependencies"`
+}
+
 // designResult is the raw structured output of the authoringDesign prompt
 // (before the reuse-or-author resolution overlays dispositions).
 type designResult struct {
 	AutomationName    string             `json:"automationName"`
 	AutomationPurpose string             `json:"automationPurpose"`
 	Dependencies      []designDependency `json:"dependencies"`
+	// Phases is the optional ordered phase decomposition (#1163). When the
+	// model emits 2+ phases, the per-phase dependency closures live here and
+	// the top-level Dependencies may be empty.
+	Phases []rawDesignPhase `json:"phases,omitempty"`
+}
+
+// hasPhaseWork reports whether the raw result carries a usable multi-phase
+// decomposition (2+ phases, at least one with a dependency).
+func (r designResult) hasPhaseWork() bool {
+	if len(r.Phases) < 2 {
+		return false
+	}
+	for _, ph := range r.Phases {
+		if len(ph.Dependencies) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // parseDesignDependencies unmarshals the authoringDesign structured output,
@@ -329,7 +411,9 @@ func parseDesignDependencies(resp any) (designResult, error) {
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return designResult{}, fmt.Errorf("parse design JSON: %w (raw=%s)", err, truncate(string(raw), 200))
 	}
-	if len(res.Dependencies) == 0 {
+	// A usable design has either a flat dependency closure (single-phase) or a
+	// multi-phase decomposition with at least one phase carrying a dependency.
+	if len(res.Dependencies) == 0 && !res.hasPhaseWork() {
 		return designResult{}, fmt.Errorf("authoringDesign emitted no dependencies (raw=%s)", truncate(string(raw), 200))
 	}
 	return res, nil

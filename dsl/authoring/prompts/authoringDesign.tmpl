@@ -64,10 +64,30 @@ Reusable catalog (constructs already available to compose -- prefer these):
 - Owner-stamped writes (`createdBy: actor.userId`) and owner-filtered
   reads (`payload.ownerUserId == actor.userId`) for per-row authz.
 
+# Multi-phase decomposition (long, sequential duties)
+
+Most Responsibilities are SINGLE-PHASE: one headline automation + a small
+closure. Emit those flat, via `dependencies` (below).
+
+When a Responsibility is genuinely a LONG, multi-step duty whose work
+happens in distinct ordered stages -- stage 0 must finish before stage 1
+can start, etc. (e.g. "gather the data, THEN summarize it, THEN file a
+report") -- decompose it into 2+ ordered `phases` instead. Each phase is
+itself "one sub-automation + its own minimal closure". The planner then
+synthesizes a headline automation that triggers your phase sub-automations
+in order (phase 0 -> phase 1 -> ...), so you do NOT author the headline or
+the chaining yourself -- just name each phase and list its dependencies.
+
+Only decompose when the stages are truly SEQUENTIAL and each is
+non-trivial. Do not invent phases for a simple duty -- prefer the flat
+single-phase shape.
+
 # Output contract
 
 Emit ONLY a JSON object (first character {, last character }), no
-prose, no markdown fence:
+prose, no markdown fence.
+
+SINGLE-PHASE (the common case):
 
 {
   "automationName": "<camelCase>",
@@ -82,5 +102,23 @@ prose, no markdown fence:
   ]
 }
 
-The dependencies list must be non-empty. Keep it to the minimal
-closure the automation truly needs.
+MULTI-PHASE (only for long, sequential duties): same top-level
+automationName/automationPurpose (they name the SYNTHESIZED headline),
+with `phases` instead of a flat `dependencies`:
+
+{
+  "automationName": "<camelCase headline>",
+  "automationPurpose": "<one line>",
+  "phases": [
+    {
+      "name": "<camelCase phase sub-automation name>",
+      "purpose": "<one line for this stage>",
+      "dependencies": [ { "kind": "...", "name": "...", "purpose": "...", "candidateSource": "..." } ]
+    }
+  ]
+}
+
+Provide EITHER `dependencies` (single-phase) OR `phases` (multi-phase),
+not both. The chosen list must be non-empty and each phase's dependency
+list must be non-empty. Keep every closure to the minimal set truly
+needed.
