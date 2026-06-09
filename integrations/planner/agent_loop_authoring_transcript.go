@@ -105,11 +105,30 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, p
 	if err := d.persistConstructs(ctx, ownerUserId, bundleId, []memql.SandboxConstruct{construct}); err != nil {
 		return fmt.Errorf("persist transcript construct: %w", err)
 	}
-	if err := d.recordTranscriptValidated(ctx, ownerUserId, bundleId, len(calls)); err != nil {
+
+	// Gate 1 (re-runnability check, #1195): compile + bind the rendered
+	// automation through the SAME sandbox the author path uses. A transcript is
+	// a faithful RECORD regardless; this answers whether it is also genuinely
+	// RE-RUNNABLE -- compiles + binds -- versus a record whose literal calls
+	// (run-scoped ids, non-automation tool calls) don't form a runnable
+	// automation. Best-effort: a binary without the authoring seams linked
+	// still stores the transcript as a record, just without the Gate-1 verdict.
+	var (
+		report     memql.SandboxReport
+		gate1Ran   bool
+		reRunnable bool
+	)
+	if ae, ok := d.engine.(captureEngine); ok {
+		report = ae.CompileBundle([]memql.SandboxConstruct{construct})
+		gate1Ran = true
+		reRunnable = report.OK
+	}
+	if err := d.recordTranscriptValidated(ctx, ownerUserId, bundleId, report, gate1Ran, reRunnable, len(calls)); err != nil {
 		return fmt.Errorf("record transcript status: %w", err)
 	}
 
-	d.logger.Info("authoring transcript: captured", "planId", planId, "bundleId", bundleId, "calls", len(calls))
+	d.logger.Info("authoring transcript: captured", "planId", planId, "bundleId", bundleId,
+		"calls", len(calls), "gate1Ran", gate1Ran, "reRunnable", reRunnable)
 	return nil
 }
 
@@ -182,14 +201,38 @@ func (d *AuthoringCaptureDispatcher) persistTranscriptBundle(ctx context.Context
 	return err
 }
 
-// recordTranscriptValidated marks the bundle 'validated' with a transcript
-// marker -- a faithful record (not a Gate-1-compiled artifact), but a clean,
-// non-draft status the viewers render well.
-func (d *AuthoringCaptureDispatcher) recordTranscriptValidated(ctx context.Context, ownerUserId, bundleId string, callCount int) error {
+// recordTranscriptValidated records the bundle's validation result. The
+// transcript is always stored as a 'validated' RECORD -- a clean, non-draft
+// status the viewers render well -- carrying a transcript marker. When the
+// Gate-1 compiler is linked (gate1Ran), the report also carries the REAL
+// compile/bind verdict plus a reRunnable flag (#1195): true when the rendered
+// automation actually compiles + binds, false when it is a record whose literal
+// calls don't form a runnable automation (diagnostics say why). The bundle is
+// never auto-activated into the authored-construct runtime -- that stays a
+// separate Gate-3 approval step -- so 'validated' here is a record status, not
+// a live registration.
+func (d *AuthoringCaptureDispatcher) recordTranscriptValidated(ctx context.Context, ownerUserId, bundleId string, report memql.SandboxReport, gate1Ran, reRunnable bool, callCount int) error {
+	vr := map[string]any{
+		"transcript": true,
+		"callCount":  callCount,
+		"reRunnable": reRunnable,
+	}
+	if gate1Ran {
+		vr["ok"] = report.OK
+		vr["gate1"] = "ran"
+		if obj := structToObject(report); obj["diagnostics"] != nil {
+			vr["diagnostics"] = obj["diagnostics"]
+		}
+	} else {
+		// No Gate-1 seam in this binary: record the transcript without a
+		// re-runnability verdict rather than asserting a compile that never ran.
+		vr["ok"] = true
+		vr["gate1"] = "unavailable"
+	}
 	args := map[string]any{
 		"bundleId":         bundleId,
 		"status":           "validated",
-		"validationReport": map[string]any{"ok": true, "transcript": true, "callCount": callCount},
+		"validationReport": vr,
 	}
 	q := fmt.Sprintf(`mutationRecordBundleValidation(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)

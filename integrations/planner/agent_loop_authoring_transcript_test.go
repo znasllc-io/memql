@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // TestRenderTranscriptAutomation_VerbatimCalls: the render emits one step per
@@ -122,6 +124,55 @@ func TestRunCaptureTranscript_NoCallsSkips(t *testing.T) {
 	exec, _, _ := fe.snapshot()
 	if anyCallContainsAll(exec, "mutationCreateAuthoringBundle") {
 		t.Errorf("no tool calls => no bundle; exec=%v", exec)
+	}
+}
+
+// TestRunCaptureTranscript_Gate1ReRunnable: when the Gate-1 sandbox is linked,
+// the transcript runs the rendered automation through real compile+bind and
+// records the verdict -- reRunnable:true on a clean compile, false otherwise --
+// while still storing the transcript as a validated RECORD either way. (#1195)
+func TestRunCaptureTranscript_Gate1ReRunnable(t *testing.T) {
+	cases := []struct {
+		name      string
+		report    memql.SandboxReport
+		wantReRun string
+	}{
+		{"compiles", memql.SandboxReport{OK: true}, `"reRunnable":true`},
+		{"doesNotCompile", memql.SandboxReport{OK: false}, `"reRunnable":false`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := capturePlanRow("p-g1", "user-9", "Make a list")
+			tasks := []any{
+				map[string]any{"id": "t1", "category": "toolInvocation", "status": "succeeded", "toolName": "workbenchHost", "toolArgs": map[string]any{"args": map[string]any{"path": "x.md", "content": "# X"}}, "seq": float64(0)},
+			}
+			fe := &fakeEngine{
+				execResponder: func(query string) (any, error) {
+					switch {
+					case strings.Contains(query, "queryAuthoringBundleForPlan"):
+						return map[string]any{"output": []any{}}, nil
+					case strings.Contains(query, "queryPlanById"):
+						return map[string]any{"output": []any{plan}}, nil
+					case strings.Contains(query, "queryTasksForPlan"):
+						return map[string]any{"output": tasks}, nil
+					}
+					return nil, nil
+				},
+			}
+			ce := &fakeCaptureEngine{fakeEngine: fe, sandbox: &fakeSandbox{reports: []memql.SandboxReport{tc.report}}}
+			d := NewAuthoringCaptureDispatcher(&PlannerAgentLoop{engine: ce, logger: authoringTestLogger()}, ce, authoringTestLogger())
+
+			if err := d.runCaptureTranscript(context.Background(), "p-g1", "produceArtifact"); err != nil {
+				t.Fatalf("runCaptureTranscript: %v", err)
+			}
+			if len(ce.sandbox.calls) == 0 {
+				t.Fatalf("Gate-1 compile was not invoked on the rendered transcript")
+			}
+			exec, _, _ := ce.snapshot()
+			if !anyCallContainsAll(exec, "mutationRecordBundleValidation", `"status":"validated"`, `"transcript":true`, `"gate1":"ran"`, tc.wantReRun) {
+				t.Errorf("validation must record the gate1 verdict %s; exec=%v", tc.wantReRun, exec)
+			}
+		})
 	}
 }
 
