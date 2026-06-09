@@ -301,10 +301,16 @@ function main() {
     # by exporting MEMQL_DEV_DEFAULT_AVATAR_PERSONA before `make dev-refresh`;
     # set it empty to opt out.
     export MEMQL_DEV_DEFAULT_AVATAR_PERSONA="${MEMQL_DEV_DEFAULT_AVATAR_PERSONA:-Sofia}"
-    # Anam live render model for the avatar (memql#772). This org is entitled
-    # to cara-3 (cara-4-* 403s); the Sofia avatar persona renders with cara-3.
-    # Sent as personaConfig.avatarModel on the ephemeral session token.
-    export MEMQL_ANAM_AVATAR_MODEL="${MEMQL_ANAM_AVATAR_MODEL:-cara-3}"
+    # Anam live render model for the avatar (memql#772, #1209). Forcing a CARA
+    # model the avatar was NOT built for makes the engine fall back / close
+    # (robotic render + ~30-40s disconnect). Leave UNSET by default so Anam
+    # renders with each avatar's OWN model (anam.go: unset = use the avatar's
+    # own model -- the safe path). Operators can still pin one by exporting
+    # MEMQL_ANAM_AVATAR_MODEL (e.g. cara-3) before `make dev-refresh`; only then
+    # is avatarModel sent on the ephemeral session token.
+    if [ -n "${MEMQL_ANAM_AVATAR_MODEL:-}" ]; then
+        export MEMQL_ANAM_AVATAR_MODEL
+    fi
     step3_wipe_and_restart
     step4_mint_voice_agent_token
     step4b_mint_node_tokens
