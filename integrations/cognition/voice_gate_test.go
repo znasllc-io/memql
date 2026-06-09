@@ -6,6 +6,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestVoiceAgentToolLoopEnabled verifies the A2 flag (#1198) is OFF by default
+// (today's #479 gate path) and opt-in via MEMQL_VOICE_AGENT_TOOL_LOOP=true.
+func TestVoiceAgentToolLoopEnabled(t *testing.T) {
+	t.Setenv("MEMQL_VOICE_AGENT_TOOL_LOOP", "")
+	assert.False(t, voiceAgentToolLoopEnabled(), "off by default")
+
+	t.Setenv("MEMQL_VOICE_AGENT_TOOL_LOOP", "true")
+	assert.True(t, voiceAgentToolLoopEnabled(), "opt-in via env")
+
+	t.Setenv("MEMQL_VOICE_AGENT_TOOL_LOOP", "TRUE")
+	assert.True(t, voiceAgentToolLoopEnabled(), "case-insensitive")
+
+	t.Setenv("MEMQL_VOICE_AGENT_TOOL_LOOP", "false")
+	assert.False(t, voiceAgentToolLoopEnabled(), "explicit off")
+}
+
 func TestDecideVoiceGate_PresenceAndCompletenessDefer(t *testing.T) {
 	// A human mid-message -> defer even with an otherwise-engaging signal.
 	d := DecideVoiceGate(VoiceGateSignals{HumanIsTyping: true, DirectAddressScore: 1.0})

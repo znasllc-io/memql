@@ -1117,49 +1117,66 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 			primaryDirective.Instruction = primaryDirective.Instruction + "\n\n" + voiceInstruction
 		}
 
-		// #479: hand the turn to the realtime model. Cognition has decided WHO
-		// (the winner) and WHEN/how-briefly (the directive) -- it stays the
-		// director + scribe. It no longer AUTHORS the voice reply: publish the
-		// gate directive (mode + brevity) and stop here. The relay forwards it on
-		// VoiceAgentTurnComplete, the realtime model generates the words natively,
-		// and its spoken output is captured as the SI utterance
-		// (handleVoiceAgentRealtimeOutput). This removes the ~1-1.5s authoring
-		// LLM call from the voice critical path (#475/#477). Voice is GA-only, so
-		// there is exactly one agent to gate here.
-		gateMode := string(primaryDirective.Mode)
-		if strings.TrimSpace(gateMode) == "" || strings.EqualFold(gateMode, string(DirectiveDefer)) {
-			gateMode = string(DirectivePrimary)
+		// A2 (#1198, epic #1197): when the agent-tool-loop flag is on, cognition
+		// does NOT publish the gate directive + return. Instead it falls through to
+		// the normal agent-loop path below so a voice turn runs the SAME full tool
+		// loop text chat runs (produceArtifact etc.) and authors a brief reply; the
+		// realtime model re-voices the authored FinalText (returned via the relay's
+		// reply-utterance path, directive_mode empty). The brevity instruction
+		// above still caps the spoken length. Flag off keeps the proven #479 gate
+		// path unchanged (cognition gates WHEN/brevity, the model authors WHAT).
+		if !voiceAgentToolLoopEnabled() {
+			// #479: hand the turn to the realtime model. Cognition has decided WHO
+			// (the winner) and WHEN/how-briefly (the directive) -- it stays the
+			// director + scribe. It no longer AUTHORS the voice reply: publish the
+			// gate directive (mode + brevity) and stop here. The relay forwards it on
+			// VoiceAgentTurnComplete, the realtime model generates the words natively,
+			// and its spoken output is captured as the SI utterance
+			// (handleVoiceAgentRealtimeOutput). This removes the ~1-1.5s authoring
+			// LLM call from the voice critical path (#475/#477). Voice is GA-only, so
+			// there is exactly one agent to gate here.
+			gateMode := string(primaryDirective.Mode)
+			if strings.TrimSpace(gateMode) == "" || strings.EqualFold(gateMode, string(DirectiveDefer)) {
+				gateMode = string(DirectivePrimary)
+			}
+			gateBrevity := string(primaryDirective.Brevity)
+			if strings.TrimSpace(gateBrevity) == "" {
+				gateBrevity = string(BrevityShort)
+			}
+			// Grounding (#490, opt-in via MEMQL_VOICE_GROUNDING): retrieve the top
+			// knowledge chunks for this turn over the agent's domains and ride the
+			// rendered block to the executor on the directive, so the model-authored
+			// voice reply is grounded. Off by default; fail-safe (empty -> no
+			// grounding, no behaviour change).
+			var grounding string
+			if voiceGroundingEnabled() {
+				grounding = c.retrieveVoiceGroundingBlock(ctx, scoringUtterance.Text, agent.domains())
+			}
+			c.publishVoiceGateDirective(ctx, spaceId, utterance.ID, VoiceGateDecision{
+				Engage: true, Mode: gateMode, Brevity: gateBrevity, Reason: "voice_engage",
+			}, grounding)
+			if c.Logger != nil {
+				c.Logger.Info("voice trace: gate directive published",
+					"voiceTrace", utterance.ID,
+					"stage", "cognition.gate.engage",
+					"spaceId", spaceId,
+					"agentName", winner.AgentName,
+					"mode", gateMode,
+					"brevity", gateBrevity)
+			}
+			// Reset the winner's presence so it does not stick in a thinking state
+			// now that cognition no longer authors the voice reply (the model speaks,
+			// and the realtime output capture lands the utterance row).
+			_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
+			return
 		}
-		gateBrevity := string(primaryDirective.Brevity)
-		if strings.TrimSpace(gateBrevity) == "" {
-			gateBrevity = string(BrevityShort)
-		}
-		// Grounding (#490, opt-in via MEMQL_VOICE_GROUNDING): retrieve the top
-		// knowledge chunks for this turn over the agent's domains and ride the
-		// rendered block to the executor on the directive, so the model-authored
-		// voice reply is grounded. Off by default; fail-safe (empty -> no
-		// grounding, no behaviour change).
-		var grounding string
-		if voiceGroundingEnabled() {
-			grounding = c.retrieveVoiceGroundingBlock(ctx, scoringUtterance.Text, agent.domains())
-		}
-		c.publishVoiceGateDirective(ctx, spaceId, utterance.ID, VoiceGateDecision{
-			Engage: true, Mode: gateMode, Brevity: gateBrevity, Reason: "voice_engage",
-		}, grounding)
 		if c.Logger != nil {
-			c.Logger.Info("voice trace: gate directive published",
+			c.Logger.Info("voice trace: agent tool loop engaged (A2)",
 				"voiceTrace", utterance.ID,
-				"stage", "cognition.gate.engage",
+				"stage", "cognition.toolloop.engage",
 				"spaceId", spaceId,
-				"agentName", winner.AgentName,
-				"mode", gateMode,
-				"brevity", gateBrevity)
+				"agentName", winner.AgentName)
 		}
-		// Reset the winner's presence so it does not stick in a thinking state
-		// now that cognition no longer authors the voice reply (the model speaks,
-		// and the realtime output capture lands the utterance row).
-		_ = c.upsertParticipantPresence(ctx, spaceId, winnerParticipant.ID, presenceStateIdle, "Idle", "", utterance.ID, "", nil)
-		return
 	}
 
 	// replyId: canonical id for this whole agent reply. Fully qualified at
@@ -1214,7 +1231,12 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 				voiceMode = "always_on"
 			}
 		}
-		voiceStreamed = voiceMode != "always_off"
+		// A2 (#1198): when voice runs the agent tool loop, the realtime model
+		// re-voices the authored reply -- cognition must NOT also dispatch cascade
+		// TTS, or the turn would play twice. Author chat-only (the reply utterance
+		// still lands in chat, which the relay returns as FinalText for the model
+		// to voice). Flag off keeps today's cascade streaming behaviour.
+		voiceStreamed = voiceMode != "always_off" && !voiceAgentToolLoopEnabled()
 		if voiceStreamed {
 			voiceModelResolved := resolveAgentVoice(agent)
 			response, err = c.generateVoiceStreaming(ctx, agent, "utterance", spaceId,

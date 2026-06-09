@@ -19,6 +19,18 @@ func voiceGroundingEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("MEMQL_VOICE_GROUNDING")), "true")
 }
 
+// voiceAgentToolLoopEnabled reports whether voice turns run cognition's full
+// agent tool loop instead of the realtime model authoring natively (#1198, epic
+// #1197 A2). Opt-in via MEMQL_VOICE_AGENT_TOOL_LOOP=true; off by default so the
+// proven #479 gate path (model authors, cognition only gates WHEN/brevity) is
+// unchanged until A2 is verified live. MUST match the voice-agent-side flag
+// (Config.RealtimeAgentToolLoop): with this on, cognition authors the reply via
+// the tool loop and the realtime model re-voices it; the executor must be in the
+// gated path (create_response:false) so the model does not also auto-author.
+func voiceAgentToolLoopEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("MEMQL_VOICE_AGENT_TOOL_LOOP")), "true")
+}
+
 // retrieveVoiceGroundingBlock retrieves the top knowledge chunks for the user
 // turn over the agent's domains and renders a numbered, domain-attributed
 // grounding block the realtime model conditions its native generation on

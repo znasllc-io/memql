@@ -95,6 +95,7 @@ type realtimeRoomBridge struct {
 	nativeEnabled         bool
 	multiPartySemanticVad bool // #481: multi-party uses semantic_vad + gate when set
 	grounding             bool // #490: route 1-on-1 through the gate so grounding can inject
+	agentToolLoop         bool // #1198 (A2): route 1-on-1 through the gate so cognition runs the full tool loop
 	nativeSTT             bool // Deepgram off the realtime path; gpt-realtime owns STT/VAD
 	transcriptionModel    string
 	language              string
@@ -250,6 +251,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		// model still detects + transcribes the turn natively).
 		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad || cfg.RealtimeNativeSTT,
 		grounding:             cfg.VoiceGrounding,
+		agentToolLoop:         cfg.RealtimeAgentToolLoop,
 		nativeSTT:             cfg.RealtimeNativeSTT,
 		transcriptionModel:    cfg.RealtimeTranscriptionModel,
 		// OpenAI's GA realtime input-transcription accepts only the bare
@@ -348,10 +350,15 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	var mode int32
 	var cfg openai.SessionConfig
 	switch {
-	case humanCount == 1 && b.grounding:
-		// 1-on-1 with grounding (#490): route through the gate
-		// (create_response:false) so the executor can inject the retrieved
-		// grounding block before generation -- pure native mode has no window.
+	case humanCount == 1 && (b.grounding || b.agentToolLoop):
+		// 1-on-1 routed through the gate (create_response:false) instead of pure
+		// native authorship for either of two reasons:
+		//   - grounding (#490): the executor injects the retrieved grounding block
+		//     before generation -- pure native mode has no inject window.
+		//   - agent tool loop (#1198, A2): the model must NOT auto-author; the turn
+		//     round-trips to cognition, which runs the full tool loop
+		//     (produceArtifact etc.) and authors the reply, and the model re-voices
+		//     the authored FinalText (runTurn's directive_mode-empty path).
 		mode = turnModeGatedSemanticVad
 		cfg = b.multiPartySemanticVadConfig()
 	case humanCount == 1:

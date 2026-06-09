@@ -153,6 +153,20 @@ func TestLoadConfig_NativeTurnOptOut(t *testing.T) {
 	assert.False(t, cfg.RealtimeNativeTurn)
 }
 
+// TestLoadConfig_AgentToolLoopOptIn: the #1198 (A2) flag is off by default
+// (today's native authorship) and opt-in via MEMQL_VOICE_AGENT_TOOL_LOOP.
+func TestLoadConfig_AgentToolLoopOptIn(t *testing.T) {
+	cfg, err := LoadConfig(envMap(baseEnv()))
+	require.NoError(t, err)
+	assert.False(t, cfg.RealtimeAgentToolLoop, "A2 defaults off")
+
+	env := baseEnv()
+	env["MEMQL_VOICE_AGENT_TOOL_LOOP"] = "true"
+	cfg, err = LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.True(t, cfg.RealtimeAgentToolLoop)
+}
+
 func TestLoadConfig_IntFallbackOnGarbage(t *testing.T) {
 	env := baseEnv()
 	env["MEMQL_REALTIME_MAX_SESSION_SEC"] = "not-a-number"
