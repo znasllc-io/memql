@@ -10,18 +10,21 @@
 
 use agents.concepts.{ avatarPersona }
 
-// Sofia uses Anam (memql#785). The Simli fallback (memql#782) was a workaround
-// while the TURN relay was blocked (memql#770/#772); that relay is now fixed so
-// we switch back to Anam as the default. personaId is the Anam-issued face id
-// for the Mia persona (female); ANAM_API_KEY authenticates.
-@description("Avatar persona Sofia (female) -- Anam (memql#785).")
+// Sofia uses Anam (memql#785, #1219). personaId is Sofia's own Anam avatarId
+// (the "Sarah" face, minted from avatars/female_0.png) -- used verbatim on the
+// bare-avatarId path (dispatch.go resolveAnamPlan), with our audio driving the
+// lip-sync; ANAM_API_KEY authenticates. Previously this reused Mia's avatar
+// (wrong face). imageRef/previewRef point at the same female_0 source image,
+// served by copresent at /avatars/female_0.png so the Create-Assistant picker
+// shows the real face.
+@description("Avatar persona Sofia (female) -- Anam 'Sarah' avatar from avatars/female_0.png (memql#1219).")
 seed avatarPersona sofia {
   vendor:     "anam"
-  personaId:  "edf6fdcb-acab-44b8-b974-ded72665ee26"
+  personaId:  "8981b946-c125-4f41-b6b0-863fe67ae180"
   name:       "Sofia"
   gender:     "female"
-  imageRef:   "https://lab.anam.ai/persona_thumbnails/mia_studio.png"
-  previewRef: "https://lab.anam.ai/persona_thumbnails/mia_studio.png"
+  imageRef:   "avatars/female_0.png"
+  previewRef: "/avatars/female_0.png"
 }
 
 @description("Avatar persona Mia (female) -- Anam.")
