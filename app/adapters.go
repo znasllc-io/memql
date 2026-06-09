@@ -100,6 +100,33 @@ func (a *CognitionEngineAdapter) RunBundleDryRun(ctx context.Context, req memql.
 	return memql.RunBundleDryRun(ctx, a.Engine, req)
 }
 
+// CompileBundle delegates to the engine's Gate-1 sandbox compile+bind harness
+// (memql#956). Used by the planner authoring loop's emit/repair pass (#960) and
+// the everyday-task capture orchestrator (#1161): it compiles + binds a
+// candidate bundle's constructs in isolation (never the live engine Init path)
+// and returns per-construct diagnostics. The adapter exists because
+// SandboxCompileBundleWithEngine needs the concrete *MemQLEngine, which the
+// planner's narrow Engine interface does not expose.
+func (a *CognitionEngineAdapter) CompileBundle(constructs []memql.SandboxConstruct) memql.SandboxReport {
+	if a == nil || a.Engine == nil {
+		return memql.SandboxReport{OK: false}
+	}
+	return memql.SandboxCompileBundleWithEngine(constructs, a.Engine)
+}
+
+// CatalogNearMatches delegates to the engine's compose-first fuzzy retrieval
+// (memql#957): embed a need's match text and rank the caller's cataloged
+// constructs by cosine similarity. Used by the authoring design pass to decide
+// reuse-vs-author. The adapter exists because CatalogNearMatches is a method on
+// the concrete *MemQLEngine, which the planner's narrow Engine interface does
+// not expose.
+func (a *CognitionEngineAdapter) CatalogNearMatches(ctx context.Context, matchText string, limit int) ([]memql.CatalogNearMatch, error) {
+	if a == nil || a.Engine == nil {
+		return nil, fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.CatalogNearMatches(ctx, matchText, limit)
+}
+
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")

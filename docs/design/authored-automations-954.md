@@ -210,6 +210,63 @@ hand-authored mistakes today too).
   front door; the authored bundle is its compiled artifact. Reuse its
   draft/active/paused/archived lifecycle and intake/clarification flow.
 - **`produceArtifact`** is the sibling of the new authoring job: instead of
-  writing a runtime file, the planner writes a *capability*.
+  writing a runtime file, the planner writes a *capability*. As of epic #1160
+  it is also the **trigger**: a completed `produceArtifact` / `adHocAction`
+  task is post-hoc CAPTURED into a bundle (see below).
 - The planner's existing **budget / model-tiering / convergence guards** (#818-#843)
   wrap the design/repair loop so authoring spend is bounded like any other plan.
+
+## Connected: everyday-task capture (epic #1160, #1161)
+
+#955-#961 built the full pipeline above as **building blocks** -- design pass,
+emit/repair, the gates, the runtime, versioning, the catalog -- each
+independently unit-tested. They were NOT chained on a live trigger: nothing ran
+the Responsibility/task -> bundle flow end to end (`runDesignPass` /
+`emitAndRepairBundle` / `handoffToGate2` had zero non-test callers). Epic #1160
+wires the spine.
+
+`integrations/planner/agent_loop_authoring_capture.go` is the live orchestrator.
+On every user-facing one-off task (`produceArtifact` / `adHocAction`) reaching
+`succeeded`, the `AuthoringCaptureDispatcher` runs the pipeline **post-hoc** in a
+detached goroutine and persists a stored, versioned `v1:authoring:bundle`:
+
+```
+Plan succeeded (produceArtifact / adHocAction)        [trigger -- #1161]
+   |  AuthoringCaptureDispatcher.HandlePlanUpdated -> claim once
+   v
+runDesignPass (goal = design statement)               [reuse-or-author]
+   v
+emitAndRepairBundle (GATE 1 + repair loop)            [validated | failed]
+   v
+persist: mutationCreateAuthoringBundle (sourcePlanId) [v1:authoring:bundle]
+         + mutationCreateAuthoringConstruct (per dep)
+         + mutationRecordBundleValidation
+   v
+handoffToGate2 (GATE 2 behavioral dry-run)            [dryRunPassed | failed]
+         + mutationRecordBundleDryRun
+   v
+TERMINAL = dryRunPassed   (NOT activated -- GATE 3 approval + activation are a
+                           later user action via the #1162 surface)
+```
+
+Design decisions (owner):
+
+- **Post-hoc capture, not author-and-run.** The task runs exactly as today (the
+  deliverable is never at risk); the bundle is authored AFTER the fact and is
+  NOT activated. Capture records what ran; it does not replace execution.
+  Promoting a captured/edited bundle to a live executing automation
+  (author-and-run) is the documented follow-up.
+- **Default-on for every task**, gated by `MEMQL_AUTHORING_CAPTURE_ENABLED`
+  (default on; an ops kill-switch) and bounded by the same process-wide LLM
+  ceiling + latching kill-switch (#1141) and the per-plan repair budget (#819).
+- **Idempotent**: `sourcePlanId` on the bundle + `queryAuthoringBundleForPlan`
+  skip a re-delivered terminal event (belt-and-suspenders with the in-process
+  claim across restarts / cross-node re-delivery, #1155). `sourcePlanId` is also
+  the lookup key for the #1162 view/edit/export surface.
+
+The three Gate seams (`CompileBundle` / `CatalogNearMatches` / `RunBundleDryRun`)
+need the concrete `*MemQLEngine`, which the planner's narrow `Engine` interface
+does not expose; they are reached through the app-level `CognitionEngineAdapter`
+and obtained by the orchestrator via a `captureEngine` type assertion, so a
+binary without the authoring seams linked simply skips capture (never a hard
+failure).

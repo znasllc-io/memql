@@ -12,6 +12,7 @@ shape bundle bundleFull {
   row.id
   payload.ownerUserId
   payload.responsibilityId
+  payload.sourcePlanId
   payload.title
   payload.summary
   payload.status
