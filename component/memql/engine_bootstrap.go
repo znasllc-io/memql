@@ -217,6 +217,13 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 
 	e.tools = toolRegistry
 
+	// Boot self-check (memql#1156): a capability tool missing from the
+	// registry means a tool slice silently failed to load (the loader
+	// logs+skips unparseable slices). Surface it LOUDLY here at boot instead
+	// of letting it resurface at runtime as "tool not in registry" -- which is
+	// what stranded produceArtifact and drove a plan/event storm (memql#1153).
+	VerifyCapabilityToolsRegistered(toolRegistry.Has, e.Logger)
+
 	promptRegistry, err := loadPromptRegistry(e.Logger)
 	if err != nil {
 		return err
