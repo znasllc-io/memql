@@ -18,7 +18,8 @@
 # Prerequisites:
 #   - ngrok CLI installed on the host (brew install ngrok)
 #   - ngrok authtoken saved (ngrok config add-authtoken <token>)
-#   - polyphon-livekit container running
+#   - the voice/avatar overlay running on the cluster (make dev-cluster-voice),
+#     which stands up the polyphon-livekit container + coturn + voice-agent.
 #
 # Idempotent: re-run any time to refresh.
 
@@ -32,25 +33,28 @@ source "${SCRIPT_DIR}/lib.sh"
 # FUNCTIONS
 #=============================================================================
 
-function warn_overlay_pending() {
-    # The voice/avatar overlay (docker-compose.polyphon.yml, the
-    # polyphon-livekit container + voice-agent) rode the retired single-node
-    # stack (memql#1311) and is pending re-home onto the parity cluster
-    # (memql#1310). The cluster ships its own `livekit` service, but the
-    # avatar TURN-relay path this ngrok tunnel feeds is not wired to it yet.
-    echo "NOTE: voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
-    echo "      This ngrok/TURN path targeted the retired single-node stack; it may"
-    echo "      not connect to the cluster's livekit service until #1310 lands."
+function warn_avatar_video_caveat() {
+    # The voice/avatar overlay (docker-compose.polyphon.yml) now layers on
+    # the parity cluster (memql#1310). This ngrok/TURN path restores the
+    # avatar relay PLUMBING -- but local cloud-avatar VIDEO does NOT render
+    # (memql#1277): the cloud engine joins LiveKit signaling but its WebRTC
+    # media leg to the dockerized LiveKit never connects over the free ngrok
+    # TURN relay. Avatar video is validated on STAGING only. Direct avatar
+    # runs audio-only locally.
+    echo "NOTE: this restores the voice-agent + avatar TURN-relay plumbing."
+    echo "      Local cloud-avatar VIDEO (Anam/Simli) does NOT render over this"
+    echo "      relay (memql#1277) -- validated on staging only. Voice still works."
     echo ""
 }
 
 function require_livekit() {
-    # The cluster's LiveKit container is `memql-livekit`; the retired
-    # overlay used `polyphon-livekit`. Accept either so this keeps working
-    # once the overlay is re-homed (memql#1310).
+    # The voice/avatar overlay renames the cluster's livekit container to
+    # `polyphon-livekit` (so lib_refresh_turn_relay can stamp + restart it).
+    # Accept the bare cluster name too in case the overlay isn't up yet.
     if ! docker ps --format '{{.Names}}' | grep -qE '^(memql|polyphon)-livekit$'; then
         echo "ERROR: no LiveKit container is running."
-        echo "       Start the parity cluster first: make dev-cluster-up"
+        echo "       Start the cluster WITH the voice/avatar overlay first:"
+        echo "         make dev-cluster-voice"
         echo "       Or run a full refresh: make dev-cluster-refresh"
         exit 1
     fi
@@ -71,10 +75,10 @@ function refresh_tunnel() {
 
 function restart_dependent_services() {
     echo ""
-    echo "Restarting bff + livekit so they pick up the new URL..."
-    # The voice-agent service rode the retired overlay (memql#1310, see the
-    # note above); restart only the cluster services that exist today.
-    $LIB_COMPOSE $LIB_COMPOSE_FILE_CLUSTER restart bff livekit >/dev/null
+    echo "Restarting bff + livekit + voice-agent so they pick up the new URL..."
+    # Use the cluster + voice/avatar overlay so the polyphon-livekit + the
+    # voice-agent (defined in the overlay) are in scope for the restart.
+    $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON restart bff livekit voice-agent >/dev/null
 }
 
 function print_summary() {
@@ -101,7 +105,7 @@ EOF
 
 function main() {
     check_docker
-    warn_overlay_pending
+    warn_avatar_video_caveat
     require_livekit
     refresh_tunnel
     restart_dependent_services

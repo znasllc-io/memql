@@ -15,6 +15,13 @@
 
 readonly LIB_COMPOSE="docker compose"
 readonly LIB_COMPOSE_FILE_CLUSTER="-f docker/docker-compose.cluster.yml"
+# The opt-in voice/avatar overlay (memql#1310): the parity cluster PLUS the
+# voice-agent + avatar TURN-relay overlay. The overlay layers ON TOP of the
+# cluster (it overrides livekit + adds voice-agent + coturn) -- so the two
+# -f flags must stay in this order (base first, overlay second). Used by the
+# ngrok/avatar-relay path (ngrok-up.sh + lib_refresh_turn_relay) and the
+# `make dev-cluster-voice` target.
+readonly LIB_COMPOSE_FILE_POLYPHON="-f docker/docker-compose.cluster.yml -f docker/docker-compose.polyphon.yml"
 # Compose PROJECT name of the retired single-node stack (memql#1311). It
 # used `name: memql-cluster`; we tear it down by name (its compose file is
 # gone) so any leftover container releases the host ports the cluster binds.

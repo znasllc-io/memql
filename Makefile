@@ -20,6 +20,10 @@ VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
 # Docker
 COMPOSE      := docker compose
 COMPOSE_CLST := -f docker/docker-compose.cluster.yml
+# Cluster + opt-in voice/avatar overlay (memql#1310): the parity cluster PLUS
+# the voice-agent + avatar TURN-relay overlay. Base first, overlay second --
+# the overlay overrides livekit + adds voice-agent + coturn.
+COMPOSE_POLY := -f docker/docker-compose.cluster.yml -f docker/docker-compose.polyphon.yml
 
 # ---------------------------------------------------------------------------
 # Build targets
@@ -161,7 +165,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-nginx-reload voice-trace voice-trace-now db
+.PHONY: run dev-cluster dev-cluster-up dev-cluster-voice dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-nginx-reload voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
@@ -184,9 +188,29 @@ dev-cluster-up:
 	@echo "Cluster up (2 replicas/mesh node, staging parity). Front door: https://app.local.znas.io (TLS subdomains)"
 	@echo "Parity litmus (distinct per-replica node ids): make dev-cluster-status"
 
+## Boot the parity cluster WITH the opt-in voice/avatar overlay (memql#1310):
+## the cluster PLUS the voice-agent + avatar TURN-relay (coturn + the
+## livekit-dev.yaml config override). This is the opt-in voice/avatar path --
+## the plain `make dev-cluster-up` runs the cluster WITHOUT the voice-agent.
+##
+## CAVEAT (memql#1277): this restores the voice-agent + the avatar relay
+## PLUMBING. Local cloud-avatar VIDEO (Anam/Simli direct avatar) does NOT
+## render -- the cloud engine's WebRTC media leg can't reach the dockerized
+## LiveKit over the free ngrok TURN relay (host-candidate-only ICE). Voice
+## works; avatar video is validated on STAGING only. After bring-up, run
+## `bash scripts/dev/ngrok-up.sh` to stand up the avatar relay tunnel.
+dev-cluster-voice:
+	$(COMPOSE) $(COMPOSE_POLY) up --build -d
+	@echo ""
+	@echo "Cluster + voice/avatar overlay up. Front door: https://app.local.znas.io (TLS subdomains)"
+	@echo "Voice-agent joins LiveKit rooms; avatar relay plumbing is in place."
+	@echo "NOTE (memql#1277): local cloud-avatar VIDEO does NOT render (staging-only); voice works."
+	@echo "Next (avatar relay tunnel): bash scripts/dev/ngrok-up.sh"
+
 ## Stop the staging-parity cluster (alias of dev-cluster-stop; keeps volumes).
+## Tears down the voice/avatar overlay services too (they share the project).
 dev-cluster-down:
-	$(COMPOSE) $(COMPOSE_CLST) down
+	$(COMPOSE) $(COMPOSE_POLY) down
 
 ## Cross-replica delivery gate (memql#1261): boot the port-isolated 2-replica
 ## cluster and run test/clustere2e. EXPECTED RED on current main (it reproduces
@@ -276,23 +300,17 @@ dev-cluster-scale:
 	@echo "[scale] $(NODE) -> $(N) replicas"
 
 ## Tail the end-to-end voice latency waterfall (each voice turn emits
-## "voice trace" log lines at every pipeline stage). The voice/avatar
-## overlay (docker-compose.polyphon.yml + the voice-agent) is pending
-## re-home onto the parity cluster (memql#1310); the single-node stack
-## it rode was retired in memql#1311. Until #1310 lands, tail the
-## cluster's voice nodes directly.
+## "voice trace" log lines at every pipeline stage). Tails the cluster's
+## voice path PLUS the voice-agent from the voice/avatar overlay (memql#1310).
+## Run `make dev-cluster-voice` first so the voice-agent service exists.
 voice-trace:
-	@echo "voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
-	@echo "Until then, tail the cluster voice path directly:"
-	@$(COMPOSE) $(COMPOSE_CLST) logs -f bff cognition voice 2>&1 | grep --line-buffered "voice trace"
+	@$(COMPOSE) $(COMPOSE_POLY) logs -f bff cognition voice voice-agent 2>&1 | grep --line-buffered "voice trace"
 
 ## Same as voice-trace but pre-loads the last 5 minutes of history
 ## so you don't have to re-utter to see a waterfall when you're
 ## starting the tail mid-session.
 voice-trace-now:
-	@echo "voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
-	@echo "Until then, tail the cluster voice path directly:"
-	@$(COMPOSE) $(COMPOSE_CLST) logs -f --since 5m bff cognition voice 2>&1 | grep --line-buffered "voice trace"
+	@$(COMPOSE) $(COMPOSE_POLY) logs -f --since 5m bff cognition voice voice-agent 2>&1 | grep --line-buffered "voice trace"
 
 ## Reload the nginx LB so its DNS cache picks up any cluster nodes
 ## that got recreated since the last reload. Useful after a partial
@@ -773,6 +791,7 @@ help:
 	@echo "RUN"
 	@echo "  make run          Run standalone server locally (single process, not a topology)"
 	@echo "  make dev-cluster-up            BLESSED local topology: boot staging-parity cluster (2 replicas/node) in background"
+	@echo "  make dev-cluster-voice         Cluster + OPT-IN voice/avatar overlay (voice-agent + TURN relay). Voice works; avatar VIDEO is staging-only (#1277)"
 	@echo "  make dev-cluster-down          Stop the staging-parity cluster (keeps volumes)"
 	@echo "  make dev-cluster               Same as dev-cluster-up but FOREGROUND (build + up)"
 	@echo "  make dev-cluster-restart       Restart cluster fresh (down + rebuild + up -d)"
