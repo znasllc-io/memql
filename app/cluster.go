@@ -201,6 +201,14 @@ func (a *App) cluster() {
 			substrate = node.NewSubstrateWithStore(dbGetter, a.Logger)
 		}
 		a.deliverySubstrate = substrate
+		// Streaming over the substrate (memql#1266): hand the substrate to the
+		// gRPC server so the token-streaming + audio-streaming handlers produce
+		// (worker) / consume (WS-owning bff) ordered chunks over it, surviving a
+		// mid-stream replica switch. Set on every mesh node; the handlers pick the
+		// producer vs consumer role from the node type at call time.
+		if a.grpcServer != nil {
+			a.grpcServer.SetDeliverySubstrate(substrate, nodeIdentity.ID)
+		}
 		isBFF := nodeIdentity.Type == node.NodeTypeBFF
 		if crd := node.NewChatReplyDelivery(nodeIdentity, substrate, a.eventBus, isBFF, a.Logger); crd != nil {
 			if isBFF && eventBridge != nil {

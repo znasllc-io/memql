@@ -101,6 +101,24 @@ func (s *Server) SetClientToolResultServer(srv *node.ClientToolResultServer) {
 	}
 }
 
+// SetDeliverySubstrate installs the durable streaming substrate (memql#1266)
+// so the live token + audio streaming paths produce/consume ordered chunks over
+// it instead of the ad-hoc forwardedStream mesh push. Wired on every mesh node
+// during app bootstrap once the substrate is resolved. Nil-safe: when unset the
+// streaming handlers fall back to the direct forwardedStream push (single-node /
+// non-mesh binaries).
+func (s *Server) SetDeliverySubstrate(sub node.DeliverySubstrate, nodeID string) {
+	if s == nil {
+		return
+	}
+	s.deliverySubstrate = sub
+	s.streamNodeID = nodeID
+	if s.serviceRef != nil && s.serviceRef.svc != nil {
+		s.serviceRef.svc.deliverySubstrate = sub
+		s.serviceRef.svc.streamNodeID = nodeID
+	}
+}
+
 // handleAgentPreemptTurn is the agent-node landing for a planner "pass"
 // (epic memql#902 / #906): it flags the in-flight background turn named by
 // request_id to stop at its next checkpoint. Fire-and-forget -- the turn ends

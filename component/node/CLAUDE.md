@@ -231,11 +231,17 @@ the common frame stays a string concat). Cross-replica + backpressure + lifecycl
 durable-store-only, mirroring the #1264 cross-replica style). This is the
 node-library realization of "migrate token + audio onto the streaming contract",
 at the same altitude as the sibling RPC migration (`substrate_rpc.go`, memql#1265).
-The live grpc-handler cutover (pointing `si_forward.go`'s token relay +
-`si_transcribe_stream.go`'s audio relay at `StreamSession`/`SubscribeStreamFrames`
-instead of the ad-hoc `SIForwardResponse` mesh push) + the cluster streamed-turn
-test ride memql#1267 (gated on #1264 #1265 #1266), the same per-path gating the
-RPC pattern uses.
+The live grpc-handler cutover landed in memql#1266 (`component/grpc/si_stream_substrate.go`):
+the worker's `handleAiChatStream` (token deltas) + `si_transcribe_stream.go` (audio
+deltas) produce frames to `stream:<requestId>` via `StreamSession` instead of the
+ad-hoc `SIForwardResponse` mesh push, and the WS-owning bff (`proxySIStream`)
+consumes them via `SubscribeStreamFrames` and renders the SAME wire messages back
+to the browser. The trigger still rides the mesh forward (the bff Forward()s the
+request; a bare terminal closes the inflight); only the streamed RESPONSE delivery
+moves onto the durable substrate, so a streamed turn survives a mid-stream replica
+switch. The cutover is gated on `streamProducerOverSubstrate()` (substrate wired
+AND a forwarded worker session) on the producer side and `streamingOverSubstrate()`
++ bff-proxy on the consumer side, so single-binary / non-mesh keeps the direct push.
 
 ### NodeServer (`server.go`)
 gRPC server implementing `NodeService.Stream`. Handles handshake (NodeHello/NodeWelcome),

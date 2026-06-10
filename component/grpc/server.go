@@ -123,6 +123,17 @@ type Server struct {
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
 	clientToolRPC   *node.ClientToolResultServer
+	// deliverySubstrate is the durable streaming substrate (memql#1266). Set by
+	// app bootstrap on every mesh node where the substrate is wired; nil on
+	// single-node / non-mesh binaries (streaming falls back to the direct
+	// forwardedStream push). Producers (agent token streaming, voice audio
+	// streaming) StreamSession.Delta to stream:<requestId>; the WS-owning bff
+	// SubscribeStreamFrames it back, surviving a mid-stream replica switch.
+	deliverySubstrate node.DeliverySubstrate
+	// streamNodeID is this node's id, used as the substrate stream producer
+	// origin + the bff consumer cursor identity (memql#1266). Set alongside
+	// deliverySubstrate.
+	streamNodeID    string
 	serviceRef      *serviceRef
 	extraRegistrars []func(*grpc.Server)
 	// tokenVerifier honors RotateAuthMsg on open streams. Set by
@@ -316,6 +327,8 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		clientToolResultServer: s.clientToolRPC,
+		deliverySubstrate:      s.deliverySubstrate,
+		streamNodeID:           s.streamNodeID,
 		verifier:               s.tokenVerifier,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
@@ -495,6 +508,19 @@ type service struct {
 	// regardless of cognition<->agent connection churn (the #1245 fix). Nil =>
 	// the legacy ForwardContinuation path stays in effect.
 	clientToolResultServer *node.ClientToolResultServer
+
+	// deliverySubstrate is the durable streaming substrate (memql#1266). Non-nil
+	// on every mesh node where the substrate is wired (set via
+	// Server.SetDeliverySubstrate during app bootstrap). The token-streaming
+	// (handleAiChatStream) + audio-streaming (si_transcribe_stream) paths produce
+	// ordered chunks to stream:<requestId> on the producing worker and the
+	// WS-owning bff consumes them back, so a streamed turn survives a mid-stream
+	// replica switch (replayed from the durable outbox). Nil => the legacy
+	// forwardedStream / direct push stays in effect (single-node / non-mesh).
+	deliverySubstrate node.DeliverySubstrate
+	// streamNodeID is this node's id (memql#1266): the substrate stream producer
+	// origin (worker) + the per-replica consumer cursor identity (bff).
+	streamNodeID string
 
 	// agentPauseHook flags an in-flight background turn for cooperative
 	// preemption (epic memql#902 / #906), keyed by request_id. Injected on

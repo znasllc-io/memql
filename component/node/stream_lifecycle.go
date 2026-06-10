@@ -178,6 +178,24 @@ func (s *StreamSession) Delta(ctx context.Context, data string) (int64, error) {
 	return s.pub.Append(ctx, s.topic, encodeFrame(StreamPhaseDelta, data, nil))
 }
 
+// DeltaWithMeta publishes one incremental chunk carrying per-delta metadata (the
+// audio-transcript path's isFinal / confidence flags). It is the Delta variant
+// for streams whose deltas are not pure text -- the meta rides the frame envelope
+// (JSON encoding when present) and the consumer reads frame.Meta. When meta is
+// empty it is exactly Delta (the cheap compact encoding).
+func (s *StreamSession) DeltaWithMeta(ctx context.Context, data string, meta map[string]any) (int64, error) {
+	if s == nil || s.pub == nil {
+		return 0, fmt.Errorf("stream session: not configured")
+	}
+	if !s.started {
+		return 0, fmt.Errorf("stream session %s: Delta before Start", s.pub.StreamID())
+	}
+	if s.finished {
+		return 0, fmt.Errorf("stream session %s: Delta after terminal", s.pub.StreamID())
+	}
+	return s.pub.Append(ctx, s.topic, encodeFrame(StreamPhaseDelta, data, meta))
+}
+
 // Complete publishes the normal terminal frame carrying the final assembled text
 // (token streaming) / final transcript (audio streaming) and optional completion
 // metadata. After Complete the consumer closes its channel.
