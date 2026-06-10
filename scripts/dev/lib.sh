@@ -862,7 +862,7 @@ function lib_setup_blob() {
 # Set MEMQL_NGROK_TURN_ADDR to a RESERVED ngrok TCP addr (e.g.
 # "1.tcp.us-cal-1.ngrok.io:12345") so host:port stay STABLE across
 # restarts -- otherwise ngrok hands out a fresh dynamic addr each run.
-# Reserve one in the ngrok dashboard once; see docs/voice/turn-relay.md.
+# Reserve one in the ngrok dashboard once; see docs/internal/design/voice-turn-relay.md.
 #
 # Best-effort: returns 1 (non-fatal) when the ngrok TCP tunnel / docker /
 # the config are unavailable so refresh.sh keeps going (the browser voice
@@ -938,5 +938,16 @@ function lib_refresh_turn_relay() {
 
     echo "  TURN relay up: node_ip=${lk_ip}, turn=${turn_host}:${turn_port} (tcp)"
     echo "  ${LIB_LIVEKIT_CONFIG} stamped; ${LIB_LIVEKIT_CONTAINER} restarted."
+    # Loud expectation-setting (memql#1277): this relay carries LiveKit
+    # SIGNALING + browser<->LiveKit media only. Local CLOUD-avatar VIDEO
+    # (Anam / Simli direct avatar) does NOT render: the cloud engine joins
+    # signaling but its WebRTC media leg to the dockerized LiveKit never
+    # connects (both sides only offer unreachable host ICE candidates; the
+    # cloud engine forms no relay candidate). This is intrinsic to free
+    # tunneling, not a misconfiguration. Cloud-avatar video is validated on
+    # STAGING (#784). See docs/internal/design/voice-turn-relay.md.
+    echo "  NOTE: local cloud-avatar VIDEO (Anam/Simli direct avatar) will NOT render over this relay --"
+    echo "        the cloud engine's WebRTC media leg can't reach the dockerized LiveKit (host-candidate-only ICE)."
+    echo "        Direct avatar runs audio-only locally; avatar video is validated on staging (memql#784/#1277)."
     return 0
 }

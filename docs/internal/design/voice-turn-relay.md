@@ -9,6 +9,22 @@ owner: znas
 
 # Anam avatar TURN media relay (local dev)
 
+> **Determination (memql#1277): local cloud-avatar VIDEO does not render over
+> this relay, and cannot on free tunneling.** This relay reliably carries
+> LiveKit **signaling** and **browser <-> LiveKit** media, and the TURN path
+> passes a `turnutils_uclient` round-trip. But the **cloud-engine <-> LiveKit
+> media leg never connects**, so the Anam/Simli direct avatar shows no video
+> locally. Proven from live dev-cluster logs (see "Why cloud-avatar video can't
+> render locally" below). The cloud engine joins LiveKit signaling fine, then
+> ICE fails because both sides only offer **unreachable host candidates** and
+> the cloud engine forms **no relay candidate** from the advertised TURN
+> server. This is **not vendor-specific** (Anam and Simli fail identically) and
+> **not a timeout-tuning issue** (memql#1274 ruled that out). **Supported local
+> path: direct avatar audio-only. Cloud-avatar VIDEO is validated on STAGING
+> (memql#784)**, where LiveKit is directly reachable and advertises real host
+> candidates. The relay below remains useful for the browser media path and as
+> the signaling tunnel.
+
 The Anam direct/Guide avatar needs Anam's **cloud** engine to exchange
 WebRTC media with the **local** dev LiveKit. The browser is on the same
 host and reaches LiveKit fine, but Anam's cloud cannot reach the host's
@@ -126,5 +142,47 @@ docker logs polyphon-livekit | grep -i turn
 
 A working relay logs `ALLOCATE ... success`, `CREATE_PERMISSION ...
 success`, `CHANNEL_BIND ... success`, and relays bytes both ways
-(non-zero `rp/rb/sp/sb`). The render of the avatar itself is a separate,
-Anam-cloud-side concern (memql#772).
+(non-zero `rp/rb/sp/sb`). That round-trip + the browser media path is all
+this relay was ever validated for -- the render of the avatar itself was
+flagged as a separate, unverified concern (memql#772), and memql#1277
+confirmed it does NOT render.
+
+## Why cloud-avatar video can't render locally (memql#1277)
+
+Pulling the live `polyphon-livekit` + `memql-coturn` logs during an actual
+Simli direct-avatar join (room `avatar-*`) shows the relay is plumbed
+correctly but the cloud-engine media leg still never connects:
+
+1. **Signaling works.** Simli's cloud LiveKit agent (`kind=AGENT`,
+   `sdk=PYTHON 1.1.8`, from Simli's cloud IP) joins the room over the ngrok
+   https tunnel. It retries the join ~5x, ~15s apart, then gives up -- that
+   window is the ~30s `engageVendor` "context deadline exceeded".
+2. **The TURN relay IS advertised to the cloud engine.** LiveKit's join
+   response to the avatar agent carries
+   `iceServers: [{urls: ["turn:<ngrok-tcp>?transport=tcp"], ...}]` with
+   `forceRelay: UNSET`.
+3. **The cloud engine never uses it.** The cloud engine's IP never connects
+   to coturn (every coturn session is from the docker host gateway =
+   LiveKit-side + browser-side); it gathers **no relay candidate**.
+4. **ICE has only unreachable host candidates -> media dies.** The avatar
+   room's ICE pair stats show LiveKit offering only its docker host candidate
+   (`172.18.0.x:7882`, unreachable from the cloud) and the cloud engine
+   offering only its cloud-internal host candidate (`192.168.x.x`,
+   unreachable from our LiveKit): `requestsSent: 8, responsesReceived: 0` ->
+   both transports `failed` -> `leave reason CONNECTION_TIMEOUT`.
+
+The blocker is intrinsic: relaying a **public cloud engine** into a
+**NAT'd/dockerized local LiveKit** over **free tunneling** has no candidate
+both sides can reach. Even forcing relay (`rtc.force_relay`) does not help --
+LiveKit's own relay candidate would be coturn's docker-internal relay address
+(no `external-ip` is set, and a single ngrok TCP port cannot carry coturn's
+dynamic relay-port range anyway). Making it work would require LiveKit on a
+publicly-reachable host (i.e. staging) or a TURN server with a real public IP
+and full relay-port range -- neither is a local-dev-box shape.
+
+**Fail-loud surfaces (so this is never re-debugged as a bug):**
+- `make dev-refresh` (`lib_refresh_turn_relay`) prints a NOTE that local
+  cloud-avatar video will not render.
+- `avatardirect.engageVendor` replaces the cryptic vendor "context deadline
+  exceeded" with a definitive error pointing at this limitation + the
+  staging-validated path, when the engine URL is a dev ngrok tunnel.

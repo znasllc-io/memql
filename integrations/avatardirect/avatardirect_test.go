@@ -209,6 +209,45 @@ func TestEngageVendor_VendorStartFailurePropagates(t *testing.T) {
 	assert.Contains(t, err.Error(), "bring up anam avatar")
 }
 
+func TestEngageVendor_DevTunnelMediaTimeoutSurfacesDeterminationHint(t *testing.T) {
+	// memql#1277: on the local dev path the engine URL is an ngrok tunnel and a
+	// vendor-join timeout means the WebRTC media leg never connected. The cryptic
+	// "context deadline exceeded" is replaced with a definitive, documented error
+	// pointing at the local limitation + the staging-validated path.
+	t.Setenv("LIVEKIT_PUBLIC_URL", "wss://unscrutinisingly-nondetonating-taisha.ngrok-free.dev")
+	eng := &fakeEngine{vendor: "simli", personaId: "face-1"}
+	client := &stubVendorClient{err: errors.New(`simli: livekit agent: Post "https://api.simli.ai/integrations/livekit/agents": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`)}
+	i := newTestIntegration(eng, client)
+
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "a", "room_name": "avatar-x", "browser_identity": "viewer-1",
+	}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported on the dev cluster")
+	assert.Contains(t, err.Error(), "audio-only locally")
+	assert.Contains(t, err.Error(), "validated on staging")
+	assert.Contains(t, err.Error(), "voice-turn-relay.md")
+	// The underlying vendor error is still wrapped for debugging.
+	assert.Contains(t, err.Error(), "context deadline exceeded")
+}
+
+func TestEngageVendor_DevTunnelNonTimeoutKeepsRawError(t *testing.T) {
+	// A fast 4xx/5xx (bad key, bad face id) on the dev tunnel is NOT a media
+	// failure, so it keeps the raw "bring up <vendor> avatar" wrapping rather
+	// than the misleading media-relay determination hint.
+	t.Setenv("LIVEKIT_PUBLIC_URL", "wss://foo.ngrok-free.dev")
+	eng := &fakeEngine{vendor: "simli", personaId: "face-1"}
+	client := &stubVendorClient{err: errors.New("simli: compose token: POST .../compose/token -> 401: invalid api key")}
+	i := newTestIntegration(eng, client)
+
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "a", "room_name": "avatar-x", "browser_identity": "viewer-1",
+	}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bring up simli avatar")
+	assert.NotContains(t, err.Error(), "not supported on the dev cluster")
+}
+
 func TestStartSession_MissingAgentId(t *testing.T) {
 	i := newTestIntegration(&fakeEngine{vendor: "anam"}, &stubVendorClient{})
 	_, err := i.handleStartSession(context.Background(), map[string]any{}, 0)

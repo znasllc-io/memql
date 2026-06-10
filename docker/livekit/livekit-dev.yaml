@@ -24,7 +24,13 @@
 # browser-only path working on a stock `docker compose up` (no dev-refresh),
 # and the placeholder TURN host is harmless until dev-refresh stamps the real
 # tunnel (the browser ignores a dead TURN candidate; only Anam needs it).
-# See docs/voice/turn-relay.md for the full path + hard-won gotchas.
+# See docs/internal/design/voice-turn-relay.md for the full path + hard-won gotchas.
+#
+# NB (memql#1277): this relay carries SIGNALING + browser<->LiveKit media only.
+# Local CLOUD-avatar VIDEO (Anam / Simli direct avatar) does NOT render -- the
+# cloud engine joins signaling but its WebRTC media leg never connects (both
+# sides only offer unreachable host candidates; the cloud engine forms no relay
+# candidate). Cloud-avatar video is validated on staging (#784).
 
 port: 7880
 
@@ -47,7 +53,7 @@ rtc:
   # endpoint + turns: -- the TLS endpoint mangles the bidirectional TURN
   # stream ("recv: Success"). host/port are stamped from the live tunnel by
   # dev-refresh (a RESERVED ngrok TCP addr keeps them stable across restarts;
-  # see docs/voice/turn-relay.md). credential is the pinned dev-only literal,
+  # see docs/internal/design/voice-turn-relay.md). credential is the pinned dev-only literal,
   # kept in sync with docker/coturn/turnserver.conf.
   turn_servers:
     - host: turn-host.stamped-by-dev-refresh.invalid
