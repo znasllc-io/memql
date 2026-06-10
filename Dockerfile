@@ -59,8 +59,17 @@ RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
 # The CGO-free node types keep -ldflags="-s -w" for a stripped static binary.
 # The voice node links against libopus dynamically; -s -w still applies. The
 # healthcheck is always CGO-free.
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=amd64 go build -tags "${BUILD_TAGS}" -ldflags="-s -w" -o /app/bin/memql .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
+#
+# GOARCH follows TARGETARCH (the BuildKit-provided target-platform arch) rather
+# than a hardcoded amd64, so the CGO voice node builds NATIVELY for the host:
+# amd64 under staging's `az acr build --platform linux/amd64`, arm64 on an
+# Apple-Silicon dev machine running the local parity cluster. A hardcoded
+# amd64 cross-compile from arm64 fails the CGO voice build (gcc: unrecognized
+# '-m64'); the CGO-free nodes cross-compile either way. Defaults to amd64 if
+# TARGETARCH is somehow unset (preserves the prior behaviour).
+ARG TARGETARCH
+RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w" -o /app/bin/memql .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
 
 # --- Runtime: CGO-free node types (default) use distroless. ---------------
 FROM gcr.io/distroless/base-debian12 AS runtime

@@ -1,0 +1,86 @@
+# CI / co-tenant override for the staging-parity cluster (memql#1261).
+#
+#   docker compose -f docker/docker-compose.cluster.yml \
+#                  -f docker/docker-compose.cluster.ci.yml up -d
+#
+# Two jobs, both in service of running the cluster-e2e delivery gate
+# (test/clustere2e) unattended -- in GitHub Actions, or locally NEXT TO an
+# already-running single-node `full.yml` stack without fighting over host
+# ports:
+#
+#   1. PORT ISOLATION. The base compose publishes postgres:5432,
+#      identity:8081, azurite:10000 on the host. Those collide with a
+#      running `docker-compose.full.yml` stack (and with a second cluster).
+#      The e2e harness never needs them: it drives the cluster through the
+#      nginx front door (:8085 HTTP / :50050 gRPC, both still published) and
+#      seeds via `docker exec`. So we drop the host publishes with the
+#      compose `!override` tag (everything still talks over the
+#      memql-cluster network by service name). Requires Docker Compose
+#      v2.24+ for the !override / !reset merge tags.
+#
+#   2. NON-INTERACTIVE USER SEED. The base cluster runs identity in
+#      `waitlist` registration; a fresh-DB CI cluster therefore has no users
+#      and no way to self-register without an operator. We flip it to `open`
+#      so scripts/test/cluster-e2e.sh can mint a probe user + token through
+#      the first-run /setup owner path. This is a TEST-ONLY relaxation; the
+#      base compose (and staging) keep waitlist.
+
+# Both jobs use the compose `!override` / `!reset` merge tags (Docker Compose
+# v2.24+). The singleton services pin a fixed `container_name` (memql-db,
+# memql-identity, memql-lb, memql-azurite, memql-livekit) that collides with a
+# running full.yml stack on the same daemon; we !reset them so Compose
+# auto-names each `<project>-<service>-N` and the parity cluster coexists.
+# Services stay reachable by SERVICE NAME on the cluster network regardless.
+services:
+  postgres:
+    ports: !override []
+    container_name: !reset null
+
+  identity:
+    ports: !override []
+    container_name: !reset null
+    environment:
+      # Test-only: allow the seed step to register a probe user without an
+      # operator approving a waitlist entry. NEVER set this on staging/prod.
+      IDENTITY_REGISTRATION_MODE: open
+      # SERVICE_NAME is normally supplied by the genesis env envelope; set it
+      # explicitly so the cluster boots against a minimal CI .env.local that
+      # doesn't carry the per-service genesis vars.
+      SERVICE_NAME: memQL-identity
+
+  # SERVICE_NAME is normally supplied per-node by the genesis env envelope;
+  # set it explicitly for every node so the cluster boots against a minimal
+  # CI .env.local that doesn't carry the per-service genesis vars.
+  bff:
+    environment:
+      SERVICE_NAME: memQL-bff
+
+  cognition:
+    environment:
+      SERVICE_NAME: memQL-cognition
+
+  agent:
+    environment:
+      SERVICE_NAME: memQL-agent
+
+  planner:
+    environment:
+      SERVICE_NAME: memQL-planner
+
+  voice:
+    environment:
+      SERVICE_NAME: memQL-voice
+
+  workbench:
+    environment:
+      SERVICE_NAME: memQL-workbench
+
+  nginx:
+    container_name: !reset null
+
+  azurite:
+    ports: !override []
+    container_name: !reset null
+
+  livekit:
+    container_name: !reset null

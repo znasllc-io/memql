@@ -177,7 +177,11 @@ services:
   # scopes) before `make dev-cluster`. 2 replicas (staging parity #551).
   copresent:
     build:
-      context: ../copresent
+      # The copresent SPA repo is a workspace SIBLING of memql
+      # (../../copresent from docker/), matching the bind mount the
+      # full.yml `app` service uses. The carrier nodes build from the
+      # workspace parent (../..); the SPA builds from its own repo root.
+      context: ../../copresent
       dockerfile: Dockerfile
       args:
         # Same-origin: the browser hits the nginx front door on :8085;
