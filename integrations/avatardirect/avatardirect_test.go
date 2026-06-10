@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -96,6 +98,41 @@ func decode(t *testing.T, nodes []memorynodes.MemoryNode, err error) map[string]
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(nodes[0].Payload, &out))
 	return out
+}
+
+// TestMintBrowserToken_KindByVendor pins the memql#1236 fix: the browser join
+// token's participant KIND is vendor-specific. anam needs a STANDARD (non-agent)
+// participant in the room or its engine self-leaves at ~26-27s; simli needs the
+// browser to be AGENT-kind so its receiver picks it as the audio source. The
+// match is case-insensitive (the vendor string flows from the agent record).
+func TestMintBrowserToken_KindByVendor(t *testing.T) {
+	i := newTestIntegration(&fakeEngine{}, nil)
+
+	cases := []struct {
+		vendor string
+		want   livekit.ParticipantInfo_Kind
+	}{
+		{"anam", livekit.ParticipantInfo_STANDARD},
+		{"ANAM", livekit.ParticipantInfo_STANDARD},
+		{"simli", livekit.ParticipantInfo_AGENT},
+		{"", livekit.ParticipantInfo_AGENT}, // unknown/empty defaults to the simli-compatible agent kind
+	}
+	for _, tc := range cases {
+		t.Run("vendor="+tc.vendor, func(t *testing.T) {
+			tok, err := i.mintBrowserToken("avatar-room", "viewer-1", tc.vendor)
+			require.NoError(t, err)
+
+			v, err := auth.ParseAPIToken(tok)
+			require.NoError(t, err)
+			_, grants, err := v.Verify(testLKConfig().LiveKitAPISecret)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, grants.GetParticipantKind())
+			assert.Equal(t, "viewer-1", grants.Identity)
+			require.NotNil(t, grants.Video)
+			assert.Equal(t, "avatar-room", grants.Video.Room)
+		})
+	}
 }
 
 func TestStartSession_Phase1MintsCredsWithoutEngine(t *testing.T) {
