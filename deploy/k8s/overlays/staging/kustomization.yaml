@@ -1,13 +1,14 @@
-# Staging overlay -> 0.9.34. All 7 node images + the copresent SPA REBUILT from
-# current main (memql b2493b6 / memql-bff-copresent 586994a / copresent 80d9362).
-# THE END STATE for the duplicate/dropped-reply saga:
-#   - cognition now carries BOTH #1217 (exactly-once dispatch gate -> no dup) AND
-#     #1232 (bounded per-peer outbox -> events to a churning/not-yet-attached
-#     peer are buffered + flushed on connect instead of silently dropped -> no
-#     missing replies). Retires the interim #1233 cognition revert.
-#   - #1232 (mesh delivery) is in EVERY node image (component/node).
-#   - copresent: document versioning + canvas artifact viewers (#405-#416),
-#     copresent-sdk 0.1.8, on top of the prior batch.
+# Staging overlay -> 0.9.35. All 7 node images + the copresent SPA REBUILT from
+# current main (memql 56c802d / memql-bff-copresent 0636e33 / copresent 3397bdf).
+# Mesh-robustness release on top of 0.9.34's no-dup/no-drop end state:
+#   - #1245 (every node): the forwarder no longer buffers+TTL-expires reply
+#     events to dead-for-delivery peers (old blue-green / unready / never-dialed
+#     pods). Makes rollouts converge cleanly instead of dropping replies during
+#     the post-roll window. Builds on #1217 (gate) + #1232 (outbox).
+#   - #114 (carrier DSL): canonical-id @pattern now allows camelCase concepts
+#     (canvasState/...), so mutationCreateCanvasState stops rejecting the
+#     space.created card.
+#   - copresent: Simli-only avatar picker (#418) on top of the prior batch.
 # cognition/agent/planner/workbench/bff CARRIER-built; voice + identity engine.
 # livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -35,27 +36,27 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:0dfc873cb6f151d9392759781573d4c8d0cae1b1c20b3d1bf897d69768a835e1
-  # Carrier-built; 0.9.34 — #1232 reliable mesh delivery.
+    digest: sha256:e9e684ea22aeb06d230b1ef20d7bf4bac07d88356190c10ac27d4d7649826612
+  # Carrier-built; 0.9.35 — #1245 mesh convergence + #114 canvasState id-pattern.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:c0518d7e6104773c004c2c8c807915ea2c01639c75586a6a269e66f8af3331d0
-  # Carrier-built; 0.9.34 — #1217 dispatch gate (no dup) + #1232 reliable delivery (no drops).
+    digest: sha256:55e4a83f63df9cfe21aa37185a1c64d0422fe1e9d525cb9b36b399572aeb7ef0
+  # Carrier-built; 0.9.35 — #1217 gate + #1232 outbox + #1245 dead-peer skip.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:1ceb64cec7f0c47a33c1c85837cafd4436a662309525a386e56c41ff8f86b268
+    digest: sha256:14b32aa8eb2b9fcf9592ea70147b9c5a7fa83ec9c888ad9eca43226e76ab5f5e
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:75f5c9f4f5c50cb748b75a0f210faf29514f1f7bf0881f91fdbe34016381a235
-  # Carrier-built; 0.9.34.
+    digest: sha256:5112dcb03e36ad2b386712e6a3f01ec4a039ef8b63d508df91df33eeaaf2acf6
+  # Carrier-built; 0.9.35.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:e8a6552629a43ceced306f56131f45963a6c2598aba784b13c69d47176c3d398
-  # Carrier-built; 0.9.34.
+    digest: sha256:f566915b1173a7bf530506b7dd11564d951a90171474779a48bbb50e54e02821
+  # Carrier-built; 0.9.35.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:90e50af1af905a9f9b5f32e6d94be3b9680d5ce5a90690e659b5fbf89e4d1441
-  # Carrier-built; 0.9.34.
+    digest: sha256:5d56f8f575b7bfaeb7ce8d8541d13466c586b4c626b59f8ebbe3db5957113e16
+  # Carrier-built; 0.9.35.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:c0c6ad60ad16671521e92d998e7727ea7b19904cda6f0938fb05d8a45598695e
-  # SPA rebuilt from copresent main (80d9362) -- document versioning + canvas viewers (#405-#416), sdk 0.1.8.
+    digest: sha256:d584ed523db8619cca198a8f3f3db46b6926f62a43b815327583f2b001eb2fb8
+  # SPA rebuilt from copresent main (3397bdf) -- Simli-only avatar picker (#418).
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:63a4adbc90cfd0eb4fd5395cb3afb14f2acfb2b4a85c2529c2065bea2556cf80
+    digest: sha256:d908c5d0057244ff965ad0b9dde729948a12d1b106bc9a05bacc19a4a369c557
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
