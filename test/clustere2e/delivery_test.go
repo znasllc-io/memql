@@ -14,20 +14,21 @@
 // exercises the same component/node EventBridge.forwardToPeers path as
 // the live chat reply, deterministically and without SI provider keys.
 //
-// HOW IT REPRODUCES THE BUG (RED on current main)
-// -----------------------------------------------
+// HOW IT REPRODUCED THE BUG (historical) AND HOW IT IS NOW GREEN
+// --------------------------------------------------------------
 // nginx round-robins each new gRPC connection across the bff replicas,
 // so a handful of subscriber connections spread across both. The producer
 // inserts one utterance on whichever replica its connection landed on;
 // that replica fans the event out to its LOCAL subscribers and forwards
 // to peers. But bff replicas never dial each other (bff is the mesh root;
 // MEMQL_WORKER_PEERS lists only worker node types), so from the producer
-// replica every sibling bff is a peer with Connection==nil and, past the
-// connecting-grace window, the memql#1245 change classifies it
-// dispositionSkip and DROPS the forward. Result: only the subscribers
-// co-located with the producer observe the utterance; every subscriber on
-// another replica misses it. The durable backbone in Phase 1
-// (memql#1263/#1264) makes every replica converge -> this goes green.
+// replica every sibling bff is a peer with Connection==nil. Historically
+// the memql#1245 change SKIPPED those Connection==nil peers and DROPPED the
+// forward, so only the subscribers co-located with the producer observed
+// the utterance. The durable backbone in Phase 1 (memql#1263/#1264) makes
+// every replica converge regardless of the mesh fast-path, and Phase 4
+// (memql#1271) reverted the #1245 skip so the fast-path now BUFFERS (never
+// drops) to those Connection==nil sibling replicas -> this is green.
 //
 // The gate needs NO replica identification: it simply asserts that EVERY
 // subscriber observes the one utterance exactly once. On current main the
