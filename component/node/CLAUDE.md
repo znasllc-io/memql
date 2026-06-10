@@ -112,8 +112,18 @@ How it is wired (in `app/cluster.go` + `app/run.go`):
   by `MEMQL_SHUTDOWN_GRACE_PERIOD`, for in-flight user streams
   (`server.ActiveStreams`) to finish before tearing down -- in-flight that
   outlives the grace is cut off at the deadline by the bounded #1119
-  `GracefulStop`. The operator-triggered drain (CLI/API + ordered rollout) is
-  memql#1270.
+  `GracefulStop`.
+- **Operator-triggered drain (memql#1270):** the SAME drain above, initiated
+  on demand by an owner/admin operator instead of by SIGTERM (epic decision
+  #4: one drain mechanism, two triggers). An owner/admin sends the gRPC
+  `NodeMaintenanceMsg` on `MemqlService.Stream` to a target node; the
+  owner/admin-gated `handleNodeMaintenance` calls `app.RequestOperatorDrain`,
+  which closes the operator-drain channel `app.Run`'s wait path selects on
+  (alongside the OS signal). The drain orchestration that follows is byte-for-
+  byte the #1269 path -- there is no separate drain code. The
+  `scripts/cluster/rolling-drain` Go tool fires the per-node trigger, and
+  `scripts/cluster/rolling-drain.sh` is the ordered-rollout driver that drains
+  one replica at a time, waiting for a Ready replacement before the next.
 - **Stopped (memql#1269):** `app.MarkNodeStopped()` flips it to the terminal
   `Stopped` at the END of the drain -- after in-flight finishes -- immediately
   before the dependency Stop sweep, so the node leaves the mesh as cleanly

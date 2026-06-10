@@ -211,6 +211,17 @@ message MemqlClientMessage {
     // it at its next checkpoint, persists taskState, and ends the turn
     // with AgentGenerateTurnComplete.paused=true. Fire-and-forget.
     AgentPreemptTurnMsg agent_preempt_turn = 72;
+    // NodeMaintenance -- on-demand operator maintenance trigger
+    // (memql#1270, epic memql#1259 decision #4). An owner/admin operator
+    // sends this to a target node to put it into maintenance/Draining on
+    // demand, running the EXACT same graceful-drain sequence the deploy
+    // SIGTERM path runs (memql#1269) -- Draining advertised in gossip +
+    // readiness 503, in-flight drained within the grace period, then
+    // Stopped + the Stop sweep. Owner/admin-gated; a non-owner/admin
+    // caller is rejected. The drain targets the node that receives the
+    // message (operators address a specific node directly), which is how
+    // the ordered-rollout driver drains one replica at a time.
+    NodeMaintenanceMsg node_maintenance = 73;
   }
 }
 
@@ -315,6 +326,16 @@ message MemqlServerMessage {
     // The stream remains open in either case -- a rejected rotation
     // does NOT tear down the existing session.
     RotateAuthResult rotate_auth_result = 111;
+    // NodeMaintenance reply (see NodeMaintenanceMsg, memql#1270).
+    // `ok=true` means the operator request was accepted: either THIS
+    // call put the node into Draining, or it was already draining
+    // (already_draining=true). `ok=false` carries error_code /
+    // error_message ("permission_denied" for a non-owner/admin caller,
+    // "unavailable" on a node with no maintenance entrypoint -- e.g. a
+    // non-mesh binary). node_id + state echo the target node's id and its
+    // lifecycle state AFTER the trigger so the ordered-rollout driver can
+    // confirm which node it drained.
+    NodeMaintenanceResult node_maintenance_result = 102;
   }
 }
 
@@ -1965,4 +1986,60 @@ message RotateAuthResult {
   bool ok = 1;
   string error = 2;
   string error_description = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Operator maintenance trigger (memql#1270, epic memql#1259 Phase 3)
+// -----------------------------------------------------------------------------
+
+// NodeMaintenanceMsg is the on-demand operator maintenance trigger. An
+// owner/admin operator sends it to a target node to put that node into
+// maintenance/Draining on command, running the IDENTICAL graceful-drain
+// sequence the deploy SIGTERM path runs (memql#1269) -- the same one drain
+// mechanism, a second trigger (epic decision #4). The node it lands on is
+// the node that drains: operators address a specific node directly (its
+// gRPC address, a kubectl port-forward, or the per-replica service), which
+// is exactly how the ordered-rollout driver drains one replica at a time
+// and waits for a healthy replacement before the next.
+//
+// Owner/admin-gated: the handler resolves the caller's AccessContext and
+// rejects anyone who is not a cluster owner or admin. There is no open
+// maintenance endpoint.
+message NodeMaintenanceMsg {
+  string request_id = 1;
+  // action is "drain" -- put the node into Draining now. The only action
+  // for v1: Draining is a forward-only lifecycle edge (a node never
+  // un-drains; it is replaced by a fresh Ready node), so there is no
+  // "undrain". Reserved as a field so a future restore action -- if the
+  // lifecycle ever grows one -- is additive.
+  string action = 2;
+  // reason is a free-form operator note recorded in logs / audit (e.g.
+  // "debugging bff-2", "manual roll 0.9.40"). Optional.
+  string reason = 3;
+}
+
+// NodeMaintenanceResult is the reply to NodeMaintenanceMsg.
+message NodeMaintenanceResult {
+  string request_id = 1;
+  // ok is true when the request was accepted (the node is now draining, or
+  // was already draining). False on a rejected / unavailable request.
+  bool ok = 2;
+  // already_draining is true when the node was already in Draining/Stopped
+  // before this request (a no-op success -- e.g. a SIGTERM raced the
+  // operator, or a second operator call). Lets the ordered-rollout driver
+  // treat "already draining" as success rather than re-issuing.
+  bool already_draining = 3;
+  // node_id echoes the target node's id so the operator confirms which
+  // node drained.
+  string node_id = 4;
+  // state is the node's lifecycle state after the trigger (lowercase:
+  // starting/ready/draining/stopped/unknown).
+  string state = 5;
+  // error_code is a machine-readable failure code on !ok:
+  // "permission_denied" (caller not owner/admin), "unavailable" (node has
+  // no maintenance entrypoint, e.g. a non-mesh binary), "bad_request"
+  // (unknown action).
+  string error_code = 6;
+  // error_message is a human-readable failure detail on !ok.
+  string error_message = 7;
 }

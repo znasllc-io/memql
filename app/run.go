@@ -220,8 +220,16 @@ func Run(cfg RunConfig) {
 	// cluster bootstrap automation sees the full dependency surface.
 	application.EmitSystemStartup()
 
-	sig := wait()
-	cfg.Logger.Info("shutdown signal received", "signal", sig.String())
+	// Block until a shutdown trigger fires. TWO triggers funnel into the
+	// SAME drain sequence below (epic memql#1259 decision #4: one drain
+	// mechanism, two triggers): the OS shutdown signal (SIGINT/SIGTERM --
+	// the deploy path, memql#1269) and an on-demand operator maintenance
+	// request (memql#1270, RequestOperatorDrain closes the channel from
+	// the owner/admin-gated gRPC handler). Whichever fires first wins; the
+	// drain orchestration that follows is identical for both.
+	trigger := waitForShutdownTrigger(wait, application.OperatorDrainSignal())
+	cfg.Logger.Info("shutdown triggered", "trigger", trigger,
+		"reason", application.OperatorDrainReason())
 
 	// Flip this node's lifecycle Ready -> Draining (memql#1268) on the
 	// shutdown signal so the next gossip heartbeat advertises Draining and
@@ -434,4 +442,35 @@ func DefaultWaitForShutdownSignal() os.Signal {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
 	return <-signals
+}
+
+// waitForShutdownTrigger blocks until EITHER the OS shutdown signal fires
+// (via the injected wait, which parks on a real syscall by default) OR the
+// operator maintenance drain channel closes (memql#1270). It returns a
+// short label naming which trigger won, for log context. Both triggers
+// lead into the identical drain sequence in Run -- this only multiplexes
+// the two wait sources.
+//
+// The OS-signal wait blocks on a syscall, so it runs on its own goroutine
+// and reports via a buffered channel; that goroutine is left parked when
+// the operator trigger wins first (the process is shutting down either
+// way, so leaking the one goroutine for the brief teardown window is
+// harmless and avoids racing signal.Notify teardown). When opDrain is nil
+// (non-mesh binary, no operator entrypoint) this degenerates to the plain
+// OS-signal wait.
+func waitForShutdownTrigger(wait func() os.Signal, opDrain <-chan struct{}) string {
+	if opDrain == nil {
+		sig := wait()
+		return "signal:" + sig.String()
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	go func() { sigCh <- wait() }()
+
+	select {
+	case sig := <-sigCh:
+		return "signal:" + sig.String()
+	case <-opDrain:
+		return "operator"
+	}
 }
