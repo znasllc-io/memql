@@ -114,6 +114,9 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 
 	conn := newPeerConnection(pc.identity, "", pc.identity.ParentAddress, pc.logger)
 	conn.SetHeartbeatInterval(pc.peerMgr.HeartbeatInterval())
+	// Advertise this node's lifecycle health on every heartbeat to the parent
+	// (memql#1268) so the parent routes around us the instant we drain.
+	conn.SetHealthFn(pc.peerMgr.Lifecycle().Health)
 
 	pc.mu.Lock()
 	pc.conn = conn

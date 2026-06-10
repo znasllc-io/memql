@@ -150,12 +150,26 @@ func Run(cfg RunConfig) {
 
 	start(application.Dependencies...)
 
+	// The node is now actually serving (every dependency started): flip its
+	// lifecycle Starting -> Ready (memql#1268) so the next gossip heartbeat
+	// advertises Ready and the readiness probe reports ready. No-op on
+	// non-mesh binaries.
+	application.MarkNodeReady()
+
 	// Emit system.startup AFTER every dependency has started so the
 	// cluster bootstrap automation sees the full dependency surface.
 	application.EmitSystemStartup()
 
 	sig := wait()
 	cfg.Logger.Info("shutdown signal received", "signal", sig.String())
+
+	// Flip this node's lifecycle Ready -> Draining (memql#1268) on the
+	// shutdown signal so the next gossip heartbeat advertises Draining and
+	// peers route around it at once (the lifecycle observer also flips
+	// readiness to not-ready). This is the mechanism only; the in-flight
+	// finish / flush BEHAVIOUR is memql#1269. Runs before the drain delay so
+	// the new state propagates during the DrainDelay window.
+	application.BeginNodeDrain()
 
 	// Graceful drain (#552): flip readiness to 503 + keep serving for
 	// DrainDelay so k8s removes this pod from the Service endpoints

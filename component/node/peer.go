@@ -145,6 +145,14 @@ type PeerManager struct {
 	// drains it. See peer_outbox.go (memql#1232).
 	outbox *peerOutbox
 
+	// lifecycle is THIS node's self-asserted lifecycle state machine
+	// (Starting/Ready/Draining/Stopped, epic memql#1259 #4). The heartbeat
+	// builders advertise lifecycle.Health() in gossip so peers learn this
+	// node's state; the readiness handler consults it so a Draining node
+	// reports not-ready while staying alive on /livez. Never nil after
+	// construction.
+	lifecycle *NodeLifecycle
+
 	logger *slog.Logger
 }
 
@@ -166,6 +174,7 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 		connectingGrace:    defaultConnectingGrace,
 		now:                time.Now,
 		outbox:             newPeerOutbox(peerOutboxCapacity, peerOutboxTTL, logger),
+		lifecycle:          NewNodeLifecycle(),
 		logger:             logger,
 	}
 
@@ -286,6 +295,16 @@ func (pm *PeerManager) forwardTarget(entry *PeerEntry) (*peerConnection, forward
 // same cadence the liveness checker expects.
 func (pm *PeerManager) HeartbeatInterval() time.Duration {
 	return pm.heartbeatInterval
+}
+
+// Lifecycle returns this node's self-asserted lifecycle state machine
+// (Starting/Ready/Draining/Stopped, epic memql#1259 #4). Callers use it to
+// flip the node Ready at boot, mark it Draining on shutdown (the actual
+// triggers land in memql#1269 / #1270), and to gate readiness. The heartbeat
+// builders read Lifecycle().Health() so the advertised gossip health tracks
+// the lifecycle. Never nil.
+func (pm *PeerManager) Lifecycle() *NodeLifecycle {
+	return pm.lifecycle
 }
 
 // SetStatusChangeHandler installs a callback invoked on every health
