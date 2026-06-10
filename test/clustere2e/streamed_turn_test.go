@@ -23,15 +23,20 @@
 // WHAT IT ASSERTS (the #1266 acceptance: "cluster test covers a streamed turn")
 //  1. EXACTLY-ONCE per chunk on EVERY connection -- no lost, no duplicated
 //     chunk (the delivery invariant, per chunk across the whole turn).
-//  2. PER-TURN ORDERING on every connection -- the sequence each subscriber
-//     observes is monotonically increasing with no gaps; the substrate's
-//     per-key ordering guarantee holds cross-replica.
+//  2. PER-PRODUCER ORDERING on every connection -- each producer's chunks
+//     arrive in their produce order. Total cross-producer arrival order is
+//     intentionally NOT asserted: a subscriber co-located with one producer
+//     receives that producer's rows instantly off the local bus while the
+//     other producer's rows arrive via the durable pull, so the segments may
+//     interleave (owner decision on memql#1316; clients order by createdAt,
+//     and the live token stream has its own totally-ordered substrate stream
+//     channel -- see checkStream).
 //  3. MID-STREAM REPLICA SWITCH -- the front half of the turn is produced
 //     from one connection and the back half from a SECOND producer
 //     connection (round-robined by nginx onto, with high probability, the
 //     other bff replica). The single logical turn is thus produced across
-//     two replicas yet must still arrive complete + ordered at every
-//     subscriber. This is the cross-process streaming case #1266 added.
+//     two replicas yet must still arrive complete at every subscriber, each
+//     half in order. This is the cross-process streaming case #1266 added.
 //
 // Build-tagged `clustere2e` (like delivery_test.go) so `go test ./...` skips
 // it; it runs only under the parity gate (`make cluster-e2e`).
@@ -114,10 +119,13 @@ func TestClusterStreamedTurn(t *testing.T) {
 	t.Logf("opened %d connections (%d subscribers + 2 producers, round-robined across bff replicas); space %s",
 		len(conns), connCount-1, spaceID)
 
-	// Subscribe on EVERY connection before producing, then let the
-	// subscriptions settle so we don't race the first chunk.
+	// Every connection OPENS the space (the SPA's join/create-session
+	// sequence -- the memql#1316 space-interest signal for its replica) and
+	// subscribes before producing, then the subscriptions settle so we don't
+	// race the first chunk.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
+		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
 		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)
@@ -200,12 +208,13 @@ func TestClusterStreamedTurn(t *testing.T) {
 	}
 	if len(faults) > 0 {
 		t.Fatalf("streamed-turn delivery FAILED on %d/%d connections (run %s, %d chunks, mid-stream switch at %d):\n  %s\n"+
-			"Every subscriber -- on EITHER bff replica -- must observe ALL %d chunks of the turn exactly once and in order, "+
-			"even though the back half was produced from a different replica. A miss/dup is the memql#1259 cross-replica drop; "+
-			"an out-of-order or gapped sequence is a memql#1266 streaming-ordering regression.",
+			"Every subscriber -- on EITHER bff replica -- must observe ALL %d chunks of the turn exactly once, with each "+
+			"producer's chunks in order, even though the back half was produced from a different replica. A miss/dup is the "+
+			"memql#1259 cross-replica drop; a reorder WITHIN one producer's segment is a memql#1266 streaming-ordering "+
+			"regression. (Total cross-producer arrival order is intentionally NOT asserted -- see checkStream.)",
 			len(faults), len(conns), runID, streamChunkCount, switchAt, strings.Join(faults, "\n  "), streamChunkCount)
 	}
-	t.Logf("streamed turn delivered exactly-once and in-order on all %d connections (incl. the mid-stream replica switch)", len(conns))
+	t.Logf("streamed turn delivered exactly-once with per-producer ordering on all %d connections (incl. the mid-stream replica switch)", len(conns))
 }
 
 // allComplete reports whether every connection has observed at least
@@ -236,9 +245,22 @@ func dedupComplete(arr []int) bool {
 	return true
 }
 
-// checkStream returns "" if arr is exactly the sequence 0..streamChunkCount-1,
-// each once, in strictly increasing arrival order; otherwise a human-readable
-// description of the first fault (missing, duplicated, or reordered).
+// checkStream returns "" if arr contains exactly the sequence
+// 0..streamChunkCount-1, each once, with PER-PRODUCER ordering preserved;
+// otherwise a human-readable description of the first fault (missing,
+// duplicated, or reordered-within-a-producer).
+//
+// Ordering contract (owner decision on memql#1316): chat-reply GRAPH-EVENT
+// delivery promises exactly-once per subscriber and in-order delivery of each
+// producer's own events; it does NOT promise a total cross-producer arrival
+// order. A subscriber co-located with producer B receives B's rows instantly
+// off the local bus while A's rows arrive via the durable pull, so the two
+// segments may interleave. Clients are order-insensitive at this layer (the
+// SPA sorts by createdAt at render), and the live token-stream path has its
+// own totally-ordered substrate stream channel (#1266,
+// stream_lifecycle_test.go). So: chunks 0..switchAt-1 (producer A) must arrive
+// ascending among themselves, chunks switchAt.. (producer B) ascending among
+// themselves.
 func checkStream(arr []int) string {
 	counts := make(map[int]int, len(arr))
 	for _, s := range arr {
@@ -260,13 +282,22 @@ func checkStream(arr []int) string {
 	if len(duped) > 0 {
 		return fmt.Sprintf("DUPLICATED chunk(s) %v", duped)
 	}
-	// Exactly-once holds; now ordering: arrival order must be strictly
-	// increasing (== sorted), i.e. no reorder.
-	if !sort.IntsAreSorted(arr) {
-		want := make([]int, len(arr))
-		copy(want, arr)
-		sort.Ints(want)
-		return fmt.Sprintf("REORDERED -- arrived %v, expected ascending %v", arr, want)
+	// Exactly-once holds; now per-producer ordering: the subsequence of each
+	// producer's chunks must be strictly increasing.
+	switchAt := streamChunkCount / 2
+	var orderA, orderB []int
+	for _, s := range arr {
+		if s < switchAt {
+			orderA = append(orderA, s)
+		} else {
+			orderB = append(orderB, s)
+		}
+	}
+	if !sort.IntsAreSorted(orderA) {
+		return fmt.Sprintf("REORDERED within producer A's segment -- arrived %v (full arrival %v)", orderA, arr)
+	}
+	if !sort.IntsAreSorted(orderB) {
+		return fmt.Sprintf("REORDERED within producer B's segment -- arrived %v (full arrival %v)", orderB, arr)
 	}
 	return ""
 }

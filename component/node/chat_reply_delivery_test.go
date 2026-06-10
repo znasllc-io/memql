@@ -276,7 +276,23 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 // TestChatReplyTopicGate documents which topics the chat-reply migration owns:
 // utterance / presence / canvasState (created+updated). Everything else stays
 // on the mesh forward (scope boundary: RPC=#1265, streaming=#1266).
+//
+// The concept ids are pinned as LITERALS here on purpose: the constants held a
+// wrong presence id (v1:cognition:presence, a concept that does not exist) from
+// #1264 until the #1316 cluster probe caught it -- a symbolic comparison can
+// never catch a constant that drifted from the DSL.
 func TestChatReplyTopicGate(t *testing.T) {
+	literals := map[string]string{
+		"utterance":   "v1:cognition:utterance",
+		"presence":    "v1:cognition:participant:presence",
+		"canvasState": "v1:copresent:canvasState",
+	}
+	if conceptUtterance != literals["utterance"] ||
+		conceptPresence != literals["presence"] ||
+		conceptCanvasState != literals["canvasState"] {
+		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q",
+			conceptUtterance, conceptPresence, conceptCanvasState)
+	}
 	on := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptUtterance),
@@ -299,6 +315,111 @@ func TestChatReplyTopicGate(t *testing.T) {
 		if isChatReplyTopic(topic) {
 			t.Fatalf("topic %q must NOT be diverted to the substrate", topic)
 		}
+	}
+}
+
+// TestSpaceInterestTopicGate documents the consumer-side subscription triggers
+// (memql#1316): participant / session created+updated signal space interest,
+// and chat-reply topics are NOT interest topics (they have their own path).
+func TestSpaceInterestTopicGate(t *testing.T) {
+	on := []string{
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptParticipant),
+		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptParticipant),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptSession),
+		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptSession),
+	}
+	for _, topic := range on {
+		if !isSpaceInterestTopic(topic) {
+			t.Fatalf("topic %q must be a space-interest trigger", topic)
+		}
+		if isChatReplyTopic(topic) {
+			t.Fatalf("topic %q must NOT be on the substrate publish path", topic)
+		}
+	}
+	off := []string{
+		events.BuildTopicWithConcept(events.TopicGraphNodeDeleted, conceptParticipant),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, "v1:cluster:node"),
+		"automation.completed",
+	}
+	for _, topic := range off {
+		if isSpaceInterestTopic(topic) {
+			t.Fatalf("topic %q must NOT be a space-interest trigger", topic)
+		}
+	}
+}
+
+// TestSpaceInterestSubscribesWithoutPublishing is the focused proof for the
+// memql#1316 passive-subscriber fix: a LOCAL session-created event (what every
+// client writes on opening a space) subscribes the bff to the space's durable
+// stream -- so a reply produced on ANOTHER node reaches this replica's browser
+// -- while the interest event itself is never published to the substrate.
+func TestSpaceInterestSubscribesWithoutPublishing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newFakeOutboxStore()
+	const spaceID = "v1:cognition:space:interest"
+	key := RoutingKey{Kind: "space", ID: spaceID}
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-2", store, sink)
+
+	// The client opens the space on bff-2: join + create-session execute on
+	// bff-2's engine and land as LOCAL events. No chat-reply event exists yet.
+	sessionTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptSession)
+	consumer.onLocalEvent(ctx, events.Event{
+		Topic:   sessionTopic,
+		Kind:    events.KindNodeCreated,
+		Payload: map[string]any{"id": "session:abc", "spaceId": spaceID},
+	})
+
+	// Interest events are consumer-side only: nothing was published durably.
+	if rows, _ := store.ReadAfter(ctx, key, 0, 0); len(rows) != 0 {
+		t.Fatalf("interest event must not be published to the substrate, found %d rows", len(rows))
+	}
+
+	// A reply produced on a different node now reaches bff-2's local bus.
+	producer := NewSubstrate(store, time.Minute, nil, nil)
+	replyTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance)
+	if _, err := producer.Publish(ctx, Deliverable{
+		EventID: "utterance:reply-9", Key: key,
+		Topic:      replyTopic,
+		Kind:       events.KindNodeCreated,
+		Payload:    map[string]any{"id": "utterance:reply-9", "spaceId": spaceID},
+		OriginNode: "cognition-1",
+	}); err != nil {
+		t.Fatalf("publish reply: %v", err)
+	}
+	got := waitForEvents(t, sink, 1)
+	if id, _ := got[0].Payload["id"].(string); id != "utterance:reply-9" {
+		t.Fatalf("delivered wrong payload id: got %q", id)
+	}
+}
+
+// TestSpaceInterestIgnoresRemoteEvents pins the locality rule: a participant /
+// session event that arrived FROM A PEER is evidence the space is active
+// somewhere, not that this replica anchors a browser for it -- it must not
+// subscribe (otherwise every replica converges on every active space).
+func TestSpaceInterestIgnoresRemoteEvents(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newFakeOutboxStore()
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-2", store, sink)
+
+	consumer.onLocalEvent(ctx, events.Event{
+		Topic:        events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptSession),
+		Kind:         events.KindNodeCreated,
+		Payload:      map[string]any{"id": "session:remote", "spaceId": "v1:cognition:space:elsewhere"},
+		OriginNodeId: "bff-1", // remote: produced on a different replica
+	})
+
+	consumer.mu.Lock()
+	subbed := len(consumer.subbed)
+	consumer.mu.Unlock()
+	if subbed != 0 {
+		t.Fatalf("remote interest event must not subscribe, got %d subscriptions", subbed)
 	}
 }
 

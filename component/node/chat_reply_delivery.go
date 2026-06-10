@@ -38,11 +38,13 @@ import (
 //     substrate and re-publishes each deliverable onto its LOCAL bus -- where
 //     the existing browser gRPC subscription already consumes it -- then Acks.
 //     A bff lazily subscribes to a space the moment it observes a local
-//     chat-reply event for it: that local event is the user's own WS traffic
-//     (the human utterance the browser just wrote, a presence/canvas change it
-//     made), which is exactly the signal that THIS replica anchors that user's
-//     socket. So the reply reaches it even though it is not the producer's mesh
-//     parent.
+//     chat-reply event for it (the human utterance the browser just wrote, a
+//     presence/canvas change it made) OR a local space-interest event
+//     (participant join / session create+touch -- what every client writes on
+//     opening a space, memql#1316). Both are the signal that THIS replica
+//     anchors a socket that cares about the space, so the reply reaches it even
+//     though it is not the producer's mesh parent and even when the client only
+//     READS the space.
 //
 // Exactly-once for the browser stream is the substrate's per-subscription
 // EventID dedup (the mesh-hint copy and the durable-pull copy of the same
@@ -81,10 +83,33 @@ const (
 // Chat-reply concept ids whose graph.node.created/updated events must reach the
 // WS-owning bff replica. Confirmed against the code: utterance + presence carry
 // a spaceId field; canvasState carries a space field (see resolveSpaceKey).
+//
+// NOTE the presence id: the concept is declared under
+// @namespace("cognition:participant") (dsl/cognition/concepts.memql), so its
+// id is v1:cognition:participant:presence -- NOT v1:cognition:presence, which
+// this constant carried from #1264 until the #1316 cluster probe caught that
+// presence events never matched the topic gate (mesh-only delivery, no durable
+// publish, no consumer subscription trigger). Matches
+// database/memory-nodes.ConceptCognitionParticipantPresence (not imported here
+// to keep the node package off the database package).
 const (
 	conceptUtterance   = "v1:cognition:utterance"
-	conceptPresence    = "v1:cognition:presence"
+	conceptPresence    = "v1:cognition:participant:presence"
 	conceptCanvasState = "v1:copresent:canvasState"
+)
+
+// Space-interest concept ids (memql#1316): graph events that signal "a client
+// on THIS replica opened space X" without being chat-reply payload themselves.
+// On every space open the CoPresent client joins the space (participant row,
+// first open only -- idempotent content-addressed id) and creates a session row
+// (EVERY open, fresh sessionId), and heartbeats the session while the space
+// stays open (mutationTouchSession). Both concepts carry a required spaceId.
+// These are consumer-side subscription triggers ONLY -- they are never
+// published to the substrate (the producer set stays the chat-reply topics;
+// participant/session events keep riding the mesh fast-path).
+const (
+	conceptParticipant = "v1:cognition:participant"
+	conceptSession     = "v1:cognition:session"
 )
 
 // NewChatReplyDelivery builds the chat-reply delivery router over the given
@@ -140,6 +165,20 @@ func (d *ChatReplyDelivery) run(ctx context.Context, markStarted func()) error {
 // subscribed so the durable stream fans back to this replica's browsers.
 func (d *ChatReplyDelivery) onLocalEvent(ctx context.Context, event events.Event) {
 	if !isChatReplyTopic(event.Topic) {
+		// Space-interest topics (memql#1316): a LOCALLY-produced participant /
+		// session event is the engine-side trace of a client on THIS replica
+		// opening the space (join + create-session fire on every space open),
+		// so subscribe the space even though the client has produced no
+		// chat-reply event yet. This closes the #1259 passive-subscriber drop:
+		// a replica whose browser only READS a space still pulls the durable
+		// stream. Local only -- a REMOTE participant/session event is evidence
+		// the space is active somewhere, not that this replica anchors a
+		// browser for it.
+		if d.isBFF && !event.IsRemote() && isSpaceInterestTopic(event.Topic) {
+			if key, ok := resolveSpaceKey(event.Payload); ok {
+				d.ensureSubscribed(key)
+			}
+		}
 		return
 	}
 	key, ok := resolveSpaceKey(event.Payload)
@@ -314,6 +353,20 @@ func (d *ChatReplyDelivery) warn(msg string, args ...any) {
 // not part of the reply stream the browser renders.
 func isChatReplyTopic(topic string) bool {
 	for _, concept := range []string{conceptUtterance, conceptPresence, conceptCanvasState} {
+		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
+			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSpaceInterestTopic reports whether a topic is a space-interest graph event
+// (created/updated for participant / session, memql#1316) -- the consumer-side
+// subscription trigger for clients that open a space without producing any
+// chat-reply event. Never a producer-side topic.
+func isSpaceInterestTopic(topic string) bool {
+	for _, concept := range []string{conceptParticipant, conceptSession} {
 		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
 			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
 			return true
