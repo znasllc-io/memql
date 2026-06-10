@@ -91,6 +91,14 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: bff
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID intentionally UNSET -- derived from the container
       # hostname per replica (memql#1213). Setting it would collide.
       MEMQL_NODE_ADDRESS: bff:50058
@@ -256,6 +264,14 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: cognition
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: cognition:50054
       MEMQL_NODE_SERVICE_ADDRESS: ":50054"
@@ -317,6 +333,14 @@ services:
       # Inter-node peer auth (memql#338).
       MEMQL_NODE_TOKEN: ${MEMQL_VOICE_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: voice
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: voice:50059
       MEMQL_NODE_SERVICE_ADDRESS: ":50059"
@@ -395,6 +419,14 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: agent
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: agent:50055
       MEMQL_NODE_SERVICE_ADDRESS: ":50055"
@@ -466,6 +498,14 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: workbench
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: workbench:50060
       MEMQL_NODE_SERVICE_ADDRESS: ":50060"
@@ -519,6 +559,14 @@ services:
       # Inter-node peer auth (memql#338).
       MEMQL_NODE_TOKEN: ${MEMQL_PLANNER_NODE_TOKEN:-}
       MEMQL_NODE_TYPE: planner
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
+      # Allow the in-cluster plaintext http://identity:8081 node-bootstrap
+      # (the worker self-mints its class="node" JWT). Without this the
+      # node sends no auth header and every NodeService.Stream call fails.
+      MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP: ${MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP:-1}
       # MEMQL_NODE_ID UNSET -> hostname-derived per replica (#1213).
       MEMQL_NODE_ADDRESS: planner:50056
       MEMQL_NODE_SERVICE_ADDRESS: ":50056"
@@ -577,6 +625,10 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: identity
+      # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
+      # hostname id (memql#1213) wins over the shared "bff-local" that
+      # leaks in from the genesis env_file. Empty -> os.Hostname().
+      MEMQL_NODE_ID: ""
       # MEMQL_NODE_ID intentionally UNSET -- derived from the container hostname
       # per replica (memql#1213). A static id would collide across the 2
       # replicas (the memql#1042 node-id-collision chat-outage shape).
