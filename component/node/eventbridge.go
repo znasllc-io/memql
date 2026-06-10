@@ -251,24 +251,20 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 	eb.forwardToPeers(forward, decision)
 }
 
-// forwardToPeers sends an EventForward to the appropriate peers based on the routing decision.
+// forwardToPeers sends an EventForward to the appropriate peers based on the
+// routing decision. It is a best-effort fast-path send: a peer with a live
+// outbound Connection is sent to immediately; a Connection==nil peer is simply
+// skipped.
 //
-// A peer with Connection=nil (e.g. its outbound stream has not yet been
-// attached after a blue-green cutover, or is mid-reconnect) does NOT lose
-// the event: it is enqueued into that peer's bounded, TTL'd outbox
-// (PeerManager.EnqueuePending) and flushed in order when AttachConnection
-// finally binds the connection. The receiver dedups by EventId
-// (component/node/dedup.go), so a buffered copy that also reaches the peer
-// another way is harmless. (memql#1232)
-//
-// The earlier dead-for-delivery "skip" (memql#1245) is reverted (memql#1271):
-// it silently DROPPED the fast-path copy to live non-parent replicas (a peer
-// learned only via gossip is Connection==nil on this node even when it is up
-// and owns the user's WebSocket), which broke cross-replica chat delivery on
-// the star topology. The mesh is now only a best-effort fast-path over the
-// durable delivery substrate (memql#1264), so the substrate -- not the mesh --
-// is the delivery guarantee; the fast-path therefore never silently skips,
-// it buffers (best effort) and lets the substrate backstop durability.
+// There is no buffering and no skip-classification here -- both were ad-hoc
+// push-model patches (the #1232 per-peer outbox and the #1245 dead-peer skip)
+// that have been retired in epic memql#1259 Phase 2 (memql#1267). Now that
+// events / RPC / streaming all ride the durable delivery substrate
+// (memql#1264/#1265/#1266), the substrate -- not the mesh -- is the
+// cross-replica delivery guarantee, so the mesh fast-path is purely a latency
+// optimization. A hint that misses a not-yet-connected peer is harmless: the
+// durable pull catches that consumer up, and the receiver dedups by EventId
+// (component/node/dedup.go) so the two paths never double-deliver.
 func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
@@ -284,42 +280,22 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, buffered := 0, 0
-	var bufferedPeers []string
+	sent := 0
 	for _, peer := range targets {
-		conn, disp := eb.peerManager.forwardTarget(peer)
-		switch disp {
-		case dispositionSend:
+		if conn, ok := eb.peerManager.sendTarget(peer); ok {
 			conn.Send(msg)
 			sent++
-		default: // dispositionBuffer (Connection==nil)
-			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
-			buffered++
-			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
 		}
 	}
 
 	if len(targets) > 0 {
-		if buffered > 0 {
-			// Buffered (not lost): the peer's outbox holds the event until
-			// AttachConnection flushes it. Logged at Info so a churning peer
-			// is still visible without implying a delivery failure.
-			eb.logger.Info("event buffered for peers pending connection",
-				"topic", forward.Topic,
-				"event_id", forward.EventId,
-				"sent", sent,
-				"buffered", buffered,
-				"buffered_peers", bufferedPeers,
-				"broadcast", decision.Broadcast,
-			)
-		} else {
-			eb.logger.Debug("event forwarded to peers",
-				"topic", forward.Topic,
-				"event_id", forward.EventId,
-				"peer_count", sent,
-				"broadcast", decision.Broadcast,
-			)
-		}
+		eb.logger.Debug("event forwarded to peers",
+			"topic", forward.Topic,
+			"event_id", forward.EventId,
+			"peer_count", sent,
+			"targets", len(targets),
+			"broadcast", decision.Broadcast,
+		)
 	}
 }
 
@@ -360,39 +336,28 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, buffered := 0, 0
-	var bufferedPeers []string
+	// Best-effort fast-path relay: send to connected peers, skip the rest.
+	// Same as forwardToPeers, the durable substrate (memql#1264) is the
+	// delivery guarantee so a Connection==nil peer is harmlessly skipped (the
+	// relayed copy keeps the original EventId, so the receiver's dedup window
+	// suppresses any duplicate that also arrives via a direct hop).
+	sent := 0
 	for _, peer := range targets {
 		if peer.Info.NodeId == excludeNodeId {
 			continue // don't send back to the node that sent it
 		}
-		conn, disp := eb.peerManager.forwardTarget(peer)
-		switch disp {
-		case dispositionSend:
+		if conn, ok := eb.peerManager.sendTarget(peer); ok {
 			conn.Send(msg)
 			sent++
-		default: // dispositionBuffer (Connection==nil)
-			// Buffer for a not-yet-attached peer (same reliability backstop
-			// as forwardToPeers). The relayed copy keeps the original
-			// EventId, so the receiver's dedup window suppresses any
-			// duplicate that also arrives via a direct hop. (memql#1232)
-			// The memql#1245 dead-peer skip is reverted here (memql#1271):
-			// the durable substrate is the delivery guarantee, so the mesh
-			// fast-path never silently drops to a Connection==nil peer.
-			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
-			buffered++
-			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
 		}
 	}
 
-	if buffered > 0 {
-		eb.logger.Info("mesh relay buffered for peers pending connection",
+	if len(targets) > 0 {
+		eb.logger.Debug("mesh relay forwarded to peers",
 			"topic", evt.Topic,
 			"event_id", evt.EventId,
 			"ttl", evt.Ttl,
-			"sent", sent,
-			"buffered", buffered,
-			"buffered_peers", bufferedPeers,
+			"peer_count", sent,
 		)
 	}
 }
