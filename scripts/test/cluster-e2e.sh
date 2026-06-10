@@ -23,6 +23,10 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_BASE="-f docker/docker-compose.cluster.yml -f docker/docker-compose.cluster.ci.yml"
+# The delivery gate is SYNTHETIC (injects utterances over gRPC) -- it only needs
+# the cross-replica bff mesh + auth, NOT the SPA/voice/livekit (which need genesis
+# secrets a CI runner does not have). Boot just this subset.
+GATE_SERVICES="postgres identity bff nginx"
 PROJECT="memql-cluster-multinode" # matches `name:` in the base compose
 GRPC_ENDPOINT="${MEMQL_E2E_ENDPOINT:-localhost:50050}"
 HTTP_FRONT="http://localhost:8085"
@@ -60,29 +64,50 @@ function check_prereqs() {
     fi
 }
 
+function ensure_env_local() {
+    # The cluster compose has `env_file: ${GENESIS_ENV_FILE:-../.env.local}`, a hard
+    # requirement. On a CI runner / co-tenant checkout there is no genesis decrypt,
+    # but the synthetic gate needs no genesis secrets (the ci override injects
+    # SERVICE_NAME + open registration; the DSN / bootstrap token are inline with
+    # defaults). Create a minimal placeholder if absent so the boot does not fail on
+    # a missing env file. Never clobber a real local one.
+    local f="$REPO_ROOT/.env.local"
+    if [[ ! -f "$f" ]]; then
+        log "No $f -- writing a minimal placeholder for the gate (no genesis secrets needed)."
+        printf '# minimal placeholder for cluster-e2e (memql#1273); see docker-compose.cluster.ci.yml\n' > "$f"
+    fi
+}
+
 function boot_cluster() {
     cd "$REPO_ROOT" || die "cd $REPO_ROOT"
+    ensure_env_local
     if [[ "$DO_BUILD" == true ]]; then
-        log "Building + starting the 2-replica parity cluster (port-isolated). This is heavy on a cold cache."
+        log "Building + starting the delivery subset ($GATE_SERVICES), port-isolated. Heavy on a cold cache."
         # shellcheck disable=SC2086
-        docker compose $COMPOSE_BASE up --build -d || die "cluster bring-up failed"
+        docker compose $COMPOSE_BASE up --build -d $GATE_SERVICES || die "cluster bring-up failed"
     else
-        log "Starting the cluster (no rebuild)."
+        log "Starting the delivery subset ($GATE_SERVICES) (no rebuild)."
         # shellcheck disable=SC2086
-        docker compose $COMPOSE_BASE up -d --no-build || die "cluster start failed"
+        docker compose $COMPOSE_BASE up -d --no-build $GATE_SERVICES || die "cluster start failed"
     fi
 }
 
 function wait_healthy() {
-    log "Waiting for the front door + identity to accept..."
+    log "Waiting for the bff replicas + identity to report healthy..."
     local i
     for i in $(seq 1 60); do
-        if curl -fsS "$HTTP_FRONT/healthz" >/dev/null 2>&1; then
-            log "Front door healthy after ${i}0s."
+        local healthy=0 cid
+        # shellcheck disable=SC2086
+        for cid in $(docker compose $COMPOSE_BASE ps -q bff identity 2>/dev/null); do
+            [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid" 2>/dev/null)" == "healthy" ]] && healthy=$((healthy+1))
+        done
+        if [[ "$healthy" -ge 3 ]]; then   # 2 bff replicas + identity
+            log "bff replicas + identity healthy after ${i}0s."
             return 0
         fi
         sleep 10
     done
+    # shellcheck disable=SC2086
     die "cluster did not become healthy in 10m; check 'docker compose $COMPOSE_BASE logs'"
 }
 
