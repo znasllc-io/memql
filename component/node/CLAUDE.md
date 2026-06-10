@@ -114,6 +114,12 @@ if the channel is full.
 Routing rules use `*` to match any partition segment in event topics. For example,
 `graph.node.created.*.v1:cluster:*` matches cluster node creation in any partition.
 
+> The mesh push is becoming a best-effort **fast-path** over a durable
+> outbox+cursor delivery substrate (the star-topology delivery bug, epic
+> memql#1259). Decision + delivery contract:
+> [docs/internal/design/mesh-delivery-substrate-adr.md](../../docs/internal/design/mesh-delivery-substrate-adr.md)
+> (spike memql#1262; backbone memql#1263).
+
 ### NodeServer (`server.go`)
 gRPC server implementing `NodeService.Stream`. Handles handshake (NodeHello/NodeWelcome),
 heartbeats, peer introductions, spawn requests, event forwarding, capability queries.
