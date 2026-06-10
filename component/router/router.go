@@ -237,6 +237,47 @@ func (r *Router) providerLookup(name string, mod providerModality) (any, Resolve
 	return nil, Resolved{}, false
 }
 
+// buildRouterCallArgs assembles the mutationRecordRouterCall arg map for one
+// call. callId is the row's own shortId -- a freshly-minted bare slug, NOT the
+// requestId. The requestId is a fully-qualified utterance id
+// (v1:cognition:utterance:<uuid>); using it as the v1:router:call shortId is
+// rejected by canonical-id validation (one concept's full id can't be another
+// concept's shortId), which silently dropped every ledger write (memql#1244).
+// The originating utterance id is preserved on the requestId field for
+// correlation; minting a fresh id (vs. extracting the bare UUID) also avoids
+// an id collision when one request fans out to a fallback call.
+func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
+	return map[string]any{
+		"callId":             callId,
+		"requestId":          rec.RequestId,
+		"agentId":            rec.AgentId,
+		"userId":             rec.UserId,
+		"spaceId":            rec.SpaceId,
+		"promptName":         rec.PromptName,
+		"policyName":         rec.PolicyName,
+		"vendor":             rec.Vendor,
+		"model":              rec.Model,
+		"providerName":       rec.ProviderName,
+		"inputTokens":        rec.InputTokens,
+		"outputTokens":       rec.OutputTokens,
+		"cachedInputTokens":  rec.CachedInputTokens,
+		"tokensEstimated":    rec.TokensEstimated,
+		"inputCost":          rec.InputCost,
+		"outputCost":         rec.OutputCost,
+		"cachedInputCost":    rec.CachedInputCost,
+		"totalCost":          rec.TotalCost,
+		"pricingConfigured":  rec.PricingConfigured,
+		"timeToFirstTokenMs": rec.TimeToFirstTokenMs,
+		"totalDurationMs":    rec.TotalDurationMs,
+		"tokensPerSec":       rec.TokensPerSec,
+		"streaming":          rec.Streaming,
+		"outcome":            rec.Outcome,
+		"errorCategory":      rec.ErrorCategory,
+		"errorMessage":       rec.ErrorMessage,
+		"fallbackFromModel":  rec.FallbackFromModel,
+	}
+}
+
 // recordCall writes one v1:router:call row via the router mutation.
 // Fire-and-forget: runs on a detached goroutine with a fresh context so
 // the caller's cancellation never interrupts observability. A failed
@@ -256,34 +297,7 @@ func (r *Router) recordCall(rec CallRecord) {
 			Claims:  map[string]any{"sub": "system:router"},
 		})
 
-		args := map[string]any{
-			"requestId":          rec.RequestId,
-			"agentId":            rec.AgentId,
-			"userId":             rec.UserId,
-			"spaceId":            rec.SpaceId,
-			"promptName":         rec.PromptName,
-			"policyName":         rec.PolicyName,
-			"vendor":             rec.Vendor,
-			"model":              rec.Model,
-			"providerName":       rec.ProviderName,
-			"inputTokens":        rec.InputTokens,
-			"outputTokens":       rec.OutputTokens,
-			"cachedInputTokens":  rec.CachedInputTokens,
-			"tokensEstimated":    rec.TokensEstimated,
-			"inputCost":          rec.InputCost,
-			"outputCost":         rec.OutputCost,
-			"cachedInputCost":    rec.CachedInputCost,
-			"totalCost":          rec.TotalCost,
-			"pricingConfigured":  rec.PricingConfigured,
-			"timeToFirstTokenMs": rec.TimeToFirstTokenMs,
-			"totalDurationMs":    rec.TotalDurationMs,
-			"tokensPerSec":       rec.TokensPerSec,
-			"streaming":          rec.Streaming,
-			"outcome":            rec.Outcome,
-			"errorCategory":      rec.ErrorCategory,
-			"errorMessage":       rec.ErrorMessage,
-			"fallbackFromModel":  rec.FallbackFromModel,
-		}
+		args := buildRouterCallArgs(rec, id.NewShortId())
 		payload, err := json.Marshal(args)
 		if err != nil {
 			r.recordsDropped.Add(1)

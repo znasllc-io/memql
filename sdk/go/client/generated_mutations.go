@@ -8076,6 +8076,7 @@ func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibili
 //
 // Bound concept: call.
 type MutationRecordRouterCallArgs struct {
+	CallId               string
 	RequestId            string
 	AgentId              string
 	UserId               string
@@ -8116,6 +8117,11 @@ func (qc *QueryClient) MutationRecordRouterCall(ctx context.Context, args Mutati
 func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
 	var b strings.Builder
 	b.WriteString("mutationRecordRouterCall({")
+	b.WriteString("callId: ")
+	b.WriteString(fmt.Sprintf("%q", args.CallId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.AgentId != "" {
