@@ -30,6 +30,43 @@ const (
 	// being re-advertised by the mesh is not reaped prematurely, while dead
 	// pods are cleared within ~1 minute.
 	defaultStaleGossipTimeout = 60 * time.Second
+
+	// defaultConnectingGrace bounds how long a peer whose outbound
+	// connection is nil is still treated as a viable BUFFERING target by
+	// the EventBridge forward path (memql#1245). Within this window after
+	// the peer is first registered (or after its connection is detached) a
+	// forwarded event is buffered into the per-peer outbox (the #1232
+	// reliable-delivery behaviour) -- the peer is genuinely CONNECTING and
+	// a connection is expected imminently. Past this window a peer that has
+	// remained Connection==nil is classified DEAD-FOR-DELIVERY: new events
+	// are skipped WITHOUT buffering, so a node never spends its outbox (and
+	// the 30s peerOutboxTTL) buffering+expiring to a pod it will never
+	// dial -- the old blue-green replicaset pods and /healthz-503 unready
+	// pods that keep heartbeating (so "offline" detection never trips) but
+	// never accept / get dialed an outbound stream. The instant the peer
+	// (re)attaches a connection (AttachConnection) it becomes a live
+	// delivery target again and its buffered events flush, so this is a
+	// reversible viability gate, never a permanent blacklist. Kept well
+	// under peerOutboxTTL (30s) so a peer that legitimately attaches inside
+	// the grace window still drains every buffered event.
+	defaultConnectingGrace = 10 * time.Second
+)
+
+// forwardDisposition classifies how the EventBridge forward path should
+// treat a peer for a single event. See PeerManager.DispositionFor.
+type forwardDisposition int
+
+const (
+	// dispositionSend: the peer has a live outbound connection; Send now.
+	dispositionSend forwardDisposition = iota
+	// dispositionBuffer: the peer has no connection but is within the
+	// connecting grace window; enqueue into its outbox for flush-on-attach
+	// (memql#1232).
+	dispositionBuffer
+	// dispositionSkip: the peer has been Connection==nil past the
+	// connecting grace window -- dead-for-delivery. Drop the event for this
+	// peer without buffering (memql#1245).
+	dispositionSkip
 )
 
 // StatusChangeHandler is invoked whenever a peer's health status transitions.
@@ -56,6 +93,18 @@ type PeerEntry struct {
 	LastSeen   time.Time
 	Connection *peerConnection // nil if not directly connected
 	Monitored  bool
+
+	// connectingSince marks when this entry last entered a state where it
+	// has no outbound Connection but one is expected -- set on first
+	// Register and reset on DetachConnection (a fresh reconnect window).
+	// The EventBridge forward path treats a Connection==nil peer as a
+	// viable buffering target only within connectingGrace of this stamp;
+	// past it the peer is dead-for-delivery and events are skipped without
+	// buffering (memql#1245). Zero once a Connection is attached (the field
+	// is irrelevant while Connection != nil). LastSeen is NOT reused for
+	// this because a gossiped dead pod that keeps being re-advertised /
+	// heartbeats elsewhere would refresh LastSeen and never age out.
+	connectingSince time.Time
 }
 
 // PeerManager maintains an in-memory peer table and manages the heartbeat
@@ -79,6 +128,11 @@ type PeerManager struct {
 	livenessTimeout    time.Duration
 	offlineTimeout     time.Duration
 	staleGossipTimeout time.Duration
+	connectingGrace    time.Duration
+
+	// now is the clock used for connecting-grace evaluation. Overridable in
+	// tests via setNow; defaults to time.Now.
+	now func() time.Time
 
 	// onStatusChange is invoked on every actual health transition. Set via
 	// SetStatusChangeHandler during bootstrap. nil handler == no-op.
@@ -109,6 +163,8 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 		livenessTimeout:    defaultLivenessTimeout,
 		offlineTimeout:     defaultOfflineTimeout,
 		staleGossipTimeout: defaultStaleGossipTimeout,
+		connectingGrace:    defaultConnectingGrace,
+		now:                time.Now,
 		outbox:             newPeerOutbox(peerOutboxCapacity, peerOutboxTTL, logger),
 		logger:             logger,
 	}
@@ -145,6 +201,84 @@ func (pm *PeerManager) SetStaleGossipTimeout(d time.Duration) {
 	if d > 0 {
 		pm.staleGossipTimeout = d
 	}
+}
+
+// SetConnectingGrace overrides the window after which a Connection==nil
+// peer is treated as dead-for-delivery by the EventBridge forward path
+// (memql#1245). A zero or negative value leaves the current value
+// unchanged. Must be called before Start.
+func (pm *PeerManager) SetConnectingGrace(d time.Duration) {
+	if d > 0 {
+		pm.connectingGrace = d
+	}
+}
+
+// setNow overrides the clock used for connecting-grace evaluation. Test-only.
+func (pm *PeerManager) setNow(f func() time.Time) {
+	if f != nil {
+		pm.now = f
+	}
+}
+
+// DispositionFor classifies how the EventBridge forward path should treat
+// the given peer entry for a single event (memql#1245):
+//
+//   - dispositionSend   -- the peer has a live outbound Connection; Send.
+//   - dispositionBuffer -- Connection==nil but the peer is within the
+//     connecting grace window (recently registered / recently detached);
+//     buffer into its outbox for flush-on-attach (#1232).
+//   - dispositionSkip   -- Connection==nil and the peer has been so past
+//     the connecting grace window; it is dead-for-delivery, so drop the
+//     event for this peer WITHOUT buffering (no outbox churn / TTL-expiry
+//     to a pod we will never dial).
+//
+// The caller passes a *PeerEntry it obtained from AllPeers()/ByType()
+// (which return live pointers into the peer table). DispositionFor takes
+// the read lock to read Connection / connectingSince consistently against
+// concurrent Attach/DetachConnection writes -- callers must therefore NOT
+// already hold pm.mu. connectingSince being zero (never stamped) is
+// treated as dead-for-delivery once Connection==nil -- every live
+// registration stamps it, so a zero here means an entry that has had no
+// connecting transition, which should not absorb buffered events.
+func (pm *PeerManager) DispositionFor(entry *PeerEntry) forwardDisposition {
+	_, d := pm.forwardTarget(entry)
+	return d
+}
+
+// forwardTarget atomically reads the entry's Connection and connecting-
+// grace stamp under the read lock and returns both the live connection to
+// Send on (non-nil only when the disposition is dispositionSend) and the
+// disposition. Returning the connection from inside the lock-protected read
+// closes the check->Send TOCTOU window: the EventBridge sends on the
+// snapshot it got here rather than re-reading entry.Connection (which a
+// concurrent DetachConnection could have niled). pm.connectingGrace / pm.now
+// are set before Start and never mutated, so they are safe to read outside
+// the lock.
+func (pm *PeerManager) forwardTarget(entry *PeerEntry) (*peerConnection, forwardDisposition) {
+	if entry == nil {
+		return nil, dispositionSkip
+	}
+	pm.mu.RLock()
+	conn := entry.Connection
+	since := entry.connectingSince
+	pm.mu.RUnlock()
+
+	if conn != nil {
+		return conn, dispositionSend
+	}
+	grace := pm.connectingGrace
+	if grace <= 0 {
+		grace = defaultConnectingGrace
+	}
+	if since.IsZero() {
+		// No connecting transition was ever recorded for this entry; it is
+		// not a genuine connecting target. Treat as dead-for-delivery.
+		return nil, dispositionSkip
+	}
+	if pm.now().Sub(since) <= grace {
+		return nil, dispositionBuffer
+	}
+	return nil, dispositionSkip
 }
 
 // HeartbeatInterval returns the interval between outbound heartbeats.
@@ -265,6 +399,13 @@ func (pm *PeerManager) RegisterPeer(info *nodev1.PeerInfo, monitored bool) {
 			Info:      info,
 			LastSeen:  now,
 			Monitored: monitored,
+			// First sighting with no outbound connection yet: open the
+			// connecting-grace window so the forward path buffers (not
+			// skips) events for this peer until it either attaches a
+			// connection or the grace window lapses (memql#1245). Stamped
+			// from pm.now() (the same clock DispositionFor compares
+			// against) so a test clock and the grace evaluation agree.
+			connectingSince: pm.now(),
 		}
 		pm.peers[info.NodeId] = entry
 		priorHealth = nodev1.NodeHealthStatus_NODE_HEALTH_UNSPECIFIED
@@ -492,6 +633,12 @@ func (pm *PeerManager) AttachConnection(nodeId string, conn *peerConnection) {
 	pm.mu.Lock()
 	if entry, ok := pm.peers[nodeId]; ok {
 		entry.Connection = conn
+		// Connection is live: the peer is a direct delivery target again.
+		// Clear the connecting-grace stamp -- it is only consulted while
+		// Connection==nil, and clearing it means a later DetachConnection
+		// opens a fresh window from the detach moment, not from the
+		// original registration (memql#1245).
+		entry.connectingSince = time.Time{}
 	}
 	pm.mu.Unlock()
 
@@ -545,6 +692,11 @@ func (pm *PeerManager) DetachConnection(nodeId string) {
 	defer pm.mu.Unlock()
 	if entry, ok := pm.peers[nodeId]; ok {
 		entry.Connection = nil
+		// The outbound connection just dropped. Open a fresh connecting-
+		// grace window so a transient blip on a live peer still buffers +
+		// flushes on reattach (#1232 preserved), rather than being
+		// immediately classified dead-for-delivery (memql#1245).
+		entry.connectingSince = pm.now()
 	}
 }
 
