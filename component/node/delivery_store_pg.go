@@ -134,7 +134,7 @@ func (s *pgOutboxStore) Append(ctx context.Context, d Deliverable) (int64, bool,
 		   (routing_key, seq, event_id, topic, kind, payload, origin_node)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (event_id) DO NOTHING`,
-		key, seq, d.EventID, d.Topic, int(d.Kind), payload, d.OriginNode)
+		key, seq, d.EventID, d.Topic, int(d.Kind), string(payload), d.OriginNode)
 	if err != nil {
 		return 0, false, fmt.Errorf("delivery substrate: insert outbox row for %s: %w", key, err)
 	}
