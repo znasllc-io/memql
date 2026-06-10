@@ -581,7 +581,7 @@ docker-planner:
 # up the stack, and seeds manifest-listed entries into the running
 # memQL cluster as concept rows.
 
-.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps genesis-seal
+.PHONY: db-purge dev-fresh dev-refresh dev-cluster-refresh dev-status install-deps genesis-seal
 
 ## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
 ## envelope dev-refresh decrypts at cluster start). Headless equivalent
@@ -639,6 +639,21 @@ dev-status:
 ## Implementation lives in scripts/dev/refresh.sh.
 dev-fresh:
 	@bash scripts/dev/refresh.sh
+
+## dev-refresh ergonomics on the BLESSED 2-replica parity cluster
+## (memql#1283, epic memql#1259 / follows memql#1260). Same recipe as
+## dev-refresh -- decrypt genesis (needs MEMQL_MASTER_KEY) -> wipe DB ->
+## rebuild -> restart -> wait healthy -> reseed -- but on
+## docker-compose.cluster.yml (2 replicas/mesh node + copresent SPA +
+## LiveKit) so the owner's muscle memory works on the staging-parity
+## topology that actually reproduces the mesh-delivery bugs. Diverges
+## from full.yml's TLS *.local.znas.io front door by design: the cluster
+## uses the plain-HTTP single-origin front door at http://localhost:8085
+## (HTTP) + localhost:50050 (gRPC) -- the documented memql#1260
+## divergence; the seed + health-wait target it. Tear down full.yml
+## first. Implementation lives in scripts/dev/cluster-refresh.sh.
+dev-cluster-refresh:
+	@bash scripts/dev/cluster-refresh.sh
 
 # ---------------------------------------------------------------------------
 # Azure deployment (staging foundation -- epic #491)
@@ -900,8 +915,9 @@ help:
 	@echo "  the cluster + the decrypted genesis."
 	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, mkcert)"
 	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make dev-refresh               Verify deps -> decrypt genesis -> wipe -> restart -> seed"
+	@echo "  make dev-refresh               Verify deps -> decrypt genesis -> wipe -> restart -> seed (single-node full.yml)"
 	@echo "                                 (dev-fresh works as an alias)"
+	@echo "  make dev-cluster-refresh       Same recipe on the BLESSED 2-replica parity cluster (front door http://localhost:8085)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
 	@echo ""
 	@echo "AZURE DEPLOY (epic #491)"
