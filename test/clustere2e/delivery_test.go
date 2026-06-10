@@ -183,25 +183,31 @@ func rowID(row memqlclient.Row) string {
 }
 
 // openSpaceOnConn performs the client-side "open this space" sequence on one
-// connection, mirroring what the CoPresent SPA does on every space open
-// (useCopresent.joinAsHuman): the participant already exists, so it creates a
-// fresh session row for it. The session insert executes on the engine of
-// WHICHEVER bff replica owns this connection and lands there as a LOCAL
-// graph event -- the space-interest signal that subscribes that replica to the
-// space's durable stream (memql#1316). A subscriber that skips this models a
-// client that never opened the space, which is not a supported delivery
-// contract (SubscribeMsg carries a topic pattern, not a space id).
-func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, participantID string) {
+// connection, mirroring what the CoPresent SPA does on space open
+// (useCopresent.joinAsHuman): an idempotent join-as-human write. The insert is
+// content-addressed on (space, user) -- a repeat join versions the SAME
+// participant row -- and executes on the engine of WHICHEVER bff replica owns
+// this connection, landing there as a LOCAL graph event: the space-interest
+// signal that subscribes that replica to the space's durable stream
+// (memql#1316). A subscriber that skips this models a client that never opened
+// the space, which is not a supported delivery contract (SubscribeMsg carries
+// a topic pattern, not a space id).
+//
+// The SPA's every-open write is actually mutationCreateSessionForParticipant,
+// but that mutation is currently uncallable from the Go SDK (the generated
+// builder always emits `streams: {}` and the session concept types streams as
+// string -- see memql#1319/#1321); the join write exercises the same
+// participant-interest trigger.
+func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, userID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
-	if _, err := qc.MutationCreateSessionForParticipant(ctx, memqlclient.MutationCreateSessionForParticipantArgs{
-		SessionId:     "session-" + id.NewShortId(),
-		SpaceId:       spaceID,
-		ParticipantId: participantID,
-		HumanInput:    map[string]any{"microphoneEnabled": false, "cameraEnabled": false},
-		AiOutput:      map[string]any{"voiceEnabled": false, "avatarEnabled": false, "visionEnabled": false},
+	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
+		SpaceId:     spaceID,
+		UserId:      userID,
+		DisplayName: "clustere2e probe",
+		Status:      "active",
 	}); err != nil {
-		t.Fatalf("open space (create session) on connection: %v", err)
+		t.Fatalf("open space (join as human) on connection: %v", err)
 	}
 }
 
@@ -277,7 +283,7 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	// to pull the space's durable stream (memql#1316).
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, participantID)
+		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
 		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)

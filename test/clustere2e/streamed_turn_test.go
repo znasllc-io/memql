@@ -120,7 +120,7 @@ func TestClusterStreamedTurn(t *testing.T) {
 	// race the first chunk.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, participantID)
+		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
 		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)

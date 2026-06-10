@@ -42,8 +42,10 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for i, c := range conns {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
+		// PresenceId must be a bare slug (no colons) -- participantID is the
+		// canonical id, so mint a fresh short id per connection instead.
 		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
-			PresenceId:    "presence-" + participantID,
+			PresenceId:    "presence-" + id.NewShortId(),
 			SpaceId:       spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
