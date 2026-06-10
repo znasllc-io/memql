@@ -1,0 +1,153 @@
+name: cluster-e2e
+
+# Resilient-mesh parity gate (epic znasllc-io/memql#1259 Phase 4, #1273).
+#
+# Boots the 2-replica STAGING-PARITY cluster (the same topology staging runs:
+# bff/cognition/voice/agent/planner/workbench x2 + identity x2 + the copresent
+# SPA) and runs the cross-replica delivery gate (`make cluster-e2e` ->
+# scripts/test/cluster-e2e.sh -> test/clustere2e, build-tagged `clustere2e`,
+# from #1261). The gate asserts the #1259 delivery invariant: an utterance
+# produced on one bff replica reaches a subscriber anchored on EVERY bff
+# replica, exactly once. It went GREEN once #1264 migrated the chat-reply path
+# onto the durable backbone.
+#
+# WHY THIS IS NOT ON THE PR MERGE QUEUE
+# -------------------------------------
+# A full-cluster boot (~16 containers, a cold-cache multi-image build, a 10m
+# health wait) is heavy and inherently flakier than a unit lane. Making it a
+# required check on `pull_request` would let one slow/flaky boot WEDGE the merge
+# queue. So this is a DEPLOY-PATH gate, not a merge-queue gate: it runs on the
+# deploy/promotion trigger (a release lockfile landing on main) + on manual
+# dispatch, and its result is the green-before-staging-deploy signal -- NOT a
+# branch-protection required check on PRs. (`ci-required` in ci.yml stays the
+# only required PR check.) See docs/public/operate/lifecycle-runbook.md.
+#
+# OWNER PREREQUISITE -- SECRETS (the job SKIPS cleanly without them)
+# -----------------------------------------------------------------
+# The parity cluster builds the carrier (memql-bff-copresent) + the copresent
+# SPA from their PRIVATE sibling repos, so this needs two owner-provisioned
+# repo/org secrets:
+#   * SIBLING_CHECKOUT_TOKEN -- a token that can `actions/checkout` the private
+#     copresent + memql-bff-copresent repos (read access to both).
+#   * MEMQL_PACKAGES_TOKEN   -- read:packages (BOTH scopes) for the SPA build
+#     (docker/docker-compose.cluster.yml sources the `node_auth_token` build
+#     secret from this env var).
+# The `gate` job is guarded on `secrets.SIBLING_CHECKOUT_TOKEN != ''`, so until
+# the owner provisions it the gate NO-OPS (a visible skip) and never spuriously
+# blocks. The owner-finalization checklist (provision -> verify green -> flip to
+# a required deploy gate -> staging roll) is in the runbook.
+
+on:
+  # DEPLOY trigger: a release lockfile landing on main is the staging-deploy
+  # event. The parity gate is the green-before-staging-deploy check for it.
+  push:
+    branches: [main]
+    paths:
+      - 'releases/**'
+  # On-demand: re-run the gate against main (or validate a sibling change)
+  # without cutting a release.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One parity boot at a time -- the cluster binds fixed compose project
+# resources; serialize so two runs can't fight over them. Never cancel an
+# in-flight gate (a deploy decision rides on it).
+concurrency:
+  group: cluster-e2e
+  cancel-in-progress: false
+
+jobs:
+  # Guard: surface whether the owner secrets exist (secrets can't be read in a
+  # job-level `if:` that gates the whole matrix cleanly without a step, so we
+  # expose it as an output the gate job keys off).
+  secrets-present:
+    name: secrets present?
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          SIBLING_TOKEN: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
+          PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
+        run: |
+          if [ -n "$SIBLING_TOKEN" ] && [ -n "$PACKAGES_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "INFO: owner secrets present -- the parity gate will run."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "WARNING: SIBLING_CHECKOUT_TOKEN and/or MEMQL_PACKAGES_TOKEN are unset."
+            echo "WARNING: skipping the parity gate (owner prerequisite not met)."
+            echo "WARNING: see docs/public/operate/lifecycle-runbook.md (owner-finalization)."
+          fi
+
+  gate:
+    name: cross-replica delivery parity gate
+    needs: secrets-present
+    if: ${{ needs.secrets-present.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MEMQL_PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
+    steps:
+      # The parity cluster builds the carrier + SPA from sibling repos that
+      # must sit NEXT TO memql in the workspace (../copresent,
+      # ../memql-bff-copresent) -- mirroring the `replace ../memql` directive
+      # the compose contexts assume. Lay the workspace out the same way locally.
+      - name: checkout memql
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          path: memql
+
+      - name: checkout copresent (private sibling)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: visionarys-io/copresent
+          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
+          path: copresent
+
+      - name: checkout memql-bff-copresent (private sibling)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: visionarys-io/memql-bff-copresent
+          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
+          path: memql-bff-copresent
+
+      - name: setup go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: memql/go.mod
+          cache: false
+
+      - name: setup buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v3
+
+      # Boot the full-parity cluster + run the gate. cluster-e2e.sh does the
+      # heavy lifting: `docker compose -f docker-compose.cluster.yml -f
+      # docker-compose.cluster.ci.yml up --build -d` (the CI override drops the
+      # host port publishes), waits for the front door, asserts >=2 bff
+      # replicas, OAuth-seeds a JWT, then runs
+      # `go test -tags clustere2e ./test/clustere2e/...`.
+      - name: parity cluster + cross-replica delivery gate
+        working-directory: memql
+        run: make cluster-e2e
+
+      - name: cluster logs on failure
+        if: ${{ failure() }}
+        working-directory: memql
+        run: |
+          docker compose \
+            -f docker/docker-compose.cluster.yml \
+            -f docker/docker-compose.cluster.ci.yml \
+            logs --no-color --tail=200 || true
+
+      - name: tear down the cluster
+        if: ${{ always() }}
+        working-directory: memql
+        run: |
+          docker compose \
+            -f docker/docker-compose.cluster.yml \
+            -f docker/docker-compose.cluster.ci.yml \
+            down -v || true

@@ -262,7 +262,12 @@ console-error tier (#658).
 ## 8. Zero-downtime + recovery
 
 - **Rollout**: stateless nodes roll with RollingUpdate + graceful gRPC drain;
-  identity is HA (§5) so auth stays up across a roll.
+  identity is HA (§5) so auth stays up across a roll. The node lifecycle state
+  machine, the SIGTERM/operator-triggered graceful drain
+  (`MEMQL_SHUTDOWN_DRAIN_DELAY` / `MEMQL_SHUTDOWN_GRACE_PERIOD`), readiness≠liveness
+  (`/livez` vs `/healthz`+`/readyz`), the ordered-rollout driver
+  (`scripts/cluster/rolling-drain*`), and the green-before-staging-deploy parity
+  gate are detailed in the [lifecycle runbook](./lifecycle-runbook.md).
 - **Rollback = `git revert`** (deployment-v2 Phase 1, #699). The committed
   digest overlay is the only image authority, so a rollback reverts the bad
   overlay commit and reconciles: `make deploy-rollback ARGS=--to=<commit>`
