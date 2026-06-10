@@ -91,7 +91,32 @@ make dev-cluster-restart                 # rebuild, keep the DB
 make dev-cluster-restart-purge           # rebuild AND wipe the DB (clean seed)
 #   or run it in the foreground:
 make dev-cluster
+
+# One-command "fresh testing stack" on the cluster (memql#1283): the
+# cluster sibling of `make dev-refresh`. Decrypt genesis (needs
+# MEMQL_MASTER_KEY in env) -> wipe DB -> rebuild -> restart -> wait
+# healthy -> reseed secrets/variables from genesis, all on this
+# 2-replica topology. Tear down full.yml first (the owner's habitual
+# `make dev-refresh` targets the single-node full.yml stack):
+export MEMQL_MASTER_KEY=...               # your 64-hex genesis key
+make dev-stop                             # tear down full.yml if it's up
+make dev-cluster-refresh
 ```
+
+> **Front-door divergence (memql#1283, resolved option a).** Unlike
+> `make dev-refresh` -- which waits on full.yml's TLS
+> `https://bff.local.znas.io` front door -- `make dev-cluster-refresh`
+> uses the cluster's **plain-HTTP single-origin front door at
+> <http://localhost:8085>** (HTTP) + `localhost:50050` (gRPC), the
+> deliberate divergence adopted in memql#1260. The health-wait probes
+> `http://localhost:8085/healthz`, and the secrets seed is routed to
+> the cluster gRPC front door via `MEMQL_GRPC_ENDPOINT=localhost:50050`
+> (plaintext, since the endpoint has no `:443` suffix) rather than
+> full.yml's `bff.local.znas.io:443`. Building a TLS/domain front door
+> for the cluster is intentionally out of scope; the routing map itself
+> is at parity with staging (only TLS termination + the `:8085` host
+> port differ -- see the [divergence
+> audit](#config-vs-topology-audit-1216--1260)).
 
 This is heavy -- it builds 6 carrier/engine images plus the copresent
 SPA. Allow several minutes on a cold cache.
