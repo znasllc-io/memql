@@ -43,6 +43,20 @@ func NewSubstrateWithStore(dbGetter func() *bun.DB, logger *slog.Logger) *Substr
 	return NewSubstrate(newPGOutboxStore(dbGetter), defaultDedupTTL, nil, logger)
 }
 
+// NewSubstrateWithMeshFastPath builds a production DeliverySubstrate over the
+// cluster Postgres outbox WITH the mesh fast-path wired (memql#1289). The durable
+// outbox is still the delivery guarantee; fastPath (the EventBridge) is the
+// best-effort low-latency hint surface that wakes a cross-node subscriber
+// instantly instead of waiting for the durable-poll floor. The hint carries the
+// same EventID as the durable row, so the per-subscription dedup collapses the
+// two paths to exactly one delivery and the cursor advances on the durable path
+// only (ADR 4.5). This is the wiring entry point app/cluster.go uses on every
+// mesh node; the matching SetFastPathSink(substrate.HandleFastPath) on the same
+// EventBridge feeds inbound hints back into this node's subscriptions.
+func NewSubstrateWithMeshFastPath(dbGetter func() *bun.DB, fastPath meshFastPath, logger *slog.Logger) *Substrate {
+	return NewSubstrate(newPGOutboxStore(dbGetter), defaultDedupTTL, fastPath, logger)
+}
+
 // errNoDB is returned when the database handle is not yet available.
 var errNoDB = errors.New("delivery substrate: database not available")
 
