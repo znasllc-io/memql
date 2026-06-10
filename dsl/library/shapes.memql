@@ -1,6 +1,6 @@
 // library domain -- row projections.
 
-use library.concepts.{ artifact, generatedOutput, memory }
+use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
 use knowledge.concepts.{ liveSnapshot }
 
 @row
@@ -56,6 +56,41 @@ shape memory memoryFull {
   payload.agentId
   payload.spaceId
   payload.sourceUtteranceId
+  row.createdAt
+}
+
+@row
+@description("History-list projection of a document version: the metadata a user scans the edit history with (version number, who, when, what-changed note) WITHOUT the full content body. Backs queryDocumentVersions. The full content is fetched on demand per-version via documentVersionFull (queryDocumentVersionById).")
+shape documentVersion documentVersionSummary {
+  row.id
+  payload.ownerUserId
+  payload.documentId
+  payload.versionNumber
+  payload.authorKind
+  payload.authorId
+  payload.note
+  payload.parentVersionId
+  payload.attachmentId
+  payload.producedByPlanId
+  payload.spaceId
+  row.createdAt
+}
+
+@row
+@description("Full document-version projection including the immutable content body. Backs queryDocumentVersionById (the 'open this version' / restore-source read) and the edit/restore handlers that read the latest version to compute the next versionNumber.")
+shape documentVersion documentVersionFull {
+  row.id
+  payload.ownerUserId
+  payload.documentId
+  payload.versionNumber
+  payload.content
+  payload.attachmentId
+  payload.authorKind
+  payload.authorId
+  payload.note
+  payload.parentVersionId
+  payload.producedByPlanId
+  payload.spaceId
   row.createdAt
 }
 
