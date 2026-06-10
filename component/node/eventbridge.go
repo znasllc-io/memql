@@ -212,20 +212,22 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 
 // forwardToPeers sends an EventForward to the appropriate peers based on the routing decision.
 //
-// A peer with Connection=nil is handled per its forward disposition
-// (PeerManager.forwardTarget, memql#1245):
+// A peer with Connection=nil (e.g. its outbound stream has not yet been
+// attached after a blue-green cutover, or is mid-reconnect) does NOT lose
+// the event: it is enqueued into that peer's bounded, TTL'd outbox
+// (PeerManager.EnqueuePending) and flushed in order when AttachConnection
+// finally binds the connection. The receiver dedups by EventId
+// (component/node/dedup.go), so a buffered copy that also reaches the peer
+// another way is harmless. (memql#1232)
 //
-//   - genuinely CONNECTING (recently registered / recently detached, within
-//     the connecting grace window): the event is enqueued into that peer's
-//     bounded, TTL'd outbox (PeerManager.EnqueuePending) and flushed in
-//     order when AttachConnection finally binds the connection. The receiver
-//     dedups by EventId (component/node/dedup.go), so a buffered copy that
-//     also reaches the peer another way is harmless. (memql#1232)
-//   - DEAD-FOR-DELIVERY (Connection==nil past the grace window -- e.g. an old
-//     blue-green pod / unready pod that heartbeats but is never dialed): the
-//     event is skipped for that peer WITHOUT buffering, so we don't spend the
-//     outbox + 30s TTL buffering+expiring to a pod we'll never reach. When it
-//     reattaches a connection it rejoins live delivery. (memql#1245)
+// The earlier dead-for-delivery "skip" (memql#1245) is reverted (memql#1271):
+// it silently DROPPED the fast-path copy to live non-parent replicas (a peer
+// learned only via gossip is Connection==nil on this node even when it is up
+// and owns the user's WebSocket), which broke cross-replica chat delivery on
+// the star topology. The mesh is now only a best-effort fast-path over the
+// durable delivery substrate (memql#1264), so the substrate -- not the mesh --
+// is the delivery guarantee; the fast-path therefore never silently skips,
+// it buffers (best effort) and lets the substrate backstop durability.
 func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
@@ -241,38 +243,32 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, buffered, skipped := 0, 0, 0
-	var bufferedPeers, skippedPeers []string
+	sent, buffered := 0, 0
+	var bufferedPeers []string
 	for _, peer := range targets {
 		conn, disp := eb.peerManager.forwardTarget(peer)
 		switch disp {
 		case dispositionSend:
 			conn.Send(msg)
 			sent++
-		case dispositionBuffer:
+		default: // dispositionBuffer (Connection==nil)
 			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
 			buffered++
 			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
-		default: // dispositionSkip
-			skipped++
-			skippedPeers = append(skippedPeers, peer.Info.GetNodeId())
 		}
 	}
 
 	if len(targets) > 0 {
-		if buffered > 0 || skipped > 0 {
-			// Buffered events are not lost (the outbox flushes on attach);
-			// skipped peers are dead-for-delivery (no viable connection).
-			// Logged at Info so churn is visible without implying every
-			// target failed.
-			eb.logger.Info("event forwarded with non-connected peers",
+		if buffered > 0 {
+			// Buffered (not lost): the peer's outbox holds the event until
+			// AttachConnection flushes it. Logged at Info so a churning peer
+			// is still visible without implying a delivery failure.
+			eb.logger.Info("event buffered for peers pending connection",
 				"topic", forward.Topic,
 				"event_id", forward.EventId,
 				"sent", sent,
 				"buffered", buffered,
 				"buffered_peers", bufferedPeers,
-				"skipped", skipped,
-				"skipped_peers", skippedPeers,
 				"broadcast", decision.Broadcast,
 			)
 		} else {
@@ -323,8 +319,8 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, buffered, skipped := 0, 0, 0
-	var bufferedPeers, skippedPeers []string
+	sent, buffered := 0, 0
+	var bufferedPeers []string
 	for _, peer := range targets {
 		if peer.Info.NodeId == excludeNodeId {
 			continue // don't send back to the node that sent it
@@ -334,33 +330,28 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 		case dispositionSend:
 			conn.Send(msg)
 			sent++
-		case dispositionBuffer:
-			// Buffer for a genuinely-connecting peer (same reliability
-			// backstop as forwardToPeers). The relayed copy keeps the
-			// original EventId, so the receiver's dedup window suppresses
-			// any duplicate that also arrives via a direct hop. (memql#1232)
+		default: // dispositionBuffer (Connection==nil)
+			// Buffer for a not-yet-attached peer (same reliability backstop
+			// as forwardToPeers). The relayed copy keeps the original
+			// EventId, so the receiver's dedup window suppresses any
+			// duplicate that also arrives via a direct hop. (memql#1232)
+			// The memql#1245 dead-peer skip is reverted here (memql#1271):
+			// the durable substrate is the delivery guarantee, so the mesh
+			// fast-path never silently drops to a Connection==nil peer.
 			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
 			buffered++
 			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
-		default: // dispositionSkip
-			// Dead-for-delivery peer: skip without buffering so the relay
-			// doesn't burn the outbox + TTL on a pod we'll never dial
-			// (memql#1245).
-			skipped++
-			skippedPeers = append(skippedPeers, peer.Info.GetNodeId())
 		}
 	}
 
-	if buffered > 0 || skipped > 0 {
-		eb.logger.Info("mesh relay to non-connected peers",
+	if buffered > 0 {
+		eb.logger.Info("mesh relay buffered for peers pending connection",
 			"topic", evt.Topic,
 			"event_id", evt.EventId,
 			"ttl", evt.Ttl,
 			"sent", sent,
 			"buffered", buffered,
 			"buffered_peers", bufferedPeers,
-			"skipped", skipped,
-			"skipped_peers", skippedPeers,
 		)
 	}
 }
