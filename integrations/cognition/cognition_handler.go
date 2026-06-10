@@ -736,15 +736,22 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		return
 	}
 
-	// Cross-replica dispatch gate (znasllc-io/memql#1217). The
-	// utterance-created event is broadcast to BOTH cognition replicas, so both
-	// reach this point. Acquire a Postgres advisory lock keyed by the utterance
-	// id: exactly one replica wins and proceeds, the loser bails immediately
-	// without dispatching (no second LLM turn, no duplicate row). The winner
-	// holds the lock until the handler returns (release deferred below), which
-	// spans the multi-second turn through insertSIResponse. Fails SAFE on any
-	// DB/lock error (proceeds, falling through to the read-before-write check
-	// just below) and is a no-op on single-replica. See dispatch_gate.go.
+	// Cross-replica dispatch gate (znasllc-io/memql#1217, re-enabled on the
+	// reliable substrate per #1272). The utterance-created event is broadcast
+	// to BOTH cognition replicas, so both reach this point. Acquire a Postgres
+	// advisory lock keyed by the utterance id: exactly one replica wins and
+	// proceeds, the loser bails immediately without dispatching (no second LLM
+	// turn, no duplicate row). The winner holds the lock until the handler
+	// returns (release deferred below), which spans the multi-second turn
+	// through insertSIResponse.
+	//
+	// This is now the GENUINE exactly-once boundary: the single reply it admits
+	// is delivered reliably because #1264 routes the chat-reply path through the
+	// durable DeliverySubstrate (logical addressing + dedup + replay) -- so the
+	// gate gives no dup AND no drop. The loser's bail is enforced for real.
+	// Still fails SAFE on any DB/lock error (proceeds, falling through to the
+	// read-before-write check just below) so a gate-infra failure can never DROP
+	// a reply, and is a no-op on single-replica. See dispatch_gate.go.
 	proceed, releaseGate, gateErr := c.dispatchGate.tryDispatch(ctx, utterance.ID)
 	if gateErr != nil {
 		c.Logger.Warn("cognition: dispatch gate errored; failing safe and proceeding",
