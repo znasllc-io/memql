@@ -76,6 +76,26 @@ function ensure_env_local() {
         log "No $f -- writing a minimal placeholder for the gate (no genesis secrets needed)."
         printf '# minimal placeholder for cluster-e2e (memql#1273); see docker-compose.cluster.ci.yml\n' > "$f"
     fi
+
+    # The carrier (bff) build context is the workspace ROOT (../.. from docker/),
+    # where the Dockerfile `COPY go.work ./` expects the workspace tie-file. That
+    # file is a local-only artifact (not in any repo), so a clean CI checkout lacks
+    # it. Write the same 3-module go.work the local workspace uses; the carrier
+    # Dockerfile stubs the missing memql-cockpit module itself. Never clobber a real
+    # local one.
+    local w="$REPO_ROOT/../go.work"
+    if [[ ! -f "$w" ]]; then
+        log "No $w -- writing the workspace go.work for the carrier build."
+        {
+            echo "go 1.26.3"
+            echo ""
+            echo "use ("
+            echo "./memql"
+            echo "./memql-bff-copresent"
+            echo "./memql-cockpit"
+            echo ")"
+        } > "$w"
+    fi
 }
 
 function boot_cluster() {
