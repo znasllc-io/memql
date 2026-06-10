@@ -214,7 +214,7 @@ frontend coordination.
 | Task | Command | Description |
 |------|---------|-------------|
 | **Start development** | `docker compose -f docker/docker-compose.full.yml up --build` | Full stack (PostgreSQL + memQL) |
-| **Start cluster mode** | `docker compose -f docker/docker-compose.cluster.yml up --build` | Multi-node (bff + cognition + planner) |
+| **Start cluster (staging parity, blessed)** | `make dev-cluster-up` | 2-replica mesh matching staging; the default local topology (memql#1260). `make dev-cluster-down` to stop |
 | **Stop services** | `docker compose -f docker/docker-compose.full.yml down` | Stop all services |
 | **View logs** | `docker compose -f docker/docker-compose.full.yml logs -f` | Service logs |
 | **Run tests** | `go test ./...` | Go tests |
@@ -343,8 +343,8 @@ carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity):** `make dev-cluster-restart` / `make dev-cluster-restart-purge` (uses docker-compose.cluster.yml). The cluster is built to be topologically identical to staging (memql#1212): >=2 replicas per mesh node with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind a single-origin nginx front door (http://localhost:8085). Only config differs from staging (local Postgres, Azurite blob, dev secrets/keys). `make dev-cluster-status` prints the per-replica node ids (parity litmus). Runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
-**Local single-node:** `docker compose -f docker/docker-compose.full.yml up --build` -- spins up Postgres + bff + voice (so transcription works end-to-end on the basic dev path; previously the full compose had no voice node and `AiTranscribeStreamStart` had nowhere to forward to).
+**Local cluster (staging parity -- THE blessed local topology, memql#1260):** `make dev-cluster-up` (background) / `make dev-cluster-down`, or `make dev-cluster` (foreground); `make dev-cluster-restart[-purge]` force a fresh `--no-cache` rebuild after Go/MemQL source edits. Uses `docker-compose.cluster.yml`. The cluster mirrors staging along the **mesh-delivery path** (memql#1212): 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind a single-origin nginx front door (http://localhost:8085). `make dev-cluster-status` prints the per-replica node ids (parity litmus). A few nodes off that path diverge for concrete local-host reasons (identity at 1 replica, voice-agent opt-in via the polyphon overlay, lifecycle probes deferred to Phase 3) -- each is enumerated + justified in the divergence audit in the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle.
+**Local single-node (fast path):** `docker compose -f docker/docker-compose.full.yml up --build` (`make dev`) -- Postgres + bff + voice only. Quicker to boot for engine/DSL/single-binary work that does NOT exercise the multi-replica mesh; it structurally cannot reproduce cross-replica delivery bugs, so use the cluster for anything mesh-shaped.
 
 #### Client-tool relay (agent → browser, across nodes)
 

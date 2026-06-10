@@ -32,9 +32,15 @@
 # the unique per-replica id we want. Address services by SERVICE NAME
 # (bff, cognition, ...); Docker DNS round-robins across the replica IPs.
 #
-# ONLY config differs from staging (DB endpoint = local Postgres, blob =
-# Azurite, secrets = dev defaults, LiveKit = dev keys). Topology + build
-# model are identical.
+# Along the MESH-DELIVERY PATH (the 2-replica bff + worker fan-out this
+# cluster exists to exercise) topology + build model are identical to
+# staging; only config differs (DB endpoint = local Postgres, blob =
+# Azurite, secrets = dev defaults, LiveKit = dev keys). A few nodes OFF
+# that path diverge for concrete local-host reasons (identity at 1
+# replica, voice-agent opt-in via docker-compose.polyphon.yml, lifecycle
+# probes deferred to Phase 3). Each is enumerated + justified in the
+# divergence audit: docs/public/operate/reproduce-staging-locally.md
+# (memql#1260).
 
 # Compose project name -- distinct from full.yml's "memql-cluster" so
 # both topologies can coexist on the same host.
@@ -506,12 +512,18 @@ services:
   # Identity node -- in-house auth provider (magic-link, JWT issuance,
   # JWKS publishing, web UI, admin app, PAT management).
   #
-  # SINGLE replica. Identity is the mesh ROOT + the migration owner; it
-  # is deliberately NOT scaled here (staging runs it as a singleton too
-  # for the same reasons -- it self-bootstraps nothing and owns the
-  # write-once key material in the named volume). Keeping it at 1 also
-  # lets it keep a stable `container_name`/`hostname` for the host
-  # port-map (8081) the other nodes' IDENTITY_VERIFIER_BASE_URL targets.
+  # SINGLE replica -- a KNOWN, justified divergence from staging (memql#1260
+  # divergence audit). Staging actually runs identity at replicas: 2 with a
+  # per-replica fieldRef node id (deploy/k8s/base/identity.yaml); local keeps
+  # it at 1 because on a single Docker host (a) the host port-map 8081:8081
+  # can only bind ONE replica, and (b) the static MEMQL_NODE_ID=identity-local
+  # below would collide across replicas (the memql#1042 chat-outage shape) --
+  # so scaling identity locally means dropping the static id + container_name
+  # + host port, which is more divergence than parity. Identity is also OFF
+  # the chat-reply mesh-delivery path this parity targets (it serves auth /
+  # JWKS / migrations only), so a single local replica does not mask the
+  # cross-replica fan-out bugs the cluster exists to reproduce. See the
+  # divergence audit in docs/public/operate/reproduce-staging-locally.md.
   identity:
     build:
       context: ..

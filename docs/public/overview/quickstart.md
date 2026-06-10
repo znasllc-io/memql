@@ -84,6 +84,20 @@ docker compose -f docker/docker-compose.full.yml up --build
 
 This brings up Postgres + TimescaleDB, the BFF binary (default), and the
 Voice node (so transcription works end-to-end on the basic dev path).
+It is the **single-node fast path** -- quickest to boot for engine / DSL
+work.
+
+> **Working on anything mesh-shaped** (cross-node delivery, replica
+> fan-out, node lifecycle)? Use the **2-replica staging-parity cluster**
+> instead -- it is the blessed local topology and the only one that can
+> reproduce cluster-only bugs locally:
+> ```bash
+> make dev-cluster-up       # 2 replicas/mesh node; front door http://localhost:8085
+> make dev-cluster-status   # parity litmus: distinct per-replica node ids
+> make dev-cluster-down     # stop
+> ```
+> Runbook + divergence audit:
+> [docs/public/operate/reproduce-staging-locally.md](../operate/reproduce-staging-locally.md).
 
 ### 3. Seed concept-stored config
 
