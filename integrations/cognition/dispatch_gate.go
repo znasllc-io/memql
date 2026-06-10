@@ -51,15 +51,42 @@ const dispatchGateLockClass int32 = 0x434F474E
 //     would instead WEDGE the utterance -- a crashed winner's claim would block
 //     every retry forever, SILENTLY DROPPING the reply, which is the one
 //     outcome #1217 says is worse than a duplicate. Holding the live lock keeps
-//     the failure mode at "no worse than today."
+//     the auto-recovery path open: the survivor (or the crashed pod's restart)
+//     re-runs the handler and wins the now-free lock.
 //
-// FAIL-SAFE. The gate is an optimization over today's read-before-write check,
-// not a hard safety boundary. On ANY infrastructure failure (nil getter, DB not
+// WHY THE GATE IS SAFE TO ENFORCE NOW (znasllc-io/memql#1272, epic #1259
+// Phase 4). The #1217 gate kills the duplicate that two cognition replicas
+// produce when both run the turn for one utterance. It was correct from day
+// one, but it removed the double-dispatch redundancy that had been MASKING an
+// unreliable mesh: on the old star topology a worker could not reliably reach
+// the bff replica that owned the user's WebSocket, so the lone surviving
+// dispatch sometimes never reached the browser (#1232 / the "assistant not
+// responding" incidents). With redundancy gone, a strict gate risked turning a
+// duplicate (recoverable) into a DROP (not recoverable), so the gate was rolled
+// back at the deploy layer until delivery was made reliable.
+//
+// Delivery is now reliable. #1264 routes the chat-reply (utterance / presence /
+// canvas) path through the durable DeliverySubstrate: the producer writes a
+// durable, logically-addressed (space:<id>) outbox row and the WS-owning bff
+// receives it via its durable subscription regardless of which worker produced
+// it, with per-EventID dedup and per-key ordering + replay on (re)connect.
+// #1265 moves the dispatch/return RPC leg onto the same substrate, and #1271
+// reverts the harmful #1245 dead-peer skip (the mesh fast-path now buffers,
+// never drops). So the SINGLE reply the gate lets through is GUARANTEED to be
+// delivered. The gate now gives no dup AND no drop -- it is the genuine
+// exactly-once boundary, not merely "no worse than the old double dispatch."
+//
+// FAIL-SAFE (preserved -- for genuine error conditions only). The gate's
+// exactly-once decision (the !acquired bail below) is now enforced for real,
+// because the substrate backstops delivery of the reply it admits. But the
+// cardinal rule is unchanged: a BUG or INFRASTRUCTURE FAILURE in the gate must
+// never DROP a reply. So on ANY infrastructure failure (nil getter, DB not
 // ready, connection error, lock-query error) tryDispatch returns
-// (proceed=true, release=noop): the replica falls through to today's behavior
-// (the existing queryHasSIResponseForReply check downstream still runs). The
-// cardinal rule is that a bug in this gate must never DROP a reply -- a
-// duplicate is recoverable, a dropped reply is not.
+// (proceed=true, release=noop): the replica falls through to the existing
+// queryHasSIResponseForReply read-before-write check downstream. The fail-safe
+// fires ONLY when the gate cannot make a trustworthy lock decision (the DB is
+// the gate's source of truth); a clean "another replica owns this" answer is
+// honored strictly. A duplicate is recoverable; a dropped reply is not.
 //
 // NO-OP on single replica. The lone replica always wins pg_try_advisory_lock,
 // so local/single-node dev (one cognition replica) is unaffected.
