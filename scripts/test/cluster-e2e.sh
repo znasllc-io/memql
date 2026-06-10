@@ -93,28 +93,75 @@ function assert_two_replicas() {
     log "bff replicas: $n (parity OK)"
 }
 
-# seed_token: obtain a cluster user token for the harness.
+CLUSTER_NET="${PROJECT}_memql-cluster" # compose network for the curl sidecar
+
+# curl_id runs curl inside a throwaway container on the cluster network so it
+# can reach identity by service name (its host port is dropped for co-tenancy).
+function curl_id() { docker run --rm --network "$CLUSTER_NET" curlimages/curl:latest -s "$@"; }
+
+# scrape_magic_link returns the most recent /auth/complete?ml=... path from
+# the identity logs (the dev LogSender prints the email body, link included).
+function scrape_magic_link() {
+    docker compose $COMPOSE_BASE logs identity --since 40s 2>&1 \
+        | grep -oE "/auth/complete\?ml=[A-Za-z0-9_.:-]+" | tail -1
+}
+
+# seed_token: obtain a cluster user JWT for the harness.
 #
-# Preferred: caller exports MEMQL_E2E_TOKEN (a PAT/JWT) and we use it as-is.
-#
-# Fallback (best-effort; validated on first real cluster boot, memql#1261):
-# the CI override runs identity in `open` registration, so a probe user can
-# be created via the first-run /setup owner path and a PAT minted with
-# `memql pat mint`. The exact wiring is finalised against a live cluster;
-# until then, pass MEMQL_E2E_TOKEN explicitly.
+# Preferred: caller exports MEMQL_E2E_TOKEN (a user JWT) and we use it as-is.
+# PATs do NOT work -- the bff stream interceptor doesn't wire the PAT path; it
+# needs a JWT. So the auto-seed drives the real OAuth flow against identity
+# (which the CI override runs in `open` registration):
+#   1. ensure an owner exists  -- first-run POST /setup + redeem (idempotent:
+#      /setup 404s once bootstrapped),
+#   2. mint a JWT              -- POST /login (OAuth ctx) -> redeem the magic
+#      link -> capture the auth code -> POST /oauth/token.
 function seed_token() {
     if [[ -n "${MEMQL_E2E_TOKEN:-}" ]]; then
         log "Using caller-provided MEMQL_E2E_TOKEN."
         return 0
     fi
-    warn "MEMQL_E2E_TOKEN not provided; attempting best-effort seed via the identity container."
-    local idc
-    idc="$(docker compose $COMPOSE_BASE ps -q identity 2>/dev/null | head -1)"
-    [[ -n "$idc" ]] || die "identity container not found for seed"
-    # The first-run /setup owner-mint + PAT path is finalised against a live
-    # cluster (see memql#1261 design note). Surface a clear actionable error
-    # rather than a half-working seed.
-    die "auto-seed not yet validated against a live 2-replica cluster. Re-run with MEMQL_E2E_TOKEN=<PAT/JWT>. (memql#1261)"
+    log "Seeding a probe user JWT via the identity OAuth flow..."
+    local idbase="http://identity:8081"
+    local r=$RANDOM
+    local email="clustere2e+${r:-x}@local.test"
+    local rURI="http://localhost:8085/auth/callback"
+    local state="e2e${r:-x}"
+
+    # 1. Ensure an owner exists (first-run only; harmless 404 afterward).
+    local setup_code
+    setup_code=$(curl_id -o /dev/null -w "%{http_code}" -X POST "$idbase/setup" \
+        --data-urlencode "domain=local.test" \
+        --data-urlencode "owner_email=$email" \
+        --data-urlencode "owner_first_name=Cluster" \
+        --data-urlencode "owner_last_name=E2E")
+    if [[ "$setup_code" == "303" || "$setup_code" == "302" ]]; then
+        local sml; sml=$(scrape_magic_link)
+        [[ -n "$sml" ]] && curl_id -o /dev/null "${idbase}${sml}&state=setup" >/dev/null 2>&1
+        log "Owner provisioned via /setup."
+    else
+        log "/setup returned $setup_code (cluster already bootstrapped); using existing owner login."
+    fi
+
+    # 2. Mint a JWT via the OAuth code flow.
+    curl_id -o /dev/null -X POST "$idbase/login" \
+        --data-urlencode "email=$email" \
+        --data-urlencode "client_id=copresent" \
+        --data-urlencode "redirect_uri=$rURI" \
+        --data-urlencode "state=$state"
+    local ml; ml=$(scrape_magic_link)
+    [[ -n "$ml" ]] || die "seed: no magic link found in identity logs (login may have failed)"
+    local code
+    code=$(curl_id -D - -o /dev/null "${idbase}${ml}&state=${state}" 2>&1 \
+        | grep -i "^location:" | grep -oE "code=[A-Za-z0-9_.:-]+" | head -1 | cut -d= -f2)
+    [[ -n "$code" ]] || die "seed: no auth code in /auth/complete redirect"
+    local jwt
+    jwt=$(curl_id -X POST "$idbase/oauth/token" -H "Content-Type: application/json" \
+        -d "{\"grant_type\":\"authorization_code\",\"code\":\"$code\",\"client_id\":\"copresent\",\"redirect_uri\":\"$rURI\"}" \
+        | tr ',' '\n' | grep -oE "\"access_token\":\"[^\"]+\"" | head -1 | sed 's/"access_token":"//;s/"//')
+    [[ -n "$jwt" ]] || die "seed: /oauth/token returned no access_token"
+    export MEMQL_E2E_TOKEN="$jwt"
+    log "Seeded user JWT (len ${#jwt})."
 }
 
 function run_gate() {
