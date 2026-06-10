@@ -1,11 +1,18 @@
 # Reproduce staging locally (cluster parity)
 
-The local Docker cluster (`docker/docker-compose.cluster.yml`) is built
-to be **topologically identical** to staging (the `aks-memql-staging`
-AKS cluster, `deploy/k8s/base/*.yaml`). The point is to catch
-cluster-only bugs -- replica fan-out, cross-node event double-delivery,
-leader/singleton races -- in local dev instead of discovering them on
-staging. Epic: memql#1212 (children #1213 / #1214 / #1215 / #1216).
+The local Docker cluster (`docker/docker-compose.cluster.yml`) is the
+**blessed local dev topology** (memql#1260): boot it with
+`make dev-cluster-up`. It is built to mirror staging (the
+`aks-memql-staging` AKS cluster, `deploy/k8s/base/*.yaml`) along the
+**mesh-delivery path** -- the same 2-replica-per-node fan-out that
+staging runs -- so cluster-only bugs (replica fan-out, cross-node event
+double-delivery, leader/singleton races) reproduce in local dev instead
+of only on staging. A handful of nodes off that path (identity replica
+count, the voice-agent, lifecycle probes) diverge for concrete local-
+host reasons; every one is enumerated and justified in the
+[divergence audit](#config-vs-topology-audit-1216--1260) below.
+Epics: memql#1212 (children #1213 / #1214 / #1215 / #1216) +
+memql#1260 (adopt as first-class + close/justify divergences).
 
 ## What "parity" means here
 
@@ -13,18 +20,24 @@ staging. Epic: memql#1212 (children #1213 / #1214 / #1215 / #1216).
 |---|---|---|---|
 | Node-type split | bff / cognition / voice / agent / planner / workbench + identity | same | identical |
 | Build model | carrier (`memql-bff-copresent/Dockerfile` + `BUILD_TAGS`) for bff/cognition/agent/planner/workbench; engine for voice/identity | same | identical |
-| Replicas per mesh node | **2** (`deploy.replicas: 2`) | **2** | identical |
-| Per-replica node id | hostname-derived (`os.Hostname()`) | `fieldRef: metadata.name` | equivalent |
+| Replicas per **mesh** node (bff/cognition/voice/agent/planner/workbench) | **2** (`deploy.replicas: 2`) | **2** | identical |
+| Per-replica node id (mesh nodes) | hostname-derived (`os.Hostname()`) | `fieldRef: metadata.name` | equivalent |
 | copresent SPA | present (2 replicas, built image) | present (2 replicas) | identical |
 | LiveKit | present (`livekit/livekit-server:v1.8`) | present (`v1.8`) | identical |
 | Front door | nginx, single origin, path-routed | ingress-nginx, single origin | equivalent |
+| identity replicas | **1** (static id, host port 8081) | **2** (`fieldRef` id) | **divergent -- justified** (off the delivery path; see audit) |
+| voice-agent (LiveKit participant) | layered via `docker-compose.polyphon.yml` (opt-in) | in base (`replicas: 1`) | **divergent -- justified** (needs Deepgram/LiveKit creds) |
+| Health probes / graceful drain | bff+identity healthcheck only; no `/livez` split, no preStop | startup+readiness `/healthz` + liveness `/livez` + preStop on every node | **divergent -- deferred to Phase 3** (#1268/#1269) |
 | Database | local Postgres + TimescaleDB | Tiger Cloud | **config only** |
 | Blob storage | Azurite emulator | Azure Blob | **config only** |
 | Secrets / keys | dev defaults | Key Vault via ESO | **config only** |
 
-The only things that differ are **config** (DB endpoint, blob backend,
-secret values, LiveKit keys). Topology and build model are identical, by
+For the **mesh-delivery path** (the 2-replica bff + worker fan-out this
+cluster exists to exercise) topology and build model are identical, by
 design -- see the header comment in `docker/docker-compose.cluster.yml`.
+The off-path divergences (identity, voice-agent, probes) are each
+enumerated, with their justification and any follow-up owner, in the
+[divergence audit](#config-vs-topology-audit-1216--1260).
 
 ## The per-replica node-id mechanism (the core of #1213)
 
@@ -67,11 +80,16 @@ replicas of each service must show **distinct** `node_id` values.
 ```bash
 export MEMQL_PACKAGES_TOKEN=ghp_...      # read:packages, both scopes
 
-# Fresh build of all 6 carrier/engine images + the SPA, then up.
-make dev-cluster-restart-purge           # also wipes the DB (clean seed)
-#   or, keeping existing data:
-make dev-cluster-restart
-#   or foreground:
+# Blessed path -- boot the staging-parity cluster in the background:
+make dev-cluster-up                      # build + up -d (the default verb)
+#   ...and to stop it again (volumes preserved):
+make dev-cluster-down
+
+# When you've edited Go / MemQL / prompt source and need fresh binaries,
+# force a --no-cache rebuild instead:
+make dev-cluster-restart                 # rebuild, keep the DB
+make dev-cluster-restart-purge           # rebuild AND wipe the DB (clean seed)
+#   or run it in the foreground:
 make dev-cluster
 ```
 
@@ -145,23 +163,53 @@ was invisible in dev. With parity in place it should now reproduce.
 > `make dev-cluster-scale NODE=bff N=3`, then retry. More replicas =
 > more chances for the double-delivery race to surface.
 
-## Config-vs-topology audit (#1216)
+## Config-vs-topology audit (#1216 / #1260)
 
-When changing the local cluster, the invariant is: **only config may
-differ from staging, never topology or build.** Concretely, the
-following MUST stay identical between
-`docker/docker-compose.cluster.yml` and `deploy/k8s/base/*.yaml`:
+The governing invariant: **along the mesh-delivery path, only config may
+differ from staging -- never topology or build.** The delivery path is
+the 2-replica bff + worker fan-out that the #1217/#1232/#1245 incidents
+all lived on; it is exactly the surface a single-replica local cluster
+cannot exercise. Everything on that path is held at strict parity. A few
+nodes *off* that path diverge for concrete local-host reasons; each is
+enumerated below with its justification and follow-up owner, so "local
+matches staging" is a checkable claim rather than an aspiration.
 
-- The set of services (node types + copresent + livekit + identity).
-- The build source per node (carrier vs engine -- the #1053 enforced
+This audit was re-run service-by-service against `deploy/k8s/base/*.yaml`
+for #1260. It supersedes the earlier note that claimed identity is
+single-replica on both (it is not -- staging runs it at 2).
+
+### Invariants -- MUST stay identical (the mesh-delivery path)
+
+These are the parity surface. A change that breaks one of these is a
+regression, not a divergence:
+
+- **Service set on the delivery path:** bff, cognition, voice, agent,
+  planner, workbench, + copresent + livekit.
+- **Build source per node** (carrier vs engine -- the #1053 enforced
   rule; see the table in the repo-root `CLAUDE.md`).
-- `replicas: 2` on every mesh node + copresent (identity + livekit stay
-  single-replica in both).
-- Per-replica unique node identity (hostname locally, fieldRef on k8s).
-- The front-door routing map (`/`, `/memql/ws`, `/memql/audio`,
-  `/auth/*`, `/oauth/token`, `/.well-known/jwks.json`).
+- **`replicas: 2`** on every mesh node (bff/cognition/voice/agent/
+  planner/workbench) + copresent.
+- **Per-replica unique node identity** on those mesh nodes (hostname-
+  derived locally via `os.Hostname()`; `fieldRef: metadata.name` on
+  k8s). `make dev-cluster-status` is the litmus.
+- **Inter-node addressing** (`MEMQL_NODE_ADDRESS` / `MEMQL_PARENT_ADDRESS`
+  / `MEMQL_WORKER_PEERS` / `MEMQL_WORKBENCH_REMOTE`) -- byte-identical to
+  the k8s manifests.
+- **Front-door routing map** (`/`, `/memql/ws`, `/memql/audio`,
+  `/auth/refresh`, `/auth/logout`, `/oauth/token`,
+  `/.well-known/jwks.json`).
 
-The following are EXPECTED to differ (config only):
+### Divergences -- justified, with follow-up owner
+
+| # | Divergence | Local | Staging | Why it's acceptable | Owner |
+|---|---|---|---|---|---|
+| 1 | **identity replica count** | 1 (static `MEMQL_NODE_ID=identity-local`, host port `8081:8081`, pinned `container_name`/`hostname`) | 2 (`fieldRef` id) | On one Docker host the `8081:8081` host-port maps to a single replica, and the static id would collide across replicas (the #1042 chat-outage shape) -- so scaling identity locally means dropping the static id + host port, which is *more* divergence than parity. Identity is **off the chat-reply delivery path** (auth / JWKS / migrations only), so 1 local replica does not mask the cross-replica fan-out this cluster exists to catch. | accepted (revisit if an identity/JWKS multi-replica bug appears) |
+| 2 | **voice-agent** (LiveKit room participant, `memql-voice voice-agent` subcommand) | not in the cluster compose; layer it via `docker-compose.polyphon.yml` | in base (`replicas: 1`) | The voice-agent auto-joins LiveKit rooms and needs live Deepgram + LiveKit credentials; baking it into the default cluster bring-up would crash-loop without those keys and hurt the dev path. It is opt-in via the polyphon overlay, and it is not on the text chat-reply delivery path. | accepted (opt-in overlay) |
+| 3 | **health probes + graceful drain** | only bff + identity carry a healthcheck (`/app/healthcheck`); no readiness/liveness split, no `/livez`, no `preStop`, no `terminationGracePeriodSeconds` | every node: startup + readiness `/healthz`, liveness `/livez` (#1117), `preStop sleep 5`, `terminationGracePeriodSeconds 45-60` | The readiness-vs-liveness split and graceful SIGTERM drain are the explicit subject of **Phase 3** of the resilient-mesh epic. Adding them here would pre-empt that design. | **deferred to #1268 / #1269** |
+| 4 | **bff internal HTTP port** | `8088` (`SERVER_ADDRESS`, nginx upstream `bff:8088`, copresent `VITE_MEMQL_API_URL=http://bff:8088`) | `8085` | Internal port number only; the `/healthz` + WS contract is identical and it sits behind the front door, so it is functionally equivalent. Aligning it would ripple nginx + copresent for zero behavioural gain. | accepted (cosmetic) |
+| 5 | **migrations** | no explicit migrate flags (binary default on first boot) | only identity sets `MIGRATE_ON_START`; a dedicated `migrate-job` owns schema | Each environment migrates exactly once at bring-up; the difference is *who* runs it, not *whether*. | accepted |
+
+### Config-only -- EXPECTED to differ
 
 - `MEMORY_NODES_DATABASE_DSN` (local Postgres vs Tiger Cloud).
 - Blob backend (Azurite connection string vs Azure Blob via genesis).
@@ -169,6 +217,11 @@ The following are EXPECTED to differ (config only):
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`,
   the dev `MEMQL_NODE_BOOTSTRAP_TOKEN`).
 - TLS termination (nginx plain-HTTP front door locally vs ingress TLS).
+- `pgadmin` (local-only convenience under the `tools` profile).
+
+When you change the local cluster, re-run this audit: anything new that
+is not a config-only difference must land in the divergence table with a
+justification and an owner, or be closed.
 
 ## Teardown
 

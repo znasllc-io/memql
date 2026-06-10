@@ -165,7 +165,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
+.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
@@ -195,6 +195,23 @@ dev-nemoclaw:
 ## Start cluster mode (bff + cognition + planner)
 dev-cluster:
 	$(COMPOSE) $(COMPOSE_CLST) up --build
+
+## Boot the staging-parity cluster in the BACKGROUND (build + up -d).
+## THIS IS THE BLESSED LOCAL TOPOLOGY (memql#1260): 2 replicas per mesh
+## node, matching staging, so cross-replica delivery bugs reproduce
+## locally instead of only in staging. `make dev-cluster` is the same
+## thing in the foreground; `make dev-cluster-restart[-purge]` force a
+## fresh --no-cache rebuild. Run `make dev-cluster-status` after to
+## confirm distinct per-replica node ids (the parity litmus).
+dev-cluster-up:
+	$(COMPOSE) $(COMPOSE_CLST) up --build -d
+	@echo ""
+	@echo "Cluster up (2 replicas/mesh node, staging parity). Front door: http://localhost:8085"
+	@echo "Parity litmus (distinct per-replica node ids): make dev-cluster-status"
+
+## Stop the staging-parity cluster (alias of dev-cluster-stop; keeps volumes).
+dev-cluster-down:
+	$(COMPOSE) $(COMPOSE_CLST) down
 
 ## Restart the cluster with FRESH binaries: stop, force --no-cache
 ## rebuild of every image (so every Go layer re-runs against the
@@ -826,7 +843,9 @@ help:
 	@echo "  make dev-bg       Start full dev stack in Docker (background)"
 	@echo "  make dev-polyphon Start dev stack with Polyphon voice pipeline"
 	@echo "  make dev-nemoclaw Start dev stack with NemoClaw coding agent"
-	@echo "  make dev-cluster               Start staging-parity cluster (2 replicas/node + SPA + LiveKit)"
+	@echo "  make dev-cluster-up            BLESSED local topology: boot staging-parity cluster (2 replicas/node) in background"
+	@echo "  make dev-cluster-down          Stop the staging-parity cluster (keeps volumes)"
+	@echo "  make dev-cluster               Same as dev-cluster-up but FOREGROUND (build + up)"
 	@echo "  make dev-cluster-restart       Restart cluster fresh (down + rebuild + up -d)"
 	@echo "  make dev-cluster-restart-purge Restart cluster AND wipe the database (down -v)"
 	@echo "  make dev-cluster-stop          Stop the cluster"
