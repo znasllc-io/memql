@@ -165,7 +165,7 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
+.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
@@ -212,6 +212,14 @@ dev-cluster-up:
 ## Stop the staging-parity cluster (alias of dev-cluster-stop; keeps volumes).
 dev-cluster-down:
 	$(COMPOSE) $(COMPOSE_CLST) down
+
+## Cross-replica delivery gate (memql#1261): boot the port-isolated 2-replica
+## cluster and run test/clustere2e. EXPECTED RED on current main (it reproduces
+## the memql#1259 delivery drop); green once the Phase-1 backbone lands. Pass a
+## token via MEMQL_E2E_TOKEN, or MEMQL_PACKAGES_TOKEN to build the SPA. Co-tenant
+## safe: drops the host ports that collide with a running full.yml stack.
+cluster-e2e:
+	bash scripts/test/cluster-e2e.sh
 
 ## Restart the cluster with FRESH binaries: stop, force --no-cache
 ## rebuild of every image (so every Go layer re-runs against the

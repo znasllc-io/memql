@@ -1,0 +1,40 @@
+# CI / co-tenant override for the staging-parity cluster (memql#1261).
+#
+#   docker compose -f docker/docker-compose.cluster.yml \
+#                  -f docker/docker-compose.cluster.ci.yml up -d
+#
+# Two jobs, both in service of running the cluster-e2e delivery gate
+# (test/clustere2e) unattended -- in GitHub Actions, or locally NEXT TO an
+# already-running single-node `full.yml` stack without fighting over host
+# ports:
+#
+#   1. PORT ISOLATION. The base compose publishes postgres:5432,
+#      identity:8081, azurite:10000 on the host. Those collide with a
+#      running `docker-compose.full.yml` stack (and with a second cluster).
+#      The e2e harness never needs them: it drives the cluster through the
+#      nginx front door (:8085 HTTP / :50050 gRPC, both still published) and
+#      seeds via `docker exec`. So we drop the host publishes with the
+#      compose `!override` tag (everything still talks over the
+#      memql-cluster network by service name). Requires Docker Compose
+#      v2.24+ for the !override / !reset merge tags.
+#
+#   2. NON-INTERACTIVE USER SEED. The base cluster runs identity in
+#      `waitlist` registration; a fresh-DB CI cluster therefore has no users
+#      and no way to self-register without an operator. We flip it to `open`
+#      so scripts/test/cluster-e2e.sh can mint a probe user + token through
+#      the first-run /setup owner path. This is a TEST-ONLY relaxation; the
+#      base compose (and staging) keep waitlist.
+
+services:
+  postgres:
+    ports: !override []
+
+  identity:
+    ports: !override []
+    environment:
+      # Test-only: allow the seed step to register a probe user without an
+      # operator approving a waitlist entry. NEVER set this on staging/prod.
+      IDENTITY_REGISTRATION_MODE: open
+
+  azurite:
+    ports: !override []
