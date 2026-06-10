@@ -200,10 +200,32 @@ bounded subscription channel + synchronous `Publish` are the backpressure floor.
 `StreamPublisher` (worker side: `Append` / `Close` / `Fail`) produces ordered
 chunks; `SubscribeStream` (BFF side) returns an ordered, replayed, deduped
 `<-chan StreamChunk` + an `Ack`, so a WS owned by a replica that dies mid-stream
-replays from its cursor on a different replica with no lost/reordered chunks. The
-live grpc cutover of `handleAiChatStream` (token deltas) + `si_transcribe_stream.go`
-(audio deltas) and the cluster streamed-turn test sequence AFTER memql#1264 wires
-the substrate construction + fast-path into `app/`.
+replays from its cursor on a different replica with no lost/reordered chunks.
+
+### Stream lifecycle (`stream_lifecycle.go`, memql#1266)
+The typed lifecycle layer that MIGRATES the two concrete streaming paths -- token
+streaming (agent reply token deltas) + audio streaming (STT transcription
+deltas) -- onto the `stream_channel.go` contract. Both share one shape:
+`Start{opening metadata} -> Delta*{tokens / interim transcripts, in order} ->
+Complete{final text} | Error | Cancel`. `StreamSession` (producer:
+`Start`/`Delta`/`Complete`/`Fail`/`Cancel`) drives that lifecycle as ordered
+substrate chunks; `SubscribeStreamFrames` (consumer) returns an ordered,
+replayed, deduped `<-chan StreamFrame` whose frames carry the decoded
+`StreamPhase` + the Start/Complete metadata, plus an `Ack`. Ordering,
+exactly-once, backpressure, and replay-across-replica-restart are inherited
+verbatim from the substrate stream contract; this layer adds only the lifecycle
+phase + metadata envelope (a compact `<phase>\x1f<data>` string on the hot Delta
+path, JSON only when a frame carries meta -- streaming is volume-sensitive, so
+the common frame stays a string concat). Cross-replica + backpressure + lifecycle
++ cancel/error are proven in `stream_lifecycle_test.go` (race-enabled,
+durable-store-only, mirroring the #1264 cross-replica style). This is the
+node-library realization of "migrate token + audio onto the streaming contract",
+at the same altitude as the sibling RPC migration (`substrate_rpc.go`, memql#1265).
+The live grpc-handler cutover (pointing `si_forward.go`'s token relay +
+`si_transcribe_stream.go`'s audio relay at `StreamSession`/`SubscribeStreamFrames`
+instead of the ad-hoc `SIForwardResponse` mesh push) + the cluster streamed-turn
+test ride memql#1267 (gated on #1264 #1265 #1266), the same per-path gating the
+RPC pattern uses.
 
 ### NodeServer (`server.go`)
 gRPC server implementing `NodeService.Stream`. Handles handshake (NodeHello/NodeWelcome),
