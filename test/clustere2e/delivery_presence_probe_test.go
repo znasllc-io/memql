@@ -2,13 +2,13 @@
 
 package clustere2e
 
-// EXPERIMENTAL probe (not a committed gate): does cross-replica delivery work
-// when every subscriber establishes PRESENCE in the space first -- i.e. behaves
-// like a real CoPresent client opening a space (which writes a v1:cognition:
-// presence row, the chat-reply topic that triggers ChatReplyDelivery's
-// consumer-side substrate subscription on that replica)? If GREEN, the substrate
-// works for realistic clients and the bare-subscriber gate was unrealistic; if
-// RED, there is a deeper consume-path bug.
+// Coverage for the ORIGINAL (chat-reply topic) consumer-subscription trigger:
+// cross-replica delivery when every subscriber writes a v1:cognition:presence
+// row first. Presence is a chat-reply topic, so the write triggers
+// ChatReplyDelivery's substrate subscription on the subscriber's replica --
+// the pre-#1316 lazy trigger. The main gate (delivery_test.go) covers the
+// #1316 space-interest trigger (join/create-session, what real clients write
+// on space open); this probe keeps the chat-reply-write trigger covered too.
 
 import (
 	"context"
@@ -35,16 +35,23 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 
 	// Each connection establishes presence in the space -> a v1:cognition:presence
 	// event fires on ITS replica -> ChatReplyDelivery.ensureSubscribed(space) on
-	// that replica. This is what a real client does on opening the space.
-	for _, c := range conns {
+	// that replica. PresenceId/SinceAt/LastUpdatedAt are passed explicitly (like
+	// the SPA does) -- also required until #1319: omitting the leading optional
+	// arg trips the generated-builder dangling-comma bug and the mutation never
+	// reaches the engine.
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i, c := range conns {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())
 		if _, err := qc.MutationUpdateParticipantPresence(ctx, memqlclient.MutationUpdateParticipantPresenceArgs{
+			PresenceId:    "presence-" + participantID,
 			SpaceId:       spaceID,
 			ParticipantId: participantID,
 			State:         "idle",
 			Label:         "probe",
+			SinceAt:       now,
+			LastUpdatedAt: now,
 		}); err != nil {
-			t.Logf("presence upsert on a connection failed (continuing): %v", err)
+			t.Fatalf("presence upsert on connection %d failed: %v", i, err)
 		}
 	}
 

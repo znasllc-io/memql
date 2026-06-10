@@ -114,10 +114,13 @@ func TestClusterStreamedTurn(t *testing.T) {
 	t.Logf("opened %d connections (%d subscribers + 2 producers, round-robined across bff replicas); space %s",
 		len(conns), connCount-1, spaceID)
 
-	// Subscribe on EVERY connection before producing, then let the
-	// subscriptions settle so we don't race the first chunk.
+	// Every connection OPENS the space (the SPA's join/create-session
+	// sequence -- the memql#1316 space-interest signal for its replica) and
+	// subscribes before producing, then the subscriptions settle so we don't
+	// race the first chunk.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
+		openSpaceOnConn(ctx, t, c, spaceID, participantID)
 		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)

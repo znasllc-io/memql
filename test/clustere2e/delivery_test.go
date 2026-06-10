@@ -182,6 +182,29 @@ func rowID(row memqlclient.Row) string {
 	return ""
 }
 
+// openSpaceOnConn performs the client-side "open this space" sequence on one
+// connection, mirroring what the CoPresent SPA does on every space open
+// (useCopresent.joinAsHuman): the participant already exists, so it creates a
+// fresh session row for it. The session insert executes on the engine of
+// WHICHEVER bff replica owns this connection and lands there as a LOCAL
+// graph event -- the space-interest signal that subscribes that replica to the
+// space's durable stream (memql#1316). A subscriber that skips this models a
+// client that never opened the space, which is not a supported delivery
+// contract (SubscribeMsg carries a topic pattern, not a space id).
+func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, participantID string) {
+	t.Helper()
+	qc := memqlclient.NewQueryClient(conn.Dispatcher())
+	if _, err := qc.MutationCreateSessionForParticipant(ctx, memqlclient.MutationCreateSessionForParticipantArgs{
+		SessionId:     "session-" + id.NewShortId(),
+		SpaceId:       spaceID,
+		ParticipantId: participantID,
+		HumanInput:    map[string]any{"microphoneEnabled": false, "cameraEnabled": false},
+		AiOutput:      map[string]any{"voiceEnabled": false, "avatarEnabled": false, "visionEnabled": false},
+	}); err != nil {
+		t.Fatalf("open space (create session) on connection: %v", err)
+	}
+}
+
 // subscribeUtterances opens a graph-events subscription on conn and returns
 // a channel of created-utterance ids observed by THAT connection's replica.
 func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID string) <-chan string {
@@ -248,10 +271,13 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
 	t.Logf("opened %d connections (round-robined across bff replicas); space %s", len(conns), spaceID)
 
-	// Subscribe on EVERY connection before producing, then let the
-	// subscriptions settle so we don't race the insert.
+	// Every connection OPENS the space (the SPA's join/create-session sequence)
+	// and subscribes before producing, then the subscriptions settle so we
+	// don't race the insert. The open is what signals the connection's replica
+	// to pull the space's durable stream (memql#1316).
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
+		openSpaceOnConn(ctx, t, c, spaceID, participantID)
 		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)
