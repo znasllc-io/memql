@@ -25,15 +25,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // AvatarRequestTimeout bounds each vendor REST call (session-token mint,
 // persona lookup, engine-session start). Generous for a cold cloud call but
-// bounded so a wedged vendor can't hang session bring-up. Mirrors the Python
-// APIConnectOptions(timeout=10s) the LiveKit plugins ship.
-const AvatarRequestTimeout = 15 * time.Second
+// bounded so a wedged vendor can't hang session bring-up. This is the DEFAULT;
+// override with MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS via avatarRequestTimeout().
+//
+// 30s (was 15s): Simli's POST /integrations/livekit/agents -- which spins up an
+// avatar agent and joins the LiveKit room before responding -- routinely exceeds
+// 15s when the room is reached over a dev ngrok tunnel (memql#1274). On a real
+// public LiveKit (staging/prod) it returns fast, so the higher cap only matters
+// on the slow local path; a wedged vendor is still bounded.
+const AvatarRequestTimeout = 30 * time.Second
+
+// avatarRequestTimeout returns the per-call REST timeout: the env override
+// MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS (1..300s) when set + valid, else
+// AvatarRequestTimeout. Lets a slow local tunnel be tuned without a rebuild.
+func avatarRequestTimeout() time.Duration {
+	if s := strings.TrimSpace(os.Getenv("MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS")); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 1 && n <= 300 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return AvatarRequestTimeout
+}
 
 // HTTPDoer is the minimal HTTP surface the vendor clients depend on. The real
 // clients use *http.Client; tests inject a stub so the request shape (URL,
@@ -197,7 +217,7 @@ type AvatarVendorClient interface {
 // is used. The room glue passes nil; tests pass a stub.
 func NewAvatarVendorClient(plan AvatarPlan, doer HTTPDoer) (AvatarVendorClient, error) {
 	if doer == nil {
-		doer = &http.Client{Timeout: AvatarRequestTimeout}
+		doer = &http.Client{Timeout: avatarRequestTimeout()}
 	}
 	switch plan.Vendor {
 	case avatarVendorAnam:
