@@ -181,6 +181,30 @@ Routing rules use `*` to match any partition segment in event topics. For exampl
 > [docs/internal/design/mesh-delivery-substrate-adr.md](../../docs/internal/design/mesh-delivery-substrate-adr.md)
 > (spike memql#1262; backbone memql#1263).
 
+### DeliverySubstrate (`delivery_substrate.go`, `delivery_store_pg.go`, memql#1263)
+The durable outbox+cursor backbone the ADR pins. Producers `Publish` a
+logically-addressed `Deliverable`; consumers `Subscribe(key, consumerID)` for an
+ordered, replayed, deduped stream and `Ack` to advance a durable per-(key,
+consumer) cursor. Mesh fast-path hints (`HandleFastPath`) short-circuit latency
+and feed the per-subscription dedup window; the cursor advances on the durable
+path only. This is a library capability today -- constructing it in `app/` and
+wiring the `EventBridge` fast-path + the WS-owning-replica consume loop lands
+with the chat-reply migration (memql#1264).
+
+### Stream channel (`stream_channel.go`, memql#1266)
+Streaming over the substrate (token streaming + audio/transcription streaming).
+A stream is modelled as its own logical key `RoutingKey{Kind:"stream", ID:<streamId>}`;
+each chunk is a `Deliverable` whose substrate-assigned monotonic `Seq` IS the
+per-stream ordering, the durable outbox is the replay/catch-up store, and the
+bounded subscription channel + synchronous `Publish` are the backpressure floor.
+`StreamPublisher` (worker side: `Append` / `Close` / `Fail`) produces ordered
+chunks; `SubscribeStream` (BFF side) returns an ordered, replayed, deduped
+`<-chan StreamChunk` + an `Ack`, so a WS owned by a replica that dies mid-stream
+replays from its cursor on a different replica with no lost/reordered chunks. The
+live grpc cutover of `handleAiChatStream` (token deltas) + `si_transcribe_stream.go`
+(audio deltas) and the cluster streamed-turn test sequence AFTER memql#1264 wires
+the substrate construction + fast-path into `app/`.
+
 ### NodeServer (`server.go`)
 gRPC server implementing `NodeService.Stream`. Handles handshake (NodeHello/NodeWelcome),
 heartbeats, peer introductions, spawn requests, event forwarding, capability queries.
