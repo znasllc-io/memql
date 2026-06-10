@@ -83,9 +83,18 @@ const (
 // Chat-reply concept ids whose graph.node.created/updated events must reach the
 // WS-owning bff replica. Confirmed against the code: utterance + presence carry
 // a spaceId field; canvasState carries a space field (see resolveSpaceKey).
+//
+// NOTE the presence id: the concept is declared under
+// @namespace("cognition:participant") (dsl/cognition/concepts.memql), so its
+// id is v1:cognition:participant:presence -- NOT v1:cognition:presence, which
+// this constant carried from #1264 until the #1316 cluster probe caught that
+// presence events never matched the topic gate (mesh-only delivery, no durable
+// publish, no consumer subscription trigger). Matches
+// database/memory-nodes.ConceptCognitionParticipantPresence (not imported here
+// to keep the node package off the database package).
 const (
 	conceptUtterance   = "v1:cognition:utterance"
-	conceptPresence    = "v1:cognition:presence"
+	conceptPresence    = "v1:cognition:participant:presence"
 	conceptCanvasState = "v1:copresent:canvasState"
 )
 

@@ -276,7 +276,23 @@ func TestChatReplySelfEchoSuppressed(t *testing.T) {
 // TestChatReplyTopicGate documents which topics the chat-reply migration owns:
 // utterance / presence / canvasState (created+updated). Everything else stays
 // on the mesh forward (scope boundary: RPC=#1265, streaming=#1266).
+//
+// The concept ids are pinned as LITERALS here on purpose: the constants held a
+// wrong presence id (v1:cognition:presence, a concept that does not exist) from
+// #1264 until the #1316 cluster probe caught it -- a symbolic comparison can
+// never catch a constant that drifted from the DSL.
 func TestChatReplyTopicGate(t *testing.T) {
+	literals := map[string]string{
+		"utterance":   "v1:cognition:utterance",
+		"presence":    "v1:cognition:participant:presence",
+		"canvasState": "v1:copresent:canvasState",
+	}
+	if conceptUtterance != literals["utterance"] ||
+		conceptPresence != literals["presence"] ||
+		conceptCanvasState != literals["canvasState"] {
+		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q",
+			conceptUtterance, conceptPresence, conceptCanvasState)
+	}
 	on := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptUtterance),
