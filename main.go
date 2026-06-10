@@ -81,12 +81,20 @@ func main() {
 		SetHealth: func(deps []common.Dependency) {
 			server.SetHealthDependencies(deps)
 		},
-		// Graceful shutdown (#552): on SIGTERM, flip /healthz to 503 so
-		// k8s/LB de-route this pod, then app.Run keeps serving for the
-		// drain delay before stopping. terminationGracePeriodSeconds in
-		// deploy/k8s must exceed DrainDelay + the Stop budget.
-		BeginDrain: func() { server.SetDraining(true) },
-		DrainDelay: resolveShutdownDrainDelay(serviceLogger),
+		// Graceful shutdown (#552 + memql#1269): on SIGTERM, flip /healthz
+		// + /readyz to 503 (BeginDrain) so k8s/LB de-route this pod, then
+		// app.Run keeps serving for the drain delay (endpoint-removal
+		// window), waits up to GracePeriod for in-flight user streams
+		// (ActiveWork) to finish, marks the node lifecycle Stopped, and
+		// finally stops. terminationGracePeriodSeconds in deploy/k8s must
+		// exceed DrainDelay + GracePeriod + the Stop budget.
+		BeginDrain:  func() { server.SetDraining(true) },
+		DrainDelay:  resolveShutdownDrainDelay(serviceLogger),
+		GracePeriod: resolveShutdownGracePeriod(serviceLogger),
+		// In-flight accounting for the drain wait: the user-facing
+		// MemqlService.Stream session count (memql#1269). Mesh / worker /
+		// voice streams ride other services and are infra, not user work.
+		ActiveWork: func() int64 { return server.ActiveStreams() },
 	})
 }
 
@@ -105,6 +113,27 @@ func resolveShutdownDrainDelay(logger *slog.Logger) time.Duration {
 				"value", raw, "default", app.DefaultShutdownDrainDelay.String())
 		}
 		return app.DefaultShutdownDrainDelay
+	}
+	return d
+}
+
+// resolveShutdownGracePeriod reads MEMQL_SHUTDOWN_GRACE_PERIOD (a Go duration
+// string, e.g. "25s") -- the bound on how long the graceful drain (memql#1269)
+// waits for in-flight user streams to finish after the node is de-routed --
+// and falls back to app.DefaultShutdownGracePeriod. An unparseable value logs a
+// warning and uses the default.
+func resolveShutdownGracePeriod(logger *slog.Logger) time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MEMQL_SHUTDOWN_GRACE_PERIOD"))
+	if raw == "" {
+		return app.DefaultShutdownGracePeriod
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("invalid MEMQL_SHUTDOWN_GRACE_PERIOD; using default",
+				"value", raw, "default", app.DefaultShutdownGracePeriod.String())
+		}
+		return app.DefaultShutdownGracePeriod
 	}
 	return d
 }

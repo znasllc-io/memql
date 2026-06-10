@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/component"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -106,6 +107,14 @@ func (*ParentConnector) Order() int {
 	return parentConnectorOrder
 }
 
+// parentReconnectDelay is how long the supervising run loop waits before
+// re-dialing the parent after Connect returns a non-context error (memql#1246).
+// peerConnection.Connect already backs off internally between attempts within a
+// single Connect call; this is the OUTER backstop for the rare path where
+// Connect itself returns (e.g. a clean parent-side stream end during the
+// parent's own rollout) so we re-establish promptly without busy-spinning.
+const parentReconnectDelay = 2 * time.Second
+
 func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 	ctx, cancel := context.WithCancel(ctx)
 	pc.mu.Lock()
@@ -132,17 +141,42 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 		"node_type", string(pc.identity.Type),
 	)
 
-	// Connect blocks for the lifetime of the context; it handles its own
-	// reconnect backoff (see connection.go). Returning its error cleanly
-	// lets the component framework surface it.
-	err := conn.Connect(ctx, pc.handleServerMessage)
-	if err != nil && ctx.Err() == nil {
-		pc.logger.Error("parent_connector: connection ended with error",
+	// Supervising reconnect loop (memql#1246). A lost parent stream -- even a
+	// clean/transient one while the parent (e.g. identity) is ITSELF rolling
+	// -- must NOT terminate this run hook: if it did, the component framework
+	// would flip IsRunning() false permanently (ParentConnector is a /healthz
+	// dependency), wedging the pod at readiness 503 / 0-1 until a manual delete
+	// (the exact #1246 outage). Instead, keep re-dialing with backoff until the
+	// context is cancelled (Stop). Readiness then reflects serving-capability
+	// (the node reconnects on its own) rather than "every mesh dependency is
+	// currently connected". peerConnection.Connect already reconnects
+	// internally between attempts; this outer loop is the backstop for the rare
+	// path where Connect itself returns.
+	for {
+		err := conn.Connect(ctx, pc.handleServerMessage)
+
+		// Context cancelled -> Stop was requested; exit cleanly so the
+		// component framework records a normal stop (not a crash).
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		// Connect returned without a cancellation: the parent stream ended
+		// (clean EOF or error). Log + re-dial after a short backoff rather than
+		// returning, so the node stays serving-capable across the parent's
+		// reconnect window.
+		pc.logger.Warn("parent_connector: parent stream ended; will reconnect",
 			"error", err,
 			"parent_address", pc.identity.ParentAddress,
+			"node_id", pc.identity.ID,
 		)
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(parentReconnectDelay):
+		}
 	}
-	return err
 }
 
 func (pc *ParentConnector) cleanup() {
