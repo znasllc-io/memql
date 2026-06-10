@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
@@ -128,6 +130,7 @@ func (a *App) cluster() {
 	var peerMgr *node.PeerManager
 	var nodeServer *node.NodeServer
 	var parentConnector *node.ParentConnector
+	var eventBridge *node.EventBridge
 	for _, dep := range nodeDeps {
 		switch d := dep.(type) {
 		case *node.PeerManager:
@@ -136,6 +139,49 @@ func (a *App) cluster() {
 			nodeServer = d
 		case *node.ParentConnector:
 			parentConnector = d
+		case *node.EventBridge:
+			eventBridge = d
+		}
+	}
+
+	// Phase 1 of epic memql#1259 (memql#1264): route the chat-reply path
+	// (utterance / presence / canvasState) through the durable DeliverySubstrate
+	// (memql#1263), fixing the live cross-replica drop where a reply produced on
+	// a worker never reached the bff replica that owns the user's WebSocket.
+	//
+	//   - Producer side (every mesh node): on a locally-produced chat-reply
+	//     event, ChatReplyDelivery durably Publishes a Deliverable keyed by
+	//     space:<id>. The durable outbox row is the cross-replica guarantee.
+	//   - Consumer side (bff only): the bff Subscribes per space and fans the
+	//     durable stream back onto its local bus, where the browser's gRPC
+	//     subscription already consumes it -- so it gets the reply regardless of
+	//     which node produced it. EventBridge then SUPPRESSES the inbound mesh
+	//     copy of these topics on the bff (SuppressInboundChatReply) so the
+	//     browser receives them exactly once via the substrate.
+	//
+	// The mesh forward itself is left fully intact: it still carries the human
+	// utterance to the cognition/agent worker that produces the reply (the chat
+	// TRIGGER path), and still publishes these topics on worker local buses.
+	// Only the bff's redundant inbound copy is dropped. The substrate runs
+	// durable-only (nil fast-path); the mesh-hint coexistence is an independent
+	// latency optimization for a later pass. RPC dispatch = #1265, streaming =
+	// #1266, retirement of the old machinery = #1267 -- all out of scope here.
+	if node.ValidNodeTypes[nodeIdentity.Type] && a.eventBus != nil {
+		dbGetter := func() *bun.DB {
+			if a.db == nil {
+				return nil
+			}
+			return a.db.BunDB()
+		}
+		substrate := node.NewSubstrateWithStore(dbGetter, a.Logger)
+		isBFF := nodeIdentity.Type == node.NodeTypeBFF
+		if crd := node.NewChatReplyDelivery(nodeIdentity, substrate, a.eventBus, isBFF, a.Logger); crd != nil {
+			if isBFF && eventBridge != nil {
+				eventBridge.SuppressInboundChatReply(true)
+			}
+			a.Dependencies = append(a.Dependencies, crd)
+			a.Logger.Info("chat-reply path routed through durable delivery substrate",
+				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type), "is_bff", isBFF)
 		}
 	}
 

@@ -1,0 +1,366 @@
+package node
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+	"sync"
+
+	"github.com/znasllc-io/memql/component"
+	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/core/common"
+)
+
+// ChatReplyDelivery routes the chat-reply delivery path (utterance / presence /
+// canvasState events that must reach the bff replica owning a user's WebSocket)
+// through the durable DeliverySubstrate (memql#1264, Phase 1 of epic
+// memql#1259). It is the first path cut over to the substrate; the generic
+// ad-hoc mesh forwards (#1232 outbox, #1245 skip) stay in place for the
+// not-yet-migrated paths (RPC dispatch = #1265, streaming = #1266; wholesale
+// retirement = #1267).
+//
+// Why this exists -- the live "Sofia not responding" bug. A browser opens
+// MemqlService.Stream (via /memql/ws) on ONE bff replica and subscribes that
+// socket to the bff's LOCAL events.Bus for the chat-reply topics. A reply is
+// produced on a worker (cognition/agent), lands on THAT node's local bus, and
+// is pushed over the mesh by EventBridge.forwardToPeers. The mesh is a star and
+// #1245 skips live non-parent replicas, so the copy can miss the bff replica
+// that actually owns the browser's WS -- the silent cross-replica drop.
+//
+// The fix inverts the addressing from physical ("deliver to bff-pod-3") to
+// logical ("deliver to whoever owns space X"):
+//
+//   - Producer side (every node that emits a chat-reply event): on a LOCAL,
+//     non-remote chat-reply event we Publish a Deliverable to the substrate
+//     keyed by space:<spaceId>. The durable outbox row is the guarantee; the
+//     EventBridge mesh forward stays as the deduped low-latency fast-path.
+//   - Consumer side (bff only): a bff Subscribes to space:<spaceId> on the
+//     substrate and re-publishes each deliverable onto its LOCAL bus -- where
+//     the existing browser gRPC subscription already consumes it -- then Acks.
+//     A bff lazily subscribes to a space the moment it observes a local
+//     chat-reply event for it: that local event is the user's own WS traffic
+//     (the human utterance the browser just wrote, a presence/canvas change it
+//     made), which is exactly the signal that THIS replica anchors that user's
+//     socket. So the reply reaches it even though it is not the producer's mesh
+//     parent.
+//
+// Exactly-once for the browser stream is the substrate's per-subscription
+// EventID dedup (the mesh-hint copy and the durable-pull copy of the same
+// EventID collapse to one delivery); per-space ordering is the substrate's
+// per-key monotonic seq + cursor. The EventID we publish is the graph row id
+// (stable + unique), carried byte-identical on both paths so they can never
+// double-deliver.
+type ChatReplyDelivery struct {
+	*component.Component
+
+	substrate   DeliverySubstrate
+	localBus    *events.Bus
+	identity    *Identity
+	isBFF       bool
+	logger      *slog.Logger
+	unsubscribe func()
+
+	// republish re-emits a substrate deliverable onto the local bus. Defaulted
+	// to localBus.Publish; overridable in tests to observe delivery.
+	republish func(events.Event)
+
+	mu      sync.Mutex
+	subbed  map[string]context.CancelFunc // routing-key string -> subscription canceller
+	ctx     context.Context
+	stopped bool
+}
+
+const (
+	// ChatReplyDeliveryComponentName names the component in the lifecycle.
+	ChatReplyDeliveryComponentName = common.ComponentName("nodeChatReplyDelivery")
+	// chatReplyDeliveryOrder runs just after EventBridge (46) so the local bus
+	// and the substrate are both available; before NodeServer (48).
+	chatReplyDeliveryOrder = 47
+)
+
+// Chat-reply concept ids whose graph.node.created/updated events must reach the
+// WS-owning bff replica. Confirmed against the code: utterance + presence carry
+// a spaceId field; canvasState carries a space field (see resolveSpaceKey).
+const (
+	conceptUtterance   = "v1:cognition:utterance"
+	conceptPresence    = "v1:cognition:presence"
+	conceptCanvasState = "v1:copresent:canvasState"
+)
+
+// NewChatReplyDelivery builds the chat-reply delivery router over the given
+// substrate. isBFF gates the consumer (Subscribe + re-publish) side: only bff
+// replicas own browser WebSockets, so only they subscribe and fan back to the
+// local bus. Every node runs the producer (Publish) side. Returns nil when the
+// substrate is absent (single-node / non-mesh binaries) so the caller can skip
+// wiring it without a nil-guard at every call site.
+func NewChatReplyDelivery(identity *Identity, substrate DeliverySubstrate, localBus *events.Bus, isBFF bool, logger *slog.Logger) *ChatReplyDelivery {
+	if substrate == nil || localBus == nil {
+		return nil
+	}
+	comp, _ := component.New(ChatReplyDeliveryComponentName)
+	d := &ChatReplyDelivery{
+		Component: comp,
+		substrate: substrate,
+		localBus:  localBus,
+		identity:  identity,
+		isBFF:     isBFF,
+		logger:    logger,
+		subbed:    make(map[string]context.CancelFunc),
+	}
+	d.republish = d.localBus.Publish
+	d.ConfigureLifecycle(
+		component.WithRunHook(d.run),
+		component.WithOnStopHook(d.cleanup),
+	)
+	return d
+}
+
+// Order returns the startup order.
+func (*ChatReplyDelivery) Order() int { return chatReplyDeliveryOrder }
+
+// run subscribes to the local bus for the chat-reply topics and drives both
+// sides off each local event: Publish to the substrate (producer) and, on a
+// bff, ensure a substrate subscription for the event's space (consumer).
+func (d *ChatReplyDelivery) run(ctx context.Context, markStarted func()) error {
+	d.mu.Lock()
+	d.ctx = ctx
+	d.mu.Unlock()
+
+	d.unsubscribe = d.localBus.Subscribe("graph.node.#", func(event events.Event) {
+		d.onLocalEvent(ctx, event)
+	}, events.WithSubscriberName("nodeChatReplyDelivery"))
+
+	markStarted()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// onLocalEvent handles one local bus event. It Publishes locally-produced
+// chat-reply events to the substrate, and -- on a bff -- ensures the space is
+// subscribed so the durable stream fans back to this replica's browsers.
+func (d *ChatReplyDelivery) onLocalEvent(ctx context.Context, event events.Event) {
+	if !isChatReplyTopic(event.Topic) {
+		return
+	}
+	key, ok := resolveSpaceKey(event.Payload)
+	if !ok {
+		return
+	}
+
+	// Consumer side (bff): a local chat-reply event for this space means a
+	// browser on THIS replica is involved with it, so ensure we're subscribed
+	// to the durable stream for the space. Done for events we originate AND for
+	// events that arrived from a peer (mesh fast-path / inbound bridge) -- both
+	// are evidence this replica cares about the space.
+	if d.isBFF {
+		d.ensureSubscribed(key)
+	}
+
+	// Producer side: only durably publish events PRODUCED here. A remote event
+	// was already published to the outbox by its origin node; re-publishing it
+	// would just be an idempotent no-op (same EventID), so skip the round-trip.
+	if event.IsRemote() {
+		return
+	}
+	d.publish(ctx, key, event)
+}
+
+// publish writes one chat-reply event to the durable outbox keyed by its space.
+// The EventID is the graph row id (stable + unique), so the durable copy and
+// the EventBridge mesh-hint copy dedup against each other on the consumer.
+func (d *ChatReplyDelivery) publish(ctx context.Context, key RoutingKey, event events.Event) {
+	eventID := stringField(event.Payload, "id")
+	if eventID == "" {
+		eventID = stringField(event.Payload, "nodeId")
+	}
+	if eventID == "" {
+		// No stable row id to dedup on -- never publish an unkeyed deliverable
+		// (it would double-deliver against the mesh copy). Drop to the mesh-only
+		// path for this (degenerate) event.
+		d.warn("chat-reply delivery: event has no stable id; not publishing to substrate",
+			"topic", event.Topic, "key", key.String())
+		return
+	}
+
+	d.publishDeliverable(ctx, Deliverable{
+		EventID:    eventID,
+		Key:        key,
+		Topic:      event.Topic,
+		Kind:       event.Kind,
+		Payload:    event.Payload,
+		OriginNode: d.nodeID(),
+	})
+}
+
+// publishDeliverable is the substrate Publish call, split out so the producer
+// path is testable without a live local bus.
+func (d *ChatReplyDelivery) publishDeliverable(ctx context.Context, dl Deliverable) {
+	if _, err := d.substrate.Publish(ctx, dl); err != nil {
+		d.warn("chat-reply delivery: substrate publish failed",
+			"topic", dl.Topic, "key", dl.Key.String(), "event_id", dl.EventID, "error", err)
+	}
+}
+
+// ensureSubscribed starts a single durable subscription per space-key (idempotent
+// per key). The subscription replays from this consumer's cursor, then tails
+// live, re-publishing each deliverable onto the local bus and Acking as it goes.
+func (d *ChatReplyDelivery) ensureSubscribed(key RoutingKey) {
+	d.mu.Lock()
+	if d.stopped || d.ctx == nil {
+		d.mu.Unlock()
+		return
+	}
+	if _, ok := d.subbed[key.String()]; ok {
+		d.mu.Unlock()
+		return
+	}
+	subCtx, cancel := context.WithCancel(d.ctx)
+	d.subbed[key.String()] = cancel
+	d.mu.Unlock()
+
+	ch, err := d.substrate.Subscribe(subCtx, key, d.consumerID())
+	if err != nil {
+		d.mu.Lock()
+		delete(d.subbed, key.String())
+		d.mu.Unlock()
+		cancel()
+		d.warn("chat-reply delivery: substrate subscribe failed", "key", key.String(), "error", err)
+		return
+	}
+	if d.logger != nil {
+		d.logger.Info("chat-reply delivery: subscribed space to substrate",
+			"key", key.String(), "consumer", d.consumerID())
+	}
+	go d.consume(subCtx, key, ch)
+}
+
+// consume drains one space subscription: re-publish each deliverable onto the
+// local bus (so the browser's gRPC subscription delivers it) and Ack to advance
+// the cursor. The re-published event is tagged with its OriginNode so the local
+// EventBridge treats it as remote and does NOT re-forward it back over the mesh.
+//
+// A deliverable this node PRODUCED itself is Acked but NOT re-published: the
+// original local-bus event already delivered it to this replica's browsers
+// (handleBusEvent does not dedup by row id), so re-emitting the durable copy
+// would deliver the SAME row to the browser twice. We must still advance the
+// cursor past it (it is a real seq position) so a reconnect does not replay it.
+// Cross-node replies (origin != self) are the rows this subscription exists to
+// deliver, and they are re-published exactly once.
+func (d *ChatReplyDelivery) consume(ctx context.Context, key RoutingKey, ch <-chan Deliverable) {
+	self := d.nodeID()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case dl, ok := <-ch:
+			if !ok {
+				return
+			}
+			if dl.OriginNode == "" || dl.OriginNode != self {
+				d.republish(events.Event{
+					Topic:        dl.Topic,
+					Kind:         dl.Kind,
+					Payload:      dl.Payload,
+					Metadata:     map[string]string{},
+					OriginNodeId: deliverableOrigin(dl, self),
+				})
+			}
+			if err := d.substrate.Ack(ctx, key, d.consumerID(), dl.Seq); err != nil {
+				d.warn("chat-reply delivery: ack failed",
+					"key", key.String(), "seq", dl.Seq, "error", err)
+			}
+		}
+	}
+}
+
+// cleanup tears down the local-bus subscription and every space subscription.
+func (d *ChatReplyDelivery) cleanup() {
+	if d.unsubscribe != nil {
+		d.unsubscribe()
+		d.unsubscribe = nil
+	}
+	d.mu.Lock()
+	d.stopped = true
+	for k, cancel := range d.subbed {
+		cancel()
+		delete(d.subbed, k)
+	}
+	d.mu.Unlock()
+}
+
+// consumerID is the durable cursor identity for this node's subscription. The
+// node id makes the cursor per-replica, so a different bff replica taking over a
+// space gets its own clean replay (ADR 4.2 / 4.4) rather than inheriting our
+// acked position.
+func (d *ChatReplyDelivery) consumerID() string { return d.nodeID() }
+
+func (d *ChatReplyDelivery) nodeID() string {
+	if d.identity != nil {
+		return d.identity.ID
+	}
+	return ""
+}
+
+func (d *ChatReplyDelivery) warn(msg string, args ...any) {
+	if d.logger != nil {
+		d.logger.Warn(msg, args...)
+	}
+}
+
+// --- pure helpers (no receiver state; unit-testable directly) ----------------
+
+// isChatReplyTopic reports whether a topic is a chat-reply graph event
+// (created/updated for utterance / presence / canvasState). Deleted events are
+// not part of the reply stream the browser renders.
+func isChatReplyTopic(topic string) bool {
+	for _, concept := range []string{conceptUtterance, conceptPresence, conceptCanvasState} {
+		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
+			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSpaceKey extracts the logical delivery key (space:<spaceId>) from a
+// chat-reply event payload. The graph emitter flattens the node's fields onto
+// the event payload, so the space id is a top-level field: utterance + presence
+// use "spaceId", canvasState uses "space". We also fall back to the nested
+// "payload" map for robustness.
+func resolveSpaceKey(payload map[string]any) (RoutingKey, bool) {
+	for _, field := range []string{"spaceId", "space"} {
+		if v := stringField(payload, field); v != "" {
+			return RoutingKey{Kind: "space", ID: v}, true
+		}
+	}
+	if nested, ok := payload["payload"].(map[string]any); ok {
+		for _, field := range []string{"spaceId", "space"} {
+			if v := stringField(nested, field); v != "" {
+				return RoutingKey{Kind: "space", ID: v}, true
+			}
+		}
+	}
+	return RoutingKey{}, false
+}
+
+// stringField reads a non-empty string field from a payload map.
+func stringField(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if v, ok := payload[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// deliverableOrigin returns the origin node id to stamp on the re-published
+// event so the local EventBridge treats it as remote (IsRemote()==true) and
+// does not loop it back onto the mesh. Falls back to this node's id when the
+// deliverable carries none.
+func deliverableOrigin(dl Deliverable, self string) string {
+	if dl.OriginNode != "" {
+		return dl.OriginNode
+	}
+	return self
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/uptrace/bun"
 
@@ -28,6 +29,18 @@ type pgOutboxStore struct {
 // newPGOutboxStore wires a durable outbox store over the cluster database.
 func newPGOutboxStore(dbGetter func() *bun.DB) *pgOutboxStore {
 	return &pgOutboxStore{dbGetter: dbGetter}
+}
+
+// NewSubstrateWithStore builds a production DeliverySubstrate over the cluster
+// Postgres outbox (delivery_store_pg.go), durable-only (no mesh fast-path).
+// This is the wiring entry point used by app/cluster.go for the chat-reply
+// migration (memql#1264): the durable outbox alone is the cross-replica
+// delivery guarantee. dbGetter is resolved lazily so the substrate can be
+// constructed before the database component is up. dedupTTL mirrors the mesh's
+// eventDedup window (defaultDedupTTL) so a per-subscription cross-path dedup
+// behaves consistently with the rest of the mesh.
+func NewSubstrateWithStore(dbGetter func() *bun.DB, logger *slog.Logger) *Substrate {
+	return NewSubstrate(newPGOutboxStore(dbGetter), defaultDedupTTL, nil, logger)
 }
 
 // errNoDB is returned when the database handle is not yet available.
