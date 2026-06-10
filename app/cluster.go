@@ -299,6 +299,29 @@ func (a *App) cluster() {
 	// Store node identity for startup event emission.
 	a.nodeIdentity = nodeIdentity
 
+	// Capture this node's lifecycle state machine (Starting/Ready/Draining/
+	// Stopped, memql#1268) and bridge it to the readiness surface: the moment
+	// the node enters Draining (or the terminal Stopped) the readiness probe
+	// (/healthz, /readyz) must flip to 503 so k8s/LB de-route it -- while
+	// /livez stays 200 (readiness != liveness). The observer fires only on an
+	// actual transition. The advertised gossip health rides the heartbeats
+	// (peerConnection healthFn / server heartbeat), so peers route around a
+	// Draining node at once rather than after a missed-heartbeat timeout.
+	// node sits below component/server in the import graph, so the bridge is
+	// wired here in app/ (same pattern as BeginDrain -> server.SetDraining).
+	if peerMgr != nil {
+		a.nodeLifecycle = peerMgr.Lifecycle()
+		a.nodeLifecycle.SetObserver(func(_, newState node.LifecycleState) {
+			if newState == node.LifecycleDraining || newState == node.LifecycleStopped {
+				server.SetDraining(true)
+			}
+			a.Logger.Info("node lifecycle transition",
+				"node_id", nodeIdentity.ID,
+				"state", newState.String(),
+			)
+		})
+	}
+
 	// Expose node identity in /healthz so load balancers can route by type.
 	server.SetNodeIdentity(
 		nodeIdentity.ID,
@@ -314,6 +337,39 @@ func (a *App) cluster() {
 		"parent_address", nodeIdentity.ParentAddress,
 		"bootstrap", bootstrap.Description(),
 	)
+}
+
+// MarkNodeReady flips this node's lifecycle from Starting to Ready
+// (memql#1268), advertised on the next gossip heartbeat and consulted by the
+// readiness handler. Called from the Run lifecycle once every dependency has
+// started (EmitSystemStartup), i.e. the node is actually able to serve.
+// No-op on non-mesh binaries (no PeerManager / lifecycle). Idempotent.
+func (a *App) MarkNodeReady() {
+	if a.nodeLifecycle == nil {
+		return
+	}
+	if err := a.nodeLifecycle.MarkReady(); err != nil {
+		// A node already past Ready (e.g. a drain raced startup) is fine --
+		// don't regress it. Log and move on.
+		a.Logger.Warn("node lifecycle: could not mark ready", "error", err)
+		return
+	}
+	a.Logger.Info("node marked ready", "node_id", a.nodeIdentity.ID)
+}
+
+// BeginNodeDrain flips this node's lifecycle to Draining (memql#1268) -- the
+// mechanism a graceful SIGTERM drain (memql#1269) and the operator trigger
+// (memql#1270) drive. This issue only wires it to the existing shutdown
+// signal so a rolling deploy advertises Draining in gossip and flips readiness
+// to not-ready immediately; the in-flight-finish / flush / ordered-rollout
+// BEHAVIOUR is left to those downstream issues. No-op on non-mesh binaries.
+func (a *App) BeginNodeDrain() {
+	if a.nodeLifecycle == nil {
+		return
+	}
+	if err := a.nodeLifecycle.MarkDraining(); err != nil {
+		a.Logger.Warn("node lifecycle: could not mark draining", "error", err)
+	}
 }
 
 // EmitSystemStartup publishes the system.startup event with infrastructure metadata.

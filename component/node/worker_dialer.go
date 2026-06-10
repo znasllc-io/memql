@@ -520,6 +520,9 @@ func (wd *WorkerDialer) dialTarget(parent context.Context, target WorkerTarget) 
 	if hb := wd.peerMgr.HeartbeatInterval(); hb > 0 {
 		conn.SetHeartbeatInterval(hb)
 	}
+	// Advertise this node's lifecycle health on every heartbeat to the worker
+	// (memql#1268) so peers route around us the instant we drain.
+	conn.SetHealthFn(wd.peerMgr.Lifecycle().Health)
 
 	entry := &dialEntry{
 		target: target,

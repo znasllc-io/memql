@@ -48,6 +48,13 @@ type peerConnection struct {
 	// heartbeatInterval is the cadence at which this connection sends
 	// NodeHeartbeat messages to the peer. Zero disables the send ticker.
 	heartbeatInterval time.Duration
+
+	// healthFn supplies the NodeHealthStatus to stamp on each outbound
+	// heartbeat -- this node's self-asserted lifecycle health (memql#1268).
+	// nil means advertise HEALTHY (the pre-lifecycle default), so a
+	// connection created without a lifecycle source keeps the old wire
+	// behaviour and the gossip contract stays backward-compatible.
+	healthFn func() nodev1.NodeHealthStatus
 }
 
 // newPeerConnection creates a new outbound connection to a peer.
@@ -71,6 +78,15 @@ func (pc *peerConnection) SetHeartbeatInterval(d time.Duration) {
 	}
 	pc.mu.Lock()
 	pc.heartbeatInterval = d
+	pc.mu.Unlock()
+}
+
+// SetHealthFn installs the source of this node's advertised lifecycle health
+// for outbound heartbeats (memql#1268). Typically pm.Lifecycle().Health.
+// A nil fn restores the HEALTHY default. Thread-safe.
+func (pc *peerConnection) SetHealthFn(fn func() nodev1.NodeHealthStatus) {
+	pc.mu.Lock()
+	pc.healthFn = fn
 	pc.mu.Unlock()
 }
 
@@ -255,8 +271,20 @@ func (pc *peerConnection) heartbeatLoop(ctx context.Context, interval time.Durat
 }
 
 func (pc *peerConnection) sendHeartbeatMessage() {
-	msg := buildHeartbeatMessage(nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY)
-	pc.Send(msg)
+	pc.mu.Lock()
+	fn := pc.healthFn
+	pc.mu.Unlock()
+
+	// Advertise this node's self-asserted lifecycle health (memql#1268) so a
+	// Draining node is routed around at once. Default to HEALTHY when no
+	// lifecycle source is wired (backward-compatible).
+	health := nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY
+	if fn != nil {
+		if h := fn(); h != nodev1.NodeHealthStatus_NODE_HEALTH_UNSPECIFIED {
+			health = h
+		}
+	}
+	pc.Send(buildHeartbeatMessage(health))
 }
 
 // sendLoop drains the send channel and writes to the stream.

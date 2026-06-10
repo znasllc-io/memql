@@ -103,6 +103,13 @@ type App struct {
 	// Phase 6: cluster
 	nodeIdentity *node.Identity
 
+	// nodeLifecycle is THIS node's lifecycle state machine
+	// (Starting/Ready/Draining/Stopped, epic memql#1259 #4, memql#1268),
+	// resolved from the PeerManager during cluster bootstrap. Nil on
+	// non-mesh binaries (no PeerManager). MarkNodeReady / BeginNodeDrain
+	// drive it from the Run lifecycle.
+	nodeLifecycle *node.NodeLifecycle
+
 	// agentForwarder is the SIForwardRouter used on cognition binaries
 	// to forward AgentGenerateTurnMsg to agent peers. Nil on all other
 	// node types (BFF uses its own aiForwarder on grpcServer for a

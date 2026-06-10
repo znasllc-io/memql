@@ -37,6 +37,7 @@ In the default build (no tags), BFF code is included.
 component/node/
 ├── CLAUDE.md              # This file
 ├── identity.go            # NodeType enum, Identity struct, env var parsing
+├── lifecycle.go           # NodeLifecycle state machine (Starting/Ready/Draining/Stopped, #1268)
 ├── node.proto             # NodeService proto (11 message types)
 ├── generate.go            # protoc go:generate directive
 ├── gen/                   # Generated gRPC code
@@ -78,6 +79,47 @@ timestamps. Removes stale peers after configurable timeout. `AttachConnection(no
 conn)` / `DetachConnection(nodeId)` bind an outbound `*peerConnection` onto a
 `PeerEntry` so callers (AiForwardRouter, EventBridge, CapabilityRouter) can
 `Send` on it. Only peers this node is the client for have `Connection != nil`.
+The PeerManager also owns THIS node's `NodeLifecycle` (`Lifecycle()`); the
+heartbeat builders read `Lifecycle().Health()` so the advertised gossip health
+tracks the node's own lifecycle state.
+
+### NodeLifecycle (`lifecycle.go`, memql#1268)
+The node's explicit, self-asserted operational state machine -- distinct from
+`common.Lifecycle` (component start/stop machinery) and from a peer's observed
+`NodeHealthStatus`. States and legal forward edges:
+
+```
+Starting -> Ready -> Draining -> Stopped
+```
+
+There is no backward edge (a node never un-drains; `Stopped` is terminal);
+`Transition` guards illegal edges and returns an error, leaving the state
+unchanged. Idempotent self-edges (`X -> X`) are no-ops. `NodeLifecycle` is
+concurrency-safe (the node is multi-goroutine) and notifies an optional
+observer on every actual change.
+
+How it is wired (in `app/cluster.go` + `app/run.go`):
+
+- **Boot:** the PeerManager constructs the lifecycle in `Starting`.
+- **Ready:** `app.MarkNodeReady()` flips it to `Ready` once every dependency
+  has started (`Run` -> after `start(deps...)`), i.e. the node can actually
+  serve.
+- **Draining:** `app.BeginNodeDrain()` flips it to `Draining` on the shutdown
+  signal (the existing SIGTERM path). This is only the MECHANISM; the
+  in-flight-finish / flush / ordered-rollout BEHAVIOUR is memql#1269, and the
+  operator-triggered drain is memql#1270.
+- **Gossip advertisement:** `LifecycleState.Health()` maps the state onto the
+  existing `NodeHealthStatus` wire enum (`Starting`->CONNECTING,
+  `Ready`->HEALTHY, `Draining`->DRAINING, `Stopped`->STOPPED). The outbound
+  heartbeat (`peerConnection` healthFn, set by ParentConnector + WorkerDialer)
+  and the server-side heartbeat (`buildServerHeartbeat`) stamp this, so peers
+  learn the state via the unchanged gossip contract and route AROUND a
+  Draining node at once instead of after a missed-heartbeat timeout. Backward-
+  compatible: a connection with no lifecycle source still advertises HEALTHY.
+- **Readiness != liveness:** an observer (wired in `app/cluster.go`) bridges
+  `Draining`/`Stopped` to `component/server.SetDraining(true)`, so `/healthz`
+  + `/readyz` (READINESS) report 503 while `/livez` (pure LIVENESS, #1117)
+  stays 200. A draining node is de-routed but NOT liveness-killed.
 
 ### WorkerDialer (`worker_dialer.go`, BFF-only)
 On BFF binaries, opens one outbound NodeService stream per worker-type peer
@@ -181,7 +223,7 @@ NodeHeartbeat, PeerIntroduction, QueryResponse, AiForwardResponse, etc.).
 |---------|-----------|---------|
 | NodeHello | Client -> Server | Handshake with identity |
 | NodeWelcome | Server -> Client | Server's own node_id + peer table |
-| NodeHeartbeat | Bidirectional | Liveness with health status (client + server-side tickers) |
+| NodeHeartbeat | Bidirectional | Liveness with health status (client + server-side tickers). `health` carries this node's advertised lifecycle state via `NodeLifecycle.Health()` (memql#1268). |
 | PeerIntroduction | Bidirectional | Peer table updates |
 | SpawnRequest/Result | Bidirectional | Node spawning |
 | EventForward/Ack | Bidirectional | Distributed events |

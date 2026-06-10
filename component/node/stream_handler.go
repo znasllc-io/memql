@@ -261,7 +261,7 @@ func (s *nodeService) serverHeartbeatLoop(stream nodev1.NodeService_StreamServer
 	}
 	// Send one immediately so the peer's LastSeen is refreshed on
 	// NodeWelcome and every interval thereafter.
-	if err := stream.Send(buildServerHeartbeat()); err != nil {
+	if err := stream.Send(buildServerHeartbeat(s.selfHealth())); err != nil {
 		return
 	}
 	ticker := time.NewTicker(interval)
@@ -271,23 +271,40 @@ func (s *nodeService) serverHeartbeatLoop(stream nodev1.NodeService_StreamServer
 		case <-stop:
 			return
 		case <-ticker.C:
-			if err := stream.Send(buildServerHeartbeat()); err != nil {
+			if err := stream.Send(buildServerHeartbeat(s.selfHealth())); err != nil {
 				return
 			}
 		}
 	}
 }
 
+// selfHealth returns this node's self-asserted lifecycle health for gossip
+// (memql#1268). Defaults to HEALTHY when no PeerManager/lifecycle is wired so
+// the server heartbeat keeps its pre-lifecycle behaviour.
+func (s *nodeService) selfHealth() nodev1.NodeHealthStatus {
+	if s.peerManager == nil {
+		return nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY
+	}
+	if lc := s.peerManager.Lifecycle(); lc != nil {
+		return lc.Health()
+	}
+	return nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY
+}
+
 // buildServerHeartbeat constructs a NodeServerMessage{Heartbeat} for the
 // server-side heartbeat ticker. Mirrors buildHeartbeatMessage but with
-// the server-direction envelope type.
-func buildServerHeartbeat() *nodev1.NodeServerMessage {
+// the server-direction envelope type. health carries this node's
+// self-asserted lifecycle health (memql#1268).
+func buildServerHeartbeat(health nodev1.NodeHealthStatus) *nodev1.NodeServerMessage {
+	if health == nodev1.NodeHealthStatus_NODE_HEALTH_UNSPECIFIED {
+		health = nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY
+	}
 	return &nodev1.NodeServerMessage{
 		MessageId: id.NewShortId(),
 		Payload: &nodev1.NodeServerMessage_Heartbeat{
 			Heartbeat: &nodev1.NodeHeartbeat{
 				Ts:     timestamppb.New(time.Now()),
-				Health: nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
+				Health: health,
 			},
 		},
 	}
