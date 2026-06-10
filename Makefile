@@ -28,7 +28,7 @@ COMPOSE_CLST := -f docker/docker-compose.cluster.yml
 # Build targets
 # ---------------------------------------------------------------------------
 
-.PHONY: all build build-all server bff voice cognition agent planner identity identity-templ identity-tailwind identity-assets identity-build healthcheck
+.PHONY: all build build-all bff voice cognition agent planner identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
 all: build healthcheck
