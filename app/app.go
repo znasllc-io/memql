@@ -133,6 +133,12 @@ type App struct {
 	// different forwarding flow).
 	agentForwarder *memqlgrpc.SIForwardRouter
 
+	// deliverySubstrate is the durable outbox+cursor mesh delivery substrate
+	// (memql#1263), constructed once in the cluster phase and shared by every
+	// path migrated onto it: chat-reply (memql#1264) and the client-tool RPC
+	// return leg (memql#1265). Nil on single-node / non-mesh binaries.
+	deliverySubstrate node.DeliverySubstrate
+
 	// cognitionIntegration is stashed here so cluster.go can inject
 	// the agent-turn forwarder after creating it. Stored as `any` to
 	// avoid importing integrations/cognition in all builds; the

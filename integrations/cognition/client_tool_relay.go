@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -282,6 +283,41 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 	if !ok || entry == nil {
 		return
 	}
+
+	// Preferred return leg (memql#1265): deliver the result to the agent turn
+	// over the durable substrate, addressed by the turn's LOGICAL key
+	// (agentturn:<requestId>). This reaches whichever agent replica runs the
+	// turn regardless of cognition<->agent connection state, fixing the #1245
+	// 0-turns drop where the legacy ForwardContinuation re-used a stale cached
+	// peer connection. Falls back to ForwardContinuation only when the
+	// substrate client isn't wired (single-node / non-substrate builds).
+	if c.clientToolResultClient != nil {
+		found, err := c.clientToolResultClient.Deliver(
+			context.Background(),
+			entry.requestId,
+			node.ClientToolResultPayload{
+				CallID:       callId,
+				ContentJSON:  contentJSON,
+				IsError:      isError,
+				ErrorMessage: errorMessage,
+			},
+		)
+		if err != nil {
+			c.Logger.Warn("client-tool relay: substrate Deliver failed",
+				"callId", callId, "requestId", entry.requestId, "error", err)
+			return
+		}
+		c.Logger.Info("client-tool relay: delivered response to agent via substrate",
+			"callId", callId,
+			"requestId", entry.requestId,
+			"isError", isError,
+			"waiterFound", found,
+			"wait_ms", time.Since(entry.createdAt).Milliseconds(),
+		)
+		return
+	}
+
+	// Legacy fallback: ForwardContinuation over the cached peer connection.
 	if c.agentForwarder == nil {
 		c.Logger.Warn("client-tool relay: response dropped, no agentForwarder configured",
 			"callId", callId)

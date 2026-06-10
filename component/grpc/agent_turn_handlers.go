@@ -9,6 +9,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -81,6 +82,22 @@ func (s *Server) SetAgentPauseHook(hook func(requestId string)) {
 	s.agentPauseHook = hook
 	if s.serviceRef != nil && s.serviceRef.svc != nil {
 		s.serviceRef.svc.agentPauseHook = hook
+	}
+}
+
+// SetClientToolResultServer installs the substrate-RPC server that delivers a
+// ClientToolResult back to this agent's parked waiter over the durable delivery
+// substrate (memql#1265). Wired on agent binaries during app bootstrap once the
+// substrate + PeerManager are resolved. Nil-safe: when unset the agent simply
+// does not serve the substrate return channel and the legacy ForwardContinuation
+// path is used.
+func (s *Server) SetClientToolResultServer(srv *node.ClientToolResultServer) {
+	if s == nil {
+		return
+	}
+	s.clientToolRPC = srv
+	if s.serviceRef != nil && s.serviceRef.svc != nil {
+		s.serviceRef.svc.clientToolResultServer = srv
 	}
 }
 
@@ -179,6 +196,15 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 		}
 	}
 
+	// Serve the substrate-RPC client-tool return channel for this turn's
+	// logical key (memql#1265). Started here at turn begin so a ClientToolResult
+	// cognition publishes to agentturn:<requestId> fires the local waiter even
+	// if the cognition<->agent connection churns mid-turn. Torn down at turn end
+	// in runAgentTurn. Nil-safe: unset on single-node / non-substrate builds.
+	if s.service != nil && s.service.clientToolResultServer != nil {
+		s.service.clientToolResultServer.BeginTurn(ctx, requestId)
+	}
+
 	go s.runAgentTurn(ctx, correlate, requestId, msg, sink)
 	return nil
 }
@@ -195,6 +221,13 @@ func (s *streamSession) runAgentTurn(
 	msg *memqlv1.AgentGenerateTurnMsg,
 	sink AgentTurnSink,
 ) {
+	// Stop serving this turn's substrate-RPC client-tool return channel once the
+	// turn finishes (memql#1265). Deferred so it fires on every exit path,
+	// including the handler-failure early return below.
+	if s.service != nil && s.service.clientToolResultServer != nil {
+		defer s.service.clientToolResultServer.EndTurn(requestId)
+	}
+
 	result, err := s.service.agentReplier.Handle(ctx, msg, sink)
 	if err != nil {
 		if s.service != nil && s.service.logger != nil {
