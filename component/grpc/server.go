@@ -119,8 +119,12 @@ type Server struct {
 	// port -- component/grpc can't import app/node-lifecycle). Nil on
 	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
 	nodeMaintenanceHandler NodeMaintenanceHandler
-	serviceRef             *serviceRef
-	extraRegistrars        []func(*grpc.Server)
+	// clientToolRPC serves the substrate-RPC client-tool return channel per
+	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
+	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
+	clientToolRPC   *node.ClientToolResultServer
+	serviceRef      *serviceRef
+	extraRegistrars []func(*grpc.Server)
 	// tokenVerifier honors RotateAuthMsg on open streams. Set by
 	// SetVerifier during app bootstrap; nil on nodes that don't run
 	// an identity verifier (rotation responds with
@@ -163,6 +167,36 @@ func (s *Server) SIForwardHandler() node.SIForwardHandler {
 		s.serviceRef = &serviceRef{}
 	}
 	return &aiForwardHandlerShim{ref: s.serviceRef}
+}
+
+// ClientToolResultFirer returns a node.ClientToolResultFirer that delivers a
+// ClientToolResult to this node's parked client-tool waiter (memql#1265). Like
+// SIForwardHandler it resolves through the serviceRef so it can be retrieved at
+// bootstrap time and handed to the agent's ClientToolResultServer before Run()
+// has constructed the service. On non-agent nodes DeliverClientToolResult finds
+// no waiter and returns false.
+func (s *Server) ClientToolResultFirer() node.ClientToolResultFirer {
+	if s == nil {
+		return nil
+	}
+	if s.serviceRef == nil {
+		s.serviceRef = &serviceRef{}
+	}
+	return &clientToolFirerShim{ref: s.serviceRef}
+}
+
+// clientToolFirerShim defers resolution of the worker-side service (built in
+// Run) so the firer can be wired at bootstrap. A nil/early call returns
+// found=false rather than panicking.
+type clientToolFirerShim struct {
+	ref *serviceRef
+}
+
+func (h *clientToolFirerShim) DeliverClientToolResult(p node.ClientToolResultPayload) bool {
+	if h == nil || h.ref == nil || h.ref.svc == nil {
+		return false
+	}
+	return h.ref.svc.DeliverClientToolResult(p)
 }
 
 // NewServer constructs a gRPC server bound to the provided address.
@@ -281,6 +315,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		aiForwarder:            s.aiForwarder,
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
+		clientToolResultServer: s.clientToolRPC,
 		verifier:               s.tokenVerifier,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
@@ -450,6 +485,16 @@ type service struct {
 	// bootstrap). Other binaries leave this nil; handleAgentGenerateTurn
 	// returns an error when the caller lands on the wrong node type.
 	agentReplier AgentTurnHandler
+
+	// clientToolResultServer serves the substrate-RPC return channel for an
+	// agent turn's client-tool round-trip (memql#1265). Non-nil only on agent
+	// binaries where the delivery substrate is wired (set via
+	// Server.SetClientToolResultServer during app bootstrap). The agent
+	// BeginTurn/EndTurn it around each forwarded turn so a ClientToolResult
+	// published by cognition to the turn's logical key fires the local waiter
+	// regardless of cognition<->agent connection churn (the #1245 fix). Nil =>
+	// the legacy ForwardContinuation path stays in effect.
+	clientToolResultServer *node.ClientToolResultServer
 
 	// agentPauseHook flags an in-flight background turn for cooperative
 	// preemption (epic memql#902 / #906), keyed by request_id. Injected on
@@ -1477,6 +1522,72 @@ func (s *streamSession) handleClientToolResult(_ *memqlv1.MemqlClientMessage, ms
 	default:
 	}
 	return nil
+}
+
+// DeliverClientToolResult fires the service-scoped client-tool waiter for a
+// result that arrived over the substrate-RPC return channel (memql#1265). It
+// implements node.ClientToolResultFirer so the agent's ClientToolResultServer
+// can hand a decoded result straight to the parked waiter, independent of any
+// streamSession. Reuses the exact same dispatch as handleClientToolResult (the
+// legacy ForwardContinuation landing) -- the only difference is the transport
+// that carried the result here. Returns whether a live waiter was found+fired
+// so the RPC reply can tell cognition the result actually landed.
+func (s *service) DeliverClientToolResult(p node.ClientToolResultPayload) bool {
+	if s == nil || p.CallID == "" {
+		return false
+	}
+	result := &memqlv1.ClientToolResult{
+		CallId:       p.CallID,
+		Content:      parseClientToolContentJSON(p.ContentJSON),
+		IsError:      p.IsError,
+		ErrorMessage: p.ErrorMessage,
+	}
+	s.clientToolMu.Lock()
+	ch, ok := s.clientToolWaiters[p.CallID]
+	if ok {
+		delete(s.clientToolWaiters, p.CallID)
+	}
+	s.clientToolMu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- result:
+	default:
+	}
+	return true
+}
+
+// parseClientToolContentJSON decodes the browser's JSON-encoded tool-result
+// content array into []*ToolResultContent. Returns nil on empty/invalid input so
+// the agent sees an empty result rather than a malformed reply. Mirrors
+// cognition's parseToolResultContent (the producer side) so the substrate-RPC
+// path and the legacy relay path decode identically.
+func parseClientToolContentJSON(jsonStr string) []*memqlv1.ToolResultContent {
+	jsonStr = strings.TrimSpace(jsonStr)
+	if jsonStr == "" || jsonStr == "null" {
+		return nil
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(jsonStr), &items); err != nil {
+		return nil
+	}
+	out := make([]*memqlv1.ToolResultContent, 0, len(items))
+	for _, item := range items {
+		typeStr, _ := item["type"].(string)
+		text, _ := item["text"].(string)
+		mimeType, _ := item["mimeType"].(string)
+		data, _ := item["data"].(string)
+		uri, _ := item["uri"].(string)
+		out = append(out, &memqlv1.ToolResultContent{
+			Type:     typeStr,
+			Text:     text,
+			MimeType: mimeType,
+			Data:     data,
+			Uri:      uri,
+		})
+	}
+	return out
 }
 
 // executeClientTool emits a ClientToolCall envelope on the stream and

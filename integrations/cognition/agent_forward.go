@@ -50,6 +50,19 @@ func (c *CognitionIntegration) SetAgentForwarder(fwd AgentForwarder) {
 	c.agentForwarder = fwd
 }
 
+// SetClientToolResultClient installs the substrate-RPC client that delivers a
+// ClientToolResult back to the agent turn over the durable delivery substrate,
+// addressed by the turn's logical key (memql#1265). When set it replaces the
+// legacy agentForwarder.ForwardContinuation return leg in
+// handleClientToolResponse. Wired by app bootstrap on cognition binaries once
+// the substrate is constructed.
+func (c *CognitionIntegration) SetClientToolResultClient(client *node.ClientToolResultClient) {
+	if c == nil {
+		return
+	}
+	c.clientToolResultClient = client
+}
+
 // forwardTurnToAgent builds an AgentGenerateTurnMsg from the current
 // turn state and ships it to an agent peer via the forwarder. Streams
 // AgentGenerateTurnDelta replies back, emitting each text chunk through

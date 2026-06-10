@@ -17,6 +17,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
@@ -230,6 +231,16 @@ type (
 		// on cognition binaries; nil otherwise (cognition is the only
 		// node type that originates agent-turn forwards today).
 		agentForwarder AgentForwarder
+
+		// clientToolResultClient delivers a ClientToolResult back to the agent
+		// turn over the durable delivery substrate, addressed by the turn's
+		// LOGICAL key (memql#1265). Injected by app bootstrap on cognition
+		// binaries when the substrate is wired. When non-nil it REPLACES the
+		// legacy agentForwarder.ForwardContinuation return leg, which re-used the
+		// churn-fragile cached peer connection and dropped the result (and lost
+		// the agent turn) on agent-replica churn -- the #1245 0-turns symptom.
+		// Nil => the legacy ForwardContinuation path stays in effect.
+		clientToolResultClient *node.ClientToolResultClient
 
 		// pendingClientToolCalls tracks in-flight client-tool calls
 		// relayed across cluster nodes. When the agent node emits a
