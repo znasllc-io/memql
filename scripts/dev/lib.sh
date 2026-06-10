@@ -598,7 +598,13 @@ function lib_ngrok_install_hint() {
 # (which holds the authtoken), parsed from `ngrok config check`, or
 # empty when not found.
 function lib_ngrok_global_config() {
-    ngrok config check 2>&1 | grep -oE '/[^ ]*ngrok\.yml' | head -1
+    # Allow spaces in the path: macOS' default is
+    # "/Users/<u>/Library/Application Support/ngrok/ngrok.yml" -- a
+    # `[^ ]*` class stops at the space and yields the bogus tail
+    # "/ngrok/ngrok.yml", so ngrok then fails to load its config and the
+    # tunnel never registers (memql#1257). `.*` is greedy to the final
+    # ngrok.yml; the path is the only "/...ngrok.yml" token on the line.
+    ngrok config check 2>&1 | grep -oE '/.*ngrok\.yml' | head -1
 }
 
 # lib_write_ngrok_tunnels_config generates the v3 endpoints file
