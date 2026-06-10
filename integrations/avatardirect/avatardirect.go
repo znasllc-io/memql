@@ -309,6 +309,18 @@ func (i *Integration) handleEngageVendor(ctx context.Context, args map[string]an
 		LiveKitToken: avatarToken,
 	}, i.newClient)
 	if err != nil {
+		// On the local dev path the engine URL is an ngrok tunnel and the only
+		// way bring-up fails after signaling works is the WebRTC MEDIA leg never
+		// connecting: the cloud engine joins LiveKit signaling but the dockerized
+		// LiveKit advertises only its docker host ICE candidate and the cloud
+		// engine forms no relay candidate, so ICE has no reachable pair and the
+		// vendor's join-and-publish POST never returns before our deadline
+		// (memql#1277). That is an intrinsic dev-tunnel limitation, NOT a bug to
+		// retry -- surface it as a definitive, documented error instead of the
+		// vendor's cryptic "context deadline exceeded".
+		if isDevTunnelURL(engineURL) && isMediaTimeoutErr(err) {
+			return nil, fmt.Errorf("avatardirect.engageVendor: %s cloud avatar joined LiveKit signaling but could not establish WebRTC media to the local dev LiveKit over the ngrok TURN relay -- local cloud-avatar VIDEO is not supported on the dev cluster (the cloud engine and the dockerized LiveKit only exchange unreachable host ICE candidates; the cloud engine forms no relay candidate from the advertised TURN server). Run the direct avatar audio-only locally; cloud-avatar video is validated on staging (memql#784), where LiveKit is directly reachable. See docs/internal/design/voice-turn-relay.md. (underlying: %w)", vendor, err)
+		}
 		return nil, fmt.Errorf("avatardirect.engageVendor: bring up %s avatar: %w", vendor, err)
 	}
 	if !started {
@@ -487,6 +499,31 @@ func (i *Integration) vendorAPIKey(ctx context.Context, secretName string) (stri
 // -----------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------
+
+// isDevTunnelURL reports whether engineURL points at a dev ngrok tunnel (the
+// local cloud-avatar relay path), as opposed to a directly-reachable
+// staging/prod LiveKit. Cloud-avatar VIDEO media cannot complete over the dev
+// tunnel (memql#1277), so a media-establishment timeout there is an expected,
+// documented limitation -- "ngrok" in the host cleanly separates dev from a
+// real staging domain with no false positives.
+func isDevTunnelURL(engineURL string) bool {
+	return strings.Contains(engineURL, "ngrok")
+}
+
+// isMediaTimeoutErr reports whether err is the vendor-join timeout shape a
+// failed local WebRTC media leg produces (the cloud engine joins signaling,
+// retries ICE, and the vendor REST POST never returns before our deadline). It
+// deliberately does NOT match a fast 4xx/5xx (bad key, bad face id) so those
+// still surface as themselves rather than the dev-tunnel media hint.
+func isMediaTimeoutErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "deadline") ||
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "awaiting headers")
+}
 
 func systemActorContext(ctx context.Context) context.Context {
 	return coreauth.ContextWithToken(ctx, &coreauth.TokenInfo{
