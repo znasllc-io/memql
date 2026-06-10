@@ -40,9 +40,15 @@ images:
   # Carrier-built; 0.9.33 — adds the #1217 dispatch gate.
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:2179d543eb8a660c46e069de7ef7f28b01830a3e2c741a4f1aac6c843fc477e8
-  # Carrier-built (engine + CoPresent DSL #1053); 0.9.33 — #1217 exactly-once cognition dispatch.
+  # TEMPORARY ROLLBACK to the 0.9.32 (pre-#1217) cognition build. The #1217
+  # exactly-once dispatch gate is CORRECT but exposed #1232 (cross-node
+  # graph-event delivery silently drops to churning peers -> intermittent
+  # missing replies); the prior double-dispatch was masking it. Reverting just
+  # cognition restores the redundancy (reliable replies; the dup returns) until
+  # #1232 lands, at which point #1217 is re-enabled on top. All other nodes stay
+  # 0.9.33. Wire-compatible (no memql.proto change between the builds).
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:6336261b61e1421c24329d7968adf5389093f4532d83b1dacfa34be00af94ca3
+    digest: sha256:ca99343d416d2ed2d74c018bdce2eb41217ac1a8db18f3d6caa649953ea7b1e3
   - name: acrmemql.azurecr.io/memql-voice
     digest: sha256:c133d4b2181d979b7b923bf985bb8f528bd65d6b7e45fccd9becb93757172f27
   # Carrier-built (engine + CoPresent DSL) -- #1053.
