@@ -98,7 +98,7 @@ the canonical row:
 
 ```bash
 # Single-binary compose:
-docker compose -f docker/docker-compose.full.yml restart
+docker compose -f docker/docker-compose.cluster.yml restart
 
 # Cluster compose:
 docker compose -f docker/docker-compose.cluster.yml restart \

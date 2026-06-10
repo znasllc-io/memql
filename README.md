@@ -62,7 +62,7 @@ A concept (schema) and an LLM-callable tool in the same file, same language. Add
 
 ```bash
 # Start development environment (Docker)
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up
 
 # Run tests
 go test ./...
@@ -106,7 +106,7 @@ make deploy VERSION=X
 - **Database:** Local PostgreSQL + TimescaleDB container
 - **Service:** Local memQL container
 - **Access:** All developers
-- **Command:** `docker compose -f docker/docker-compose.full.yml up --build`
+- **Command:** `make dev-cluster-up`
 
 ### Staging (Cloud)
 - **Database:** TimescaleDB Cloud (Tiger Cloud)
@@ -149,7 +149,7 @@ make deploy VERSION=X
 
 2. **Start development environment**
    ```bash
-   docker compose -f docker/docker-compose.full.yml up --build
+   make dev-cluster-up
    ```
 
 3. **Make changes and test**
@@ -161,7 +161,7 @@ make deploy VERSION=X
    go test ./...
 
    # View logs
-   docker compose -f docker/docker-compose.full.yml logs -f
+   make dev-cluster-logs
    ```
 
 4. **Deploy to staging for integration testing**
@@ -221,11 +221,11 @@ memQL/
 
 | Task | Command |
 |------|---------|
-| **Start Docker stack** | `docker compose -f docker/docker-compose.full.yml up --build` |
-| **Stop Docker services** | `docker compose -f docker/docker-compose.full.yml down` |
+| **Start Docker stack** | `make dev-cluster-up` |
+| **Stop Docker services** | `make dev-cluster-down` |
 | **Run Go test suite** | `go test ./...` |
 | **Deploy to staging** | `make deploy VERSION=X` |
-| **View container logs** | `docker compose -f docker/docker-compose.full.yml logs -f` |
+| **View container logs** | `make dev-cluster-logs` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
 
 ---
@@ -270,16 +270,16 @@ Full stack with PostgreSQL + TimescaleDB + memQL service:
 
 ```bash
 # Start everything
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up
 
 # View logs
-docker compose -f docker/docker-compose.full.yml logs -f
+make dev-cluster-logs
 
 # Access database
 psql postgres://memql:memql_dev@localhost:5432/memql
 
 # Stop (preserves data)
-docker compose -f docker/docker-compose.full.yml down
+make dev-cluster-down
 ```
 
 **Documentation:** [docker/README.md](docker/README.md)

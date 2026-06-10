@@ -13,8 +13,9 @@
 #   MEMQL_E2E_TOKEN=mql_pat_... bash scripts/test/cluster-e2e.sh --no-build
 #
 # Co-tenant safe: the CI override (docker-compose.cluster.ci.yml) drops the
-# host port publishes that would collide with a running full.yml stack, so
-# this can run next to single-node dev. Front door stays on :8085 / :50050.
+# colliding host port publishes AND swaps the dev TLS subdomain front door
+# for a plain-HTTP single-origin one (CI has no mkcert root CA), so the
+# synthetic gate drives the cluster over plaintext on :8085 / :50050.
 set -uo pipefail
 
 #=============================================================================

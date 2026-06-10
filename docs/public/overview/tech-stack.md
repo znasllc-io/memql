@@ -71,13 +71,13 @@ This document establishes the **opinionated technologies and practices** for mem
 **Commands:**
 ```bash
 # Start development environment
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up
 
 # Stop (preserves data)
-docker compose -f docker/docker-compose.full.yml down
+make dev-cluster-down
 
 # View logs
-docker compose -f docker/docker-compose.full.yml logs -f
+make dev-cluster-logs
 
 # Access database
 psql postgres://memql:memql_dev@localhost:5432/memql
@@ -173,10 +173,10 @@ for the operator-side narrative.
 
 **Workflow:**
 1. Pull latest from `main`
-2. Start development Docker environment: `docker compose -f docker/docker-compose.full.yml up --build`
+2. Start development Docker environment: `make dev-cluster-up`
 3. Make code changes
 4. Test locally: `go test ./...`
-5. View logs: `docker compose -f docker/docker-compose.full.yml logs -f`
+5. View logs: `make dev-cluster-logs`
 6. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
 
 **Best Practices:**
@@ -301,9 +301,9 @@ memQL/
 
 ```bash
 # Development Environment
-docker compose -f docker/docker-compose.full.yml up --build    # Start Docker stack
-docker compose -f docker/docker-compose.full.yml down           # Stop containers
-docker compose -f docker/docker-compose.full.yml logs -f        # View logs
+make dev-cluster-up    # Start Docker stack
+make dev-cluster-down           # Stop containers
+make dev-cluster-logs        # View logs
 psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell
 
 # Testing
@@ -395,7 +395,7 @@ for the full design.
 1. **Migrations:** Automatic on startup (use carefully in production)
 2. **Seeding:** Use concept seeding for test data
 3. **Backups:** Managed by Tiger Cloud (production and staging)
-4. **Reset:** `docker compose -f docker/docker-compose.full.yml down -v` then restart for fresh development database
+4. **Reset:** `make dev-cluster-restart-purge` for a fresh development database (drops volumes + rebuilds)
 5. **Schema changes:** Coordinate with team
 
 ---

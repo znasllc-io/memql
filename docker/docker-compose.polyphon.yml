@@ -1,13 +1,17 @@
 # Polyphon Development Stack
 #
-# Adds LiveKit, Redis, and the Go voice-agent to the standard memQL
-# development stack. The voice-agent joins LiveKit rooms as the General
-# Assistant's media participant and runs the STT -> cognition -> TTS
-# cascade (or the gpt-realtime speech-to-speech executor) over Deepgram
-# Nova-3 + Aura-2.
+# Adds LiveKit, Redis, and the Go voice-agent. The voice-agent joins
+# LiveKit rooms as the General Assistant's media participant and runs the
+# STT -> cognition -> TTS cascade (or the gpt-realtime speech-to-speech
+# executor) over Deepgram Nova-3 + Aura-2.
 #
-# Usage:
-#   docker-compose -f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml up -d
+# RE-HOME PENDING (memql#1310): this overlay rode the retired single-node
+# stack (memql#1311) -- it overlays the `memql` network + services that no
+# longer exist as a base, and the cluster uses the `memql-cluster` network
+# with its own `livekit` service. Until #1310 re-homes the voice-agent +
+# avatar TURN-relay path onto docker-compose.cluster.yml, this file is NOT
+# directly runnable as an overlay. Kept as the source-of-truth for the
+# voice-agent service definition the re-home will port.
 #
 # Architecture:
 #   LOCAL (Docker):  PostgreSQL, memQL, LiveKit, Redis, Go voice-agent
@@ -96,8 +100,8 @@ services:
   # transcription work; the cognition node forwards agent responses
   # to the voice-agent for TTS publication. The legacy `memql:`
   # override block targeted a single-binary service that no longer
-  # exists in docker-compose.full.yml -- the cluster split moved
-  # the voice surface to bff + voice + cognition.
+  # exists -- the cluster split moved the voice surface to
+  # bff + voice + cognition.
   bff:
     environment:
       # Internal URL the BFF uses for any backend chatter (none today).
@@ -253,8 +257,7 @@ services:
 volumes:
   redis_data:
 
-# The `memql` network is created by docker-compose.full.yml (the
-# overlay we sit on top of). Don't redeclare it as external -- when
-# dev-refresh wipes volumes the docker_memql network is gone, and
-# the external lookup fails. Compose merges the network reference
-# from full.yml when no declaration is present here.
+# The `memql` network was created by the retired single-node base this
+# overlay sat on top of. That base is gone (memql#1311); the re-home onto
+# the parity cluster (memql#1310) will repoint these services at the
+# cluster's `memql-cluster` network. Left as-is pending that work.

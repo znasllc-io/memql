@@ -197,13 +197,13 @@ sees these — it gets the URL and a per-session token from
 If a developer wants to run the stack:
 
 ```bash
-docker-compose -f memQL/docker/docker-compose.full.yml \
-               -f memQL/docker/docker-compose.polyphon.yml up -d
+make dev-cluster-up
 ```
 
-This brings up Postgres, memQL, LiveKit, Redis, and the Bridge
-Agent. CoPresent runs separately via `make dev` and connects to
-memQL on port 50051.
+This brings up the 2-replica parity cluster (Postgres, the memQL mesh
+nodes, identity, the copresent SPA, and LiveKit) behind the nginx TLS
+front door. The voice/avatar overlay (`docker-compose.polyphon.yml`) is
+pending re-home onto the cluster (memql#1310).
 
 ## Open coordination points
 

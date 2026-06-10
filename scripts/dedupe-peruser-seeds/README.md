@@ -71,9 +71,7 @@ script prints a `NEXT STEP` message. **Restart the memql cluster** so
 the seed materializer's startup sweep re-writes the canonical row:
 
 ```bash
-docker compose -f docker/docker-compose.full.yml restart
-# or, for the cluster compose:
-docker compose -f docker/docker-compose.cluster.yml restart memql-bff memql-cognition memql-agent memql-planner memql-voice
+docker compose -f docker/docker-compose.cluster.yml restart bff cognition agent planner voice
 ```
 
 Each restarted node's `SeedMaterializer.Start()` will re-iterate

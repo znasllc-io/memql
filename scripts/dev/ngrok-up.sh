@@ -32,13 +32,26 @@ source "${SCRIPT_DIR}/lib.sh"
 # FUNCTIONS
 #=============================================================================
 
+function warn_overlay_pending() {
+    # The voice/avatar overlay (docker-compose.polyphon.yml, the
+    # polyphon-livekit container + voice-agent) rode the retired single-node
+    # stack (memql#1311) and is pending re-home onto the parity cluster
+    # (memql#1310). The cluster ships its own `livekit` service, but the
+    # avatar TURN-relay path this ngrok tunnel feeds is not wired to it yet.
+    echo "NOTE: voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
+    echo "      This ngrok/TURN path targeted the retired single-node stack; it may"
+    echo "      not connect to the cluster's livekit service until #1310 lands."
+    echo ""
+}
+
 function require_livekit() {
-    if ! docker ps --format '{{.Names}}' | grep -q '^polyphon-livekit$'; then
-        echo "ERROR: polyphon-livekit container is not running."
-        echo "       Start the stack first:"
-        echo "         docker compose -f docker/docker-compose.full.yml \\"
-        echo "                        -f docker/docker-compose.polyphon.yml up -d"
-        echo "       Or run a full refresh: make dev-refresh"
+    # The cluster's LiveKit container is `memql-livekit`; the retired
+    # overlay used `polyphon-livekit`. Accept either so this keeps working
+    # once the overlay is re-homed (memql#1310).
+    if ! docker ps --format '{{.Names}}' | grep -qE '^(memql|polyphon)-livekit$'; then
+        echo "ERROR: no LiveKit container is running."
+        echo "       Start the parity cluster first: make dev-cluster-up"
+        echo "       Or run a full refresh: make dev-cluster-refresh"
         exit 1
     fi
 }
@@ -58,8 +71,10 @@ function refresh_tunnel() {
 
 function restart_dependent_services() {
     echo ""
-    echo "Restarting bff + voice-agent + livekit so they pick up the new URL..."
-    $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON restart bff voice-agent livekit >/dev/null
+    echo "Restarting bff + livekit so they pick up the new URL..."
+    # The voice-agent service rode the retired overlay (memql#1310, see the
+    # note above); restart only the cluster services that exist today.
+    $LIB_COMPOSE $LIB_COMPOSE_FILE_CLUSTER restart bff livekit >/dev/null
 }
 
 function print_summary() {
@@ -86,6 +101,7 @@ EOF
 
 function main() {
     check_docker
+    warn_overlay_pending
     require_livekit
     refresh_tunnel
     restart_dependent_services

@@ -1,15 +1,16 @@
 # Locally-trusted TLS certs (mkcert)
 
 This directory holds the per-machine TLS material used by nginx in
-the dev `docker-compose.full.yml` stack. The actual `dev.crt` /
-`dev.key` files are gitignored -- generate them once on each
-developer's machine by running:
+the dev parity cluster (`docker-compose.cluster.yml`). The actual
+`dev.crt` / `dev.key` files are gitignored -- generate them once on
+each developer's machine by running:
 
 ```bash
 make setup-tls
 ```
 
-(or directly: `bash scripts/dev/setup-tls.sh`).
+(or directly: `bash scripts/dev/setup-tls.sh`). `make dev-cluster-refresh`
+runs this step for you before the cluster comes up.
 
 The script wraps [mkcert](https://github.com/FiloSottile/mkcert),
 which:
@@ -26,7 +27,7 @@ which:
      `IDENTITY_BOOTSTRAP_DOMAIN` from the env or `.env.local`;
      export it to issue the cert for a different parent domain.
 
-After generation, `docker compose -f docker/docker-compose.full.yml
+After generation, `docker compose -f docker/docker-compose.cluster.yml
 restart nginx` for nginx to pick up the new files.
 
 ## Prerequisites

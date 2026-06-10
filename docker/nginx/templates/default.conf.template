@@ -8,8 +8,7 @@
 # Hostnames (resolved via the developer's wildcard DNS record
 # `*.${DOMAIN}` -> 127.0.0.1):
 #
-#   app.${DOMAIN}        -> CoPresent SPA (Vite dev server on the
-#                            developer's host machine)
+#   app.${DOMAIN}        -> CoPresent SPA (the `copresent` container)
 #   identity.${DOMAIN}   -> identity service HTTP surface
 #   bff.${DOMAIN}        -> BFF gRPC + HTTP (/memql/ws bridge,
 #                            attachments, polyphon, healthz);
@@ -62,18 +61,17 @@ resolver 127.0.0.11 valid=10s ipv6=off;
 upstream bff_grpc       { server bff:50051; }
 upstream bff_http       { server bff:8088; }
 upstream agent_grpc     { server agent:50051; }
-upstream agent_http     { server agent:8089; }
+upstream agent_http     { server agent:8085; }
 upstream identity_http  { server identity:8081; }
 
-# The CoPresent SPA runs as a Vite dev server in the `app` container
-# (see docker-compose.full.yml). It is gated behind a compose profile
-# (#461) and is NOT present in cluster-only runs -- so do NOT declare a
-# static `upstream app_vite { server app:8080; }` here: nginx resolves a
-# static upstream at config-load and aborts with "host not found in
-# upstream app:8080" when `app` is absent, taking the whole LB (and thus
-# the cluster) down. The `app` location below uses the runtime-resolver
-# variable form (`set $app_target app:8080`) instead, so nginx starts
-# whether or not `app` exists yet and picks it up once the frontend joins.
+# The CoPresent SPA runs in the `copresent` container
+# (docker-compose.cluster.yml, memql#1313) -- so do NOT declare a static
+# `upstream { server copresent:8080; }` here: nginx resolves a static
+# upstream at config-load and aborts with "host not found in upstream"
+# if the SPA isn't up yet, taking the whole LB (and thus the cluster)
+# down. The `app.${DOMAIN}` location below uses the runtime-resolver
+# variable form (`set $app_target copresent:8080`) instead, so nginx
+# starts whether or not the SPA exists yet and picks it up once it joins.
 
 # -----------------------------------------------------------------
 # Plaintext :80 -> 301 to TLS :443
@@ -92,10 +90,10 @@ server {
 }
 
 # -----------------------------------------------------------------
-# CoPresent SPA -- proxies to Vite dev server on the host.
-# Vite handles HMR over WebSocket; nginx upgrades the connection
-# through. Vite also proxies /memql/*, /spaces/..., /polyphon/*
-# internally (per copresent/vite.config.ts).
+# CoPresent SPA -- proxies to the `copresent` container's server.
+# WebSocket upgrade is passed through (same-origin WS rides here);
+# the browser reaches the backend directly via the absolute VITE_*
+# URLs (bff./identity.${DOMAIN}), so this block only serves the bundle.
 #
 # Identity-service XHR paths (/auth/*, /oauth/*, /.well-known/*) are
 # proxied here too -- same-origin from the SPA's perspective. Why:
@@ -186,9 +184,11 @@ server {
     location / {
         # Variable-based upstream so the resolver picks fresh DNS each
         # request (see the resolver block at the top) -- lets nginx
-        # start before the `app` container is up and survive its
-        # recreation. Mirrors the bff/agent/identity locations.
-        set $app_target app:8080;
+        # start before the SPA container is up and survive its
+        # recreation. Mirrors the bff/agent/identity locations. The
+        # cluster compose names the SPA service `copresent` (memql#1313);
+        # the app.${DOMAIN} server_name still fronts it.
+        set $app_target copresent:8080;
         proxy_pass http://$app_target;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
@@ -337,7 +337,9 @@ server {
     }
 
     location / {
-        set $agent_http_target agent:8089;
+        # The cluster agent's HTTP server listens on :8085
+        # (SERVER_ADDRESS in docker-compose.cluster.yml), not :8089.
+        set $agent_http_target agent:8085;
         proxy_pass http://$agent_http_target;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;

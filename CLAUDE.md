@@ -169,7 +169,9 @@ make dev-cluster-status
 ```
 
 The cluster uses `docker/docker-compose.cluster.yml`; the front door
-is http://localhost:8085. See
+is the TLS `*.local.znas.io` subdomains (https://app.local.znas.io,
+https://identity.local.znas.io, https://bff.local.znas.io, ...) --
+memql#1313. See
 [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
 for the full runbook + the documented divergences.
 
@@ -362,8 +364,8 @@ carrier Dockerfile. The pure-engine `memql-<type>` images are only for a
 memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
-**Local cluster (staging parity -- THE blessed local topology, memql#1260):** `make dev-cluster-up` (background) / `make dev-cluster-down`, or `make dev-cluster` (foreground); `make dev-cluster-restart[-purge]` force a fresh `--no-cache` rebuild after Go/MemQL source edits. Uses `docker-compose.cluster.yml`. The cluster mirrors staging along the **mesh-delivery path** (memql#1212): 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind a single-origin nginx front door (http://localhost:8085). `make dev-cluster-status` prints the per-replica node ids (parity litmus). A few nodes off that path diverge for concrete local-host reasons (identity at 1 replica, voice-agent opt-in via the polyphon overlay, lifecycle probes deferred to Phase 3) -- each is enumerated + justified in the divergence audit in the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle.
-**Local single-node (raw compose, NOT parity):** the `make dev*` single-node run/refresh targets were removed (memql#1304) because a single-node `full.yml` stack masquerading as the app structurally cannot reproduce the resilient-mesh class of bugs. If you genuinely need the single-binary stack for narrow engine/DSL work, drive `docker/docker-compose.full.yml` directly (`docker compose -f docker/docker-compose.full.yml up --build`) -- but reach for `make dev-cluster-refresh` / `make dev-cluster-up` for anything mesh-shaped, which is the supported path.
+**Local cluster (staging parity -- THE blessed local topology, memql#1260):** `make dev-cluster-up` (background) / `make dev-cluster-down`, or `make dev-cluster` (foreground); `make dev-cluster-restart[-purge]` force a fresh `--no-cache` rebuild after Go/MemQL source edits. Uses `docker-compose.cluster.yml`. The cluster mirrors staging along the **mesh-delivery path** (memql#1212): 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind the nginx TLS subdomain front door (`*.local.znas.io` -- app./identity./bff./agent./livekit., memql#1313). `make dev-cluster-status` prints the per-replica node ids (parity litmus). A few nodes off that path diverge for concrete local-host reasons (voice-agent opt-in pending re-home onto the cluster via memql#1310, lifecycle probes deferred to Phase 3) -- each is enumerated + justified in the divergence audit in the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle.
+**Single-node stack -- RETIRED (memql#1311):** the single-node `full.yml` + `nemoclaw` compose files were deleted; the 2-replica parity cluster (`make dev-cluster-refresh` / `make dev-cluster-up`) is the only supported local run path (memql#1304), since a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
 
@@ -704,7 +706,7 @@ the agent used no trained sources, citations is an empty array.
   - Per-agent workspaces at `/workspaces/{agentId}/`
   - SI calls routed through memQL's centralized provider system
 - **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
-- **Development:** Docker Compose overlay (`docker-compose.nemoclaw.yml`, port 18789)
+- **Development:** the standalone `docker-compose.nemoclaw.yml` overlay was retired (memql#1311); a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
 - **Cloud:** runs as a sidecar container alongside the agent node on AKS
 - **Agent capability:** `claw` flag on agent concept enables coding tools
 - **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
@@ -1985,7 +1987,7 @@ the analyzeFile case end-to-end.
 
 1. **Documentation:** Check [GLOSSARY.md](GLOSSARY.md)
 2. **Quick start:** See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
-3. **Logs:** `docker compose -f docker/docker-compose.full.yml logs -f`
+3. **Logs:** `make dev-cluster-logs`
 
 ---
 
