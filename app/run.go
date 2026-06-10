@@ -26,8 +26,32 @@ const DefaultRunShutdownTimeout = 30 * time.Second
 // Service endpoints, so NEW traffic stops arriving while in-flight requests
 // finish -- instead of new connections racing onto a pod that's tearing
 // down. terminationGracePeriodSeconds in the manifests must exceed this plus
-// the Stop budget. Override via the carrier binary (MEMQL_SHUTDOWN_DRAIN_DELAY).
+// the grace period plus the Stop budget. Override via the carrier binary
+// (MEMQL_SHUTDOWN_DRAIN_DELAY).
 const DefaultShutdownDrainDelay = 5 * time.Second
+
+// DefaultShutdownGracePeriod bounds how long Run waits, AFTER the drain delay
+// (endpoint-removal window) has elapsed, for in-flight work to finish before
+// it transitions the node Draining -> Stopped and runs the dependency Stop
+// sweep (memql#1269, the graceful-drain BEHAVIOUR on top of the #1268
+// lifecycle seams). The node is already de-routed (readiness 503, gossip
+// DRAINING) so no NEW work arrives; this grace lets the in-flight user streams
+// (server.ActiveStreams via RunConfig.ActiveWork) drain to zero so a rolling
+// deploy doesn't drop a turn mid-flight. In-flight that outlives the grace is
+// cut off at the deadline (the bounded #1119 GracefulStop in the Stop sweep
+// then forces remaining streams closed). Override via the carrier binary
+// (MEMQL_SHUTDOWN_GRACE_PERIOD). A zero value falls back to this default; a
+// negative value skips the in-flight wait entirely.
+const DefaultShutdownGracePeriod = 25 * time.Second
+
+// DefaultStartupReadyTimeout bounds how long Run waits for every dependency's
+// Ready() to fire before it flips the node lifecycle to Ready (memql#1269
+// clean startup: readiness != liveness, so a node only advertises Ready once
+// its dependencies -- DB, engine, mesh registration -- are actually up, not
+// merely once Start was invoked). On timeout Run logs and proceeds (the
+// per-component /healthz + /readyz invariants remain the runtime gate), so a
+// single slow dependency can't wedge boot forever.
+const DefaultStartupReadyTimeout = 30 * time.Second
 
 // RunConfig configures Run. Every field has a sensible default the
 // app package supplies when omitted -- the only required fields in
@@ -67,10 +91,35 @@ type RunConfig struct {
 	BeginDrain func()
 
 	// DrainDelay is how long to keep serving after the signal before
-	// the Stop sweep, giving endpoint removal time to propagate. Zero
-	// falls back to DefaultShutdownDrainDelay; negative disables the
-	// delay (tests pass a negative or tiny value).
+	// the in-flight wait + Stop sweep, giving endpoint removal time to
+	// propagate. Zero falls back to DefaultShutdownDrainDelay; negative
+	// disables the delay (tests pass a negative or tiny value).
 	DrainDelay time.Duration
+
+	// GracePeriod bounds the in-flight drain (memql#1269): after the
+	// DrainDelay window, Run waits up to this long for ActiveWork to
+	// report zero before transitioning Draining -> Stopped and running
+	// the Stop sweep. Zero falls back to DefaultShutdownGracePeriod;
+	// negative skips the in-flight wait (tests pass a tiny/negative
+	// value). The carrier binary wires it from MEMQL_SHUTDOWN_GRACE_PERIOD.
+	GracePeriod time.Duration
+
+	// ActiveWork reports the count of currently in-flight units of work
+	// (the carrier wires it to component/server.ActiveStreams -- open
+	// user-facing MemqlService.Stream sessions). Run polls it during the
+	// grace window and proceeds to teardown the instant it hits zero.
+	// Zero (nil) means "no in-flight accounting" -- Run waits the full
+	// grace period unless GracePeriod is negative. Kept as a hook so the
+	// app package doesn't import component/server. (memql#1269)
+	ActiveWork func() int64
+
+	// WaitForReady blocks until every dependency reports Ready (or a
+	// bounded timeout fires), so the node flips lifecycle Ready only once
+	// its deps are actually up -- clean startup, readiness != liveness
+	// (memql#1269). Zero falls back to the package default (waits on each
+	// dep's Ready() channel up to DefaultStartupReadyTimeout). Tests
+	// override to assert ordering or inject a never-ready dependency.
+	WaitForReady func(deps []common.Dependency)
 
 	// Start is the per-dependency start hook. Zero falls back to
 	// the package default, which calls dep.Start(context.Background())
@@ -141,6 +190,10 @@ func Run(cfg RunConfig) {
 	if wait == nil {
 		wait = DefaultWaitForShutdownSignal
 	}
+	waitForReady := cfg.WaitForReady
+	if waitForReady == nil {
+		waitForReady = DefaultWaitForDependenciesReady
+	}
 
 	application := Build(cfg.Logger, cfg.Version, cfg.Overrides)
 
@@ -150,10 +203,17 @@ func Run(cfg RunConfig) {
 
 	start(application.Dependencies...)
 
-	// The node is now actually serving (every dependency started): flip its
-	// lifecycle Starting -> Ready (memql#1268) so the next gossip heartbeat
-	// advertises Ready and the readiness probe reports ready. No-op on
-	// non-mesh binaries.
+	// Clean startup (memql#1269, readiness != liveness): block until every
+	// dependency has actually signalled Ready (DB, engine, mesh registration
+	// up) -- not merely until Start was INVOKED -- before flipping the node to
+	// Ready. Otherwise the node would advertise Ready (and readiness 200) the
+	// instant Start returned, while deps were still wiring up, and route
+	// traffic onto a not-yet-serving pod.
+	waitForReady(application.Dependencies)
+
+	// The node's dependencies are now actually serving: flip its lifecycle
+	// Starting -> Ready (memql#1268) so the next gossip heartbeat advertises
+	// Ready and the readiness probe reports ready. No-op on non-mesh binaries.
 	application.MarkNodeReady()
 
 	// Emit system.startup AFTER every dependency has started so the
@@ -174,13 +234,28 @@ func Run(cfg RunConfig) {
 	// Graceful drain (#552): flip readiness to 503 + keep serving for
 	// DrainDelay so k8s removes this pod from the Service endpoints
 	// before we tear down -- new traffic stops arriving while in-flight
-	// requests finish. Runs BEFORE EmitSystemShutdown/Stop.
+	// requests finish. Runs BEFORE the in-flight wait + Stop sweep.
 	applyShutdownDrain(cfg.Logger, cfg.BeginDrain, cfg.DrainDelay, time.Sleep)
+
+	// Finish in-flight work (memql#1269): the node is now de-routed
+	// (readiness 503, gossip DRAINING) so no NEW work arrives. Wait -- bounded
+	// by GracePeriod -- for the in-flight user streams to drain to zero before
+	// tearing the transport down, so a rolling deploy doesn't drop a turn
+	// mid-flight. Work that outlives the grace is cut off at the deadline (the
+	// bounded #1119 GracefulStop in the Stop sweep below then forces what
+	// remains closed).
+	waitForInflightDrain(cfg.Logger, cfg.ActiveWork, cfg.GracePeriod, time.Sleep)
 
 	// Emit system.shutdown BEFORE the dependency Stop sweep so the
 	// node-deregistration automation has a chance to run while the
 	// engine is still up.
 	application.EmitSystemShutdown()
+
+	// In-flight work is done (or the grace deadline fired): flip the node
+	// lifecycle Draining -> Stopped (memql#1268/#1269) so it leaves the mesh
+	// as cleanly Stopped rather than vanishing mid-Draining, immediately
+	// before the Stop sweep closes the transport. No-op on non-mesh binaries.
+	application.MarkNodeStopped()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -209,6 +284,92 @@ func applyShutdownDrain(logger *slog.Logger, beginDrain func(), delay time.Durat
 		logger.Info("draining before shutdown", "delay", delay.String())
 	}
 	sleep(delay)
+}
+
+// inflightPollInterval is how often waitForInflightDrain re-checks the
+// in-flight count while waiting for it to reach zero. Small enough that a drain
+// that finishes early proceeds promptly; large enough not to busy-spin.
+const inflightPollInterval = 250 * time.Millisecond
+
+// waitForInflightDrain implements the memql#1269 in-flight finish: after the
+// node is de-routed (readiness 503, gossip DRAINING), wait -- bounded by
+// `grace` -- for `activeWork` to report zero before returning so the caller can
+// transition Stopped + run the Stop sweep. Polls on a fixed interval and
+// returns the instant the count hits zero. A zero `grace` falls back to
+// DefaultShutdownGracePeriod; a negative `grace` skips the wait entirely
+// (work is cut off immediately, relying on the bounded GracefulStop). A nil
+// `activeWork` means there is no in-flight accounting, so there is nothing to
+// wait ON -- return immediately rather than blocking the full grace for no
+// reason. `sleep` is injected so tests don't park on the wall clock.
+func waitForInflightDrain(logger *slog.Logger, activeWork func() int64, grace time.Duration, sleep func(time.Duration)) {
+	if grace == 0 {
+		grace = DefaultShutdownGracePeriod
+	}
+	if grace < 0 || activeWork == nil {
+		return
+	}
+
+	if n := activeWork(); n <= 0 {
+		return
+	}
+
+	if logger != nil {
+		logger.Info("waiting for in-flight work to drain",
+			"grace", grace.String(), "active", activeWork())
+	}
+
+	deadline := grace
+	for deadline > 0 {
+		step := inflightPollInterval
+		if step > deadline {
+			step = deadline
+		}
+		sleep(step)
+		deadline -= step
+
+		if n := activeWork(); n <= 0 {
+			if logger != nil {
+				logger.Info("in-flight work drained; proceeding to shutdown")
+			}
+			return
+		}
+	}
+
+	if logger != nil {
+		logger.Warn("in-flight grace period elapsed; proceeding to shutdown with work still active",
+			"grace", grace.String(), "active", activeWork())
+	}
+}
+
+// DefaultWaitForDependenciesReady is the package default for
+// RunConfig.WaitForReady. It blocks until every dependency's Ready() channel
+// closes (the parallel-startup signal every component exposes) or a bounded
+// DefaultStartupReadyTimeout fires, whichever comes first -- the clean-startup
+// half of memql#1269 (the node flips lifecycle Ready only once its deps are
+// actually up). On timeout it logs which dependency was still not ready and
+// returns so a single slow/stuck dependency can't wedge boot forever; the
+// per-component /healthz + /readyz invariants remain the runtime gate.
+func DefaultWaitForDependenciesReady(deps []common.Dependency) {
+	if len(deps) == 0 {
+		return
+	}
+
+	deadline := time.NewTimer(DefaultStartupReadyTimeout)
+	defer deadline.Stop()
+
+	for _, dep := range deps {
+		if dep == nil {
+			continue
+		}
+		select {
+		case <-dep.Ready():
+			// This dependency is up; move on.
+		case <-deadline.C:
+			// Bounded budget exhausted: stop waiting on the remaining deps so
+			// boot proceeds. The runtime readiness probes still gate traffic.
+			return
+		}
+	}
 }
 
 // DefaultStartDependencies is the package default for RunConfig.Start.

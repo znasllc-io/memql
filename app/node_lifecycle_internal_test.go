@@ -83,5 +83,46 @@ func TestNodeLifecycle_NoMeshIsNoop(t *testing.T) {
 	a := &App{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	a.MarkNodeReady()   // must not panic
 	a.BeginNodeDrain()  // must not panic
+	a.MarkNodeStopped() // must not panic
 	assert.False(t, server.IsDraining(), "no-mesh drain must not flip readiness")
+}
+
+// TestNodeLifecycle_FullDrainSequence is the memql#1269 end-to-end lifecycle
+// acceptance: Starting -> Ready -> Draining -> Stopped. Readiness flips to
+// not-ready at Draining and STAYS not-ready through Stopped (a stopping node is
+// never ready); the terminal Stopped state is reached cleanly.
+func TestNodeLifecycle_FullDrainSequence(t *testing.T) {
+	server.SetDraining(false)
+	t.Cleanup(func() { server.SetDraining(false) })
+
+	a := newLifecycleTestApp(t)
+
+	a.MarkNodeReady()
+	require.True(t, a.nodeLifecycle.IsReady())
+	assert.False(t, server.IsDraining())
+
+	a.BeginNodeDrain()
+	require.Equal(t, node.LifecycleDraining, a.nodeLifecycle.State())
+	assert.True(t, server.IsDraining(), "Draining must report not-ready")
+
+	a.MarkNodeStopped()
+	assert.Equal(t, node.LifecycleStopped, a.nodeLifecycle.State(),
+		"drain must reach the terminal Stopped state")
+	assert.True(t, server.IsDraining(),
+		"a Stopped node must remain not-ready (never un-drains)")
+}
+
+// TestNodeLifecycle_MarkStoppedIsIdempotent asserts calling MarkNodeStopped
+// when already Stopped (or driving straight to Stopped) is a safe no-op -- Run
+// may reach it via either path without erroring.
+func TestNodeLifecycle_MarkStoppedIsIdempotent(t *testing.T) {
+	server.SetDraining(false)
+	t.Cleanup(func() { server.SetDraining(false) })
+
+	a := newLifecycleTestApp(t)
+	a.MarkNodeReady()
+	a.BeginNodeDrain()
+	a.MarkNodeStopped()
+	a.MarkNodeStopped() // second call must not panic or regress
+	assert.Equal(t, node.LifecycleStopped, a.nodeLifecycle.State())
 }

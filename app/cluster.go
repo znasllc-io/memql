@@ -359,16 +359,35 @@ func (a *App) MarkNodeReady() {
 
 // BeginNodeDrain flips this node's lifecycle to Draining (memql#1268) -- the
 // mechanism a graceful SIGTERM drain (memql#1269) and the operator trigger
-// (memql#1270) drive. This issue only wires it to the existing shutdown
-// signal so a rolling deploy advertises Draining in gossip and flips readiness
-// to not-ready immediately; the in-flight-finish / flush / ordered-rollout
-// BEHAVIOUR is left to those downstream issues. No-op on non-mesh binaries.
+// (memql#1270) drive. The graceful-drain BEHAVIOUR (finish in-flight work
+// bounded by a grace period, then MarkNodeStopped + the dependency Stop sweep)
+// is orchestrated by app.Run (memql#1269); the operator-triggered drain is
+// memql#1270. Flipping to Draining advertises DRAINING in gossip (peers route
+// around at once) and flips readiness to 503 (LB/k8s de-route) via the #1268
+// observer, while /livez stays 200. No-op on non-mesh binaries.
 func (a *App) BeginNodeDrain() {
 	if a.nodeLifecycle == nil {
 		return
 	}
 	if err := a.nodeLifecycle.MarkDraining(); err != nil {
 		a.Logger.Warn("node lifecycle: could not mark draining", "error", err)
+	}
+}
+
+// MarkNodeStopped flips this node's lifecycle to the terminal Stopped state
+// (memql#1268), advertised as STOPPED in gossip. Called by app.Run at the END
+// of the graceful SIGTERM drain (memql#1269) -- after in-flight work has
+// finished (or the grace deadline fired) and immediately before the dependency
+// Stop sweep tears the transport down -- so the node leaves the mesh as cleanly
+// Stopped rather than vanishing mid-Draining. Stopped is terminal and a no-op
+// if already there; readiness already reports 503 from the Draining transition,
+// so this does not change the readiness surface. No-op on non-mesh binaries.
+func (a *App) MarkNodeStopped() {
+	if a.nodeLifecycle == nil {
+		return
+	}
+	if err := a.nodeLifecycle.MarkStopped(); err != nil {
+		a.Logger.Warn("node lifecycle: could not mark stopped", "error", err)
 	}
 }
 

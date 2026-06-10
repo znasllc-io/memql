@@ -101,13 +101,23 @@ observer on every actual change.
 How it is wired (in `app/cluster.go` + `app/run.go`):
 
 - **Boot:** the PeerManager constructs the lifecycle in `Starting`.
-- **Ready:** `app.MarkNodeReady()` flips it to `Ready` once every dependency
-  has started (`Run` -> after `start(deps...)`), i.e. the node can actually
-  serve.
-- **Draining:** `app.BeginNodeDrain()` flips it to `Draining` on the shutdown
-  signal (the existing SIGTERM path). This is only the MECHANISM; the
-  in-flight-finish / flush / ordered-rollout BEHAVIOUR is memql#1269, and the
-  operator-triggered drain is memql#1270.
+- **Ready (clean startup, memql#1269):** `app.MarkNodeReady()` flips it to
+  `Ready` only AFTER every dependency has signalled `Ready()` (DB, engine, mesh
+  registration actually up) -- `Run` waits on each dep's `Ready()` channel
+  (bounded by `DefaultStartupReadyTimeout`) before flipping, so the node never
+  advertises Ready / readiness-200 while deps are still wiring up.
+- **Draining (graceful SIGTERM drain, memql#1269):** `app.BeginNodeDrain()`
+  flips it to `Draining` on the shutdown signal. `Run` then keeps serving for
+  the endpoint-removal window (`MEMQL_SHUTDOWN_DRAIN_DELAY`) and waits, bounded
+  by `MEMQL_SHUTDOWN_GRACE_PERIOD`, for in-flight user streams
+  (`server.ActiveStreams`) to finish before tearing down -- in-flight that
+  outlives the grace is cut off at the deadline by the bounded #1119
+  `GracefulStop`. The operator-triggered drain (CLI/API + ordered rollout) is
+  memql#1270.
+- **Stopped (memql#1269):** `app.MarkNodeStopped()` flips it to the terminal
+  `Stopped` at the END of the drain -- after in-flight finishes -- immediately
+  before the dependency Stop sweep, so the node leaves the mesh as cleanly
+  Stopped rather than vanishing mid-Draining.
 - **Gossip advertisement:** `LifecycleState.Health()` maps the state onto the
   existing `NodeHealthStatus` wire enum (`Starting`->CONNECTING,
   `Ready`->HEALTHY, `Draining`->DRAINING, `Stopped`->STOPPED). The outbound
@@ -145,6 +155,15 @@ Installed only when `MEMQL_PARENT_ADDRESS` is set. Dials the configured parent
 peer and keeps a single outbound NodeService stream open. Complementary to
 WorkerDialer: WorkerDialer runs on the BFF for outbound fan-out to workers,
 ParentConnector runs on any node with a configured upstream.
+
+The `run` hook is a **supervising reconnect loop** (memql#1246): a lost parent
+stream -- even a clean/transient one while the parent (e.g. identity) is itself
+rolling -- does NOT terminate the hook. If it did, the component framework would
+flip `IsRunning()` false permanently (ParentConnector is a `/healthz`
+dependency), wedging the pod at readiness 503 / `0-1` until a manual delete (the
+exact #1246 outage). Instead it re-dials with backoff until the context is
+cancelled (Stop), so readiness reflects serving-capability (the node reconnects
+on its own) rather than "every mesh dependency is currently connected".
 
 ### EventBridge (`eventbridge.go`, `eventbridge_bus.go`)
 Subscribes to local `events.Bus` with `#` pattern. Forwards matching events to connected
