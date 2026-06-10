@@ -1,324 +1,111 @@
-# Docker Full Stack Setup
+# Docker dev stack (parity cluster)
 
-Complete memQL environment in Docker (database + service).
+The 2-replica staging-parity cluster (`docker-compose.cluster.yml`) is
+the ONLY supported local run path (memql#1304). The single-node
+`docker-compose.full.yml` + `docker-compose.nemoclaw.yml` stacks were
+retired in memql#1311; the cluster reproduces the cross-node /
+replica-fan-out class of bugs a single-node stack structurally cannot.
 
----
-
-## START Quick Start
-
-### Start Everything
-```bash
-# From project root
-docker-compose -f docker/docker-compose.full.yml up -d
-```
-
-### Stop Everything
-```bash
-docker-compose -f docker/docker-compose.full.yml down
-```
-
-### Reset (Delete All Data)
-```bash
-docker-compose -f docker/docker-compose.full.yml down -v
-```
+Front door (memql#1313): the cluster serves at the TLS `*.local.znas.io`
+subdomains via nginx (parity with staging's per-subdomain ingress).
+`*.local.znas.io` resolves to 127.0.0.1 via real DNS (no `/etc/hosts`).
 
 ---
 
-## What's Included
+## Quick start
 
-| Service | Container | Port | Purpose |
-|---------|-----------|------|---------|
-| **PostgreSQL + TimescaleDB** | `memql-db` | 5432 | Database |
-| **Nginx load balancer** | `memql-lb` | 8085, 50050 | Single entry point for clients |
-| **BFF node** | `memql-bff` | 8088 | Backend-for-frontend / API surface |
-| **Cognition node** | `memql-cognition` | 8086 | Conversation intelligence |
-| **Voice node** | `memql-voice` | 8085 (in-cluster) | ASR/TTS pipeline |
-| **Agent node** | `memql-agent` | 8089 | Task execution / SI work |
-| **Planner node** | `memql-planner` | 8087 | Task planning + orchestration |
-| **Identity node** | `memql-identity` | 8081 | Magic-link auth, JWKS, admin UI |
-| **pgAdmin** | `memql-dbadmin` | 5050 | DB Management (optional, `--profile tools`) |
+```bash
+# Generate the wildcard mkcert dev cert, decrypt genesis, wipe the DB,
+# rebuild, restart, wait healthy, reseed -- one command:
+make dev-cluster-refresh
 
-The compose project is named `memql-cluster` (full topology) or
-`memql-cluster-multinode` (cluster.yml topology) so the stack is
-identifiable at a glance via `docker compose ls`.
+# Or boot the cluster in the background without the genesis wipe/seed:
+make dev-cluster-up
+
+# Foreground (build + up):
+make dev-cluster
+
+# Stop (keeps volumes) / view logs / parity litmus:
+make dev-cluster-down
+make dev-cluster-logs
+make dev-cluster-status
+```
+
+Export `MEMQL_PACKAGES_TOKEN` (read:packages for the @visionarys-io +
+@znasllc-io scopes) before building -- the copresent SPA image needs it.
 
 ---
 
-## CONFIG Configuration
+## What's included
 
-### Environment Variables
+| Service | Replicas | Internal port(s) | Purpose |
+|---------|----------|------------------|---------|
+| **postgres** (`memql-db`) | 1 | 5432 | PostgreSQL + TimescaleDB |
+| **nginx** (`memql-lb`) | 1 | 80, 443 | TLS subdomain front door |
+| **bff** | 2 | 8088 (HTTP), 50051 (gRPC) | Backend-for-frontend / API surface |
+| **cognition** | 2 | 8085 | Conversation intelligence |
+| **voice** | 2 | 8085 | ASR/TTS pipeline (`/memql/audio`) |
+| **agent** | 2 | 8085 (HTTP), 50051 (gRPC) | Task execution / SI work + WorkerService |
+| **planner** | 2 | 8085 | Task planning + orchestration |
+| **workbench** | 2 | 8085 | Per-Plan sandboxed exec environment |
+| **identity** | 2 | 8081 | Magic-link auth, JWKS, admin UI |
+| **copresent** | 2 | 8080 | CoPresent SPA |
+| **livekit** | 1 | 7880-7882 | Self-hosted WebRTC SFU (voice/video) |
+| **azurite** | 1 | 10000 | Azure Blob emulator |
+| **pgadmin** (`memql-dbadmin`) | 1 | 5050 | DB management (optional, `--profile tools`) |
 
-Create `.env.docker` in project root with secrets:
-
-```bash
-# SI
-MEMQL_SI_OPENAI_API_KEY=sk-...
-
-# Identity service (per-node verifier)
-IDENTITY_VERIFIER_BASE_URL=http://identity:8081
-IDENTITY_VERIFIER_EXPECTED_ISSUER=http://localhost:8081
-
-# Optional: Discord, etc.
-```
-
-### Load Environment
-```bash
-# Export all vars
-export $(grep -v '^#' .env.docker | xargs)
-
-# Then start
-docker-compose -f docker/docker-compose.full.yml up -d
-```
+The replicated mesh nodes set no `container_name`/`hostname` so Compose
+assigns each replica a unique `<project>-<service>-N` id (the compose
+equivalent of staging's `fieldRef: metadata.name`). The compose project
+is named `memql-cluster-multinode`.
 
 ---
 
-## CHECK Verification
+## Front-door URLs (TLS, :443)
 
-### Check Services
+| Subdomain | Backend |
+|-----------|---------|
+| `https://app.local.znas.io` | copresent SPA |
+| `https://identity.local.znas.io` | identity (auth, /admin, /setup, JWKS) |
+| `https://bff.local.znas.io` | BFF gRPC + HTTP (`/memql/ws`, attachments, healthz); `/memql/audio` -> voice |
+| `https://agent.local.znas.io` | agent gRPC (WorkerService.Stream) + HTTP |
+| `https://livekit.local.znas.io` | LiveKit signaling |
+
+Routing map: `docker/nginx/templates/default.conf.template`. The wildcard
+mkcert cert lives in `docker/nginx/certs/dev.{crt,key}` (gitignored;
+`make setup-tls` or `make dev-cluster-refresh` generates it).
+
+---
+
+## Verify
+
 ```bash
-docker-compose -f docker/docker-compose.full.yml ps
-```
+# Identity JWKS (TLS via nginx)
+curl -v https://identity.local.znas.io/.well-known/jwks.json
 
-### Check Logs
-```bash
-# All services
-docker-compose -f docker/docker-compose.full.yml logs -f
+# Front-door health
+curl -v https://bff.local.znas.io/healthz
 
-# Just memQL
-docker-compose -f docker/docker-compose.full.yml logs -f memql
-
-# Just database
-docker-compose -f docker/docker-compose.full.yml logs -f postgres
-```
-
-### Test HTTP API
-```bash
-curl http://localhost:8088/healthz
-```
-
-### Test Database
-```bash
+# Database (direct, not via nginx)
 psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
+
+# Per-replica node ids (parity litmus)
+make dev-cluster-status
 ```
 
 ---
 
-## TOOLS Development Workflow
+## Files in this directory
 
-### Make Code Changes
-
-1. **Edit code** in your IDE
-2. **Rebuild service:**
-   ```bash
-   docker-compose -f docker/docker-compose.full.yml up -d --build memql
-   ```
-3. **Watch logs:**
-   ```bash
-   docker-compose -f docker/docker-compose.full.yml logs -f memql
-   ```
-
-### Hot Reload (Alternative)
-
-Mount source code as volume (for development):
-```yaml
-# Add to docker-compose.full.yml memql service:
-volumes:
-  - ..:/app:ro  # Mount entire project (read-only)
-```
-
-Then use `air` or `CompileDaemon` for hot reload.
-
----
-
-## INFO Database Management
-
-### Connect with psql
-```bash
-docker-compose -f docker/docker-compose.full.yml exec postgres psql -U memql -d memql
-```
-
-### Use pgAdmin
-```bash
-# Start pgAdmin
-docker-compose -f docker/docker-compose.full.yml --profile tools up -d pgadmin
-
-# Open: http://localhost:5050
-# Email: admin@memql.local
-# Password: admin
-```
-
-**Add Server in pgAdmin:**
-- Host: `postgres` (Docker network name)
-- Port: `5432`
-- Database: `memql`
-- Username: `memql`
-- Password: `memql_dev`
-
----
-
-## Troubleshooting
-
-### Containers Won't Start
-
-```bash
-# Check Docker is running
-docker ps
-
-# View detailed logs
-docker-compose -f docker/docker-compose.full.yml logs
-```
-
-### Port Conflicts
-
-```bash
-# Check what's using ports
-lsof -i :8088  # memQL HTTP
-lsof -i :5432  # PostgreSQL
-lsof -i :50051 # memQL gRPC
-
-# Stop conflicting services or change ports in docker-compose.full.yml
-```
-
-### Database Connection Errors
-
-```bash
-# Check database health
-docker-compose -f docker/docker-compose.full.yml exec postgres pg_isready -U memql
-
-# Check memQL can reach database
-docker-compose -f docker/docker-compose.full.yml exec memql sh -c 'nc -zv postgres 5432'
-```
-
-### Migrations Failing
-
-```bash
-# Check migration logs
-docker-compose -f docker/docker-compose.full.yml logs memql | grep migration
-
-# Reset database
-docker-compose -f docker/docker-compose.full.yml down -v
-docker-compose -f docker/docker-compose.full.yml up -d
-```
-
-### Build Failures
-
-```bash
-# Clean build
-docker-compose -f docker/docker-compose.full.yml build --no-cache memql
-
-# Check Go modules
-docker-compose -f docker/docker-compose.full.yml run --rm memql go mod download
-```
-
----
-
-## Security Notes
-
-### Production Use
-
-**DO NOT use this setup for production!** This is for local development only.
-
-For production:
-1. Use secrets management (not environment variables)
-2. Enable SSL/TLS for database
-3. Use strong passwords
-4. Restrict network access
-5. Run as non-root user (already configured)
-6. Use read-only volumes where possible
-
----
-
-## Performance
-
-### Resource Limits
-
-Add to `docker-compose.full.yml`:
-
-```yaml
-services:
-  memql:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-```
-
-### Build Cache
-
-Speed up builds:
-```bash
-# Use BuildKit
-DOCKER_BUILDKIT=1 docker-compose -f docker/docker-compose.full.yml build
-```
-
----
-
-## Cleanup
-
-### Remove Everything
-```bash
-# Stop and remove containers, networks
-docker-compose -f docker/docker-compose.full.yml down
-
-# Also remove volumes (deletes data!)
-docker-compose -f docker/docker-compose.full.yml down -v
-
-# Also remove images
-docker-compose -f docker/docker-compose.full.yml down --rmi all -v
-```
-
-### Clean Docker System
-```bash
-# Remove unused containers, networks, images
-docker system prune -a
-
-# Remove unused volumes
-docker volume prune
-```
-
----
-
-## Compose File Variants
-
-| File | Purpose | Usage |
-|------|---------|-------|
-| `docker-compose.full.yml` | Standard single-node development | `docker-compose -f docker/docker-compose.full.yml up -d` |
-| `docker-compose.polyphon.yml` | Overlay: adds LiveKit, Redis, Bridge Agent | `docker-compose -f full.yml -f polyphon.yml up -d` |
-| `docker-compose.nemoclaw.yml` | Overlay: adds NemoClaw coding agent | `docker-compose -f full.yml -f nemoclaw.yml up -d` |
-| `docker-compose.cluster.yml` | Multi-node cluster (bff, cognition, agent) | `docker-compose -f docker/docker-compose.cluster.yml up -d` |
-
-Overlays are combined with the full stack: `docker-compose -f full.yml -f polyphon.yml up -d`
-
-The cluster variant runs separate containers for each node type, all sharing one PostgreSQL database.
-See [component/node/CLAUDE.md](../component/node/CLAUDE.md) for distributed architecture details.
-
----
-
-## DOCS See Also
-
-- [docs/public/overview/quickstart.md](../docs/public/overview/quickstart.md) - Quick start guide
-- [Local Development](../docs/guides/local-development.md) - Development guide
-- [CLAUDE.md](../CLAUDE.md) - Project overview
-
----
-
-## TASKS Commands Reference
-
-| Task | Command |
+| File | Purpose |
 |------|---------|
-| **Start** | `docker-compose -f docker/docker-compose.full.yml up -d` |
-| **Stop** | `docker-compose -f docker/docker-compose.full.yml down` |
-| **Logs** | `docker-compose -f docker/docker-compose.full.yml logs -f` |
-| **Rebuild** | `docker-compose -f docker/docker-compose.full.yml up -d --build` |
-| **Reset** | `docker-compose -f docker/docker-compose.full.yml down -v && up -d` |
-| **psql** | `docker-compose -f docker/docker-compose.full.yml exec postgres psql -U memql` |
-| **Status** | `docker-compose -f docker/docker-compose.full.yml ps` |
-| **Exec Shell** | `docker-compose -f docker/docker-compose.full.yml exec memql sh` |
+| `docker-compose.cluster.yml` | The 2-replica staging-parity cluster (the supported dev stack) |
+| `docker-compose.cluster.ci.yml` | CI / co-tenant override: drops colliding host publishes + swaps the TLS front door for a plain-HTTP single-origin one (`nginx.ci.conf`) so the unattended cross-replica delivery gate runs without mkcert |
+| `docker-compose.polyphon.yml` | Voice/avatar overlay (LiveKit + voice-agent) -- pending re-home onto the cluster (memql#1310) |
+| `nginx/templates/default.conf.template` | The TLS subdomain front-door config (envsubst on `${DOMAIN}`) |
+| `nginx/nginx.ci.conf` | Plain-HTTP single-origin front door used ONLY by the CI override |
+| `nginx/certs/` | mkcert dev cert (`dev.{crt,key}`, gitignored) |
+| `memql.Dockerfile` | The engine image (voice + identity nodes) |
 
----
-
-**Ready to develop!**
+See the full runbook + divergence audit:
+[docs/public/operate/reproduce-staging-locally.md](../docs/public/operate/reproduce-staging-locally.md).

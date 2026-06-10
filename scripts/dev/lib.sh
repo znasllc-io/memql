@@ -14,10 +14,11 @@
 # -----------------------------------------------------------------
 
 readonly LIB_COMPOSE="docker compose"
-readonly LIB_COMPOSE_FILE_FULL="-f docker/docker-compose.full.yml"
 readonly LIB_COMPOSE_FILE_CLUSTER="-f docker/docker-compose.cluster.yml"
-readonly LIB_COMPOSE_FILE_POLYPHON="-f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml"
-readonly LIB_COMPOSE_FILE_NEMOCLAW="-f docker/docker-compose.full.yml -f docker/docker-compose.nemoclaw.yml"
+# Compose PROJECT name of the retired single-node stack (memql#1311). It
+# used `name: memql-cluster`; we tear it down by name (its compose file is
+# gone) so any leftover container releases the host ports the cluster binds.
+readonly LIB_LEGACY_SINGLE_NODE_PROJECT="memql-cluster"
 
 # Domain anchor for dev URLs. Lets `lib_grpc_url` and the printed
 # status block stay in sync with whatever IDENTITY_BOOTSTRAP_DOMAIN
@@ -163,24 +164,17 @@ EOF
     export GENESIS_ENV_FILE="$tmp"
 }
 
-# cleanup_sibling_compose_modes runs `docker compose down
-# --remove-orphans` against the cluster / nemoclaw / base-full compose
-# configs. dev-refresh now targets docker-compose.full.yml +
-# docker-compose.polyphon.yml together (the LIB_COMPOSE_FILE_POLYPHON
-# combo) so voice testing works out of the box; we don't list polyphon
-# as a sibling because that's the active mode. The base-full file is
-# listed so a dev who previously ran the basic stack (no overlay) gets
-# its container set torn down before the polyphon stack starts.
-# No-ops if a given mode has nothing running.
+# cleanup_sibling_compose_modes tears down any leftover containers from a
+# previous run so they release the host ports the cluster binds. It runs
+# `docker compose down --remove-orphans` against:
+#   - the cluster compose file (the active topology), and
+#   - the retired single-node project BY NAME (its compose files were
+#     deleted in memql#1311, so we can't reference them by `-f`;
+#     `-p <project>` tears the project down regardless).
+# No-ops if nothing is running.
 function cleanup_sibling_compose_modes() {
-    local sibling
-    for sibling in \
-        "$LIB_COMPOSE_FILE_CLUSTER" \
-        "$LIB_COMPOSE_FILE_FULL" \
-        "$LIB_COMPOSE_FILE_NEMOCLAW" \
-    ; do
-        $LIB_COMPOSE $sibling down --remove-orphans 2>/dev/null || true
-    done
+    $LIB_COMPOSE $LIB_COMPOSE_FILE_CLUSTER down --remove-orphans 2>/dev/null || true
+    $LIB_COMPOSE -p "$LIB_LEGACY_SINGLE_NODE_PROJECT" down --remove-orphans 2>/dev/null || true
 }
 
 # nuke_stray_memql_containers is the belt-and-suspenders cleanup for
@@ -352,8 +346,8 @@ function section_grpc() {
 
 # section_containers prints the docker-compose ps output.
 function section_containers() {
-    print_section "Compose containers (full + polyphon stack):"
-    if ! $LIB_COMPOSE $LIB_COMPOSE_FILE_POLYPHON ps 2>/dev/null; then
+    print_section "Compose containers (parity cluster):"
+    if ! $LIB_COMPOSE $LIB_COMPOSE_FILE_CLUSTER ps 2>/dev/null; then
         echo "  (compose not reachable)"
     fi
     echo ""

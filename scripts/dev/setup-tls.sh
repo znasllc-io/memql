@@ -91,7 +91,7 @@ function summarize() {
     ls -lh "$CERT_DIR"/dev.crt "$CERT_DIR"/dev.key
     echo ""
     echo "Restart nginx for the new certs to take effect:"
-    echo "  docker compose -f docker/docker-compose.full.yml restart nginx"
+    echo "  docker compose -f docker/docker-compose.cluster.yml restart nginx"
     echo ""
     echo "Verify (after DNS records propagate):"
     echo "  curl -v https://app.${DOMAIN}"

@@ -19,7 +19,7 @@
 # step4b. Operators can also call it directly:
 #
 #   bash scripts/dev/mint-node-tokens.sh
-#   docker compose -f docker/docker-compose.full.yml \
+#   docker compose -f docker/docker-compose.cluster.yml \
 #     up -d --force-recreate bff voice cognition agent planner
 #
 # Per repo convention (CLAUDE.md): function-based structure. main()
@@ -44,7 +44,7 @@ readonly NODE_TARGETS=(
 function check_identity_container() {
     if ! docker ps --filter "name=^memql-identity$" --filter "status=running" --format '{{.Names}}' | grep -q "memql-identity"; then
         echo "ERROR: memql-identity container is not running."
-        echo "Start the stack first: docker compose -f docker/docker-compose.full.yml up -d"
+        echo "Start the stack first: make dev-cluster-up"
         exit 1
     fi
 }
@@ -97,7 +97,7 @@ function main() {
 
   Next: recreate the cluster nodes so they pick up the new tokens:
 
-      docker compose -f docker/docker-compose.full.yml \\
+      docker compose -f docker/docker-compose.cluster.yml \\
           up -d --force-recreate bff voice cognition agent planner
 
   (scripts/dev/refresh.sh does this automatically as step 4b.)

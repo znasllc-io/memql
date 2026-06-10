@@ -125,7 +125,7 @@ goal text indicates they're needed -- see the
 ## 6. Testing the MVP locally
 
 ```bash
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up
 ```
 
 Then:

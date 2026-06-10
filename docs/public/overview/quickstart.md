@@ -79,23 +79,18 @@ domain>`. You also need the matching DNS record for that domain.
 ### 2. Start the stack
 
 ```bash
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up       # 2 replicas/mesh node; front door https://app.local.znas.io
+make dev-cluster-status   # parity litmus: distinct per-replica node ids
 ```
 
-This brings up Postgres + TimescaleDB, the BFF binary (default), and the
-Voice node (so transcription works end-to-end on the basic dev path).
-It is the **single-node fast path** -- quickest to boot for engine / DSL
-work.
+This brings up the **2-replica staging-parity cluster** -- the blessed
+and only supported local topology (memql#1304): Postgres + TimescaleDB,
+the bff/cognition/agent/planner/voice/workbench mesh nodes (2 replicas
+each), identity, the copresent SPA, and LiveKit, all behind the nginx
+TLS front door on the `*.local.znas.io` subdomains. It is the only local
+topology that reproduces cluster-only bugs (cross-node delivery, replica
+fan-out, node lifecycle).
 
-> **Working on anything mesh-shaped** (cross-node delivery, replica
-> fan-out, node lifecycle)? Use the **2-replica staging-parity cluster**
-> instead -- it is the blessed local topology and the only one that can
-> reproduce cluster-only bugs locally:
-> ```bash
-> make dev-cluster-up       # 2 replicas/mesh node; front door http://localhost:8085
-> make dev-cluster-status   # parity litmus: distinct per-replica node ids
-> make dev-cluster-down     # stop
-> ```
 > Runbook + divergence audit:
 > [docs/public/operate/reproduce-staging-locally.md](../operate/reproduce-staging-locally.md).
 
@@ -114,7 +109,7 @@ bootstrap-envelope-vs-concept-storage breakdown.
 ### 4. Watch logs
 
 ```bash
-docker compose -f docker/docker-compose.full.yml logs -f
+make dev-cluster-logs
 ```
 
 ---
@@ -135,7 +130,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
 
 | Service | Public URL | Notes |
 |---------|------------|-------|
-| **App SPA** | https://app.local.znas.io | Proxied by nginx to the `app` container's Vite dev server (in-container; needs `MEMQL_PACKAGES_TOKEN`) |
+| **App SPA** | https://app.local.znas.io | Proxied by nginx to the `copresent` container (built bundle; needs `MEMQL_PACKAGES_TOKEN`) |
 | **Identity service** | https://identity.local.znas.io | Magic-link auth, OAuth, JWKS, /admin, /pair/* |
 | **BFF (gRPC + WS)** | https://bff.local.znas.io | gRPC for cockpit / SDKs; HTTP/WS for browser bridge |
 | **Agent (gRPC)** | https://agent.local.znas.io | WorkerService.Stream lives here; cockpit-workers attach |
@@ -160,10 +155,10 @@ go test ./...
 
 ```bash
 # Stop (preserves data)
-docker compose -f docker/docker-compose.full.yml down
+make dev-cluster-down
 
-# Full reset (drops Postgres volume)
-docker compose -f docker/docker-compose.full.yml down -v
+# Full reset (drops volumes) + fresh rebuild
+make dev-cluster-restart-purge
 ```
 
 The repo includes a one-shot `make dev-cluster-refresh` that exports
@@ -208,7 +203,7 @@ export IDENTITY_BOOTSTRAP_REGISTRATION_MODE=waitlist
 # optional: phone, primary_role, gender, birthdate, org_name,
 # registration_domains, internal_domains, internal_default_role,
 # notify_emails -- all envs at IDENTITY_BOOTSTRAP_<NAME>
-docker compose -f docker/docker-compose.full.yml up --build
+make dev-cluster-up
 ```
 
 Operators who set SOME but not all of the required envs go
@@ -274,14 +269,14 @@ lsof -i :5432   # PostgreSQL
 ### Docker not starting
 
 ```bash
-docker ps                                                          # is docker up?
-docker compose -f docker/docker-compose.full.yml logs              # check container logs
+docker ps                                                             # is docker up?
+make dev-cluster-logs                                                 # check container logs
 ```
 
 ### Database connection errors
 
 ```bash
-docker compose -f docker/docker-compose.full.yml exec postgres pg_isready -U memql
+docker compose -f docker/docker-compose.cluster.yml exec postgres pg_isready -U memql
 psql postgres://memql:memql_dev@localhost:5432/memql
 ```
 
@@ -296,6 +291,7 @@ schema-validation errors: a concept declaring a reserved payload field
 
 ## Tips
 
-- Use `docker compose -f docker/docker-compose.full.yml -f docker/docker-compose.nemoclaw.yml up --build` to include the NemoClaw coding agent.
-- Use `docker compose -f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml up --build` to include the Polyphon voice pipeline (LiveKit + Bridge Agent).
+- The voice/avatar overlay (`docker-compose.polyphon.yml`) is pending
+  re-home onto the parity cluster (memql#1310); the cluster already ships
+  a `livekit` service for the in-app voice path.
 - pgAdmin is available at http://localhost:5050 with `--profile tools`.

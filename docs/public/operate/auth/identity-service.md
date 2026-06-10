@@ -198,8 +198,7 @@ secret.
 
 ## Dev quick-start
 
-The full local stack runs via `docker compose -f
-docker/docker-compose.full.yml up --build` -- see
+The local stack runs via `make dev-cluster-up` -- see
 [docs/public/overview/quickstart.md](../../overview/quickstart.md) for the prerequisite wildcard
 DNS record (`*.${IDENTITY_BOOTSTRAP_DOMAIN}` -> `127.0.0.1`,
 default `*.local.znas.io`) and the mkcert TLS setup

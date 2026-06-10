@@ -22,9 +22,9 @@ memQL splits configuration into two tiers:
 1. **Bootstrap envelope** -- a small set of OS environment variables the
    process must see *before* it can read anything else. Things like
    "where is Postgres", "what node am I", "what's the master encryption
-   key". These are set in `docker-compose.full.yml` /
-   `docker-compose.cluster.yml` (dev) or in the Cloud Run service
-   manifest (prod). There is no encrypted-at-rest path for these --
+   key". These are set in `docker-compose.cluster.yml` (dev) or in the
+   AKS deploy manifests (prod). There is no encrypted-at-rest path for
+   these --
    they live in plain env.
 2. **Concept storage** -- everything else. API keys, OAuth client
    secrets, model defaults, feature flags, mail-sender addresses, and
@@ -559,9 +559,9 @@ each worker:
 Both are bootstrap envelope vars -- they have to be in the env
 before the gRPC server starts.
 
-`docker-compose.full.yml` and `docker-compose.cluster.yml` have full
-worked examples. The full compose is the BFF + cognition + agent +
-planner shape; the cluster compose adds voice.
+`docker-compose.cluster.yml` has full worked examples -- the 2-replica
+staging-parity mesh (bff + cognition + agent + planner + voice +
+workbench), identity, the copresent SPA, and LiveKit.
 
 ---
 
@@ -629,8 +629,7 @@ automatically.
 | `component/identity/verifier/config.go`                                       | Per-node verifier env reads (bff/voice/cognition/agent/planner).               |
 | `component/node/identity.go`                                                  | Node-identity env reads.                                                       |
 | `component/server/memqlws/env.go`                                             | WebSocket tuning env reads.                                                    |
-| `docker/docker-compose.full.yml`                                              | Worked example of every required bootstrap env var for the dev stack.          |
-| `docker/docker-compose.cluster.yml`                                           | Same, for full cluster mode (adds voice).                                      |
+| `docker/docker-compose.cluster.yml`                                           | Worked example of every required bootstrap env var for the dev cluster.        |
 
 ---
 

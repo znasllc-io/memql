@@ -19,8 +19,6 @@ VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
 
 # Docker
 COMPOSE      := docker compose
-COMPOSE_FULL := -f docker/docker-compose.full.yml
-COMPOSE_POLY := -f docker/docker-compose.polyphon.yml
 COMPOSE_CLST := -f docker/docker-compose.cluster.yml
 
 # ---------------------------------------------------------------------------
@@ -183,7 +181,7 @@ dev-cluster:
 dev-cluster-up:
 	$(COMPOSE) $(COMPOSE_CLST) up --build -d
 	@echo ""
-	@echo "Cluster up (2 replicas/mesh node, staging parity). Front door: http://localhost:8085"
+	@echo "Cluster up (2 replicas/mesh node, staging parity). Front door: https://app.local.znas.io (TLS subdomains)"
 	@echo "Parity litmus (distinct per-replica node ids): make dev-cluster-status"
 
 ## Stop the staging-parity cluster (alias of dev-cluster-stop; keeps volumes).
@@ -194,7 +192,7 @@ dev-cluster-down:
 ## cluster and run test/clustere2e. EXPECTED RED on current main (it reproduces
 ## the memql#1259 delivery drop); green once the Phase-1 backbone lands. Pass a
 ## token via MEMQL_E2E_TOKEN, or MEMQL_PACKAGES_TOKEN to build the SPA. Co-tenant
-## safe: drops the host ports that collide with a running full.yml stack.
+## safe: drops the host ports that could collide with another local stack.
 cluster-e2e:
 	bash scripts/test/cluster-e2e.sh
 
@@ -264,8 +262,8 @@ dev-cluster-status:
 		done; \
 	done
 	@echo ""
-	@echo "[parity] front door: http://localhost:8085  (SPA + /memql/ws + /memql/audio + same-origin auth)"
-	@echo "[parity] gRPC:       localhost:50050         (MemqlService/NodeService -> bff replicas)"
+	@echo "[parity] front door: https://app.local.znas.io   (SPA); https://bff.local.znas.io (BFF gRPC + /memql/ws + /memql/audio)"
+	@echo "[parity] identity:   https://identity.local.znas.io   agent: https://agent.local.znas.io"
 	@echo "[parity] LiveKit:    ws://localhost:7880      (dev key 'devkey' / secret 'secret')"
 
 ## Scale a single mesh node to N replicas on the running parity cluster
@@ -277,30 +275,24 @@ dev-cluster-scale:
 	$(COMPOSE) $(COMPOSE_CLST) up -d --no-recreate --scale $(NODE)=$(N) $(NODE)
 	@echo "[scale] $(NODE) -> $(N) replicas"
 
-## Tail the end-to-end voice latency waterfall.
-##
-## Each voice turn emits structured log lines stamped with
-## "voice trace" + a stable trace id (utterance id on the cognition
-## side, space:agent on the bridge side) at every stage of the
-## pipeline:
-##
-##   bridge.stt.flush          -- silence detected, OGG handed to STT
-##   bridge.stt.complete       -- Whisper returned (sttMs)
-##   bridge.utterance.posted   -- BFF accepted the row (postMs)
-##   cognition.agent.start     -- agent LLM call begins (routeMs)
-##   cognition.agent.complete  -- reply text in hand (agentLlmMs)
-## Tail voice-path log lines emitted by the Go voice-agent + memql
-## cluster. Pre-Initiative-C this targeted bridge-agent containers;
-## the voice-agent process now emits the same `voice trace` markers
-## from its own logs.
+## Tail the end-to-end voice latency waterfall (each voice turn emits
+## "voice trace" log lines at every pipeline stage). The voice/avatar
+## overlay (docker-compose.polyphon.yml + the voice-agent) is pending
+## re-home onto the parity cluster (memql#1310); the single-node stack
+## it rode was retired in memql#1311. Until #1310 lands, tail the
+## cluster's voice nodes directly.
 voice-trace:
-	@$(COMPOSE) $(COMPOSE_FULL) $(COMPOSE_POLY) logs -f voice-agent bff cognition voice 2>&1 | grep --line-buffered "voice trace"
+	@echo "voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
+	@echo "Until then, tail the cluster voice path directly:"
+	@$(COMPOSE) $(COMPOSE_CLST) logs -f bff cognition voice 2>&1 | grep --line-buffered "voice trace"
 
 ## Same as voice-trace but pre-loads the last 5 minutes of history
 ## so you don't have to re-utter to see a waterfall when you're
 ## starting the tail mid-session.
 voice-trace-now:
-	@$(COMPOSE) $(COMPOSE_FULL) $(COMPOSE_POLY) logs -f --since 5m voice-agent bff cognition voice 2>&1 | grep --line-buffered "voice trace"
+	@echo "voice/avatar overlay pending re-home onto the cluster -- see memql#1310."
+	@echo "Until then, tail the cluster voice path directly:"
+	@$(COMPOSE) $(COMPOSE_CLST) logs -f --since 5m bff cognition voice 2>&1 | grep --line-buffered "voice trace"
 
 ## Reload the nginx LB so its DNS cache picks up any cluster nodes
 ## that got recreated since the last reload. Useful after a partial
@@ -545,11 +537,13 @@ genesis-seal:
 install-deps:
 	@bash scripts/dev/install-deps.sh
 
-## Wipe ALL local memQL data (docker compose down -v + up -d). The
-## next dev-cluster-refresh will re-seed from ~/.memql/genesis.znas.
+## Wipe ALL local memQL data (docker compose down -v + up -d) on the
+## parity cluster. The next dev-cluster-refresh re-seeds from
+## ~/.memql/genesis.znas. (Alias-ish of dev-cluster-restart-purge, which
+## also forces a --no-cache rebuild.)
 db-purge:
-	$(COMPOSE) $(COMPOSE_FULL) down -v
-	$(COMPOSE) $(COMPOSE_FULL) up -d --build
+	$(COMPOSE) $(COMPOSE_CLST) down -v
+	$(COMPOSE) $(COMPOSE_CLST) up -d --build
 
 ## Quick status snapshot: docker daemon? memQL gRPC reachable? what
 ## containers are running? Useful when 'dev-cluster-refresh' didn't
@@ -559,18 +553,15 @@ dev-status:
 	@bash scripts/dev/status.sh
 
 ## Single-command "fresh testing stack" on the BLESSED 2-replica parity
-## cluster (memql#1283, epic memql#1259 / follows memql#1260): decrypt
-## genesis (needs MEMQL_MASTER_KEY) -> wipe DB ->
-## rebuild -> restart -> wait healthy -> reseed -- but on
-## docker-compose.cluster.yml (2 replicas/mesh node + copresent SPA +
-## LiveKit) so the owner's muscle memory works on the staging-parity
-## topology that actually reproduces the mesh-delivery bugs. Diverges
-## from full.yml's TLS *.local.znas.io front door by design: the cluster
-## uses the plain-HTTP single-origin front door at http://localhost:8085
-## (HTTP) + localhost:50050 (gRPC) -- the documented memql#1260
-## divergence; the seed + health-wait target it. Tear down any raw
-## full.yml stack (`docker compose -f docker/docker-compose.full.yml
-## down`) first. Implementation lives in scripts/dev/cluster-refresh.sh.
+## cluster (memql#1283, epic memql#1259 / follows memql#1260): generate
+## the wildcard TLS cert (mkcert) -> decrypt genesis (needs
+## MEMQL_MASTER_KEY) -> wipe DB -> rebuild -> restart -> wait healthy ->
+## reseed -- on docker-compose.cluster.yml (2 replicas/mesh node +
+## copresent SPA + LiveKit). The cluster serves at the TLS
+## *.local.znas.io subdomains (memql#1313) -- parity with staging's
+## per-subdomain ingress; the seed + health-wait target
+## https://bff.local.znas.io. Implementation lives in
+## scripts/dev/cluster-refresh.sh.
 dev-cluster-refresh:
 	@bash scripts/dev/cluster-refresh.sh
 
@@ -826,7 +817,7 @@ help:
 	@echo "  the cluster + the decrypted genesis."
 	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, mkcert)"
 	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make dev-cluster-refresh       BLESSED local refresh: verify deps -> decrypt genesis -> wipe -> restart -> seed on the 2-replica parity cluster (front door http://localhost:8085)"
+	@echo "  make dev-cluster-refresh       BLESSED local refresh: verify deps -> TLS cert -> decrypt genesis -> wipe -> restart -> seed on the 2-replica parity cluster (front door https://app.local.znas.io)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
 	@echo ""
 	@echo "AZURE DEPLOY (epic #491)"

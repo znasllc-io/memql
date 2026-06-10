@@ -413,8 +413,8 @@ call `a.engine.RegisterIntegration(yourInstance)` directly.
 
 ### Test It
 ```bash
-docker compose -f docker/docker-compose.full.yml up --build
-docker compose -f docker/docker-compose.full.yml logs -f memql | grep -iE "plug-in|<name>"
+make dev-cluster-up
+make dev-cluster-logs | grep -iE "plug-in|<name>"
 ```
 
 ---

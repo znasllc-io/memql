@@ -43,8 +43,9 @@
 # Each is enumerated + justified in the divergence audit:
 # docs/public/operate/reproduce-staging-locally.md (memql#1260).
 
-# Compose project name -- distinct from full.yml's "memql-cluster" so
-# both topologies can coexist on the same host.
+# Compose project name. The retired single-node full.yml used the
+# "memql-cluster" project name; this multinode topology keeps its own
+# distinct name so any leftover containers don't collide.
 name: memql-cluster-multinode
 
 services:
@@ -95,8 +96,9 @@ services:
       MEMQL_NODE_ADDRESS: bff:50058
       MEMQL_NODE_SERVICE_ADDRESS: ":50058"
       MEMQL_NODE_FLAVOR: ""
-      # Inter-node peer auth (memql#338) -- see the bff service in
-      # docker-compose.full.yml for the full annotation.
+      # Inter-node peer auth (memql#338). MEMQL_BFF_NODE_TOKEN is minted by
+      # scripts/dev/mint-node-tokens.sh; first-boot before that runs leaves
+      # it empty and the node self-mints via MEMQL_NODE_BOOTSTRAP_TOKEN.
       MEMQL_NODE_TOKEN: ${MEMQL_BFF_NODE_TOKEN:-}
       # Static seed addresses for WorkerDialer. DB-based discovery
       # (via v1:cluster:node events) takes over once workers register
@@ -123,7 +125,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
     deploy:
       # Staging parity (#1213): two replicas exercise the cross-replica
       # fan-out path that single-replica local dev structurally cannot.
@@ -146,21 +148,48 @@ services:
     networks:
       - memql-cluster
 
-  # Nginx front door -- single stable entry point. Path-routed, single
-  # origin (mirrors staging's public-entry ingress); load-balances across
-  # the bff replicas via the resolver + variable-upstream trick. See
-  # docker/nginx/nginx.conf.
+  # Nginx front door (memql#1313) -- TLS subdomain entry point matching
+  # staging's per-subdomain ingress AND full.yml's proven dev front door.
+  # Routes by Host header to the right backend:
+  #   app.${DOMAIN}        -> copresent SPA
+  #   identity.${DOMAIN}   -> identity service
+  #   bff.${DOMAIN}        -> BFF gRPC + HTTP (/memql/ws, attachments, healthz)
+  #   agent.${DOMAIN}      -> Agent gRPC (WorkerService.Stream) + HTTP
+  #   voice.${DOMAIN}      -> voice (/memql/audio)
+  #   livekit.${DOMAIN}    -> LiveKit signaling
+  # Load-balances across the 2-replica mesh nodes via the resolver +
+  # variable-upstream trick. See docker/nginx/templates/default.conf.template.
+  #
+  # Hostnames resolve to 127.0.0.1 via a wildcard DNS record
+  # (`*.${IDENTITY_BOOTSTRAP_DOMAIN}` -> 127.0.0.1) on the operator's
+  # owned domain. TLS certs are generated locally with mkcert
+  # (scripts/dev/setup-tls.sh, run by cluster-refresh.sh) for that wildcard.
+  #
+  # nginx:alpine processes /etc/nginx/templates/*.template through envsubst
+  # on container start, expanding ${DOMAIN} only (per NGINX_ENVSUBST_FILTER)
+  # so nginx-internal $host / $scheme / $remote_addr stay literal.
   nginx:
     image: nginx:alpine
     container_name: memql-lb
     hostname: nginx
+    environment:
+      DOMAIN: ${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
+      NGINX_ENVSUBST_FILTER: "DOMAIN"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     ports:
-      - "8085:8080"
-      - "50050:50051"
+      - "80:80"
+      - "443:443"
+    extra_hosts:
+      # Fallback for anyone who reverts the SPA upstream to a host-run
+      # Vite dev server (copresent:8080 -> host.docker.internal:8080);
+      # host-gateway makes it work on Linux.
+      - "host.docker.internal:host-gateway"
     depends_on:
       bff:
+        condition: service_healthy
+      identity:
         condition: service_healthy
     networks:
       - memql-cluster
@@ -169,8 +198,9 @@ services:
   # CoPresent SPA (memql#1214) -- the actual app UI, built from the
   # sibling copresent repo (../copresent) exactly like staging
   # (deploy/k8s/base/copresent.yaml), NOT a Vite dev server. VITE_* args
-  # point the bundle at the LOCAL FRONT DOOR (http://localhost:8085) so
-  # auth + WS are SAME-ORIGIN, mirroring app.staging.copresent.ai.
+  # point the bundle at the TLS subdomain front door (memql#1313) so auth
+  # + WS hit the same per-subdomain origins staging uses
+  # (app./bff./identity.${DOMAIN}), mirroring app.staging.copresent.ai.
   #
   # The private @visionarys-io/@znasllc-io SDKs need a GitHub Packages
   # token at install time -- passed as a BuildKit secret (never baked
@@ -179,19 +209,20 @@ services:
   copresent:
     build:
       # The copresent SPA repo is a workspace SIBLING of memql
-      # (../../copresent from docker/), matching the bind mount the
-      # full.yml `app` service uses. The carrier nodes build from the
+      # (../../copresent from docker/). The carrier nodes build from the
       # workspace parent (../..); the SPA builds from its own repo root.
       context: ../../copresent
       dockerfile: Dockerfile
       args:
-        # Same-origin: the browser hits the nginx front door on :8085;
-        # nginx routes /memql/ws -> bff, /memql/audio -> voice,
-        # /auth + /oauth + /.well-known -> identity.
-        VITE_MEMQL_WS_URL: ${VITE_MEMQL_WS_URL:-ws://localhost:8085/memql/ws}
-        VITE_MEMQL_AUDIO_WS_URL: ${VITE_MEMQL_AUDIO_WS_URL:-ws://localhost:8085/memql/audio}
-        VITE_MEMQL_TOKEN_EXCHANGE_URL: ${VITE_MEMQL_TOKEN_EXCHANGE_URL:-http://localhost:8085/oauth/token}
-        VITE_IDENTITY_BASE_URL: ${VITE_IDENTITY_BASE_URL:-http://localhost:8085}
+        # Browser-facing absolute URLs, TLS-fronted by nginx (memql#1313).
+        # nginx routes bff.${DOMAIN} -> /memql/ws + /memql/audio (audio is
+        # forwarded to voice) + the BFF HTTP/gRPC surface; identity.${DOMAIN}
+        # -> the identity service (/auth, /oauth, /.well-known, ...).
+        VITE_MEMQL_WS_URL: ${VITE_MEMQL_WS_URL:-wss://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}/memql/ws}
+        VITE_MEMQL_AUDIO_WS_URL: ${VITE_MEMQL_AUDIO_WS_URL:-wss://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}/memql/audio}
+        VITE_MEMQL_API_URL: ${VITE_MEMQL_API_URL:-https://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
+        VITE_MEMQL_TOKEN_EXCHANGE_URL: ${VITE_MEMQL_TOKEN_EXCHANGE_URL:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}/oauth/token}
+        VITE_IDENTITY_BASE_URL: ${VITE_IDENTITY_BASE_URL:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
         VITE_IDENTITY_CLIENT_ID: ${VITE_IDENTITY_CLIENT_ID:-copresent}
       secrets:
         - node_auth_token
@@ -200,7 +231,8 @@ services:
       APP_PORT: "8080"
       FRONTEND_PORT: "8080"
       CORS_ALLOWED_ORIGIN: "*"
-      # Server-side memQL URL for the Express /api/* endpoints (internal BFF).
+      # Server-side memQL URL for the Express /api/* endpoints (internal BFF,
+      # in-cluster service name -- not the public subdomain).
       VITE_MEMQL_API_URL: http://bff:8088
     deploy:
       replicas: 2
@@ -255,7 +287,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
     deploy:
       replicas: 2
     depends_on:
@@ -306,7 +338,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
 
       # ---- STT provider selection ----
       # Auto-selected default is "deepgram" when MEMQL_DEEPGRAM_API_KEY
@@ -387,7 +419,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       # Local Azure Blob Storage via Azurite (memql#806).
       # The well-known Azurite dev account + key are public constants
       # (non-secret; https://learn.microsoft.com/azure/storage/common/storage-use-azurite).
@@ -453,7 +485,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       # Local Azure Blob Storage via Azurite (memql#806). Matches the
       # agent node so workbench-initiated uploads go to the same emulator.
       MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
@@ -503,7 +535,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
     deploy:
       replicas: 2
     depends_on:
@@ -521,17 +553,17 @@ services:
   # replicas: 2 with a per-replica fieldRef node id (deploy/k8s/base/identity.yaml);
   # this mirrors that on a single Docker host by:
   #   (a) dropping the host port-map 8081:8081 -- two replicas can't bind one
-  #       host port, so identity is reached ONLY through the nginx front door
-  #       on :8085, which path-routes the full identity surface (/auth/* except
-  #       the SPA-owned /auth/callback + /auth/oauth, /oauth/*, /.well-known/*,
-  #       /setup, /admin, /me, /legal) to identity:8081 via the resolver +
+  #       host port, so identity is reached ONLY through the nginx :443 front
+  #       door on the identity.${DOMAIN} subdomain (memql#1313), which proxies
+  #       the full identity surface to identity:8081 via the resolver +
   #       variable-upstream pattern, so it load-balances across both replicas;
   #   (b) dropping container_name + hostname + the static MEMQL_NODE_ID so each
   #       replica gets a unique container name and a hostname-derived node id
   #       (memql#1213), avoiding the memql#1042 node-id collision; and
-  #   (c) moving IDENTITY_BASE_URL + the issuer claim onto the :8085 front door
-  #       (IDENTITY_VERIFIER_BASE_URL still uses the in-cluster identity:8081
-  #       service name for JWKS fetch, which DNS-round-robins across replicas).
+  #   (c) moving IDENTITY_BASE_URL + the issuer claim onto the TLS
+  #       identity.${DOMAIN} subdomain (IDENTITY_VERIFIER_BASE_URL still uses
+  #       the in-cluster identity:8081 service name for the JWKS fetch, which
+  #       DNS-round-robins across replicas).
   # See docs/public/operate/reproduce-staging-locally.md.
   identity:
     build:
@@ -561,9 +593,14 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
       IDENTITY_ENABLED: "true"
-      IDENTITY_BASE_URL: http://localhost:8085
+      # Public origin browsers + cockpits dial (memql#1313). The wildcard
+      # DNS record (`*.${IDENTITY_BOOTSTRAP_DOMAIN}` -> 127.0.0.1) plus the
+      # nginx :443 server block for identity.${DOMAIN} deliver this URL to
+      # the identity HTTP listener (host-routed config in
+      # docker/nginx/templates/default.conf.template).
+      IDENTITY_BASE_URL: https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
       IDENTITY_KEY_DIR: /var/identity/keys
 
       # Dev escape hatch: admit plaintext HTTP requests to /node/bootstrap.
@@ -578,23 +615,33 @@ services:
       # so the pair-redeem path also works under the in-cluster plain HTTP.
       MEMQL_IDENTITY_ALLOW_INSECURE_PAIR: ${MEMQL_IDENTITY_ALLOW_INSECURE_PAIR:-1}
       IDENTITY_KEY_ENCRYPTION_KEY: ""
-      # Registered OAuth clients. The copresent SPA (#1214) is served
-      # SAME-ORIGIN through the nginx front door on :8085, so its
-      # callback + the cockpit loopback rule both target that origin.
-      # See docker-compose.full.yml for the full annotation on this shape.
-      IDENTITY_REGISTERED_CLIENTS: '[{"clientId":"copresent","redirectURIs":["http://localhost:8085/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
-      IDENTITY_CORS_ALLOWED_ORIGINS: "http://localhost:8085,http://localhost:5173"
-      MEMQL_DISCOVERY_GRPC_ENDPOINT: localhost:50050
+      # Registered OAuth clients (memql#1313). The copresent SPA (#1214) is
+      # served at https://app.${DOMAIN} through the nginx :443 front door, so
+      # its callback targets that subdomain; the cockpit loopback rule keeps
+      # the RFC-8252 portless 127.0.0.1 + localhost forms. clientId stays
+      # `copresent` (the VITE_IDENTITY_CLIENT_ID the SPA bundle is built with).
+      IDENTITY_REGISTERED_CLIENTS: '[{"clientId":"copresent","redirectURIs":["https://app.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]}]'
+      IDENTITY_CORS_ALLOWED_ORIGINS: "https://app.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}"
+      # Discovery overrides for /.well-known/memql-config.json -- tell the
+      # cockpit which gRPC endpoint to dial + which client_id to present.
+      # The `https://` scheme makes the cockpit dial TLS against the system
+      # trust store (mkcert root CA). nginx routes bff.${DOMAIN}:443 -> the
+      # bff gRPC surface; the agent dial endpoint -> agent:50051.
+      MEMQL_DISCOVERY_GRPC_ENDPOINT: https://bff.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
       MEMQL_DISCOVERY_CLIENT_ID: cockpit
       MEMQL_DISCOVERY_CLUSTER_NAME: local
+      # Worker pairing redeems stamp THIS URL so cockpits dial the agent
+      # node directly for WorkerService.Stream. nginx routes
+      # agent.${DOMAIN}:443 -> agent:50051.
+      MEMQL_WORKER_DIAL_ENDPOINT: https://agent.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
       IDENTITY_REGISTRATION_MODE: waitlist
       # Branding intentionally unset; operator picks at /admin/settings.
       IDENTITY_BRAND_NAME: ${IDENTITY_BRAND_NAME:-}
       IDENTITY_BRAND_PRIMARY_COLOR: ${IDENTITY_BRAND_PRIMARY_COLOR:-}
     # No host port publish: two replicas can't share 8081:8081. Identity is
-    # reached via the nginx front door on :8085 (see the header note); the
-    # internal SERVER_ADDRESS :8081 + the identity:8081 service name still work
-    # in-cluster and DNS-round-robin across replicas.
+    # reached via the nginx :443 front door on identity.${DOMAIN} (see the
+    # header note); the internal SERVER_ADDRESS :8081 + the identity:8081
+    # service name still work in-cluster and DNS-round-robin across replicas.
     depends_on:
       postgres:
         condition: service_healthy

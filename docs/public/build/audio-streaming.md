@@ -623,9 +623,10 @@ Same env vars as the legacy `/memql/audio` path:
 | `MEMQL_DEEPGRAM_API_KEY` | Deepgram key | required for `deepgram` |
 | `MEMQL_SI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
 
-`docker-compose.full.yml` brings up a voice node alongside the BFF so
-streaming transcription works on the basic dev path without needing
-the cluster overlay (this was the change in 545537d).
+`docker-compose.cluster.yml` brings up voice nodes alongside the BFF so
+streaming transcription works on the local cluster; nginx proxies
+`/memql/audio` on the `bff.local.znas.io` subdomain through to the voice
+node (STT lives there, not the bff).
 
 ### Single-shot batch path
 
