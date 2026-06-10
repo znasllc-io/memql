@@ -80,6 +80,16 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// The Chunk/End envelopes will land on BFF later and flow through
 	// ForwardContinuation on the same inflight entry.
 	if s.shouldProxySI(nodeTargetForTranscribe()) {
+		// Audio streaming over the substrate (memql#1266): forward the Start
+		// trigger (opening the forward inflight the later Chunk/End continuations
+		// reuse) and consume the transcript Delta/Complete frames from the durable
+		// substrate (stream:<requestId>) instead of the forwardedStream responses,
+		// so a streamed transcription survives a mid-stream replica switch. The
+		// worker's pumpDeltas produces to the substrate under the same gate (no
+		// double delivery). Non-substrate binaries keep the plain relay.
+		if s.service.streamingOverSubstrate() {
+			return s.proxySIStream(envelope, requestId, nodeTargetForTranscribe(), s.consumeTranscriptStream)
+		}
 		return s.proxySI(envelope, requestId, nodeTargetForTranscribe())
 	}
 
@@ -125,6 +135,23 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 			"failed to start streaming transcription: "+err.Error())
 	}
 
+	// Outbound sink for this stream's Delta/Complete messages. On a mesh worker
+	// the durable substrate is the delivery path (memql#1266): translate each
+	// outgoing SITranscribeStream* message into an ordered StreamSession frame on
+	// stream:<requestId>, so the WS-owning bff consumes it back surviving a
+	// mid-stream replica switch. Single-node / non-mesh binaries send directly on
+	// the local stream as before.
+	rawSend := func(m *memqlv1.MemqlServerMessage) error {
+		return s.stream.Send(m)
+	}
+	send := rawSend
+	if s.streamProducerOverSubstrate() {
+		// The substrate carries the transcript content; rawSend still gets the
+		// terminal so the bff's forward inflight is cleaned up (the bff discards
+		// forward responses under proxySIStream, so no double delivery).
+		send = s.service.newTranscriptStreamSink(sessCtx, requestId, rawSend)
+	}
+
 	ts := &transcribeStream{
 		requestId:  requestId,
 		correlate:  envelope.GetMessageId(),
@@ -132,12 +159,10 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 		startTime:  time.Now(),
 		sttSession: sttSess,
 		filter:     stt.NewTranscriptFilter(),
-		send: func(m *memqlv1.MemqlServerMessage) error {
-			return s.stream.Send(m)
-		},
-		ctx:    sessCtx,
-		cancel: cancel,
-		done:   make(chan struct{}),
+		send:       send,
+		ctx:        sessCtx,
+		cancel:     cancel,
+		done:       make(chan struct{}),
 	}
 
 	s.service.registerTranscribeStream(requestId, ts)

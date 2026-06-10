@@ -53,6 +53,17 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	// bidirectional stream. shouldProxySI short-circuits to false on
 	// worker binaries so they execute locally.
 	if s.shouldProxySI(nodeTargetForChat()) {
+		// Streaming chat over the substrate (memql#1266): forward the trigger to
+		// the worker as usual, but consume the streamed token deltas from the
+		// durable substrate (stream:<requestId>) rather than relaying the
+		// forwardedStream responses -- so a streamed turn survives this bff replica
+		// dying mid-stream (the next owner replays from the cursor). The worker's
+		// handleAiChatStream produces to the substrate (not the forward stream)
+		// under the same gate, so there is no double delivery. Non-streaming chat
+		// and the non-substrate path keep the plain relay.
+		if msg.GetStream() && s.service.streamingOverSubstrate() {
+			return s.proxySIStream(envelope, requestId, nodeTargetForChat(), s.consumeTokenStream)
+		}
 		return s.proxySI(envelope, requestId, nodeTargetForChat())
 	}
 
@@ -149,6 +160,17 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 	chunks, err := streamProvider.CallChatStream(ctx, messages)
 	if err != nil {
 		s.sendAiError(requestId, correlate, "chat stream failed", err)
+		return
+	}
+
+	// Substrate cutover (memql#1266): on a mesh worker the durable substrate is
+	// the streamed-response delivery path -- produce ordered token frames to
+	// stream:<requestId> instead of pushing SIStreamChunk over the forwardedStream
+	// (the star-mesh drop/dup path). The WS-owning bff consumes them via
+	// consumeTokenStream, surviving a mid-stream replica switch. Single-node /
+	// non-mesh binaries (substrate nil) keep the direct push below.
+	if s.streamProducerOverSubstrate() {
+		s.produceTokenStreamToSubstrate(ctx, requestId, chunks)
 		return
 	}
 
