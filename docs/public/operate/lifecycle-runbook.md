@@ -177,10 +177,22 @@ The contract (epic #1259's whole point):
 `.github/workflows/cluster-e2e.yml` boots the 2-replica **staging-parity**
 cluster and runs the cross-replica delivery gate (`make cluster-e2e` →
 `scripts/test/cluster-e2e.sh` → `test/clustere2e`, build-tagged `clustere2e`,
-#1261). The gate asserts the #1259 invariant: an utterance produced on one bff
-replica reaches a subscriber anchored on **every** bff replica, exactly once. It
-was RED-by-design on the pre-fix mesh and went **green** once #1264 migrated the
-chat-reply path onto the durable backbone.
+#1261). The gate asserts the #1259 invariant on two shapes:
+
+- **Single-event delivery** (`TestClusterCrossReplicaDelivery`): an utterance
+  produced on one bff replica reaches a subscriber anchored on **every** bff
+  replica, exactly once. RED-by-design on the pre-fix mesh; went **green** once
+  #1264 migrated the chat-reply path onto the durable backbone.
+- **Streamed turn** (`TestClusterStreamedTurn`, the #1266 cross-process
+  verification): an ordered token-streamed turn -- including a **mid-stream
+  replica switch** (the back half of the turn produced from a different replica)
+  -- arrives on every replica complete, exactly once, and **in order** (no lost,
+  reordered, or duplicated chunk). Exercises the #1266 ordered/backpressured
+  streaming contract over the same substrate.
+
+Both are synthetic-event tests (no SI provider keys): the streamed turn drives a
+sequence of utterance rows whose ids encode their order, so ordering is
+observable without a live LLM.
 
 **It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~16
 containers, a cold-cache multi-image build, a 10m health wait) is heavy and
