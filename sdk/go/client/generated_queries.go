@@ -1382,6 +1382,72 @@ func QueryDocumentChunksForDomainBuild(args QueryDocumentChunksForDomainArgs) st
 	return b.String()
 }
 
+// QueryDocumentVersionById -- Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).
+//
+// Bound concept: documentVersion.
+type QueryDocumentVersionByIdArgs struct {
+	VersionId string
+}
+
+// QueryDocumentVersionById calls the engine query queryDocumentVersionById.
+func (qc *QueryClient) QueryDocumentVersionById(ctx context.Context, args QueryDocumentVersionByIdArgs) (*Result, error) {
+	call := QueryDocumentVersionByIdBuild(args)
+	return qc.executeNamed(ctx, "queryDocumentVersionById", call)
+}
+
+func QueryDocumentVersionByIdBuild(args QueryDocumentVersionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDocumentVersionById({")
+	b.WriteString("versionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryDocumentVersions -- List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.
+//
+// Bound concept: documentVersion.
+type QueryDocumentVersionsArgs struct {
+	DocumentId string
+}
+
+// QueryDocumentVersions calls the engine query queryDocumentVersions.
+func (qc *QueryClient) QueryDocumentVersions(ctx context.Context, args QueryDocumentVersionsArgs) (*Result, error) {
+	call := QueryDocumentVersionsBuild(args)
+	return qc.executeNamed(ctx, "queryDocumentVersions", call)
+}
+
+func QueryDocumentVersionsBuild(args QueryDocumentVersionsArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDocumentVersions({")
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString("})")
+	return b.String()
+}
+
+// QueryDocumentVersionsForOwner -- Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors queryDocumentVersions' filter with the full content shape.
+//
+// Bound concept: documentVersion.
+type QueryDocumentVersionsForOwnerArgs struct {
+	DocumentId string
+}
+
+// QueryDocumentVersionsForOwner calls the engine query queryDocumentVersionsForOwner.
+func (qc *QueryClient) QueryDocumentVersionsForOwner(ctx context.Context, args QueryDocumentVersionsForOwnerArgs) (*Result, error) {
+	call := QueryDocumentVersionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "queryDocumentVersionsForOwner", call)
+}
+
+func QueryDocumentVersionsForOwnerBuild(args QueryDocumentVersionsForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("queryDocumentVersionsForOwner({")
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryDocumentsForDomain -- Validated Documents attached to a knowledge domain.
 //
 // Bound concept: document.

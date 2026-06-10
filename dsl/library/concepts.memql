@@ -106,6 +106,79 @@ concept generatedOutput {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
+// ---- documentVersion: append-only version history for a logical document ----
+//
+// Library documents (generatedOutput rows, and uploaded knowledge
+// documents surfaced as artifacts) had NO version history before
+// memql#1228: producing or editing a document OVERWROTE the backing
+// row, so the prior content was lost and there was no provenance for
+// "who changed what, when". documentVersion is the fix.
+//
+// Each documentVersion row is an IMMUTABLE content snapshot of one
+// logical document at one point in its history. The history is
+// append-only: editing a document (by the user via memql#1229, by an
+// assistant via memql#1231, or restoring an earlier version via
+// memql#1230) never mutates an existing version -- it APPENDS a new
+// one with the next monotonic versionNumber. The artifact index row
+// (and the backing generatedOutput) always points at the LATEST
+// version; the full history stays retained behind it.
+//
+// Storage / time-series choice (memql#1228): like every other concept,
+// documentVersion rows live in the MemoryNodes TimescaleDB hypertable,
+// which is partitioned on createdAt -- so version history is inherently
+// time-partitioned with no extra physical table. createdAt is the
+// hypertable time dimension and the natural ordering key for "show me
+// the history" reads. History is LONG-LIVED: the migration
+// (20260609000000_document_version_history) sets a long-window
+// compression policy (compress chunks older than 90 days, segment by
+// concept so a single document's history decompresses contiguously)
+// and deliberately sets NO retention policy -- versions are never
+// dropped on a schedule. See that migration's header for the full
+// rationale.
+//
+// Per-row authz tier: owned. ownerUserId is threaded from the backing
+// document's owner on every append (edits run server-side on the
+// owner's behalf, mirroring mutationCreateArtifact); every read gates
+// on ownerUserId==actor.userId so a caller can only ever see their own
+// document history.
+
+@version("1.0.0")
+@namespace("library")
+@displayCard(primary="documentId", secondary="note", tertiary="createdAt")
+@description("An immutable content snapshot of one logical Library document at one point in its edit history. Appended -- never overwritten -- whenever a document is produced, edited (by user or assistant), or restored, with a monotonically increasing versionNumber. The artifact index + backing document always point at the LATEST version while the full append-only history is retained behind it. Backed by the MemoryNodes TimescaleDB hypertable (partitioned on createdAt); long-lived, compression-after-90-days, no retention drop (memql#1228). Per-row authz: owned -- ownerUserId is threaded from the document's owner on append; reads gate on ownerUserId==actor.userId.")
+concept documentVersion {
+  ownerUserId      string  @required  @description("v1:identity:user.id that owns the logical document this version belongs to. Threaded from the backing document's owner on every append (edits run server-side on the owner's behalf, not as the owner); the load-bearing per-row authz key for every history read.")
+
+  documentId       string  @required  @description("Logical document id this version belongs to -- the stable identity of the document ACROSS all its versions (e.g. the v1:library:generatedOutput id, or the artifact's sourceConceptRef). A PLAIN STRING foreign key, NOT an @relationship: it points across concepts to the backing document, and the only valid @relationship types (parent/contains/alias/equals) don't model a cross-concept content-history link. Every version of the same document shares this value; it is the grouping key for the history queries.")
+
+  versionNumber    int  @required  @description("Monotonically increasing version number within the logical document, starting at 1 for the first snapshot. Computed server-side as (latest existing versionNumber for this documentId) + 1 on every append -- MemQL has no arithmetic, so the increment is done in the Go edit/restore handlers that read the current latest before inserting. The user-visible 'v3' label and the optimistic-concurrency token (an edit naming an expectedVersion that no longer matches the latest is a conflict).")
+
+  content          string  @description("Inline text content for this version (markdown / plain text). The immutable body snapshot. File-backed documents leave this empty and carry bytes on attachmentId instead. body and/or attachmentId -- at least one is set.")
+
+  attachmentId     string  @description("Back-reference to v1:common:attachment when this version is file-backed (a .docx / .pdf / .xlsx snapshot). The bytes live on the attachment row in blob storage; this version carries the metadata pointer. Empty for inline-text versions.")
+
+  authorKind       enum("user", "assistant", "system")  @required  @description("Who authored this version. user = a person edited it directly (memql#1229); assistant = an agent revised it on the user's behalf (memql#1231); system = produced automatically (the initial version on document creation, or a restore append from memql#1230). Drives the history view's author badge and the provenance line.")
+
+  authorId         string  @description("Identity of the author. For authorKind=user, the v1:identity:user.id; for authorKind=assistant, the v1:agents:agent.id; empty for system-authored versions. Read alongside authorKind for the 'edited by X' provenance line.")
+
+  note             string  @description("Optional short human-readable note describing the change in this version (e.g. 'fixed the totals', 'restored from v2'). Surfaced in the history list so a user can scan what each version changed without diffing.")
+
+  parentVersionId  string  @description("Id of the documentVersion row this one was derived from (the previous latest at append time, or the chosen source version for a restore). The append-only history's back-pointer chain -- empty only for the very first version of a document.")
+
+  producedByPlanId string  @description("v1:planner:plan.id that produced this version, when an assistant/agent edit came through the planner. Provenance back-pointer mirroring the artifact/generatedOutput spine.")
+
+  spaceId          string  @description("v1:cognition:space.id the edit happened in, when space-scoped. Carried for facet parity with the artifact index; empty for user-global edits.")
+
+  // NOTE: the append timestamp is the row intrinsic `createdAt` (the
+  // MemoryNodes hypertable time dimension + the natural history ordering
+  // key) -- it is NOT declared as a concept field here because createdAt
+  // is a reserved row intrinsic. The shapes project it via row.createdAt
+  // and the append mutation stamps it via `createdAt: timestamp()` in the
+  // insert block.
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
 // ---- memory: user-facing assistant (LLM) memory ----
 //
 // The durable things the assistant remembers about the user across
