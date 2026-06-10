@@ -120,6 +120,91 @@ func AvatarDirectStopSessionBuild(args AvatarDirectStopSessionArgs) string {
 	return b.String()
 }
 
+// EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
+type EditDocumentArgs struct {
+	DocumentId   string
+	Content      string
+	AttachmentId string
+	Note         string
+	// Enum: user | assistant | system
+	AuthorKind       string
+	AuthorId         string
+	ExpectedVersion  int
+	ProducedByPlanId string
+	SpaceId          string
+}
+
+// EditDocument calls the engine builtin editDocument.
+func (qc *QueryClient) EditDocument(ctx context.Context, args EditDocumentArgs) (*Result, error) {
+	call := EditDocumentBuild(args)
+	return qc.executeNamed(ctx, "editDocument", call)
+}
+
+func EditDocumentBuild(args EditDocumentArgs) string {
+	var b strings.Builder
+	b.WriteString("editDocument({")
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	if args.Content != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("content: ")
+		b.WriteString(fmt.Sprintf("%q", args.Content))
+	}
+	if args.AttachmentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attachmentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	}
+	if args.Note != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(fmt.Sprintf("%q", args.Note))
+	}
+	if args.AuthorKind != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authorKind: ")
+		b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
+	}
+	if args.AuthorId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authorId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
+	}
+	if args.ExpectedVersion != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedVersion: ")
+		b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	}
+	if args.ProducedByPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // HarnessTrace -- Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142).
 type HarnessTraceArgs struct {
 	PlanId string
@@ -271,6 +356,40 @@ func RecallBuild(args RecallArgs) string {
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// RestoreDocumentVersion -- Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row.
+type RestoreDocumentVersionArgs struct {
+	DocumentId string
+	VersionId  string
+	AuthorId   string
+}
+
+// RestoreDocumentVersion calls the engine builtin restoreDocumentVersion.
+func (qc *QueryClient) RestoreDocumentVersion(ctx context.Context, args RestoreDocumentVersionArgs) (*Result, error) {
+	call := RestoreDocumentVersionBuild(args)
+	return qc.executeNamed(ctx, "restoreDocumentVersion", call)
+}
+
+func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("restoreDocumentVersion({")
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	if args.AuthorId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authorId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	b.WriteString("})")
 	return b.String()

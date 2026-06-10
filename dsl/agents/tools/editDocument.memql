@@ -1,0 +1,49 @@
+// editDocument -- revise an EXISTING Library document in place (append a version)
+// =============================================================================
+//
+// produceArtifact (the sibling tool) is CREATE-only: it mints a brand-new
+// deliverable. editDocument is its counterpart for revising a document the user
+// already has -- "edit this doc", "update the bird list to add three more",
+// "revise the refund one-pager to mention store credit", "fix the totals in
+// that report". It targets an EXISTING logical document by id and commits a NEW
+// version through the append-only version-history path (memql#1228/#1231):
+//
+//   - It resolves the target document (the v1:library:generatedOutput id).
+//   - It appends a v1:library:documentVersion snapshot with authorKind=assistant
+//     and authorId = the calling agent, carrying planner provenance
+//     (producedByPlanId / agentId), so the history records WHO revised it.
+//   - It re-inserts the backing generatedOutput (same id, new version) so the
+//     Library viewer + artifact index reflect the latest content.
+//
+// Nothing is overwritten or lost: the prior version stays retained in history,
+// and the user can restore it later (queryDocumentVersions +
+// mutationRestoreDocumentVersion). The latest pointer always reflects the newest
+// version.
+//
+// Choose editDocument vs produceArtifact:
+//   - The user references an EXISTING document ("this doc", "the bird list",
+//     "that report") AND wants it CHANGED  -> editDocument.
+//   - The user wants a NEW deliverable made from scratch                -> produceArtifact.
+//   - The user just wants a QUESTION answered inline                    -> respondToUser.
+//
+// allowedRoles: assistant + specialist. Any agent fronting the conversation that
+// is asked to revise a document the user owns can call it; ownership is enforced
+// server-side (ownerUserId is threaded from the document row, not the caller).
+//
+// Mirrors the produceArtifact tool->builtin->integration shape: the builtin is
+// assistantEditDocument in dsl/library/builtins.memql, backed by
+// integration.library.editDocumentAsAssistant.
+
+@enabled
+@handler(type="function", name="assistantEditDocument")
+@allowedRoles("assistant", "specialist")
+@executionTime("fast")
+@description("Revise an EXISTING Library document the user already has, committing the change as a new retained version (the prior version is kept in history, never lost). Use this -- NOT produceArtifact -- when the user asks to edit / update / revise / change / fix / amend / rewrite a document they already have (e.g. 'edit this doc', 'update the bird list', 'revise the one-pager', 'fix the totals in that report'). Provide the FULL new content for the document (not just a diff). For making a brand-new deliverable from scratch, use produceArtifact instead; for a plain question, answer inline via respondToUser.")
+tool editDocument {
+  documentId   string  @required @description("Id of the existing logical document to revise -- the v1:library:generatedOutput id resolved from the artifact the user is referring to. The version history + backing content are keyed on this; every revision of the same document shares it.")
+  content      string  @required @description("The FULL new content of the document after your edit (markdown / text), not a diff or a fragment. The version history stores complete immutable snapshots, so write the entire revised document body. Apply the user's requested change on top of the current content you were given.")
+  note         string  @description("Short human-readable summary of WHAT this revision changed (e.g. 'added three more birds', 'mentioned store credit in the refund policy'). Surfaced in the document's history list so the user can scan what each version changed.")
+  agentId      string  @autoInjected @description("Calling agent id. Server-stamped from the agent runtime; becomes the version's authorId. The central validator drops any LLM-supplied value before dispatch.")
+  producedByPlanId string @autoInjected @description("Active planner plan id, when the edit came through a plan. Server-stamped; recorded as the version's provenance. The central validator drops any LLM-supplied value.")
+  spaceId      string  @autoInjected @description("Space the edit happened in. Server-stamped from the agent runtime turn context; the central validator drops any LLM-supplied value.")
+}

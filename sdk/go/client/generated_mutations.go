@@ -168,6 +168,109 @@ func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessC
 	return b.String()
 }
 
+// MutationAppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is threaded from the backing document's owner, versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
+//
+// Bound concept: documentVersion.
+type MutationAppendDocumentVersionArgs struct {
+	VersionId     string
+	DocumentId    string
+	OwnerUserId   string
+	VersionNumber int
+	Content       string
+	AttachmentId  string
+	// Enum: user | assistant | system
+	AuthorKind       string
+	AuthorId         string
+	Note             string
+	ParentVersionId  string
+	ProducedByPlanId string
+	SpaceId          string
+}
+
+// MutationAppendDocumentVersion calls the engine mutation mutationAppendDocumentVersion.
+func (qc *QueryClient) MutationAppendDocumentVersion(ctx context.Context, args MutationAppendDocumentVersionArgs) (*Result, error) {
+	call := MutationAppendDocumentVersionBuild(args)
+	return qc.executeNamed(ctx, "mutationAppendDocumentVersion", call)
+}
+
+func MutationAppendDocumentVersionBuild(args MutationAppendDocumentVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAppendDocumentVersion({")
+	b.WriteString("versionId: ")
+	b.WriteString(fmt.Sprintf("%q", args.VersionId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("documentId: ")
+	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionNumber: ")
+	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
+	if args.Content != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("content: ")
+		b.WriteString(fmt.Sprintf("%q", args.Content))
+	}
+	if args.AttachmentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attachmentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("authorKind: ")
+	b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
+	if args.AuthorId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("authorId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
+	}
+	if args.Note != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(fmt.Sprintf("%q", args.Note))
+	}
+	if args.ParentVersionId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("parentVersionId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ParentVersionId))
+	}
+	if args.ProducedByPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationApplyResponsibilityIntake -- Apply the responsibilityIntake result to a draft v1:planner:responsibility (issue #637). The dispatcher stamps the inferred field set (trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow) plus the intake outcome. When intake was CLEAR (no questions) the dispatcher passes status='active' + intakeStatus='clear' so the row goes straight live; when intake produced 1-2 questions it passes status='draft' + intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no ownerUserId re-stamp.
 //
 // Bound concept: responsibility.
@@ -10799,6 +10902,112 @@ func MutationUpdateDocumentValidationBuild(args MutationUpdateDocumentValidation
 		}
 		b.WriteString("validatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedAt))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
+// MutationUpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is threaded from the existing row.
+//
+// Bound concept: generatedOutput.
+type MutationUpdateGeneratedOutputContentArgs struct {
+	OutputId     string
+	OwnerUserId  string
+	Title        string
+	Summary      string
+	Body         string
+	AttachmentId string
+	// Enum: markdown | document | pdf | spreadsheet | image | text | other
+	Format   string
+	MimeType string
+	// Enum: workbench_generated | computer_use | agent_generated | derived
+	Source            string
+	SpaceId           string
+	ProducedByPlanId  string
+	ProducedByAgentId string
+}
+
+// MutationUpdateGeneratedOutputContent calls the engine mutation mutationUpdateGeneratedOutputContent.
+func (qc *QueryClient) MutationUpdateGeneratedOutputContent(ctx context.Context, args MutationUpdateGeneratedOutputContentArgs) (*Result, error) {
+	call := MutationUpdateGeneratedOutputContentBuild(args)
+	return qc.executeNamed(ctx, "mutationUpdateGeneratedOutputContent", call)
+}
+
+func MutationUpdateGeneratedOutputContentBuild(args MutationUpdateGeneratedOutputContentArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationUpdateGeneratedOutputContent({")
+	b.WriteString("outputId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OutputId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("ownerUserId: ")
+	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("title: ")
+	b.WriteString(fmt.Sprintf("%q", args.Title))
+	if args.Summary != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%q", args.Summary))
+	}
+	if args.Body != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("body: ")
+		b.WriteString(fmt.Sprintf("%q", args.Body))
+	}
+	if args.AttachmentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attachmentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
+	}
+	if args.Format != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(fmt.Sprintf("%q", args.Format))
+	}
+	if args.MimeType != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mimeType: ")
+		b.WriteString(fmt.Sprintf("%q", args.MimeType))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(fmt.Sprintf("%q", args.Source))
+	if args.SpaceId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("spaceId: ")
+		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	}
+	if args.ProducedByPlanId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByPlanId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
+	}
+	if args.ProducedByAgentId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedByAgentId: ")
+		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
 	b.WriteString("})")
 	return b.String()
