@@ -10,17 +10,18 @@
 
 use agents.concepts.{ avatarPersona }
 
-// Sofia uses Anam (memql#785, #1219). personaId is Sofia's own Anam avatarId
-// (the "Sarah" face, minted from avatars/female_0.png) -- used verbatim on the
-// bare-avatarId path (dispatch.go resolveAnamPlan), with our audio driving the
-// lip-sync; ANAM_API_KEY authenticates. Previously this reused Mia's avatar
-// (wrong face). imageRef/previewRef point at the same female_0 source image,
-// served by copresent at /avatars/female_0.png so the Create-Assistant picker
-// shows the real face.
-@description("Avatar persona Sofia (female) -- Anam 'Sarah' avatar from avatars/female_0.png (memql#1219).")
+// Sofia uses Simli (memql#1237). Anam hard-caps the ephemeral client-audio
+// session at ~26-27s regardless of every documented param (escalation: memql#1236),
+// so we switch the product avatar to Simli (validated, no cap -- memql#784).
+// personaId is the Simli faceId of our custom avatar (created from female_0);
+// dispatch.go resolveSimliPlan uses it as the Simli faceId and SIMLI_API_KEY
+// authenticates. imageRef/previewRef stay the female_0 source image (served by
+// copresent at /avatars/female_0.png) so the Create-Assistant picker shows the
+// real face. (Anam avatarId 8981b946 retained in history if we revert.)
+@description("Avatar persona Sofia (female) -- Simli custom avatar from avatars/female_0.png (memql#1237).")
 seed avatarPersona sofia {
-  vendor:     "anam"
-  personaId:  "8981b946-c125-4f41-b6b0-863fe67ae180"
+  vendor:     "simli"
+  personaId:  "d6ee6443-c99e-4027-885c-5ad9e5f1b307"
   name:       "Sofia"
   gender:     "female"
   imageRef:   "avatars/female_0.png"
