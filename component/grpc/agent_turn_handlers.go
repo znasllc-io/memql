@@ -179,6 +179,17 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 		}
 	}
 
+	// Client-tool reply leg over the substrate (memql#1265): when wired AND
+	// enabled, run a per-turn Serve loop keyed by this turn's requestId. A
+	// relayed ClientToolResult is Called to RPCRequestKey(requestId) by the
+	// cognition relay; the handler delivers it into the parked waiter. Scoped to
+	// the turn ctx so it tears down with the turn. Gated OFF by default so the
+	// live path keeps riding ForwardContinuation until the cluster gate proves
+	// it (see integrations/cognition clientToolRPCEnv).
+	if s.service.clientToolRPC != nil && requestId != "" && clientToolRPCSubstrateEnabled() {
+		go ServeClientToolRPC(ctx, s.service.clientToolRPC, s.service.grpcServer, requestId, s.service.logger)
+	}
+
 	go s.runAgentTurn(ctx, correlate, requestId, msg, sink)
 	return nil
 }

@@ -4,14 +4,74 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/id"
 )
+
+// ClusterRPC is the narrow request/response-over-substrate surface the
+// client-tool relay uses to route a ClientToolResult back to the agent that
+// parked on the call (memql#1265). Satisfied by *node.SubstrateRPC; injected via
+// SetClusterRPC on cognition binaries. When nil the relay falls back to the
+// legacy ForwardContinuation reply leg (the in-flight forwarded gRPC stream),
+// preserving behaviour on single-node / pre-cutover builds.
+//
+// The shape mirrors the RPC layer merged on main (component/node/substrate_rpc.go):
+// RoutingKey-addressed, map[string]any payload, map reply.
+type ClusterRPC interface {
+	// Call issues a request to calleeKey and awaits the correlated reply,
+	// bounded by ctx. The reply routes back by logical key, so it survives the
+	// issuing replica restarting mid-call.
+	Call(ctx context.Context, calleeKey node.RoutingKey, method string, payload map[string]any) (map[string]any, error)
+}
+
+// clientToolRPCMethod is the RPC method the agent's Serve handler dispatches a
+// relayed ClientToolResult on. Must match component/grpc's clientToolRPCMethod.
+const clientToolRPCMethod = "clientToolResult"
+
+// rpcClientToolKind is the RoutingKey.Kind for a per-turn client-tool reply
+// endpoint. Must match component/grpc's rpcClientToolKind so cognition's Call
+// and the agent's Serve address the same logical key.
+const rpcClientToolKind = "rpcClientTool"
+
+// Payload keys carried on the client-tool RPC request body. Must match
+// component/grpc's decode keys so the cross-binary wire contract round-trips.
+const (
+	clientToolRPCKeyCallID   = "callId"
+	clientToolRPCKeyContent  = "content"
+	clientToolRPCKeyIsError  = "isError"
+	clientToolRPCKeyErrorMsg = "errorMessage"
+)
+
+// clientToolRPCEnv gates the substrate-RPC reply leg. Default OFF: the live,
+// latency-sensitive client-tool round-trip keeps riding the proven
+// ForwardContinuation path until the 2-replica cluster gate (memql#1261) proves
+// the substrate reply leg non-regressive, per the issue's safety boundary.
+// Set MEMQL_CLIENT_TOOL_RPC_SUBSTRATE=1 to route replies over the substrate.
+const clientToolRPCEnv = "MEMQL_CLIENT_TOOL_RPC_SUBSTRATE"
+
+// clientToolRPCKey builds the per-turn logical endpoint addressed by the reply
+// leg. The id is the turn's requestId, shared by cognition + the owning agent.
+func clientToolRPCKey(requestId string) node.RoutingKey {
+	return node.RoutingKey{Kind: rpcClientToolKind, ID: requestId}
+}
+
+// clientToolRPCEnabled reports whether the substrate reply leg is switched on
+// AND wired (an RPC layer is installed). Both must hold; otherwise the relay
+// uses ForwardContinuation.
+func (c *CognitionIntegration) clientToolRPCEnabled() bool {
+	if c == nil || c.clusterRPC == nil {
+		return false
+	}
+	v := strings.TrimSpace(os.Getenv(clientToolRPCEnv))
+	return v == "1" || strings.EqualFold(v, "true")
+}
 
 // client_tool_relay.go
 // =====================
@@ -81,6 +141,21 @@ type pendingClientToolCall struct {
 	// relay traffic runs without end-user claims.
 	authClaims map[string]string
 	partition  string
+	// agentId is the agent's canonical logical id (audit/diagnostic only; the
+	// substrate reply leg addresses the turn's requestId endpoint, which both
+	// cognition and the owning agent replica share).
+	agentId string
+}
+
+// SetClusterRPC installs the request/response-over-substrate layer used by the
+// client-tool relay's reply leg (memql#1265). Nil is tolerated: the relay then
+// falls back to ForwardContinuation. Wired by app bootstrap on cognition
+// binaries once the substrate + node topology are resolved (cluster phase).
+func (c *CognitionIntegration) SetClusterRPC(rpc ClusterRPC) {
+	if c == nil {
+		return
+	}
+	c.clusterRPC = rpc
 }
 
 // startClientToolRelay subscribes cognition to clientToolResponse
@@ -163,6 +238,7 @@ func (c *CognitionIntegration) relayClientToolCall(
 		requestId: requestId,
 		createdAt: time.Now(),
 		partition: partition,
+		agentId:   strings.TrimSpace(agentId),
 	})
 
 	timeoutMs := int64(call.GetTimeoutMs())
@@ -282,13 +358,30 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 	if !ok || entry == nil {
 		return
 	}
+
+	content := parseToolResultContent(contentJSON)
+
+	// Reply leg (memql#1265): when the substrate RPC layer is wired AND enabled,
+	// route the ClientToolResult back over the durable substrate keyed by the
+	// agent's logical endpoint, so the reply reaches whoever owns that agent's
+	// work even if THIS cognition replica (which issued the original forward) has
+	// since restarted -- the exact churn that left the agent with 0 turns under
+	// memql#1245. Otherwise fall back to the legacy in-flight forwarded-stream
+	// continuation. The gate keeps the live path on the proven leg until the
+	// 2-replica cluster gate (memql#1261) proves the substrate leg.
+	if c.clientToolRPCEnabled() && entry.requestId != "" {
+		if c.replyViaSubstrateRPC(callId, entry, content, isError, errorMessage) {
+			return
+		}
+		// RPC reply failed; fall through to ForwardContinuation as a safety net
+		// so a transient substrate error doesn't strand the parked agent waiter.
+	}
+
 	if c.agentForwarder == nil {
 		c.Logger.Warn("client-tool relay: response dropped, no agentForwarder configured",
 			"callId", callId)
 		return
 	}
-
-	content := parseToolResultContent(contentJSON)
 
 	resultEnvelope := &memqlv1.MemqlClientMessage{
 		MessageId: id.NewShortId(),
@@ -319,6 +412,68 @@ func (c *CognitionIntegration) handleClientToolResponse(event events.Event) {
 		"isError", isError,
 		"wait_ms", time.Since(entry.createdAt).Milliseconds(),
 	)
+}
+
+// replyViaSubstrateRPC routes a ClientToolResult back to the agent over the
+// request/response substrate (memql#1265). It builds the result payload and
+// issues a Call to the turn's logical endpoint (clientToolRPCKey(requestId)),
+// returning true on success. A failure returns false so the caller can fall
+// back to the legacy ForwardContinuation leg. The Call is bounded so a
+// missing/dead agent endpoint can't park the relay goroutine forever.
+func (c *CognitionIntegration) replyViaSubstrateRPC(
+	callId string,
+	entry *pendingClientToolCall,
+	content []*memqlv1.ToolResultContent,
+	isError bool,
+	errorMessage string,
+) bool {
+	// Build the request payload as a plain map -- the RPC layer carries it as
+	// the substrate Deliverable's jsonb body, and the agent's Serve handler
+	// decodes it back into a ClientToolResult (see component/grpc's
+	// decodeClientToolResult). Content items are plain maps mirroring
+	// memqlv1.ToolResultContent so the cross-binary contract stays explicit.
+	items := make([]any, 0, len(content))
+	for _, item := range content {
+		if item == nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"type":     item.GetType(),
+			"text":     item.GetText(),
+			"mimeType": item.GetMimeType(),
+			"data":     item.GetData(),
+			"uri":      item.GetUri(),
+		})
+	}
+	payload := map[string]any{
+		clientToolRPCKeyCallID:   callId,
+		clientToolRPCKeyIsError:  isError,
+		clientToolRPCKeyErrorMsg: errorMessage,
+		clientToolRPCKeyContent:  items,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), pendingClientToolCallTTL)
+	defer cancel()
+	// The agent's per-turn Serve handler (keyed by requestId -- the turn's
+	// logical endpoint, known to both cognition and the agent) delivers the
+	// result into its parked waiter and replies with an empty-body ack; we don't
+	// need the reply payload, only that it round-tripped. The reply itself routes
+	// back to THIS cognition replica's logical reply key. Addressing by requestId
+	// makes the leg survive cognition-replica churn: whichever agent replica owns
+	// the turn picks up the request, vs. ForwardContinuation which needs the
+	// in-flight forwarded stream entry on the replica that issued the forward.
+	if _, err := c.clusterRPC.Call(ctx, clientToolRPCKey(entry.requestId), clientToolRPCMethod, payload); err != nil {
+		c.Logger.Warn("client-tool relay: substrate RPC reply failed; falling back",
+			"callId", callId, "requestId", entry.requestId, "error", err)
+		return false
+	}
+	c.Logger.Info("client-tool relay: routed response to agent via substrate RPC",
+		"callId", callId,
+		"requestId", entry.requestId,
+		"isError", isError,
+		"wait_ms", time.Since(entry.createdAt).Milliseconds(),
+	)
+	return true
 }
 
 // mapKeysSorted returns map keys for diagnostic logging (order stable).

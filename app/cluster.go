@@ -183,6 +183,30 @@ func (a *App) cluster() {
 			a.Logger.Info("chat-reply path routed through durable delivery substrate",
 				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type), "is_bff", isBFF)
 		}
+
+		// Phase 2 of epic memql#1259 (memql#1265): build the request/response RPC
+		// layer (correlation + reply-routing) over the SAME substrate. This
+		// node's reply endpoint is keyed by its node id, so a reply published to
+		// it routes back to THIS replica's logical key. Used to cut the
+		// client-tool relay's reply leg over to the substrate so it survives the
+		// issuing cognition replica restarting mid-call (the memql#1245 0-turns
+		// symptom). Wired to cognition (caller) + the agent gRPC server
+		// (responder) below; the live cutover is gated OFF by default
+		// (MEMQL_CLIENT_TOOL_RPC_SUBSTRATE) until the 2-replica cluster gate
+		// (memql#1261) proves it non-regressive -- token/audio STREAM transport
+		// stays on memql#1266, and the old ad-hoc forwards stay for the
+		// not-yet-migrated paths (retirement = memql#1267).
+		rpcReplyKey := node.RoutingKey{Kind: "rpcReply", ID: nodeIdentity.ID}
+		a.substrateRPC = node.NewSubstrateRPC(substrate, rpcReplyKey, nodeIdentity.ID, a.Logger)
+		if a.substrateRPC != nil {
+			if a.grpcServer != nil {
+				// Agent binaries: the gRPC server holds the parked client-tool
+				// waiters, so it Serves the per-turn reply endpoint.
+				a.grpcServer.SetClientToolRPC(a.substrateRPC)
+			}
+			a.Logger.Info("request/response RPC layer built over delivery substrate (memql#1265)",
+				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type))
+		}
 	}
 
 	// Install the class="node" JWT enforcement interceptor on

@@ -133,6 +133,14 @@ type App struct {
 	// different forwarding flow).
 	agentForwarder *memqlgrpc.SIForwardRouter
 
+	// substrateRPC is THIS node's request/response-over-substrate layer
+	// (correlation + reply-routing, memql#1265), built over the shared
+	// DeliverySubstrate during cluster bootstrap. On cognition it is the
+	// caller (client-tool relay reply leg); on the agent it is the
+	// responder (Serve loop delivering ClientToolResult into the parked
+	// waiter). Nil on non-mesh binaries.
+	substrateRPC *node.SubstrateRPC
+
 	// cognitionIntegration is stashed here so cluster.go can inject
 	// the agent-turn forwarder after creating it. Stored as `any` to
 	// avoid importing integrations/cognition in all builds; the

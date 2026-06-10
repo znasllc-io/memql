@@ -119,8 +119,15 @@ type Server struct {
 	// port -- component/grpc can't import app/node-lifecycle). Nil on
 	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
 	nodeMaintenanceHandler NodeMaintenanceHandler
-	serviceRef             *serviceRef
-	extraRegistrars        []func(*grpc.Server)
+	// clientToolRPC is the agent-side request/response-over-substrate layer
+	// (memql#1265). When set on an agent binary, each agent turn runs a
+	// per-turn Serve loop keyed by the turn's requestId so a relayed
+	// ClientToolResult routes back to the parked waiter by logical key
+	// (surviving cognition-replica churn) instead of riding the in-flight
+	// forwarded gRPC stream. Nil leaves the legacy ForwardContinuation path.
+	clientToolRPC   *node.SubstrateRPC
+	serviceRef      *serviceRef
+	extraRegistrars []func(*grpc.Server)
 	// tokenVerifier honors RotateAuthMsg on open streams. Set by
 	// SetVerifier during app bootstrap; nil on nodes that don't run
 	// an identity verifier (rotation responds with
@@ -142,6 +149,17 @@ type serviceRef struct {
 // request through the forwarder to the matching worker node. Workers
 // leave this nil and handle AI requests directly from their local
 // providers.
+// SetClientToolRPC installs the agent-side request/response-over-substrate
+// layer (memql#1265) used to receive a relayed ClientToolResult by logical key.
+// Wired by app bootstrap on agent binaries once the substrate is resolved; nil
+// elsewhere (the relay then uses ForwardContinuation).
+func (s *Server) SetClientToolRPC(rpc *node.SubstrateRPC) {
+	if s == nil {
+		return
+	}
+	s.clientToolRPC = rpc
+}
+
 func (s *Server) SetAiForwarder(r *SIForwardRouter) {
 	if s == nil {
 		return
@@ -282,6 +300,8 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		verifier:               s.tokenVerifier,
+		clientToolRPC:          s.clientToolRPC,
+		grpcServer:             s,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
 	if s.serviceRef != nil {
@@ -450,6 +470,14 @@ type service struct {
 	// bootstrap). Other binaries leave this nil; handleAgentGenerateTurn
 	// returns an error when the caller lands on the wrong node type.
 	agentReplier AgentTurnHandler
+
+	// clientToolRPC is the agent-side request/response-over-substrate layer
+	// (memql#1265) used to run a per-turn Serve loop that delivers a relayed
+	// ClientToolResult into the parked waiter by logical key. Nil leaves the
+	// legacy ForwardContinuation reply leg. grpcServer is the back-reference
+	// the per-turn Serve handler uses to reach DeliverClientToolResult.
+	clientToolRPC *node.SubstrateRPC
+	grpcServer    *Server
 
 	// agentPauseHook flags an in-flight background turn for cooperative
 	// preemption (epic memql#902 / #906), keyed by request_id. Injected on
@@ -1451,32 +1479,60 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 // the result so the parked tool call can return on whichever session
 // originally registered it.
 func (s *streamSession) handleClientToolResult(_ *memqlv1.MemqlClientMessage, msg *memqlv1.ClientToolResult) error {
-	if msg == nil || s.service == nil {
+	if s.service == nil {
 		return nil
+	}
+	s.service.deliverClientToolResult(msg, s.logger)
+	return nil
+}
+
+// deliverClientToolResult routes a ClientToolResult to the service-scoped
+// waiter parked on its call_id, regardless of which transport carried it (the
+// connected browser stream, the cluster ForwardContinuation, or -- memql#1265 --
+// the substrate RPC reply leg). Shared by the stream-message path and the
+// substrate RPC consumer (see Server.DeliverClientToolResult) so the parked
+// executeClientTool / InvokeClientTool caller returns on exactly one delivery.
+func (svc *service) deliverClientToolResult(msg *memqlv1.ClientToolResult, logger *slog.Logger) {
+	if svc == nil || msg == nil {
+		return
 	}
 	callId := msg.GetCallId()
 	if callId == "" {
-		return nil
+		return
 	}
-	s.service.clientToolMu.Lock()
-	ch, ok := s.service.clientToolWaiters[callId]
+	svc.clientToolMu.Lock()
+	ch, ok := svc.clientToolWaiters[callId]
 	if ok {
-		delete(s.service.clientToolWaiters, callId)
+		delete(svc.clientToolWaiters, callId)
 	}
-	s.service.clientToolMu.Unlock()
+	svc.clientToolMu.Unlock()
 	if !ok {
-		if s.logger != nil {
-			s.logger.Debug("client tool result for unknown call_id (timed out or duplicate)",
+		if logger != nil {
+			logger.Debug("client tool result for unknown call_id (timed out or duplicate)",
 				"component", ComponentName,
 				"call_id", callId)
 		}
-		return nil
+		return
 	}
 	select {
 	case ch <- msg:
 	default:
 	}
-	return nil
+}
+
+// DeliverClientToolResult is the substrate-RPC entry point (memql#1265) for a
+// ClientToolResult that arrived over the durable delivery substrate rather than
+// the forwarded gRPC stream. The agent node's SubstrateRPC Serve loop decodes a
+// reply and calls this so the parked client-tool waiter (keyed by call_id)
+// returns -- the reply leg now routes by logical key and survives the cognition
+// replica that issued the original forward restarting mid-tool-call (the
+// memql#1245 0-turns symptom). Resolves through serviceRef so a bootstrap-time
+// caller can hold the hook before Run() constructs the service.
+func (s *Server) DeliverClientToolResult(msg *memqlv1.ClientToolResult) {
+	if s == nil || s.serviceRef == nil || s.serviceRef.svc == nil {
+		return
+	}
+	s.serviceRef.svc.deliverClientToolResult(msg, s.logger)
 }
 
 // executeClientTool emits a ClientToolCall envelope on the stream and

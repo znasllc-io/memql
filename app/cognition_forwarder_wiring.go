@@ -23,4 +23,15 @@ func (a *App) attachAgentForwarderToCognition(fwd *memqlgrpc.SIForwardRouter) {
 	}
 	integ.SetAgentForwarder(fwd)
 	a.Logger.Info("cognition: agent-turn forwarder installed")
+
+	// Phase 2 (memql#1265): hand cognition the request/response RPC layer so the
+	// client-tool relay's reply leg can route a ClientToolResult back to the
+	// agent by logical key (surviving this cognition replica restarting
+	// mid-call). Built over the shared substrate earlier in the cluster phase;
+	// nil-tolerant -- the relay falls back to ForwardContinuation when absent or
+	// when the gate (MEMQL_CLIENT_TOOL_RPC_SUBSTRATE) is off.
+	if a.substrateRPC != nil {
+		integ.SetClusterRPC(a.substrateRPC)
+		a.Logger.Info("cognition: client-tool relay RPC layer installed (memql#1265)")
+	}
 }

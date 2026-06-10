@@ -231,6 +231,14 @@ type (
 		// node type that originates agent-turn forwards today).
 		agentForwarder AgentForwarder
 
+		// clusterRPC routes a relayed ClientToolResult back to the agent
+		// that parked on the call via request/response RPC over the durable
+		// delivery substrate (memql#1265), so the reply leg routes by the
+		// agent's logical key and survives the issuing cognition replica
+		// restarting mid-call. Injected by app bootstrap on cognition
+		// binaries; nil otherwise (the relay then uses ForwardContinuation).
+		clusterRPC ClusterRPC
+
 		// pendingClientToolCalls tracks in-flight client-tool calls
 		// relayed across cluster nodes. When the agent node emits a
 		// ClientToolCall (intercepted in consumeAgentTurnStream), we
