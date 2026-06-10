@@ -10,8 +10,13 @@
 ## Quick Start
 
 ```bash
-# Start complete development environment (Docker)
-docker compose -f docker/docker-compose.full.yml up --build
+# Start the local development cluster (staging-parity, the blessed
+# local topology -- memql#1260). This is the ONLY supported local
+# run path; the single-node full.yml stack cannot reproduce the
+# mesh-delivery class of bugs (memql#1304).
+make dev-cluster-refresh   # decrypt genesis -> wipe -> rebuild -> seed
+# or, without the genesis/seed wipe:
+make dev-cluster-up        # boot the parity cluster in the background
 
 # Run tests
 go test ./...
@@ -134,25 +139,39 @@ memQL/
 ## Development Workflow
 
 ### Development Environment (Docker)
+
+The staging-parity cluster is the ONLY supported local run path
+(memql#1304). The single-node `full.yml` stack structurally cannot
+reproduce the resilient-mesh class of bugs, so the `make dev*`
+single-node run/refresh targets were removed.
+
 ```bash
-# Start full stack (PostgreSQL + memQL)
-docker compose -f docker/docker-compose.full.yml up --build
+# Start / refresh the local development cluster (staging parity).
+# decrypt genesis -> wipe -> rebuild -> seed:
+make dev-cluster-refresh
 
-# Start with Polyphon voice pipeline
-docker compose -f docker/docker-compose.full.yml -f docker/docker-compose.polyphon.yml up --build
+# Boot the parity cluster in the background (no genesis wipe/seed):
+make dev-cluster-up
 
-# Start with NemoClaw coding agent
-docker compose -f docker/docker-compose.full.yml -f docker/docker-compose.nemoclaw.yml up --build
+# Foreground (build + up):
+make dev-cluster
 
-# Start cluster mode (bff + cognition + planner)
-docker compose -f docker/docker-compose.cluster.yml up --build
+# Restart with fresh binaries (keep / wipe the DB):
+make dev-cluster-restart
+make dev-cluster-restart-purge
 
-# Stop everything
-docker compose -f docker/docker-compose.full.yml down
+# Stop (keeps volumes):
+make dev-cluster-down
 
-# View logs
-docker compose -f docker/docker-compose.full.yml logs -f
+# View logs / parity litmus:
+make dev-cluster-logs
+make dev-cluster-status
 ```
+
+The cluster uses `docker/docker-compose.cluster.yml`; the front door
+is http://localhost:8085. See
+[docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
+for the full runbook + the documented divergences.
 
 ### Building
 ```bash
@@ -213,10 +232,10 @@ frontend coordination.
 
 | Task | Command | Description |
 |------|---------|-------------|
-| **Start development** | `docker compose -f docker/docker-compose.full.yml up --build` | Full stack (PostgreSQL + memQL) |
+| **Start development (refresh)** | `make dev-cluster-refresh` | The ONLY supported local run path: decrypt genesis -> wipe -> rebuild -> seed on the 2-replica staging-parity cluster (memql#1260 / #1304) |
 | **Start cluster (staging parity, blessed)** | `make dev-cluster-up` | 2-replica mesh matching staging; the default local topology (memql#1260). `make dev-cluster-down` to stop |
-| **Stop services** | `docker compose -f docker/docker-compose.full.yml down` | Stop all services |
-| **View logs** | `docker compose -f docker/docker-compose.full.yml logs -f` | Service logs |
+| **Stop services** | `make dev-cluster-down` | Stop the cluster (keeps volumes) |
+| **View logs** | `make dev-cluster-logs` | Cluster logs |
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell |
@@ -344,7 +363,7 @@ memQL-standalone (no CoPresent) deployment.
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 **Local cluster (staging parity -- THE blessed local topology, memql#1260):** `make dev-cluster-up` (background) / `make dev-cluster-down`, or `make dev-cluster` (foreground); `make dev-cluster-restart[-purge]` force a fresh `--no-cache` rebuild after Go/MemQL source edits. Uses `docker-compose.cluster.yml`. The cluster mirrors staging along the **mesh-delivery path** (memql#1212): 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with per-replica unique node ids (hostname-derived via `os.Hostname()`, the compose equivalent of staging's `fieldRef: metadata.name`), plus the copresent SPA + LiveKit behind a single-origin nginx front door (http://localhost:8085). `make dev-cluster-status` prints the per-replica node ids (parity litmus). A few nodes off that path diverge for concrete local-host reasons (identity at 1 replica, voice-agent opt-in via the polyphon overlay, lifecycle probes deferred to Phase 3) -- each is enumerated + justified in the divergence audit in the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle.
-**Local single-node (fast path):** `docker compose -f docker/docker-compose.full.yml up --build` (`make dev`) -- Postgres + bff + voice only. Quicker to boot for engine/DSL/single-binary work that does NOT exercise the multi-replica mesh; it structurally cannot reproduce cross-replica delivery bugs, so use the cluster for anything mesh-shaped.
+**Local single-node (raw compose, NOT parity):** the `make dev*` single-node run/refresh targets were removed (memql#1304) because a single-node `full.yml` stack masquerading as the app structurally cannot reproduce the resilient-mesh class of bugs. If you genuinely need the single-binary stack for narrow engine/DSL work, drive `docker/docker-compose.full.yml` directly (`docker compose -f docker/docker-compose.full.yml up --build`) -- but reach for `make dev-cluster-refresh` / `make dev-cluster-up` for anything mesh-shaped, which is the supported path.
 
 #### Client-tool relay (agent → browser, across nodes)
 
@@ -2012,9 +2031,9 @@ Shell-script rules (per the global convention in
   technically Bash scripts since we use `[[`, arrays, `function`
   keyword, etc.
 
-Current example: `scripts/dev/{lib,refresh,status}.sh`
-implements `make dev-refresh` and `make dev-status`. The
-Makefile targets are one-liners (`bash scripts/dev/refresh.sh`).
+Current example: `scripts/dev/{lib,cluster-refresh,status}.sh`
+implements `make dev-cluster-refresh` and `make dev-status`. The
+Makefile targets are one-liners (`bash scripts/dev/cluster-refresh.sh`).
 
 ### Documentation Style Guidelines
 

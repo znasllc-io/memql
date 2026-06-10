@@ -93,19 +93,19 @@ make dev-cluster-restart-purge           # rebuild AND wipe the DB (clean seed)
 make dev-cluster
 
 # One-command "fresh testing stack" on the cluster (memql#1283): the
-# cluster sibling of `make dev-refresh`. Decrypt genesis (needs
-# MEMQL_MASTER_KEY in env) -> wipe DB -> rebuild -> restart -> wait
-# healthy -> reseed secrets/variables from genesis, all on this
-# 2-replica topology. Tear down full.yml first (the owner's habitual
-# `make dev-refresh` targets the single-node full.yml stack):
+# BLESSED + ONLY supported local refresh (memql#1304). Decrypt genesis
+# (needs MEMQL_MASTER_KEY in env) -> wipe DB -> rebuild -> restart ->
+# wait healthy -> reseed secrets/variables from genesis, all on this
+# 2-replica parity topology. If a raw single-node full.yml stack is
+# still up, tear it down first:
 export MEMQL_MASTER_KEY=...               # your 64-hex genesis key
-make dev-stop                             # tear down full.yml if it's up
+docker compose -f docker/docker-compose.full.yml down   # if it's up
 make dev-cluster-refresh
 ```
 
-> **Front-door divergence (memql#1283, resolved option a).** Unlike
-> `make dev-refresh` -- which waits on full.yml's TLS
-> `https://bff.local.znas.io` front door -- `make dev-cluster-refresh`
+> **Front-door divergence (memql#1283, resolved option a).** A raw
+> single-node `full.yml` stack waits on its TLS
+> `https://bff.local.znas.io` front door; `make dev-cluster-refresh`
 > uses the cluster's **plain-HTTP single-origin front door at
 > <http://localhost:8085>** (HTTP) + `localhost:50050` (gRPC), the
 > deliberate divergence adopted in memql#1260. The health-wait probes

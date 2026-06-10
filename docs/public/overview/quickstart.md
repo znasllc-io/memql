@@ -28,7 +28,7 @@ owner: znas
   export MEMQL_PACKAGES_TOKEN=$(gh auth token)
   ```
 
-  Export it before `docker compose up` / `make dev-refresh`. Without it
+  Export it before `make dev-cluster-up` / `make dev-cluster-refresh`. Without it
   the `app` container's install fails (the backend still comes up). Full
   details + how to mint the token: copresent
   [`docs/sdk-dependency.md`](../copresent/docs/sdk-dependency.md).
@@ -166,9 +166,11 @@ docker compose -f docker/docker-compose.full.yml down
 docker compose -f docker/docker-compose.full.yml down -v
 ```
 
-The repo includes a one-shot `make dev-refresh` that exports concept
-state to yaml, wipes the DB, restarts, and re-seeds -- use it when
-you're iterating on schema changes.
+The repo includes a one-shot `make dev-cluster-refresh` that exports
+concept state to yaml, wipes the DB, restarts, and re-seeds on the
+staging-parity cluster -- use it when you're iterating on schema
+changes. (memql#1304: the single-node `make dev-refresh` was removed;
+the parity cluster is the only supported local run path.)
 
 ---
 

@@ -2,10 +2,10 @@
 # Source of truth for all build, test, run, and development commands.
 #
 # Usage:
-#   make              Build all binaries
-#   make help         Show all available targets
-#   make dev          Start full development stack (Docker)
-#   make test         Run all tests
+#   make                   Build all binaries
+#   make help              Show all available targets
+#   make dev-cluster-up    Start the staging-parity dev cluster (Docker)
+#   make test              Run all tests
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -21,7 +21,6 @@ VERSION     := $(shell cat VERSION 2>/dev/null || echo "dev")
 COMPOSE      := docker compose
 COMPOSE_FULL := -f docker/docker-compose.full.yml
 COMPOSE_POLY := -f docker/docker-compose.polyphon.yml
-COMPOSE_CLAW := -f docker/docker-compose.nemoclaw.yml
 COMPOSE_CLST := -f docker/docker-compose.cluster.yml
 
 # ---------------------------------------------------------------------------
@@ -111,9 +110,9 @@ healthcheck:
 ## voice-agent process. Execs the identity binary inside the
 ## memql-identity container so the mint runs against the same DB +
 ## Ed25519 key the live service uses, then prints the bearer to
-## stdout. Used by scripts/dev/refresh.sh to inject
-## VOICE_AGENT_TOKEN at bring-up. Override INSTANCE / TTL / OUT as
-## needed; defaults match the dev compose setup. See
+## stdout. Used to inject VOICE_AGENT_TOKEN at bring-up. Override
+## INSTANCE / TTL / OUT as needed; defaults match the dev compose
+## setup. See
 ## docs/auth/voice-agent-jwt.md.
 voice-agent-token:
 	@docker exec memql-identity /app/memql voice-agent-token mint \
@@ -121,8 +120,8 @@ voice-agent-token:
 		$${TTL:+--ttl=$$TTL} \
 		$${OUT:+--out=$$OUT}
 
-## Mint a class="node" JWT for the given cluster node. Used by
-## scripts/dev/refresh.sh + the bootstrap-tokens target below to
+## Mint a class="node" JWT for the given cluster node. Used by the
+## bootstrap-tokens target below to
 ## seed MEMQL_NODE_TOKEN for every cluster-node binary in the dev
 ## docker stack (without it the receiving NodeService interceptor
 ## rejects with `authorization header missing` and inter-node
@@ -145,8 +144,7 @@ node-token:
 ##
 ## Run this after `docker compose up` brings the identity service
 ## healthy, then `docker compose up -d --force-recreate` the cluster
-## nodes so they pick up the new env. `make dev-refresh` runs the
-## same flow automatically via scripts/dev/refresh.sh. memql#338.
+## nodes so they pick up the new env. memql#338.
 dev-node-tokens-bootstrap:
 	@bash scripts/dev/mint-node-tokens.sh
 
@@ -165,32 +163,11 @@ identity-signing-key:
 # Run targets
 # ---------------------------------------------------------------------------
 
-.PHONY: run dev dev-polyphon dev-nemoclaw dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-stop dev-logs dev-ps dev-nginx-reload dev-rebuild-node voice-trace voice-trace-now db
+.PHONY: run dev-cluster dev-cluster-up dev-cluster-down dev-cluster-restart dev-cluster-restart-purge dev-cluster-stop dev-cluster-logs dev-cluster-status dev-cluster-scale cluster-e2e dev-nginx-reload voice-trace voice-trace-now db
 
 ## Run the standalone server locally
 run: build
 	./$(BIN_DIR)/memql
-
-## Start the backend cluster (PostgreSQL + memQL nodes) in Docker.
-## The CoPresent frontend (`app`) is gated behind the "frontend"
-## compose profile, so this backend-only stack does NOT start it
-## (memql#461). To include the frontend from here, append
-## `--profile frontend`; or run `make dev-refresh` from the copresent
-## repo, which brings up the cluster AND the frontend.
-dev:
-	$(COMPOSE) $(COMPOSE_FULL) up --build
-
-## Start the backend cluster in background (frontend profiled out; see `dev`)
-dev-bg:
-	$(COMPOSE) $(COMPOSE_FULL) up --build -d
-
-## Start with Polyphon voice pipeline
-dev-polyphon:
-	$(COMPOSE) $(COMPOSE_FULL) $(COMPOSE_POLY) up --build
-
-## Start with NemoClaw coding agent
-dev-nemoclaw:
-	$(COMPOSE) $(COMPOSE_FULL) $(COMPOSE_CLAW) up --build
 
 ## Start cluster mode (bff + cognition + planner)
 dev-cluster:
@@ -300,25 +277,6 @@ dev-cluster-scale:
 	$(COMPOSE) $(COMPOSE_CLST) up -d --no-recreate --scale $(NODE)=$(N) $(NODE)
 	@echo "[scale] $(NODE) -> $(N) replicas"
 
-## Full rebuild — force Docker to rebuild images from scratch
-dev-rebuild:
-	$(COMPOSE) $(COMPOSE_FULL) down
-	$(COMPOSE) $(COMPOSE_FULL) build --no-cache
-	IDENTITY_VERIFIER_BASE_URL= $(COMPOSE) $(COMPOSE_FULL) up -d
-
-## Stop all development services
-dev-stop:
-	$(COMPOSE) $(COMPOSE_FULL) down
-	$(COMPOSE) $(COMPOSE_CLST) down 2>/dev/null || true
-
-## View development service logs (follow)
-dev-logs:
-	$(COMPOSE) $(COMPOSE_FULL) logs -f
-
-## Show running development services
-dev-ps:
-	$(COMPOSE) $(COMPOSE_FULL) ps
-
 ## Tail the end-to-end voice latency waterfall.
 ##
 ## Each voice turn emits structured log lines stamped with
@@ -350,7 +308,7 @@ voice-trace-now:
 ## reload, nginx keeps trying to reach the old container's IP and
 ## the cockpit-worker reconnect loop fails with
 ## "Unimplemented: unknown service WorkerService". The fully-restarted
-## flows (dev-refresh, dev-cluster-restart, dev-rebuild) recreate
+## flows (dev-cluster-refresh, dev-cluster-restart[-purge]) recreate
 ## nginx as part of `compose up` and don't need this.
 ##
 ## Defense in depth -- the live nginx config also runs Docker's
@@ -359,21 +317,6 @@ voice-trace-now:
 ## without a reload. This target just makes it instant.
 dev-nginx-reload:
 	@docker exec memql-lb nginx -s reload && echo "[nginx] reloaded"
-
-## Surgical "rebuild + restart ONE node, then reload nginx" loop.
-## Defaults to the agent node (the one most often touched during
-## worker / computer_use feature work). Override with NODE=:
-##     make dev-rebuild-node NODE=cognition
-##     make dev-rebuild-node NODE=bff
-## Compared to running `docker compose ... up -d --build <node>`
-## directly, this sequence ALSO reloads nginx so the LB picks up
-## the new container's IP without the 10s resolver-TTL window.
-dev-rebuild-node:
-	@if [ -z "$(NODE)" ]; then NODE=agent; else NODE=$(NODE); fi; \
-	echo "[rebuild-node] Rebuilding $$NODE..."; \
-	$(COMPOSE) $(COMPOSE_FULL) up -d --build $$NODE; \
-	echo "[rebuild-node] Reloading nginx..."; \
-	docker exec memql-lb nginx -s reload >/dev/null && echo "[nginx] reloaded"
 
 ## Connect to the development database
 db:
@@ -577,14 +520,14 @@ docker-planner:
 # Database wipe / dev refresh
 # ---------------------------------------------------------------------------
 # Authoring of env vars / secrets lives in `memql-cockpit genesis init`
-# (writes ~/.memql/genesis.znas). dev-refresh decrypts that file, brings
-# up the stack, and seeds manifest-listed entries into the running
+# (writes ~/.memql/genesis.znas). dev-cluster-refresh decrypts that file,
+# brings up the cluster, and seeds manifest-listed entries into the running
 # memQL cluster as concept rows.
 
-.PHONY: db-purge dev-fresh dev-refresh dev-cluster-refresh dev-status install-deps genesis-seal
+.PHONY: db-purge dev-cluster-refresh dev-status install-deps genesis-seal
 
 ## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
-## envelope dev-refresh decrypts at cluster start). Headless equivalent
+## envelope dev-cluster-refresh decrypts at cluster start). Headless equivalent
 ## of the cockpit's first-launch genesis wizard: parse + manifest-validate
 ## + encrypt under MEMQL_MASTER_KEY (reused from your environment when
 ## present, generated + printed on first use).
@@ -597,52 +540,27 @@ genesis-seal:
 ## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
 ## missing) plus go / docker / mkcert (verified only -- printed
 ## install hint if missing). Idempotent. Run before 'make generate'
-## or after a fresh clone. Wired into 'make dev-refresh' so first-
-## time clones aren't surprised by a missing protoc.
+## or after a fresh clone. Wired into 'make dev-cluster-refresh' so
+## first-time clones aren't surprised by a missing protoc.
 install-deps:
 	@bash scripts/dev/install-deps.sh
 
 ## Wipe ALL local memQL data (docker compose down -v + up -d). The
-## next dev-refresh will re-seed from ~/.memql/genesis.znas.
+## next dev-cluster-refresh will re-seed from ~/.memql/genesis.znas.
 db-purge:
 	$(COMPOSE) $(COMPOSE_FULL) down -v
 	$(COMPOSE) $(COMPOSE_FULL) up -d --build
 
-## Single-command "fresh testing stack": decrypt the operator's
-## ~/.memql/genesis.znas (requires MEMQL_MASTER_KEY in env), wipe the
-## database, restart the cluster with the full identity flow, then
-## re-seed manifest-listed entries into the cluster.
-##
-## Steps:
-##   1. Verify MEMQL_MASTER_KEY + locate genesis.znas; decrypt to a
-##      temp .env (mode 0600); export every KEY=VALUE so docker
-##      compose's interpolation finds them.
-##   2. Knowledge-cache export (so the wipe doesn't burn LLM-seeded
-##      chunks).
-##   3. docker compose down -v + rebuild + up -d.
-##   4. Wait for memQL gRPC to accept connections.
-##   5. `secrets seed --env-file <temp>` pushes manifest entries as
-##      concept rows.
-##   6. Restore the knowledge cache from step 2.
-##
-## Alias: dev-fresh is the same recipe; either name works.
-dev-refresh: dev-fresh
-
 ## Quick status snapshot: docker daemon? memQL gRPC reachable? what
-## containers are running? Useful when 'dev-refresh' didn't behave
-## as expected. Implementation lives in scripts/dev/status.sh per
-## the function-based-shell-script convention (CLAUDE.md).
+## containers are running? Useful when 'dev-cluster-refresh' didn't
+## behave as expected. Implementation lives in scripts/dev/status.sh
+## per the function-based-shell-script convention (CLAUDE.md).
 dev-status:
 	@bash scripts/dev/status.sh
 
-## Single-command "fresh testing stack" -- see dev-refresh.
-## Implementation lives in scripts/dev/refresh.sh.
-dev-fresh:
-	@bash scripts/dev/refresh.sh
-
-## dev-refresh ergonomics on the BLESSED 2-replica parity cluster
-## (memql#1283, epic memql#1259 / follows memql#1260). Same recipe as
-## dev-refresh -- decrypt genesis (needs MEMQL_MASTER_KEY) -> wipe DB ->
+## Single-command "fresh testing stack" on the BLESSED 2-replica parity
+## cluster (memql#1283, epic memql#1259 / follows memql#1260): decrypt
+## genesis (needs MEMQL_MASTER_KEY) -> wipe DB ->
 ## rebuild -> restart -> wait healthy -> reseed -- but on
 ## docker-compose.cluster.yml (2 replicas/mesh node + copresent SPA +
 ## LiveKit) so the owner's muscle memory works on the staging-parity
@@ -650,8 +568,9 @@ dev-fresh:
 ## from full.yml's TLS *.local.znas.io front door by design: the cluster
 ## uses the plain-HTTP single-origin front door at http://localhost:8085
 ## (HTTP) + localhost:50050 (gRPC) -- the documented memql#1260
-## divergence; the seed + health-wait target it. Tear down full.yml
-## first. Implementation lives in scripts/dev/cluster-refresh.sh.
+## divergence; the seed + health-wait target it. Tear down any raw
+## full.yml stack (`docker compose -f docker/docker-compose.full.yml
+## down`) first. Implementation lives in scripts/dev/cluster-refresh.sh.
 dev-cluster-refresh:
 	@bash scripts/dev/cluster-refresh.sh
 
@@ -861,11 +780,7 @@ help:
 	@echo "  make planner      Build planner node binary"
 	@echo ""
 	@echo "RUN"
-	@echo "  make run          Run standalone server locally"
-	@echo "  make dev          Start full dev stack in Docker (foreground)"
-	@echo "  make dev-bg       Start full dev stack in Docker (background)"
-	@echo "  make dev-polyphon Start dev stack with Polyphon voice pipeline"
-	@echo "  make dev-nemoclaw Start dev stack with NemoClaw coding agent"
+	@echo "  make run          Run standalone server locally (single process, not a topology)"
 	@echo "  make dev-cluster-up            BLESSED local topology: boot staging-parity cluster (2 replicas/node) in background"
 	@echo "  make dev-cluster-down          Stop the staging-parity cluster (keeps volumes)"
 	@echo "  make dev-cluster               Same as dev-cluster-up but FOREGROUND (build + up)"
@@ -875,11 +790,7 @@ help:
 	@echo "  make dev-cluster-logs          Follow cluster logs"
 	@echo "  make dev-cluster-status        Show per-replica node ids (parity litmus) + front-door URLs"
 	@echo "  make dev-cluster-scale NODE=x N=3  Scale one mesh node on the running cluster"
-	@echo "  make dev-stop            Stop all development services"
-	@echo "  make dev-logs            Follow development service logs"
-	@echo "  make dev-ps              Show running development services"
 	@echo "  make dev-nginx-reload    Reload nginx LB so its DNS cache picks up recreated nodes"
-	@echo "  make dev-rebuild-node NODE=agent    Rebuild + restart ONE node, then reload nginx"
 	@echo "  make voice-trace         Tail end-to-end voice latency waterfall (per-stage ms)"
 	@echo "  make voice-trace-now     Same but pre-loads last 5m of voice trace history"
 	@echo "  make db           Connect to development database (psql)"
@@ -915,9 +826,7 @@ help:
 	@echo "  the cluster + the decrypted genesis."
 	@echo "  make install-deps              Install + verify build tools (protoc, plugins, go, docker, mkcert)"
 	@echo "  make db-purge                  Wipe DB (no restore)"
-	@echo "  make dev-refresh               Verify deps -> decrypt genesis -> wipe -> restart -> seed (single-node full.yml)"
-	@echo "                                 (dev-fresh works as an alias)"
-	@echo "  make dev-cluster-refresh       Same recipe on the BLESSED 2-replica parity cluster (front door http://localhost:8085)"
+	@echo "  make dev-cluster-refresh       BLESSED local refresh: verify deps -> decrypt genesis -> wipe -> restart -> seed on the 2-replica parity cluster (front door http://localhost:8085)"
 	@echo "  make dev-status                Quick snapshot: docker daemon, gRPC handshake, container list"
 	@echo ""
 	@echo "AZURE DEPLOY (epic #491)"
