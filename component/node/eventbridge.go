@@ -63,12 +63,33 @@ type EventBridge struct {
 	// because only the bff fans them to a browser and only the bff subscribes
 	// the substrate.
 	suppressInboundChatReply bool
+
+	// fastPathSink receives a decoded mesh fast-path hint inbound from a peer
+	// (memql#1289). It is the local DeliverySubstrate's HandleFastPath, set on
+	// every mesh node via SetFastPathSink from app/cluster.go. A nil sink means
+	// the substrate is not wired (single-node / durable-only mode): an inbound
+	// hint is then a harmless no-op, because the durable pull remains the
+	// delivery guarantee. The hint NEVER touches the local bus and NEVER
+	// advances a cursor -- it only feeds the per-subscription dedup window so a
+	// live local subscriber wakes instantly instead of waiting for the durable
+	// poll floor (ADR 4.5; see PublishHint).
+	fastPathSink func(Deliverable)
 }
 
 // SuppressInboundChatReply drops the inbound mesh copy of the chat-reply topics
 // on this node's local bus so the durable substrate is their single delivery
 // path to the browser (memql#1264). Called from app/cluster.go on the bff only.
 func (eb *EventBridge) SuppressInboundChatReply(on bool) { eb.suppressInboundChatReply = on }
+
+// SetFastPathSink wires the local DeliverySubstrate's HandleFastPath as the
+// receiver for inbound mesh fast-path hints (memql#1289). Called from
+// app/cluster.go on every mesh node when the substrate is constructed with this
+// EventBridge as its meshFastPath. With a sink set, an inbound hint EventForward
+// is decoded back to a Deliverable and handed to the substrate, which feeds it
+// into the per-subscription dedup window and wakes a live local subscriber
+// instantly -- the low-latency cross-node path. Without a sink (durable-only),
+// inbound hints are ignored: correctness never depends on them (ADR 4.5 rule 3).
+func (eb *EventBridge) SetFastPathSink(sink func(Deliverable)) { eb.fastPathSink = sink }
 
 // NewEventBridge creates an EventBridge that bridges events between the
 // local bus and connected peers.
@@ -102,6 +123,26 @@ func (*EventBridge) Order() int {
 // It checks dedup and TTL, then publishes the event on the local bus.
 func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 	if evt == nil {
+		return
+	}
+
+	// Mesh fast-path hint (memql#1289). A hint rides the EventForward transport
+	// under a reserved topic carrying an encoded Deliverable. It is NOT an
+	// ordinary bus event: decode it and hand it to the substrate's
+	// HandleFastPath, which feeds the per-subscription dedup window and wakes a
+	// live local subscriber for LATENCY. It never touches the local bus and
+	// never advances a cursor (ADR 4.5). A duplicate/re-circulated hint is
+	// harmless -- the substrate's dedup and the durable cursor are the guards --
+	// so it is deliberately NOT run through eb.seen (which would otherwise
+	// suppress a legitimately-distinct deliverable that reused a coincidental
+	// mesh envelope id). It is also NOT re-forwarded to other peers: the hint is
+	// broadcast by the producer, so every owner already receives it directly.
+	if evt.Topic == meshHintTopic {
+		if eb.fastPathSink != nil {
+			if d, ok := decodeMeshHint(evt); ok {
+				eb.fastPathSink(d)
+			}
+		}
 		return
 	}
 

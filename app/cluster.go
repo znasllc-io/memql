@@ -162,10 +162,18 @@ func (a *App) cluster() {
 	// The mesh forward itself is left fully intact: it still carries the human
 	// utterance to the cognition/agent worker that produces the reply (the chat
 	// TRIGGER path), and still publishes these topics on worker local buses.
-	// Only the bff's redundant inbound copy is dropped. The substrate runs
-	// durable-only (nil fast-path); the mesh-hint coexistence is an independent
-	// latency optimization for a later pass. RPC dispatch = #1265, streaming =
-	// #1266, retirement of the old machinery = #1267 -- all out of scope here.
+	// Only the bff's redundant inbound copy is dropped.
+	//
+	// memql#1289 wires the EventBridge as the substrate's mesh FAST-PATH (the
+	// low-latency half deferred from #1264): on a durable Publish the substrate
+	// also broadcasts a best-effort hint over the mesh, and the owning replica's
+	// inbound handler feeds it to HandleFastPath so a cross-node subscriber wakes
+	// INSTANTLY instead of falling back to the 250ms durable-poll floor. The
+	// durable outbox remains the delivery GUARANTEE -- the hint only short-
+	// circuits latency, never advances a cursor, and dedups by EventID against
+	// the durable pull so the two paths collapse to exactly one delivery (ADR
+	// 4.5). This is the prerequisite for the #1266 streaming cutover. RPC
+	// dispatch = #1265, retirement of the old machinery = #1267 -- out of scope.
 	if node.ValidNodeTypes[nodeIdentity.Type] && a.eventBus != nil {
 		dbGetter := func() *bun.DB {
 			if a.db == nil {
@@ -177,7 +185,21 @@ func (a *App) cluster() {
 		// every migrated path shares it: chat-reply (memql#1264) here, and the
 		// client-tool RPC return leg (memql#1265) in the forwarder-wiring block
 		// below.
-		substrate := node.NewSubstrateWithStore(dbGetter, a.Logger)
+		//
+		// memql#1289 constructs it WITH the EventBridge fast-path when the mesh is
+		// up: on a durable Publish the substrate also broadcasts a best-effort hint
+		// so a cross-node subscriber wakes instantly instead of at the 250ms
+		// durable-poll floor. The sink (HandleFastPath) is wired symmetrically so
+		// this node also consumes inbound hints for the spaces it owns. When
+		// EventBridge is absent (single-node / non-mesh binary) the substrate runs
+		// durable-only -- a supported mode (ADR 4.5 rule 3).
+		var substrate *node.Substrate
+		if eventBridge != nil {
+			substrate = node.NewSubstrateWithMeshFastPath(dbGetter, eventBridge, a.Logger)
+			eventBridge.SetFastPathSink(substrate.HandleFastPath)
+		} else {
+			substrate = node.NewSubstrateWithStore(dbGetter, a.Logger)
+		}
 		a.deliverySubstrate = substrate
 		isBFF := nodeIdentity.Type == node.NodeTypeBFF
 		if crd := node.NewChatReplyDelivery(nodeIdentity, substrate, a.eventBus, isBFF, a.Logger); crd != nil {
