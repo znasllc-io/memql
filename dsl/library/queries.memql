@@ -13,8 +13,8 @@
 // ARE server-side -- they're the high-cardinality narrowing that
 // matters; search is the cheap client-side refinement on top.
 
-use library.concepts.{ artifact, generatedOutput, memory }
-use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, liveSnapshotFreshness }
+use library.concepts.{ artifact, generatedOutput, memory, documentVersion }
+use library.shapes.{ artifactFull, generatedOutputFull, memoryFull, liveSnapshotFreshness, documentVersionSummary, documentVersionFull }
 use knowledge.concepts.{ liveSnapshot }
 
 @enabled
@@ -121,4 +121,52 @@ query liveSnapshot queryLatestLiveSnapshotForSource {
   }
   filter  payload.liveSourceId==args.liveSourceId
   shape   liveSnapshotFreshness
+}
+
+// ---- documentVersion: version-history reads (memql#1230) ----
+//
+// History is grouped by the logical documentId. memQL is append-only by
+// (id, createdAt); since each version is a DISTINCT row with its own id,
+// every version of a document persists and is returned by these reads.
+// Owned: ownerUserId==actor.userId so a caller can only ever read their
+// own document history. The frontend orders the returned set by
+// versionNumber (or createdAt) -- both are monotonic.
+
+@enabled
+@description("List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost.")
+query documentVersion queryDocumentVersions {
+  args {
+    documentId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  shape   documentVersionSummary
+}
+
+@enabled
+@description("Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230).")
+query documentVersion queryDocumentVersionById {
+  args {
+    versionId  string  @required
+  }
+  filter  when(args.versionId) { id==args.versionId } && payload.ownerUserId==actor.userId
+  shape   documentVersionFull
+}
+
+// queryDocumentVersionsForOwner backs the Go edit/restore handlers'
+// "read the current latest to compute the next versionNumber + set
+// parentVersionId" step (memql#1229 / #1231 / #1230). It returns the
+// full history for a document under a threaded owner actor (the handler
+// runs under withUserActor, not the user's JWT), and the handler picks
+// the max versionNumber in Go (MemQL has no ORDER BY / LIMIT / max()).
+// Identical filter to queryDocumentVersions; kept as a distinct named
+// read so the handler dependency is explicit and the user-facing query
+// description stays accurate.
+@enabled
+@description("Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors queryDocumentVersions' filter with the full content shape.")
+query documentVersion queryDocumentVersionsForOwner {
+  args {
+    documentId  string  @required
+  }
+  filter  payload.ownerUserId==actor.userId && payload.documentId==args.documentId
+  shape   documentVersionFull
 }
