@@ -27,12 +27,13 @@ name: cluster-e2e
 # The parity cluster builds the carrier (memql-bff-copresent) + the copresent
 # SPA from their PRIVATE sibling repos, so this needs two owner-provisioned
 # repo/org secrets:
-#   * SIBLING_CHECKOUT_TOKEN -- a token that can `actions/checkout` the private
-#     copresent + memql-bff-copresent repos (read access to both).
-#   * MEMQL_PACKAGES_TOKEN   -- read:packages (BOTH scopes) for the SPA build
-#     (docker/docker-compose.cluster.yml sources the `node_auth_token` build
-#     secret from this env var).
-# The `gate` job is guarded on `secrets.SIBLING_CHECKOUT_TOKEN != ''`, so until
+#   * MEMQL_PACKAGES_TOKEN -- a SINGLE token serving both needs (a classic PAT
+#     with `repo` + `read:packages`, SSO-authorized for both orgs covers it):
+#     it `actions/checkout`s the private copresent + memql-bff-copresent repos
+#     (needs `repo` / contents:read on both) AND provides read:packages for the
+#     SPA build (docker/docker-compose.cluster.yml sources the `node_auth_token`
+#     build secret from this env var).
+# The `gate` job is guarded on `secrets.MEMQL_PACKAGES_TOKEN != ''`, so until
 # the owner provisions it the gate NO-OPS (a visible skip) and never spuriously
 # blocks. The owner-finalization checklist (provision -> verify green -> flip to
 # a required deploy gate -> staging roll) is in the runbook.
@@ -70,15 +71,14 @@ jobs:
     steps:
       - id: check
         env:
-          SIBLING_TOKEN: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
           PACKAGES_TOKEN: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
         run: |
-          if [ -n "$SIBLING_TOKEN" ] && [ -n "$PACKAGES_TOKEN" ]; then
+          if [ -n "$PACKAGES_TOKEN" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "INFO: owner secrets present -- the parity gate will run."
+            echo "INFO: owner secret present -- the parity gate will run."
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "WARNING: SIBLING_CHECKOUT_TOKEN and/or MEMQL_PACKAGES_TOKEN are unset."
+            echo "WARNING: MEMQL_PACKAGES_TOKEN is unset."
             echo "WARNING: skipping the parity gate (owner prerequisite not met)."
             echo "WARNING: see docs/public/operate/lifecycle-runbook.md (owner-finalization)."
           fi
@@ -105,14 +105,14 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: visionarys-io/copresent
-          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
+          token: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
           path: copresent
 
       - name: checkout memql-bff-copresent (private sibling)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: visionarys-io/memql-bff-copresent
-          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
+          token: ${{ secrets.MEMQL_PACKAGES_TOKEN }}
           path: memql-bff-copresent
 
       - name: setup go
