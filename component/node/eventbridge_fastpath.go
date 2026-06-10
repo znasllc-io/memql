@@ -21,9 +21,9 @@ import (
 //   - PublishHint(d) (producer side) encodes the Deliverable into an ordinary
 //     EventForward under the reserved meshHintTopic and broadcasts it over the
 //     SAME NodeService transport EventBridge already uses for events. No proto
-//     change, no new broker, the post-#1271 buffer-or-send forward path
-//     verbatim (a hint to a Connection==nil peer buffers; a dropped hint is
-//     harmless because the durable pull is the guarantee).
+//     change, no new broker, the same best-effort send-if-connected forward
+//     path verbatim (a hint to a Connection==nil peer is skipped; a dropped
+//     hint is harmless because the durable pull is the guarantee).
 //   - HandleInbound (consumer side) recognises meshHintTopic, decodes it back to
 //     a Deliverable, and hands it to the substrate's HandleFastPath via the
 //     fastPathSink wired in app/cluster.go. HandleFastPath feeds the hint into
@@ -106,7 +106,7 @@ func (eb *EventBridge) PublishHint(d Deliverable) {
 
 	// Broadcast to all peers -- logical addressing means we do not know (or care)
 	// which physical replica owns the key's consumer; every owner picks it up,
-	// every non-owner discards it. Reuses the post-#1271 buffer-or-send path.
+	// every non-owner discards it. Reuses the best-effort send-if-connected path.
 	eb.forwardToPeers(forward, routingDecision{Forward: true, Broadcast: true})
 }
 

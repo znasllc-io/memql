@@ -32,24 +32,6 @@ const (
 	defaultStaleGossipTimeout = 60 * time.Second
 )
 
-// forwardDisposition classifies how the EventBridge forward path should
-// treat a peer for a single event. See PeerManager.forwardTarget.
-//
-// memql#1271 reverted the dead-for-delivery skip (memql#1245): a
-// Connection==nil peer is always BUFFERED, never silently dropped, because
-// the durable substrate (memql#1264) -- not the best-effort mesh fast-path
-// -- is the cross-replica delivery guarantee now. Only two dispositions
-// remain.
-type forwardDisposition int
-
-const (
-	// dispositionSend: the peer has a live outbound connection; Send now.
-	dispositionSend forwardDisposition = iota
-	// dispositionBuffer: the peer has no outbound connection; enqueue into
-	// its bounded, TTL'd outbox for flush-on-attach (memql#1232).
-	dispositionBuffer
-)
-
 // StatusChangeHandler is invoked whenever a peer's health status transitions.
 // It is called synchronously from the caller's goroutine (either a liveness
 // tick, a Register, or a TouchPeer) so implementations must return quickly
@@ -103,12 +85,6 @@ type PeerManager struct {
 	statusMu       sync.RWMutex
 	onStatusChange StatusChangeHandler
 
-	// outbox buffers EventForward messages for peers whose outbound
-	// connection has not yet been attached (the pre-attach nil window).
-	// EventBridge enqueues into it via EnqueuePending; AttachConnection
-	// drains it. See peer_outbox.go (memql#1232).
-	outbox *peerOutbox
-
 	// lifecycle is THIS node's self-asserted lifecycle state machine
 	// (Starting/Ready/Draining/Stopped, epic memql#1259 #4). The heartbeat
 	// builders advertise lifecycle.Health() in gossip so peers learn this
@@ -135,7 +111,6 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 		livenessTimeout:    defaultLivenessTimeout,
 		offlineTimeout:     defaultOfflineTimeout,
 		staleGossipTimeout: defaultStaleGossipTimeout,
-		outbox:             newPeerOutbox(peerOutboxCapacity, peerOutboxTTL, logger),
 		lifecycle:          NewNodeLifecycle(),
 		logger:             logger,
 	}
@@ -174,44 +149,30 @@ func (pm *PeerManager) SetStaleGossipTimeout(d time.Duration) {
 	}
 }
 
-// DispositionFor classifies how the EventBridge forward path should treat
-// the given peer entry for a single event:
+// sendTarget atomically reads the entry's Connection under the read lock and
+// returns the live connection to Send on, or (nil, false) when the peer has no
+// outbound connection. Returning the connection from inside the lock-protected
+// read closes the check->Send TOCTOU window: the EventBridge sends on the
+// snapshot it got here rather than re-reading entry.Connection (which a
+// concurrent DetachConnection could have niled).
 //
-//   - dispositionSend   -- the peer has a live outbound Connection; Send.
-//   - dispositionBuffer -- Connection==nil; buffer into its outbox for
-//     flush-on-attach (#1232).
-//
-// The dead-for-delivery skip (memql#1245) is reverted (memql#1271): a
-// Connection==nil peer is never silently dropped, because the durable
-// substrate (memql#1264) -- not the best-effort mesh fast-path -- is the
-// cross-replica delivery guarantee. Skipping was harmful: a live non-parent
-// bff replica that this node learned only via gossip is Connection==nil
-// here even while it is up and owns the user's WebSocket, so the skip
-// dropped real chat replies on the star topology (#1259).
-func (pm *PeerManager) DispositionFor(entry *PeerEntry) forwardDisposition {
-	_, d := pm.forwardTarget(entry)
-	return d
-}
-
-// forwardTarget atomically reads the entry's Connection under the read lock
-// and returns both the live connection to Send on (non-nil only when the
-// disposition is dispositionSend) and the disposition. Returning the
-// connection from inside the lock-protected read closes the check->Send
-// TOCTOU window: the EventBridge sends on the snapshot it got here rather
-// than re-reading entry.Connection (which a concurrent DetachConnection
-// could have niled).
-func (pm *PeerManager) forwardTarget(entry *PeerEntry) (*peerConnection, forwardDisposition) {
+// A Connection==nil peer is simply skipped for this best-effort fast-path send
+// -- there is no buffering. The mesh is purely a latency optimization over the
+// durable delivery substrate (memql#1264), which is the cross-replica delivery
+// guarantee; a fast-path hint that misses a not-yet-connected peer is harmless
+// because the durable pull catches it up. This is the closeout of epic
+// memql#1259 Phase 2: the ad-hoc push-model patches (#1232 per-peer outbox,
+// #1245 dead-peer skip) are retired now that all three delivery patterns ride
+// the substrate.
+func (pm *PeerManager) sendTarget(entry *PeerEntry) (*peerConnection, bool) {
 	if entry == nil {
-		return nil, dispositionBuffer
+		return nil, false
 	}
 	pm.mu.RLock()
 	conn := entry.Connection
 	pm.mu.RUnlock()
 
-	if conn != nil {
-		return conn, dispositionSend
-	}
-	return nil, dispositionBuffer
+	return conn, conn != nil
 }
 
 // HeartbeatInterval returns the interval between outbound heartbeats.
@@ -403,11 +364,6 @@ func (pm *PeerManager) Remove(nodeId string) {
 	delete(pm.peers, nodeId)
 	pm.mu.Unlock()
 
-	// Drop any events buffered for a peer that is gone for good.
-	if pm.outbox != nil {
-		pm.outbox.discard(nodeId)
-	}
-
 	pm.logger.Info("peer removed", "peer_id", nodeId)
 
 	pm.fireStatusChange(peerSnapshot, priorHealth, nodev1.NodeHealthStatus_NODE_HEALTH_STOPPED, lastSeen)
@@ -571,43 +527,6 @@ func (pm *PeerManager) AttachConnection(nodeId string, conn *peerConnection) {
 		entry.Connection = conn
 	}
 	pm.mu.Unlock()
-
-	// Flush any events buffered while this peer had no connection. The drain
-	// copies the queued messages out under the outbox's own lock; the
-	// conn.Send calls below run with NO PeerManager lock held, so they cannot
-	// deadlock against the send path (which takes the connection's lock).
-	// Sends happen in FIFO order to preserve event ordering, and the receiver
-	// dedups by EventId (component/node/dedup.go) so re-delivering a buffered
-	// event that also reached the peer another way is a no-op. (memql#1232)
-	if pm.outbox == nil {
-		return
-	}
-	buffered := pm.outbox.drain(nodeId)
-	if len(buffered) == 0 {
-		return
-	}
-	for _, msg := range buffered {
-		conn.Send(msg)
-	}
-	pm.logger.Info("flushed buffered events to newly-attached peer",
-		"peer_id", nodeId,
-		"count", len(buffered),
-	)
-}
-
-// EnqueuePending buffers an EventForward-bearing message for a peer whose
-// outbound connection is not yet attached (Connection == nil). It is the
-// reliable-delivery backstop for the pre-attach nil window: EventBridge calls
-// this instead of silently dropping a broadcast/typed forward to a churning
-// peer. The buffer is bounded (peerOutboxCapacity) and TTL'd
-// (peerOutboxTTL); overflow drops the oldest and stale entries are discarded
-// on the next enqueue or on drain. Safe to call with no PeerManager lock
-// held. (memql#1232)
-func (pm *PeerManager) EnqueuePending(nodeId string, msg *nodev1.NodeClientMessage) {
-	if pm == nil || pm.outbox == nil {
-		return
-	}
-	pm.outbox.enqueue(nodeId, msg)
 }
 
 // DetachConnection clears the *peerConnection on the PeerEntry for
@@ -680,7 +599,6 @@ func (pm *PeerManager) checkLiveness() {
 		remove   bool
 	}
 	var transitions []transition
-	var reaped []string // node ids removed from the table this pass
 
 	pm.mu.Lock()
 	for nodeId, entry := range pm.peers {
@@ -713,7 +631,6 @@ func (pm *PeerManager) checkLiveness() {
 					}
 				}
 				delete(pm.peers, nodeId)
-				reaped = append(reaped, nodeId)
 
 				pm.logger.Info("stale unmonitored peer reaped from peer table",
 					"peer_id", nodeId,
@@ -752,7 +669,6 @@ func (pm *PeerManager) checkLiveness() {
 				entry.Connection.Close()
 			}
 			delete(pm.peers, nodeId)
-			reaped = append(reaped, nodeId)
 
 			pm.logger.Warn("peer marked offline and removed from routing table",
 				"peer_id", nodeId,
@@ -777,13 +693,6 @@ func (pm *PeerManager) checkLiveness() {
 		}
 	}
 	pm.mu.Unlock()
-
-	// Drop buffered events for reaped peers outside the lock.
-	if pm.outbox != nil {
-		for _, nodeId := range reaped {
-			pm.outbox.discard(nodeId)
-		}
-	}
 
 	// Fire handlers outside the lock. Preserving `remove` flag for possible
 	// future use (e.g. emitting distinct events for degradation vs. eviction).
