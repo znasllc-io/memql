@@ -82,12 +82,24 @@ const connCount = 10
 // --- helpers -----------------------------------------------------------------
 
 // openConnections opens n authenticated stream connections through the
-// front door. conns[0] doubles as the producer.
+// front door. conns[0] doubles as the producer. Each connect is retried with
+// backoff: right after a cluster boot the first stream through nginx can be
+// closed mid-handshake while a bff finishes wiring up (seen in CI run
+// 27300481452) -- a transient, not the delivery bug under test.
 func openConnections(ctx context.Context, t *testing.T, tok string, n int) []*memqlclient.Connection {
 	t.Helper()
 	conns := make([]*memqlclient.Connection, 0, n)
 	for i := 0; i < n; i++ {
-		conn, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{Endpoint: endpoint(), Token: tok})
+		var conn *memqlclient.Connection
+		var err error
+		for attempt := 1; attempt <= 4; attempt++ {
+			conn, err = memqlclient.Connect(ctx, memqlclient.ConnectConfig{Endpoint: endpoint(), Token: tok})
+			if err == nil {
+				break
+			}
+			t.Logf("connect %d/%d attempt %d to %s failed (retrying): %v", i+1, n, attempt, endpoint(), err)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
 		if err != nil {
 			for _, c := range conns {
 				c.Close()

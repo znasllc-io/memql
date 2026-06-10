@@ -175,6 +175,11 @@ function seed_token() {
     local state="e2e${r:-x}"
 
     # 1. Ensure an owner exists (first-run only; harmless 404 afterward).
+    # Remember the setup magic link so the login scrape below can tell the
+    # (already-redeemed) setup link apart from the fresh login link -- on a
+    # fast runner both land in the same log window and grabbing the stale one
+    # redeems a used link and yields no auth code (seen in run 27302017089).
+    local consumed_ml=""
     local setup_code
     setup_code=$(curl_id -o /dev/null -w "%{http_code}" -X POST "$idbase/setup" \
         --data-urlencode "domain=local.test" \
@@ -184,24 +189,42 @@ function seed_token() {
     if [[ "$setup_code" == "303" || "$setup_code" == "302" ]]; then
         local sml; sml=$(scrape_magic_link)
         [[ -n "$sml" ]] && curl_id -o /dev/null "${idbase}${sml}&state=setup" >/dev/null 2>&1
+        consumed_ml="$sml"
         log "Owner provisioned via /setup."
     else
         log "/setup returned $setup_code (cluster already bootstrapped); using existing owner login."
     fi
 
-    # 2. Mint a JWT via the OAuth code flow.
-    curl_id -o /dev/null -X POST "$idbase/login" \
-        --data-urlencode "email=$email" \
-        --data-urlencode "client_id=copresent" \
-        --data-urlencode "redirect_uri=$rURI" \
-        --data-urlencode "state=$state"
-    local ml; ml=$(scrape_magic_link)
-    [[ -n "$ml" ]] || die "seed: no magic link found in identity logs (login may have failed)"
-    local code
-    code=$(curl_id -D - -o /dev/null "${idbase}${ml}&state=${state}" 2>&1 \
-        | grep -i "^location:" | grep -oE "code=[A-Za-z0-9_.:-]+" | head -1 | cut -d= -f2)
-    [[ -n "$code" ]] || die "seed: no auth code in /auth/complete redirect"
-    local jwt
+    # 2. Mint a JWT via the OAuth code flow. Retried: the magic-link email is
+    # written to the identity logs asynchronously, so poll for a link that is
+    # NOT the one we already consumed, and retry the whole login->redeem cycle
+    # on a miss.
+    local attempt ml code="" jwt=""
+    for attempt in 1 2 3; do
+        curl_id -o /dev/null -X POST "$idbase/login" \
+            --data-urlencode "email=$email" \
+            --data-urlencode "client_id=copresent" \
+            --data-urlencode "redirect_uri=$rURI" \
+            --data-urlencode "state=$state"
+        ml=""
+        local i
+        for i in $(seq 1 15); do
+            ml=$(scrape_magic_link)
+            [[ -n "$ml" && "$ml" != "$consumed_ml" ]] && break
+            ml=""
+            sleep 1
+        done
+        if [[ -z "$ml" ]]; then
+            warn "seed attempt $attempt: no fresh magic link in identity logs; retrying login"
+            continue
+        fi
+        consumed_ml="$ml"
+        code=$(curl_id -D - -o /dev/null "${idbase}${ml}&state=${state}" 2>&1 \
+            | grep -i "^location:" | grep -oE "code=[A-Za-z0-9_.:-]+" | head -1 | cut -d= -f2)
+        [[ -n "$code" ]] && break
+        warn "seed attempt $attempt: no auth code in /auth/complete redirect; retrying login"
+    done
+    [[ -n "$code" ]] || die "seed: no auth code after 3 login attempts"
     jwt=$(curl_id -X POST "$idbase/oauth/token" -H "Content-Type: application/json" \
         -d "{\"grant_type\":\"authorization_code\",\"code\":\"$code\",\"client_id\":\"copresent\",\"redirect_uri\":\"$rURI\"}" \
         | tr ',' '\n' | grep -oE "\"access_token\":\"[^\"]+\"" | head -1 | sed 's/"access_token":"//;s/"//')
