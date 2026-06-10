@@ -16,6 +16,8 @@ package app
 import (
 	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
 
 	"github.com/uptrace/bun"
 
@@ -109,6 +111,21 @@ type App struct {
 	// non-mesh binaries (no PeerManager). MarkNodeReady / BeginNodeDrain
 	// drive it from the Run lifecycle.
 	nodeLifecycle *node.NodeLifecycle
+
+	// opDrain carries an operator-initiated maintenance/drain request
+	// (memql#1270). An owner/admin operator's gRPC NodeMaintenanceMsg
+	// lands in the handler, which calls RequestOperatorDrain; that closes
+	// opDrain exactly once. app.Run's wait path selects on this channel
+	// alongside the OS shutdown signal, so an operator trigger funnels
+	// into the IDENTICAL graceful-drain sequence #1269 runs on SIGTERM
+	// (Draining advertised in gossip + readiness 503, in-flight drained
+	// within MEMQL_SHUTDOWN_GRACE_PERIOD, Stopped, then the Stop sweep) --
+	// the operator path is a second TRIGGER into the one drain mechanism,
+	// not a re-implementation. opDrainReason records why, for logs.
+	// Constructed in cluster() on mesh binaries; nil on non-mesh ones.
+	opDrain       chan struct{}
+	opDrainOnce   sync.Once
+	opDrainReason atomic.Value // string
 
 	// agentForwarder is the SIForwardRouter used on cognition binaries
 	// to forward AgentGenerateTurnMsg to agent peers. Nil on all other

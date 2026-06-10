@@ -320,6 +320,23 @@ func (a *App) cluster() {
 				"state", newState.String(),
 			)
 		})
+
+		// Operator maintenance trigger (memql#1270): bring up the
+		// operator-drain channel app.Run's wait path selects on, and wire
+		// the owner/admin-gated gRPC NodeMaintenanceMsg handler to it via
+		// the grpcServer. The handler resolves the caller's AccessContext,
+		// rejects non-owner/admin, and calls RequestOperatorDrain on a
+		// drain request -- funneling into the SAME #1269 drain sequence
+		// SIGTERM uses. Only on mesh binaries with a lifecycle; non-mesh
+		// builds have no maintenance entrypoint (the handler reports
+		// unavailable). A node's NodeMaintenanceMsg targets the node that
+		// receives it: operators address a specific node directly (its
+		// gRPC address / a port-forward), matching how the ordered-rollout
+		// driver drives one replica at a time.
+		a.opDrain = make(chan struct{})
+		if a.grpcServer != nil {
+			a.grpcServer.SetNodeMaintenanceHandler(&appNodeMaintenanceHandler{app: a})
+		}
 	}
 
 	// Expose node identity in /healthz so load balancers can route by type.
@@ -389,6 +406,116 @@ func (a *App) MarkNodeStopped() {
 	if err := a.nodeLifecycle.MarkStopped(); err != nil {
 		a.Logger.Warn("node lifecycle: could not mark stopped", "error", err)
 	}
+}
+
+// RequestOperatorDrain is the on-demand operator entrypoint into the
+// graceful drain (memql#1270, epic memql#1259 decision #4: "a
+// maintenance/Draining state triggered two ways from ONE mechanism --
+// automatically on deploy (SIGTERM) and on-demand by an operator
+// command"). An owner/admin operator's gRPC NodeMaintenanceMsg lands in
+// the handler, which calls this. It closes the opDrain channel exactly
+// once; app.Run's wait path selects on that channel alongside the OS
+// shutdown signal, so the operator trigger runs the IDENTICAL drain
+// sequence #1269 runs on SIGTERM -- BeginNodeDrain (Draining advertised
+// in gossip + readiness 503) -> drain delay -> in-flight wait bounded by
+// MEMQL_SHUTDOWN_GRACE_PERIOD -> MarkNodeStopped -> dependency Stop sweep.
+// There is no separate drain code path: the operator path is a second
+// TRIGGER into the one mechanism.
+//
+// Idempotent: a second call (or a SIGTERM that races it) is a no-op
+// because the underlying drain is already under way. Returns true if THIS
+// call initiated the drain, false if it was already requested. A nil
+// opDrain (non-mesh binary, or a node that didn't bring the channel up)
+// returns false -- such a node has no operator drain entrypoint and the
+// handler reports it as unavailable rather than pretending to drain.
+func (a *App) RequestOperatorDrain(reason string) bool {
+	if a == nil || a.opDrain == nil {
+		return false
+	}
+	initiated := false
+	a.opDrainOnce.Do(func() {
+		if reason == "" {
+			reason = "operator maintenance"
+		}
+		a.opDrainReason.Store(reason)
+		a.Logger.Warn("operator maintenance drain requested",
+			"reason", reason,
+			"node_id", a.operatorNodeID(),
+		)
+		close(a.opDrain)
+		initiated = true
+	})
+	return initiated
+}
+
+// OperatorDrainSignal returns the channel app.Run's wait path selects on
+// (closed by RequestOperatorDrain). Nil on non-mesh binaries / nodes with
+// no operator entrypoint, in which case Run waits on the OS signal only.
+func (a *App) OperatorDrainSignal() <-chan struct{} {
+	if a == nil {
+		return nil
+	}
+	return a.opDrain
+}
+
+// OperatorDrainReason returns the reason recorded by the operator drain
+// trigger (empty if none was set). Used for shutdown log context.
+func (a *App) OperatorDrainReason() string {
+	if a == nil {
+		return ""
+	}
+	if v, ok := a.opDrainReason.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// operatorNodeID is a nil-safe helper for log context.
+func (a *App) operatorNodeID() string {
+	if a == nil || a.nodeIdentity == nil {
+		return ""
+	}
+	return a.nodeIdentity.ID
+}
+
+// appNodeMaintenanceHandler bridges the grpc package's
+// NodeMaintenanceHandler port (memql#1270) to the App so the
+// owner/admin-gated NodeMaintenanceMsg handler can drive THIS node's
+// lifecycle. Lives in app/ (rather than grpc/) so the grpc layer stays
+// free of any App / node-lifecycle dependency -- it depends on the narrow
+// port shape, the wiring layer satisfies it. The handler's auth gate
+// (owner/admin) is enforced in component/grpc before this is called.
+type appNodeMaintenanceHandler struct {
+	app *App
+}
+
+// NodeID reports the local node's id so the operator's reply / ordered-
+// rollout driver can confirm which node it actually drained.
+func (h *appNodeMaintenanceHandler) NodeID() string {
+	if h == nil {
+		return ""
+	}
+	return h.app.operatorNodeID()
+}
+
+// CurrentState reports the node's current lifecycle state (lowercase:
+// starting/ready/draining/stopped) so the reply echoes it.
+func (h *appNodeMaintenanceHandler) CurrentState() string {
+	if h == nil || h.app == nil || h.app.nodeLifecycle == nil {
+		return "unknown"
+	}
+	return h.app.nodeLifecycle.State().String()
+}
+
+// BeginDrain runs the operator-initiated drain by funneling into the
+// SAME #1269 sequence SIGTERM uses (RequestOperatorDrain). Returns
+// whether THIS call initiated it (false = drain already under way, which
+// the handler reports as already-draining rather than an error).
+func (h *appNodeMaintenanceHandler) BeginDrain(reason string) bool {
+	if h == nil || h.app == nil {
+		return false
+	}
+	return h.app.RequestOperatorDrain(reason)
 }
 
 // EmitSystemStartup publishes the system.startup event with infrastructure metadata.

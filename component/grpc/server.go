@@ -113,8 +113,14 @@ type Server struct {
 	aiForwarder       *SIForwardRouter
 	agentReplier      AgentTurnHandler
 	agentPauseHook    func(requestId string)
-	serviceRef        *serviceRef
-	extraRegistrars   []func(*grpc.Server)
+	// nodeMaintenanceHandler drives THIS node's lifecycle for the operator
+	// maintenance trigger (memql#1270). Set by app bootstrap on mesh
+	// binaries (app wires it to the App's RequestOperatorDrain via a narrow
+	// port -- component/grpc can't import app/node-lifecycle). Nil on
+	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
+	nodeMaintenanceHandler NodeMaintenanceHandler
+	serviceRef             *serviceRef
+	extraRegistrars        []func(*grpc.Server)
 	// tokenVerifier honors RotateAuthMsg on open streams. Set by
 	// SetVerifier during app bootstrap; nil on nodes that don't run
 	// an identity verifier (rotation responds with
@@ -262,19 +268,20 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	s.grpcServer = grpc.NewServer(serverOpts...)
 	identityResolver := auth.NewIdentityResolver(&engineQueryRunner{engine: s.engine}, s.logger)
 	svc := &service{
-		logger:           s.logger,
-		engine:           s.engine,
-		eventBus:         s.eventBus,
-		sttProvider:      s.sttProvider,
-		wiring:           s.wiring,
-		sense:            s.sense,
-		scoreEngine:      s.scoreEngine,
-		roomProvider:     s.roomProvider,
-		conceptRegistry:  s.conceptRegistry,
-		identityResolver: identityResolver,
-		aiForwarder:      s.aiForwarder,
-		agentReplier:     s.agentReplier,
-		verifier:         s.tokenVerifier,
+		logger:                 s.logger,
+		engine:                 s.engine,
+		eventBus:               s.eventBus,
+		sttProvider:            s.sttProvider,
+		wiring:                 s.wiring,
+		sense:                  s.sense,
+		scoreEngine:            s.scoreEngine,
+		roomProvider:           s.roomProvider,
+		conceptRegistry:        s.conceptRegistry,
+		identityResolver:       identityResolver,
+		aiForwarder:            s.aiForwarder,
+		agentReplier:           s.agentReplier,
+		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
+		verifier:               s.tokenVerifier,
 	}
 	memqlv1.RegisterMemqlServiceServer(s.grpcServer, svc)
 	if s.serviceRef != nil {
@@ -449,6 +456,12 @@ type service struct {
 	// agent binaries as agent.RequestPause via Server.SetAgentPauseHook.
 	// Nil on other node types; the AgentPreemptTurn handler no-ops when unset.
 	agentPauseHook func(requestId string)
+
+	// nodeMaintenanceHandler drives THIS node's lifecycle for the operator
+	// maintenance trigger (memql#1270). Non-nil on mesh binaries (wired by
+	// app bootstrap to the App's RequestOperatorDrain). Nil elsewhere; the
+	// NodeMaintenance handler reports "unavailable" when unset.
+	nodeMaintenanceHandler NodeMaintenanceHandler
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's
@@ -1040,6 +1053,10 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// refresh-token rotation. See handleRotateAuth.
 	case *memqlv1.MemqlClientMessage_RotateAuth:
 		return s.handleRotateAuth(envelope, payload.RotateAuth)
+	// Operator maintenance trigger (memql#1270): owner/admin-gated; puts
+	// THIS node into Draining on demand via the same #1269 drain mechanism.
+	case *memqlv1.MemqlClientMessage_NodeMaintenance:
+		return s.handleNodeMaintenance(envelope, payload.NodeMaintenance)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)

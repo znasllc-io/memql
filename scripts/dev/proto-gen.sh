@@ -75,10 +75,13 @@ regenerate() {
 			grpc_args=(--go-grpc_out=gen --go-grpc_opt=paths=source_relative)
 		fi
 		echo "  regenerating ${dir} (${files})..."
+		# "${grpc_args[@]+...}" guards the empty-array expansion under set -u
+		# on bash 3.2 (macOS): a grpc=no target (bus) has an empty grpc_args,
+		# and a bare "${grpc_args[@]}" aborts with "unbound variable" there.
 		# shellcheck disable=SC2086 -- word-splitting the file list is intended.
 		(cd "$dir" && protoc --proto_path=. \
 			--go_out=gen --go_opt=paths=source_relative \
-			"${grpc_args[@]}" \
+			${grpc_args[@]+"${grpc_args[@]}"} \
 			$files)
 	done
 }
