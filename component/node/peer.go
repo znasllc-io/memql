@@ -85,6 +85,12 @@ type PeerManager struct {
 	statusMu       sync.RWMutex
 	onStatusChange StatusChangeHandler
 
+	// outbox buffers EventForward messages for peers whose outbound
+	// connection has not yet been attached (the pre-attach nil window).
+	// EventBridge enqueues into it via EnqueuePending; AttachConnection
+	// drains it. See peer_outbox.go (memql#1232).
+	outbox *peerOutbox
+
 	logger *slog.Logger
 }
 
@@ -103,6 +109,7 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 		livenessTimeout:    defaultLivenessTimeout,
 		offlineTimeout:     defaultOfflineTimeout,
 		staleGossipTimeout: defaultStaleGossipTimeout,
+		outbox:             newPeerOutbox(peerOutboxCapacity, peerOutboxTTL, logger),
 		logger:             logger,
 	}
 
@@ -319,6 +326,11 @@ func (pm *PeerManager) Remove(nodeId string) {
 	delete(pm.peers, nodeId)
 	pm.mu.Unlock()
 
+	// Drop any events buffered for a peer that is gone for good.
+	if pm.outbox != nil {
+		pm.outbox.discard(nodeId)
+	}
+
 	pm.logger.Info("peer removed", "peer_id", nodeId)
 
 	pm.fireStatusChange(peerSnapshot, priorHealth, nodev1.NodeHealthStatus_NODE_HEALTH_STOPPED, lastSeen)
@@ -478,10 +490,47 @@ func (pm *PeerManager) AttachConnection(nodeId string, conn *peerConnection) {
 		return
 	}
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
 	if entry, ok := pm.peers[nodeId]; ok {
 		entry.Connection = conn
 	}
+	pm.mu.Unlock()
+
+	// Flush any events buffered while this peer had no connection. The drain
+	// copies the queued messages out under the outbox's own lock; the
+	// conn.Send calls below run with NO PeerManager lock held, so they cannot
+	// deadlock against the send path (which takes the connection's lock).
+	// Sends happen in FIFO order to preserve event ordering, and the receiver
+	// dedups by EventId (component/node/dedup.go) so re-delivering a buffered
+	// event that also reached the peer another way is a no-op. (memql#1232)
+	if pm.outbox == nil {
+		return
+	}
+	buffered := pm.outbox.drain(nodeId)
+	if len(buffered) == 0 {
+		return
+	}
+	for _, msg := range buffered {
+		conn.Send(msg)
+	}
+	pm.logger.Info("flushed buffered events to newly-attached peer",
+		"peer_id", nodeId,
+		"count", len(buffered),
+	)
+}
+
+// EnqueuePending buffers an EventForward-bearing message for a peer whose
+// outbound connection is not yet attached (Connection == nil). It is the
+// reliable-delivery backstop for the pre-attach nil window: EventBridge calls
+// this instead of silently dropping a broadcast/typed forward to a churning
+// peer. The buffer is bounded (peerOutboxCapacity) and TTL'd
+// (peerOutboxTTL); overflow drops the oldest and stale entries are discarded
+// on the next enqueue or on drain. Safe to call with no PeerManager lock
+// held. (memql#1232)
+func (pm *PeerManager) EnqueuePending(nodeId string, msg *nodev1.NodeClientMessage) {
+	if pm == nil || pm.outbox == nil {
+		return
+	}
+	pm.outbox.enqueue(nodeId, msg)
 }
 
 // DetachConnection clears the *peerConnection on the PeerEntry for
@@ -554,6 +603,7 @@ func (pm *PeerManager) checkLiveness() {
 		remove   bool
 	}
 	var transitions []transition
+	var reaped []string // node ids removed from the table this pass
 
 	pm.mu.Lock()
 	for nodeId, entry := range pm.peers {
@@ -586,6 +636,7 @@ func (pm *PeerManager) checkLiveness() {
 					}
 				}
 				delete(pm.peers, nodeId)
+				reaped = append(reaped, nodeId)
 
 				pm.logger.Info("stale unmonitored peer reaped from peer table",
 					"peer_id", nodeId,
@@ -624,6 +675,7 @@ func (pm *PeerManager) checkLiveness() {
 				entry.Connection.Close()
 			}
 			delete(pm.peers, nodeId)
+			reaped = append(reaped, nodeId)
 
 			pm.logger.Warn("peer marked offline and removed from routing table",
 				"peer_id", nodeId,
@@ -648,6 +700,13 @@ func (pm *PeerManager) checkLiveness() {
 		}
 	}
 	pm.mu.Unlock()
+
+	// Drop buffered events for reaped peers outside the lock.
+	if pm.outbox != nil {
+		for _, nodeId := range reaped {
+			pm.outbox.discard(nodeId)
+		}
+	}
 
 	// Fire handlers outside the lock. Preserving `remove` flag for possible
 	// future use (e.g. emitting distinct events for degradation vs. eviction).

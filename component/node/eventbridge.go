@@ -173,11 +173,13 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 
 // forwardToPeers sends an EventForward to the appropriate peers based on the routing decision.
 //
-// A peer with Connection=nil (e.g. its outbound stream is mid-reconnect)
-// is counted as "skipped" -- the message is NOT delivered to it. Callers
-// should treat skipped peers as missed deliveries. If the originating
-// concept has stricter delivery semantics than fire-and-forget (e.g.
-// client-tool-request), it must layer its own retry/outbox on top.
+// A peer with Connection=nil (e.g. its outbound stream has not yet been
+// attached after a blue-green cutover, or is mid-reconnect) does NOT lose
+// the event: it is enqueued into that peer's bounded, TTL'd outbox
+// (PeerManager.EnqueuePending) and flushed in order when AttachConnection
+// finally binds the connection. The receiver dedups by EventId
+// (component/node/dedup.go), so a buffered copy that also reaches the peer
+// another way is harmless. (memql#1232)
 func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
@@ -193,29 +195,30 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, skipped := 0, 0
-	var skippedPeers []string
+	sent, buffered := 0, 0
+	var bufferedPeers []string
 	for _, peer := range targets {
 		if peer.Connection != nil {
 			peer.Connection.Send(msg)
 			sent++
 		} else {
-			skipped++
-			skippedPeers = append(skippedPeers, peer.Info.GetNodeId())
+			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
+			buffered++
+			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
 		}
 	}
 
 	if len(targets) > 0 {
-		if skipped > 0 {
-			// Elevated to Warn so silent delivery failures show up
-			// without needing DEBUG logs. Previously events to a peer
-			// with Connection=nil were lost without any indication.
-			eb.logger.Warn("event forwarded with skipped peers (nil Connection)",
+		if buffered > 0 {
+			// Buffered (not lost): the peer's outbox holds the event until
+			// AttachConnection flushes it. Logged at Info so a churning peer
+			// is still visible without implying a delivery failure.
+			eb.logger.Info("event buffered for peers pending connection",
 				"topic", forward.Topic,
 				"event_id", forward.EventId,
 				"sent", sent,
-				"skipped", skipped,
-				"skipped_peers", skippedPeers,
+				"buffered", buffered,
+				"buffered_peers", bufferedPeers,
 				"broadcast", decision.Broadcast,
 			)
 		} else {
@@ -266,8 +269,8 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
 
-	sent, skipped := 0, 0
-	var skippedPeers []string
+	sent, buffered := 0, 0
+	var bufferedPeers []string
 	for _, peer := range targets {
 		if peer.Info.NodeId == excludeNodeId {
 			continue // don't send back to the node that sent it
@@ -276,19 +279,24 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 			peer.Connection.Send(msg)
 			sent++
 		} else {
-			skipped++
-			skippedPeers = append(skippedPeers, peer.Info.GetNodeId())
+			// Buffer for a not-yet-attached peer (same reliability backstop
+			// as forwardToPeers). The relayed copy keeps the original
+			// EventId, so the receiver's dedup window suppresses any
+			// duplicate that also arrives via a direct hop. (memql#1232)
+			eb.peerManager.EnqueuePending(peer.Info.GetNodeId(), msg)
+			buffered++
+			bufferedPeers = append(bufferedPeers, peer.Info.GetNodeId())
 		}
 	}
 
-	if skipped > 0 {
-		eb.logger.Warn("mesh relay forwarded with skipped peers (nil Connection)",
+	if buffered > 0 {
+		eb.logger.Info("mesh relay buffered for peers pending connection",
 			"topic", evt.Topic,
 			"event_id", evt.EventId,
 			"ttl", evt.Ttl,
 			"sent", sent,
-			"skipped", skipped,
-			"skipped_peers", skippedPeers,
+			"buffered", buffered,
+			"buffered_peers", bufferedPeers,
 		)
 	}
 }
