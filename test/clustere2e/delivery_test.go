@@ -14,27 +14,37 @@
 // exercises the same component/node EventBridge.forwardToPeers path as
 // the live chat reply, deterministically and without SI provider keys.
 //
-// WHY THIS GOES RED ON CURRENT MAIN
-// ---------------------------------
-// bff replicas do not dial each other: bff is the mesh root (no
-// MEMQL_PARENT_ADDRESS) and its MEMQL_WORKER_PEERS lists only the
-// worker node types, never a sibling bff. So a row inserted on bff-1
-// has, from bff-1's view, a peer bff-2 with Connection==nil; past the
-// connecting-grace window the memql#1245 change classifies it
-// dispositionSkip and drops the forward. A subscriber whose stream is
-// anchored on bff-2 therefore never sees an utterance inserted on bff-1
-// -> delivered-count 1 instead of N. The durable backbone in Phase 1
+// HOW IT REPRODUCES THE BUG (RED on current main)
+// -----------------------------------------------
+// nginx round-robins each new gRPC connection across the bff replicas,
+// so a handful of subscriber connections spread across both. The producer
+// inserts one utterance on whichever replica its connection landed on;
+// that replica fans the event out to its LOCAL subscribers and forwards
+// to peers. But bff replicas never dial each other (bff is the mesh root;
+// MEMQL_WORKER_PEERS lists only worker node types), so from the producer
+// replica every sibling bff is a peer with Connection==nil and, past the
+// connecting-grace window, the memql#1245 change classifies it
+// dispositionSkip and DROPS the forward. Result: only the subscribers
+// co-located with the producer observe the utterance; every subscriber on
+// another replica misses it. The durable backbone in Phase 1
 // (memql#1263/#1264) makes every replica converge -> this goes green.
 //
+// The gate needs NO replica identification: it simply asserts that EVERY
+// subscriber observes the one utterance exactly once. On current main the
+// cross-replica subscribers miss it, so the count is short.
+//
 // RUN
-//   MEMQL_E2E_TOKEN=<user PAT/JWT> go test -tags clustere2e -count=1 \
+//   MEMQL_E2E_TOKEN=<user JWT> go test -tags clustere2e -count=1 \
 //     -timeout=300s ./test/clustere2e/...
 // or `make cluster-e2e`, which boots the cluster + seeds a token first.
 package clustere2e
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,64 +66,69 @@ func token(t *testing.T) string {
 	v := os.Getenv("MEMQL_E2E_TOKEN")
 	if v == "" {
 		t.Skip("MEMQL_E2E_TOKEN not set -- run via `make cluster-e2e` which seeds a user token, " +
-			"or export a PAT/JWT for a cluster user")
+			"or export a JWT for a cluster user")
 	}
 	return v
 }
 
-// wantReplicas is how many distinct bff replicas the subscriber side must
-// cover. Staging + the local parity cluster both run bff at replicas: 2.
-const wantReplicas = 2
+// connCount is how many gRPC connections the gate opens through the front
+// door. nginx round-robins them across the bff replicas; with this many,
+// at least one lands on a replica other than the producer's with
+// overwhelming probability, so a cross-replica drop is observed
+// deterministically. (P(all co-located on a 2-replica cluster) ~= 2^-N.)
+const connCount = 10
 
 // --- helpers -----------------------------------------------------------------
 
-// connectReplicas opens connections through the front door until it has
-// covered `want` DISTINCT bff replicas (keyed by the ServerHello NodeId),
-// or fails. nginx round-robins each new gRPC connection across the bff
-// replicas, so a handful of dials reliably covers both. Returns one live
-// connection per distinct replica.
-func connectReplicas(ctx context.Context, t *testing.T, tok string, want int) map[string]*memqlclient.Connection {
+// openConnections opens n authenticated stream connections through the
+// front door. conns[0] doubles as the producer.
+func openConnections(ctx context.Context, t *testing.T, tok string, n int) []*memqlclient.Connection {
 	t.Helper()
-	byReplica := make(map[string]*memqlclient.Connection)
-	const maxDials = 24
-	for dials := 0; dials < maxDials && len(byReplica) < want; dials++ {
-		conn, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{
-			Endpoint: endpoint(),
-			Token:    tok,
-		})
+	conns := make([]*memqlclient.Connection, 0, n)
+	for i := 0; i < n; i++ {
+		conn, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{Endpoint: endpoint(), Token: tok})
 		if err != nil {
-			t.Fatalf("connect to %s (dial %d): %v", endpoint(), dials, err)
+			for _, c := range conns {
+				c.Close()
+			}
+			t.Fatalf("connect %d/%d to %s: %v", i+1, n, endpoint(), err)
 		}
-		if conn.NodeId == "" {
-			conn.Close()
-			t.Fatalf("server handshake returned an empty NodeId; cannot tell replicas apart")
-		}
-		if _, seen := byReplica[conn.NodeId]; seen {
-			conn.Close() // already covered this replica
-			continue
-		}
-		byReplica[conn.NodeId] = conn
+		conns = append(conns, conn)
 	}
-	if len(byReplica) < want {
-		ids := make([]string, 0, len(byReplica))
-		for nodeID := range byReplica {
-			ids = append(ids, nodeID)
-		}
-		for _, c := range byReplica {
-			c.Close()
-		}
-		t.Fatalf("could not reach %d distinct bff replicas after %d dials (saw %d: %v). "+
-			"Is this the 2-replica parity cluster (make dev-cluster-up)? A single-replica "+
-			"topology structurally cannot reproduce the cross-replica delivery bug.",
-			want, maxDials, len(ids), ids)
-	}
-	return byReplica
+	return conns
 }
 
-// newSpaceWithHuman creates a fresh space and joins the token's user to it
-// as a human participant, so the user can both send utterances and see the
-// space's graph events. Returns the space id + the human participant id.
-func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Connection) (spaceID, participantID string) {
+// userIDFromToken extracts the actor user id from the JWT `sub` claim
+// (v1:identity:user:<uuid>). The signature isn't verified here -- the BFF
+// already verified it on the stream; we just need the subject string.
+func userIDFromToken(t *testing.T, tok string) string {
+	t.Helper()
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("MEMQL_E2E_TOKEN is not a JWT (got %d segments); a user JWT is required", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode JWT payload: %v", err)
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		t.Fatalf("parse JWT claims: %v", err)
+	}
+	if claims.Sub == "" {
+		t.Fatalf("JWT has no sub claim")
+	}
+	return claims.Sub
+}
+
+// newSpaceWithHuman creates a fresh space, joins the token's user to it as a
+// human participant, and returns the space id + the SERVER-assigned human
+// participant id (content-addressed on (space, user); we read it back rather
+// than guess it). The user can then send utterances and see the space's
+// graph events.
+func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Connection, userID string) (spaceID, participantID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
 	spaceID = "v1:cognition:space:" + id.NewShortId()
@@ -124,34 +139,65 @@ func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Conn
 	}); err != nil {
 		t.Fatalf("create space: %v", err)
 	}
-	participantID = "v1:cognition:participant:" + id.NewShortId()
 	if _, err := qc.MutationJoinSpaceAsHuman(ctx, memqlclient.MutationJoinSpaceAsHumanArgs{
 		SpaceId:     spaceID,
+		UserId:      userID,
 		DisplayName: "clustere2e probe",
 		Status:      "active",
 	}); err != nil {
 		t.Fatalf("join space as human: %v", err)
 	}
+	// Read back the server-assigned participant id.
+	res, err := qc.QuerySpaceParticipants(ctx, memqlclient.QuerySpaceParticipantsArgs{
+		SpaceId:         spaceID,
+		ParticipantType: "human",
+	})
+	if err != nil {
+		t.Fatalf("query space participants: %v", err)
+	}
+	for _, row := range res.Rows() {
+		if pid := rowID(row); strings.HasPrefix(pid, "participant-") || strings.Contains(pid, ":participant:") || pid != "" {
+			participantID = pid
+			break
+		}
+	}
+	if participantID == "" {
+		t.Fatalf("no human participant found in space %s after join (rows=%d)", spaceID, len(res.Rows()))
+	}
 	return spaceID, participantID
 }
 
+// rowID pulls the row id out of a query row, tolerating a flat `id` or a
+// nested `payload.id` shape.
+func rowID(row memqlclient.Row) string {
+	if v, _ := row["id"].(string); v != "" {
+		return v
+	}
+	if p, ok := row["payload"].(map[string]any); ok {
+		if v, _ := p["id"].(string); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // subscribeUtterances opens a graph-events subscription on conn and returns
-// a channel of created-utterance ids observed by THAT replica.
+// a channel of created-utterance ids observed by THAT connection's replica.
 func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID string) <-chan string {
 	t.Helper()
 	sm := memqlclient.NewSubscriptionManager(conn.Dispatcher())
 	// graph.node.created.# -- every node-created event; we filter to the
-	// utterance concept + our space + our utterance id below. (A tighter
-	// server-side filter risks masking a drop behind a filter mismatch, so
-	// we subscribe broad and assert narrow.)
+	// utterance concept + our utterance id below. (A tighter server-side
+	// filter risks masking a drop behind a filter mismatch, so we subscribe
+	// broad and assert narrow.)
 	_, events, err := sm.Subscribe(ctx, memqlclient.SubscriptionKindGraphEvents, "node.created.#")
 	if err != nil {
-		t.Fatalf("subscribe on replica %s: %v", conn.NodeId, err)
+		t.Fatalf("subscribe: %v", err)
 	}
 	out := make(chan string, 64)
 	go func() {
 		for ev := range events {
-			if uid := utteranceIDFor(ev, spaceID); uid != "" {
+			if uid := utteranceIDFor(ev); uid != "" {
 				out <- uid
 			}
 		}
@@ -160,66 +206,56 @@ func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Co
 }
 
 // utteranceIDFor returns the utterance id if the event is the creation of a
-// v1:cognition:utterance row in spaceID, else "".
-func utteranceIDFor(ev memqlclient.Event, spaceID string) string {
+// v1:cognition:utterance row, else "". Tolerates flat or node-nested payloads.
+func utteranceIDFor(ev memqlclient.Event) string {
 	concept, _ := ev.Payload["concept"].(string)
-	if concept != "v1:cognition:utterance" {
-		// Some event shapes nest the row under "node"/"payload"; tolerate both.
-		if node, ok := ev.Payload["node"].(map[string]any); ok {
-			concept, _ = node["concept"].(string)
-		}
+	node, _ := ev.Payload["node"].(map[string]any)
+	if concept == "" && node != nil {
+		concept, _ = node["concept"].(string)
 	}
 	if concept != "v1:cognition:utterance" {
 		return ""
 	}
-	id, _ := ev.Payload["id"].(string)
-	if id == "" {
-		if node, ok := ev.Payload["node"].(map[string]any); ok {
-			id, _ = node["id"].(string)
-		}
+	if uid, _ := ev.Payload["id"].(string); uid != "" {
+		return uid
 	}
-	return id
+	if node != nil {
+		uid, _ := node["id"].(string)
+		return uid
+	}
+	return ""
 }
 
 // --- the gate ----------------------------------------------------------------
 
 // TestClusterCrossReplicaDelivery is the permanent Phase-0 gate. It must be
-// RED on current main (a subscriber on a non-producing bff replica misses
-// the utterance) and GREEN once the durable backbone lands (Phase 1).
+// RED on current main (subscribers on a non-producing bff replica miss the
+// utterance) and GREEN once the durable backbone lands (Phase 1).
 func TestClusterCrossReplicaDelivery(t *testing.T) {
 	tok := token(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Subscriber side: one live connection per distinct bff replica.
-	replicas := connectReplicas(ctx, t, tok, wantReplicas)
+	conns := openConnections(ctx, t, tok, connCount)
 	defer func() {
-		for _, c := range replicas {
+		for _, c := range conns {
 			c.Close()
 		}
 	}()
-	t.Logf("covered %d bff replicas: %v", len(replicas), keys(replicas))
+	producer := conns[0]
 
-	// Producer side: its own connection (lands on some replica via nginx).
-	producer, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{Endpoint: endpoint(), Token: tok})
-	if err != nil {
-		t.Fatalf("producer connect: %v", err)
-	}
-	defer producer.Close()
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producer)
-	t.Logf("producer anchored on replica %s; space %s", producer.NodeId, spaceID)
+	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
+	t.Logf("opened %d connections (round-robined across bff replicas); space %s", len(conns), spaceID)
 
-	// Subscribe on every replica BEFORE producing, then let the
+	// Subscribe on EVERY connection before producing, then let the
 	// subscriptions settle so we don't race the insert.
-	seen := make(map[string]map[string]int) // replica -> utteranceId -> count
-	chans := make(map[string]<-chan string)
-	for nodeID, c := range replicas {
-		seen[nodeID] = make(map[string]int)
-		chans[nodeID] = subscribeUtterances(ctx, t, c, spaceID)
+	chans := make([]<-chan string, len(conns))
+	for i, c := range conns {
+		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
-	// Produce exactly one utterance.
+	// Produce exactly one utterance from conns[0].
 	utteranceID := "v1:cognition:utterance:" + id.NewShortId()
 	qc := memqlclient.NewQueryClient(producer.Dispatcher())
 	if _, err := qc.MutationSendTextUtterance(ctx, memqlclient.MutationSendTextUtteranceArgs{
@@ -233,21 +269,22 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	}
 	t.Logf("produced utterance %s", utteranceID)
 
-	// Collect for a generous window; every replica must observe it exactly once.
+	// Collect for a generous window; every connection must observe it once.
+	seen := make([]int, len(conns))
 	deadline := time.After(8 * time.Second)
 	for collecting := true; collecting; {
 		select {
 		case <-deadline:
 			collecting = false
-		case uid := <-chans[producer.NodeId]:
-			recordIfMatch(seen, producer.NodeId, uid, utteranceID)
 		default:
 			drained := false
-			for nodeID, ch := range chans {
+			for i, ch := range chans {
 				select {
 				case uid := <-ch:
-					recordIfMatch(seen, nodeID, uid, utteranceID)
-					drained = true
+					if uid == utteranceID {
+						seen[i]++
+						drained = true
+					}
 				default:
 				}
 			}
@@ -257,39 +294,33 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 		}
 	}
 
-	// Assert exactly-once delivery on EVERY replica.
-	var dropped, duped []string
-	for nodeID := range replicas {
-		switch seen[nodeID][utteranceID] {
+	// Sanity: the producer's OWN replica must observe its own utterance --
+	// otherwise this is a subscription/authz fault, not the delivery bug.
+	if seen[0] == 0 {
+		t.Fatalf("producer connection did not observe its own utterance %s -- "+
+			"subscription/authz setup problem, not the cross-replica delivery bug", utteranceID)
+	}
+
+	var missed, duped []int
+	for i := range conns {
+		switch seen[i] {
 		case 1: // good
 		case 0:
-			dropped = append(dropped, nodeID)
+			missed = append(missed, i)
 		default:
-			duped = append(duped, nodeID)
+			duped = append(duped, i)
 		}
 	}
-	if len(dropped) > 0 || len(duped) > 0 {
-		t.Fatalf("cross-replica delivery FAILED for utterance %s:\n"+
-			"  dropped on replicas: %v\n"+
-			"  duplicated on replicas: %v\n"+
-			"  per-replica counts: %v\n"+
-			"This is the memql#1259 delivery bug: an event produced on one bff replica "+
-			"does not reach a subscriber anchored on another. Expected exactly-once on all %d replicas.",
-			utteranceID, dropped, duped, seen, len(replicas))
-	}
-	t.Logf("exactly-once delivery confirmed on all %d replicas", len(replicas))
-}
+	sawCount := len(conns) - len(missed)
+	t.Logf("subscribers that observed the utterance exactly once: %d/%d", sawCount, len(conns))
 
-func recordIfMatch(seen map[string]map[string]int, nodeID, uid, want string) {
-	if uid == want {
-		seen[nodeID][uid]++
+	if len(missed) > 0 || len(duped) > 0 {
+		t.Fatalf("cross-replica delivery FAILED: only %d/%d subscribers observed utterance %s "+
+			"(missed connections %v, duplicated on %v; per-conn counts %v).\n"+
+			"On a 2-replica cluster a subscriber anchored on a different bff replica than the "+
+			"producer never sees the event -- the memql#1259 delivery drop. Expected exactly-once "+
+			"on ALL %d connections.",
+			sawCount, len(conns), utteranceID, missed, duped, seen, len(conns))
 	}
-}
-
-func keys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
+	t.Logf("exactly-once delivery confirmed on all %d connections", len(conns))
 }

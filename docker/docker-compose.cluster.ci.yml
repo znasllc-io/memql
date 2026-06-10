@@ -25,16 +25,62 @@
 #      the first-run /setup owner path. This is a TEST-ONLY relaxation; the
 #      base compose (and staging) keep waitlist.
 
+# Both jobs use the compose `!override` / `!reset` merge tags (Docker Compose
+# v2.24+). The singleton services pin a fixed `container_name` (memql-db,
+# memql-identity, memql-lb, memql-azurite, memql-livekit) that collides with a
+# running full.yml stack on the same daemon; we !reset them so Compose
+# auto-names each `<project>-<service>-N` and the parity cluster coexists.
+# Services stay reachable by SERVICE NAME on the cluster network regardless.
 services:
   postgres:
     ports: !override []
+    container_name: !reset null
 
   identity:
     ports: !override []
+    container_name: !reset null
     environment:
       # Test-only: allow the seed step to register a probe user without an
       # operator approving a waitlist entry. NEVER set this on staging/prod.
       IDENTITY_REGISTRATION_MODE: open
+      # SERVICE_NAME is normally supplied by the genesis env envelope; set it
+      # explicitly so the cluster boots against a minimal CI .env.local that
+      # doesn't carry the per-service genesis vars.
+      SERVICE_NAME: memQL-identity
+
+  # SERVICE_NAME is normally supplied per-node by the genesis env envelope;
+  # set it explicitly for every node so the cluster boots against a minimal
+  # CI .env.local that doesn't carry the per-service genesis vars.
+  bff:
+    environment:
+      SERVICE_NAME: memQL-bff
+
+  cognition:
+    environment:
+      SERVICE_NAME: memQL-cognition
+
+  agent:
+    environment:
+      SERVICE_NAME: memQL-agent
+
+  planner:
+    environment:
+      SERVICE_NAME: memQL-planner
+
+  voice:
+    environment:
+      SERVICE_NAME: memQL-voice
+
+  workbench:
+    environment:
+      SERVICE_NAME: memQL-workbench
+
+  nginx:
+    container_name: !reset null
 
   azurite:
     ports: !override []
+    container_name: !reset null
+
+  livekit:
+    container_name: !reset null
