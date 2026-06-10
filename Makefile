@@ -556,7 +556,7 @@ docker-planner:
 # up the stack, and seeds manifest-listed entries into the running
 # memQL cluster as concept rows.
 
-.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps genesis-seal avatar-mint
+.PHONY: db-purge dev-fresh dev-refresh dev-status install-deps genesis-seal
 
 ## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
 ## envelope dev-refresh decrypts at cluster start). Headless equivalent
@@ -567,16 +567,6 @@ docker-planner:
 genesis-seal:
 	@test -n "$(ENV_FILE)" || { echo "usage: make genesis-seal ENV_FILE=/path/to/local.genesis.env"; exit 1; }
 	$(GO) run ./cmd/genesis-seal --env-file=$(ENV_FILE)
-
-## Mint the operator avatar-persona catalog into Anam and write the seed
-## (dsl/agents/avatarPersonas.memql) the SeedMaterializer reads -- memql#609.
-## Reads ANAM_API_KEY from the env or the sealed genesis envelope (needs
-## MEMQL_MASTER_KEY). Idempotent: personas already in the seed are not
-## re-minted. Pass DRY_RUN=1 to preview without calling the vendor.
-##   make avatar-mint
-##   make avatar-mint DRY_RUN=1
-avatar-mint:
-	$(GO) run ./cmd/avatar-mint $(if $(DRY_RUN),--dry-run,) $(if $(IMAGES_DIR),--images-dir=$(IMAGES_DIR),)
 
 ## Install + verify every build-time tool the dev workflow needs:
 ## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when

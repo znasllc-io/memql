@@ -1057,7 +1057,7 @@ func QueryAvatarPersonaByIdBuild(args QueryAvatarPersonaByIdArgs) string {
 	return b.String()
 }
 
-// QueryAvatarPersonas -- List every active CUSTOM Simli avatar persona in the operator catalog (memql#609 / Simli-only memql#1239). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Hard-filtered to vendor==simli: Anam is render-blocked (memql#1236), so only our custom Simli avatars may surface. Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql (NOT via the Anam-era avatar-mint).
+// QueryAvatarPersonas -- List every active CUSTOM Simli avatar persona in the operator catalog (memql#609 / Simli-only memql#1239). Backs the Create-Assistant persona picker (copresent#239); the SPA filters to the user's selected gender client-side over this small catalog. Hard-filtered to vendor==simli: Anam is render-blocked (memql#1236), so only our custom Simli avatars may surface. Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
 //
 // Bound concept: avatarPersona.
 type QueryAvatarPersonasArgs struct {
