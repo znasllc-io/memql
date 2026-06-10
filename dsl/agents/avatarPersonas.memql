@@ -21,7 +21,7 @@ use agents.concepts.{ avatarPersona }
 @description("Avatar persona Sofia (female) -- Simli custom avatar from avatars/female_0.png (memql#1237).")
 seed avatarPersona sofia {
   vendor:     "simli"
-  personaId:  "d6ee6443-c99e-4027-885c-5ad9e5f1b307"
+  personaId:  "ab2f2d4b-779b-40b7-be72-d4c69c136642"
   name:       "Sofia"
   gender:     "female"
   imageRef:   "avatars/female_0.png"
