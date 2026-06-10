@@ -11,6 +11,63 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// TestEventBridge_SuppressInboundChatReply asserts the asymmetric gate that
+// memql#1264 adds: with SuppressInboundChatReply(true) (set only on the bff),
+// the INBOUND mesh copy of a chat-reply topic is dropped before it hits the
+// local bus -- so the browser receives those topics exactly once via the
+// durable substrate -- while a NON-chat-reply inbound event still publishes.
+// The outbound forward is unaffected (covered by the other forward tests).
+func TestEventBridge_SuppressInboundChatReply(t *testing.T) {
+	bus := events.NewBus(events.WithLogger(testLogger()))
+	defer bus.Close()
+
+	pm := NewPeerManager(testIdentity(), testLogger())
+	eb := NewEventBridge(testIdentity(), bus, pm, testLogger())
+	eb.SuppressInboundChatReply(true)
+
+	var mu sync.Mutex
+	got := map[string]int{}
+	bus.Subscribe("#", func(event events.Event) {
+		mu.Lock()
+		got[event.Topic]++
+		mu.Unlock()
+	})
+
+	chatReply := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance)
+	other := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, "v1:cluster:node")
+
+	eb.HandleInbound(&nodev1.EventForward{
+		EventId: "u-1", Topic: chatReply, Kind: int32(events.KindNodeCreated),
+		Ts: timestamppb.New(time.Now()), OriginNodeId: "remote", Ttl: 3,
+	})
+	eb.HandleInbound(&nodev1.EventForward{
+		EventId: "n-1", Topic: other, Kind: int32(events.KindNodeCreated),
+		Ts: timestamppb.New(time.Now()), OriginNodeId: "remote", Ttl: 3,
+	})
+
+	// Let the async bus deliver.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		done := got[other] >= 1
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got[chatReply] != 0 {
+		t.Fatalf("chat-reply topic must be suppressed inbound on the bff; got %d", got[chatReply])
+	}
+	if got[other] != 1 {
+		t.Fatalf("non-chat-reply inbound must still publish; got %d", got[other])
+	}
+}
+
 func TestEventBridge_HandleInbound_PublishesLocally(t *testing.T) {
 	bus := events.NewBus(events.WithLogger(testLogger()))
 	defer bus.Close()

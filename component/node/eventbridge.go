@@ -43,7 +43,32 @@ type EventBridge struct {
 	logger      *slog.Logger
 	unsubscribe func() // local bus subscription cleanup
 	wiring      *bus.Wiring
+
+	// suppressInboundChatReply, when true, drops the INBOUND mesh copy of the
+	// chat-reply topics (utterance / presence / canvasState) before it is
+	// published onto THIS node's local bus. Set only on the bff (via
+	// SuppressInboundChatReply from app/cluster.go) once ChatReplyDelivery is
+	// wired: on the bff the browser must receive those topics EXACTLY ONCE, and
+	// the durable substrate (memql#1264) is their single delivery path, so a
+	// second copy arriving over the mesh would double-deliver to the browser.
+	//
+	// This is deliberately asymmetric and inbound-only:
+	//   - The OUTBOUND forward (onLocalEvent -> peers) is UNTOUCHED, so a human
+	//     utterance written on the bff still reaches the cognition/agent worker
+	//     that subscribes graph.node.created.v1:cognition:utterance to produce
+	//     the reply. The chat TRIGGER path must keep flowing over the mesh.
+	//   - On a WORKER (non-bff) the inbound publish is UNTOUCHED, so cognition
+	//     still sees the human utterance on its local bus.
+	// Only the bff's inbound-to-local-bus copy of these reply topics is dropped,
+	// because only the bff fans them to a browser and only the bff subscribes
+	// the substrate.
+	suppressInboundChatReply bool
 }
+
+// SuppressInboundChatReply drops the inbound mesh copy of the chat-reply topics
+// on this node's local bus so the durable substrate is their single delivery
+// path to the browser (memql#1264). Called from app/cluster.go on the bff only.
+func (eb *EventBridge) SuppressInboundChatReply(on bool) { eb.suppressInboundChatReply = on }
 
 // NewEventBridge creates an EventBridge that bridges events between the
 // local bus and connected peers.
@@ -77,6 +102,20 @@ func (*EventBridge) Order() int {
 // It checks dedup and TTL, then publishes the event on the local bus.
 func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 	if evt == nil {
+		return
+	}
+
+	// Chat-reply path is on the durable substrate (memql#1264). On the bff the
+	// browser receives these topics ONLY via the substrate republish, so drop
+	// the inbound mesh copy here to keep the browser stream exactly-once. The
+	// mesh still carried this event to other peers (e.g. cognition's trigger);
+	// we are only declining to ALSO publish it onto this bff's local bus. The
+	// durable path is the guarantee, so dropping the best-effort mesh copy never
+	// loses the event. Non-bff nodes never set this flag.
+	if eb.suppressInboundChatReply && isChatReplyTopic(evt.Topic) {
+		// Still record the id in the dedup window so a later mesh re-circulation
+		// of the same event is recognised as already-handled.
+		eb.seen.Check(evt.EventId)
 		return
 	}
 
