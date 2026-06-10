@@ -35,28 +35,30 @@ patches:
           value: "20.246.247.180"
 
 images:
+  # 0.9.36 — resilient-mesh delivery fixes (#1316/#1320): consumer space-interest
+  # subscription + presence concept-id; cluster-e2e gate GREEN on main.
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:e9e684ea22aeb06d230b1ef20d7bf4bac07d88356190c10ac27d4d7649826612
-  # Carrier-built; 0.9.35 — #1245 mesh convergence + #114 canvasState id-pattern.
+    digest: sha256:5bcec2447bcedc2880c9578dd67eda648ba23c4796c606acd3eb8c217aa5d0fa
+  # Carrier-built; 0.9.36.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:55e4a83f63df9cfe21aa37185a1c64d0422fe1e9d525cb9b36b399572aeb7ef0
-  # Carrier-built; 0.9.35 — #1217 gate + #1232 outbox + #1245 dead-peer skip.
+    digest: sha256:cb4485a54b66de7c1fc074eb2304bb1376c917331ae8ccdf4905ca455877ca65
+  # Carrier-built; 0.9.36.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:14b32aa8eb2b9fcf9592ea70147b9c5a7fa83ec9c888ad9eca43226e76ab5f5e
+    digest: sha256:6eda6eebd27a9f1e2057d8ee6e154b7ac2717b9596861fb55632149a8dafa7c1
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:5112dcb03e36ad2b386712e6a3f01ec4a039ef8b63d508df91df33eeaaf2acf6
-  # Carrier-built; 0.9.35.
+    digest: sha256:e0f5810fa31ff327462dd4b796517dff711fb5e64d9f4c635aee368eecf9bed4
+  # Carrier-built; 0.9.36.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:f566915b1173a7bf530506b7dd11564d951a90171474779a48bbb50e54e02821
-  # Carrier-built; 0.9.35.
+    digest: sha256:2f4274893c89e28e783d81514c3ac46eab3bf523ecf42f4769bebe9e3f9bbfac
+  # Carrier-built; 0.9.36.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:5d56f8f575b7bfaeb7ce8d8541d13466c586b4c626b59f8ebbe3db5957113e16
-  # Carrier-built; 0.9.35.
+    digest: sha256:d4cfe2f06cc7ad198ccb43339ac566ba7c4e682e6f75bfd7d9a192eb411ceab0
+  # Carrier-built; 0.9.36.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:d584ed523db8619cca198a8f3f3db46b6926f62a43b815327583f2b001eb2fb8
-  # SPA rebuilt from copresent main (3397bdf) -- Simli-only avatar picker (#418).
+    digest: sha256:29839d00251089af3e7d6056a048ec5a0e08865e2b32750997c60780b8472a27
+  # SPA rebuilt from copresent main (24fd9ad) at 0.9.36.
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:d908c5d0057244ff965ad0b9dde729948a12d1b106bc9a05bacc19a4a369c557
+    digest: sha256:a8c03e4cc8b48a8e62325a4f761147a43f9ae6d925058c1fc7243f7e922fd267
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
