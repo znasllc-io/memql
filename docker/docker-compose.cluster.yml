@@ -35,12 +35,13 @@
 # Along the MESH-DELIVERY PATH (the 2-replica bff + worker fan-out this
 # cluster exists to exercise) topology + build model are identical to
 # staging; only config differs (DB endpoint = local Postgres, blob =
-# Azurite, secrets = dev defaults, LiveKit = dev keys). A few nodes OFF
-# that path diverge for concrete local-host reasons (identity at 1
-# replica, voice-agent opt-in via docker-compose.polyphon.yml, lifecycle
-# probes deferred to Phase 3). Each is enumerated + justified in the
-# divergence audit: docs/public/operate/reproduce-staging-locally.md
-# (memql#1260).
+# Azurite, secrets = dev defaults, LiveKit = dev keys). Identity now runs
+# at 2 replicas too (memql#1304) -- full replica parity with staging --
+# reached via the nginx front door (no host port). A few nodes still
+# diverge for concrete local-host reasons (voice-agent opt-in via
+# docker-compose.polyphon.yml, lifecycle probes deferred to Phase 3).
+# Each is enumerated + justified in the divergence audit:
+# docs/public/operate/reproduce-staging-locally.md (memql#1260).
 
 # Compose project name -- distinct from full.yml's "memql-cluster" so
 # both topologies can coexist on the same host.
@@ -122,7 +123,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
     deploy:
       # Staging parity (#1213): two replicas exercise the cross-replica
       # fan-out path that single-replica local dev structurally cannot.
@@ -254,7 +255,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
     deploy:
       replicas: 2
     depends_on:
@@ -305,7 +306,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
 
       # ---- STT provider selection ----
       # Auto-selected default is "deepgram" when MEMQL_DEEPGRAM_API_KEY
@@ -386,7 +387,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
       # Local Azure Blob Storage via Azurite (memql#806).
       # The well-known Azurite dev account + key are public constants
       # (non-secret; https://learn.microsoft.com/azure/storage/common/storage-use-azurite).
@@ -452,7 +453,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
       # Local Azure Blob Storage via Azurite (memql#806). Matches the
       # agent node so workbench-initiated uploads go to the same emulator.
       MEMQL_AZURE_STORAGE_CONNECTION_STRING: ${MEMQL_AZURE_STORAGE_CONNECTION_STRING:-DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;}
@@ -502,7 +503,7 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
     deploy:
       replicas: 2
     depends_on:
@@ -516,31 +517,37 @@ services:
   # Identity node -- in-house auth provider (magic-link, JWT issuance,
   # JWKS publishing, web UI, admin app, PAT management).
   #
-  # SINGLE replica -- a KNOWN, justified divergence from staging (memql#1260
-  # divergence audit). Staging actually runs identity at replicas: 2 with a
-  # per-replica fieldRef node id (deploy/k8s/base/identity.yaml); local keeps
-  # it at 1 because on a single Docker host (a) the host port-map 8081:8081
-  # can only bind ONE replica, and (b) the static MEMQL_NODE_ID=identity-local
-  # below would collide across replicas (the memql#1042 chat-outage shape) --
-  # so scaling identity locally means dropping the static id + container_name
-  # + host port, which is more divergence than parity. Identity is also OFF
-  # the chat-reply mesh-delivery path this parity targets (it serves auth /
-  # JWKS / migrations only), so a single local replica does not mask the
-  # cross-replica fan-out bugs the cluster exists to reproduce. See the
-  # divergence audit in docs/public/operate/reproduce-staging-locally.md.
+  # 2 replicas -- FULL staging parity (memql#1304). Staging runs identity at
+  # replicas: 2 with a per-replica fieldRef node id (deploy/k8s/base/identity.yaml);
+  # this mirrors that on a single Docker host by:
+  #   (a) dropping the host port-map 8081:8081 -- two replicas can't bind one
+  #       host port, so identity is reached ONLY through the nginx front door
+  #       on :8085, which path-routes the full identity surface (/auth/* except
+  #       the SPA-owned /auth/callback + /auth/oauth, /oauth/*, /.well-known/*,
+  #       /setup, /admin, /me, /legal) to identity:8081 via the resolver +
+  #       variable-upstream pattern, so it load-balances across both replicas;
+  #   (b) dropping container_name + hostname + the static MEMQL_NODE_ID so each
+  #       replica gets a unique container name and a hostname-derived node id
+  #       (memql#1213), avoiding the memql#1042 node-id collision; and
+  #   (c) moving IDENTITY_BASE_URL + the issuer claim onto the :8085 front door
+  #       (IDENTITY_VERIFIER_BASE_URL still uses the in-cluster identity:8081
+  #       service name for JWKS fetch, which DNS-round-robins across replicas).
+  # See docs/public/operate/reproduce-staging-locally.md.
   identity:
     build:
       context: ..
       dockerfile: Dockerfile
       args:
         BUILD_TAGS: identity
-    container_name: memql-identity
-    hostname: identity
+    deploy:
+      replicas: 2
     env_file:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: identity
-      MEMQL_NODE_ID: identity-local
+      # MEMQL_NODE_ID intentionally UNSET -- derived from the container hostname
+      # per replica (memql#1213). A static id would collide across the 2
+      # replicas (the memql#1042 node-id-collision chat-outage shape).
       MEMQL_NODE_ADDRESS: identity:50061
       MEMQL_NODE_SERVICE_ADDRESS: ":50061"
       MEMORY_NODES_DATABASE_DSN: postgres://memql:memql_dev@postgres:5432/memql?sslmode=disable
@@ -554,9 +561,9 @@ services:
       # value so `docker compose up` works out of the box; production
       # overrides via .env.local or shell export.
       MEMQL_NODE_BOOTSTRAP_TOKEN: ${MEMQL_NODE_BOOTSTRAP_TOKEN:-dev-bootstrap-do-not-use-in-production-memql338}
-      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8081}
+      IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-http://localhost:8085}
       IDENTITY_ENABLED: "true"
-      IDENTITY_BASE_URL: http://localhost:8081
+      IDENTITY_BASE_URL: http://localhost:8085
       IDENTITY_KEY_DIR: /var/identity/keys
 
       # Dev escape hatch: admit plaintext HTTP requests to /node/bootstrap.
@@ -584,8 +591,10 @@ services:
       # Branding intentionally unset; operator picks at /admin/settings.
       IDENTITY_BRAND_NAME: ${IDENTITY_BRAND_NAME:-}
       IDENTITY_BRAND_PRIMARY_COLOR: ${IDENTITY_BRAND_PRIMARY_COLOR:-}
-    ports:
-      - "8081:8081"
+    # No host port publish: two replicas can't share 8081:8081. Identity is
+    # reached via the nginx front door on :8085 (see the header note); the
+    # internal SERVER_ADDRESS :8081 + the identity:8081 service name still work
+    # in-cluster and DNS-round-robin across replicas.
     depends_on:
       postgres:
         condition: service_healthy
