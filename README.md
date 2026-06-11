@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="memQL" width="500">
+  <img src="assets/memql-lockup.png" alt="memQL" width="500">
 </p>
 
 <h1 align="center">memQL</h1>
