@@ -80,7 +80,7 @@ spec:
             name: livekit-config
       containers:
         - name: livekit
-          image: livekit/livekit-server:v1.8.0
+          image: livekit/livekit-server:v1.13.1
           args: ["--config", "/etc/livekit/livekit.yaml"]
           ports:
             - { name: signaling, containerPort: 7880, protocol: TCP }

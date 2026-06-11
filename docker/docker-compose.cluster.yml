@@ -727,7 +727,7 @@ services:
   # manual mint, `livekit-cli create-token --api-key devkey --api-secret
   # secret --join --room <room> --identity <id>` against ws://localhost:7880.
   livekit:
-    image: livekit/livekit-server:v1.8.0
+    image: livekit/livekit-server:v1.13.1
     container_name: memql-livekit
     hostname: livekit
     # --dev enables the built-in dev key pair (apiKey=devkey,
