@@ -49,15 +49,19 @@ type Worker struct {
 	IdentityId     string
 	Name           string
 	Capabilities   []string
-	Labels         map[string]string
-	Concurrency    map[string]uint32
-	Platform       map[string]any
-	Permissions    map[string]any
-	Version        string
-	BuildTag       string
-	ConnectedAt    time.Time
-	LastSeenAt     time.Time
-	SourceIP       string
+	// CapabilityDescriptor is the optional structured capability
+	// self-description sent at registration (memql#1330). Nil when
+	// the worker didn't send one.
+	CapabilityDescriptor *CapabilityDescriptor
+	Labels               map[string]string
+	Concurrency          map[string]uint32
+	Platform             map[string]any
+	Permissions          map[string]any
+	Version              string
+	BuildTag             string
+	ConnectedAt          time.Time
+	LastSeenAt           time.Time
+	SourceIP             string
 
 	dispatchFn   DispatchFunc
 	cancelStream func()

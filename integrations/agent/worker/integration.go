@@ -449,7 +449,7 @@ func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any
 	}
 	out := make([]map[string]any, 0)
 	for _, w := range i.registry.WorkersForUser(owner) {
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"registrationId": w.RegistrationId,
 			"name":           w.Name,
 			"capabilities":   w.Capabilities,
@@ -457,7 +457,14 @@ func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any
 			"version":        w.Version,
 			"connectedAt":    w.ConnectedAt.UTC().Format(time.RFC3339Nano),
 			"lastSeenAt":     w.LastSeenAt.UTC().Format(time.RFC3339Nano),
-		})
+		}
+		// Structured per-action capability self-description
+		// (memql#1330). Present only when the worker sent one at
+		// registration; older workers list without it.
+		if w.CapabilityDescriptor != nil {
+			entry["capabilityDescriptor"] = w.CapabilityDescriptor.AsMap()
+		}
+		out = append(out, entry)
 	}
 	payload, _ := json.Marshal(out)
 	return []memorynodes.MemoryNode{{

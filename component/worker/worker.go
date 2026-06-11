@@ -102,23 +102,27 @@ type AuditEvent struct {
 
 // RegistrationRow is the persistence projection of v1:worker:registration.
 type RegistrationRow struct {
-	ID                  string
-	OwnerUserId         string
-	IdentityId          string
-	Name                string
-	Capabilities        []string
-	Labels              map[string]string
-	Concurrency         map[string]uint32
-	Platform            map[string]any
-	Permissions         map[string]any
-	Version             string
-	BuildTag            string
-	RegisteredAt        time.Time
-	LastSeenAt          time.Time
-	LastConnectedFromIP string
-	RevokedAt           time.Time
-	RevokedBy           string
-	RevokeReason        string
+	ID           string
+	OwnerUserId  string
+	IdentityId   string
+	Name         string
+	Capabilities []string
+	// CapabilityDescriptor is the optional structured capability
+	// self-description from Register.capability_descriptor_json.
+	// Nil when the worker didn't send one.
+	CapabilityDescriptor *CapabilityDescriptor
+	Labels               map[string]string
+	Concurrency          map[string]uint32
+	Platform             map[string]any
+	Permissions          map[string]any
+	Version              string
+	BuildTag             string
+	RegisteredAt         time.Time
+	LastSeenAt           time.Time
+	LastConnectedFromIP  string
+	RevokedAt            time.Time
+	RevokedBy            string
+	RevokeReason         string
 }
 
 // IsActive reports whether the registration is currently usable.

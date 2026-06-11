@@ -68,6 +68,18 @@ message Register {
   string version = 7;
   // build_tag = "gui" or "nogui".
   string build_tag = 8;
+  // Optional structured capability self-description, serialized as
+  // JSON (memql#1330 / memql-cockpit#162). Shape (schemaVersion 1):
+  //   {"platform": "<GOOS>",
+  //    "displayServer": "quartz"|"x11"|"wayland"|"none",
+  //    "guiAvailable": bool,
+  //    "actions": ["<workerComputer action name>", ...],
+  //    "schemaVersion": 1}
+  // Validated server-side (size cap, schemaVersion, displayServer
+  // enum, action-name pattern -- see component/worker). Workers that
+  // omit it register exactly as before; HEADLESS/GUI capability
+  // strings keep their scope-check semantics unchanged.
+  string capability_descriptor_json = 9;
 }
 
 message PlatformInfo {
