@@ -738,7 +738,19 @@ services:
     # a non-default POLYPHON_LIVEKIT_API_KEY/SECRET override on the BFF
     # would NOT match (drop --dev and mount a config with explicit keys,
     # mirroring deploy/k8s/base/livekit.yaml, if you need a custom pair).
-    command: ["--dev", "--bind", "0.0.0.0"]
+    #
+    # --node-ip 127.0.0.1 (memql#1343): without it, dev mode advertises
+    # the container's bridge address (172.x) as the ICE candidate. On
+    # macOS Docker Desktop the bridge network lives inside the VM, so a
+    # host browser can never reach that candidate and EVERY join dies
+    # with "negotiation timed out" after signaling succeeds. 127.0.0.1
+    # works because 7881/tcp + 7882/udp are published on the host (same
+    # "safe browser-only default" the retired polyphon stack used in
+    # docker/livekit/livekit-dev.yaml). Trade-off: loopback candidates
+    # are wrong for IN-NETWORK media participants -- when the voice-agent
+    # re-homes into the cluster (memql#1310) this needs a real config
+    # (split-horizon or host LAN IP) instead of the flag.
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]
     ports:
       # Signaling (ws) + media (WebRTC) on the host so a browser can
       # reach ws://localhost:7880 same-host.
