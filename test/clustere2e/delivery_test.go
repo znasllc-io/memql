@@ -205,11 +205,9 @@ func rowID(row memqlclient.Row) string {
 // the space, which is not a supported delivery contract (SubscribeMsg carries
 // a topic pattern, not a space id).
 //
-// The SPA's every-open write is actually mutationCreateSessionForParticipant,
-// but that mutation is currently uncallable from the Go SDK (the generated
-// builder always emits `streams: {}` and the session concept types streams as
-// string -- see memql#1319/#1321); the join write exercises the same
-// participant-interest trigger.
+// The SPA's every-open write is actually mutationCreateSessionForParticipant
+// (callable from the Go SDK since memql#1319/#1321 were fixed); the join write
+// exercises the same participant-interest trigger.
 func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, userID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())

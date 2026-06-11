@@ -33,18 +33,18 @@ func AvatarDirectEngageVendorBuild(args AvatarDirectEngageVendorArgs) string {
 	b.WriteString("avatarDirectEngageVendor({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("room_name: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoomName))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("browser_identity: ")
 	b.WriteString(fmt.Sprintf("%q", args.BrowserIdentity))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -72,7 +72,7 @@ func AvatarDirectStartSessionBuild(args AvatarDirectStartSessionArgs) string {
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -103,14 +103,14 @@ func AvatarDirectStopSessionBuild(args AvatarDirectStopSessionArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.SessionId))
 	}
 	if args.Vendor != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("vendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.Vendor))
 	}
 	if args.RoomName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("room_name: ")
@@ -146,56 +146,56 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
 	if args.Content != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
 		b.WriteString(fmt.Sprintf("%q", args.Content))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Note != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
 	if args.AuthorKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
 	}
 	if args.AuthorId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	if args.ExpectedVersion != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expectedVersion: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 14 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -244,21 +244,23 @@ func KnowledgeAugmentDomainAnalyzeBuild(args KnowledgeAugmentDomainAnalyzeArgs) 
 	b.WriteString("knowledgeAugmentDomainAnalyze({")
 	b.WriteString("userQuestion: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserQuestion))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentResponse: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentResponse))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domains: ")
 	b.WriteString(renderMemQLValue(args.Domains))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Retrieved != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("retrieved: ")
+		b.WriteString(renderMemQLValue(args.Retrieved))
 	}
-	b.WriteString("retrieved: ")
-	b.WriteString(renderMemQLValue(args.Retrieved))
 	b.WriteString("})")
 	return b.String()
 }
@@ -284,31 +286,31 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	b.WriteString("knowledgeAugmentDomainGenerate({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("topic: ")
 	b.WriteString(fmt.Sprintf("%q", args.Topic))
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
@@ -337,21 +339,21 @@ func RecallBuild(args RecallArgs) string {
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.Concept != "" {
-		if b.Len() > 17 {
+		if b.Len() > 8 {
 			b.WriteString(", ")
 		}
 		b.WriteString("concept: ")
 		b.WriteString(fmt.Sprintf("%q", args.Concept))
 	}
 	if args.K != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 8 {
 			b.WriteString(", ")
 		}
 		b.WriteString("k: ")
 		b.WriteString(fmt.Sprintf("%v", args.K))
 	}
 	if args.Provider != "" {
-		if b.Len() > 17 {
+		if b.Len() > 8 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
@@ -379,13 +381,13 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	b.WriteString("restoreDocumentVersion({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
 	if args.AuthorId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
@@ -416,32 +418,36 @@ func TrainAgentBuild(args TrainAgentArgs) string {
 	b.WriteString("trainAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Domains != nil {
+		if b.Len() > 12 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domains: ")
+		b.WriteString(renderMemQLValue(args.Domains))
 	}
-	b.WriteString("domains: ")
-	b.WriteString(renderMemQLValue(args.Domains))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Tools != nil {
+		if b.Len() > 12 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tools: ")
+		b.WriteString(renderMemQLValue(args.Tools))
 	}
-	b.WriteString("tools: ")
-	b.WriteString(renderMemQLValue(args.Tools))
 	if args.Provider != "" {
-		if b.Len() > 17 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.RequestedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 12 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedBy: ")
@@ -471,27 +477,27 @@ func TrainAgentRetryStepBuild(args TrainAgentRetryStepArgs) string {
 	b.WriteString("trainAgentRetryStep({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("step: ")
 	b.WriteString(fmt.Sprintf("%q", args.Step))
 	if args.Provider != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("provider: ")
 		b.WriteString(fmt.Sprintf("%q", args.Provider))
 	}
 	if args.RetryPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("retryPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RetryPlanId))
 	}
 	if args.OriginalPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originalPlanId: ")

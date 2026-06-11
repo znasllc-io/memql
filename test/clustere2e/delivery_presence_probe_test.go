@@ -36,9 +36,9 @@ func TestPresenceDrivenDelivery(t *testing.T) {
 	// Each connection establishes presence in the space -> a v1:cognition:presence
 	// event fires on ITS replica -> ChatReplyDelivery.ensureSubscribed(space) on
 	// that replica. PresenceId/SinceAt/LastUpdatedAt are passed explicitly (like
-	// the SPA does) -- also required until #1319: omitting the leading optional
-	// arg trips the generated-builder dangling-comma bug and the mutation never
-	// reaches the engine.
+	// the SPA does). (Passing the leading optional arg was also a required
+	// workaround for the generated-builder dangling-comma bug until #1319 was
+	// fixed; it is now just SPA parity.)
 	now := time.Now().UTC().Format(time.RFC3339)
 	for i, c := range conns {
 		qc := memqlclient.NewQueryClient(c.Dispatcher())

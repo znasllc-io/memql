@@ -70,10 +70,11 @@ func emitConstruct(buf *bytes.Buffer, c Construct, kindLabel string) {
 		fmt.Fprintf(buf, "\t_ = args\n\treturn %q\n", c.Name+"({})")
 	} else {
 		fmt.Fprintf(buf, "\tvar b strings.Builder\n")
-		fmt.Fprintf(buf, "\tb.WriteString(%q)\n", c.Name+"({")
+		prefix := c.Name + "({"
+		fmt.Fprintf(buf, "\tb.WriteString(%q)\n", prefix)
 		first := true
 		for _, a := range c.Args {
-			emitArgComposer(buf, a, first)
+			emitArgComposer(buf, a, first, len(prefix))
 			if first {
 				first = false
 			}
@@ -108,39 +109,53 @@ func writeArgField(buf *bytes.Buffer, a ArgField) {
 	}
 }
 
-func emitArgComposer(buf *bytes.Buffer, a ArgField, first bool) {
+func emitArgComposer(buf *bytes.Buffer, a ArgField, first bool, prefixLen int) {
 	field := pascalCase(a.Name)
 	// Optional fields skip emission when at the Go zero value
-	// (string=="" / bool zero only when !FieldSet). Required fields
-	// always emit.
+	// (string=="" / bool zero only when !FieldSet / nil map or
+	// slice). Required fields always emit.
 	emitGuard := func(action func()) {
 		if a.Required {
 			action()
 			return
 		}
-		switch a.Type {
-		case "bool", "boolean":
+		switch {
+		case a.Type == "bool" || a.Type == "boolean":
 			fmt.Fprintf(buf, "\tif args.%sSet {\n", field)
 			action()
 			fmt.Fprintf(buf, "\t}\n")
-		case "string":
+		case a.Type == "string":
 			fmt.Fprintf(buf, "\tif args.%s != \"\" {\n", field)
 			action()
 			fmt.Fprintf(buf, "\t}\n")
-		case "number", "int", "integer":
+		case a.Type == "number" || a.Type == "int" || a.Type == "integer":
 			fmt.Fprintf(buf, "\tif args.%s != 0 {\n", field)
 			action()
 			fmt.Fprintf(buf, "\t}\n")
+		case a.Type == "object" || a.Type == "array" || strings.HasPrefix(a.Type, "[]"):
+			// Map / slice args: a nil value means "not provided" --
+			// skip the field entirely instead of rendering `{}` /
+			// `[]`, which the engine would treat as a real (empty)
+			// value and run through concept validation (memql#1321).
+			fmt.Fprintf(buf, "\tif args.%s != nil {\n", field)
+			action()
+			fmt.Fprintf(buf, "\t}\n")
 		default:
-			// Object / array / unknown: emit unconditionally; the
-			// DSL parser tolerates nil values.
+			// Unknown: emit unconditionally; the DSL parser
+			// tolerates nil values.
 			action()
 		}
 	}
 
 	emitGuard(func() {
 		if !first {
-			fmt.Fprintf(buf, "\tif b.Len() > %d { b.WriteString(\", \") }\n", len("FNAME({")+10)
+			// "Have we already written a field?" guard: compare the
+			// builder length against the real `<fnName>({` prefix
+			// length. A hardcoded constant here made the guard
+			// always-true for long function names, emitting a
+			// dangling comma when a leading optional field was
+			// omitted (memql#1319).
+			fmt.Fprintf(buf, "\tif b.Len() > %d { b.WriteString(\", \") }\n", prefixLen)
 		}
 		fmt.Fprintf(buf, "\tb.WriteString(%q)\n", a.Name+": ")
 		fmt.Fprintf(buf, "\tb.WriteString(%s)\n", renderArg(field, a.Type))

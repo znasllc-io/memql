@@ -223,7 +223,7 @@ func QueryActiveGreetSuppressionBuild(args QueryActiveGreetSuppressionArgs) stri
 	b.WriteString("queryActiveGreetSuppression({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("now: ")
@@ -402,7 +402,7 @@ func QueryActiveUsersBuild(args QueryActiveUsersArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.GroupId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 18 {
 			b.WriteString(", ")
 		}
 		b.WriteString("groupId: ")
@@ -745,7 +745,7 @@ func QueryAttachmentByIdBuild(args QueryAttachmentByIdArgs) string {
 	b.WriteString("queryAttachmentById({")
 	b.WriteString("attachmentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
@@ -1295,7 +1295,7 @@ func QueryDependentsOfConstructBuild(args QueryDependentsOfConstructArgs) string
 	b.WriteString("queryDependentsOfConstruct({")
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
@@ -1324,12 +1324,12 @@ func QueryDetectConflictsBuild(args QueryDetectConflictsArgs) string {
 	b.WriteString("queryDetectConflicts({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("naturalKeyValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
@@ -1569,12 +1569,12 @@ func QueryEntityIndexLookupBuild(args QueryEntityIndexLookupArgs) string {
 	b.WriteString("queryEntityIndexLookup({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("entityKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.EntityKind))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
@@ -1626,7 +1626,7 @@ func QueryEventsByDayBuild(args QueryEventsByDayArgs) string {
 	b.WriteString("queryEventsByDay({")
 	b.WriteString("dayStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.DayStart))
-	if b.Len() > 17 {
+	if b.Len() > 18 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dayEnd: ")
@@ -1921,7 +1921,7 @@ func QueryGreetingUtteranceBuild(args QueryGreetingUtteranceArgs) string {
 	b.WriteString("queryGreetingUtterance({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -2054,7 +2054,7 @@ func QueryHasSIResponseForReplyBuild(args QueryHasSIResponseForReplyArgs) string
 	b.WriteString("queryHasSIResponseForReply({")
 	b.WriteString("replyToId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
@@ -2551,7 +2551,7 @@ func QueryMissingCapabilityByKindAndNameBuild(args QueryMissingCapabilityByKindA
 	b.WriteString("queryMissingCapabilityByKindAndName({")
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
@@ -2596,7 +2596,7 @@ func QueryNodeTokenIdentityByBindingBuild(args QueryNodeTokenIdentityByBindingAr
 	b.WriteString("queryNodeTokenIdentityByBinding({")
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
@@ -2729,7 +2729,7 @@ func QueryParticipantByAgentSpaceBuild(args QueryParticipantByAgentSpaceArgs) st
 	b.WriteString("queryParticipantByAgentSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -2760,7 +2760,7 @@ func QueryParticipantSessionBuild(args QueryParticipantSessionArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
@@ -2939,7 +2939,7 @@ func QueryPolicyBuild(args QueryPolicyArgs) string {
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 13 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -3036,21 +3036,21 @@ func QueryRecordsByStateBuild(args QueryRecordsByStateArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecordType))
 	}
 	if args.ValidationState != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationState: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidationState))
 	}
 	if args.ImportSource != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("importSource: ")
@@ -3415,14 +3415,14 @@ func QuerySpaceParticipantsBuild(args QuerySpaceParticipantsArgs) string {
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	if args.Status != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
@@ -3475,14 +3475,14 @@ func QuerySpaceUtterancesBuild(args QuerySpaceUtterancesArgs) string {
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	if args.ParticipantId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.UtteranceType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("utteranceType: ")
@@ -3660,7 +3660,7 @@ func QueryUpcomingEventsBuild(args QueryUpcomingEventsArgs) string {
 	b.WriteString("queryUpcomingEvents({")
 	b.WriteString("windowStart: ")
 	b.WriteString(fmt.Sprintf("%q", args.WindowStart))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("windowEnd: ")
@@ -3691,7 +3691,7 @@ func QueryUsableRecordsBuild(args QueryUsableRecordsArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.RecordType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recordType: ")
@@ -3924,14 +3924,14 @@ func QueryValidationLogBuild(args QueryValidationLogArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.RecordId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.Action != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("action: ")

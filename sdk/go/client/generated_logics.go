@@ -703,8 +703,10 @@ func (qc *QueryClient) LogicRolloverDailySpace(ctx context.Context, args LogicRo
 func LogicRolloverDailySpaceBuild(args LogicRolloverDailySpaceArgs) string {
 	var b strings.Builder
 	b.WriteString("logicRolloverDailySpace({")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
+	if args.Event != nil {
+		b.WriteString("event: ")
+		b.WriteString(renderMemQLValue(args.Event))
+	}
 	b.WriteString("})")
 	return b.String()
 }
