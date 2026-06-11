@@ -60,7 +60,13 @@ function resolve_tailwind_binary() {
     mkdir -p "${TOOLS_DIR}"
     local url="https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${platform}"
     log_info "downloading Tailwind ${TAILWIND_VERSION} for ${platform}"
-    if ! curl -sSL --fail -o "${bin_path}" "${url}"; then
+    # Retries: a single TLS hiccup on this ~100MB pull killed entire
+    # cluster builds (memql#1351). Docker builds normally never reach
+    # this path -- the Dockerfiles pre-fetch the binary into bin/tools
+    # in an early cached layer (keep their ARG TAILWIND_VERSION in
+    # sync with the pin above) -- so this download is the host-side /
+    # cold-layer fallback.
+    if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${bin_path}" "${url}"; then
         log_error "failed to download ${url}"
         rm -f "${bin_path}"
         exit 1
