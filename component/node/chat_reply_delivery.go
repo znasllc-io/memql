@@ -14,7 +14,8 @@ import (
 )
 
 // ChatReplyDelivery routes the chat-reply delivery path (utterance / presence /
-// canvasState events that must reach the bff replica owning a user's WebSocket)
+// text-chunk / canvasState events that must reach the bff replica owning a
+// user's WebSocket)
 // through the durable DeliverySubstrate (memql#1264, Phase 1 of epic
 // memql#1259). It is the first path cut over to the substrate; the generic
 // ad-hoc mesh forwards (#1232 outbox, #1245 skip) stay in place for the
@@ -83,8 +84,9 @@ const (
 )
 
 // Chat-reply concept ids whose graph.node.created/updated events must reach the
-// WS-owning bff replica. Confirmed against the code: utterance + presence carry
-// a spaceId field; canvasState carries a space field (see resolveSpaceKey).
+// WS-owning bff replica. Confirmed against the code: utterance + presence +
+// textChunk carry a spaceId field; canvasState carries a space field (see
+// resolveSpaceKey).
 //
 // NOTE the presence id: the concept is declared under
 // @namespace("cognition:participant") (dsl/cognition/concepts.memql), so its
@@ -94,9 +96,22 @@ const (
 // publish, no consumer subscription trigger). Matches
 // database/memory-nodes.ConceptCognitionParticipantPresence (not imported here
 // to keep the node package off the database package).
+//
+// textChunk (memql#1326): the agent TEXT-chat path streams reply tokens as
+// v1:cognition:text:chunk graph inserts (cognition's mutationEmitTextChunk),
+// NOT over the #1266 gRPC stream channel -- so the chunks are chat-reply
+// payload exactly like the committed utterance they precede. Left off this set
+// at #1264, they rode only the mesh star: cognition's single parent dial lands
+// on ONE bff replica and bff replicas hold no connections to each other, so the
+// WS-owning replica structurally never saw them (live trace: 40 chunks on the
+// parent-dialed bff, 0 on the sibling owning the browser) and streaming was
+// dead -- the reply popped in atomically when the utterance landed via the
+// substrate. Per-key seq also guarantees the committed utterance sorts after
+// the turn's last chunk on the same space key.
 const (
 	conceptUtterance   = "v1:cognition:utterance"
 	conceptPresence    = "v1:cognition:participant:presence"
+	conceptTextChunk   = "v1:cognition:text:chunk"
 	conceptCanvasState = "v1:copresent:canvasState"
 )
 
@@ -371,7 +386,7 @@ func (d *ChatReplyDelivery) warn(msg string, args ...any) {
 // (created/updated for utterance / presence / canvasState). Deleted events are
 // not part of the reply stream the browser renders.
 func isChatReplyTopic(topic string) bool {
-	for _, concept := range []string{conceptUtterance, conceptPresence, conceptCanvasState} {
+	for _, concept := range []string{conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState} {
 		if topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, concept) ||
 			topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, concept) {
 			return true
