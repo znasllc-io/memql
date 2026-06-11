@@ -324,6 +324,7 @@ delivery).
 | `MEMORY_ENGINE_SI_TOOL_LOOP_MAX_ITERATIONS`     | `10`    | Max SI tool-calling iterations per turn.                                                 |
 | `MEMQL_DSL_PATH`                                | unset   | Optional on-disk root for the .memql tree. When set and `<root>/<typeName>` exists, that DSL type reads from disk instead of the embedded copy. Per-type partial overrides supported. |
 | `MEMQL_POLICYTRACE_RETENTION_DAYS`             | `90`    | Retention window (days) for v1:platform:policyTrace rows. Surfaced by `purgeExpiredPolicyTraces` cron. |
+| `MEMQL_MESH_OUTBOX_RETENTION`                  | `24h`   | Max-age watermark (Go duration string) for the mesh delivery substrate's `mesh_outbox` rows and stale `mesh_cursor` rows; an hourly per-node sweep deletes rows older than this. `0` or negative disables the sweep; an unparsable value falls back to the default. `mesh_key_seq` is never swept (seq-restart hazard). |
 
 #### STT / voice (only if Polyphon or streaming STT is enabled)
 

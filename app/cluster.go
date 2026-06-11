@@ -209,6 +209,16 @@ func (a *App) cluster() {
 		if a.grpcServer != nil {
 			a.grpcServer.SetDeliverySubstrate(substrate, nodeIdentity.ID)
 		}
+		// Retention sweep for the substrate's tables (memql#1328): mesh_outbox
+		// rows older than the MEMQL_MESH_OUTBOX_RETENTION watermark (default
+		// 24h; 0/negative disables) and mesh_cursor rows stale past the same
+		// watermark are deleted on an hourly per-node ticker, mirroring the
+		// automation_execution_claims pruning precedent (memql#561). Deletes
+		// are idempotent, so every replica sweeping concurrently is harmless --
+		// the same multi-node posture as the #561 prune. mesh_key_seq is
+		// deliberately not swept (see pgOutboxStore.SweepOlderThan).
+		a.Dependencies = append(a.Dependencies, node.NewOutboxRetention(dbGetter, a.Logger))
+
 		isBFF := nodeIdentity.Type == node.NodeTypeBFF
 		if crd := node.NewChatReplyDelivery(nodeIdentity, substrate, a.eventBus, isBFF, a.Logger); crd != nil {
 			if isBFF && eventBridge != nil {
