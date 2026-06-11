@@ -141,7 +141,17 @@ prompt conductorTurn {
   lastResponder  string            @description("Display name of the most-recent SI participant to speak before this turn; the implicit addressee of follow-up shapes.")
 }
 
-@defaultProvider("chat54Mini")
+// Provider: chat54Nano (gpt-5.4-nano), the fastest structured-
+// output-capable tier (#1329 candidate 1). This call serializes
+// ahead of EVERY text-turn dispatch, so its latency is paid by the
+// whole pre-dispatch pipeline; the schema is tiny (intent /
+// carriesAction / answersPriorAgentPrompt / addressedAgentName /
+// confidence / reasoning) and explicitly low-complexity, so it does
+// not need the Mini tier it previously rode. Must stay on an OpenAI
+// provider: only openSIProvider implements CallChatStructured
+// (json_schema constrained decoding); an Anthropic-class name would
+// silently fall back to the default structured provider.
+@defaultProvider("chat54Nano")
 @templateFile("prompts/messageClassification.tmpl")
 @description("Classify a user message in a multi-agent space: intent, whether it carries an action request, whether it answers a prior agent prompt, who (if anyone) it's addressing. Pure semantic classification -- no decision about who answers (that's the conductor). Designed for caching: input is just the user text + the prior agent text + the agent roster, no per-conversation state, so identical phrasings hit the cache regardless of conversation. Sub-500ms fast-model target.")
 prompt messageClassification {
