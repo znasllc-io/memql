@@ -61,6 +61,42 @@ func (s *EngineStore) CreateRegistration(ctx context.Context, row RegistrationRo
 	return nil
 }
 
+// RefreshRegistration re-stamps the registration-authoritative
+// fields on an existing v1:worker:registration row (memql#1332).
+// Called on every reconnect so the persisted row tracks the latest
+// Register message instead of going stale across cockpit upgrades.
+// row.CapabilityDescriptor == nil serializes to JSON null, which the
+// mutation coalesces to {} -- i.e. an omitted descriptor CLEARS the
+// persisted one.
+func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationRow) error {
+	if s == nil || s.Engine == nil {
+		return fmt.Errorf("worker.store: engine not configured")
+	}
+	args := map[string]any{
+		"registrationId":       row.ID,
+		"name":                 row.Name,
+		"capabilities":         row.Capabilities,
+		"capabilityDescriptor": row.CapabilityDescriptor.AsMap(),
+		"labels":               row.Labels,
+		"concurrency":          row.Concurrency,
+		"platformInfo":         row.Platform,
+		"permissions":          row.Permissions,
+		"version":              row.Version,
+		"buildTag":             row.BuildTag,
+		"lastSeenAt":           row.LastSeenAt.UTC().Format(time.RFC3339Nano),
+		"lastConnectedFromIP":  row.LastConnectedFromIP,
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("worker.store: marshal refresh args: %w", err)
+	}
+	query := fmt.Sprintf("mutationRefreshWorkerRegistration(%s)", string(body))
+	if _, err := s.Engine.Execute(ctx, query); err != nil {
+		return fmt.Errorf("worker.store: refresh registration: %w", err)
+	}
+	return nil
+}
+
 // UpdateLastSeen bumps lastSeenAt on a registration.
 func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error {
 	if s == nil || s.Engine == nil {

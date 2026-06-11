@@ -247,8 +247,15 @@ func (s *server) upsertRegistration(
 	}
 	registration.ID = existing.ID
 	registration.RegisteredAt = existing.RegisteredAt
-	if err := s.store.UpdateLastSeen(ctx, existing.ID, now, sourceIP); err != nil {
-		return RegistrationRow{}, fmt.Errorf("worker update lastSeen: %w", err)
+	// Refresh the registration-authoritative fields, not just
+	// lastSeenAt (memql#1332): the persisted capabilities /
+	// capabilityDescriptor / platform / version must track the
+	// LATEST Register message, or the row goes stale across cockpit
+	// upgrades while the in-memory registry stays fresh. A
+	// registration that omits the descriptor clears the persisted
+	// one -- the worker no longer advertises it.
+	if err := s.store.RefreshRegistration(ctx, registration); err != nil {
+		return RegistrationRow{}, fmt.Errorf("worker refresh registration: %w", err)
 	}
 	return registration, nil
 }

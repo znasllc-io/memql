@@ -67,8 +67,9 @@ mutation invocation mutationCreateWorkerInvocation {
 // via WorkerService.Stream and presents a valid mql_wkr_<token>.
 // Subsequent reconnects locate the existing row by identityId (the
 // auth path resolves the token to its v1:identity:identity row, and
-// that's a 1:1 mapping with the registration) and update lastSeenAt
-// via mutationUpdateWorkerLastSeen instead of re-running this
+// that's a 1:1 mapping with the registration) and refresh the
+// registration-authoritative fields via
+// mutationRefreshWorkerRegistration instead of re-running this
 // mutation.
 //
 // ownerUserId is taken from the identity's userId, NOT from the
@@ -110,6 +111,60 @@ mutation registration mutationCreateWorkerRegistration {
     buildTag: coalesce(args.buildTag, "")
     args.registeredAt
     lastSeenAt: coalesce(args.lastSeenAt, args.registeredAt)
+    lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
+  }
+}
+
+// ---- mutations/v1/worker/refreshWorkerRegistration.memql ----
+
+// refreshWorkerRegistration
+// =========================
+//
+// Refreshes the registration-authoritative fields on an existing
+// v1:worker:registration row when its worker reconnects (memql#1332).
+// Everything the Register message carries is re-stamped from the new
+// registration -- name, capabilities, capabilityDescriptor, labels,
+// concurrency, platformInfo, permissions, version, buildTag -- plus
+// lastSeenAt / lastConnectedFromIP. Without this the persisted row
+// goes stale across cockpit upgrades (e.g. a worker upgraded to
+// advertise new actions keeps its old descriptor until the row is
+// recreated) even though the in-memory registry is always fresh.
+//
+// Omission semantics: a registration that OMITS the capability
+// descriptor clears the persisted one (coalesce to {}) -- the worker
+// no longer advertises a descriptor, so the row must not keep the
+// old one. Identity / lifecycle fields (id, ownerUserId, identityId,
+// registeredAt, revoked*) are never touched here.
+
+@enabled
+@description("Refresh registration-authoritative fields on worker reconnect.")
+mutation registration mutationRefreshWorkerRegistration {
+  args {
+    registrationId       string  @required
+    name                 string  @required
+    capabilities         array   @required
+    capabilityDescriptor object
+    labels               object
+    concurrency          object  @required
+    platformInfo         object
+    permissions          object
+    version              string
+    buildTag             string
+    lastSeenAt           string  @required
+    lastConnectedFromIP  string
+  }
+  update {
+    id: args.registrationId
+    args.name
+    args.capabilities
+    capabilityDescriptor: coalesce(args.capabilityDescriptor, {})
+    labels: coalesce(args.labels, {})
+    args.concurrency
+    platformInfo: coalesce(args.platformInfo, {})
+    permissions: coalesce(args.permissions, {})
+    version: coalesce(args.version, "")
+    buildTag: coalesce(args.buildTag, "")
+    args.lastSeenAt
     lastConnectedFromIP: coalesce(args.lastConnectedFromIP, "")
   }
 }
