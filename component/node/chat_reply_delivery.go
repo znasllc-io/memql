@@ -3,8 +3,10 @@ package node
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/component"
 	"github.com/znasllc-io/memql/component/events"
@@ -50,8 +52,8 @@ import (
 // EventID dedup (the mesh-hint copy and the durable-pull copy of the same
 // EventID collapse to one delivery); per-space ordering is the substrate's
 // per-key monotonic seq + cursor. The EventID we publish is the graph row id
-// (stable + unique), carried byte-identical on both paths so they can never
-// double-deliver.
+// suffixed with the bus event's emission timestamp (see publish), carried
+// byte-identical on both paths so they can never double-deliver.
 type ChatReplyDelivery struct {
 	*component.Component
 
@@ -205,14 +207,25 @@ func (d *ChatReplyDelivery) onLocalEvent(ctx context.Context, event events.Event
 }
 
 // publish writes one chat-reply event to the durable outbox keyed by its space.
-// The EventID is the graph row id (stable + unique), so the durable copy and
-// the EventBridge mesh-hint copy dedup against each other on the consumer.
+// The EventID is the graph row id suffixed with the bus event's nanosecond
+// emission timestamp, so the durable copy and the EventBridge mesh-hint copy
+// dedup against each other on the consumer.
+//
+// The suffix exists because the row id alone is NOT unique per occurrence for
+// upsert-style concepts: presence keeps ONE deterministic row id per
+// participant across every state transition (memQL is append-only -- each
+// write is a new row VERSION under the same logical id), and update() re-emits
+// its row id too. The outbox enforces uniqueness on EventID, so a bare row id
+// silently swallowed every write after the first -- the "assistant stuck at
+// Idle" cluster bug (memql#1324). The Deliverable is built exactly once per
+// occurrence on the producing node, so both paths still carry the same bytes
+// and genuine re-deliveries of one occurrence still collapse.
 func (d *ChatReplyDelivery) publish(ctx context.Context, key RoutingKey, event events.Event) {
-	eventID := stringField(event.Payload, "id")
-	if eventID == "" {
-		eventID = stringField(event.Payload, "nodeId")
+	rowID := stringField(event.Payload, "id")
+	if rowID == "" {
+		rowID = stringField(event.Payload, "nodeId")
 	}
-	if eventID == "" {
+	if rowID == "" {
 		// No stable row id to dedup on -- never publish an unkeyed deliverable
 		// (it would double-deliver against the mesh copy). Drop to the mesh-only
 		// path for this (degenerate) event.
@@ -220,9 +233,15 @@ func (d *ChatReplyDelivery) publish(ctx context.Context, key RoutingKey, event e
 			"topic", event.Topic, "key", key.String())
 		return
 	}
+	ts := event.Timestamp
+	if ts.IsZero() {
+		// Defensive: every engine emission stamps Timestamp (events.NewEvent),
+		// but a hand-built event must still get a per-occurrence id.
+		ts = time.Now()
+	}
 
 	d.publishDeliverable(ctx, Deliverable{
-		EventID:    eventID,
+		EventID:    rowID + "@" + strconv.FormatInt(ts.UnixNano(), 10),
 		Key:        key,
 		Topic:      event.Topic,
 		Kind:       event.Kind,

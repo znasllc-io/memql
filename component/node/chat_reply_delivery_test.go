@@ -124,6 +124,69 @@ func TestChatReplyCrossReplicaDelivery(t *testing.T) {
 	}
 }
 
+// TestPresenceTransitionsAllDeliverDespiteStableRowID is the regression proof
+// for memql#1324 ("assistant stuck at Idle on the cluster"). Presence is an
+// upsert-style concept: every state transition for a participant re-inserts
+// under the SAME deterministic row id, and the outbox enforces uniqueness on
+// EventID. With EventID = bare row id, only the FIRST write per participant
+// ever landed durably -- every later transition (idle -> thinking ->
+// responding -> idle) hit ON CONFLICT DO NOTHING and silently vanished, so the
+// browser's presence pill froze on whatever state arrived first.
+//
+// The producer side must therefore key the deliverable per OCCURRENCE (row id
+// + emission timestamp), so each transition of the same logical row is its own
+// durable row and all of them reach the consumer bff, in order.
+func TestPresenceTransitionsAllDeliverDespiteStableRowID(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newFakeOutboxStore()
+	const spaceID = "v1:cognition:space:abc"
+	key := RoutingKey{Kind: "space", ID: spaceID}
+
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-2", store, sink)
+	consumer.ensureSubscribed(key)
+
+	producer := NewChatReplyDelivery(
+		&Identity{ID: "cognition-1", Type: NodeTypeCognition},
+		NewSubstrate(store, time.Minute, nil, nil),
+		events.NewBus(),
+		false, // not bff: producer-only
+		nil,
+	)
+	if producer == nil {
+		t.Fatal("producer NewChatReplyDelivery returned nil")
+	}
+
+	// The SAME presence row id transitions through three states -- exactly what
+	// the cognition handler writes across one agent turn.
+	presenceTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptPresence)
+	const presenceRowID = "v1:cognition:participant:presence:sofia"
+	base := time.Now()
+	for i, state := range []string{"idle", "thinking", "responding"} {
+		producer.onLocalEvent(ctx, events.Event{
+			Topic: presenceTopic,
+			Kind:  events.KindNodeCreated,
+			// Distinct emission instants, as the engine stamps via
+			// events.NewEvent on each write (explicit here for determinism).
+			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
+			Payload: map[string]any{
+				"id":      presenceRowID,
+				"spaceId": spaceID,
+				"state":   state,
+			},
+		})
+	}
+
+	got := waitForEvents(t, sink, 3)
+	for i, want := range []string{"idle", "thinking", "responding"} {
+		if state, _ := got[i].Payload["state"].(string); state != want {
+			t.Fatalf("delivery %d: got state %q want %q (all transitions of a stable row id must deliver, in order)", i, state, want)
+		}
+	}
+}
+
 // waitForCursor polls until the stored cursor for (key, consumer) reaches at
 // least want, or times out.
 func waitForCursor(t *testing.T, store outboxStore, key RoutingKey, consumer string, want int64) error {
