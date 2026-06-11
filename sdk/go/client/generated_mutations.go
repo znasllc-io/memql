@@ -57,21 +57,23 @@ func MutationAddAgentToSpaceBuild(args MutationAddAgentToSpaceArgs) string {
 	b.WriteString("mutationAddAgentToSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilityOverrides != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityOverrides: ")
+		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
-	b.WriteString("capabilityOverrides: ")
-	b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	b.WriteString("})")
 	return b.String()
 }
@@ -101,31 +103,35 @@ func MutationAddHarnessStepBuild(args MutationAddHarnessStepArgs) string {
 		b.WriteString("stepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StepId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("idempotencyKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DependsOn != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dependsOn: ")
+		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
-	b.WriteString("dependsOn: ")
-	b.WriteString(renderMemQLValue(args.DependsOn))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Input != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("input: ")
+		b.WriteString(renderMemQLValue(args.Input))
 	}
-	b.WriteString("input: ")
-	b.WriteString(renderMemQLValue(args.Input))
 	b.WriteString("})")
 	return b.String()
 }
@@ -152,13 +158,13 @@ func MutationAdvanceHarnessConsolidationCursorBuild(args MutationAdvanceHarnessC
 		b.WriteString("cursorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CursorId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 43 {
 		b.WriteString(", ")
 	}
 	b.WriteString("watermark: ")
 	b.WriteString(fmt.Sprintf("%q", args.Watermark))
 	if args.EpisodesSeen != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 43 {
 			b.WriteString(", ")
 		}
 		b.WriteString("episodesSeen: ")
@@ -198,70 +204,70 @@ func MutationAppendDocumentVersionBuild(args MutationAppendDocumentVersionArgs) 
 	b.WriteString("mutationAppendDocumentVersion({")
 	b.WriteString("versionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.VersionId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("versionNumber: ")
 	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
 	if args.Content != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("content: ")
 		b.WriteString(fmt.Sprintf("%q", args.Content))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("authorKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthorKind))
 	if args.AuthorId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorId))
 	}
 	if args.Note != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
 		b.WriteString(fmt.Sprintf("%q", args.Note))
 	}
 	if args.ParentVersionId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentVersionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentVersionId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -304,71 +310,75 @@ func MutationApplyResponsibilityIntakeBuild(args MutationApplyResponsibilityInta
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Trigger != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Condition != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("condition: ")
+		b.WriteString(renderMemQLValue(args.Condition))
 	}
-	b.WriteString("condition: ")
-	b.WriteString(renderMemQLValue(args.Condition))
 	if args.TargetKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.Status != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.IntakeStatus != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.IntakeStatus))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.IntakeRequest != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intakeRequest: ")
+		b.WriteString(renderMemQLValue(args.IntakeRequest))
 	}
-	b.WriteString("intakeRequest: ")
-	b.WriteString(renderMemQLValue(args.IntakeRequest))
 	b.WriteString("})")
 	return b.String()
 }
@@ -394,18 +404,18 @@ func MutationApproveAccessRequestBuild(args MutationApproveAccessRequestArgs) st
 	b.WriteString("mutationApproveAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("invitationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvitationId))
 	if args.ReviewerNote != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
@@ -434,7 +444,7 @@ func MutationArchiveSpaceBuild(args MutationArchiveSpaceArgs) string {
 	b.WriteString("mutationArchiveSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -465,20 +475,20 @@ func MutationAssignResponsibilityBuild(args MutationAssignResponsibilityArgs) st
 	b.WriteString("mutationAssignResponsibility({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	if args.AssignedAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
@@ -507,7 +517,7 @@ func MutationAttachDocumentToDomainBuild(args MutationAttachDocumentToDomainArgs
 	b.WriteString("mutationAttachDocumentToDomain({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachedDomains: ")
@@ -536,12 +546,12 @@ func MutationBumpMissingCapabilitySightingBuild(args MutationBumpMissingCapabili
 	b.WriteString("mutationBumpMissingCapabilitySighting({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sightingCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.SightingCount))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
@@ -575,34 +585,34 @@ func MutationBumpPATLastUsedAtBuild(args MutationBumpPATLastUsedAtArgs) string {
 	b.WriteString("mutationBumpPATLastUsedAt({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("active: ")
 	b.WriteString(fmt.Sprintf("%v", args.Active))
 	if args.UsableByAgentsSet {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
 		b.WriteString(fmt.Sprintf("%v", args.UsableByAgents))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastUsedAt: ")
@@ -652,7 +662,7 @@ func MutationBumpUserRevocationEpochBuild(args MutationBumpUserRevocationEpochAr
 	b.WriteString("mutationBumpUserRevocationEpoch({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newEpoch: ")
@@ -704,17 +714,17 @@ func MutationCatalogueConstructBuild(args MutationCatalogueConstructArgs) string
 	b.WriteString("mutationCatalogueConstruct({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogKey))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("catalogMatchText: ")
 	b.WriteString(fmt.Sprintf("%q", args.CatalogMatchText))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromBundleId: ")
@@ -744,17 +754,17 @@ func MutationCheckRecordBuild(args MutationCheckRecordArgs) string {
 	b.WriteString("mutationCheckRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newCheckCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewCheckCount))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
@@ -782,11 +792,13 @@ func MutationCompleteHarnessStepBuild(args MutationCompleteHarnessStepArgs) stri
 	b.WriteString("mutationCompleteHarnessStep({")
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Result != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("result: ")
+		b.WriteString(renderMemQLValue(args.Result))
 	}
-	b.WriteString("result: ")
-	b.WriteString(renderMemQLValue(args.Result))
 	b.WriteString("})")
 	return b.String()
 }
@@ -810,7 +822,7 @@ func MutationCompleteTodoBuild(args MutationCompleteTodoArgs) string {
 	b.WriteString("mutationCompleteTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -841,25 +853,27 @@ func MutationCompleteToolInvocationBuild(args MutationCompleteToolInvocationArgs
 	b.WriteString("mutationCompleteToolInvocation({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ToolResult != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toolResult: ")
+		b.WriteString(renderMemQLValue(args.ToolResult))
 	}
-	b.WriteString("toolResult: ")
-	b.WriteString(renderMemQLValue(args.ToolResult))
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
@@ -890,17 +904,17 @@ func MutationConfirmRecordBuild(args MutationConfirmRecordArgs) string {
 	b.WriteString("mutationConfirmRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newConfirmCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.NewConfirmCount))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newState: ")
@@ -929,7 +943,7 @@ func MutationConsumeAuthCodeBuild(args MutationConsumeAuthCodeArgs) string {
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
 	if args.ConsumedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
@@ -959,7 +973,7 @@ func MutationConsumeMagicLinkRequestBuild(args MutationConsumeMagicLinkRequestAr
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.ConsumedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("consumedFromIP: ")
@@ -994,48 +1008,48 @@ func MutationCreateAccessRequestBuild(args MutationCreateAccessRequestArgs) stri
 	b.WriteString("mutationCreateAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
 	if args.Name != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("name: ")
 		b.WriteString(fmt.Sprintf("%q", args.Name))
 	}
 	if args.AdditionalContext != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("additionalContext: ")
 		b.WriteString(fmt.Sprintf("%q", args.AdditionalContext))
 	}
 	if args.RiskScore != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskScore: ")
 		b.WriteString(fmt.Sprintf("%v", args.RiskScore))
 	}
 	if args.RiskSignals != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("riskSignals: ")
 		b.WriteString(fmt.Sprintf("%q", args.RiskSignals))
 	}
 	if args.SourceIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
@@ -1067,22 +1081,22 @@ func MutationCreateAdHocPlanBuild(args MutationCreateAdHocPlanArgs) string {
 	b.WriteString("mutationCreateAdHocPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
@@ -1132,116 +1146,124 @@ func MutationCreateAgentBuild(args MutationCreateAgentArgs) string {
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Personality != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("personality: ")
 		b.WriteString(fmt.Sprintf("%q", args.Personality))
 	}
 	if args.Role != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
 	if args.RoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("roleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
 	}
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Gender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.AudioControl != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioControl))
 	}
 	if args.VideoControl != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoControl: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoControl))
 	}
 	if args.AvatarPersonaId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
 	if args.AvatarVendor != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarVendor: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarVendor))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Capabilities != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilities: ")
+		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
-	b.WriteString("capabilities: ")
-	b.WriteString(renderMemQLValue(args.Capabilities))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Avatar != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("avatar: ")
+		b.WriteString(renderMemQLValue(args.Avatar))
 	}
-	b.WriteString("avatar: ")
-	b.WriteString(renderMemQLValue(args.Avatar))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ProviderConfig != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("providerConfig: ")
+		b.WriteString(renderMemQLValue(args.ProviderConfig))
 	}
-	b.WriteString("providerConfig: ")
-	b.WriteString(renderMemQLValue(args.ProviderConfig))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.TriggerBehavior != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("triggerBehavior: ")
+		b.WriteString(renderMemQLValue(args.TriggerBehavior))
 	}
-	b.WriteString("triggerBehavior: ")
-	b.WriteString(renderMemQLValue(args.TriggerBehavior))
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.DeletedSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("deleted: ")
@@ -1278,42 +1300,42 @@ func MutationCreateAgentAuthorizationBuild(args MutationCreateAgentAuthorization
 		b.WriteString("authId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanKind))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceScope: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceScope))
 	if args.TokenBudgetCap != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudgetCap: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudgetCap))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.ComputerUseScope != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
@@ -1360,94 +1382,102 @@ func MutationCreateAgentRoleBuild(args MutationCreateAgentRoleArgs) string {
 		b.WriteString("agentRoleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentRoleId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
 	if args.Tier != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Tier))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.LockedSkillIds != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lockedSkillIds: ")
+		b.WriteString(renderMemQLValue(args.LockedSkillIds))
 	}
-	b.WriteString("lockedSkillIds: ")
-	b.WriteString(renderMemQLValue(args.LockedSkillIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DefaultSkillIds != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("defaultSkillIds: ")
+		b.WriteString(renderMemQLValue(args.DefaultSkillIds))
 	}
-	b.WriteString("defaultSkillIds: ")
-	b.WriteString(renderMemQLValue(args.DefaultSkillIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.AvailableSkillIds != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("availableSkillIds: ")
+		b.WriteString(renderMemQLValue(args.AvailableSkillIds))
 	}
-	b.WriteString("availableSkillIds: ")
-	b.WriteString(renderMemQLValue(args.AvailableSkillIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ForbiddenSkillIds != nil {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("forbiddenSkillIds: ")
+		b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
 	}
-	b.WriteString("forbiddenSkillIds: ")
-	b.WriteString(renderMemQLValue(args.ForbiddenSkillIds))
 	if args.MaxSkills != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxSkills: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxSkills))
 	}
 	if args.RecommendedPolicySlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedPolicySlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedPolicySlug))
 	}
 	if args.RecommendedGender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendedGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendedGender))
 	}
 	if args.SystemPromptHints != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("systemPromptHints: ")
 		b.WriteString(fmt.Sprintf("%q", args.SystemPromptHints))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
@@ -1485,65 +1515,65 @@ func MutationCreateApprovalRequestBuild(args MutationCreateApprovalRequestArgs) 
 	b.WriteString("mutationCreateApprovalRequest({")
 	b.WriteString("correlationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CorrelationKey))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
@@ -1594,103 +1624,103 @@ func MutationCreateArtifactBuild(args MutationCreateArtifactArgs) string {
 	b.WriteString("mutationCreateArtifact({")
 	b.WriteString("sourceConceptRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceConceptRef))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lens: ")
 	b.WriteString(fmt.Sprintf("%q", args.Lens))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Format != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
 	if args.LiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("live: ")
 		b.WriteString(fmt.Sprintf("%v", args.Live))
 	}
 	if args.Scope != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerName))
 	}
 	if args.ValidationStatus != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationStatus: ")
@@ -1738,112 +1768,114 @@ func MutationCreateAuditEventBuild(args MutationCreateAuditEventArgs) string {
 	b.WriteString("mutationCreateAuditEvent({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("occurredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.OccurredAt))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("category: ")
 	b.WriteString(fmt.Sprintf("%q", args.Category))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ActorUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorEmail != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorEmail))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.ActorIdentityId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorIdentityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorIdentityId))
 	}
 	if args.TargetType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetType: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetType))
 	}
 	if args.TargetId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetId))
 	}
 	if args.TargetEmail != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetEmail))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Detail != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("detail: ")
+		b.WriteString(renderMemQLValue(args.Detail))
 	}
-	b.WriteString("detail: ")
-	b.WriteString(renderMemQLValue(args.Detail))
 	if args.SourceIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
 	if args.Outcome != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outcome: ")
 		b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	}
 	if args.FailureReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FailureReason))
 	}
 	if args.PrevEventHash != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("prevEventHash: ")
@@ -1880,49 +1912,49 @@ func MutationCreateAuthCodeBuild(args MutationCreateAuthCodeArgs) string {
 	b.WriteString("mutationCreateAuthCode({")
 	b.WriteString("codeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("code: ")
 	b.WriteString(fmt.Sprintf("%q", args.Code))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clientId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClientId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redirectURI: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedirectURI))
 	if args.State != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("state: ")
 		b.WriteString(fmt.Sprintf("%q", args.State))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("magicLinkRequestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MagicLinkRequestId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
@@ -1957,43 +1989,43 @@ func MutationCreateAuthSessionBuild(args MutationCreateAuthSessionArgs) string {
 	b.WriteString("mutationCreateAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.UserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.IdentityId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityId))
 	}
 	if args.ClientLabel != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientLabel: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientLabel))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
@@ -2027,51 +2059,53 @@ func MutationCreateAuthoringBundleBuild(args MutationCreateAuthoringBundleArgs) 
 	b.WriteString("mutationCreateAuthoringBundle({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.ResponsibilityId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
 	if args.SourcePlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourcePlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourcePlanId))
 	}
 	if args.Version != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%v", args.Version))
 	}
 	if args.SupersedesBundleId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersedesBundleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SupersedesBundleId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ReusedConstructRefs != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reusedConstructRefs: ")
+		b.WriteString(renderMemQLValue(args.ReusedConstructRefs))
 	}
-	b.WriteString("reusedConstructRefs: ")
-	b.WriteString(renderMemQLValue(args.ReusedConstructRefs))
 	b.WriteString("})")
 	return b.String()
 }
@@ -2100,27 +2134,27 @@ func MutationCreateAuthoringConstructBuild(args MutationCreateAuthoringConstruct
 	b.WriteString("mutationCreateAuthoringConstruct({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetNamespace: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetNamespace))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
@@ -2157,42 +2191,42 @@ func MutationCreateAvatarPersonaBuild(args MutationCreateAvatarPersonaArgs) stri
 		b.WriteString("avatarPersonaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarPersonaId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("personaId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PersonaId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("gender: ")
 	b.WriteString(fmt.Sprintf("%q", args.Gender))
 	if args.ImageRef != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("imageRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.ImageRef))
 	}
 	if args.PreviewRef != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("previewRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.PreviewRef))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -2230,44 +2264,44 @@ func MutationCreateCalendarEventBuild(args MutationCreateCalendarEventArgs) stri
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartsAt))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("endsAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.EndsAt))
 	if args.AllDaySet {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("allDay: ")
 		b.WriteString(fmt.Sprintf("%v", args.AllDay))
 	}
 	if args.Location != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("location: ")
 		b.WriteString(fmt.Sprintf("%q", args.Location))
 	}
 	if args.Notes != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notes: ")
 		b.WriteString(fmt.Sprintf("%q", args.Notes))
 	}
 	if args.Recurrence != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recurrence: ")
@@ -2301,33 +2335,33 @@ func MutationCreateClusterBuild(args MutationCreateClusterArgs) string {
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Region != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("region: ")
 		b.WriteString(fmt.Sprintf("%q", args.Region))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("environment: ")
 	b.WriteString(fmt.Sprintf("%q", args.Environment))
 	if args.DatabaseId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("databaseId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DatabaseId))
 	}
 	if args.IdentityProviderId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("identityProviderId: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdentityProviderId))
 	}
 	if args.Version != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
@@ -2384,171 +2418,171 @@ func MutationCreateClusterSettingsBuild(args MutationCreateClusterSettingsArgs) 
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
@@ -2579,17 +2613,17 @@ func MutationCreateDailySpaceBuild(args MutationCreateDailySpaceArgs) string {
 	b.WriteString("mutationCreateDailySpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dailyDateKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.DailyDateKey))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
@@ -2618,13 +2652,13 @@ func MutationCreateDatabaseBuild(args MutationCreateDatabaseArgs) string {
 	b.WriteString("mutationCreateDatabase({")
 	b.WriteString("host: ")
 	b.WriteString(fmt.Sprintf("%q", args.Host))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dbName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DbName))
 	if args.SslMode != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sslMode: ")
@@ -2664,50 +2698,50 @@ func MutationCreateDelegationBuild(args MutationCreateDelegationArgs) string {
 		b.WriteString("delegationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DelegationId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identitySubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentitySubject))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentSubject: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentSubject))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleCeiling: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleCeiling))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scopes: ")
 	b.WriteString(renderMemQLValue(args.Scopes))
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Note != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -2748,63 +2782,65 @@ func MutationCreateDocumentBuild(args MutationCreateDocumentArgs) string {
 		b.WriteString("documentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.DocumentId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("attachmentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fileName: ")
 	b.WriteString(fmt.Sprintf("%q", args.FileName))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mimeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.MimeType))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("format: ")
 	b.WriteString(fmt.Sprintf("%q", args.Format))
 	if args.ItemKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("itemKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.ItemKind))
 	}
 	if args.ItemCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("itemCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.ItemCount))
 	}
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DomainHints != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domainHints: ")
+		b.WriteString(renderMemQLValue(args.DomainHints))
 	}
-	b.WriteString("domainHints: ")
-	b.WriteString(renderMemQLValue(args.DomainHints))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("uploadedBy: ")
@@ -2840,58 +2876,58 @@ func MutationCreateDocumentChunkBuild(args MutationCreateDocumentChunkArgs) stri
 	b.WriteString("mutationCreateDocumentChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.SourceRef != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceRef: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	}
 	if args.Seq != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAgentId))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")
@@ -2929,49 +2965,51 @@ func MutationCreateDomainEntitySchemaBuild(args MutationCreateDomainEntitySchema
 		b.WriteString("schemaId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SchemaId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("entityKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.EntityKind))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyFields: ")
 	b.WriteString(renderMemQLValue(args.KeyFields))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DisplayFields != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("displayFields: ")
+		b.WriteString(renderMemQLValue(args.DisplayFields))
 	}
-	b.WriteString("displayFields: ")
-	b.WriteString(renderMemQLValue(args.DisplayFields))
 	if args.InferredFromDocumentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inferredFromDocumentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.InferredFromDocumentId))
 	}
 	if args.InferredFromTaskId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inferredFromTaskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.InferredFromTaskId))
 	}
 	if args.ConfirmedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confirmedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.ConfirmedBy))
 	}
 	if args.ConfirmedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confirmedAt: ")
@@ -3010,45 +3048,45 @@ func MutationCreateEntityIndexEntryBuild(args MutationCreateEntityIndexEntryArgs
 		b.WriteString("entryId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EntryId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("entityKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.EntityKind))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceDocumentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceDocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceItemId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceItemId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("validatedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ValidatedAt))
 	if args.ForceAddedSet {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forceAdded: ")
 		b.WriteString(fmt.Sprintf("%v", args.ForceAdded))
 	}
 	if args.DedupOverrideNote != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dedupOverrideNote: ")
@@ -3091,86 +3129,86 @@ func MutationCreateGeneratedOutputBuild(args MutationCreateGeneratedOutputArgs) 
 	b.WriteString("mutationCreateGeneratedOutput({")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByAgentId))
 	}
 	if args.ProducedByWorkerId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByWorkerId))
 	}
 	if args.ProducedByWorkerName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByWorkerName: ")
@@ -3202,22 +3240,22 @@ func MutationCreateGreetingUtteranceBuild(args MutationCreateGreetingUtteranceAr
 	b.WriteString("mutationCreateGreetingUtterance({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("greetingKind: ")
@@ -3263,91 +3301,95 @@ func MutationCreateGuideBuild(args MutationCreateGuideArgs) string {
 		b.WriteString("guideId: ")
 		b.WriteString(fmt.Sprintf("%q", args.GuideId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.AvatarEnabledSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AvatarEnabled))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.SceneCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sceneCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.SceneCount))
 	}
 	if args.GeneratedFromIntakeSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("generatedFromIntake: ")
 		b.WriteString(fmt.Sprintf("%v", args.GeneratedFromIntake))
 	}
 	if args.IntakeSummary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("intakeSummary: ")
 		b.WriteString(fmt.Sprintf("%q", args.IntakeSummary))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RequiredScopes != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requiredScopes: ")
+		b.WriteString(renderMemQLValue(args.RequiredScopes))
 	}
-	b.WriteString("requiredScopes: ")
-	b.WriteString(renderMemQLValue(args.RequiredScopes))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Locales != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("locales: ")
+		b.WriteString(renderMemQLValue(args.Locales))
 	}
-	b.WriteString("locales: ")
-	b.WriteString(renderMemQLValue(args.Locales))
 	if args.Version != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%v", args.Version))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -3379,16 +3421,18 @@ func MutationCreateHarnessPlanBuild(args MutationCreateHarnessPlanArgs) string {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Input != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("input: ")
+		b.WriteString(renderMemQLValue(args.Input))
 	}
-	b.WriteString("input: ")
-	b.WriteString(renderMemQLValue(args.Input))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3419,27 +3463,27 @@ func MutationCreateHarnessSemanticMemoryBuild(args MutationCreateHarnessSemantic
 		b.WriteString("memoryId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MemoryId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
 	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastReinforced: ")
@@ -3473,30 +3517,30 @@ func MutationCreateIdentityBuild(args MutationCreateIdentityArgs) string {
 	b.WriteString("mutationCreateIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityType: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityType))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("credentials: ")
 	b.WriteString(renderMemQLValue(args.Credentials))
 	if args.Label != "" {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.UsableByAgentsSet {
-		if b.Len() > 17 {
+		if b.Len() > 24 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
@@ -3527,20 +3571,20 @@ func MutationCreateIdentityProviderBuild(args MutationCreateIdentityProviderArgs
 	b.WriteString("mutationCreateIdentityProvider({")
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("issuerUrl: ")
 	b.WriteString(fmt.Sprintf("%q", args.IssuerUrl))
 	if args.ClientIdPrefix != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clientIdPrefix: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClientIdPrefix))
 	}
 	if args.RedirectUrl != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redirectUrl: ")
@@ -3575,31 +3619,33 @@ func MutationCreateImageRegionBuild(args MutationCreateImageRegionArgs) string {
 		b.WriteString("regionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegionId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("regionSeq: ")
 	b.WriteString(fmt.Sprintf("%v", args.RegionSeq))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bbox: ")
 	b.WriteString(renderMemQLValue(args.Bbox))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("caption: ")
 	b.WriteString(fmt.Sprintf("%q", args.Caption))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DomainHints != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domainHints: ")
+		b.WriteString(renderMemQLValue(args.DomainHints))
 	}
-	b.WriteString("domainHints: ")
-	b.WriteString(renderMemQLValue(args.DomainHints))
 	b.WriteString("})")
 	return b.String()
 }
@@ -3628,37 +3674,37 @@ func MutationCreateKnowledgeBridgeBuild(args MutationCreateKnowledgeBridgeArgs) 
 	b.WriteString("mutationCreateKnowledgeBridge({")
 	b.WriteString("bridgeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BridgeId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("roleSlug: ")
 	b.WriteString(fmt.Sprintf("%q", args.RoleSlug))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainIds: ")
 	b.WriteString(renderMemQLValue(args.DomainIds))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("combinationKey: ")
 	b.WriteString(fmt.Sprintf("%q", args.CombinationKey))
 	if args.ChunkCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("chunkCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.ChunkCount))
 	}
 	if args.RecipeVersion != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recipeVersion: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecipeVersion))
 	}
 	if args.GeneratedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("generatedAt: ")
@@ -3703,98 +3749,104 @@ func MutationCreateKnowledgeDomainBuild(args MutationCreateKnowledgeDomainArgs) 
 	b.WriteString("mutationCreateKnowledgeDomain({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RelevantForRoles != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("relevantForRoles: ")
+		b.WriteString(renderMemQLValue(args.RelevantForRoles))
 	}
-	b.WriteString("relevantForRoles: ")
-	b.WriteString(renderMemQLValue(args.RelevantForRoles))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.LockedForRoles != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lockedForRoles: ")
+		b.WriteString(renderMemQLValue(args.LockedForRoles))
 	}
-	b.WriteString("lockedForRoles: ")
-	b.WriteString(renderMemQLValue(args.LockedForRoles))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RequiredByToolSlugs != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requiredByToolSlugs: ")
+		b.WriteString(renderMemQLValue(args.RequiredByToolSlugs))
 	}
-	b.WriteString("requiredByToolSlugs: ")
-	b.WriteString(renderMemQLValue(args.RequiredByToolSlugs))
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.Scope != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scope: ")
 		b.WriteString(fmt.Sprintf("%q", args.Scope))
 	}
 	if args.OwnerId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerId))
 	}
 	if args.Tier != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tier: ")
 		b.WriteString(fmt.Sprintf("%q", args.Tier))
 	}
 	if args.LastSeededAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeededAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeededAt))
 	}
 	if args.SeederRecipeVersion != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seederRecipeVersion: ")
 		b.WriteString(fmt.Sprintf("%q", args.SeederRecipeVersion))
 	}
 	if args.Source != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("source: ")
 		b.WriteString(fmt.Sprintf("%q", args.Source))
 	}
 	if args.RefreshCadenceDays != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCadenceDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshCadenceDays))
 	}
 	if args.PredefinedSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
@@ -3829,44 +3881,44 @@ func MutationCreateMagicLinkRequestBuild(args MutationCreateMagicLinkRequestArgs
 	b.WriteString("mutationCreateMagicLinkRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("email: ")
 	b.WriteString(fmt.Sprintf("%q", args.Email))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceIP))
 	}
 	if args.UserAgent != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userAgent: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserAgent))
 	}
 	if args.OauthCtxJSON != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("oauthCtxJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.OauthCtxJSON))
 	}
 	if args.InvitationId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationId: ")
@@ -3902,46 +3954,46 @@ func MutationCreateMemoryBuild(args MutationCreateMemoryArgs) string {
 	b.WriteString("mutationCreateMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.SourceUtteranceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceUtteranceId: ")
@@ -3975,27 +4027,27 @@ func MutationCreateNodeBuild(args MutationCreateNodeArgs) string {
 		b.WriteString("id: ")
 		b.WriteString(fmt.Sprintf("%q", args.Id))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Address != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("address: ")
 		b.WriteString(fmt.Sprintf("%q", args.Address))
 	}
 	if args.Health != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("health: ")
 		b.WriteString(fmt.Sprintf("%q", args.Health))
 	}
 	if args.LastSeen != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeen: ")
@@ -4031,47 +4083,47 @@ func MutationCreateNodeTokenIdentityBuild(args MutationCreateNodeTokenIdentityAr
 	b.WriteString("mutationCreateNodeTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.BootstrappedFrom != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedFrom: ")
@@ -4103,22 +4155,24 @@ func MutationCreateNoteBuild(args MutationCreateNoteArgs) string {
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
 	if args.Title != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("title: ")
 		b.WriteString(fmt.Sprintf("%q", args.Title))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("body: ")
 	b.WriteString(fmt.Sprintf("%q", args.Body))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Tags != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tags: ")
+		b.WriteString(renderMemQLValue(args.Tags))
 	}
-	b.WriteString("tags: ")
-	b.WriteString(renderMemQLValue(args.Tags))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4146,23 +4200,23 @@ func MutationCreatePATIdentityBuild(args MutationCreatePATIdentityArgs) string {
 	b.WriteString("mutationCreatePATIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	if args.UsableByAgentsSet {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
@@ -4206,80 +4260,82 @@ func MutationCreatePlanBuild(args MutationCreatePlanArgs) string {
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	if args.ParentPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parentPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParentPlanId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
 	b.WriteString(fmt.Sprintf("%q", args.Goal))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestedBy))
 	if args.TriggerSource != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("triggerSource: ")
 		b.WriteString(fmt.Sprintf("%q", args.TriggerSource))
 	}
 	if args.AuthorizedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authorizedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AuthorizedBy))
 	}
 	if args.OwnerAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
 	b.WriteString(renderMemQLValue(args.Input))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RefinementContext != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("refinementContext: ")
+		b.WriteString(renderMemQLValue(args.RefinementContext))
 	}
-	b.WriteString("refinementContext: ")
-	b.WriteString(renderMemQLValue(args.RefinementContext))
 	if args.TokenBudget != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenBudget: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenBudget))
 	}
 	if args.PauseExtendsDeadlineSet {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pauseExtendsDeadline: ")
 		b.WriteString(fmt.Sprintf("%v", args.PauseExtendsDeadline))
 	}
 	if args.ChatAnchorMessageId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("chatAnchorMessageId: ")
@@ -4318,66 +4374,66 @@ func MutationCreateRecordBuild(args MutationCreateRecordArgs) string {
 	b.WriteString("mutationCreateRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.NaturalKeyField != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
 		b.WriteString(fmt.Sprintf("%v", args.Confidence))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
@@ -4415,59 +4471,59 @@ func MutationCreateRecordBatchBuild(args MutationCreateRecordBatchArgs) string {
 	b.WriteString("mutationCreateRecordBatch({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("recordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordType))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importSource: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportSource))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("importedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ImportedBy))
 	if args.SourceAttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceAttachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SourceAttachmentId))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
@@ -4511,72 +4567,74 @@ func MutationCreateResponsibilityBuild(args MutationCreateResponsibilityArgs) st
 		b.WriteString("responsibilityId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("statement: ")
 	b.WriteString(fmt.Sprintf("%q", args.Statement))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("trigger: ")
 	b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	if args.Schedule != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Condition != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("condition: ")
+		b.WriteString(renderMemQLValue(args.Condition))
 	}
-	b.WriteString("condition: ")
-	b.WriteString(renderMemQLValue(args.Condition))
 	if args.TargetKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopeSpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeSpaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
@@ -4618,63 +4676,63 @@ func MutationCreateSceneBuild(args MutationCreateSceneArgs) string {
 		b.WriteString("sceneId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SceneId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("guideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.GuideId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("order: ")
 	b.WriteString(fmt.Sprintf("%v", args.Order))
 	if args.Title != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("title: ")
 		b.WriteString(fmt.Sprintf("%q", args.Title))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("narrationIntent: ")
 	b.WriteString(fmt.Sprintf("%q", args.NarrationIntent))
 	if args.CanvasActions != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("canvasActions: ")
 		b.WriteString(fmt.Sprintf("%q", args.CanvasActions))
 	}
 	if args.AvatarDirectives != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("avatarDirectives: ")
 		b.WriteString(fmt.Sprintf("%q", args.AvatarDirectives))
 	}
 	if args.InterruptibleSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("interruptible: ")
 		b.WriteString(fmt.Sprintf("%v", args.Interruptible))
 	}
 	if args.AllowsQuestionsSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("allowsQuestions: ")
 		b.WriteString(fmt.Sprintf("%v", args.AllowsQuestions))
 	}
 	if args.SuccessCondition != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCondition: ")
@@ -4708,34 +4766,34 @@ func MutationCreateScopeElevationPlanBuild(args MutationCreateScopeElevationPlan
 	b.WriteString("mutationCreateScopeElevationPlan({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intent: ")
 	b.WriteString(fmt.Sprintf("%q", args.Intent))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("summary: ")
 	b.WriteString(fmt.Sprintf("%q", args.Summary))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestedScope: ")
@@ -4770,48 +4828,50 @@ func MutationCreateSemanticTaskBuild(args MutationCreateSemanticTaskArgs) string
 	b.WriteString("mutationCreateSemanticTask({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.LogicalStepId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("logicalStepId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LogicalStepId))
 	}
 	if args.AttemptNumber != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attemptNumber: ")
 		b.WriteString(fmt.Sprintf("%v", args.AttemptNumber))
 	}
 	if args.Phase != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DependsOn != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("dependsOn: ")
+		b.WriteString(renderMemQLValue(args.DependsOn))
 	}
-	b.WriteString("dependsOn: ")
-	b.WriteString(renderMemQLValue(args.DependsOn))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
@@ -4845,31 +4905,37 @@ func MutationCreateSessionForParticipantBuild(args MutationCreateSessionForParti
 		b.WriteString("sessionId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SessionId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 37 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.HumanInput != nil {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("humanInput: ")
+		b.WriteString(renderMemQLValue(args.HumanInput))
 	}
-	b.WriteString("humanInput: ")
-	b.WriteString(renderMemQLValue(args.HumanInput))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.AiOutput != nil {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aiOutput: ")
+		b.WriteString(renderMemQLValue(args.AiOutput))
 	}
-	b.WriteString("aiOutput: ")
-	b.WriteString(renderMemQLValue(args.AiOutput))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Streams != nil {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("streams: ")
+		b.WriteString(renderMemQLValue(args.Streams))
 	}
-	b.WriteString("streams: ")
-	b.WriteString(renderMemQLValue(args.Streams))
 	b.WriteString("})")
 	return b.String()
 }
@@ -4907,64 +4973,72 @@ func MutationCreateSkillBuild(args MutationCreateSkillArgs) string {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Tags != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tags: ")
+		b.WriteString(renderMemQLValue(args.Tags))
 	}
-	b.WriteString("tags: ")
-	b.WriteString(renderMemQLValue(args.Tags))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DomainIds != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domainIds: ")
+		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
-	b.WriteString("domainIds: ")
-	b.WriteString(renderMemQLValue(args.DomainIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ToolSlugs != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toolSlugs: ")
+		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
-	b.WriteString("toolSlugs: ")
-	b.WriteString(renderMemQLValue(args.ToolSlugs))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.LiveSourceIds != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("liveSourceIds: ")
+		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	b.WriteString("liveSourceIds: ")
-	b.WriteString(renderMemQLValue(args.LiveSourceIds))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.PredefinedSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("predefined: ")
 		b.WriteString(fmt.Sprintf("%v", args.Predefined))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -5000,49 +5074,53 @@ func MutationCreateSkillChangeEventBuild(args MutationCreateSkillChangeEventArgs
 	b.WriteString("mutationCreateSkillChangeEvent({")
 	b.WriteString("skillChangeEventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillChangeEventId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetAgentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetAgentId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("skillId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	if args.ChangeKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("changeKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.ChangeKind))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Before != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("before: ")
+		b.WriteString(renderMemQLValue(args.Before))
 	}
-	b.WriteString("before: ")
-	b.WriteString(renderMemQLValue(args.Before))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.After != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("after: ")
+		b.WriteString(renderMemQLValue(args.After))
 	}
-	b.WriteString("after: ")
-	b.WriteString(renderMemQLValue(args.After))
 	if args.ActorAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorAgentId))
 	}
 	if args.ActorUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
@@ -5086,82 +5164,90 @@ func MutationCreateSpaceBuild(args MutationCreateSpaceArgs) string {
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Goal != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("goal: ")
+		b.WriteString(renderMemQLValue(args.Goal))
 	}
-	b.WriteString("goal: ")
-	b.WriteString(renderMemQLValue(args.Goal))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Settings != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("settings: ")
+		b.WriteString(renderMemQLValue(args.Settings))
 	}
-	b.WriteString("settings: ")
-	b.WriteString(renderMemQLValue(args.Settings))
 	if args.Status != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.SpaceType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceType: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceType))
 	}
 	if args.ScheduledAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scheduledAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScheduledAt))
 	}
 	if args.TurnStateId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("turnStateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TurnStateId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ParticipantIds != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("participantIds: ")
+		b.WriteString(renderMemQLValue(args.ParticipantIds))
 	}
-	b.WriteString("participantIds: ")
-	b.WriteString(renderMemQLValue(args.ParticipantIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.UtteranceIds != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("utteranceIds: ")
+		b.WriteString(renderMemQLValue(args.UtteranceIds))
 	}
-	b.WriteString("utteranceIds: ")
-	b.WriteString(renderMemQLValue(args.UtteranceIds))
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	if args.MaxHumans != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxHumans: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxHumans))
 	}
 	if args.MaxAgents != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxAgents: ")
@@ -5192,18 +5278,18 @@ func MutationCreateSpawnEventBuild(args MutationCreateSpawnEventArgs) string {
 	b.WriteString("mutationCreateSpawnEvent({")
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
@@ -5237,26 +5323,28 @@ func MutationCreateSpreadsheetRowBuild(args MutationCreateSpreadsheetRowArgs) st
 		b.WriteString("rowId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RowId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("rowSeq: ")
 	b.WriteString(fmt.Sprintf("%v", args.RowSeq))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("data: ")
 	b.WriteString(renderMemQLValue(args.Data))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DomainHints != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domainHints: ")
+		b.WriteString(renderMemQLValue(args.DomainHints))
 	}
-	b.WriteString("domainHints: ")
-	b.WriteString(renderMemQLValue(args.DomainHints))
 	b.WriteString("})")
 	return b.String()
 }
@@ -5288,43 +5376,43 @@ func MutationCreateTaskBuild(args MutationCreateTaskArgs) string {
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
 	b.WriteString(fmt.Sprintf("%v", args.Seq))
 	if args.Phase != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phase: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phase))
 	}
 	if args.ExecutionSurface != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executionSurface: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutionSurface))
 	}
 	if args.ExecutorBackend != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("executorBackend: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExecutorBackend))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("input: ")
@@ -5356,25 +5444,25 @@ func MutationCreateTodoBuild(args MutationCreateTodoArgs) string {
 	b.WriteString("mutationCreateTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dueAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.DueAt))
 	if args.Priority != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("priority: ")
 		b.WriteString(fmt.Sprintf("%q", args.Priority))
 	}
 	if args.SourceResponsibilityId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceResponsibilityId: ")
@@ -5407,27 +5495,29 @@ func MutationCreateToolInvocationTaskBuild(args MutationCreateToolInvocationTask
 	b.WriteString("mutationCreateToolInvocationTask({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("parentTaskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParentTaskId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ToolArgs != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toolArgs: ")
+		b.WriteString(renderMemQLValue(args.ToolArgs))
 	}
-	b.WriteString("toolArgs: ")
-	b.WriteString(renderMemQLValue(args.ToolArgs))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seq: ")
@@ -5460,33 +5550,37 @@ func MutationCreateUserBuild(args MutationCreateUserArgs) string {
 	b.WriteString("mutationCreateUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Role != "" {
-		if b.Len() > 17 {
+		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.GroupIds != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupIds: ")
+		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
-	b.WriteString("groupIds: ")
-	b.WriteString(renderMemQLValue(args.GroupIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Preferences != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preferences: ")
+		b.WriteString(renderMemQLValue(args.Preferences))
 	}
-	b.WriteString("preferences: ")
-	b.WriteString(renderMemQLValue(args.Preferences))
 	b.WriteString("})")
 	return b.String()
 }
@@ -5522,80 +5616,84 @@ func MutationCreateUserOnFirstLoginBuild(args MutationCreateUserOnFirstLoginArgs
 	b.WriteString("mutationCreateUserOnFirstLogin({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.FirstName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("firstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.FirstName))
 	}
 	if args.LastName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastName))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("primaryEmail: ")
 	b.WriteString(fmt.Sprintf("%q", args.PrimaryEmail))
 	if args.Phone != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("phone: ")
 		b.WriteString(fmt.Sprintf("%q", args.Phone))
 	}
 	if args.PrimaryRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("primaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.PrimaryRole))
 	}
 	if args.Gender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("gender: ")
 		b.WriteString(fmt.Sprintf("%q", args.Gender))
 	}
 	if args.Birthdate != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("birthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.Birthdate))
 	}
 	if args.Role != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("role: ")
 		b.WriteString(fmt.Sprintf("%q", args.Role))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internal: ")
 	b.WriteString(fmt.Sprintf("%v", args.Internal))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.GroupIds != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupIds: ")
+		b.WriteString(renderMemQLValue(args.GroupIds))
 	}
-	b.WriteString("groupIds: ")
-	b.WriteString(renderMemQLValue(args.GroupIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Preferences != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preferences: ")
+		b.WriteString(renderMemQLValue(args.Preferences))
 	}
-	b.WriteString("preferences: ")
-	b.WriteString(renderMemQLValue(args.Preferences))
 	b.WriteString("})")
 	return b.String()
 }
@@ -5627,42 +5725,42 @@ func MutationCreateValidationEventBuild(args MutationCreateValidationEventArgs) 
 		b.WriteString("eventId: ")
 		b.WriteString(fmt.Sprintf("%q", args.EventId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetConceptType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetConceptType))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromStatus: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromStatus))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toStatus: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToStatus))
 	if args.ActorUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.Note != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -5696,35 +5794,35 @@ func MutationCreateVoiceAgentTokenIdentityBuild(args MutationCreateVoiceAgentTok
 	b.WriteString("mutationCreateVoiceAgentTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("instanceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InstanceId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	}
 	if args.Label != "" {
-		if b.Len() > 17 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
@@ -5772,125 +5870,127 @@ func MutationCreateWorkerInvocationBuild(args MutationCreateWorkerInvocationArgs
 	b.WriteString("mutationCreateWorkerInvocation({")
 	b.WriteString("invocationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.InvocationId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("workerId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkerId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.TaskId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("taskId: ")
 		b.WriteString(fmt.Sprintf("%q", args.TaskId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tool: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tool))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ArgsRedacted != nil {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("argsRedacted: ")
+		b.WriteString(renderMemQLValue(args.ArgsRedacted))
 	}
-	b.WriteString("argsRedacted: ")
-	b.WriteString(renderMemQLValue(args.ArgsRedacted))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("startedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	if args.CompletedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.DurationMs != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("durationMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ExitCode != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exitCode: ")
 		b.WriteString(fmt.Sprintf("%v", args.ExitCode))
 	}
 	if args.Signal != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("signal: ")
 		b.WriteString(fmt.Sprintf("%q", args.Signal))
 	}
 	if args.ErrorCode != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCode: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCode))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.BytesIn != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesIn: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesIn))
 	}
 	if args.BytesOut != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bytesOut: ")
 		b.WriteString(fmt.Sprintf("%v", args.BytesOut))
 	}
 	if args.OutputPreview != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputPreview: ")
@@ -5923,28 +6023,28 @@ func MutationCreateWorkerPairingCodeBuild(args MutationCreateWorkerPairingCodeAr
 	b.WriteString("mutationCreateWorkerPairingCode({")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("codeHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.CodeHash))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("clusterURL: ")
 	b.WriteString(fmt.Sprintf("%q", args.ClusterURL))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
 	if args.SourceIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceIP: ")
@@ -5986,79 +6086,87 @@ func MutationCreateWorkerRegistrationBuild(args MutationCreateWorkerRegistration
 	b.WriteString("mutationCreateWorkerRegistration({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilityDescriptor != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityDescriptor: ")
+		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
-	b.WriteString("capabilityDescriptor: ")
-	b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Labels != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	b.WriteString("labels: ")
-	b.WriteString(renderMemQLValue(args.Labels))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.PlatformInfo != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("platformInfo: ")
+		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
-	b.WriteString("platformInfo: ")
-	b.WriteString(renderMemQLValue(args.PlatformInfo))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Permissions != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("permissions: ")
+		b.WriteString(renderMemQLValue(args.Permissions))
 	}
-	b.WriteString("permissions: ")
-	b.WriteString(renderMemQLValue(args.Permissions))
 	if args.Version != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredAt))
 	if args.LastSeenAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastSeenAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	}
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -6093,38 +6201,42 @@ func MutationCreateWorkerTokenIdentityBuild(args MutationCreateWorkerTokenIdenti
 	b.WriteString("mutationCreateWorkerTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registeredBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegisteredBy))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilitiesAdvertised != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilitiesAdvertised: ")
+		b.WriteString(renderMemQLValue(args.CapabilitiesAdvertised))
 	}
-	b.WriteString("capabilitiesAdvertised: ")
-	b.WriteString(renderMemQLValue(args.CapabilitiesAdvertised))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.LabelsAdvertised != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labelsAdvertised: ")
+		b.WriteString(renderMemQLValue(args.LabelsAdvertised))
 	}
-	b.WriteString("labelsAdvertised: ")
-	b.WriteString(renderMemQLValue(args.LabelsAdvertised))
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
@@ -6153,7 +6265,7 @@ func MutationDecayHarnessSemanticMemoryBuild(args MutationDecayHarnessSemanticMe
 	b.WriteString("mutationDecayHarnessSemanticMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
@@ -6229,35 +6341,39 @@ func MutationDeleteKnowledgeDomainBuild(args MutationDeleteKnowledgeDomainArgs) 
 	b.WriteString("mutationDeleteKnowledgeDomain({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RelevantForRoles != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("relevantForRoles: ")
+		b.WriteString(renderMemQLValue(args.RelevantForRoles))
 	}
-	b.WriteString("relevantForRoles: ")
-	b.WriteString(renderMemQLValue(args.RelevantForRoles))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.RequiredByToolSlugs != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requiredByToolSlugs: ")
+		b.WriteString(renderMemQLValue(args.RequiredByToolSlugs))
 	}
-	b.WriteString("requiredByToolSlugs: ")
-	b.WriteString(renderMemQLValue(args.RequiredByToolSlugs))
 	b.WriteString("})")
 	return b.String()
 }
@@ -6303,7 +6419,7 @@ func MutationDeleteSpaceNowBuild(args MutationDeleteSpaceNowArgs) string {
 	b.WriteString("mutationDeleteSpaceNow({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -6359,46 +6475,46 @@ func MutationEmitClientToolRequestBuild(args MutationEmitClientToolRequestArgs) 
 	b.WriteString("mutationEmitClientToolRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toolName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToolName))
 	if args.ArgumentsJSON != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argumentsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgumentsJSON))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.ParticipantId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	}
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.ExpiresAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("expiresAt: ")
@@ -6432,34 +6548,34 @@ func MutationEmitClientToolResponseBuild(args MutationEmitClientToolResponseArgs
 	b.WriteString("mutationEmitClientToolResponse({")
 	b.WriteString("responseId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponseId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
 	if args.ContentJSON != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("contentJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.ContentJSON))
 	}
 	if args.IsErrorSet {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isError: ")
 		b.WriteString(fmt.Sprintf("%v", args.IsError))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -6493,32 +6609,32 @@ func MutationEmitTextChunkBuild(args MutationEmitTextChunkArgs) string {
 	b.WriteString("mutationEmitTextChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("replyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReplyId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("index: ")
 	b.WriteString(fmt.Sprintf("%v", args.Index))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("done: ")
@@ -6569,7 +6685,7 @@ func MutationFailHarnessStepBuild(args MutationFailHarnessStepArgs) string {
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
@@ -6607,53 +6723,55 @@ func MutationFoldResponsibilityIntakeAnswersBuild(args MutationFoldResponsibilit
 	b.WriteString("mutationFoldResponsibilityIntakeAnswers({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 17 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intakeResponse: ")
 	b.WriteString(renderMemQLValue(args.IntakeResponse))
 	if args.Trigger != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Condition != nil {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("condition: ")
+		b.WriteString(renderMemQLValue(args.Condition))
 	}
-	b.WriteString("condition: ")
-	b.WriteString(renderMemQLValue(args.Condition))
 	if args.TargetKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
@@ -6696,93 +6814,93 @@ func MutationInsertOutputScreeningBuild(args MutationInsertOutputScreeningArgs) 
 	b.WriteString("mutationInsertOutputScreening({")
 	b.WriteString("contentType: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentType))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("contentLength: ")
 	b.WriteString(fmt.Sprintf("%q", args.ContentLength))
 	if args.RedactedSample != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redactedSample: ")
 		b.WriteString(fmt.Sprintf("%q", args.RedactedSample))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("verdict: ")
 	b.WriteString(fmt.Sprintf("%q", args.Verdict))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("screener: ")
 	b.WriteString(fmt.Sprintf("%q", args.Screener))
 	if args.RuleId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
@@ -6818,54 +6936,54 @@ func MutationInsertPolicyTraceBuild(args MutationInsertPolicyTraceArgs) string {
 	b.WriteString("mutationInsertPolicyTrace({")
 	b.WriteString("policyName: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyName))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.ActorUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorUserId))
 	}
 	if args.ActorRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("actorRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.ActorRole))
 	}
 	if args.CallerPartition != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("callerPartition: ")
 		b.WriteString(fmt.Sprintf("%q", args.CallerPartition))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("argsHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.ArgsHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("resultJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResultJson))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("traceJson: ")
 	b.WriteString(fmt.Sprintf("%q", args.TraceJson))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("durationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.DurationMs))
 	if args.Error != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("error: ")
@@ -6908,93 +7026,93 @@ func MutationInsertSafetyClassificationBuild(args MutationInsertSafetyClassifica
 	b.WriteString("mutationInsertSafetyClassification({")
 	b.WriteString("surface: ")
 	b.WriteString(fmt.Sprintf("%q", args.Surface))
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
 	b.WriteString(fmt.Sprintf("%q", args.Action))
 	if args.ArgsRedacted != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("argsRedacted: ")
 		b.WriteString(fmt.Sprintf("%q", args.ArgsRedacted))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.Categories != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("categories: ")
 		b.WriteString(fmt.Sprintf("%q", args.Categories))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decision: ")
 	b.WriteString(fmt.Sprintf("%q", args.Decision))
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.RuleId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ruleId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RuleId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("latencyMs: ")
 	b.WriteString(fmt.Sprintf("%q", args.LatencyMs))
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.OwnerUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
 	}
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
 	if args.CorrelationId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 36 {
 			b.WriteString(", ")
 		}
 		b.WriteString("correlationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.CorrelationId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
@@ -7026,35 +7144,37 @@ func MutationJoinSpaceAsHumanBuild(args MutationJoinSpaceAsHumanArgs) string {
 	b.WriteString("mutationJoinSpaceAsHuman({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilityOverrides != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityOverrides: ")
+		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
-	b.WriteString("capabilityOverrides: ")
-	b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7087,51 +7207,53 @@ func MutationJoinSpaceAsSIBuild(args MutationJoinSpaceAsSIArgs) string {
 	b.WriteString("mutationJoinSpaceAsSI({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 23 {
 		b.WriteString(", ")
 	}
 	b.WriteString("displayName: ")
 	b.WriteString(fmt.Sprintf("%q", args.DisplayName))
 	if args.Status != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("status: ")
 		b.WriteString(fmt.Sprintf("%q", args.Status))
 	}
 	if args.JoinedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("joinedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.JoinedAt))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilityOverrides != nil {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityOverrides: ")
+		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	}
-	b.WriteString("capabilityOverrides: ")
-	b.WriteString(renderMemQLValue(args.CapabilityOverrides))
 	if args.HiddenSet {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("hidden: ")
 		b.WriteString(fmt.Sprintf("%v", args.Hidden))
 	}
 	if args.ForUserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("forUserId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ForUserId))
 	}
 	if args.IsGroupGASet {
-		if b.Len() > 17 {
+		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
 		b.WriteString("isGroupGA: ")
@@ -7160,7 +7282,7 @@ func MutationLeaveSpaceBuild(args MutationLeaveSpaceArgs) string {
 	b.WriteString("mutationLeaveSpace({")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -7196,56 +7318,56 @@ func MutationLogMissingCapabilityBuild(args MutationLogMissingCapabilityArgs) st
 	b.WriteString("mutationLogMissingCapability({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capability: ")
 	b.WriteString(fmt.Sprintf("%q", args.Capability))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("description: ")
 	b.WriteString(fmt.Sprintf("%q", args.Description))
 	if args.RequestedFromPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedFromPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedFromPlanId))
 	}
 	if args.RequestedByAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requestedByAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RequestedByAgentId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.PartitionScope != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("partitionScope: ")
 		b.WriteString(fmt.Sprintf("%q", args.PartitionScope))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("firstSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.FirstSeenAt))
 	if args.ExampleGoal != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("exampleGoal: ")
@@ -7275,13 +7397,13 @@ func MutationMarkChunkSupersededBuild(args MutationMarkChunkSupersededArgs) stri
 	b.WriteString("mutationMarkChunkSuperseded({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("supersededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.SupersededAt))
 	if args.SupersededReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("supersededReason: ")
@@ -7311,12 +7433,12 @@ func MutationMarkKnowledgeDomainSeededBuild(args MutationMarkKnowledgeDomainSeed
 	b.WriteString("mutationMarkKnowledgeDomainSeeded({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeededAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeededAt))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("seederRecipeVersion: ")
@@ -7344,7 +7466,7 @@ func MutationMarkKnowledgeDomainStaleBuild(args MutationMarkKnowledgeDomainStale
 	b.WriteString("mutationMarkKnowledgeDomainStale({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("staleSignalCount: ")
@@ -7406,64 +7528,72 @@ func MutationMintSkillBuild(args MutationMintSkillArgs) string {
 		b.WriteString("skillId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SkillId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("slug: ")
 	b.WriteString(fmt.Sprintf("%q", args.Slug))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.Category != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("category: ")
 		b.WriteString(fmt.Sprintf("%q", args.Category))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Tags != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tags: ")
+		b.WriteString(renderMemQLValue(args.Tags))
 	}
-	b.WriteString("tags: ")
-	b.WriteString(renderMemQLValue(args.Tags))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DomainIds != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domainIds: ")
+		b.WriteString(renderMemQLValue(args.DomainIds))
 	}
-	b.WriteString("domainIds: ")
-	b.WriteString(renderMemQLValue(args.DomainIds))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ToolSlugs != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toolSlugs: ")
+		b.WriteString(renderMemQLValue(args.ToolSlugs))
 	}
-	b.WriteString("toolSlugs: ")
-	b.WriteString(renderMemQLValue(args.ToolSlugs))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.LiveSourceIds != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("liveSourceIds: ")
+		b.WriteString(renderMemQLValue(args.LiveSourceIds))
 	}
-	b.WriteString("liveSourceIds: ")
-	b.WriteString(renderMemQLValue(args.LiveSourceIds))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.OriginatingPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("originatingPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OriginatingPlanId))
 	}
 	if args.MintedByAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mintedByAgentId: ")
@@ -7498,33 +7628,35 @@ func MutationMoveGroupToPrivateBuild(args MutationMoveGroupToPrivateArgs) string
 		b.WriteString("newUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.NewUtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7554,33 +7686,35 @@ func MutationMovePrivateToGroupBuild(args MutationMovePrivateToGroupArgs) string
 		b.WriteString("newUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.NewUtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7610,33 +7744,39 @@ func MutationPersistTaskStateBuild(args MutationPersistTaskStateArgs) string {
 		b.WriteString("stateId: ")
 		b.WriteString(fmt.Sprintf("%q", args.StateId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.WorkingMemory != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("workingMemory: ")
+		b.WriteString(renderMemQLValue(args.WorkingMemory))
 	}
-	b.WriteString("workingMemory: ")
-	b.WriteString(renderMemQLValue(args.WorkingMemory))
 	if args.ReasoningChain != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reasoningChain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReasoningChain))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.ToolCallHistory != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("toolCallHistory: ")
+		b.WriteString(renderMemQLValue(args.ToolCallHistory))
 	}
-	b.WriteString("toolCallHistory: ")
-	b.WriteString(renderMemQLValue(args.ToolCallHistory))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.PendingSubPlanIds != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pendingSubPlanIds: ")
+		b.WriteString(renderMemQLValue(args.PendingSubPlanIds))
 	}
-	b.WriteString("pendingSubPlanIds: ")
-	b.WriteString(renderMemQLValue(args.PendingSubPlanIds))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7662,12 +7802,12 @@ func MutationProvisionWorkspaceBuild(args MutationProvisionWorkspaceArgs) string
 	b.WriteString("mutationProvisionWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("storageRoot: ")
@@ -7720,18 +7860,18 @@ func MutationRecordBundleDryRunBuild(args MutationRecordBundleDryRunArgs) string
 	b.WriteString("mutationRecordBundleDryRun({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("dryRunReport: ")
 	b.WriteString(renderMemQLValue(args.DryRunReport))
 	if args.FailureReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -7763,18 +7903,18 @@ func MutationRecordBundleValidationBuild(args MutationRecordBundleValidationArgs
 	b.WriteString("mutationRecordBundleValidation({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("validationReport: ")
 	b.WriteString(renderMemQLValue(args.ValidationReport))
 	if args.FailureReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -7811,32 +7951,32 @@ func MutationRecordDependencyEdgeBuild(args MutationRecordDependencyEdgeArgs) st
 	b.WriteString("mutationRecordDependencyEdge({")
 	b.WriteString("edgeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EdgeId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromConstruct: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromConstruct))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fromKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.FromKind))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToName))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toKind: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToKind))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toSource: ")
@@ -7871,33 +8011,35 @@ func MutationRecordHarnessObservationBuild(args MutationRecordHarnessObservation
 		b.WriteString("observationId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ObservationId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.PlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("planId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("kind: ")
 	b.WriteString(fmt.Sprintf("%q", args.Kind))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("content: ")
 	b.WriteString(fmt.Sprintf("%q", args.Content))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Data != nil {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("data: ")
+		b.WriteString(renderMemQLValue(args.Data))
 	}
-	b.WriteString("data: ")
-	b.WriteString(renderMemQLValue(args.Data))
 	b.WriteString("})")
 	return b.String()
 }
@@ -7921,7 +8063,7 @@ func MutationRecordLegalAcceptanceBuild(args MutationRecordLegalAcceptanceArgs) 
 	b.WriteString("mutationRecordLegalAcceptance({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("legalAcceptance: ")
@@ -7959,53 +8101,53 @@ func MutationRecordMisrouteFeedbackBuild(args MutationRecordMisrouteFeedbackArgs
 		b.WriteString("feedbackId: ")
 		b.WriteString(fmt.Sprintf("%q", args.FeedbackId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("originalThread: ")
 	b.WriteString(fmt.Sprintf("%q", args.OriginalThread))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("intendedThread: ")
 	b.WriteString(fmt.Sprintf("%q", args.IntendedThread))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
 	if args.Why != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("why: ")
 		b.WriteString(fmt.Sprintf("%q", args.Why))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("message: ")
 	b.WriteString(fmt.Sprintf("%q", args.Message))
 	if args.UtteranceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
 	if args.MovedToId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("movedToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MovedToId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userAction: ")
@@ -8035,17 +8177,19 @@ func MutationRecordPlannerInvocationBuild(args MutationRecordPlannerInvocationAr
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
 	if args.TokenSpent != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Metrics != nil {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("metrics: ")
+		b.WriteString(renderMemQLValue(args.Metrics))
 	}
-	b.WriteString("metrics: ")
-	b.WriteString(renderMemQLValue(args.Metrics))
 	b.WriteString("})")
 	return b.String()
 }
@@ -8069,7 +8213,7 @@ func MutationRecordResponsibilityEvaluationBuild(args MutationRecordResponsibili
 	b.WriteString("mutationRecordResponsibilityEvaluation({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 17 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastResult: ")
@@ -8125,161 +8269,161 @@ func MutationRecordRouterCallBuild(args MutationRecordRouterCallArgs) string {
 	b.WriteString("mutationRecordRouterCall({")
 	b.WriteString("callId: ")
 	b.WriteString(fmt.Sprintf("%q", args.CallId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
 	if args.AgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("agentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AgentId))
 	}
 	if args.UserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UserId))
 	}
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.PromptName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("promptName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PromptName))
 	}
 	if args.PolicyName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("policyName: ")
 		b.WriteString(fmt.Sprintf("%q", args.PolicyName))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("vendor: ")
 	b.WriteString(fmt.Sprintf("%q", args.Vendor))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("model: ")
 	b.WriteString(fmt.Sprintf("%q", args.Model))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("providerName: ")
 	b.WriteString(fmt.Sprintf("%q", args.ProviderName))
 	if args.InputTokens != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("inputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.InputTokens))
 	}
 	if args.OutputTokens != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("outputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.OutputTokens))
 	}
 	if args.CachedInputTokens != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cachedInputTokens: ")
 		b.WriteString(fmt.Sprintf("%v", args.CachedInputTokens))
 	}
 	if args.TokensEstimatedSet {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokensEstimated: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokensEstimated))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("inputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.InputCost))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputCost))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("cachedInputCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.CachedInputCost))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalCost: ")
 	b.WriteString(fmt.Sprintf("%q", args.TotalCost))
 	if args.PricingConfiguredSet {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pricingConfigured: ")
 		b.WriteString(fmt.Sprintf("%v", args.PricingConfigured))
 	}
 	if args.TimeToFirstTokenMs != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("timeToFirstTokenMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TimeToFirstTokenMs))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("totalDurationMs: ")
 	b.WriteString(fmt.Sprintf("%v", args.TotalDurationMs))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokensPerSec: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokensPerSec))
 	if args.StreamingSet {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("streaming: ")
 		b.WriteString(fmt.Sprintf("%v", args.Streaming))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("outcome: ")
 	b.WriteString(fmt.Sprintf("%q", args.Outcome))
 	if args.ErrorCategory != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorCategory: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorCategory))
 	}
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.FallbackFromModel != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("fallbackFromModel: ")
@@ -8310,18 +8454,18 @@ func MutationRedeemWorkerPairingCodeBuild(args MutationRedeemWorkerPairingCodeAr
 	b.WriteString("mutationRedeemWorkerPairingCode({")
 	b.WriteString("pairingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PairingId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("redeemedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.RedeemedBy))
 	if args.RedeemedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 33 {
 			b.WriteString(", ")
 		}
 		b.WriteString("redeemedFromIP: ")
@@ -8360,62 +8504,70 @@ func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrati
 	b.WriteString("mutationRefreshWorkerRegistration({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.CapabilityDescriptor != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("capabilityDescriptor: ")
+		b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	}
-	b.WriteString("capabilityDescriptor: ")
-	b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Labels != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("labels: ")
+		b.WriteString(renderMemQLValue(args.Labels))
 	}
-	b.WriteString("labels: ")
-	b.WriteString(renderMemQLValue(args.Labels))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("concurrency: ")
 	b.WriteString(renderMemQLValue(args.Concurrency))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.PlatformInfo != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("platformInfo: ")
+		b.WriteString(renderMemQLValue(args.PlatformInfo))
 	}
-	b.WriteString("platformInfo: ")
-	b.WriteString(renderMemQLValue(args.PlatformInfo))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Permissions != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("permissions: ")
+		b.WriteString(renderMemQLValue(args.Permissions))
 	}
-	b.WriteString("permissions: ")
-	b.WriteString(renderMemQLValue(args.Permissions))
 	if args.Version != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("version: ")
 		b.WriteString(fmt.Sprintf("%q", args.Version))
 	}
 	if args.BuildTag != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("buildTag: ")
 		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -8446,17 +8598,17 @@ func MutationReinforceHarnessSemanticMemoryBuild(args MutationReinforceHarnessSe
 	b.WriteString("mutationReinforceHarnessSemanticMemory({")
 	b.WriteString("memoryId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MemoryId))
-	if b.Len() > 17 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(fmt.Sprintf("%q", args.Confidence))
-	if b.Len() > 17 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	if b.Len() > 17 {
+	if b.Len() > 40 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
@@ -8485,13 +8637,13 @@ func MutationRejectAccessRequestBuild(args MutationRejectAccessRequestArgs) stri
 	b.WriteString("mutationRejectAccessRequest({")
 	b.WriteString("requestId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RequestId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reviewedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.ReviewedBy))
 	if args.ReviewerNote != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reviewerNote: ")
@@ -8522,7 +8674,7 @@ func MutationReleaseWorkspaceBuild(args MutationReleaseWorkspaceArgs) string {
 	b.WriteString("mutationReleaseWorkspace({")
 	b.WriteString("workspaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.WorkspaceId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reason: ")
@@ -8550,7 +8702,7 @@ func MutationRemoveAgentFromSpaceBuild(args MutationRemoveAgentFromSpaceArgs) st
 	b.WriteString("mutationRemoveAgentFromSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
@@ -8578,7 +8730,7 @@ func MutationRenameSpaceBuild(args MutationRenameSpaceArgs) string {
 	b.WriteString("mutationRenameSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -8606,7 +8758,7 @@ func MutationRequestPlanFeedbackBuild(args MutationRequestPlanFeedbackArgs) stri
 	b.WriteString("mutationRequestPlanFeedback({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("feedbackRequest: ")
@@ -8634,7 +8786,7 @@ func MutationResetStaleAfterRefreshBuild(args MutationResetStaleAfterRefreshArgs
 	b.WriteString("mutationResetStaleAfterRefresh({")
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeededAt: ")
@@ -8664,18 +8816,18 @@ func MutationResolveApprovalRequestBuild(args MutationResolveApprovalRequestArgs
 	b.WriteString("mutationResolveApprovalRequest({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 17 {
+	if b.Len() > 32 {
 		b.WriteString(", ")
 	}
 	b.WriteString("decidedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.DecidedBy))
 	if args.DecisionReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 32 {
 			b.WriteString(", ")
 		}
 		b.WriteString("decisionReason: ")
@@ -8704,7 +8856,7 @@ func MutationRestoreSpaceBuild(args MutationRestoreSpaceArgs) string {
 	b.WriteString("mutationRestoreSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -8756,17 +8908,17 @@ func MutationRevertRecordBuild(args MutationRevertRecordArgs) string {
 	b.WriteString("mutationRevertRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("toState: ")
 	b.WriteString(fmt.Sprintf("%q", args.ToState))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("checkCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.CheckCount))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confirmCount: ")
@@ -8823,33 +8975,33 @@ func MutationRevokeAuthSessionBuild(args MutationRevokeAuthSessionArgs) string {
 	b.WriteString("mutationRevokeAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("subject: ")
 	b.WriteString(fmt.Sprintf("%q", args.Subject))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.TokenHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedReason: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedReason))
 	if args.UserId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("userId: ")
@@ -8878,7 +9030,7 @@ func MutationRevokeDelegationBuild(args MutationRevokeDelegationArgs) string {
 	b.WriteString("mutationRevokeDelegation({")
 	b.WriteString("delegationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DelegationId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -8914,47 +9066,47 @@ func MutationRevokeNodeTokenIdentityBuild(args MutationRevokeNodeTokenIdentityAr
 	b.WriteString("mutationRevokeNodeTokenIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastConnectAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastConnectAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedFrom: ")
@@ -8986,23 +9138,23 @@ func MutationRevokePATIdentityBuild(args MutationRevokePATIdentityArgs) string {
 	b.WriteString("mutationRevokePATIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
 	if args.UsableByAgentsSet {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("usableByAgents: ")
@@ -9033,20 +9185,20 @@ func MutationRevokeWorkerBuild(args MutationRevokeWorkerArgs) string {
 	b.WriteString("mutationRevokeWorker({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("revokedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.RevokedAt))
 	if args.RevokedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.RevokedBy))
 	}
 	if args.RevokeReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revokeReason: ")
@@ -9099,17 +9251,17 @@ func MutationRotateAuthSessionBuild(args MutationRotateAuthSessionArgs) string {
 	b.WriteString("mutationRotateAuthSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.NewRefreshTokenHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("previousRefreshTokenHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.PreviousRefreshTokenHash))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("newExpiresAt: ")
@@ -9137,7 +9289,7 @@ func MutationSaveSpaceBuild(args MutationSaveSpaceArgs) string {
 	b.WriteString("mutationSaveSpace({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -9195,43 +9347,45 @@ func MutationSendActionUtteranceBuild(args MutationSendActionUtteranceArgs) stri
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.ReplyToId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	if args.CreatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("action: ")
@@ -9266,40 +9420,42 @@ func MutationSendPrivateUtteranceBuild(args MutationSendPrivateUtteranceArgs) st
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.ReplyToId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9337,74 +9493,78 @@ func MutationSendRealtimeTranscriptUtteranceBuild(args MutationSendRealtimeTrans
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
 	if args.IdempotencyKey != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("idempotencyKey: ")
 		b.WriteString(fmt.Sprintf("%q", args.IdempotencyKey))
 	}
 	if args.CreatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("createdAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CreatedAt))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 41 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 41 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Timestamps != nil {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timestamps: ")
+		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
-	b.WriteString("timestamps: ")
-	b.WriteString(renderMemQLValue(args.Timestamps))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9438,61 +9598,65 @@ func MutationSendSpeechUtteranceBuild(args MutationSendSpeechUtteranceArgs) stri
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
 	if args.Text != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("text: ")
 		b.WriteString(fmt.Sprintf("%q", args.Text))
 	}
 	if args.AudioId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("audioId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AudioId))
 	}
 	if args.VideoId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("videoId: ")
 		b.WriteString(fmt.Sprintf("%q", args.VideoId))
 	}
 	if args.Duration != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("duration: ")
 		b.WriteString(fmt.Sprintf("%v", args.Duration))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Timestamps != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timestamps: ")
+		b.WriteString(renderMemQLValue(args.Timestamps))
 	}
-	b.WriteString("timestamps: ")
-	b.WriteString(renderMemQLValue(args.Timestamps))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9524,45 +9688,49 @@ func MutationSendTextUtteranceBuild(args MutationSendTextUtteranceArgs) string {
 		b.WriteString("utteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.UtteranceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
 	if args.ParticipantType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("participantType: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParticipantType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
 	if args.ReplyToId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("replyToId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ReplyToId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Source != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(renderMemQLValue(args.Source))
 	}
-	b.WriteString("source: ")
-	b.WriteString(renderMemQLValue(args.Source))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Citations != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("citations: ")
+		b.WriteString(renderMemQLValue(args.Citations))
 	}
-	b.WriteString("citations: ")
-	b.WriteString(renderMemQLValue(args.Citations))
 	b.WriteString("})")
 	return b.String()
 }
@@ -9591,27 +9759,27 @@ func MutationSetAccountEntitlementBuild(args MutationSetAccountEntitlementArgs) 
 	b.WriteString("mutationSetAccountEntitlement({")
 	b.WriteString("accountId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AccountId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("tier: ")
 	b.WriteString(fmt.Sprintf("%q", args.Tier))
 	if args.MaxConcurrentTasks != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("maxConcurrentTasks: ")
 		b.WriteString(fmt.Sprintf("%v", args.MaxConcurrentTasks))
 	}
 	if args.AccountKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accountKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccountKind))
 	}
 	if args.Note != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("note: ")
@@ -9644,25 +9812,25 @@ func MutationSetAgentAudioOverrideBuild(args MutationSetAgentAudioOverrideArgs) 
 	b.WriteString("mutationSetAgentAudioOverride({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9695,25 +9863,25 @@ func MutationSetAgentVideoOverrideBuild(args MutationSetAgentVideoOverrideArgs) 
 	b.WriteString("mutationSetAgentVideoOverride({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mode: ")
 	b.WriteString(fmt.Sprintf("%q", args.Mode))
 	if args.SetBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("setBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.SetBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9766,13 +9934,13 @@ func MutationSetAuthoringBundleStatusBuild(args MutationSetAuthoringBundleStatus
 	b.WriteString("mutationSetAuthoringBundleStatus({")
 	b.WriteString("bundleId: ")
 	b.WriteString(fmt.Sprintf("%q", args.BundleId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.FailureReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("failureReason: ")
@@ -9808,44 +9976,44 @@ func MutationSetBudgetBuild(args MutationSetBudgetArgs) string {
 	b.WriteString("mutationSetBudget({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("scope: ")
 	b.WriteString(fmt.Sprintf("%q", args.Scope))
 	if args.ScopeId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopeId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("periodType: ")
 	b.WriteString(fmt.Sprintf("%q", args.PeriodType))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("limitUSD: ")
 	b.WriteString(fmt.Sprintf("%q", args.LimitUSD))
 	if args.AlertThresholdPct != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("alertThresholdPct: ")
 		b.WriteString(fmt.Sprintf("%v", args.AlertThresholdPct))
 	}
 	if args.ResetAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resetAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ResetAt))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -9874,7 +10042,7 @@ func MutationSetConstructCompiledFormBuild(args MutationSetConstructCompiledForm
 	b.WriteString("mutationSetConstructCompiledForm({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("compiledForm: ")
@@ -9903,7 +10071,7 @@ func MutationSetConstructStatusBuild(args MutationSetConstructStatusArgs) string
 	b.WriteString("mutationSetConstructStatus({")
 	b.WriteString("constructId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ConstructId))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -9938,44 +10106,44 @@ func MutationSetGlobalSecretBuild(args MutationSetGlobalSecretArgs) string {
 	b.WriteString("mutationSetGlobalSecret({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -10008,25 +10176,25 @@ func MutationSetGlobalVariableBuild(args MutationSetGlobalVariableArgs) string {
 	b.WriteString("mutationSetGlobalVariable({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 27 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -10062,44 +10230,44 @@ func MutationSetPartitionSecretBuild(args MutationSetPartitionSecretArgs) string
 	b.WriteString("mutationSetPartitionSecret({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("encryptedValue: ")
 	b.WriteString(fmt.Sprintf("%q", args.EncryptedValue))
-	if b.Len() > 17 {
+	if b.Len() > 28 {
 		b.WriteString(", ")
 	}
 	b.WriteString("fingerprint: ")
 	b.WriteString(fmt.Sprintf("%q", args.Fingerprint))
 	if args.Kind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("kind: ")
 		b.WriteString(fmt.Sprintf("%q", args.Kind))
 	}
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.AddedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("addedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.AddedBy))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -10132,25 +10300,25 @@ func MutationSetPartitionVariableBuild(args MutationSetPartitionVariableArgs) st
 	b.WriteString("mutationSetPartitionVariable({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("name: ")
 	b.WriteString(fmt.Sprintf("%q", args.Name))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("value: ")
 	b.WriteString(fmt.Sprintf("%q", args.Value))
 	if args.Description != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("description: ")
 		b.WriteString(fmt.Sprintf("%q", args.Description))
 	}
 	if args.ActiveSet {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("active: ")
@@ -10185,41 +10353,41 @@ func MutationSetPolicyBuild(args MutationSetPolicyArgs) string {
 	b.WriteString("mutationSetPolicy({")
 	b.WriteString("policyId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PolicyId))
-	if b.Len() > 17 {
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("targetRecordType: ")
 	b.WriteString(fmt.Sprintf("%q", args.TargetRecordType))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.RequiredChecks != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredChecks: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredChecks))
 	}
 	if args.RequiredConfirmations != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("requiredConfirmations: ")
 		b.WriteString(fmt.Sprintf("%v", args.RequiredConfirmations))
 	}
 	if args.CheckedDataUsableSet {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("checkedDataUsable: ")
 		b.WriteString(fmt.Sprintf("%v", args.CheckedDataUsable))
 	}
 	if args.RevertMinRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
 		b.WriteString("revertMinRole: ")
@@ -10249,7 +10417,7 @@ func MutationSetResponsibilityStatusBuild(args MutationSetResponsibilityStatusAr
 	b.WriteString("mutationSetResponsibilityStatus({")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
@@ -10277,7 +10445,7 @@ func MutationSetSpaceGoalBuild(args MutationSetSpaceGoalArgs) string {
 	b.WriteString("mutationSetSpaceGoal({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("goal: ")
@@ -10306,7 +10474,7 @@ func MutationSetUserActiveSpaceBuild(args MutationSetUserActiveSpaceArgs) string
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 28 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
@@ -10336,12 +10504,12 @@ func MutationSetUserMicStateBuild(args MutationSetUserMicStateArgs) string {
 	b.WriteString("mutationSetUserMicState({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 25 {
 		b.WriteString(", ")
 	}
 	b.WriteString("muted: ")
@@ -10398,42 +10566,42 @@ func MutationStampNodeTokenBootstrapBuild(args MutationStampNodeTokenBootstrapAr
 	b.WriteString("mutationStampNodeTokenBootstrap({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("keyHash: ")
 	b.WriteString(fmt.Sprintf("%q", args.KeyHash))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("mintedBy: ")
 	b.WriteString(fmt.Sprintf("%q", args.MintedBy))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.ExpiresAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("bootstrappedFrom: ")
@@ -10462,7 +10630,7 @@ func MutationStartHarnessStepBuild(args MutationStartHarnessStepArgs) string {
 	b.WriteString("stepId: ")
 	b.WriteString(fmt.Sprintf("%q", args.StepId))
 	if args.AssignedAgent != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgent: ")
@@ -10513,7 +10681,7 @@ func MutationSuppressGreetOnJoinBuild(args MutationSuppressGreetOnJoinArgs) stri
 	b.WriteString("mutationSuppressGreetOnJoin({")
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("expiresAt: ")
@@ -10541,7 +10709,7 @@ func MutationToggleComputerUseEnabledBuild(args MutationToggleComputerUseEnabled
 	b.WriteString("mutationToggleComputerUseEnabled({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("enabled: ")
@@ -10569,7 +10737,7 @@ func MutationTouchSessionBuild(args MutationTouchSessionArgs) string {
 	b.WriteString("mutationTouchSession({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 22 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10619,7 +10787,7 @@ func MutationUpdateAgentBuild(args MutationUpdateAgentArgs) string {
 	b.WriteString("mutationUpdateAgent({")
 	b.WriteString("agentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AgentId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10647,7 +10815,7 @@ func MutationUpdateAgentAuthScopeBuild(args MutationUpdateAgentAuthScopeArgs) st
 	b.WriteString("mutationUpdateAgentAuthScope({")
 	b.WriteString("authorizationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthorizationId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("computerUseScope: ")
@@ -10675,7 +10843,7 @@ func MutationUpdateAgentAuthorizationBuild(args MutationUpdateAgentAuthorization
 	b.WriteString("mutationUpdateAgentAuthorization({")
 	b.WriteString("authId: ")
 	b.WriteString(fmt.Sprintf("%q", args.AuthId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10703,7 +10871,7 @@ func MutationUpdateCalendarEventBuild(args MutationUpdateCalendarEventArgs) stri
 	b.WriteString("mutationUpdateCalendarEvent({")
 	b.WriteString("eventId: ")
 	b.WriteString(fmt.Sprintf("%q", args.EventId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -10759,171 +10927,171 @@ func MutationUpdateClusterSettingsBuild(args MutationUpdateClusterSettingsArgs) 
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
 	if args.ClusterDomain != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("clusterDomain: ")
 		b.WriteString(fmt.Sprintf("%q", args.ClusterDomain))
 	}
 	if args.BrandName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandName))
 	}
 	if args.BrandPrimaryColor != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandPrimaryColor: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandPrimaryColor))
 	}
 	if args.BrandLogoDataURI != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandLogoDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandLogoDataURI))
 	}
 	if args.BrandIconDataURI != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("brandIconDataURI: ")
 		b.WriteString(fmt.Sprintf("%q", args.BrandIconDataURI))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("registrationMode: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationMode))
 	if args.RegistrationDomains != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registrationDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegistrationDomains))
 	}
 	if args.InternalDomains != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("internalDomains: ")
 		b.WriteString(fmt.Sprintf("%q", args.InternalDomains))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("internalDefaultRole: ")
 	b.WriteString(fmt.Sprintf("%q", args.InternalDefaultRole))
 	if args.RegisteredClientsJSON != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("registeredClientsJSON: ")
 		b.WriteString(fmt.Sprintf("%q", args.RegisteredClientsJSON))
 	}
 	if args.AccessRequestNotifyEmails != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessRequestNotifyEmails: ")
 		b.WriteString(fmt.Sprintf("%q", args.AccessRequestNotifyEmails))
 	}
 	if args.BootstrapEmail != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapEmail: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapEmail))
 	}
 	if args.BootstrapFirstName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapFirstName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapFirstName))
 	}
 	if args.BootstrapLastName != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapLastName: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapLastName))
 	}
 	if args.BootstrapPhone != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPhone: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPhone))
 	}
 	if args.BootstrapPrimaryRole != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapPrimaryRole: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapPrimaryRole))
 	}
 	if args.BootstrapGender != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapGender: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapGender))
 	}
 	if args.BootstrapBirthdate != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrapBirthdate: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrapBirthdate))
 	}
 	if args.BootstrappedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("bootstrappedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.BootstrappedAt))
 	}
 	if args.AccessTokenTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("accessTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.AccessTokenTTLSeconds))
 	}
 	if args.RefreshTokenTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshTokenTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.RefreshTokenTTLSeconds))
 	}
 	if args.MagicLinkTTLSeconds != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("magicLinkTTLSeconds: ")
 		b.WriteString(fmt.Sprintf("%v", args.MagicLinkTTLSeconds))
 	}
 	if args.InvitationTTLDays != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("invitationTTLDays: ")
 		b.WriteString(fmt.Sprintf("%v", args.InvitationTTLDays))
 	}
 	if args.RefreshCookieSameSite != "" {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("refreshCookieSameSite: ")
 		b.WriteString(fmt.Sprintf("%q", args.RefreshCookieSameSite))
 	}
 	if args.AuthoredAutomationsEnabledSet {
-		if b.Len() > 17 {
+		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
@@ -10953,13 +11121,13 @@ func MutationUpdateDocumentEmbeddingStatusBuild(args MutationUpdateDocumentEmbed
 	b.WriteString("mutationUpdateDocumentEmbeddingStatus({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("embeddingStatus: ")
 	b.WriteString(fmt.Sprintf("%q", args.EmbeddingStatus))
 	if args.EmbeddedItemCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("embeddedItemCount: ")
@@ -10990,20 +11158,20 @@ func MutationUpdateDocumentValidationBuild(args MutationUpdateDocumentValidation
 	b.WriteString("mutationUpdateDocumentValidation({")
 	b.WriteString("documentId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DocumentId))
-	if b.Len() > 17 {
+	if b.Len() > 34 {
 		b.WriteString(", ")
 	}
 	b.WriteString("validationStatus: ")
 	b.WriteString(fmt.Sprintf("%q", args.ValidationStatus))
 	if args.ValidatedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedBy))
 	}
 	if args.ValidatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 34 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedAt: ")
@@ -11044,72 +11212,72 @@ func MutationUpdateGeneratedOutputContentBuild(args MutationUpdateGeneratedOutpu
 	b.WriteString("mutationUpdateGeneratedOutputContent({")
 	b.WriteString("outputId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OutputId))
-	if b.Len() > 17 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("ownerUserId: ")
 	b.WriteString(fmt.Sprintf("%q", args.OwnerUserId))
-	if b.Len() > 17 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("title: ")
 	b.WriteString(fmt.Sprintf("%q", args.Title))
 	if args.Summary != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("summary: ")
 		b.WriteString(fmt.Sprintf("%q", args.Summary))
 	}
 	if args.Body != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("body: ")
 		b.WriteString(fmt.Sprintf("%q", args.Body))
 	}
 	if args.AttachmentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("attachmentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AttachmentId))
 	}
 	if args.Format != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
 		b.WriteString(fmt.Sprintf("%q", args.Format))
 	}
 	if args.MimeType != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("mimeType: ")
 		b.WriteString(fmt.Sprintf("%q", args.MimeType))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 38 {
 		b.WriteString(", ")
 	}
 	b.WriteString("source: ")
 	b.WriteString(fmt.Sprintf("%q", args.Source))
 	if args.SpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("spaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.SpaceId))
 	}
 	if args.ProducedByPlanId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByPlanId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ProducedByPlanId))
 	}
 	if args.ProducedByAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 38 {
 			b.WriteString(", ")
 		}
 		b.WriteString("producedByAgentId: ")
@@ -11138,7 +11306,7 @@ func MutationUpdateGuideBuild(args MutationUpdateGuideArgs) string {
 	b.WriteString("mutationUpdateGuide({")
 	b.WriteString("guideId: ")
 	b.WriteString(fmt.Sprintf("%q", args.GuideId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11166,7 +11334,7 @@ func MutationUpdateIdentityBuild(args MutationUpdateIdentityArgs) string {
 	b.WriteString("mutationUpdateIdentity({")
 	b.WriteString("identityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.IdentityId))
-	if b.Len() > 17 {
+	if b.Len() > 24 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11195,13 +11363,13 @@ func MutationUpdateMissingCapabilityStatusBuild(args MutationUpdateMissingCapabi
 	b.WriteString("mutationUpdateMissingCapabilityStatus({")
 	b.WriteString("missingId: ")
 	b.WriteString(fmt.Sprintf("%q", args.MissingId))
-	if b.Len() > 17 {
+	if b.Len() > 39 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.Resolution != "" {
-		if b.Len() > 17 {
+		if b.Len() > 39 {
 			b.WriteString(", ")
 		}
 		b.WriteString("resolution: ")
@@ -11233,24 +11401,24 @@ func MutationUpdateNodeHealthBuild(args MutationUpdateNodeHealthArgs) string {
 	b.WriteString("mutationUpdateNodeHealth({")
 	b.WriteString("id: ")
 	b.WriteString(fmt.Sprintf("%q", args.Id))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("nodeType: ")
 	b.WriteString(fmt.Sprintf("%q", args.NodeType))
 	if args.Address != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("address: ")
 		b.WriteString(fmt.Sprintf("%q", args.Address))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("health: ")
 	b.WriteString(fmt.Sprintf("%q", args.Health))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeen: ")
@@ -11278,7 +11446,7 @@ func MutationUpdateNoteBuild(args MutationUpdateNoteArgs) string {
 	b.WriteString("mutationUpdateNote({")
 	b.WriteString("noteId: ")
 	b.WriteString(fmt.Sprintf("%q", args.NoteId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11318,66 +11486,68 @@ func MutationUpdateParticipantPresenceBuild(args MutationUpdateParticipantPresen
 		b.WriteString("presenceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.PresenceId))
 	}
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("spaceId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("state: ")
 	b.WriteString(fmt.Sprintf("%q", args.State))
-	if b.Len() > 17 {
+	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
 	b.WriteString("label: ")
 	b.WriteString(fmt.Sprintf("%q", args.Label))
 	if args.Reason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("reason: ")
 		b.WriteString(fmt.Sprintf("%q", args.Reason))
 	}
 	if args.SinceAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sinceAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.SinceAt))
 	}
 	if args.LastUpdatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUpdatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUpdatedAt))
 	}
 	if args.LastUtteranceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastUtteranceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastUtteranceId))
 	}
 	if args.LastError != "" {
-		if b.Len() > 17 {
+		if b.Len() > 35 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastError: ")
 		b.WriteString(fmt.Sprintf("%q", args.LastError))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Intent != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intent: ")
+		b.WriteString(renderMemQLValue(args.Intent))
 	}
-	b.WriteString("intent: ")
-	b.WriteString(renderMemQLValue(args.Intent))
 	b.WriteString("})")
 	return b.String()
 }
@@ -11401,7 +11571,7 @@ func MutationUpdateParticipantStatusBuild(args MutationUpdateParticipantStatusAr
 	b.WriteString("mutationUpdateParticipantStatus({")
 	b.WriteString("participantId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ParticipantId))
-	if b.Len() > 17 {
+	if b.Len() > 33 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11448,127 +11618,139 @@ func MutationUpdatePlanStatusBuild(args MutationUpdatePlanStatusArgs) string {
 	b.WriteString("mutationUpdatePlanStatus({")
 	b.WriteString("planId: ")
 	b.WriteString(fmt.Sprintf("%q", args.PlanId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
 	if args.OwnerAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("ownerAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.OwnerAgentId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Output != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("output: ")
+		b.WriteString(renderMemQLValue(args.Output))
 	}
-	b.WriteString("output: ")
-	b.WriteString(renderMemQLValue(args.Output))
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.CancelledBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("cancelledBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.CancelledBy))
 	}
 	if args.PausedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("pausedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.PausedAt))
 	}
 	if args.TotalPausedMs != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("totalPausedMs: ")
 		b.WriteString(fmt.Sprintf("%v", args.TotalPausedMs))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.FeedbackRequest != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("feedbackRequest: ")
+		b.WriteString(renderMemQLValue(args.FeedbackRequest))
 	}
-	b.WriteString("feedbackRequest: ")
-	b.WriteString(renderMemQLValue(args.FeedbackRequest))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.FeedbackResponse != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("feedbackResponse: ")
+		b.WriteString(renderMemQLValue(args.FeedbackResponse))
 	}
-	b.WriteString("feedbackResponse: ")
-	b.WriteString(renderMemQLValue(args.FeedbackResponse))
 	if args.FeedbackReason != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("feedbackReason: ")
 		b.WriteString(fmt.Sprintf("%q", args.FeedbackReason))
 	}
 	if args.RecommendationCardId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("recommendationCardId: ")
 		b.WriteString(fmt.Sprintf("%q", args.RecommendationCardId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Phases != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("phases: ")
+		b.WriteString(renderMemQLValue(args.Phases))
 	}
-	b.WriteString("phases: ")
-	b.WriteString(renderMemQLValue(args.Phases))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Estimate != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("estimate: ")
+		b.WriteString(renderMemQLValue(args.Estimate))
 	}
-	b.WriteString("estimate: ")
-	b.WriteString(renderMemQLValue(args.Estimate))
 	if args.EstimatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("estimatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.EstimatedAt))
 	}
 	if args.TokenSpent != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenSpent: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenSpent))
 	}
 	if args.TokenAllocatedToChildren != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenAllocatedToChildren: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenAllocatedToChildren))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Metrics != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("metrics: ")
+		b.WriteString(renderMemQLValue(args.Metrics))
 	}
-	b.WriteString("metrics: ")
-	b.WriteString(renderMemQLValue(args.Metrics))
 	if args.ComputerUseScope != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("computerUseScope: ")
@@ -11601,34 +11783,36 @@ func MutationUpdateRecordBuild(args MutationUpdateRecordArgs) string {
 	b.WriteString("mutationUpdateRecord({")
 	b.WriteString("recordId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RecordId))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Data != nil {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("data: ")
+		b.WriteString(renderMemQLValue(args.Data))
 	}
-	b.WriteString("data: ")
-	b.WriteString(renderMemQLValue(args.Data))
 	if args.Label != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("label: ")
 		b.WriteString(fmt.Sprintf("%q", args.Label))
 	}
 	if args.NaturalKeyField != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyField: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyField))
 	}
 	if args.NaturalKeyValue != "" {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("naturalKeyValue: ")
 		b.WriteString(fmt.Sprintf("%q", args.NaturalKeyValue))
 	}
 	if args.Confidence != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 22 {
 			b.WriteString(", ")
 		}
 		b.WriteString("confidence: ")
@@ -11671,75 +11855,77 @@ func MutationUpdateResponsibilityBuild(args MutationUpdateResponsibilityArgs) st
 	b.WriteString("responsibilityId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ResponsibilityId))
 	if args.Statement != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("statement: ")
 		b.WriteString(fmt.Sprintf("%q", args.Statement))
 	}
 	if args.Trigger != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("trigger: ")
 		b.WriteString(fmt.Sprintf("%q", args.Trigger))
 	}
 	if args.Schedule != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("schedule: ")
 		b.WriteString(fmt.Sprintf("%q", args.Schedule))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Condition != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("condition: ")
+		b.WriteString(renderMemQLValue(args.Condition))
 	}
-	b.WriteString("condition: ")
-	b.WriteString(renderMemQLValue(args.Condition))
 	if args.TargetKind != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("targetKind: ")
 		b.WriteString(fmt.Sprintf("%q", args.TargetKind))
 	}
 	if args.AssignedAgentId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedAgentId: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedAgentId))
 	}
 	if args.AssignedRoleSlug != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("assignedRoleSlug: ")
 		b.WriteString(fmt.Sprintf("%q", args.AssignedRoleSlug))
 	}
 	if args.SuccessCriteria != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("successCriteria: ")
 		b.WriteString(fmt.Sprintf("%q", args.SuccessCriteria))
 	}
 	if args.NotifyHow != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("notifyHow: ")
 		b.WriteString(fmt.Sprintf("%q", args.NotifyHow))
 	}
 	if args.ScopeSpaceId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("scopeSpaceId: ")
 		b.WriteString(fmt.Sprintf("%q", args.ScopeSpaceId))
 	}
 	if args.EnabledSet {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("enabled: ")
@@ -11768,7 +11954,7 @@ func MutationUpdateSceneBuild(args MutationUpdateSceneArgs) string {
 	b.WriteString("mutationUpdateScene({")
 	b.WriteString("sceneId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SceneId))
-	if b.Len() > 17 {
+	if b.Len() > 21 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11796,7 +11982,7 @@ func MutationUpdateSessionDevicesBuild(args MutationUpdateSessionDevicesArgs) st
 	b.WriteString("mutationUpdateSessionDevices({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11824,7 +12010,7 @@ func MutationUpdateSessionStreamsBuild(args MutationUpdateSessionStreamsArgs) st
 	b.WriteString("mutationUpdateSessionStreams({")
 	b.WriteString("sessionId: ")
 	b.WriteString(fmt.Sprintf("%q", args.SessionId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -11859,47 +12045,49 @@ func MutationUpdateSpreadsheetRowBuild(args MutationUpdateSpreadsheetRowArgs) st
 	b.WriteString("rowId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RowId))
 	if args.ValidationStatus != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validationStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidationStatus))
 	}
 	if args.ValidatedBy != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedBy: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedBy))
 	}
 	if args.ValidatedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("validatedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ValidatedAt))
 	}
 	if args.DedupStatus != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("dedupStatus: ")
 		b.WriteString(fmt.Sprintf("%q", args.DedupStatus))
 	}
 	if args.MatchesEntityIndexId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("matchesEntityIndexId: ")
 		b.WriteString(fmt.Sprintf("%q", args.MatchesEntityIndexId))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.DiffFromMatched != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("diffFromMatched: ")
+		b.WriteString(renderMemQLValue(args.DiffFromMatched))
 	}
-	b.WriteString("diffFromMatched: ")
-	b.WriteString(renderMemQLValue(args.DiffFromMatched))
 	if args.EmbeddedAsChunkId != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("embeddedAsChunkId: ")
@@ -11935,56 +12123,60 @@ func MutationUpdateTaskStatusBuild(args MutationUpdateTaskStatusArgs) string {
 	b.WriteString("mutationUpdateTaskStatus({")
 	b.WriteString("taskId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TaskId))
-	if b.Len() > 17 {
+	if b.Len() > 26 {
 		b.WriteString(", ")
 	}
 	b.WriteString("status: ")
 	b.WriteString(fmt.Sprintf("%q", args.Status))
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Output != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("output: ")
+		b.WriteString(renderMemQLValue(args.Output))
 	}
-	b.WriteString("output: ")
-	b.WriteString(renderMemQLValue(args.Output))
 	if args.ErrorMessage != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("errorMessage: ")
 		b.WriteString(fmt.Sprintf("%q", args.ErrorMessage))
 	}
 	if args.StartedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("startedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.StartedAt))
 	}
 	if args.CompletedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("completedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.CompletedAt))
 	}
 	if args.ParkedAt != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAt: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAt))
 	}
 	if args.ParkedAtCheckpoint != "" {
-		if b.Len() > 17 {
+		if b.Len() > 26 {
 			b.WriteString(", ")
 		}
 		b.WriteString("parkedAtCheckpoint: ")
 		b.WriteString(fmt.Sprintf("%q", args.ParkedAtCheckpoint))
 	}
-	if b.Len() > 17 {
-		b.WriteString(", ")
+	if args.Metrics != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("metrics: ")
+		b.WriteString(renderMemQLValue(args.Metrics))
 	}
-	b.WriteString("metrics: ")
-	b.WriteString(renderMemQLValue(args.Metrics))
 	b.WriteString("})")
 	return b.String()
 }
@@ -12008,7 +12200,7 @@ func MutationUpdateTodoBuild(args MutationUpdateTodoArgs) string {
 	b.WriteString("mutationUpdateTodo({")
 	b.WriteString("todoId: ")
 	b.WriteString(fmt.Sprintf("%q", args.TodoId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -12036,7 +12228,7 @@ func MutationUpdateUserBuild(args MutationUpdateUserArgs) string {
 	b.WriteString("mutationUpdateUser({")
 	b.WriteString("userId: ")
 	b.WriteString(fmt.Sprintf("%q", args.UserId))
-	if b.Len() > 17 {
+	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
 	b.WriteString("payload: ")
@@ -12065,13 +12257,13 @@ func MutationUpdateWorkerLastSeenBuild(args MutationUpdateWorkerLastSeenArgs) st
 	b.WriteString("mutationUpdateWorkerLastSeen({")
 	b.WriteString("registrationId: ")
 	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
-	if b.Len() > 17 {
+	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
 	b.WriteString("lastSeenAt: ")
 	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
 	if args.LastConnectedFromIP != "" {
-		if b.Len() > 17 {
+		if b.Len() > 30 {
 			b.WriteString(", ")
 		}
 		b.WriteString("lastConnectedFromIP: ")
@@ -12105,37 +12297,37 @@ func MutationWriteKnowledgeChunkBuild(args MutationWriteKnowledgeChunkArgs) stri
 	b.WriteString("mutationWriteKnowledgeChunk({")
 	b.WriteString("chunkId: ")
 	b.WriteString(fmt.Sprintf("%q", args.ChunkId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(fmt.Sprintf("%q", args.DomainId))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("text: ")
 	b.WriteString(fmt.Sprintf("%q", args.Text))
-	if b.Len() > 17 {
+	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceRef: ")
 	b.WriteString(fmt.Sprintf("%q", args.SourceRef))
 	if args.Seq != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("seq: ")
 		b.WriteString(fmt.Sprintf("%v", args.Seq))
 	}
 	if args.TokenCount != 0 {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
 	}
 	if args.SourceTopic != "" {
-		if b.Len() > 17 {
+		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
 		b.WriteString("sourceTopic: ")

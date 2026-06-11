@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -519,5 +520,76 @@ query board queryCopresentBoard {
 		if !strings.Contains(body, want) {
 			t.Errorf("merged Go output missing %q", want)
 		}
+	}
+}
+
+// TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength pins the
+// memql#1319 fix: the generated "did we already write a field"
+// separator guard must compare b.Len() against the length of the REAL
+// `<fnName>({` prefix, not a constant computed from a placeholder
+// string. Pre-fix every builder emitted `if b.Len() > 17`, which is
+// always true for any function name longer than 15 chars -- so a call
+// omitting a LEADING optional field emitted a dangling comma right
+// after `({` and the engine rejected it with a parse error.
+func TestEmitGoMethods_SeparatorGuardUsesRealPrefixLength(t *testing.T) {
+	c := Construct{
+		Kind:    "mutation",
+		Name:    "mutationUpdateParticipantPresence", // 33 chars -- the in-the-wild repro
+		Concept: "presence",
+		Args: []ArgField{
+			{Name: "presenceId", Type: "string"}, // leading OPTIONAL field
+			{Name: "participantId", Type: "string", Required: true},
+			{Name: "spaceId", Type: "string", Required: true},
+		},
+	}
+
+	out := string(emitMethods([]Construct{c}, "Mutation"))
+
+	wantGuard := fmt.Sprintf("if b.Len() > %d {", len("mutationUpdateParticipantPresence({"))
+	if !strings.Contains(out, wantGuard) {
+		t.Errorf("emitted builder missing real-prefix-length guard %q\n--- output ---\n%s", wantGuard, out)
+	}
+	// The old placeholder constant (len("FNAME({")+10 == 17) must be gone.
+	if strings.Contains(out, "b.Len() > 17") {
+		t.Errorf("emitted builder still contains the hardcoded placeholder guard `b.Len() > 17` (memql#1319)\n--- output ---\n%s", out)
+	}
+}
+
+// TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded pins the
+// memql#1321 generator fix: optional object / array args must be
+// skipped entirely when nil instead of being emitted unconditionally
+// (a nil map rendered as `{}`, which the engine treats as a real empty
+// value and runs through concept validation). Required object args
+// keep emitting unconditionally.
+func TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded(t *testing.T) {
+	c := Construct{
+		Kind:    "mutation",
+		Name:    "mutationCreateSessionForParticipant",
+		Concept: "session",
+		Args: []ArgField{
+			{Name: "spaceId", Type: "string", Required: true},
+			{Name: "humanInput", Type: "object"},
+			{Name: "streams", Type: "object"},
+			{Name: "participantIds", Type: "array"},
+			{Name: "utteranceIds", Type: "[]string"},
+			{Name: "payload", Type: "object", Required: true},
+		},
+	}
+
+	out := string(emitMethods([]Construct{c}, "Mutation"))
+
+	for _, want := range []string{
+		"if args.HumanInput != nil {",
+		"if args.Streams != nil {",
+		"if args.ParticipantIds != nil {",
+		"if args.UtteranceIds != nil {",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("emitted builder missing nil guard %q (optional object/array args must be omitted when nil, memql#1321)\n--- output ---\n%s", want, out)
+		}
+	}
+	// The REQUIRED object arg must NOT be nil-guarded.
+	if strings.Contains(out, "if args.Payload != nil {") {
+		t.Errorf("required object arg Payload must emit unconditionally, found nil guard\n--- output ---\n%s", out)
 	}
 }
