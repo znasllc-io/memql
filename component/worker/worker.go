@@ -72,6 +72,13 @@ type Service struct {
 // adapter) and the integration test layer.
 type Store interface {
 	CreateRegistration(ctx context.Context, row RegistrationRow) error
+	// RefreshRegistration re-stamps the registration-authoritative
+	// fields (name, capabilities, capabilityDescriptor, labels,
+	// concurrency, platform, permissions, version, buildTag,
+	// lastSeenAt, lastConnectedFromIP) on an existing row when its
+	// worker reconnects. A nil row.CapabilityDescriptor CLEARS the
+	// persisted descriptor -- the worker no longer advertises one.
+	RefreshRegistration(ctx context.Context, row RegistrationRow) error
 	UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error
 	RevokeRegistration(ctx context.Context, registrationId, revokedBy, reason string, at time.Time) error
 	WorkerByIdentityId(ctx context.Context, identityId string) (*RegistrationRow, error)
