@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // functionValidator validates and resolves function references in MemQL expressions.
@@ -731,6 +733,38 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 			clone := cloneExpressionNode(expr).(*ComparisonExpression)
 			clone.Value = value
 			return clone, nil
+		}
+		// canonicalId(args.X, concept) on a comparison RHS (#1360):
+		// the loaded filter tree carries a typed *ast.CanonicalIdExpr
+		// whose inner value is still the parser arg reference
+		// (`*ast.ArgRefExpr`) -- call-arg binding never reached inside
+		// the canonicalId wrapper, so the #1109 runtime pre-walk
+		// (resolveCanonicalIdComparisons, which only resolves
+		// *ast.LiteralExpr inners) left the node alone and the literal
+		// evaluator failed the whole query with "unsupported literal
+		// type *ast.CanonicalIdExpr". Substitute the bound arg value
+		// into a NEW CanonicalIdExpr with a literal inner here, at the
+		// same altitude where plain `args.X` comparison values get
+		// substituted; the runtime pre-walk then canonicalizes it like
+		// any other literal inner. Building a fresh node (never
+		// mutating cid in place) preserves the cached-plan invariant:
+		// cloneExpressionNode shallow-copies ComparisonExpression.Value,
+		// so cid is shared with the registered function's stored tree.
+		// `actor.`-prefixed paths are not caller args -- pass through
+		// to the existing downstream error path.
+		if cid, ok := node.Value.(*ast.CanonicalIdExpr); ok && cid != nil && args != nil {
+			if inner, ok := cid.Value.(*ast.ArgRefExpr); ok && inner != nil && !strings.HasPrefix(inner.Path, "actor.") {
+				value, exists := getNestedValue(args, inner.Path)
+				if !exists {
+					return nil, fmt.Errorf("required argument %q not provided", inner.Path)
+				}
+				clone := cloneExpressionNode(expr).(*ComparisonExpression)
+				clone.Value = &ast.CanonicalIdExpr{
+					Value:   &ast.LiteralExpr{Value: value},
+					Concept: cid.Concept,
+				}
+				return clone, nil
+			}
 		}
 		// Clone the comparison as-is
 		return cloneExpressionNode(expr), nil
