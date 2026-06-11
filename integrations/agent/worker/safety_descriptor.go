@@ -22,6 +22,16 @@ import (
 // fs_read / fs_write / fs_list / fs_stat / http_fetch / gui_input /
 // screenshot) one-to-one. The Payload pulls just what the rules
 // inspect; everything else (timeouts, sub-args) stays in `Args`.
+//
+// workerComputer actions without a typed payload (screenshot,
+// cursor_position, display_info, window_list, window_focus, the
+// mouse_* / key_* input family including mouse_down / mouse_up /
+// key_hold, and the introspection pair capabilities / wait) all ride
+// the default branch: the action name passes through verbatim and
+// the args are preserved for the recorder. The rule layer has no
+// opinion on them (ErrNoClassifierOpinion), so the classifier
+// escalates -- identical to how the pre-existing gui input actions
+// classify.
 func buildSafetyDescriptor(req Request, effectiveScope, capability string) safety.ActionDescriptor {
 	caller := safety.CallerContext{
 		AgentID:       req.AgentId,

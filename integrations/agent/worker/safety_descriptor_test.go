@@ -3,6 +3,8 @@
 package worker
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -79,6 +81,62 @@ func TestBuildSafetyDescriptor_HTTPFetch(t *testing.T) {
 	}
 	if got.Payload.Method != "POST" || got.Payload.URL != "https://example.com/x" || got.Payload.Body != `{"k":"v"}` {
 		t.Errorf("http payload mismatch: %+v", got.Payload)
+	}
+}
+
+func TestBuildSafetyDescriptor_ComputerUseV2Actions(t *testing.T) {
+	// The v2 workerComputer additions (cockpit #166) have no typed
+	// safety payload, so they ride the default branch like the
+	// pre-existing gui input actions: embodied surface, verbatim
+	// action name, args preserved for the recorder.
+	cases := []struct {
+		action string
+		args   map[string]any
+	}{
+		{"capabilities", nil},
+		{"wait", map[string]any{"ms": 250}},
+		{"key_hold", map[string]any{"key": "shift", "ms": 500}},
+		{"mouse_down", map[string]any{"x": 10, "y": 20, "button": "left"}},
+		{"mouse_up", map[string]any{"x": 10, "y": 20, "button": "left"}},
+		{"mouse_click", map[string]any{"x": 10, "y": 20, "count": 3}},
+	}
+	for _, tc := range cases {
+		req := Request{Tool: "workerComputer", Action: tc.action, Args: tc.args}
+		got := buildSafetyDescriptor(req, "full", "GUI")
+		if got.Surface != safety.SurfaceComputerUseEmbodied {
+			t.Errorf("%s: surface=%q, want embodied", tc.action, got.Surface)
+		}
+		if string(got.Action) != tc.action {
+			t.Errorf("%s: action passthrough broken, got %q", tc.action, got.Action)
+		}
+		for k, v := range tc.args {
+			if got.Payload.Args[k] != v {
+				t.Errorf("%s: arg %q dropped/mutated: got %v want %v", tc.action, k, got.Payload.Args[k], v)
+			}
+		}
+		if tc.args == nil && got.Payload.Args != nil {
+			t.Errorf("%s: nil args must stay nil, got %v", tc.action, got.Payload.Args)
+		}
+	}
+}
+
+func TestComputerUseV2Actions_RuleLayerEscalates(t *testing.T) {
+	// Decision-path proof: the curated rule layer has no opinion on
+	// the new actions (they are not exec/fs/http shapes), so the
+	// classifier escalates via ErrNoClassifierOpinion -- the same
+	// path the pre-existing mouse_* / key_* input actions take. A
+	// rule mis-firing on the new action names or args would fail
+	// here.
+	rc := safety.NewRuleClassifier(safety.DefaultRules()...)
+	for _, action := range []string{"capabilities", "wait", "key_hold", "mouse_down", "mouse_up"} {
+		req := Request{Tool: "workerComputer", Action: action, Args: map[string]any{
+			"key": "shift", "x": 1, "y": 2,
+		}}
+		desc := buildSafetyDescriptor(req, "full", "GUI")
+		_, err := rc.Classify(context.Background(), desc)
+		if !errors.Is(err, safety.ErrNoClassifierOpinion) {
+			t.Errorf("%s: expected rule-layer escalation, got err=%v", action, err)
+		}
 	}
 }
 

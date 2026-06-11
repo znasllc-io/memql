@@ -18,7 +18,7 @@ concept invocation {
   taskId         string  @description("v1:planner:task.id when the call was part of a plan-task. Empty for ad-hoc agent calls.")
   correlationId  string  @description("Random ID linking this row to the matching v1:identity:auditEvent row when one was emitted (denied-by-policy, scope-elevation, etc).")
   tool           enum("workerHost", "workerComputer")  @required  @description("Umbrella tool the action belongs to.")
-  action         string  @required  @description("Action discriminator within the tool. workerHost: exec / fs_read / fs_write / fs_list / fs_stat / http_fetch. workerComputer: screenshot / cursor_position / mouse_move / mouse_click / mouse_drag / mouse_scroll / key_type / key_combo / display_info / window_list / window_focus.")
+  action         string  @required  @description("Action discriminator within the tool. workerHost: exec / fs_read / fs_write / fs_list / fs_stat / http_fetch. workerComputer: capabilities / wait / screenshot / cursor_position / mouse_move / mouse_click / mouse_down / mouse_up / mouse_drag / mouse_scroll / key_type / key_combo / key_hold / display_info / window_list / window_focus.")
   argsRedacted   object  @description("Args with secret-shaped fields redacted. Tokens, passwords, Authorization headers, env vars matching SECRET/KEY/PASSWORD scrubbed.")
   startedAt      datetime  @required  @description("When dispatch was received from the agent (ToolDispatch envelope sent on the wire).")
   completedAt    datetime  @description("When ToolResult landed back on the agent. Empty for in-flight rows that haven't completed yet -- those are rare; usually the row is written once at completion.")
