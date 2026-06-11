@@ -275,6 +275,13 @@ type streamSession struct {
 	sendMu    sync.Mutex
 	sendErr   error
 	closeOnce sync.Once
+
+	// lastPersistedAt is the heartbeat timestamp of the most recent
+	// successful lastSeenAt DB flush (memql#1340). Zero until the
+	// first heartbeat of the stream persists. Only touched from
+	// handleHeartbeat, which runs on the single stream-recv
+	// goroutine, so it needs no lock.
+	lastPersistedAt time.Time
 }
 
 func newStreamSession(
@@ -431,13 +438,20 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	}
 	s.worker.TouchLastSeen(at, sourceIP)
 
-	// Persist the heartbeat immediately. The cockpit sends a
-	// heartbeat every 15s; the frontend treats a worker as offline
-	// when lastSeenAt drifts more than 60s past now. Without this
-	// write the row's lastSeenAt only ever reflects register-time,
-	// so workers go offline 60s after pairing even when the
-	// cockpit is happily heart-beating.
+	// Persist lastSeenAt at most once per HeartbeatBatchInterval
+	// (memql#1340). The cockpit heartbeats every 15s; writing the
+	// row on every beat is a steady DB write per worker per 15s
+	// for zero freshness gain -- the in-memory registry (touched
+	// above) is the live source of truth and stays fresh on every
+	// beat. Only the DB flush is throttled. The FIRST heartbeat of
+	// a stream always persists (lastPersistedAt zero value), so a
+	// (re)connected worker's row is fresh within one beat; a failed
+	// flush does NOT advance lastPersistedAt, so the next beat
+	// retries.
 	if s.server == nil || s.server.store == nil {
+		return
+	}
+	if !s.lastPersistedAt.IsZero() && at.Sub(s.lastPersistedAt) < HeartbeatBatchInterval {
 		return
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
@@ -449,7 +463,9 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 				"error", err,
 			)
 		}
+		return
 	}
+	s.lastPersistedAt = at
 }
 
 func (s *streamSession) handleToolResult(res *memqlv1.ToolResult) {

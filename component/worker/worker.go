@@ -27,8 +27,11 @@ const (
 	// TokenPrefix is the canonical scheme for worker authentication tokens.
 	TokenPrefix = "mql_wkr_"
 
-	// HeartbeatBatchInterval is how long the registry waits before
-	// flushing accumulated heartbeats to the database.
+	// HeartbeatBatchInterval throttles the per-worker lastSeenAt DB
+	// flush: the stream handler persists a heartbeat at most once
+	// per interval (the first heartbeat of a stream always
+	// persists). The in-memory registry is updated on every
+	// heartbeat regardless. See streamSession.handleHeartbeat.
 	HeartbeatBatchInterval = 60 * time.Second
 
 	// DispatchTimeoutDefault is the default ToolDispatch timeout when

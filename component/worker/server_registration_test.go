@@ -18,9 +18,11 @@ import (
 type fakeRegistrationStore struct {
 	existing *RegistrationRow
 
-	created   []RegistrationRow
-	refreshed []RegistrationRow
-	lastSeen  []string
+	created     []RegistrationRow
+	refreshed   []RegistrationRow
+	lastSeen    []string
+	lastSeenAts []time.Time
+	lastSeenErr error
 }
 
 var _ Store = (*fakeRegistrationStore)(nil)
@@ -36,7 +38,11 @@ func (f *fakeRegistrationStore) RefreshRegistration(ctx context.Context, row Reg
 }
 
 func (f *fakeRegistrationStore) UpdateLastSeen(ctx context.Context, registrationId string, lastSeenAt time.Time, sourceIP string) error {
+	if f.lastSeenErr != nil {
+		return f.lastSeenErr
+	}
 	f.lastSeen = append(f.lastSeen, registrationId)
+	f.lastSeenAts = append(f.lastSeenAts, lastSeenAt)
 	return nil
 }
 

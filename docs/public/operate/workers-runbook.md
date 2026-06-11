@@ -265,6 +265,11 @@ restarting the worker — the next reconnect refreshes
 | `unsupported_on_platform`                | `window_list` / `window_focus` on a platform without WindowServer hooks | Use macOS or X11 Linux; tracked as known gap below |
 | Process killed mid-exec on Linux         | `RLIMIT_AS` (memory) or `RLIMIT_CPU` cap reached     | Bump `policy.shell.max_memory_mb` / `max_cpu_seconds`   |
 
+Note: registration rows persisted by pre-#1334 builds stay stale
+(`lastSeenAt` frozen at register time) until the worker's next
+reconnect; the in-memory registry is always fresh, and current builds
+flush `lastSeenAt` at most once per 60s heartbeat batch interval.
+
 ---
 
 ## 8. Worker observability
