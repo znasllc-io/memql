@@ -224,14 +224,6 @@ func vendorFromType(typeName string) string {
 		return "openai"
 	case strings.Contains(lower, "anthropic"):
 		return "anthropic"
-	case strings.Contains(lower, "google"), strings.Contains(lower, "gemini"):
-		return "google"
-	case strings.Contains(lower, "xai"), strings.Contains(lower, "grok"):
-		return "xai"
-	case strings.Contains(lower, "groq"):
-		return "groq"
-	case strings.Contains(lower, "mistral"):
-		return "mistral"
 	default:
 		return lower
 	}

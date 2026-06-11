@@ -87,17 +87,17 @@ func TestPromptDefaultProviderFallsBackWhenDisabled(t *testing.T) {
 	registerParsedProviders(logger, reg, []parsedProviderConfig{
 		mkProviderCfg("openai", "OpenAI", "", "", true, false),
 		// A keyless vendor lane the prompt used to point at, now disabled.
-		mkProviderCfg("google", "Google", "", "", true, true),
-		mkProviderCfg("geminiFlash", "", "gemini-flash", "google", false, false),
+		mkProviderCfg("acme", "Acme", "", "", true, true),
+		mkProviderCfg("acmeMini", "", "acme-mini", "acme", false, false),
 	})
 
 	// The disabled provider (and its propagated child) resolve to nil --
 	// the caller (generateStructured) treats nil as "fall back to default".
-	if got := reg.ChatStructuredProviderByName("google"); got != nil {
-		t.Error("ChatStructuredProviderByName(disabled 'google') should be nil so the prompt falls back")
+	if got := reg.ChatStructuredProviderByName("acme"); got != nil {
+		t.Error("ChatStructuredProviderByName(disabled 'acme') should be nil so the prompt falls back")
 	}
-	if got := reg.ChatStructuredProviderByName("geminiFlash"); got != nil {
-		t.Error("ChatStructuredProviderByName('geminiFlash', child of disabled base) should be nil")
+	if got := reg.ChatStructuredProviderByName("acmeMini"); got != nil {
+		t.Error("ChatStructuredProviderByName('acmeMini', child of disabled base) should be nil")
 	}
 	// An unknown name is equally graceful (no panic, nil result).
 	if got := reg.ChatStructuredProviderByName("doesNotExist"); got != nil {

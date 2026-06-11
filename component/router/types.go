@@ -84,7 +84,7 @@ type ResolveRequest struct {
 // row the observer will write asynchronously.
 type Resolved struct {
 	ProviderName string        // registry name, e.g. "stream54Mini"
-	Vendor       string        // "openai" | "anthropic" | "google" | "xai" | "groq" | "mistral"
+	Vendor       string        // "openai" | "anthropic"
 	Model        string        // vendor-side model id, e.g. "gpt-5.4-mini"
 	Pricing      memql.Pricing // per-million-token USD prices (may be zero-valued)
 	Streaming    bool          // true when the wrapped path is a streaming interface

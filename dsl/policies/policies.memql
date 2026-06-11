@@ -5,49 +5,49 @@
 
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
-@fallback("streamGeminiPro")
+@fallback("streamClaudeHaiku")
 @maxLatencyMs(60000)
 @preferredRole("assistant")
 @preferredRole("specialist")
-@description("Default chat policy for non-operator agents. Claude Sonnet 4.6 primary, GPT-5.4 Pro as cross-vendor fallback, Gemini Pro as tertiary safety net. Was previously Mini-primary, which produced too many hedged + un-cited replies (the LLM smoothed RAG'd specifics into generic platitudes); the floor for agent replies is now Sonnet-class regardless of role. Use cheapestCapable / lowLatencyVoice for paths that legitimately need Mini-class speed/cost tradeoffs (batch, voice).")
+@description("Default chat policy for non-operator agents. Claude Sonnet 4.6 primary, GPT-5.4 Pro as cross-vendor fallback, Claude Haiku as tertiary safety net. Was previously Mini-primary, which produced too many hedged + un-cited replies (the LLM smoothed RAG'd specifics into generic platitudes); the floor for agent replies is now Sonnet-class regardless of role. Use cheapestCapable / lowLatencyVoice for paths that legitimately need Mini-class speed/cost tradeoffs (batch, voice).")
 policy balancedChat { }
 
 // ---- policies/v1/cheapestCapable.memql ----
 
-@primary("streamGeminiFlash")
-@fallback("streamGroqLlama70B")
-@fallback("streamCodestral")
+@primary("stream54Mini")
+@fallback("streamClaudeHaiku")
+@fallback("stream54Nano")
 @maxLatencyMs(15000)
-@description("Cheapest capable -- bulk suggestion + classification work where cost per call matters more than model ceiling. Gemini Flash primary, Groq Llama 70B second, Mistral Codestral as a structured-output-friendly third.")
+@description("Cheapest capable -- bulk suggestion + classification work where cost per call matters more than model ceiling. GPT-5.4 Mini primary, Claude Haiku as the cross-vendor second, GPT-5.4 Nano as the rock-bottom third.")
 policy cheapestCapable { }
 
 // ---- policies/v1/fastCoding.memql ----
 
-@primary("streamCodestral")
-@fallback("streamGroqLlama70B")
+@primary("streamCodex53")
 @fallback("stream54Mini")
+@fallback("streamClaudeHaiku")
 @maxLatencyMs(20000)
-@description("Fast coding -- cheap + quick for code generation and refactor assistance. Codestral primary (coding-specialized), Groq Llama as fallback (fastest tokens/sec), GPT-5.4 Mini as a last resort.")
+@description("Fast coding -- cheap + quick for code generation and refactor assistance. Codex 5.3 primary (coding-specialized), GPT-5.4 Mini as fallback, Claude Haiku as a cross-vendor last resort.")
 policy fastCoding { }
 
 // ---- policies/v1/lowLatencyVoice.memql ----
 
-@primary("streamGroqLlama70B")
-@fallback("streamGeminiFlash")
-@fallback("stream54Mini")
+@primary("stream54Mini")
+@fallback("stream54Nano")
+@fallback("streamClaudeHaiku")
 @maxTimeToFirstTokenMs(800)
 @maxLatencyMs(10000)
-@description("Low latency voice -- turn-taking in multi-party voice conversations. Groq is the best-in-class for first-token latency; Gemini Flash as a fallback matches the target TTFT envelope.")
+@description("Low latency voice -- turn-taking in multi-party voice conversations. GPT-5.4 Mini leads on first-token latency within the supported vendors; GPT-5.4 Nano and Claude Haiku back it up inside the target TTFT envelope.")
 policy lowLatencyVoice { }
 
 // ---- policies/v1/strongReasoning.memql ----
 
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
-@fallback("streamGeminiPro")
+@fallback("streamClaudeOpus")
 @maxLatencyMs(60000)
 @preferredRole("operator")
-@description("Strong reasoning -- for operator-enabled agents driving the UI and for complex tool-calling choreography. Claude Sonnet primary, GPT-5.4 Pro as a second, Gemini Pro as a third.")
+@description("Strong reasoning -- for operator-enabled agents driving the UI and for complex tool-calling choreography. Claude Sonnet primary, GPT-5.4 Pro as a second, Claude Opus as a third.")
 policy strongReasoning { }
 
 // ---- policies/v1/backgroundExecution.memql ----
@@ -64,5 +64,5 @@ policy backgroundExecution { }
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
 @maxLatencyMs(120000)
-@description("Background lane ESCALATION tier (memql#898). The strong/expensive chain the background executor swaps to when the cheap backgroundExecution tier gets stuck on a turn (an explicit stuck signal -- repeated rounds where every tool call errored, which usually means the cheap model is mishandling the workbench/worker tool). Claude Sonnet primary, GPT-5.4 Pro as a tool-capable cross-vendor fallback (both implement the non-streaming tool surface; Gemini does not, so it is intentionally absent here). Escalation happens at most once per turn and reuses the in-progress message history, so it costs one stronger continuation, not a full re-run.")
+@description("Background lane ESCALATION tier (memql#898). The strong/expensive chain the background executor swaps to when the cheap backgroundExecution tier gets stuck on a turn (an explicit stuck signal -- repeated rounds where every tool call errored, which usually means the cheap model is mishandling the workbench/worker tool). Claude Sonnet primary, GPT-5.4 Pro as a tool-capable cross-vendor fallback (both implement the non-streaming tool surface). Escalation happens at most once per turn and reuses the in-progress message history, so it costs one stronger continuation, not a full re-run.")
 policy backgroundEscalation { }

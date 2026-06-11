@@ -1342,8 +1342,8 @@ Two legacy forms are retired (both rejected at parse time):
 - `@input { ... }` — body-level wrapper around the field list.
 
 ### Providers
-SI provider configurations (OpenAI, Anthropic, Google, Groq, Mistral,
-xAI). Struct form, mirrors concepts / shapes / tools.
+SI provider configurations (OpenAI, Anthropic -- the only supported
+vendors). Struct form, mirrors concepts / shapes / tools.
 ```memql
 @description("OpenAI GPT-5.4 Mini -- balanced cost/latency chat")
 @extends("openai")
@@ -1377,18 +1377,18 @@ skips the provider at load -- it is **not registered and no auth
 resolution is attempted**, so it emits zero "registered as unavailable"
 warnings while staying in the tree for a future re-enable. `@disabled`
 on a `@base` **propagates**: every child that `@extends` it is skipped
-too. Use it to turn a keyless vendor lane off cleanly (e.g. mark the
-`google` / `groq` / `mistral` `@base` `@disabled` until their
-`MEMQL_SI_*_API_KEY` is seeded). Dependents degrade gracefully -- a
+too. Use it to turn a keyless vendor lane off cleanly (mark the `@base`
+`@disabled` until its `MEMQL_SI_*_API_KEY` is seeded). Dependents
+degrade gracefully -- a
 policy whose `@primary` is disabled routes via its `@fallback`; a prompt
 whose `@defaultProvider` is disabled falls back to the default.
 
 ```memql
 @disabled
 @base
-@type("Google")
-provider google {
-  auth { apiKey env("MEMQL_SI_GOOGLE_API_KEY") }
+@type("Acme")
+provider acme {
+  auth { apiKey env("MEMQL_SI_ACME_API_KEY") }
 }
 ```
 

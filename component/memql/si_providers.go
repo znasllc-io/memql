@@ -119,11 +119,6 @@ func (c ProviderConfig) ResolvedModality() ProviderModality {
 		return ModalityResearch
 	case "anthropic", "anthropicchat", "anthropicstream":
 		return ModalityText
-	case "google", "googlechat", "googlestream",
-		"groq", "groqchat", "groqstream",
-		"xai", "xaichat", "xaistream",
-		"mistral", "mistralchat", "mistralstream":
-		return ModalityText
 	default:
 		return ModalityText
 	}
@@ -937,18 +932,6 @@ func newSIProvider(cfg ProviderConfig) (SIProvider, error) {
 	case "openai", "openaichat":
 		return newOpenSIProvider(cfg)
 	case "openaistream":
-		return newOpenAIStreamProvider(cfg)
-	// OpenAI-wire-compatible vendors. Each provider .memql sets its own
-	// auth.baseURL and auth.apiKey env var; the existing OpenAI client
-	// handles the wire format. Add a new vendor here by dropping a
-	// provider/v1/<vendor>/_base.memql with the right baseURL and a
-	// case entry below -- no new Go client required.
-	case "google", "googlechat",
-		"groq", "groqchat",
-		"xai", "xaichat",
-		"mistral", "mistralchat":
-		return newOpenSIProvider(cfg)
-	case "googlestream", "groqstream", "xaistream", "mistralstream":
 		return newOpenAIStreamProvider(cfg)
 	case "openaitts":
 		return newOpenAITTSProvider(cfg)

@@ -1486,9 +1486,9 @@ MemQL's SI integration is intentionally scoped so that language models can only 
   ```memql
   @disabled
   @base
-  @type("Google")
-  provider google {
-    auth { apiKey env("MEMQL_SI_GOOGLE_API_KEY") }
+  @type("Acme")
+  provider acme {
+    auth { apiKey env("MEMQL_SI_ACME_API_KEY") }
   }
   ```
 
