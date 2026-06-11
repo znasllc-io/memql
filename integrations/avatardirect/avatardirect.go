@@ -17,9 +17,12 @@
 // publishes video (memql#782).
 //
 //  1. startSession: resolve the agent's avatarVendor + avatarPersonaId, mint a
-//     fresh LiveKit room + an AGENT-kind BROWSER join token, validate the
-//     persona, and return { livekit_url, livekit_client_token, browser_identity,
-//     vendor, room_name }. The vendor engine is NOT started here.
+//     fresh LiveKit room + a BROWSER join token (kind=AGENT for simli so its
+//     receiver picks the browser as audio source; kind=STANDARD for anam so
+//     anam's no-standard-participant watchdog doesn't leave the room, memql
+//     #1236), validate the persona, and return { livekit_url,
+//     livekit_client_token, browser_identity, vendor, room_name }. The vendor
+//     engine is NOT started here.
 //  2. The browser joins the room with those creds and starts forwarding the
 //     assistant audio over the lk.audio_stream byte stream.
 //  3. engageVendor: mint the AVATAR-participant join token (kind=agent,
@@ -28,9 +31,12 @@
 //     the forwarded audio. Returns { session_id, vendor, avatar_identity, ok }.
 //
 // Vendor gate: this capability serves the cloud-engine vendors `anam` and
-// `simli`; the agent's stamped avatarVendor (or the MEMQL_AVATAR_VENDOR runtime
-// default) selects which. The per-vendor API key (ANAM_API_KEY / SIMLI_API_KEY)
-// is resolved lazily from the globalSecret store (env fallback).
+// `simli`; the agent's STAMPED avatarVendor alone selects which -- there is no
+// env defaulting on this path (an empty/unknown vendor hard-errors in
+// resolveVendorConfig before any token is minted), which also guarantees the
+// vendor string reaching mintBrowserToken is always the resolved one. The
+// per-vendor API key (ANAM_API_KEY / SIMLI_API_KEY) is resolved lazily from
+// the globalSecret store (env fallback).
 //
 // Capabilities (callable as builtins from .memql files):
 //
@@ -125,7 +131,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "startSession",
-			Description: "Phase 1 of the direct/Guide avatar handshake for an anam- or simli-vendor agent: mint a dedicated LiveKit room + an AGENT-kind browser join token, validate the agent has a usable avatar persona, and return the creds the browser joins with. Does NOT bring the vendor cloud engine up -- the browser must join the room and start forwarding the assistant audio first, then call engageVendor (Simli's engine waits for an audio-providing agent participant to already be present, memql#782). Returns { livekit_url, livekit_client_token, browser_identity, vendor, room_name }.",
+			Description: "Phase 1 of the direct/Guide avatar handshake for an anam- or simli-vendor agent: mint a dedicated LiveKit room + a browser join token (kind=AGENT for simli, kind=STANDARD for anam so anam's no-standard-participant watchdog doesn't leave the room), validate the agent has a usable avatar persona, and return the creds the browser joins with. Does NOT bring the vendor cloud engine up -- the browser must join the room and start forwarding the assistant audio first, then call engageVendor (Simli's engine waits for an audio-providing agent participant to already be present, memql#782). Returns { livekit_url, livekit_client_token, browser_identity, vendor, room_name }.",
 			Handler:     i.handleStartSession,
 			ArgsSchema: map[string]string{
 				"agentId": "string (required) - the agent whose avatarVendor + avatarPersonaId drive the session",
@@ -161,8 +167,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // -----------------------------------------------------------------
 
 // handleStartSession is phase 1 of the avatar handshake. It mints the room +
-// the AGENT-kind browser join token and validates the agent has a usable avatar
-// persona, but does NOT bring the vendor engine up. The browser joins the room
+// the browser join token (kind=AGENT for simli, kind=STANDARD for anam, see
+// mintBrowserToken) and validates the agent has a usable avatar persona, but
+// does NOT bring the vendor engine up. The browser joins the room
 // with these creds and starts forwarding the assistant audio (over the
 // lk.audio_stream byte stream) BEFORE calling engageVendor -- because Simli's
 // cloud receiver waits for an audio-providing agent participant to already be
@@ -205,7 +212,7 @@ func (i *Integration) handleStartSession(ctx context.Context, args map[string]an
 	roomName := "avatar-" + id.NewShortId()
 	browserIdentity := "viewer-" + id.NewShortId()
 
-	browserToken, err := i.mintBrowserToken(roomName, browserIdentity)
+	browserToken, err := i.mintBrowserToken(roomName, browserIdentity, vendor)
 	if err != nil {
 		return nil, fmt.Errorf("avatardirect.startSession: mint browser token: %w", err)
 	}
@@ -516,16 +523,36 @@ func (i *Integration) logInfo(msg string, args ...any) {
 // LiveKit token minting
 // -----------------------------------------------------------------
 
-// mintBrowserToken builds the LiveKit join token copresent connects with. It is
-// kind=AGENT: Simli's cloud receiver lip-syncs the audio of whichever AGENT-kind
-// participant it finds in the room (DataStreamAudioReceiver waits for an
-// agent-kind participant and reads its lk.audio_stream byte stream), so the
-// browser -- which forwards the assistant audio over that byte stream -- must
-// present as an agent participant for the engine to pick it up (memql#782). It
-// can publish (the audio byte stream) and subscribe (the avatar's video).
-func (i *Integration) mintBrowserToken(roomName, identity string) (string, error) {
+// mintBrowserToken builds the LiveKit join token copresent connects with. The
+// browser can publish (the assistant-audio byte stream) and subscribe (the
+// avatar's video). Its participant KIND is vendor-specific:
+//
+//   - simli: kind=AGENT. Simli's cloud receiver lip-syncs whichever AGENT-kind
+//     participant it finds in the room (DataStreamAudioReceiver waits for an
+//     agent-kind participant and reads its lk.audio_stream byte stream), so the
+//     browser -- which forwards the assistant audio over that byte stream --
+//     must present as an agent participant for the engine to pick it up
+//     (memql#782).
+//
+//   - anam: kind=STANDARD. Anam does NOT discover its audio source by kind --
+//     the browser addresses the PCM byte stream to the avatar by identity
+//     (useLiveAvatar's destinationIdentities=[avatar]), so kind is irrelevant to
+//     audio. Anam's engine instead runs a watchdog that LEAVES the room ~15s
+//     after start if no STANDARD (non-agent) participant is present. With the
+//     browser as the only non-avatar participant, an AGENT-kind browser left the
+//     room agent-only and Anam self-left mid-session at ~26-27s
+//     (CLIENT_REQUEST_LEAVE) -- the cap we chased as an Anam session-length
+//     limit before Anam support pointed at the missing standard participant
+//     (memql#1236). Joining the browser as STANDARD satisfies the watchdog;
+//     audio forwarding and the avatar's lk.publish_on_behalf both key off
+//     identity, not kind, so neither is affected.
+func (i *Integration) mintBrowserToken(roomName, identity, vendor string) (string, error) {
 	canPublish := true
 	canSubscribe := true
+	browserKind := livekit.ParticipantInfo_AGENT
+	if strings.EqualFold(strings.TrimSpace(vendor), "anam") {
+		browserKind = livekit.ParticipantInfo_STANDARD
+	}
 	at := auth.NewAccessToken(i.lk.LiveKitAPIKey, i.lk.LiveKitAPISecret)
 	at.SetVideoGrant(&auth.VideoGrant{
 		RoomJoin:     true,
@@ -533,7 +560,7 @@ func (i *Integration) mintBrowserToken(roomName, identity string) (string, error
 		CanPublish:   &canPublish,
 		CanSubscribe: &canSubscribe,
 	}).
-		SetKind(livekit.ParticipantInfo_AGENT).
+		SetKind(browserKind).
 		SetIdentity(identity).
 		SetName("You").
 		SetValidFor(tokenTTL)
