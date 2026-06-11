@@ -19,9 +19,12 @@ import (
 //     the descriptor still needs a surface).
 //
 // Action mapping follows the worker action vocabulary (exec /
-// fs_read / fs_write / fs_list / fs_stat / http_fetch / gui_input /
-// screenshot) one-to-one. The Payload pulls just what the rules
-// inspect; everything else (timeouts, sub-args) stays in `Args`.
+// fs_read / fs_write / fs_list / fs_stat / http_fetch / screenshot /
+// the mouse_* + key_* input family) one-to-one -- every action name
+// passes through verbatim; there is no umbrella "gui_input" action
+// (the dead safety.ActionGUIInput constant was removed in #1338).
+// The Payload pulls just what the rules inspect; everything else
+// (timeouts, sub-args) stays in `Args`.
 //
 // workerComputer actions without a typed payload (screenshot,
 // cursor_position, display_info, window_list, window_focus, the

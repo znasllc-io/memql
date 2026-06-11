@@ -135,6 +135,26 @@ jobs:
       - name: go test
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -count=1 -timeout=300s ./...
+      # Build-tagged test lane (#1338). The untagged `go test ./...` above
+      # never compiles //go:build-tagged test files, so tagged suites are
+      # CI-invisible without an explicit -tags run. Audit of the tree
+      # (grep -rl "^//go:build" --include='*_test.go'):
+      #   - agent      -> integrations/agent/worker (scope / safety-descriptor
+      #                   / list-workers / generated-output tables). Covered
+      #                   HERE; CGO-free, so it rides the warm go-checks cache.
+      #   - clustere2e -> test/clustere2e. Covered by its own workflow
+      #                   (cluster-e2e.yml), which provisions the parity
+      #                   cluster the suite needs -- NOT runnable here.
+      #   - voice      -> no tagged *_test.go files; the untagged
+      #                   integrations/voice/agent tests run in the step above,
+      #                   and the build-voice (CGO) job below already runs
+      #                   `go test -tags voice ./integrations/voice/...`.
+      # No other build tag (cognition / planner / bff / workbench / identity)
+      # carries test files today. If you add a tagged test elsewhere, add its
+      # directory to this step (or a new lane if it needs system deps).
+      - name: go test -tags agent (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags agent -count=1 -timeout=300s ./integrations/agent/worker/
       # Harness eval gate (#589). Fixture-driven regression tripwire over an
       # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
       # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
