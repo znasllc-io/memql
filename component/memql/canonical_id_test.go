@@ -2,6 +2,8 @@ package memql
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -215,6 +217,149 @@ func TestResolveCanonicalIdComparisons(t *testing.T) {
 		out := engine.resolveCanonicalIdComparisons(ctx, expr)
 		require.Same(t, expr, out)
 	})
+}
+
+// TestCanonicalIdArgBinding_RealLoadedQueries is the #1360 regression:
+// the three shipped struct queries whose filter inlines
+// `canonicalId(args.spaceId, space)` alongside another comparison must
+// survive query-arg binding + the #1109 runtime pre-walk without
+// leaving a typed `*ast.CanonicalIdExpr` in any comparison value.
+//
+// Unlike TestResolveCanonicalIdComparisons (synthetic ASTs with
+// LiteralExpr inners), this loads the REAL embedded DSL tree and runs
+// the REAL runtime entry (`engine.Parse` -> resolvePlanFunctions arg
+// binding -> resolveCanonicalIdComparisons, the same pre-walk
+// evaluateExpressionSet runs before SQL compile). In the live tree the
+// CanonicalIdExpr inner is an `*ast.ArgRefExpr` (args.spaceId is NOT
+// substituted inside canonicalId() during call-arg binding pre-fix),
+// which the #1109 pre-walk could not resolve -- the node survived to
+// the literal evaluator and failed the whole query with "unsupported
+// literal type *ast.CanonicalIdExpr" (voice session stuck in
+// Preparing).
+func TestCanonicalIdArgBinding_RealLoadedQueries(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
+	}
+	registry := memoryNodes.DefaultRegistry()
+	require.NotNil(t, registry)
+
+	eng, err := New(nil)
+	require.NoError(t, err)
+	// Quiet the provider loader (no DB / no secrets here; same posture
+	// as TestEngineInitLoadsFullDSL).
+	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	require.NoError(t, eng.Init(registry))
+
+	ctx := context.Background()
+	wantCanonical, err := eng.canonicalizeIdValue(ctx, "demo-space", "v1:cognition:space")
+	require.NoError(t, err)
+	require.NotEmpty(t, wantCanonical)
+
+	cases := []struct {
+		name string
+		call string
+	}{
+		{"queryAudioOverridesForSpace", `queryAudioOverridesForSpace({spaceId: "demo-space"})`},
+		{"queryVideoOverridesForSpace", `queryVideoOverridesForSpace({spaceId: "demo-space"})`},
+		{"queryActiveGreetSuppression", `queryActiveGreetSuppression({spaceId: "demo-space", now: "2026-06-11T00:00:00Z"})`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The real runtime entry: Parse runs resolvePlanFunctions,
+			// which binds the call args into the loaded filter tree --
+			// the exact path engine.Execute takes before evaluation.
+			plan, err := eng.Parse(tc.call)
+			require.NoError(t, err)
+			require.NotNil(t, plan.Root)
+
+			// Mirror evaluateExpressionSet's pre-walk (executor.go):
+			// after this, NO comparison value may still carry the
+			// typed node -- any survivor fails the query at the
+			// literal evaluator.
+			resolved := eng.resolveCanonicalIdComparisons(ctx, plan.Root)
+
+			var spaceVal any
+			walkComparisonExpressions(resolved, func(c *ComparisonExpression) {
+				if _, isCid := c.Value.(*ast.CanonicalIdExpr); isCid {
+					t.Errorf("comparison %q still carries *ast.CanonicalIdExpr after arg binding + canonicalId pre-walk; the query would fail with \"unsupported literal type *ast.CanonicalIdExpr\" (#1360)", c.Field.Raw)
+				}
+				if c.Field.Raw == "payload.spaceId" {
+					spaceVal = c.Value
+				}
+			})
+			require.Equal(t, wantCanonical, spaceVal,
+				"payload.spaceId comparison must resolve to the canonical space id")
+
+			// Cached-plan invariant (#1109): the registered function's
+			// stored expression tree must NOT have been mutated by the
+			// call -- its CanonicalIdExpr inner stays the arg reference.
+			fn, err := eng.functions.Get(tc.name)
+			require.NoError(t, err)
+			require.NotNil(t, fn.Expr)
+			foundStoredArgRef := false
+			walkComparisonExpressions(fn.Expr, func(c *ComparisonExpression) {
+				if cid, ok := c.Value.(*ast.CanonicalIdExpr); ok {
+					if _, isArgRef := cid.Value.(*ast.ArgRefExpr); isArgRef {
+						foundStoredArgRef = true
+					}
+				}
+			})
+			require.True(t, foundStoredArgRef,
+				"registered function tree must keep its *ast.ArgRefExpr canonicalId inner (cached plans are never mutated in place)")
+		})
+	}
+}
+
+// walkComparisonExpressions visits every ComparisonExpression in an
+// engine expression tree, descending through the wrapper node kinds a
+// loaded struct-query expression can carry.
+func walkComparisonExpressions(expr ExpressionNode, visit func(*ComparisonExpression)) {
+	switch n := expr.(type) {
+	case nil:
+		return
+	case *ComparisonExpression:
+		if n != nil {
+			visit(n)
+		}
+	case *LogicalExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Left, visit)
+			walkComparisonExpressions(n.Right, visit)
+		}
+	case *RelationshipExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *ShapeExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *SortExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *PaginateExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *SelectExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *TimestampExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *DepthExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Target, visit)
+		}
+	case *ConditionalFilterExpression:
+		if n != nil {
+			walkComparisonExpressions(n.Filter, visit)
+		}
+	}
 }
 
 // newTestEngineWithConcepts builds a minimal engine seeded with the
