@@ -761,6 +761,19 @@ const (
 	AttrRetry      = "retry"
 	AttrIdempotent = "idempotent"
 
+	// Mutation-specific attributes.
+	//
+	// @mergeFields("a", "b") opts an update-kind mutation into
+	// engine-side deep-merge for the named object-typed payload
+	// fields: instead of the partial object REPLACING the stored
+	// object wholesale (the default top-level-replace contract every
+	// other mutation is written against -- see memql#350), the
+	// partial object's keys merge into the stored object so sibling
+	// keys survive. Added for mutationToggleComputerUseEnabled,
+	// which writes a single key into User.preferences and would
+	// otherwise wipe every other preference (memql#1339).
+	AttrMergeFields = "mergeFields"
+
 	// Auditing
 	AttrAudit = "audit"
 

@@ -160,6 +160,7 @@ var (
 	AttrHandler              = ast.AttrHandler
 	AttrIdempotent           = ast.AttrIdempotent
 	AttrInternal             = ast.AttrInternal
+	AttrMergeFields          = ast.AttrMergeFields
 	AttrPermission           = ast.AttrPermission
 	AttrPublic               = ast.AttrPublic
 	AttrRateLimit            = ast.AttrRateLimit
