@@ -22,15 +22,21 @@ type fakeOutboxStore struct {
 	byEvent  map[string]int64         // event-id -> seq (idempotency)
 	nextSeq  map[string]int64         // routing-key -> next seq
 	cursors  map[string]int64         // "key|consumer" -> cursor seq
+	rowAt    map[string]time.Time     // event-id -> append time (created_at)
+	cursorAt map[string]time.Time     // "key|consumer" -> last save time (updated_at)
+	clock    func() time.Time         // injectable for retention tests
 	appendCb func(d Deliverable)      // optional hook fired after each new append
 }
 
 func newFakeOutboxStore() *fakeOutboxStore {
 	return &fakeOutboxStore{
-		rows:    make(map[string][]Deliverable),
-		byEvent: make(map[string]int64),
-		nextSeq: make(map[string]int64),
-		cursors: make(map[string]int64),
+		rows:     make(map[string][]Deliverable),
+		byEvent:  make(map[string]int64),
+		nextSeq:  make(map[string]int64),
+		cursors:  make(map[string]int64),
+		rowAt:    make(map[string]time.Time),
+		cursorAt: make(map[string]time.Time),
+		clock:    time.Now,
 	}
 }
 
@@ -46,6 +52,7 @@ func (f *fakeOutboxStore) Append(_ context.Context, d Deliverable) (int64, bool,
 	d.Seq = seq
 	f.rows[k] = append(f.rows[k], d)
 	f.byEvent[d.EventID] = seq
+	f.rowAt[d.EventID] = f.clock()
 	if f.appendCb != nil {
 		f.appendCb(d)
 	}
@@ -80,7 +87,40 @@ func (f *fakeOutboxStore) SaveCursor(_ context.Context, key RoutingKey, consumer
 	if seq > f.cursors[ck] {
 		f.cursors[ck] = seq // monotonic, like the GREATEST() guard in SQL
 	}
+	f.cursorAt[ck] = f.clock()
 	return nil
+}
+
+// SweepOlderThan mirrors pgOutboxStore.SweepOlderThan against the in-memory
+// state: outbox rows appended before cutoff and cursors last saved before
+// cutoff are deleted; the per-key seq allocators (nextSeq) are deliberately
+// kept, exactly like mesh_key_seq (see the production comment for the
+// seq-restart hazard).
+func (f *fakeOutboxStore) SweepOlderThan(_ context.Context, cutoff time.Time) (int64, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var outboxDeleted, cursorsDeleted int64
+	for k, rows := range f.rows {
+		kept := rows[:0]
+		for _, d := range rows {
+			if at, ok := f.rowAt[d.EventID]; ok && at.Before(cutoff) {
+				outboxDeleted++
+				delete(f.byEvent, d.EventID)
+				delete(f.rowAt, d.EventID)
+				continue
+			}
+			kept = append(kept, d)
+		}
+		f.rows[k] = kept
+	}
+	for ck, at := range f.cursorAt {
+		if at.Before(cutoff) {
+			cursorsDeleted++
+			delete(f.cursors, ck)
+			delete(f.cursorAt, ck)
+		}
+	}
+	return outboxDeleted, cursorsDeleted, nil
 }
 
 // recordingFastPath captures the mesh hints the substrate emits and (optionally)

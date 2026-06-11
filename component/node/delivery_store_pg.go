@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/uptrace/bun"
 
@@ -213,6 +214,48 @@ func (s *pgOutboxStore) ReadAfter(ctx context.Context, key RoutingKey, afterSeq 
 		})
 	}
 	return out, rows.Err()
+}
+
+// SweepOlderThan deletes mesh_outbox rows whose created_at is older than
+// cutoff, and mesh_cursor rows whose updated_at is older than cutoff (dead
+// per-pod consumer ids from rollouts otherwise accumulate forever). It returns
+// the per-table delete counts. This is the retention sweep documented as
+// intent in the 20260610000000_mesh_delivery_substrate migration header
+// (memql#1328); chat-reply delivery is a live-stream concern and the graph
+// rows remain the source of truth, so age-based deletion is safe. Deletes are
+// idempotent, so concurrent sweeps across replicas are harmless (the same
+// multi-node posture as the automation_execution_claims prune, memql#561).
+//
+// mesh_key_seq is DELIBERATELY NOT swept (correctness beats completeness --
+// the rows are tiny). Deleting a key's allocator row would reset its next_seq
+// to 1 on the key's next produce, breaking the per-key strictly-increasing seq
+// invariant the replay contract leans on: any consumer still holding a
+// position from the key's earlier life (an in-memory tail position, or a
+// cursor recreated before the restart) would silently skip every restarted
+// seq <= that position. There is also a narrower producer race (Append's
+// allocator upsert vs. the sweep's delete). Both are eliminated by simply
+// keeping the allocator rows.
+func (s *pgOutboxStore) SweepOlderThan(ctx context.Context, cutoff time.Time) (outboxDeleted, cursorsDeleted int64, err error) {
+	db, err := s.db()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	res, err := db.ExecContext(ctx,
+		`DELETE FROM mesh_outbox WHERE created_at < $1`, cutoff)
+	if err != nil {
+		return 0, 0, fmt.Errorf("delivery substrate: sweep mesh_outbox: %w", err)
+	}
+	outboxDeleted, _ = res.RowsAffected()
+
+	res, err = db.ExecContext(ctx,
+		`DELETE FROM mesh_cursor WHERE updated_at < $1`, cutoff)
+	if err != nil {
+		return outboxDeleted, 0, fmt.Errorf("delivery substrate: sweep mesh_cursor: %w", err)
+	}
+	cursorsDeleted, _ = res.RowsAffected()
+
+	return outboxDeleted, cursorsDeleted, nil
 }
 
 // LoadCursor returns the persisted cursor seq for (key, consumerID), or 0 if
