@@ -58,13 +58,13 @@ var PolicyExposableConfig = []PolicyConfigField{
 		Key:         "sttProvider",
 		FieldName:   "SttProvider",
 		Sensitive:   false,
-		Description: "STT provider name (deepgram / openai-realtime / openai-whisper).",
+		Description: "STT provider name (openai-realtime / openai-whisper).",
 	},
 	{
 		Key:         "voiceProvider",
 		FieldName:   "PolyphonVoiceProvider",
 		Sensitive:   false,
-		Description: "Voice provider for the /memql/audio path (deepgram / openai / auto).",
+		Description: "Voice provider for the /memql/audio path (openai / auto).",
 	},
 	{
 		Key:         "authEnabled",

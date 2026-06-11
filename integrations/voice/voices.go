@@ -29,8 +29,7 @@ import (
 // engine's STT selector use:
 //
 //  1. POLYPHON_VOICE_PROVIDER explicit (non-empty) -> honor it.
-//  2. MEMQL_DEEPGRAM_API_KEY set -> "deepgram".
-//  3. Default -> "openai".
+//  2. Default -> "openai".
 //
 // Every node in the cluster (cognition, voice, bridge-agent) must
 // agree on the active provider, otherwise voice resolution on one
@@ -39,9 +38,6 @@ import (
 func ActiveProvider() string {
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("POLYPHON_VOICE_PROVIDER"))); v != "" {
 		return v
-	}
-	if strings.TrimSpace(os.Getenv("MEMQL_DEEPGRAM_API_KEY")) != "" {
-		return "deepgram"
 	}
 	return "openai"
 }
@@ -154,36 +150,6 @@ var openAIRealtimeVoiceMap = map[string]string{
 	"atlas":    "verse",
 }
 
-// deepgramVoiceMap maps canonical names to Deepgram Aura-2 voice ids
-// (`aura-2-<name>-<lang>` form -- the same string Deepgram's
-// /v1/speak `model` parameter accepts). Picked to roughly match the
-// canonical timbre per entry; the OpenAI map is the comparison
-// baseline.
-//
-// Aura-2 voice ids verified against Deepgram's TTS catalog at the
-// time of the migration; any future Deepgram catalog churn lands in
-// this map without touching consumers.
-var deepgramVoiceMap = map[string]string{
-	// female bucket
-	"alto":    "aura-2-thalia-en",
-	"soprano": "aura-2-asteria-en",
-	"mezzo":   "aura-2-luna-en",
-	"lyric":   "aura-2-stella-en",
-	"aria":    "aura-2-asteria-en",
-	"cadence": "aura-2-athena-en",
-	"harmony": "aura-2-hera-en",
-	"nova":    "aura-2-thalia-en",
-	// male bucket
-	"tenor":    "aura-2-arcas-en",
-	"baritone": "aura-2-orion-en",
-	"bass":     "aura-2-orion-en",
-	"echo":     "aura-2-perseus-en",
-	"anchor":   "aura-2-orpheus-en",
-	"marcus":   "aura-2-angus-en",
-	"drake":    "aura-2-helios-en",
-	"atlas":    "aura-2-orion-en",
-}
-
 // providerDefaults is the per-provider fallback voice when the
 // canonical name is unknown. Picked to be safe + inoffensive for
 // either gender.
@@ -192,7 +158,6 @@ var providerDefaults = map[string]string{
 	// marin is OpenAI's recommended GA realtime voice -- a good,
 	// configurable default per #483. Cedar is its male-leaning sibling.
 	"openai-realtime": "marin",
-	"deepgram":        "aura-2-thalia-en",
 }
 
 // canonicalDefaults are the catalog defaults we hand back when
@@ -274,18 +239,6 @@ func ResolveVoice(canonical, provider string) string {
 			return "cedar"
 		default:
 			return providerDefault("openai-realtime")
-		}
-	case "deepgram":
-		if id, ok := deepgramVoiceMap[canon]; ok && id != "" {
-			return id
-		}
-		// Unknown canonical: fall back to a gender-appropriate
-		// default Aura-2 voice so the audio path doesn't go silent.
-		switch CanonicalGender(canon) {
-		case "male":
-			return "aura-2-arcas-en"
-		default:
-			return providerDefault("deepgram")
 		}
 	default:
 		// Unknown provider -- hand back the canonical name and let

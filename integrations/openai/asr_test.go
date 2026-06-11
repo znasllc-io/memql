@@ -142,3 +142,28 @@ func TestHandleEvent_FinalUsesCompletedTranscript(t *testing.T) {
 		t.Fatal("expected final result on completed")
 	}
 }
+
+// TestHandleEvent_SpeechStartedEmitsOnset locks in the turn-taking contract
+// (#1355): the server-VAD onset event surfaces as a text-less
+// ASRKindSpeechStarted result, the signal the cascade's turn-taking machine
+// uses for human-turn entry and barge-in.
+func TestHandleEvent_SpeechStartedEmitsOnset(t *testing.T) {
+	s := &openaiASRStream{
+		results: make(chan polyphon.ASRResult, 16),
+		logger:  slog.New(slog.DiscardHandler),
+	}
+
+	s.handleEvent([]byte(`{"type":"input_audio_buffer.speech_started"}`))
+
+	select {
+	case r := <-s.results:
+		if r.Kind != polyphon.ASRKindSpeechStarted {
+			t.Errorf("expected ASRKindSpeechStarted, got kind=%d", r.Kind)
+		}
+		if r.Text != "" || r.IsFinal {
+			t.Errorf("onset result must be text-less and non-final, got %+v", r)
+		}
+	default:
+		t.Fatal("speech_started did not emit a result")
+	}
+}

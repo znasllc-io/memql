@@ -108,21 +108,6 @@ func TestNormalizeTranscript(t *testing.T) {
 	}
 }
 
-func TestDeepgramLanguageMapping(t *testing.T) {
-	cases := map[string]string{
-		"":      "en-US",
-		"en":    "en-US",
-		"en-US": "en-US",
-		"es-MX": "es-MX",
-		" en ":  "en-US",
-	}
-	for in, want := range cases {
-		if got := deepgramLanguage(in); got != want {
-			t.Errorf("deepgramLanguage(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestOpenAILanguageMapping(t *testing.T) {
 	cases := map[string]string{
 		"":        "en",

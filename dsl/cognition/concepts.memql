@@ -306,7 +306,7 @@ concept utterance {
     inputMethod  enum("typed", "stt", "realtimeVoice")  @description("How the human created this utterance.")
     outputMethod  enum("text", "tts", "realtimeVoice", "avatarVideo")  @description("How the SI delivered this utterance.")
     pipeline  string  @description("Source pipeline label, e.g. \"polyphon\" for utterances created by the bridge agent's STT path. Replaces the retired tier field; the cognition handler keys voice-vs-text routing on this when present.")
-    sttProvider  string  @description("Speech-to-text provider used (e.g., openai-realtime, openai-whisper, deepgram).")
+    sttProvider  string  @description("Speech-to-text provider used (e.g., openai-realtime, openai-whisper).")
     ttsProvider  string  @description("Text-to-speech provider used (e.g., elevenlabs, openai).")
   }
   spaceId  string  @required  @description("ID of the space this utterance belongs to.")

@@ -12,9 +12,8 @@ import (
 
 // polyphonASRSession adapts a polyphon.ASRStream to stt.StreamingSession.
 // It is shared by every STT provider that wraps a polyphon.ASRProvider --
-// OpenAI Realtime today, Deepgram Nova-3 in Stage 2 of the Deepgram
-// migration, and any future streaming provider -- since the bridge logic
-// between the two interfaces is identical.
+// OpenAI Realtime today, and any future streaming provider -- since the
+// bridge logic between the two interfaces is identical.
 //
 // Multi-utterance accumulation: streaming providers emit per-utterance
 // transcripts -- each IsFinal=true result carries only the text of the
@@ -84,7 +83,7 @@ func (s *polyphonASRSession) Finalize(ctx context.Context) (*FinalTranscription,
 	s.mu.Unlock()
 
 	// Closing the upstream stream is the provider-specific EOS signal
-	// (for OpenAI this closes the WebSocket; Deepgram's WebSocket likewise
+	// (for OpenAI this closes the WebSocket; other providers likewise
 	// gets a close-frame in Stage 2). Either way, forwardResults will
 	// exit when the upstream channel closes.
 	if err := s.stream.Close(); err != nil {

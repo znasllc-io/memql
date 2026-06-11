@@ -8,7 +8,7 @@
 # LiveKit for active polyphon-<spaceId> rooms and joins one. Single replica for
 # staging; concurrent multi-room dispatch is a follow-up (see dispatcher_voice.go).
 #
-# Secrets: MEMQL_DEEPGRAM_API_KEY / OPENAI_API_KEY / MEMQL_NODE_BOOTSTRAP_TOKEN
+# Secrets: OPENAI_API_KEY / MEMQL_NODE_BOOTSTRAP_TOKEN
 # come from the genesis envelope (autoload, via memql-secrets). The LiveKit
 # api key/secret come from the ESO-synced livekit-secrets (the same pair the
 # BFF mints tokens with). Auth: VOICE_AGENT_TOKEN empty -> self-bootstrap mints
@@ -67,7 +67,7 @@ spec:
             - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_SECRET } } }
             # The memql gRPC surface the agent speaks VoiceAgent* on.
             - { name: MEMQL_GRPC_ADDR, value: "bff:50051" }
-            # Deepgram cascade (STT Nova-3 -> cognition -> TTS Aura-2).
+            # Cascade executor (OpenAI STT -> cognition -> OpenAI TTS).
             - { name: MEMQL_VOICE_EXECUTOR, value: "cascade" }
             # Auto-join active polyphon rooms (no fixed room).
             - { name: MEMQL_VOICE_AUTOJOIN, value: "true" }

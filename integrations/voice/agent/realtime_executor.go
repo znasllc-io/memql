@@ -17,8 +17,8 @@ import (
 // realtime_executor.go is the Go realtime voice loop: it slots BEHIND THE SAME
 // SEAM as the cascade (cascade.go) -- same turn-taking machine, same gRPC
 // VoiceAgent* contract, same SpeakSink registration -- but drives the OpenAI
-// gpt-realtime speech-to-speech model instead of the Deepgram STT->cognition->
-// Deepgram TTS pipeline. It is the Go analog of
+// gpt-realtime speech-to-speech model instead of the OpenAI STT->cognition->
+// OpenAI TTS pipeline. It is the Go analog of
 // the Python voice-agent's realtime_executor.py + the realtime branch of
 // main.py, and implements the merged designs in
 // docs/internal/design/voice-432-conductor-response-gate.md (conductor gate) and
@@ -114,16 +114,16 @@ type RealtimeExecutor struct {
 
 	// turnMode is the realtime turn-detection / gating mode, switchable at
 	// runtime by the room layer. One pipeline, one optional gate (#475):
-	//   - turnModeGatedCascade: turn_detection:null, Deepgram drives the turn
+	//   - turnModeGatedCascade: turn_detection:null, the labeled ASR drives the turn
 	//     machine, the conductor gate runs via runTurn (the pre-#481 multi-party
 	//     path, still the default when the multi-party semantic_vad flag is off).
 	//   - turnModeNative (#478): semantic_vad + create_response:true, gpt-realtime
 	//     owns the turn, no conductor; the human transcript comes from the model's
-	//     native input transcription, not Deepgram. 1-on-1.
+	//     native input transcription, not a separate ASR stream. 1-on-1.
 	//   - turnModeGatedSemanticVad (#481): semantic_vad + create_response:false,
 	//     the model detects turn-end + transcribes the active speaker but does NOT
 	//     auto-generate; the gate decides (runTurn) and the executor fires
-	//     CreateResponse on engage. Deepgram is used ONLY for per-speaker
+	//     CreateResponse on engage. The labeled ASR is used ONLY for per-speaker
 	//     attribution (labeled-item injection), not to drive turns. Multi-party.
 	turnMode atomic.Int32
 
@@ -322,7 +322,7 @@ func (e *RealtimeExecutor) SetToolBridge(b *McpToolBridge) {
 
 // Turn-mode values for SetTurnMode (see the turnMode field doc).
 const (
-	turnModeGatedCascade     int32 = iota // null + Deepgram + conductor gate (default multi-party)
+	turnModeGatedCascade     int32 = iota // null + labeled ASR + conductor gate (default multi-party)
 	turnModeNative                        // semantic_vad + create_response:true (1-on-1, #478)
 	turnModeGatedSemanticVad              // semantic_vad + create_response:false + gate (multi-party, #481)
 )
@@ -335,7 +335,7 @@ func (e *RealtimeExecutor) SetTurnMode(mode int32) {
 	e.turnMode.Store(mode)
 	if e.logger != nil {
 		names := map[int32]string{
-			turnModeGatedCascade:     "gated-cascade (null + Deepgram + conductor)",
+			turnModeGatedCascade:     "gated-cascade (null + labeled ASR + conductor)",
 			turnModeNative:           "native (model-owns-turn)",
 			turnModeGatedSemanticVad: "gated-semantic_vad (model turn-end + conductor gate)",
 		}
@@ -352,7 +352,7 @@ func (e *RealtimeExecutor) isGatedSemanticVad() bool {
 	return e.turnMode.Load() == turnModeGatedSemanticVad
 }
 
-// ConsumeASR drives the machine from one human track's Deepgram ASR result
+// ConsumeASR drives the machine from one human track's labeled ASR result
 // stream (one goroutine per human track -- the multi-party fan-out, #433). It
 // maps each result onto a turn-taking input exactly as the cascade does, and
 // additionally streams the active-speaker audio path is wired by the room glue
@@ -388,7 +388,7 @@ func (e *RealtimeExecutor) StreamAudio(pcm16k []byte) {
 // direct unit testing.
 func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
 	// Track the active speaker on EVERY result, before any mode-specific return.
-	// Native mode does not consume Deepgram for turn-taking, but the native input
+	// Native mode does not consume the labeled ASR for turn-taking, but the native input
 	// transcript (EventInputTranscriptDone) carries no speaker of its own -- it
 	// reads getLastSpeaker() to attribute the user utterance. Without this the
 	// forwarded VoiceAgentFinalTranscript has an empty speaker id, the BFF rejects
@@ -398,16 +398,16 @@ func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.AS
 		e.setLastSpeaker(id)
 	}
 	// Native 1-on-1 mode: gpt-realtime transcribes the human, detects the turn,
-	// authors + speaks, and handles barge-in -- so Deepgram results are not
-	// consumed for turn-taking (Deepgram stays warm only for the cascade fallback
+	// authors + speaks, and handles barge-in -- so labeled-ASR results are not
+	// consumed for turn-taking (the labeled ASR stays warm only for the cascade fallback
 	// and to seed the speaker id above). The only executor turn input on the
 	// native path is StreamAudio (PCM -> model) + the native transcript events.
 	if e.isNativeMode() {
 		return
 	}
 	// Multi-party semantic_vad gate (#481): the model detects turn-end and
-	// transcribes the active speaker, so Deepgram does NOT drive the turn here.
-	// But Deepgram per-track ASR is still the attribution source -- inject each
+	// transcribes the active speaker, so the labeled ASR does NOT drive the turn here.
+	// But the per-track labeled ASR is still the attribution source -- inject each
 	// speaker's labeled final as context ("[name . role] text") so the model can
 	// attribute ("as Maria said..."), and track the last speaker for the turn's
 	// speaker id. We do not touch the turn machine in this mode.
@@ -488,12 +488,12 @@ func (e *RealtimeExecutor) onCommittedTurn(text string) {
 	// Native 1-on-1 mode: gpt-realtime owns the turn -- it detects end-of-turn
 	// (semantic_vad), authors + speaks natively, and the human transcript is
 	// captured from the model's native input-transcription events (drainEvents),
-	// not this Deepgram-driven commit. So we neither forward this final (the
+	// not this labeled-ASR-driven commit. So we neither forward this final (the
 	// native path inserts the user utterance, stamped transcript-only) nor
 	// round-trip the conductor. Guarded defensively even though the room layer
-	// also stops feeding Deepgram finals into the machine in native mode.
+	// also stops feeding labeled-ASR finals into the machine in native mode.
 	// turnModeGatedSemanticVad (#481) likewise drives the turn from the model's
-	// turn-end (EventInputTranscriptDone), not this Deepgram commit.
+	// turn-end (EventInputTranscriptDone), not this labeled-ASR commit.
 	if e.isNativeMode() || e.isGatedSemanticVad() {
 		return
 	}
@@ -503,7 +503,7 @@ func (e *RealtimeExecutor) onCommittedTurn(text string) {
 }
 
 // SetActiveSpeaker seeds the active speaker id from the room layer (the LiveKit
-// participant identity), used when Deepgram is off the path so the native input
+// participant identity), used when the labeled ASR is off the path so the native input
 // transcript still attributes the user utterance. Public seam for the room glue.
 func (e *RealtimeExecutor) SetActiveSpeaker(identity string) {
 	if id := strings.TrimSpace(identity); id != "" {
@@ -795,7 +795,7 @@ func (e *RealtimeExecutor) drainEvents() {
 	var transcript strings.Builder
 	// inputTranscript accumulates the model's native transcription of the
 	// human's audio (#478 native mode), so the chat transcript comes from the
-	// realtime model rather than a Deepgram pass on the critical path.
+	// realtime model rather than a separate ASR pass on the critical path.
 	var inputTranscript strings.Builder
 	for {
 		select {
@@ -817,7 +817,7 @@ func (e *RealtimeExecutor) drainEvents() {
 				// Observability: server-side VAD decided the human finished. This
 				// opens the end-of-speech -> first-assistant-audio window that
 				// drainAudioOut closes on the next response's first frame. This delta
-				// is the headline "snappiness" number with Deepgram off the path.
+				// is the headline "snappiness" number with no second ASR on the path.
 				e.turnSpeechStopNanos.Store(time.Now().UnixNano())
 				if e.logger != nil {
 					e.logger.Info("voice trace: turntaking event",

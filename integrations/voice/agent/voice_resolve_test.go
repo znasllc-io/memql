@@ -24,11 +24,11 @@ func TestResolveTTSVoice_ConsumesCatalog(t *testing.T) {
 	assert.NotEmpty(t, got)
 }
 
-func TestResolveTTSVoice_DeepgramProvider(t *testing.T) {
-	t.Setenv("POLYPHON_VOICE_PROVIDER", "deepgram")
+func TestResolveTTSVoice_ExplicitProviderOverride(t *testing.T) {
+	t.Setenv("POLYPHON_VOICE_PROVIDER", "openai")
 
 	p := ResolvePersona(SessionAck{CanonicalVoice: "tenor"}, Config{})
-	assert.Equal(t, voice.ResolveVoice("tenor", "deepgram"), ResolveTTSVoice(p))
+	assert.Equal(t, voice.ResolveVoice("tenor", "openai"), ResolveTTSVoice(p))
 }
 
 // TestResolveRealtimeVoice_ConsumesCatalog asserts the realtime voice id

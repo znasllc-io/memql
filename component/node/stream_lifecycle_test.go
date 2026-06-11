@@ -118,7 +118,7 @@ func TestStreamLifecycleAudioStream(t *testing.T) {
 	}
 
 	sess := NewStreamSession(sub, streamID, "transcript", "voice-1")
-	if _, err := sess.Start(ctx, map[string]any{"provider": "deepgram", "sampleRate": 16000}); err != nil {
+	if _, err := sess.Start(ctx, map[string]any{"provider": "openai-realtime", "sampleRate": 16000}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	interims := []string{"the", "the quick", "the quick brown fox"}
@@ -135,7 +135,7 @@ func TestStreamLifecycleAudioStream(t *testing.T) {
 	if len(got) != 5 {
 		t.Fatalf("want 5 frames, got %d", len(got))
 	}
-	if got[0].Phase != StreamPhaseStart || got[0].Meta["provider"] != "deepgram" {
+	if got[0].Phase != StreamPhaseStart || got[0].Meta["provider"] != "openai-realtime" {
 		t.Fatalf("start frame wrong: %+v", got[0])
 	}
 	for i, it := range interims {

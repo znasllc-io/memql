@@ -15,38 +15,37 @@ import (
 const (
 	// EnvLanguage hard-pins the transcription language on the live
 	// streaming request, overriding any client-supplied LanguageHint by
-	// default. Sourced as a single knob so one setting drives BOTH the
-	// Deepgram stream URL (language=en-US) and the OpenAI Realtime session
-	// config (language=en). Default "en".
+	// default. Drives the OpenAI Realtime session config (language=en).
+	// Default "en".
 	//
 	// The classic cause of multi-language + short-word hallucination is an
-	// unpinned language: gpt-4o-transcribe/whisper and Deepgram Nova-3
+	// unpinned language: gpt-4o-transcribe/whisper
 	// will auto-detect and "drift" to another language on noisy/short
 	// audio. Pinning it server-side fixes that regardless of what the
 	// browser passes.
 	EnvLanguage = "MEMQL_STT_LANGUAGE"
 
 	// EnvMinConfidence is the floor a FINAL transcript's confidence must
-	// clear to be emitted to the client. Deepgram exposes a real
+	// clear to be emitted to the client. Some providers expose a real
 	// per-alternative confidence; OpenAI Realtime has none and stamps 1.0
 	// on finals (so they always clear the floor and rely on server-VAD +
 	// the empty/denylist filters instead). Default 0.6.
 	EnvMinConfidence = "MEMQL_STT_MIN_CONFIDENCE"
 
 	// defaultLanguage is the pinned-language default. Bare ISO-639-1 "en";
-	// the per-provider adapter expands it (Deepgram wants en-US, OpenAI
+	// the per-provider adapter expands it (OpenAI
 	// wants en) so both lanes share this one knob.
 	defaultLanguage = "en"
 
 	// defaultMinConfidence is the low-confidence final cutoff. 0.6 is a
-	// sensible threshold for Deepgram Nova-3: genuine speech sits well
+	// sensible threshold: genuine speech sits well
 	// above it, while noise/silence hallucinations come back at or below
 	// it. Tunable via EnvMinConfidence.
 	defaultMinConfidence float32 = 0.6
 )
 
 // silenceHallucinationDenylist is the set of well-known phrases that
-// Whisper/Realtime/Deepgram fabricate from silence or non-speech audio.
+// Whisper/Realtime fabricate from silence or non-speech audio.
 // These are normalized (lowercase, trimmed, trailing punctuation stripped)
 // before comparison. They are dropped ONLY when the no-speech / low-
 // confidence signal also fires -- never on the word alone -- so a genuine
@@ -116,7 +115,7 @@ func NewTranscriptFilter() TranscriptFilter {
 //     committed utterances the user actually sees as a turn.
 //   - low-confidence FINAL (confidence below MinConfidence, and a real
 //     confidence signal is present) -> drop. OpenAI-realtime finals carry
-//     1.0 so they pass; Deepgram noise hallucinations come back low.
+//     1.0 so they pass; noise hallucinations come back low.
 //   - known silence-hallucination phrase on a FINAL, GATED on the no-speech
 //     signal (low confidence) -> drop. A high-confidence "okay"/"thank you"
 //     the user genuinely said is kept.
@@ -135,7 +134,7 @@ func (f TranscriptFilter) Keep(text string, isFinal bool, confidence float32) bo
 		return false
 	}
 
-	// No-speech-gated denylist. Deepgram emits low/zero confidence on the
+	// No-speech-gated denylist. Providers emit low/zero confidence on the
 	// noise-hallucination finals; only then do we apply the denylist, so a
 	// real high-confidence short phrase survives. The gate fires when the
 	// confidence signal is absent (0) or sits below the floor -- i.e. we

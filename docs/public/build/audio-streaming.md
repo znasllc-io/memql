@@ -257,7 +257,7 @@ function float32ToPcm16(float32Array) {
 3. Client sends "start" message with spaceId, participantId
 4. Client captures audio via getUserMedia + AudioWorklet
 5. Client converts Float32 to PCM16, base64 encodes, sends "chunk" messages
-6. Server forwards chunks to STT provider (Deepgram Nova-3 when configured; OpenAI Realtime / OpenAI Whisper otherwise)
+6. Server forwards chunks to STT provider (OpenAI Realtime by default; OpenAI Whisper for batch)
 7. Server receives interim transcriptions, sends to client (isFinal: false)
 8. User releases mic button
 9. Client sends "end" message
@@ -309,9 +309,8 @@ Voice messages create `v1:cognition:utterance` records with this structure:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `MEMQL_STT_PROVIDER` | STT provider: `deepgram` (auto-default when key set) / `openai-realtime` / `openai-whisper` | No |
-| `MEMQL_DEEPGRAM_API_KEY` | Deepgram API key (selects `deepgram` automatically when set) | Yes (for Deepgram) |
-| `MEMQL_SI_OPENAI_API_KEY` | OpenAI API key (for Whisper / Realtime) | Yes (if using OpenAI providers) |
+| `MEMQL_STT_PROVIDER` | STT provider: `openai-realtime` (default) / `openai-whisper` | No |
+| `MEMQL_SI_OPENAI_API_KEY` | OpenAI API key (for Whisper / Realtime) | Yes |
 
 #### MemQL Variables (v1:platform:partitionVariable)
 
@@ -322,19 +321,15 @@ Voice messages create `v1:cognition:utterance` records with this structure:
 
 #### Provider Comparison
 
-| Feature | Deepgram Nova-3 | OpenAI Realtime | OpenAI Whisper |
-|---------|-----------------|-----------------|----------------|
-| Real-time streaming | Yes | Yes | No (batch) |
-| Interim results | Yes | Yes | No |
-| Word timestamps | Yes | Yes | Yes |
-| Deploy | Cloud API | Cloud API | Cloud API |
-| Best for | Lowest TTFB, default | OpenAI-only stacks | Accuracy, offline |
+| Feature | OpenAI Realtime | OpenAI Whisper |
+|---------|-----------------|----------------|
+| Real-time streaming | Yes | No (batch) |
+| Interim results | Yes | No |
+| Word timestamps | Yes | Yes |
+| Deploy | Cloud API | Cloud API |
+| Best for | Streaming default | Accuracy, offline |
 
-**Deepgram Nova-3** (default when `MEMQL_DEEPGRAM_API_KEY` is set):
-Streaming WebSocket via Deepgram's `/v1/listen`; sub-300 ms first
-interim partials.
-
-**OpenAI Realtime** (fallback): Streaming transcription via the
+**OpenAI Realtime** (default): Streaming transcription via the
 Realtime API in transcription-only mode.
 
 **OpenAI Whisper**: Batch transcription via the transcriptions API.
@@ -351,8 +346,7 @@ server/audiows/
 integrations/stt/
 ├── stt.go              # Provider interface, common types
 ├── openai_whisper.go   # OpenAI Whisper (batch)
-├── openai_realtime.go  # OpenAI Realtime (streaming)
-└── deepgram.go         # Deepgram Nova-3 (streaming)
+└── openai_realtime.go  # OpenAI Realtime (streaming)
 ```
 
 ### STT Provider Interface
@@ -611,7 +605,7 @@ so chunks land on the same voice instance that owns the session.
 - `component/grpc/ai_transcribe_stream.go` -- handler + per-stream
   state machine
 - `component/grpc/ai_forward.go` -- BFF -> voice forwarding
-- `integrations/stt/` -- provider implementations (Deepgram Nova-3, OpenAI Realtime, OpenAI Whisper)
+- `integrations/stt/` -- provider implementations (OpenAI Realtime, OpenAI Whisper)
 
 ### Provider selection
 
@@ -619,8 +613,7 @@ Same env vars as the legacy `/memql/audio` path:
 
 | Variable | Values | Default |
 |----------|--------|---------|
-| `MEMQL_STT_PROVIDER` | `deepgram`, `openai-realtime`, `openai-whisper` | auto (`deepgram` when `MEMQL_DEEPGRAM_API_KEY` is set, else `openai-realtime`) |
-| `MEMQL_DEEPGRAM_API_KEY` | Deepgram key | required for `deepgram` |
+| `MEMQL_STT_PROVIDER` | `openai-realtime`, `openai-whisper` | `openai-realtime` |
 | `MEMQL_SI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
 
 `docker-compose.cluster.yml` brings up voice nodes alongside the BFF so
@@ -662,7 +655,6 @@ env vars are configured.
 
 `POLYPHON_VOICE_PROVIDER`:
 
-- `deepgram` (auto-default when `MEMQL_DEEPGRAM_API_KEY` is set) -- Nova-3 ASR + Aura-2 TTS.
 - `openai` (fallback) -- OpenAI Realtime transcription + `/v1/audio/speech` TTS.
 
 ---

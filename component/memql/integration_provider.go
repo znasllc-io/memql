@@ -47,7 +47,7 @@ type IntegrationCapability struct {
 // callable capabilities with the MemQL engine.
 //
 // Integrations are protocol adapters: they bridge external services (OpenAI
-// voice, Deepgram voice, etc.) into the memQL ecosystem. They emit events
+// voice, etc.) into the memQL ecosystem. They emit events
 // inward and expose capabilities outward. Orchestration logic (queries, AI
 // invocations, mutations, decision trees) belongs in MemQL DSL automations
 // and functions, NOT in integration Go code.

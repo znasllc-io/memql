@@ -3,31 +3,12 @@
 package app
 
 import (
-	"context"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/znasllc-io/memql/integrations/deepgram"
 	openaivoice "github.com/znasllc-io/memql/integrations/openai"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
-
-// parseEnvIntDefaultZero reads a non-negative integer env var, returning
-// 0 when the env is unset, empty, or malformed. 0 lets downstream apply
-// the consumer's own default constant.
-func parseEnvIntDefaultZero(key string) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
 
 // selectSTTProvider chooses the Speech-to-Text provider based on MEMQL_STT_PROVIDER
 // and registers the STT integration for DSL-callable transcription.
@@ -35,53 +16,17 @@ func parseEnvIntDefaultZero(key string) int {
 //
 // Provider selection order:
 //  1. If MEMQL_STT_PROVIDER is set explicitly, use that value.
-//  2. Else if MEMQL_DEEPGRAM_API_KEY is set, default to "deepgram"
-//     (Nova-3 streaming WebSocket). Falls through to openai-realtime
-//     if the Deepgram health check fails.
-//  3. Else default to "openai-realtime" (streaming via the Realtime
+//  2. Else default to "openai-realtime" (streaming via the Realtime
 //     API -- word-by-word interim results). Falls back to
 //     "openai-whisper" (batch) if the Realtime model isn't usable.
-//
-// This is the Phase 7 default flip in the Deepgram migration:
-// Deepgram is now the auto-selected default whenever a key is
-// configured; OpenAI is the startup-time fallback. Mid-session
-// failover is NOT in scope -- a transient Deepgram error on one call
-// surfaces normally and the next call retries Deepgram.
 func (a *App) selectSTTProvider() {
 	explicit := strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_STT_PROVIDER")))
 	sttProviderName := explicit
 	if sttProviderName == "" {
-		if strings.TrimSpace(os.Getenv("MEMQL_DEEPGRAM_API_KEY")) != "" {
-			sttProviderName = "deepgram"
-		} else {
-			sttProviderName = "openai-realtime"
-		}
+		sttProviderName = "openai-realtime"
 	}
 
 	switch sttProviderName {
-	case "deepgram":
-		if !a.initDeepgramProvider(explicit == "deepgram") && explicit != "deepgram" {
-			// Auto-selected deepgram fell through. Emit a
-			// structured WARN line matching the
-			// v1:identity:auditEvent shape ({category=
-			// configuration, action=voice.provider.failover,
-			// detail.requested=deepgram, detail.fallback=
-			// openai-realtime, outcome=failure, failure_reason=
-			// health_check_failed}). Operators can grep this
-			// to know a silent fallback fired -- a real
-			// db-backed audit-event insertion would need the
-			// identity-node's AuditDBSink, which non-identity
-			// binaries don't carry.
-			a.Logger.Warn("audit",
-				"category", "configuration",
-				"action", "voice.provider.failover",
-				"requested", "deepgram",
-				"fallback", "openai-realtime",
-				"reason", "health_check_failed",
-				"outcome", "failure",
-			)
-			a.initOpenAIRealtimeProvider("openai-realtime")
-		}
 	case "openai-realtime", "realtime":
 		a.initOpenAIRealtimeProvider(sttProviderName)
 	case "openai-whisper", "whisper":
@@ -103,9 +48,7 @@ func (a *App) selectSTTProvider() {
 }
 
 // initOpenAIRealtimeProvider wires the OpenAI Realtime API (streaming
-// transcription via WebSocket) as the active STT provider. This is the
-// current default; Deepgram replaces it as the auto-selected default
-// in Phase 7 of the Deepgram migration.
+// transcription via WebSocket) as the active STT provider -- the default.
 //
 // Model resolution: honors MEMQL_OPENAI_REALTIME_MODEL; falls back to
 // POLYPHON_OPENAI_ASR_MODEL so a single env var can drive both paths;
@@ -159,73 +102,4 @@ func (a *App) initWhisperProvider(name string) {
 	}
 	a.sttProvider = stt.NewOpenAIWhisperProvider(openAIKey, openAIProject, nil)
 	a.Logger.Info("audio websocket using OpenAI Whisper", "provider", name)
-}
-
-// initDeepgramProvider constructs the Deepgram STT provider and runs a
-// startup health check. Returns true on success. On failure, behavior
-// depends on explicitRequest: when the user set MEMQL_STT_PROVIDER=deepgram
-// we fail fast; otherwise the caller falls through to openai-realtime
-// (this matches the auto-selection pattern Phase 7 introduces).
-//
-// Model resolution: honors POLYPHON_DEEPGRAM_ASR_MODEL (default "nova-3").
-func (a *App) initDeepgramProvider(explicitRequest bool) bool {
-	key := strings.TrimSpace(os.Getenv("MEMQL_DEEPGRAM_API_KEY"))
-	if key == "" {
-		if explicitRequest {
-			a.fatal("MEMQL_STT_PROVIDER=deepgram but MEMQL_DEEPGRAM_API_KEY is not set")
-		}
-		a.Logger.Warn("STT provider 'deepgram' selected but MEMQL_DEEPGRAM_API_KEY not set; falling back")
-		return false
-	}
-
-	model := strings.TrimSpace(os.Getenv("POLYPHON_DEEPGRAM_ASR_MODEL"))
-	if model == "" {
-		model = "nova-3"
-	}
-	language := strings.TrimSpace(os.Getenv("POLYPHON_DEEPGRAM_LANGUAGE"))
-
-	cfg := deepgram.Config{
-		APIKey:             key,
-		ASRModel:           model,
-		Language:           language,
-		EndpointingMs:      parseEnvIntDefaultZero(deepgram.EnvEndpointingMs),
-		UtteranceEndMs:     parseEnvIntDefaultZero(deepgram.EnvUtteranceEndMs),
-		ClientEOUTimeoutMs: parseEnvIntDefaultZero(deepgram.EnvClientEOUTimeoutMs),
-		Logger:             a.Logger,
-	}
-	asr, err := deepgram.NewASRClient(cfg)
-	if err != nil {
-		if explicitRequest {
-			a.fatal("deepgram STT provider init failed", "error", err)
-		}
-		a.Logger.Warn("deepgram STT init failed; falling back", "error", err)
-		return false
-	}
-
-	if !a.deepgramHealthCheck(asr, explicitRequest) {
-		_ = asr.Close()
-		return false
-	}
-
-	a.sttProvider = stt.NewDeepgramProvider(asr, nil)
-	a.Logger.Info("STT provider initialized", "provider", "deepgram", "model", model)
-	return true
-}
-
-// deepgramHealthCheck verifies the Deepgram credentials authenticate
-// successfully by opening + immediately closing a streaming session
-// within a 5s budget. Explicit requests fail fast on failure; auto-
-// selected requests log and return false so the caller falls through.
-func (a *App) deepgramHealthCheck(asr *deepgram.ASRClient, explicitRequest bool) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := asr.Ping(ctx); err != nil {
-		if explicitRequest {
-			a.fatal("deepgram STT provider unreachable", "error", err)
-		}
-		a.Logger.Warn("deepgram unreachable; falling back to openai-realtime", "error", err)
-		return false
-	}
-	return true
 }

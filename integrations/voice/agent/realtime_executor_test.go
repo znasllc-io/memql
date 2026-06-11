@@ -411,7 +411,7 @@ func hasTurnRequest(fs *fakeStream) bool {
 }
 
 // TestRealtimeExecutor_NativeMode_NoConductorRoundTrip verifies the #478 native
-// gate: with native mode on, a (defensive) Deepgram final does NOT round-trip
+// gate: with native mode on, a (defensive) labeled-ASR final does NOT round-trip
 // the conductor (no VoiceAgentTurnRequest) and drives no response.create -- the
 // model owns the turn.
 func TestRealtimeExecutor_NativeMode_NoConductorRoundTrip(t *testing.T) {
@@ -605,7 +605,7 @@ func TestRealtimeExecutor_GateDirective_DeferSuppresses(t *testing.T) {
 }
 
 // TestRealtimeExecutor_GatedSemanticVad_AttributionNoTurn verifies the #481
-// multi-party mode: a Deepgram final injects the labeled transcript for
+// multi-party mode: a labeled-ASR final injects the labeled transcript for
 // attribution but does NOT drive a turn (semantic_vad owns turn detection).
 func TestRealtimeExecutor_GatedSemanticVad_AttributionNoTurn(t *testing.T) {
 	fs := newFakeStream()
@@ -622,8 +622,8 @@ func TestRealtimeExecutor_GatedSemanticVad_AttributionNoTurn(t *testing.T) {
 	items := rt.injectedItems()
 	require.NotEmpty(t, items, "the labeled transcript must be injected for attribution")
 	assert.Contains(t, items[len(items)-1].Text, "cut cloud spend")
-	// But Deepgram did NOT drive a turn (the model's turn-end does).
-	assert.False(t, hasTurnRequest(fs), "Deepgram finals must not drive the turn in semantic_vad mode")
+	// But the labeled ASR did NOT drive a turn (the model's turn-end does).
+	assert.False(t, hasTurnRequest(fs), "labeled-ASR finals must not drive the turn in semantic_vad mode")
 	assert.Equal(t, 0, rt.responseCount())
 }
 

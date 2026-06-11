@@ -4615,7 +4615,7 @@ type SITranscribeStreamStart struct {
 	SampleRate    int32                  `protobuf:"varint,3,opt,name=sample_rate,json=sampleRate,proto3" json:"sample_rate,omitempty"`      // e.g. 16000
 	Channels      int32                  `protobuf:"varint,4,opt,name=channels,proto3" json:"channels,omitempty"`                            // 1 (mono) or 2 (stereo)
 	LanguageHint  string                 `protobuf:"bytes,5,opt,name=language_hint,json=languageHint,proto3" json:"language_hint,omitempty"` // optional ISO-639-1 code (e.g. "en")
-	Provider      string                 `protobuf:"bytes,6,opt,name=provider,proto3" json:"provider,omitempty"`                             // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default. Stage 2 of the Deepgram migration adds "deepgram".
+	Provider      string                 `protobuf:"bytes,6,opt,name=provider,proto3" json:"provider,omitempty"`                             // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4873,7 +4873,7 @@ type SITranscribeStreamComplete struct {
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	DurationMs    int64                  `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"` // provider name, e.g. "openai-realtime", "openai-whisper". Stage 2 of the Deepgram migration adds "deepgram".
+	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"` // provider name, e.g. "openai-realtime", "openai-whisper".
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10931,7 +10931,7 @@ type VoiceAgentSessionAck struct {
 	ErrorCode    string                 `protobuf:"bytes,3,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	// GA's canonical voice (alto / soprano / tenor / etc.).
-	// The voice-agent resolves canonical -> Deepgram Aura-2 id
+	// The voice-agent resolves canonical -> provider voice id
 	// locally via its voice catalog.
 	GaCanonicalVoice string `protobuf:"bytes,5,opt,name=ga_canonical_voice,json=gaCanonicalVoice,proto3" json:"ga_canonical_voice,omitempty"`
 	// Anam persona id when avatar_vendor=anam.
@@ -11304,7 +11304,7 @@ type VoiceAgentFinalTranscript struct {
 	SpaceId       string                 `protobuf:"bytes,2,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
 	SpeakerUserId string                 `protobuf:"bytes,3,opt,name=speaker_user_id,json=speakerUserId,proto3" json:"speaker_user_id,omitempty"`
 	FinalText     string                 `protobuf:"bytes,4,opt,name=final_text,json=finalText,proto3" json:"final_text,omitempty"`
-	// Provider confidence, 0.0-1.0 (Deepgram surfaces this).
+	// Provider confidence, 0.0-1.0 (provider-dependent).
 	Confidence float32 `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`
 	// Wall-clock millis the utterance ended (voice-agent side).
 	EndedAtMs int64 `protobuf:"varint,6,opt,name=ended_at_ms,json=endedAtMs,proto3" json:"ended_at_ms,omitempty"`

@@ -1511,7 +1511,7 @@ MemQL's SI integration is intentionally scoped so that language models can only 
 
   Voice-to-voice via the OpenAI Realtime conversation mode was retired
   in favour of the Polyphon pipeline (LiveKit + ASR/TTS in
-  `integrations/deepgram/` and `integrations/openai/`). The
+  `integrations/openai/`). The
   `OpenAIRealtime` provider type and the corresponding `realtime*`
   configs have been removed; the only Realtime usage today is
   transcription-only ASR.

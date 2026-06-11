@@ -5,8 +5,7 @@ set -e
 #
 # Applies all Kubernetes manifests to the Polyphon cluster. Stage 1
 # deploys only CPU services (LiveKit, Redis, Bridge Agent); ASR/TTS
-# runs against a cloud API (OpenAI today; Deepgram in Stage 2 of the
-# Deepgram migration), so no GPU manifests get applied.
+# runs against a cloud API (OpenAI), so no GPU manifests get applied.
 #
 # Usage:
 #   ./infra/polyphon/deploy.sh [--dry-run]

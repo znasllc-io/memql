@@ -733,7 +733,7 @@ message SITranscribeStreamStart {
   int32 sample_rate = 3;       // e.g. 16000
   int32 channels = 4;          // 1 (mono) or 2 (stereo)
   string language_hint = 5;    // optional ISO-639-1 code (e.g. "en")
-  string provider = 6;         // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default. Stage 2 of the Deepgram migration adds "deepgram".
+  string provider = 6;         // optional, e.g. "openai-realtime" or "openai-whisper" -- overrides default.
 }
 
 message SITranscribeStreamChunk {
@@ -761,7 +761,7 @@ message SITranscribeStreamComplete {
   string request_id = 1;
   string text = 2;
   int64 duration_ms = 3;
-  string provider = 4;         // provider name, e.g. "openai-realtime", "openai-whisper". Stage 2 of the Deepgram migration adds "deepgram".
+  string provider = 4;         // provider name, e.g. "openai-realtime", "openai-whisper".
 }
 
 message SISuggestMsg {
@@ -1713,7 +1713,7 @@ message VoiceAgentSessionAck {
   string error_code = 3;
   string error_message = 4;
   // GA's canonical voice (alto / soprano / tenor / etc.).
-  // The voice-agent resolves canonical -> Deepgram Aura-2 id
+  // The voice-agent resolves canonical -> provider voice id
   // locally via its voice catalog.
   string ga_canonical_voice = 5;
   // Anam persona id when avatar_vendor=anam.
@@ -1779,7 +1779,7 @@ message VoiceAgentFinalTranscript {
   string space_id = 2;
   string speaker_user_id = 3;
   string final_text = 4;
-  // Provider confidence, 0.0-1.0 (Deepgram surfaces this).
+  // Provider confidence, 0.0-1.0 (provider-dependent).
   float confidence = 5;
   // Wall-clock millis the utterance ended (voice-agent side).
   int64 ended_at_ms = 6;

@@ -19,22 +19,22 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/polyphon"
-	"github.com/znasllc-io/memql/integrations/deepgram"
+	"github.com/znasllc-io/memql/integrations/openai"
 )
 
 // room_audio_voice.go is the voice-tagged (CGO/libopus) glue that binds the
 // LiveKit room media plane to the pure-Go cascade orchestrator (cascade.go).
 // It is the implementation of docs/internal/design/voice-451-livekit-go-room-participation.md
 // sections 2b/2c: decode each remote human audio track to PCM16 via
-// NewPCMRemoteTrack and feed it to a Deepgram STT stream; publish the
+// NewPCMRemoteTrack and feed it to an OpenAI STT stream; publish the
 // assistant's TTS audio via NewPCMLocalTrack.
 //
 // Everything that touches the media-sdk PCM types lives here, behind
 // `//go:build voice`, so the cascade/turn-taking logic and its tests stay
 // in the default CGO-free lane. The audioSink / ttsSynthesizer seams the
-// cascade consumes are satisfied here by real LiveKit + Deepgram objects.
+// cascade consumes are satisfied here by real LiveKit + OpenAI objects.
 
-// roomAudioBridge owns the per-session media plane: the Deepgram STT/TTS
+// roomAudioBridge owns the per-session media plane: the OpenAI STT/TTS
 // clients, the published local track, and one cascade orchestrator. It is
 // constructed inside JoinAndServe once the room connection is confirmed.
 type roomAudioBridge struct {
@@ -42,7 +42,7 @@ type roomAudioBridge struct {
 	roomReq RoomRequest
 	logger  *slog.Logger
 
-	asr   *deepgram.ASRClient
+	asr   *openai.ASRClient
 	local *lkmedia.PCMLocalTrack
 
 	cascade *Cascade
@@ -51,24 +51,23 @@ type roomAudioBridge struct {
 	streams map[string]polyphon.ASRStream // by participant identity
 }
 
-// newRoomAudioBridge builds the bridge: Deepgram clients from the agent
+// newRoomAudioBridge builds the bridge: OpenAI clients from the agent
 // config, a published local audio track, and the cascade orchestrator
 // wired to the TTS adapter + the local track as its room sink.
 func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client *Client, room *lksdk.Room, logger *slog.Logger) (*roomAudioBridge, error) {
-	dgCfg := deepgram.Config{
-		APIKey:   cfg.DeepgramAPIKey,
-		ASRModel: cfg.DGASRModel,
-		TTSModel: cfg.DGTTSModel,
-		Language: cfg.DGLanguage,
+	oaCfg := openai.Config{
+		APIKey:   cfg.OpenAIAPIKey,
+		ASRModel: cfg.CascadeASRModel,
+		TTSModel: cfg.CascadeTTSModel,
 		Logger:   logger,
 	}
-	asr, err := deepgram.NewASRClient(dgCfg)
+	asr, err := openai.NewASRClient(oaCfg)
 	if err != nil {
-		return nil, fmt.Errorf("voice-agent room audio: deepgram asr: %w", err)
+		return nil, fmt.Errorf("voice-agent room audio: openai asr: %w", err)
 	}
-	tts, err := deepgram.NewTTSClient(dgCfg)
+	tts, err := openai.NewTTSClient(oaCfg)
 	if err != nil {
-		return nil, fmt.Errorf("voice-agent room audio: deepgram tts: %w", err)
+		return nil, fmt.Errorf("voice-agent room audio: openai tts: %w", err)
 	}
 
 	local, err := lkmedia.NewPCMLocalTrack(ttsPCMSampleRate, 1, protoLogger.GetLogger())
@@ -99,7 +98,7 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 		SpaceID:   req.SpaceID,
 		GaAgentID: req.GaAgentID,
 		Thread:    threadContextFor(req),
-	}, client, newDeepgramTTSAdapter(tts, logger), sink, ResolveTTSVoice(req.Persona), logger)
+	}, client, newPCMTTSAdapter(tts, logger), sink, ResolveTTSVoice(req.Persona), logger)
 	cascade.Start()
 
 	return &roomAudioBridge{
@@ -113,7 +112,7 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 	}, nil
 }
 
-// onTrackSubscribed opens a Deepgram STT stream for a newly-subscribed
+// onTrackSubscribed opens an OpenAI STT stream for a newly-subscribed
 // human audio track and wires NewPCMRemoteTrack to feed it PCM16 at the STT
 // sample rate. The decoded PCM frames flow to the per-participant sttSink,
 // whose result channel is consumed by the cascade.
@@ -212,7 +211,7 @@ func (s *localTrackSink) WriteFrame(pcm []byte) error {
 // cuts the assistant audio immediately (PCMLocalTrack.ClearQueue).
 func (s *localTrackSink) Flush() { s.track.ClearQueue() }
 
-// sttSink adapts NewPCMRemoteTrack's PCMRemoteTrackWriter onto the Deepgram
+// sttSink adapts NewPCMRemoteTrack's PCMRemoteTrackWriter onto the
 // STT stream: each decoded PCM16 frame is packed to little-endian bytes and
 // sent via SendAudio.
 type sttSink struct {
@@ -235,7 +234,7 @@ func (s *sttSink) WriteSample(sample mediasdk.PCM16Sample) error {
 func (s *sttSink) Close() error { return nil }
 
 // pcm16ToBytes packs a media.PCM16Sample ([]int16) into little-endian
-// PCM16 bytes (the Deepgram linear16 wire shape).
+// PCM16 bytes (the ASR SendAudio wire shape).
 func pcm16ToBytes(sample mediasdk.PCM16Sample) []byte {
 	out := make([]byte, len(sample)*2)
 	for i, v := range sample {

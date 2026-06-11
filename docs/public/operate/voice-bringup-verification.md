@@ -56,7 +56,7 @@ source is locked in dev:
 | `LIVEKIT_API_KEY` | Hardcoded `devkey` in compose | yes |
 | `LIVEKIT_API_SECRET` | Hardcoded `secret` in compose | yes |
 | `MEMQL_GRPC_ADDR` | Hardcoded `bff:50051` in compose | yes |
-| `MEMQL_DEEPGRAM_API_KEY` | `.env.local` via `env_file:` (genesis-sealed in `genesis.znas`) | yes |
+| `OPENAI_API_KEY` | `.env.local` via `env_file:` (genesis-sealed in `genesis.znas`) | yes |
 | `VOICE_AGENT_TOKEN` | **Shell env at compose-up time** -- minted by `scripts/dev/refresh.sh` step 4 (see [#184](https://github.com/znasllc-io/memql/issues/184)) | yes |
 | `MEMQL_AVATAR_VENDOR` | Compose default `anam`; overridable via shell env | no |
 | `ANAM_API_KEY` | `.env.local` via `env_file:` | required when `MEMQL_AVATAR_VENDOR=anam` |
@@ -86,10 +86,10 @@ loop:
    docker logs -f polyphon-voice-agent
    ```
    You should see:
-   - `voice agent partial` lines (Deepgram interim transcripts)
-   - `voice agent final` line (Deepgram final transcript)
+   - `voice agent partial` lines (interim transcripts)
+   - `voice agent final` line (final transcript)
    - `voice agent turn request` line (memql cognition dispatched)
-   - TTS playback in the browser (Aura-2)
+   - TTS playback in the browser
    - Avatar lip-sync (Anam, if `LIVEKIT_PUBLIC_URL` is reachable)
 4. If anything goes silent, the next places to look are:
    - `docker logs memql-cognition` -- routing decision + agent
@@ -102,7 +102,7 @@ loop:
 | Symptom | Cause | Recovery |
 | --- | --- | --- |
 | `polyphon-voice-agent` restarting forever | `VOICE_AGENT_TOKEN` empty | re-run `make dev-refresh`, or run [the manual mint-and-recreate](auth/voice-agent-jwt.md#bring-up-injection-dev--prod) |
-| Auth works but no TTS | Deepgram key missing in `.env.local` | seal the key into `~/.memql/genesis.znas` via `memql-cockpit genesis init` |
+| Auth works but no TTS | OpenAI key missing in `.env.local` | seal the key into `~/.memql/genesis.znas` via `memql-cockpit genesis init` |
 | Audio works but no avatar | `ngrok` missing or `LIVEKIT_PUBLIC_URL` stale | install ngrok (`make install-deps` surfaces the hint), re-run `make dev-refresh` |
 | `UNAUTHENTICATED` in voice-agent logs | Token expired or identity row soft-deleted | re-mint with `make voice-agent-token INSTANCE=voice-agent-local` and recreate the service |
 | `voice agent turn request` lands but cognition doesn't reply | Cognition node down or routing broken | `docker logs memql-cognition`; bounce the cognition node |

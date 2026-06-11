@@ -110,7 +110,7 @@ component/
 **What It Does:**
 - Score-engine-based turn management for multi-agent conversations
 - Session lifecycle management
-- ASR/TTS provider bridge (OpenAI; Deepgram in Stage 2); LLM provider bridge (OpenAI, Anthropic) for SI
+- ASR/TTS provider bridge (OpenAI); LLM provider bridge (OpenAI, Anthropic) for SI
 - Turn policy and scoring
 
 ### server/sihttp/ - **SI Suggest Schema / Helpers**

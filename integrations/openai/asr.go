@@ -313,6 +313,14 @@ func (s *openaiASRStream) handleEvent(data []byte) {
 	}
 
 	switch eventType {
+	case "input_audio_buffer.speech_started":
+		// Server-VAD voice-activity onset. Surfaced as a text-less
+		// ASRKindSpeechStarted result -- the turn-taking machine uses it
+		// to enter human-turn and raise a barge-in candidate while the
+		// assistant has the floor (the onset contract the cascade's
+		// turn-taking machine consumes, see turntaking.go).
+		s.results <- polyphon.ASRResult{Kind: polyphon.ASRKindSpeechStarted}
+
 	case "conversation.item.input_audio_transcription.delta":
 		// Interim transcription result -- append the token to the running
 		// buffer and emit the full accumulated text. Matches the

@@ -18,7 +18,7 @@ func baseEnv() map[string]string {
 		"LIVEKIT_URL":            "ws://livekit:7880",
 		"LIVEKIT_API_KEY":        "key",
 		"LIVEKIT_API_SECRET":     "secret",
-		"MEMQL_DEEPGRAM_API_KEY": "dg",
+		"OPENAI_API_KEY":         "sk-test",
 		"MEMQL_GRPC_ADDR":        "memql:50051",
 	}
 }
@@ -31,7 +31,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "gpt-realtime-2", cfg.RealtimeModel)
 	// #478 native 1-on-1 is on by default with a sensible transcription model.
 	assert.True(t, cfg.RealtimeNativeTurn)
-	// Native STT (Deepgram off the realtime critical path) is on by default.
+	// Native STT (no second ASR stream on the realtime critical path) is on by default.
 	assert.True(t, cfg.RealtimeNativeSTT)
 	assert.Equal(t, "gpt-4o-mini-transcribe", cfg.RealtimeTranscriptionModel)
 	assert.Equal(t, 300, cfg.RealtimeIdleTimeoutSec)
@@ -44,16 +44,18 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, 500, cfg.RealtimeVadSilenceDurationMs)
 	assert.Equal(t, "anam", cfg.AvatarVendor)
 	assert.True(t, cfg.AvatarEnabled())
-	assert.Equal(t, "nova-3", cfg.DGASRModel)
-	assert.Equal(t, "aura-2", cfg.DGTTSModel)
-	assert.Equal(t, 2000, cfg.DGEndpointingMs)
+	// Cascade ASR/TTS models default empty -- the openai package applies
+	// its own defaults (whisper-1 / gpt-4o-mini-tts) at client build time.
+	assert.Equal(t, "", cfg.CascadeASRModel)
+	assert.Equal(t, "", cfg.CascadeTTSModel)
+	assert.Equal(t, "en", cfg.VoiceLanguage)
 	assert.Equal(t, "INFO", cfg.LogLevel)
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {
 	for _, key := range []string{
 		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
-		"MEMQL_DEEPGRAM_API_KEY", "MEMQL_GRPC_ADDR",
+		"OPENAI_API_KEY", "MEMQL_GRPC_ADDR",
 	} {
 		env := baseEnv()
 		delete(env, key)
@@ -82,16 +84,17 @@ func TestLoadConfig_InvalidAvatarVendor(t *testing.T) {
 func TestLoadConfig_RealtimeAndOverrides(t *testing.T) {
 	env := baseEnv()
 	env["MEMQL_VOICE_EXECUTOR"] = "realtime"
-	env["OPENAI_API_KEY"] = "sk-test"
 	env["MEMQL_VOICE_AGENT_INSTANCE_ID"] = "va-1"
-	env["POLYPHON_DEEPGRAM_ENDPOINTING_MS"] = "1500"
+	env["POLYPHON_OPENAI_ASR_MODEL"] = "gpt-4o-mini-transcribe"
+	env["POLYPHON_OPENAI_TTS_MODEL"] = "gpt-4o-tts"
 	env["MEMQL_AVATAR_VENDOR"] = "none"
 	env["VOICE_AGENT_LOG_LEVEL"] = "debug"
 	cfg, err := LoadConfig(envMap(env))
 	require.NoError(t, err)
 	assert.Equal(t, "realtime", cfg.VoiceExecutor)
 	assert.Equal(t, "sk-test", cfg.OpenAIAPIKey)
-	assert.Equal(t, 1500, cfg.DGEndpointingMs)
+	assert.Equal(t, "gpt-4o-mini-transcribe", cfg.CascadeASRModel)
+	assert.Equal(t, "gpt-4o-tts", cfg.CascadeTTSModel)
 	assert.Equal(t, "none", cfg.AvatarVendor)
 	assert.False(t, cfg.AvatarEnabled())
 	assert.Equal(t, "DEBUG", cfg.LogLevel)

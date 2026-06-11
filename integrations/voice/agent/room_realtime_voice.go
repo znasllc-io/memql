@@ -19,7 +19,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/integrations/audio"
-	"github.com/znasllc-io/memql/integrations/deepgram"
 	"github.com/znasllc-io/memql/integrations/openai"
 )
 
@@ -30,7 +29,7 @@ import (
 // branches on RoomRequest.Executor.Kind).
 //
 // Two channels feed the realtime session (docs/voice/433-multiparty-audio-
-// routing.md): per-human Deepgram STT for labeled transcripts (the read side,
+// routing.md): per-human OpenAI STT for labeled transcripts (the read side,
 // attribution) and the active-speaker decoded PCM for prosody + barge-in (the
 // hear side, streamed via the executor's StreamAudio). The model's output
 // audio is published into the same local track sink the avatar (#460)
@@ -74,14 +73,14 @@ func (j *liveKitRoomJoiner) buildMediaBridge(ctx context.Context, req RoomReques
 }
 
 // realtimeRoomBridge owns the per-session media plane for the realtime path:
-// the Deepgram STT clients (read side), the realtime websocket session, the
+// the OpenAI STT clients (read side), the realtime websocket session, the
 // published local track (the model's output audio), and one realtime executor.
 type realtimeRoomBridge struct {
 	cfg     Config
 	roomReq RoomRequest
 	logger  *slog.Logger
 
-	asr       *deepgram.ASRClient
+	asr       *openai.ASRClient
 	session   *openai.RealtimeSession
 	local     *lkmedia.PCMLocalTrack
 	executor  *RealtimeExecutor
@@ -96,7 +95,7 @@ type realtimeRoomBridge struct {
 	multiPartySemanticVad bool // #481: multi-party uses semantic_vad + gate when set
 	grounding             bool // #490: route 1-on-1 through the gate so grounding can inject
 	agentToolLoop         bool // #1198 (A2): route 1-on-1 through the gate so cognition runs the full tool loop
-	nativeSTT             bool // Deepgram off the realtime path; gpt-realtime owns STT/VAD
+	nativeSTT             bool // labeled ASR off the realtime path; gpt-realtime owns STT/VAD
 	transcriptionModel    string
 	language              string
 	sessionBase           openai.SessionConfig
@@ -117,7 +116,7 @@ type realtimeRoomBridge struct {
 	// (selecting a single identity to forward) is a tuning follow-up.
 }
 
-// newRealtimeRoomBridge builds the realtime media plane: a Deepgram STT client
+// newRealtimeRoomBridge builds the realtime media plane: an OpenAI STT client
 // (read side), the gpt-realtime websocket session configured with the resolved
 // session persona (turn_detection:null), a published local audio track for the
 // model's output, and the realtime executor wired to the local track as its
@@ -125,24 +124,22 @@ type realtimeRoomBridge struct {
 // already validated the preconditions (executor_select.go), the live dial can
 // still fail and must not wedge the join.
 func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, client *Client, room *lksdk.Room, logger *slog.Logger) (*realtimeRoomBridge, error) {
-	// Deepgram is OFF the realtime path by default (cfg.RealtimeNativeSTT):
-	// gpt-realtime owns STT + turn detection + voice, so nothing routes through
-	// Deepgram on the critical path. We only stand up the Deepgram client when
-	// native STT is disabled (the opt-in labeled-transcript read side). The
-	// integration stays fully wired -- this just doesn't dial it for the snappy
-	// realtime path.
-	var asr *deepgram.ASRClient
+	// The labeled-transcript ASR is OFF the realtime path by default
+	// (cfg.RealtimeNativeSTT): gpt-realtime owns STT + turn detection + voice,
+	// so no second transcription stream sits on the critical path. We only
+	// stand up the standalone OpenAI ASR client when native STT is disabled
+	// (the opt-in labeled-transcript read side). The integration stays fully
+	// wired -- this just doesn't dial it for the snappy realtime path.
+	var asr *openai.ASRClient
 	if !cfg.RealtimeNativeSTT {
-		dgCfg := deepgram.Config{
-			APIKey:   cfg.DeepgramAPIKey,
-			ASRModel: cfg.DGASRModel,
-			Language: cfg.DGLanguage,
-			Logger:   logger,
-		}
 		var err error
-		asr, err = deepgram.NewASRClient(dgCfg)
+		asr, err = openai.NewASRClient(openai.Config{
+			APIKey:   cfg.OpenAIAPIKey,
+			ASRModel: cfg.CascadeASRModel,
+			Logger:   logger,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("voice-agent realtime room: deepgram asr: %w", err)
+			return nil, fmt.Errorf("voice-agent realtime room: openai asr: %w", err)
 		}
 	}
 
@@ -245,8 +242,8 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		executor:      executor,
 		lifecycle:     lifecycle,
 		nativeEnabled: cfg.RealtimeNativeTurn,
-		// Native STT (Deepgram off) forces semantic_vad for multi-party too --
-		// without a Deepgram read side there is no gated-cascade path to fall back
+		// Native STT (labeled ASR off) forces semantic_vad for multi-party too --
+		// without a labeled-ASR read side there is no gated-cascade path to fall back
 		// to, so a second human routes through the gated-semantic_vad mode (the
 		// model still detects + transcribes the turn natively).
 		multiPartySemanticVad: cfg.RealtimeMultiPartySemanticVad || cfg.RealtimeNativeSTT,
@@ -258,9 +255,7 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		// ISO-639-1 primary subtag ("en"), and rejects a region-qualified tag
 		// ("en-US") with an api error that invalidates the whole session.update
 		// (so semantic_vad never applies and the model never owns the turn).
-		// Deepgram wants the full "en-US" and keeps reading cfg.DGLanguage
-		// directly; only this realtime-side copy is narrowed.
-		language:    primarySubtag(cfg.DGLanguage),
+		language:    primarySubtag(cfg.VoiceLanguage),
 		sessionBase: sessionBase,
 		streams:     make(map[string]polyphon.ASRStream),
 	}, nil
@@ -329,7 +324,7 @@ func (b *realtimeRoomBridge) multiPartySemanticVadConfig() openai.SessionConfig 
 //   - >=2 humans + multi-party semantic_vad enabled -> gated-semantic_vad
 //     (#481): the model detects the turn, the conductor gate decides, the model
 //     authors on engage.
-//   - >=2 humans otherwise -> gated-cascade: turn_detection:null + Deepgram +
+//   - >=2 humans otherwise -> gated-cascade: turn_detection:null + labeled ASR +
 //     the conductor gate (the pre-#481 multi-party path).
 //
 // Idempotent (no-op when the resolved mode already matches). Called after the
@@ -392,7 +387,7 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	}
 }
 
-// onTrackSubscribed opens a Deepgram STT stream for a newly-subscribed human
+// onTrackSubscribed opens a labeled STT stream for a newly-subscribed human
 // audio track (the labeled-transcript read side) and forwards the decoded PCM16
 // frames into BOTH the STT stream and the realtime input buffer (the active-
 // speaker prosody/barge-in hear side, #433). The per-track participant identity
@@ -412,7 +407,7 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 	// track per participant (and the connect->build replay can re-present a track
 	// the live callback also fires for), so dedupe on identity BEFORE the slow
 	// StartStream. A second track for an already-wired participant would otherwise
-	// open a second Deepgram stream AND a second PCM pump into the model's input
+	// open a second STT stream AND a second PCM pump into the model's input
 	// buffer -- doubled audio that garbles transcription, duplicates the chat
 	// utterance, and breaks semantic_vad turn detection. Reserve the slot inside
 	// the lock so a concurrent second track loses the race and returns here.
@@ -428,13 +423,13 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 	// attribution (#433 section 3). Display name + role resolution from memQL
 	// is a follow-up; the identity is the stable key in the interim.
 	b.executor.SetParticipant(identity, rp.Name(), "")
-	// Seed the active speaker from the LiveKit identity. With Deepgram off the
+	// Seed the active speaker from the LiveKit identity. With labeled ASR off the
 	// path the native input transcript (EventInputTranscriptDone) has no speaker
 	// of its own, so without this the user utterance would forward with an empty
 	// speaker id and the BFF would reject the insert.
 	b.executor.SetActiveSpeaker(identity)
 
-	// Deepgram read side is opt-in (cfg.RealtimeNativeSTT off). On the default
+	// The labeled-ASR read side is opt-in (cfg.RealtimeNativeSTT off). On the default
 	// snappy path it is nil -- gpt-realtime does STT + turn detection itself and
 	// the only executor input is the PCM pump (StreamAudio).
 	var stream polyphon.ASRStream
@@ -519,7 +514,7 @@ func (b *realtimeRoomBridge) close() {
 	b.executor.Close()
 	b.mu.Lock()
 	for _, s := range b.streams {
-		if s != nil { // nil under native STT (no Deepgram stream opened)
+		if s != nil { // nil under native STT (no labeled STT stream opened)
 			_ = s.Close()
 		}
 	}
@@ -530,7 +525,7 @@ func (b *realtimeRoomBridge) close() {
 	}
 }
 
-// realtimeSttSink adapts NewPCMRemoteTrack's writer onto BOTH the Deepgram STT
+// realtimeSttSink adapts NewPCMRemoteTrack's writer onto BOTH the labeled STT
 // stream (labeled-transcript read side) and the realtime executor's active-
 // speaker audio input (prosody/barge-in hear side, #433 section 2). Each
 // decoded PCM16 frame is packed to little-endian bytes and fanned out to both.
@@ -545,7 +540,7 @@ func (s *realtimeSttSink) WriteSample(sample mediasdk.PCM16Sample) error {
 		return nil
 	}
 	pcm := pcm16ToBytes(sample)
-	// Deepgram read side is optional (nil under native STT). When present, fan the
+	// The labeled-ASR read side is optional (nil under native STT). When present, fan the
 	// frame out to it for labeled transcripts; always stream to the model, which
 	// owns STT + turn detection on the snappy path.
 	if s.stream != nil {

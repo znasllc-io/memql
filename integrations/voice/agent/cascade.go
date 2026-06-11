@@ -11,8 +11,8 @@ import (
 	"github.com/znasllc-io/memql/component/polyphon"
 )
 
-// cascade.go is the Go cascade voice loop: human audio -> Deepgram STT ->
-// memQL cognition -> Deepgram TTS -> room audio, with turn-taking and
+// cascade.go is the Go cascade voice loop: human audio -> OpenAI STT ->
+// memQL cognition -> OpenAI TTS -> room audio, with turn-taking and
 // barge-in. It is the Go analog of the Python cascade
 // (the Python voice-agent's main.py + memql_llm_plugin.py +
 // transcript_forwarder.py + tts_plugin.py), at parity with that baseline.
@@ -26,10 +26,10 @@ import (
 // this orchestrator exposes.
 
 // ttsSynthesizer is the cascade's TTS seam. It is satisfied by
-// *deepgram.TTSClient.SynthesizeOGGOpusStream-style methods, but the
+// *openai.TTSClient.Synthesize-style methods, but the
 // orchestrator only needs PCM16 frames at the room rate, so the seam is
 // defined in terms of the local-track sample shape and kept free of the
-// Deepgram package to avoid an import cycle and keep tests trivial.
+// provider package to avoid an import cycle and keep tests trivial.
 //
 // SynthesizePCM streams PCM16 (little-endian, mono, at the agent's room
 // sample rate) for the given text + voice id onto the returned channel,
@@ -81,7 +81,7 @@ type CascadeConfig struct {
 }
 
 // Cascade owns one space's cascade voice loop. It binds a turn-taking
-// machine (turntaking.go) to: the Deepgram STT result stream (transcript
+// machine (turntaking.go) to: the ASR result stream (transcript
 // forwarding + onset/EOU signals), the gRPC client (VoiceAgentPartial/
 // FinalTranscript + the streaming VoiceAgentTurnRequest), and the TTS ->
 // room publish pump (with barge-in cancel).
@@ -166,7 +166,7 @@ func (c *Cascade) Close() {
 // Machine exposes the turn-taking machine (tests / diagnostics).
 func (c *Cascade) Machine() *TurnMachine { return c.machine }
 
-// ConsumeASR drives the machine from a Deepgram ASR result stream. It maps
+// ConsumeASR drives the machine from an ASR result stream. It maps
 // each result onto a turn-taking input: a speech-started kind raises an
 // onset (transition A / barge-in C), an interim updates the partial and is
 // forwarded as a VoiceAgentPartialTranscript, and a final commits the turn

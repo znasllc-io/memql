@@ -4,7 +4,7 @@
 
 External-service adapters and DSL-callable capabilities. The
 `integrations/` package bridges protocols memQL doesn't speak natively
-(LiveKit, OpenAI WebSocket, Deepgram WebSocket, Microsoft Graph, GCS)
+(LiveKit, OpenAI WebSocket, Microsoft Graph, GCS)
 into the MemQL DSL via typed capability functions.
 
 For the broader pattern (when to write Go vs MemQL DSL, plug-in
@@ -31,7 +31,6 @@ integrations/
 ├── knowledge/                          # corpus seed + lookup helpers
 ├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
 ├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
-├── deepgram/    asr.go, tts.go         # Polyphon ASR/TTS via Deepgram (Nova-3 WS + Aura-2 REST)
 ├── openai/      asr.go, tts.go         # Polyphon ASR/TTS via OpenAI Realtime + /v1/audio/speech
 ├── router/                             # SI router ledger + integration
 ├── similarity/                         # pgvector similarTo() builtin
@@ -131,22 +130,16 @@ output schema so the modal doesn't have to filter unwanted fields.
 
 ## Voice providers (Polyphon)
 
-`integrations/deepgram/` and `integrations/openai/` both implement the
-`polyphon.ASRProvider` and `polyphon.TTSProvider` interfaces from
-`component/polyphon/`. The active provider is auto-selected at startup
-(Deepgram when `MEMQL_DEEPGRAM_API_KEY` is set, OpenAI otherwise) and
-can be forced via `POLYPHON_VOICE_PROVIDER`:
+`integrations/openai/` implements the `polyphon.ASRProvider` and
+`polyphon.TTSProvider` interfaces from `component/polyphon/`:
 
 | Flavor | ASR | TTS | Notes |
 |--------|-----|-----|-------|
-| `deepgram` (auto-default when key set) | Deepgram Nova-3 streaming WebSocket (`/v1/listen`) | Deepgram Aura-2 REST (`/v1/speak`, OGG/Opus output) | Cloud-hosted; no GPU required. |
-| `openai` (fallback) | OpenAI Realtime API transcription-only WebSocket | OpenAI `/v1/audio/speech` (HTTP, PCM16) | Same Cloud Run / dev target. |
+| `openai` (default) | OpenAI Realtime API transcription-only WebSocket | OpenAI `/v1/audio/speech` (HTTP, PCM16) | Cloud-hosted; no GPU required. |
 
 The Polyphon pipeline standardizes on 16kHz PCM16 internally;
 `integrations/audio/resample.go` does transparent 16<->24kHz conversion
-at the OpenAI boundary. Deepgram's Nova-3 ingests 16kHz PCM16 directly
-and Aura-2 returns OGG/Opus at the codec's native rate, so no resampling
-runs on the Deepgram path.
+at the OpenAI boundary.
 
 Conversation-mode Realtime (the bundled STT+LLM+TTS) was retired with
 the Polyphon migration. The provider type `OpenAIRealtime` is gone
@@ -164,10 +157,8 @@ provider session; BFF proxies through `AiForwardRouter.ForwardContinuation`.
 Single-shot batch transcription via `AiTranscribeMsg` is still
 supported.
 
-Providers (selected by `MEMQL_STT_PROVIDER`; auto-default is
-`deepgram` when `MEMQL_DEEPGRAM_API_KEY` is set, else `openai-realtime`):
+Providers (selected by `MEMQL_STT_PROVIDER`; default `openai-realtime`):
 
-- `deepgram` -- streaming WebSocket via Deepgram Nova-3 (`/v1/listen`).
 - `openai-realtime` -- streaming WebSocket via the OpenAI Realtime API
   in transcription-only mode.
 - `openai-whisper` -- batch via `/v1/audio/transcriptions`.

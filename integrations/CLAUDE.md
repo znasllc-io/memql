@@ -8,7 +8,7 @@
 
 ## Integration Contract
 
-Integrations are **protocol adapters**. They bridge external services (OpenAI voice, Deepgram voice, etc.) into the memQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
+Integrations are **protocol adapters**. They bridge external services (OpenAI voice, LiveKit, avatar vendors, etc.) into the memQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
 
 ### What Integrations DO (Go code)
 - Handle external protocols (WebSocket, gRPC, HTTP webhooks, binary audio)
@@ -86,7 +86,6 @@ integrations/
 ├── identity/         # Identity-side helpers
 ├── knowledge/        # Corpus seed + lookup helpers (concept:* surfaces for agents)
 ├── avatardirect/     # Direct/Guide avatar: mint LiveKit room + bring Anam up (avatarDirectStartSession)
-├── deepgram/         # Polyphon ASR/TTS via Deepgram (Nova-3 WS + Aura-2 REST)
 ├── openai/           # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech)
 ├── router/           # SI router ledger
 ├── similarity/       # pgvector similarTo() builtin
@@ -199,26 +198,6 @@ Key files:
 - `POLYPHON_OPENAI_TTS_MODEL` (default: gpt-4o-mini-tts)
 - `POLYPHON_OPENAI_TTS_VOICE` (default: alloy)
 
-### deepgram/ - Deepgram Voice Providers (Polyphon)
-**Purpose:** Deepgram Nova-3 ASR + Aura-2 TTS for the Polyphon multi-agent voice pipeline. Auto-selected default when `MEMQL_DEEPGRAM_API_KEY` is set.
-
-**What It Does:**
-- Streaming ASR via Deepgram `/v1/listen` WebSocket (Nova-3)
-- TTS via Deepgram `/v1/speak` REST (Aura-2, OGG/Opus output)
-- Implements `polyphon.ASRProvider` and `polyphon.TTSProvider` interfaces
-
-**Key Files:**
-- `deepgram.go` - Package config (APIKey, ASRModel, TTSModel, Language, BaseURL)
-- `asr.go` - ASRClient using Nova-3 streaming WebSocket
-- `tts.go` - TTSClient using Aura-2 REST (OGG/Opus + raw PCM16 paths)
-
-**Environment Variables:**
-- `MEMQL_DEEPGRAM_API_KEY` - required
-- `POLYPHON_VOICE_PROVIDER=deepgram` - explicit selection (auto when key set)
-- `POLYPHON_DEEPGRAM_ASR_MODEL` (default `nova-3`)
-- `POLYPHON_DEEPGRAM_TTS_MODEL` (default `aura-2`)
-- `POLYPHON_DEEPGRAM_LANGUAGE` (default `en-US`)
-
 ### stt/ - Speech-to-Text
 **Purpose:** Convert audio to text transcriptions
 
@@ -232,11 +211,7 @@ Key files:
 - Single-shot batch transcription via `AiTranscribeMsg` (still supported; used by callers that buffer the whole recording client-side).
 - Batch transcription capability callable from DSL.
 - Providers:
-  - **Deepgram Nova-3** (auto-selected default when `MEMQL_DEEPGRAM_API_KEY`
-    is set). True streaming WebSocket via Deepgram's `/v1/listen`; sub-300 ms
-    first interim partials. Select explicitly via
-    `MEMQL_STT_PROVIDER=deepgram`.
-  - **OpenAI Realtime** (startup-time fallback). True streaming WebSocket
+  - **OpenAI Realtime** (default). True streaming WebSocket
     via the Realtime API in transcription-only mode. Select via
     `MEMQL_STT_PROVIDER=openai-realtime`.
   - **OpenAI Whisper**. Batch-only via the transcriptions API.
@@ -245,10 +220,9 @@ Key files:
     be enabled for your OpenAI project.
 
 **Environment Variables:**
-- `MEMQL_STT_PROVIDER` -- `deepgram` (default when key present), `openai-realtime`, or `openai-whisper`
-- `MEMQL_STT_LANGUAGE` -- hard-pinned streaming transcription language (default `en`). One knob drives both providers (expanded to `en-US` for Deepgram, `en` for OpenAI Realtime); overrides the client `language_hint`. Prevents wrong/mixed-language drift + short-word hallucination on noisy/short audio.
-- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Drops noise/silence hallucination finals on Deepgram (real confidence) and gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/si_transcribe_stream.go`.
-- `MEMQL_DEEPGRAM_API_KEY` -- required for the Deepgram path
+- `MEMQL_STT_PROVIDER` -- `openai-realtime` (default) or `openai-whisper`
+- `MEMQL_STT_LANGUAGE` -- hard-pinned streaming transcription language (default `en`); drives the OpenAI Realtime session config and overrides the client `language_hint`. Prevents wrong/mixed-language drift + short-word hallucination on noisy/short audio.
+- `MEMQL_STT_MIN_CONFIDENCE` -- low-confidence FINAL cutoff (default `0.6`). Gates a no-speech silence-hallucination denylist; `0` disables both gates. Filtering runs at the provider-agnostic `pumpDeltas` chokepoint in `component/grpc/si_transcribe_stream.go`.
 - `MEMQL_WHISPER_MODEL` -- OpenAI model name; defaults to `whisper-1`
 
 ### auth/ - Authentication Capabilities

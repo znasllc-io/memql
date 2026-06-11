@@ -111,9 +111,8 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// (MEMQL_STT_LANGUAGE, default "en"). This intentionally OVERRIDES any
 	// client-supplied LanguageHint: an unpinned / locale-driven / "multi"
 	// language is the classic cause of the wrong-language + short-word
-	// hallucination failure mode (gpt-4o-transcribe/whisper and Deepgram
-	// Nova-3 auto-detect and drift on noisy/short audio). One knob drives
-	// BOTH providers -- the Deepgram stream URL (en-US) and the OpenAI
+	// hallucination failure mode (gpt-4o-transcribe/whisper auto-detect
+	// and drift on noisy/short audio). One knob drives the OpenAI
 	// Realtime session config (en).
 	sttCfg := stt.StreamConfig{
 		Format:       pickNonEmpty(msg.GetFormat(), "pcm16"),

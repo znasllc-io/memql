@@ -30,7 +30,7 @@ import (
 type ExecutorKind string
 
 const (
-	// ExecutorCascade is the Deepgram STT -> cognition -> Deepgram TTS path
+	// ExecutorCascade is the OpenAI STT -> cognition -> OpenAI TTS path
 	// (the default, #455).
 	ExecutorCascade ExecutorKind = "cascade"
 	// ExecutorRealtime is the OpenAI gpt-realtime speech-to-speech path (#457).
@@ -114,7 +114,7 @@ func SelectVoiceExecutor(cfg Config, persona Persona, logger *slog.Logger) Voice
 		// the one that is live -- no silent surprise about which executor ran.
 		if logger != nil {
 			logger.Info("voice-agent voice executor: cascade " +
-				"(Deepgram STT -> cognition -> Deepgram TTS) -- " +
+				"(OpenAI STT -> cognition -> OpenAI TTS) -- " +
 				"explicitly selected via MEMQL_VOICE_EXECUTOR=cascade")
 		}
 		return VoiceExecutorPlan{Kind: ExecutorCascade}
