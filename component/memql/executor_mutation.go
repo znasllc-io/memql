@@ -92,7 +92,10 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	// Shallow merge: top-level fields in the partial replace those
 	// in the prior; nested objects aren't deep-merged. Matches the
 	// "patch this status field" mental model -- callers wanting a
-	// nested merge can read-modify-write themselves.
+	// nested merge can read-modify-write themselves, or a named
+	// mutation can opt specific object fields into engine-side
+	// deep-merge via @mergeFields (mutation.MergeFields below) so a
+	// single-key write doesn't wipe sibling keys (memql#1339).
 	priorPayloadJSON, err := priorNodes[0].Payload.MarshalJSON()
 	if err != nil {
 		return nil, fmt.Errorf("update(): marshal prior payload: %w", err)
@@ -109,9 +112,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	// the concept has no `status` field -- additive, so the field is simply
 	// absent from the event for those concepts.
 	priorStatus, _ := mergedPayload["status"].(string)
-	for k, v := range partialPayload {
-		mergedPayload[k] = v
-	}
+	mergePayloadFields(mergedPayload, partialPayload, mutation.MergeFields)
 
 	mergedJSON, err := json.Marshal(mergedPayload)
 	if err != nil {
@@ -179,6 +180,63 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		)
 	}
 	return result, nil
+}
+
+// mergePayloadFields splats the partial update payload onto the prior
+// payload (top-level replace -- the default update() contract), except
+// for the fields named in mergeFields: when BOTH the prior and partial
+// values for such a field are JSON objects, the partial object's keys
+// merge into the prior object (recursively) instead of replacing it
+// wholesale, so sibling keys survive a single-key write.
+//
+// mergeFields is opt-in per named mutation via @mergeFields("a", "b")
+// (see mutationMergeFields in mutation_templates.go). The default
+// remains top-level replacement -- the contract every existing
+// mutation was written against (memql#350 documents mutations that
+// deliberately restate every nested field under it). The opt-in exists
+// because a mutation like mutationToggleComputerUseEnabled writes a
+// single key into User.preferences and would otherwise wipe every
+// sibling preference (theme, timezone, archiveRetentionDays, ...) on
+// each kill-switch flip (memql#1339).
+//
+// When a merge-listed field's prior or partial value is not an object
+// (absent, null, scalar, array), the field falls back to plain
+// replacement -- mirroring the default and avoiding type surprises.
+func mergePayloadFields(prior, partial map[string]any, mergeFields []string) {
+	mergeSet := make(map[string]struct{}, len(mergeFields))
+	for _, f := range mergeFields {
+		mergeSet[strings.TrimSpace(f)] = struct{}{}
+	}
+	for k, v := range partial {
+		if _, merge := mergeSet[k]; merge {
+			priorObj, priorIsObj := prior[k].(map[string]any)
+			partialObj, partialIsObj := v.(map[string]any)
+			if priorIsObj && partialIsObj {
+				prior[k] = deepMergeObjects(priorObj, partialObj)
+				continue
+			}
+		}
+		prior[k] = v
+	}
+}
+
+// deepMergeObjects returns a new object carrying every key of prior
+// overlaid with every key of partial. On key collision the partial
+// value wins, except when both sides are objects, which merge
+// recursively. Inputs are not mutated.
+func deepMergeObjects(prior, partial map[string]any) map[string]any {
+	out := make(map[string]any)
+	maps.Copy(out, prior)
+	for k, v := range partial {
+		if priorObj, ok := out[k].(map[string]any); ok {
+			if partialObj, ok := v.(map[string]any); ok {
+				out[k] = deepMergeObjects(priorObj, partialObj)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) (*ExecuteResult, error) {

@@ -33,6 +33,7 @@ var ByReceiver = map[string][]string{
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
+		"mergeFields",
 	},
 	"Logic": {
 		"description", "enabled", "disabled",
@@ -76,6 +77,7 @@ var Docs = map[string]string{
 	"internal":    "Hide from external API discovery.",
 	"public":      "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
 	"actor":       "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
+	"mergeFields": "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	// Query / spec.
 	"shape": "Optional: pin the shape a spec's predicate reads (the eval strategy is otherwise derived from the body's field references).",
 	// Automation.

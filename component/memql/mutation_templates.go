@@ -55,6 +55,13 @@ type FunctionMutationTemplate struct {
 
 	// AliasOfTemplate is an optional aliasOf relationship hint.
 	AliasOfTemplate any
+
+	// MergeFields carries the mutation's @mergeFields("a", "b")
+	// annotation: object-typed payload fields that the update executor
+	// deep-merges into the stored object instead of replacing it
+	// wholesale. Only valid on update-kind mutations (enforced at
+	// load time in function_loader.go). See memql#1339.
+	MergeFields []string
 }
 
 // renderMutationTemplate evaluates a mutation template into a concrete MutationNode.
@@ -184,13 +191,14 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	}
 
 	return MutationNode{
-		Kind:       kind,
-		Concept:    concept,
-		ID:         strings.TrimSpace(id),
-		PayloadRaw: string(payloadJSON),
-		CreatedAt:  createdAtRef,
-		ParentRef:  parentRef,
-		AliasOfRef: aliasRef,
+		Kind:        kind,
+		Concept:     concept,
+		ID:          strings.TrimSpace(id),
+		PayloadRaw:  string(payloadJSON),
+		CreatedAt:   createdAtRef,
+		ParentRef:   parentRef,
+		AliasOfRef:  aliasRef,
+		MergeFields: tmpl.MergeFields,
 	}, nil
 }
 
@@ -1145,6 +1153,40 @@ func (e *mutationTemplateEvaluator) evalCondition(ctx context.Context, raw strin
 	default:
 		return ev != nil, nil
 	}
+}
+
+// mutationMergeFields extracts the @mergeFields("a", "b") annotation
+// from a mutation definition into the field-name list the update
+// executor consults. Only meaningful on update-kind mutations (insert
+// writes a full payload -- there is nothing stored to merge against),
+// so its presence on an insert mutation is a load-time error rather
+// than a silent no-op. See memql#1339.
+func mutationMergeFields(funcDef *languageParser.FunctionDef, kind ast.MutationKind) ([]string, error) {
+	var fields []string
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != languageParser.AttrMergeFields {
+			continue
+		}
+		switch v := attr.Value.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				fields = append(fields, s)
+			}
+		case []string:
+			for _, raw := range v {
+				if s := strings.TrimSpace(raw); s != "" {
+					fields = append(fields, s)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			return nil, fmt.Errorf(`@mergeFields requires at least one field name, e.g. @mergeFields("preferences")`)
+		}
+	}
+	if len(fields) > 0 && kind != ast.MutationKindUpdate {
+		return nil, fmt.Errorf("@mergeFields is only valid on update mutations (insert writes the full payload; there is nothing stored to merge against)")
+	}
+	return fields, nil
 }
 
 // parsePayloadRawToTemplate parses a MemQL object literal (payload={...} or {id:...,payload:{...}})

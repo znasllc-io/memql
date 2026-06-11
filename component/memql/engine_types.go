@@ -405,6 +405,13 @@ type MutationNode struct {
 	CreatedAt  *time.Time
 	ParentRef  *string
 	AliasOfRef *string
+
+	// MergeFields names object-typed payload fields that executeUpdate
+	// deep-merges into the stored object instead of replacing it
+	// wholesale (the default top-level-replace contract). Populated
+	// from a mutation's @mergeFields annotation; always empty for raw
+	// update() query strings and unannotated mutations. See memql#1339.
+	MergeFields []string
 }
 
 func cloneSIInvocation(src *SIInvocation) *SIInvocation {

@@ -221,7 +221,15 @@ mutation invocation mutationSoftDeleteWorkerInvocation {
   }
 }
 
+// @mergeFields("preferences") is load-bearing: update() does
+// TOP-LEVEL field replacement, so without it this single-key write
+// would replace the ENTIRE stored preferences object -- wiping theme,
+// timezone, archiveRetentionDays, dailySpaceEnabled, voice mode, and
+// the CoPresent Control settings on every kill-switch flip
+// (memql#1339). The annotation opts the preferences field into an
+// engine-side deep-merge so sibling keys survive.
 @enabled
+@mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
 mutation user mutationToggleComputerUseEnabled {
   args {
