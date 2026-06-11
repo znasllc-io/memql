@@ -331,6 +331,25 @@ func TestEngageVendor_DevTunnelMediaTimeoutSurfacesDeterminationHint(t *testing.
 	assert.Contains(t, err.Error(), "context deadline exceeded")
 }
 
+func TestEngageVendor_LocalOnlyURLNamesTheMisconfiguration(t *testing.T) {
+	// memql#1336: with no LIVEKIT_PUBLIC_URL the engine URL falls back to the
+	// browser URL -- on the dev cluster that's the *.local.znas.io front door,
+	// which a vendor's CLOUD engine can never dial. Name the misconfiguration
+	// (and the supported paths) instead of surfacing the vendor's dial timeout.
+	t.Setenv("LIVEKIT_PUBLIC_URL", "wss://livekit.local.znas.io")
+	eng := &fakeEngine{vendor: "simli", personaId: "face-1"}
+	client := &stubVendorClient{err: errors.New("simli: livekit agent: dial tcp: i/o timeout")}
+	i := newTestIntegration(eng, client)
+
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "a", "room_name": "avatar-x", "browser_identity": "viewer-1",
+	}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unreachable from the vendor's cloud")
+	assert.Contains(t, err.Error(), "LIVEKIT_PUBLIC_URL")
+	assert.Contains(t, err.Error(), "i/o timeout")
+}
+
 func TestEngageVendor_DevTunnelNonTimeoutKeepsRawError(t *testing.T) {
 	// A fast 4xx/5xx (bad key, bad face id) on the dev tunnel is NOT a media
 	// failure, so it keeps the raw "bring up <vendor> avatar" wrapping rather

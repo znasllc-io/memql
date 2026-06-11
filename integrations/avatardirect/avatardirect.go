@@ -321,6 +321,15 @@ func (i *Integration) handleEngageVendor(ctx context.Context, args map[string]an
 		if isDevTunnelURL(engineURL) && isMediaTimeoutErr(err) {
 			return nil, fmt.Errorf("avatardirect.engageVendor: %s cloud avatar joined LiveKit signaling but could not establish WebRTC media to the local dev LiveKit over the ngrok TURN relay -- local cloud-avatar VIDEO is not supported on the dev cluster (the cloud engine and the dockerized LiveKit only exchange unreachable host ICE candidates; the cloud engine forms no relay candidate from the advertised TURN server). Run the direct avatar audio-only locally; cloud-avatar video is validated on staging (memql#784), where LiveKit is directly reachable. See docs/internal/design/voice-turn-relay.md. (underlying: %w)", vendor, err)
 		}
+		// A local-only engine URL (the *.local.znas.io front door, localhost,
+		// or an in-cluster service name) is unreachable from the vendor's
+		// cloud BY CONSTRUCTION -- the engine never even joins signaling. Name
+		// the misconfiguration instead of surfacing the vendor's dial timeout
+		// (memql#1336): on the dev cluster this is the documented no-tunnel
+		// state; anywhere else it means LIVEKIT_PUBLIC_URL is missing.
+		if isLocalOnlyURL(engineURL) {
+			return nil, fmt.Errorf("avatardirect.engageVendor: the %s cloud engine was given the locally-scoped LiveKit URL %q, which is unreachable from the vendor's cloud -- set LIVEKIT_PUBLIC_URL to a publicly-reachable LiveKit endpoint (staging serves one; locally use the ngrok overlay via scripts/dev/ngrok-up.sh, noting local cloud-avatar VIDEO stays unsupported per memql#1277). (underlying: %w)", vendor, engineURL, err)
+		}
 		return nil, fmt.Errorf("avatardirect.engageVendor: bring up %s avatar: %w", vendor, err)
 	}
 	if !started {
@@ -593,6 +602,19 @@ func (i *Integration) vendorAPIKey(ctx context.Context, secretName string) (stri
 // real staging domain with no false positives.
 func isDevTunnelURL(engineURL string) bool {
 	return strings.Contains(engineURL, "ngrok")
+}
+
+// isLocalOnlyURL reports whether engineURL can only resolve/route on the
+// developer's machine or LAN -- localhost, the docker service name, or the
+// *.local.znas.io dev front door -- i.e. a URL a vendor's CLOUD engine can
+// never dial. Used to name the misconfiguration instead of surfacing the
+// vendor's opaque dial timeout (memql#1336).
+func isLocalOnlyURL(engineURL string) bool {
+	s := strings.ToLower(engineURL)
+	return strings.Contains(s, "localhost") ||
+		strings.Contains(s, "127.0.0.1") ||
+		strings.Contains(s, ".local.znas.io") ||
+		strings.Contains(s, "//livekit:")
 }
 
 // isMediaTimeoutErr reports whether err is the vendor-join timeout shape a
