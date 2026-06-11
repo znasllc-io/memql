@@ -177,21 +177,6 @@ provider claudeSonnet {
   }
 }
 
-// ---- providers/v1/mistral/codestral.memql ----
-
-@extends("mistral")
-@model("codestral-latest")
-@description("Mistral Codestral -- specialized coding model, cheap and fast for code generation tasks")
-provider codestral {
-  params {
-    contextWindow              256000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.20
-    outputCostPerMillion       0.60
-    cachedInputCostPerMillion  0.0
-  }
-}
-
 // ---- providers/v1/openai/computerUse.memql ----
 
 @extends("openai")
@@ -232,80 +217,6 @@ provider embedding3Small {
   }
 }
 
-// ---- providers/v1/google/geminiFlash.memql ----
-
-@extends("google")
-@model("gemini-2.0-flash")
-@description("Google Gemini 2 Flash via OpenAI-compatible endpoint -- fastest + cheapest Gemini tier")
-provider geminiFlash {
-  params {
-    contextWindow              1000000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.075
-    outputCostPerMillion       0.30
-    cachedInputCostPerMillion  0.01875
-  }
-}
-
-// ---- providers/v1/google/geminiPro.memql ----
-
-@extends("google")
-@model("gemini-2.0-pro")
-@description("Google Gemini 2 Pro -- higher-capability Gemini for long-context reasoning")
-provider geminiPro {
-  params {
-    contextWindow              2000000
-    maxCompletionTokens        8192
-    inputCostPerMillion        1.25
-    outputCostPerMillion       5.00
-    cachedInputCostPerMillion  0.3125
-  }
-}
-
-// @disabled: no MEMQL_SI_GOOGLE_API_KEY is seeded, so this whole vendor
-// lane (geminiFlash / geminiPro / streamGemini*) is turned off at load
-// to avoid "registered as unavailable" warnings. Definitions are kept;
-// re-enable by seeding the key (already in the secrets/genesis manifest
-// per #1069) and removing @disabled. See provider-lifecycle epic #1078.
-@disabled
-@base
-@type("Google")
-provider google {
-  auth {
-    apiKey   env("MEMQL_SI_GOOGLE_API_KEY")
-    baseURL  "https://generativelanguage.googleapis.com/v1beta/openai/"
-  }
-}
-
-// @disabled: no MEMQL_SI_GROQ_API_KEY is seeded, so this whole vendor
-// lane (groqLlama70B / streamGroqLlama70B) is turned off at load to
-// avoid "registered as unavailable" warnings. Re-enable by seeding the
-// key and removing @disabled. See provider-lifecycle epic #1078.
-@disabled
-@base
-@type("Groq")
-provider groq {
-  auth {
-    apiKey   env("MEMQL_SI_GROQ_API_KEY")
-    baseURL  "https://api.groq.com/openai/v1"
-  }
-}
-
-// ---- providers/v1/groq/groqLlama70B.memql ----
-
-@extends("groq")
-@model("llama-3.3-70b-versatile")
-@description("Groq Llama 3.3 70B Versatile -- hardware-accelerated inference, strong general model at very high tokens/sec")
-provider groqLlama70B {
-  params {
-    contextWindow              128000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.59
-    outputCostPerMillion       0.79
-    cachedInputCostPerMillion  0.0
-  }
-}
-
 // ---- providers/v1/openai/image15.memql ----
 
 @extends("openai")
@@ -331,36 +242,6 @@ provider image1Mini {
   params {
     size    "1024x1024"
     quality "standard"
-  }
-}
-
-// @disabled: no MEMQL_SI_MISTRAL_API_KEY is seeded, so this whole vendor
-// lane (codestral / mistralLarge / streamCodestral / streamMistralLarge)
-// is turned off at load to avoid "registered as unavailable" warnings.
-// Re-enable by seeding the key and removing @disabled. See provider-
-// lifecycle epic #1078.
-@disabled
-@base
-@type("Mistral")
-provider mistral {
-  auth {
-    apiKey   env("MEMQL_SI_MISTRAL_API_KEY")
-    baseURL  "https://api.mistral.ai/v1"
-  }
-}
-
-// ---- providers/v1/mistral/mistralLarge.memql ----
-
-@extends("mistral")
-@model("mistral-large-latest")
-@description("Mistral Large -- Mistral's top-tier general-purpose model")
-provider mistralLarge {
-  params {
-    contextWindow              128000
-    maxCompletionTokens        8192
-    inputCostPerMillion        2.00
-    outputCostPerMillion       6.00
-    cachedInputCostPerMillion  0.0
   }
 }
 
@@ -550,7 +431,7 @@ provider stream54Nano {
 // =================================================
 //
 // Routed-to as a fallback in the `strongReasoning` policy chain
-// (streamClaudeSonnet -> stream54Pro -> streamGeminiPro). Concept:
+// (streamClaudeSonnet -> stream54Pro). Concept:
 // "if the primary Claude is out, use the strongest OpenAI chat
 // model the v1/chat/completions endpoint accepts."
 //
@@ -682,22 +563,6 @@ provider streamClaudeSonnet {
   }
 }
 
-// ---- providers/v1/mistral/streamCodestral.memql ----
-
-@extends("mistral")
-@type("MistralStream")
-@model("codestral-latest")
-@description("Mistral Codestral (streaming) -- specialized coding model, cheap and fast")
-provider streamCodestral {
-  params {
-    contextWindow              256000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.20
-    outputCostPerMillion       0.60
-    cachedInputCostPerMillion  0.0
-  }
-}
-
 // ---- providers/v1/openai/streamCodex51Max.memql ----
 
 @extends("openai")
@@ -721,70 +586,6 @@ provider streamCodex53 {
   params {
     contextWindow        256000
     maxCompletionTokens  8192
-  }
-}
-
-// ---- providers/v1/google/streamGeminiFlash.memql ----
-
-@extends("google")
-@type("GoogleStream")
-@model("gemini-2.0-flash")
-@description("Google Gemini 2 Flash (streaming) -- fastest + cheapest Gemini tier, tool-calling enabled")
-provider streamGeminiFlash {
-  params {
-    contextWindow              1000000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.075
-    outputCostPerMillion       0.30
-    cachedInputCostPerMillion  0.01875
-  }
-}
-
-// ---- providers/v1/google/streamGeminiPro.memql ----
-
-@extends("google")
-@type("GoogleStream")
-@model("gemini-2.0-pro")
-@description("Google Gemini 2 Pro (streaming) -- higher-capability Gemini for long-context reasoning")
-provider streamGeminiPro {
-  params {
-    contextWindow              2000000
-    maxCompletionTokens        8192
-    inputCostPerMillion        1.25
-    outputCostPerMillion       5.00
-    cachedInputCostPerMillion  0.3125
-  }
-}
-
-// ---- providers/v1/groq/streamGroqLlama70B.memql ----
-
-@extends("groq")
-@type("GroqStream")
-@model("llama-3.3-70b-versatile")
-@description("Groq Llama 3.3 70B Versatile (streaming) -- first-token latency under 300ms on Groq hardware")
-provider streamGroqLlama70B {
-  params {
-    contextWindow              128000
-    maxCompletionTokens        8192
-    inputCostPerMillion        0.59
-    outputCostPerMillion       0.79
-    cachedInputCostPerMillion  0.0
-  }
-}
-
-// ---- providers/v1/mistral/streamMistralLarge.memql ----
-
-@extends("mistral")
-@type("MistralStream")
-@model("mistral-large-latest")
-@description("Mistral Large (streaming) -- top-tier general-purpose streaming with tool support")
-provider streamMistralLarge {
-  params {
-    contextWindow              128000
-    maxCompletionTokens        8192
-    inputCostPerMillion        2.00
-    outputCostPerMillion       6.00
-    cachedInputCostPerMillion  0.0
   }
 }
 

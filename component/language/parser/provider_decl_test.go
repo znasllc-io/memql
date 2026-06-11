@@ -147,10 +147,10 @@ provider testProvider {
 func TestParseProviderDecl_Disabled(t *testing.T) {
 	source := `@disabled
 @base
-@type("Google")
-provider google {
+@type("Acme")
+provider acme {
   auth {
-    apiKey  env("MEMQL_SI_GOOGLE_API_KEY")
+    apiKey  env("MEMQL_SI_ACME_API_KEY")
   }
 }`
 

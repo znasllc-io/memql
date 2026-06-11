@@ -28,7 +28,7 @@ concept call {
   promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeSI (e.g. agentReply, cognitionRouting).")
   policyName          string  @description("Routing policy that picked the provider. Reserved for Phase 2+ when policies land; Phase 1 leaves this empty.")
 
-  vendor              string  @required  @description("Vendor family: openai, anthropic, google, xai, groq, mistral, etc. Derived from provider .memql @type.")
+  vendor              string  @required  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")
   model               string  @required  @description("Model identifier as sent to the vendor (e.g. gpt-5.4-mini, claude-sonnet-4-6).")
   providerName        string  @required  @description("memQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
 
@@ -60,7 +60,7 @@ concept call {
 concept modelCatalog {
   providerName              string  @description("Registry name (e.g. stream54Mini).")
   providerType              string  @description("Raw @type annotation from the .memql file (OpenAI, AnthropicStream, etc).")
-  vendor                    string  @description("Vendor family (openai, anthropic, google, xai, groq, mistral).")
+  vendor                    string  @description("Vendor family (openai, anthropic).")
   model                     string  @description("Vendor-side model id.")
   description               string  @description("Human-readable description from the .memql @description annotation.")
   modality                  string  @description("text, tts, stt, embedding, etc.")

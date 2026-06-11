@@ -297,7 +297,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// voiceMode: cognition flips this hint on Polyphon voice turns.
 	// Used to swap the default policy from balancedChat to
 	// lowLatencyVoice -- trades Sonnet-class quality for first-token
-	// latency (Groq Llama 70B primary) on the voice path. Only kicks
+	// latency (GPT-5.4 Mini primary) on the voice path. Only kicks
 	// in when the agent has NOT explicitly pinned a policy on its
 	// stored providerConfig, so user choice always wins.
 	voiceMode := strings.TrimSpace(msg.Hints["voice_mode"]) == "true"

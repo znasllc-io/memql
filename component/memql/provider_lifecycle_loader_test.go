@@ -37,8 +37,8 @@ func TestRegisterParsedProviders_DisabledSkipAndPropagation(t *testing.T) {
 		mk("openai", "OpenAI", "", "", true, false),
 		mk("chatMini", "", "gpt-mini", "openai", false, false),
 		// Disabled base + a child that extends it (propagation): both gone.
-		mk("google", "Google", "", "", true, true),
-		mk("geminiFlash", "", "gemini-flash", "google", false, false),
+		mk("acme", "Acme", "", "", true, true),
+		mk("acmeMini", "", "acme-mini", "acme", false, false),
 		// Individually @disabled child of an ENABLED base: just this one gone.
 		mk("chatDisabled", "", "gpt-x", "openai", false, true),
 	}
@@ -54,13 +54,13 @@ func TestRegisterParsedProviders_DisabledSkipAndPropagation(t *testing.T) {
 	}
 
 	// Disabled base is absent from the registry.
-	if _, ok := reg.Entry("google"); ok {
-		t.Error("@disabled base 'google' should be absent from the registry")
+	if _, ok := reg.Entry("acme"); ok {
+		t.Error("@disabled base 'acme' should be absent from the registry")
 	}
 	// Child of a disabled base is absent (propagation) even though it
 	// carries no annotation of its own.
-	if _, ok := reg.Entry("geminiFlash"); ok {
-		t.Error("'geminiFlash' extends disabled base 'google' and should be absent (propagation)")
+	if _, ok := reg.Entry("acmeMini"); ok {
+		t.Error("'acmeMini' extends disabled base 'acme' and should be absent (propagation)")
 	}
 	// Individually disabled child is absent; its enabled sibling/base is not.
 	if _, ok := reg.Entry("chatDisabled"); ok {

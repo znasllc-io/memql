@@ -131,7 +131,7 @@ func (c *CognitionIntegration) forwardTurnToAgent(
 	// voice_mode hint -- the replier reads this to switch the
 	// router policy from balancedChat to lowLatencyVoice on voice
 	// turns, which trades Sonnet-class quality for first-token
-	// latency (Groq Llama 70B primary, Gemini Flash fallback). The
+	// latency (GPT-5.4 Mini primary, GPT-5.4 Nano fallback). The
 	// agent's stored providerConfig.llm.policyName still wins when
 	// set; this hint is the deploy-time default for voice turns
 	// only, so users who have NOT explicitly pinned a policy on

@@ -54,8 +54,8 @@ type StructuredSchema struct {
 // response (fallback providers).
 //
 // Implementations should prefer the provider's native structured-output
-// mode where available (OpenAI json_schema, Anthropic tool-use,
-// Gemini response_schema). Providers without native support should
+// mode where available (OpenAI json_schema, Anthropic tool-use).
+// Providers without native support should
 // document the fallback behaviour.
 type ChatStructuredProvider interface {
 	CallChatStructured(ctx context.Context, messages []ChatMessage, schema StructuredSchema) (string, error)
