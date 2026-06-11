@@ -35,6 +35,25 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Pre-fetch the pinned standalone Tailwind binary into the exact path
+# scripts/identity/build-css.sh probes (bin/tools is dockerignored, so the
+# source COPY below never clobbers it). Early layer = the ~100MB download
+# only re-runs on a version bump, never on source changes (memql#1351).
+# Keep TAILWIND_VERSION in sync with the script's pin; a missed bump
+# degrades gracefully (the script re-downloads, with retries).
+ARG TAILWIND_VERSION=v3.4.17
+RUN set -e; \
+    case "$(uname -m)" in \
+        x86_64) platform=linux-x64 ;; \
+        aarch64|arm64) platform=linux-arm64 ;; \
+        *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p bin/tools; \
+    curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 \
+        -o "bin/tools/tailwindcss-${platform}" \
+        "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${platform}"; \
+    chmod +x "bin/tools/tailwindcss-${platform}"
+
 # Copy source code
 COPY . .
 
