@@ -40,6 +40,7 @@ shape registration workerRegistrationFull {
   payload.identityId
   payload.name
   payload.capabilities
+  payload.capabilityDescriptor
   payload.labels
   payload.concurrency
   payload.platformInfo

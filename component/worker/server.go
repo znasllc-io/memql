@@ -130,30 +130,32 @@ func (s *server) admitRegistration(
 	if !identity.ExpiresAt.IsZero() && now.After(identity.ExpiresAt) {
 		return nil, fmt.Errorf("worker token expired")
 	}
-	if err := validateRegister(register); err != nil {
+	descriptor, err := validateRegister(register)
+	if err != nil {
 		return nil, err
 	}
 
-	registration, err := s.upsertRegistration(ctx, identity, register, now, sourceIP)
+	registration, err := s.upsertRegistration(ctx, identity, register, descriptor, now, sourceIP)
 	if err != nil {
 		return nil, err
 	}
 
 	w := &Worker{
-		RegistrationId: registration.ID,
-		OwnerUserId:    registration.OwnerUserId,
-		IdentityId:     registration.IdentityId,
-		Name:           registration.Name,
-		Capabilities:   registration.Capabilities,
-		Labels:         registration.Labels,
-		Concurrency:    registration.Concurrency,
-		Platform:       registration.Platform,
-		Permissions:    registration.Permissions,
-		Version:        registration.Version,
-		BuildTag:       registration.BuildTag,
-		ConnectedAt:    now,
-		LastSeenAt:     now,
-		SourceIP:       sourceIP,
+		RegistrationId:       registration.ID,
+		OwnerUserId:          registration.OwnerUserId,
+		IdentityId:           registration.IdentityId,
+		Name:                 registration.Name,
+		Capabilities:         registration.Capabilities,
+		CapabilityDescriptor: registration.CapabilityDescriptor,
+		Labels:               registration.Labels,
+		Concurrency:          registration.Concurrency,
+		Platform:             registration.Platform,
+		Permissions:          registration.Permissions,
+		Version:              registration.Version,
+		BuildTag:             registration.BuildTag,
+		ConnectedAt:          now,
+		LastSeenAt:           now,
+		SourceIP:             sourceIP,
 	}
 
 	streamCtx, cancel := context.WithCancel(stream.Context())
@@ -207,6 +209,7 @@ func (s *server) upsertRegistration(
 	ctx context.Context,
 	identity *WorkerIdentity,
 	register *memqlv1.Register,
+	descriptor *CapabilityDescriptor,
 	now time.Time,
 	sourceIP string,
 ) (RegistrationRow, error) {
@@ -216,18 +219,19 @@ func (s *server) upsertRegistration(
 	}
 
 	registration := RegistrationRow{
-		IdentityId:          identity.IdentityId,
-		OwnerUserId:         identity.OwnerUserId,
-		Name:                stringFallback(register.GetName(), platformHostname(register.GetPlatform())),
-		Capabilities:        normalizeCapabilities(register.GetCapabilities()),
-		Labels:              copyStringMap(register.GetLabels()),
-		Concurrency:         register.GetConcurrency(),
-		Platform:            platformInfoToMap(register.GetPlatform()),
-		Permissions:         permissionStatusToMap(register.GetPermissions()),
-		Version:             register.GetVersion(),
-		BuildTag:            register.GetBuildTag(),
-		LastSeenAt:          now,
-		LastConnectedFromIP: sourceIP,
+		IdentityId:           identity.IdentityId,
+		OwnerUserId:          identity.OwnerUserId,
+		Name:                 stringFallback(register.GetName(), platformHostname(register.GetPlatform())),
+		Capabilities:         normalizeCapabilities(register.GetCapabilities()),
+		CapabilityDescriptor: descriptor,
+		Labels:               copyStringMap(register.GetLabels()),
+		Concurrency:          register.GetConcurrency(),
+		Platform:             platformInfoToMap(register.GetPlatform()),
+		Permissions:          permissionStatusToMap(register.GetPermissions()),
+		Version:              register.GetVersion(),
+		BuildTag:             register.GetBuildTag(),
+		LastSeenAt:           now,
+		LastConnectedFromIP:  sourceIP,
 	}
 
 	if existing == nil {
@@ -507,10 +511,15 @@ func (s *streamSession) send(msg *memqlv1.WorkerServerMessage) error {
 // helpers
 // -----------------------------------------------------------------------------
 
-func validateRegister(r *memqlv1.Register) error {
+// validateRegister checks the Register payload and decodes the
+// optional structured capability descriptor. The HEADLESS/GUI
+// capability-string contract is unchanged: HEADLESS is mandatory,
+// GUI is the only other admitted string, and scope checks keep
+// keying off those two names. The descriptor is additive metadata.
+func validateRegister(r *memqlv1.Register) (*CapabilityDescriptor, error) {
 	caps := r.GetCapabilities()
 	if len(caps) == 0 {
-		return fmt.Errorf("register: at least one capability required")
+		return nil, fmt.Errorf("register: at least one capability required")
 	}
 	hasHeadless := false
 	for _, c := range caps {
@@ -518,13 +527,17 @@ func validateRegister(r *memqlv1.Register) error {
 			hasHeadless = true
 		}
 		if c != CapabilityHeadless && c != CapabilityGUI {
-			return fmt.Errorf("register: unknown capability %q", c)
+			return nil, fmt.Errorf("register: unknown capability %q", c)
 		}
 	}
 	if !hasHeadless {
-		return fmt.Errorf("register: HEADLESS capability is mandatory")
+		return nil, fmt.Errorf("register: HEADLESS capability is mandatory")
 	}
-	return nil
+	descriptor, err := ParseCapabilityDescriptor(r.GetCapabilityDescriptorJson())
+	if err != nil {
+		return nil, fmt.Errorf("register: %w", err)
+	}
+	return descriptor, nil
 }
 
 func normalizeCapabilities(caps []string) []string {

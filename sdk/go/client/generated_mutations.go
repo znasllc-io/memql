@@ -5958,20 +5958,21 @@ func MutationCreateWorkerPairingCodeBuild(args MutationCreateWorkerPairingCodeAr
 //
 // Bound concept: registration.
 type MutationCreateWorkerRegistrationArgs struct {
-	RegistrationId      string
-	OwnerUserId         string
-	IdentityId          string
-	Name                string
-	Capabilities        []any
-	Labels              map[string]any
-	Concurrency         map[string]any
-	PlatformInfo        map[string]any
-	Permissions         map[string]any
-	Version             string
-	BuildTag            string
-	RegisteredAt        string
-	LastSeenAt          string
-	LastConnectedFromIP string
+	RegistrationId       string
+	OwnerUserId          string
+	IdentityId           string
+	Name                 string
+	Capabilities         []any
+	CapabilityDescriptor map[string]any
+	Labels               map[string]any
+	Concurrency          map[string]any
+	PlatformInfo         map[string]any
+	Permissions          map[string]any
+	Version              string
+	BuildTag             string
+	RegisteredAt         string
+	LastSeenAt           string
+	LastConnectedFromIP  string
 }
 
 // MutationCreateWorkerRegistration calls the engine mutation mutationCreateWorkerRegistration.
@@ -6005,6 +6006,11 @@ func MutationCreateWorkerRegistrationBuild(args MutationCreateWorkerRegistration
 	}
 	b.WriteString("capabilities: ")
 	b.WriteString(renderMemQLValue(args.Capabilities))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("capabilityDescriptor: ")
+	b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
 	if b.Len() > 17 {
 		b.WriteString(", ")
 	}

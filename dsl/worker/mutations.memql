@@ -84,6 +84,7 @@ mutation registration mutationCreateWorkerRegistration {
     identityId           string  @required
     name                 string  @required
     capabilities         array   @required
+    capabilityDescriptor object
     labels               object
     concurrency          object  @required
     platformInfo         object
@@ -100,6 +101,7 @@ mutation registration mutationCreateWorkerRegistration {
     args.identityId
     args.name
     args.capabilities
+    capabilityDescriptor: coalesce(args.capabilityDescriptor, {})
     labels: coalesce(args.labels, {})
     args.concurrency
     platformInfo: coalesce(args.platformInfo, {})
