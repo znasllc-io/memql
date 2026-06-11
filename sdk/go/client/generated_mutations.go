@@ -8331,6 +8331,100 @@ func MutationRedeemWorkerPairingCodeBuild(args MutationRedeemWorkerPairingCodeAr
 	return b.String()
 }
 
+// MutationRefreshWorkerRegistration -- Refresh registration-authoritative fields on worker reconnect.
+//
+// Bound concept: registration.
+type MutationRefreshWorkerRegistrationArgs struct {
+	RegistrationId       string
+	Name                 string
+	Capabilities         []any
+	CapabilityDescriptor map[string]any
+	Labels               map[string]any
+	Concurrency          map[string]any
+	PlatformInfo         map[string]any
+	Permissions          map[string]any
+	Version              string
+	BuildTag             string
+	LastSeenAt           string
+	LastConnectedFromIP  string
+}
+
+// MutationRefreshWorkerRegistration calls the engine mutation mutationRefreshWorkerRegistration.
+func (qc *QueryClient) MutationRefreshWorkerRegistration(ctx context.Context, args MutationRefreshWorkerRegistrationArgs) (*Result, error) {
+	call := MutationRefreshWorkerRegistrationBuild(args)
+	return qc.executeNamed(ctx, "mutationRefreshWorkerRegistration", call)
+}
+
+func MutationRefreshWorkerRegistrationBuild(args MutationRefreshWorkerRegistrationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRefreshWorkerRegistration({")
+	b.WriteString("registrationId: ")
+	b.WriteString(fmt.Sprintf("%q", args.RegistrationId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(fmt.Sprintf("%q", args.Name))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("capabilities: ")
+	b.WriteString(renderMemQLValue(args.Capabilities))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("capabilityDescriptor: ")
+	b.WriteString(renderMemQLValue(args.CapabilityDescriptor))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("labels: ")
+	b.WriteString(renderMemQLValue(args.Labels))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("concurrency: ")
+	b.WriteString(renderMemQLValue(args.Concurrency))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("platformInfo: ")
+	b.WriteString(renderMemQLValue(args.PlatformInfo))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("permissions: ")
+	b.WriteString(renderMemQLValue(args.Permissions))
+	if args.Version != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%q", args.Version))
+	}
+	if args.BuildTag != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("buildTag: ")
+		b.WriteString(fmt.Sprintf("%q", args.BuildTag))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastSeenAt: ")
+	b.WriteString(fmt.Sprintf("%q", args.LastSeenAt))
+	if args.LastConnectedFromIP != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastConnectedFromIP: ")
+		b.WriteString(fmt.Sprintf("%q", args.LastConnectedFromIP))
+	}
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now(), and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: semanticMemory.
