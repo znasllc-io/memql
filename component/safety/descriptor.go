@@ -27,7 +27,6 @@ const (
 	ActionFSList     Action = "fs_list"
 	ActionFSStat     Action = "fs_stat"
 	ActionHTTPFetch  Action = "http_fetch"
-	ActionGUIInput   Action = "gui_input"
 	ActionScreenshot Action = "screenshot"
 	ActionWebhook    Action = "webhook"
 	ActionToolCall   Action = "tool_call"
