@@ -187,6 +187,79 @@ func TestPresenceTransitionsAllDeliverDespiteStableRowID(t *testing.T) {
 	}
 }
 
+// TestTextChunksStreamToWSOwningReplica is the regression proof for memql#1326
+// ("chat streaming dead on the cluster"). The agent text-chat path streams
+// reply tokens as v1:cognition:text:chunk graph inserts on the cognition node;
+// before #1326 those were not chat-reply topics, rode only the star mesh, and
+// structurally never reached a bff replica the producer had no dial to -- the
+// browser saw nothing until the committed utterance landed. Chunks must ride
+// the substrate like the utterance they precede, in order, with the committed
+// utterance after the turn's last chunk on the same space key.
+func TestTextChunksStreamToWSOwningReplica(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newFakeOutboxStore()
+	const spaceID = "v1:cognition:space:abc"
+	key := RoutingKey{Kind: "space", ID: spaceID}
+
+	sink := &busSink{}
+	consumer := newConsumerDelivery(t, ctx, "bff-2", store, sink)
+	consumer.ensureSubscribed(key)
+
+	producer := NewChatReplyDelivery(
+		&Identity{ID: "cognition-1", Type: NodeTypeCognition},
+		NewSubstrate(store, time.Minute, nil, nil),
+		events.NewBus(),
+		false, // not bff: producer-only
+		nil,
+	)
+	if producer == nil {
+		t.Fatal("producer NewChatReplyDelivery returned nil")
+	}
+
+	chunkTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptTextChunk)
+	replyTopic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance)
+	base := time.Now()
+	for i, text := range []string{"Hello", " there"} {
+		producer.onLocalEvent(ctx, events.Event{
+			Topic:     chunkTopic,
+			Kind:      events.KindNodeCreated,
+			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
+			Payload: map[string]any{
+				"id":      fmt.Sprintf("v1:cognition:text:chunk:text-chunk-%d", i),
+				"spaceId": spaceID,
+				"replyId": "utterance:reply-7",
+				"text":    text,
+				"index":   i,
+			},
+		})
+	}
+	producer.onLocalEvent(ctx, events.Event{
+		Topic:     replyTopic,
+		Kind:      events.KindNodeCreated,
+		Timestamp: base.Add(5 * time.Millisecond),
+		Payload: map[string]any{
+			"id":      "utterance:reply-7",
+			"spaceId": spaceID,
+			"text":    "Hello there",
+		},
+	})
+
+	got := waitForEvents(t, sink, 3)
+	for i, want := range []string{"Hello", " there"} {
+		if got[i].Topic != chunkTopic {
+			t.Fatalf("delivery %d: got topic %q want chunk topic %q", i, got[i].Topic, chunkTopic)
+		}
+		if text, _ := got[i].Payload["text"].(string); text != want {
+			t.Fatalf("delivery %d: got chunk text %q want %q", i, text, want)
+		}
+	}
+	if got[2].Topic != replyTopic {
+		t.Fatalf("committed utterance must deliver after the turn's last chunk; got topic %q", got[2].Topic)
+	}
+}
+
 // waitForCursor polls until the stored cursor for (key, consumer) reaches at
 // least want, or times out.
 func waitForCursor(t *testing.T, store outboxStore, key RoutingKey, consumer string, want int64) error {
@@ -348,18 +421,21 @@ func TestChatReplyTopicGate(t *testing.T) {
 	literals := map[string]string{
 		"utterance":   "v1:cognition:utterance",
 		"presence":    "v1:cognition:participant:presence",
+		"textChunk":   "v1:cognition:text:chunk",
 		"canvasState": "v1:copresent:canvasState",
 	}
 	if conceptUtterance != literals["utterance"] ||
 		conceptPresence != literals["presence"] ||
+		conceptTextChunk != literals["textChunk"] ||
 		conceptCanvasState != literals["canvasState"] {
-		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q",
-			conceptUtterance, conceptPresence, conceptCanvasState)
+		t.Fatalf("chat-reply concept ids drifted from the DSL: got %q/%q/%q/%q",
+			conceptUtterance, conceptPresence, conceptTextChunk, conceptCanvasState)
 	}
 	on := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptUtterance),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptPresence),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptTextChunk),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptCanvasState),
 		events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptCanvasState),
 	}
