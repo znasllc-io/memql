@@ -257,8 +257,11 @@ mutation agentAuthorization mutationUpdateAgentAuthScope {
 // Heartbeat-batched lastSeenAt + lastConnectedFromIP update. The
 // worker stream handler calls this opportunistically -- it does NOT
 // fire on every heartbeat (15s) because that would saturate the
-// engine; the in-memory registry tracks the live timestamp and
-// flushes to the database every 60s or on disconnect.
+// engine; the in-memory registry tracks the live timestamp on every
+// beat, and the stream handler flushes to the database at most once
+// per HeartbeatBatchInterval (60s), persisting the first heartbeat
+// of each stream immediately so a (re)connected worker's row is
+// fresh within one beat (memql#1340).
 
 @enabled
 @description("Bump lastSeenAt + lastConnectedFromIP on a worker registration.")
