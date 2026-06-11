@@ -20,24 +20,49 @@ import (
 
 // fakeEngine implements just the Execute method of IntegrationEngineAccess by
 // embedding the interface (the other methods panic if ever called, which they
-// are not on this path). It returns a GraphBundle whose single node carries the
-// agent's avatar fields.
+// are not on this path). It dispatches per named query: queryAgentById serves
+// the agent's avatar fields; queryAvatarPersonas / queryAvatarPersonaById
+// serve the catalog rows (memql#1336 hydration + unstamped fallback).
 type fakeEngine struct {
 	memql.IntegrationEngineAccess
 	vendor    string
 	personaId string
+	gender    string
 	err       error
 	gotQuery  string
+	queries   []string
+	// catalog rows served to the persona catalog queries. Each row carries
+	// id / vendor / personaId / gender like an avatarPersonaFull projection.
+	catalog []map[string]any
 }
 
 func (f *fakeEngine) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
 	f.gotQuery = query
+	f.queries = append(f.queries, query)
 	if f.err != nil {
 		return nil, f.err
+	}
+	if strings.Contains(query, "queryAvatarPersona") {
+		byId := strings.Contains(query, "queryAvatarPersonaById")
+		nodes := make([]*memqlv1.MemoryNode, 0, len(f.catalog))
+		for _, row := range f.catalog {
+			rowId, _ := row["id"].(string)
+			if byId && !strings.Contains(query, rowId) {
+				continue
+			}
+			payload, _ := structpb.NewStruct(row)
+			nodes = append(nodes, &memqlv1.MemoryNode{
+				Id:      rowId,
+				Concept: "v1:agents:avatarPersona",
+				Payload: payload,
+			})
+		}
+		return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: nodes}}, nil
 	}
 	payload, _ := structpb.NewStruct(map[string]any{
 		"avatarVendor":    f.vendor,
 		"avatarPersonaId": f.personaId,
+		"gender":          f.gender,
 	})
 	return &memql.ExecuteResult{
 		Bundle: &memqlv1.GraphBundle{
@@ -188,14 +213,89 @@ func TestStartSession_AgentNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestStartSession_NoPersonaIsError(t *testing.T) {
-	// anam vendor but no persona id and no platform default -> ResolveAvatarPlan
-	// returns nil (audio-only) -> started=false -> specific error.
-	eng := &fakeEngine{vendor: "anam", personaId: ""}
+func TestStartSession_UnstampedAgentEmptyCatalogIsError(t *testing.T) {
+	// No stamped persona AND an empty operator catalog -> clear error naming
+	// the empty catalog (memql#1336). Pre-#1336 this hard-failed on the empty
+	// vendor before the catalog was ever consulted.
+	eng := &fakeEngine{vendor: "", personaId: ""}
 	i := newTestIntegration(eng, &stubVendorClient{})
 	_, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "a"}, 0)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no avatar persona")
+	assert.Contains(t, err.Error(), "catalog is empty")
+}
+
+func TestStartSession_UnstampedAgentFallsBackToCatalogDefault(t *testing.T) {
+	// The auto-provisioned GA carries no avatarVendor/avatarPersonaId (the
+	// PersonaPicker only mounts in the create/edit assistant modal). The
+	// direct path must fall back to the operator catalog default instead of
+	// hard-failing (memql#1336 root cause 1 -- the live "avatarVendor=\"\" is
+	// not supported" error).
+	eng := &fakeEngine{vendor: "", personaId: "", gender: "female", catalog: []map[string]any{
+		{"id": "v1:agents:avatarPersona:sofia", "vendor": "simli", "personaId": "face-sofia", "gender": "female"},
+	}}
+	i := newTestIntegration(eng, &stubVendorClient{})
+
+	nodes, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "v1:agents:agent:abc"}, 0)
+	out := decode(t, nodes, err)
+
+	assert.Equal(t, "simli", out["vendor"])
+	assert.Contains(t, strings.Join(eng.queries, "\n"), "queryAvatarPersonas")
+}
+
+func TestStartSession_CatalogDefaultPrefersAgentGender(t *testing.T) {
+	// With multiple active personas, the fallback picks the one matching the
+	// agent's gender; the first entry is only the tiebreak default.
+	eng := &fakeEngine{vendor: "", personaId: "", gender: "female", catalog: []map[string]any{
+		{"id": "v1:agents:avatarPersona:max", "vendor": "simli", "personaId": "face-max", "gender": "male"},
+		{"id": "v1:agents:avatarPersona:sofia", "vendor": "simli", "personaId": "face-sofia", "gender": "female"},
+	}}
+	client := &stubVendorClient{res: avatarvendor.AvatarStartResult{SessionID: "s1", AvatarIdentity: avatarvendor.AvatarParticipantIdentity}}
+	i := newTestIntegration(eng, client)
+	var capturedPlan avatarvendor.AvatarPlan
+	i.newClient = func(plan avatarvendor.AvatarPlan) (avatarvendor.AvatarVendorClient, error) {
+		capturedPlan = plan
+		return client, nil
+	}
+
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "v1:agents:agent:abc", "room_name": "avatar-r1", "browser_identity": "viewer-1",
+	}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "face-sofia", capturedPlan.PersonaID, "gender-matched catalog persona must win")
+}
+
+func TestStartSession_StampedCatalogIdHydratesToVendorFaceId(t *testing.T) {
+	// The CoPresent PersonaPicker stamps the CATALOG ROW ID onto the agent;
+	// Simli needs the vendor faceId. The resolution must hydrate through
+	// queryAvatarPersonaById instead of passing the catalog id verbatim as
+	// the faceId (memql#1336 root cause 2 -- INVALID_FACE_ID).
+	eng := &fakeEngine{vendor: "simli", personaId: "v1:agents:avatarPersona:sofia", catalog: []map[string]any{
+		{"id": "v1:agents:avatarPersona:sofia", "vendor": "simli", "personaId": "face-sofia", "gender": "female"},
+	}}
+	client := &stubVendorClient{res: avatarvendor.AvatarStartResult{SessionID: "s1", AvatarIdentity: avatarvendor.AvatarParticipantIdentity}}
+	i := newTestIntegration(eng, client)
+	var capturedPlan avatarvendor.AvatarPlan
+	i.newClient = func(plan avatarvendor.AvatarPlan) (avatarvendor.AvatarVendorClient, error) {
+		capturedPlan = plan
+		return client, nil
+	}
+
+	_, err := i.handleEngageVendor(context.Background(), map[string]any{
+		"agentId": "v1:agents:agent:abc", "room_name": "avatar-r1", "browser_identity": "viewer-1",
+	}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "face-sofia", capturedPlan.PersonaID, "catalog id must hydrate to the vendor faceId")
+	assert.Contains(t, strings.Join(eng.queries, "\n"), "queryAvatarPersonaById")
+}
+
+func TestStartSession_DanglingCatalogRefIsError(t *testing.T) {
+	// A stamped catalog id whose row no longer exists is a hard error naming
+	// the dangling reference -- never silently passed to the vendor.
+	eng := &fakeEngine{vendor: "simli", personaId: "v1:agents:avatarPersona:gone"}
+	i := newTestIntegration(eng, &stubVendorClient{})
+	_, err := i.handleStartSession(context.Background(), map[string]any{"agentId": "a"}, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
 }
 
 func TestEngageVendor_VendorStartFailurePropagates(t *testing.T) {

@@ -394,10 +394,31 @@ func (i *Integration) handleStopSession(ctx context.Context, args map[string]any
 // Agent resolution
 // -----------------------------------------------------------------
 
-// resolveAgentAvatar reads the agent's avatarVendor + avatarPersonaId via the
-// named queryAgentById (the agentFull shape now projects both fields, memql
-// #692/#721). Using the named query honors the no-raw-DSL contract and avoids
-// the parser choking on a `?.`-prefixed colon-bearing id literal.
+// avatarPersonaCatalogPrefix is the canonical id prefix of the operator
+// persona catalog rows (v1:agents:avatarPersona). The CoPresent PersonaPicker
+// stamps the agent's avatarPersonaId with the CATALOG ROW ID it picked, not
+// the vendor-issued face/persona id, so a stamped value carrying this prefix
+// must be hydrated through the catalog before it reaches the vendor client
+// (resolveSimliPlan treats AvatarPersonaID as the raw Simli faceId, memql#1336).
+const avatarPersonaCatalogPrefix = "v1:agents:avatarPersona:"
+
+// resolveAgentAvatar resolves the {vendor, vendor-issued persona id} pair the
+// vendor client needs for the given agent (memql#1336):
+//
+//   - Agent stamped with a CATALOG row id -> hydrate via queryAvatarPersonaById
+//     to the entry's vendor + vendor-issued personaId. A dangling reference is
+//     a hard error naming the missing row.
+//   - Agent stamped with a raw vendor id (legacy direct stamping) -> verbatim.
+//   - Agent unstamped (every auto-provisioned assistant -- the PersonaPicker
+//     only mounts in the create/edit assistant modal, which a user with an
+//     auto-provisioned GA never visits) -> fall back to the operator catalog
+//     default: the active persona matching the agent's gender, else the first
+//     active entry. Only an EMPTY catalog is an error.
+//
+// The agent lookup uses the named queryAgentById (the agentFull shape projects
+// avatarVendor + avatarPersonaId + gender, memql #692/#721). Named queries
+// honor the no-raw-DSL contract and avoid the parser choking on a
+// `?.`-prefixed colon-bearing id literal.
 func (i *Integration) resolveAgentAvatar(ctx context.Context, agentId string) (vendor, personaId string, err error) {
 	if i.engine == nil {
 		return "", "", fmt.Errorf("avatardirect: no engine configured")
@@ -415,7 +436,71 @@ func (i *Integration) resolveAgentAvatar(ctx context.Context, agentId string) (v
 	row := rows[0]
 	vendor = strings.TrimSpace(rowString(row, "avatarVendor"))
 	personaId = strings.TrimSpace(rowString(row, "avatarPersonaId"))
+
+	if strings.HasPrefix(personaId, avatarPersonaCatalogPrefix) {
+		return i.hydrateCatalogPersona(ctx, agentId, personaId)
+	}
+	if vendor != "" && personaId != "" {
+		return vendor, personaId, nil
+	}
+	return i.defaultCatalogPersona(ctx, agentId, strings.TrimSpace(rowString(row, "gender")))
+}
+
+// hydrateCatalogPersona resolves a stamped catalog row id to the entry's
+// {vendor, vendor-issued personaId}.
+func (i *Integration) hydrateCatalogPersona(ctx context.Context, agentId, catalogId string) (string, string, error) {
+	catalogIdJSON, _ := json.Marshal(catalogId)
+	raw, err := i.engine.Execute(systemActorContext(ctx), fmt.Sprintf(`queryAvatarPersonaById({avatarPersonaId: %s})`, string(catalogIdJSON)))
+	if err != nil {
+		return "", "", fmt.Errorf("avatardirect: hydrate persona %s for agent %s: %w", catalogId, agentId, err)
+	}
+	rows := extractRows(raw)
+	if len(rows) == 0 {
+		return "", "", fmt.Errorf("avatardirect: agent %s references avatar persona %s which does not exist in the catalog", agentId, catalogId)
+	}
+	vendor := strings.TrimSpace(rowString(rows[0], "vendor"))
+	personaId := strings.TrimSpace(rowString(rows[0], "personaId"))
+	if vendor == "" || personaId == "" {
+		return "", "", fmt.Errorf("avatardirect: catalog persona %s carries an incomplete vendor/personaId pair", catalogId)
+	}
+	i.logInfo("avatardirect: hydrated catalog persona", "agent_id", agentId, "catalog_id", catalogId, "vendor", vendor)
 	return vendor, personaId, nil
+}
+
+// defaultCatalogPersona picks the catalog default for an unstamped agent:
+// the active entry matching the agent's gender, else the first active entry.
+func (i *Integration) defaultCatalogPersona(ctx context.Context, agentId, gender string) (string, string, error) {
+	raw, err := i.engine.Execute(systemActorContext(ctx), `queryAvatarPersonas({})`)
+	if err != nil {
+		return "", "", fmt.Errorf("avatardirect: agent %s has no stamped avatar persona and the catalog lookup failed: %w", agentId, err)
+	}
+	rows := extractRows(raw)
+	if len(rows) == 0 {
+		return "", "", fmt.Errorf("avatardirect: agent %s has no stamped avatar persona and the avatar persona catalog is empty", agentId)
+	}
+	pick := rows[0]
+	if gender != "" {
+		for _, row := range rows {
+			if strings.EqualFold(strings.TrimSpace(rowString(row, "gender")), gender) {
+				pick = row
+				break
+			}
+		}
+	}
+	vendor := strings.TrimSpace(rowString(pick, "vendor"))
+	personaId := strings.TrimSpace(rowString(pick, "personaId"))
+	if vendor == "" || personaId == "" {
+		return "", "", fmt.Errorf("avatardirect: catalog default persona %s carries an incomplete vendor/personaId pair", rowString(pick, "id"))
+	}
+	i.logInfo("avatardirect: agent has no stamped persona; using catalog default",
+		"agent_id", agentId, "catalog_id", rowString(pick, "id"), "vendor", vendor, "gender", gender)
+	return vendor, personaId, nil
+}
+
+func (i *Integration) logInfo(msg string, args ...any) {
+	if i.logger != nil {
+		i.logger.Info(msg, args...)
+	}
 }
 
 // -----------------------------------------------------------------
