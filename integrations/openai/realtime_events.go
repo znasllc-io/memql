@@ -57,7 +57,7 @@ const (
 	// Native input-transcription events (#478). When the session configures
 	// input transcription, the model emits the user's transcript on these --
 	// the channel that feeds the human's chat transcript without a separate
-	// Deepgram pass on the critical path. Same wire names asr.go consumes.
+	// separate ASR pass on the critical path. Same wire names asr.go consumes.
 	serverEventInputTranscriptDelta = "conversation.item.input_audio_transcription.delta"
 	serverEventInputTranscriptDone  = "conversation.item.input_audio_transcription.completed"
 
@@ -117,7 +117,7 @@ type TurnDetectionConfig struct {
 // InputTranscriptionConfig enables the model's native transcription of the
 // user's input audio (the conversation.item.input_audio_transcription.* events),
 // so the human's chat transcript comes from the realtime model rather than a
-// separate Deepgram pass on the critical path (#478). Nil leaves input
+// separate ASR pass on the critical path (#478). Nil leaves input
 // transcription off -- the current default.
 type InputTranscriptionConfig struct {
 	// Model is the transcription model id (e.g. "gpt-4o-mini-transcribe").

@@ -38,7 +38,7 @@ export interface PushToTalkOptions {
   audio: AudioFormat;
   // ISO-639-1 language hint, e.g. "en". Empty defers to the provider.
   language?: string;
-  // Provider override (e.g. "openai-realtime", "deepgram"). Empty
+  // Provider override (e.g. "openai-realtime", "openai-whisper"). Empty
   // uses the cluster default.
   provider?: string;
   // Called on every delta. Safe to be undefined.

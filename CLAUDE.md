@@ -523,7 +523,7 @@ LiveKit room
    |
    |  (voice-agent subcommand -- Go, integrations/voice/agent)
    |
-   +-- Deepgram Nova-3 STT (user audio in)
+   +-- OpenAI Realtime STT (user audio in)
    |              |
    |              v
    |        memql gRPC client         (VoiceAgentTurnRequest -> Delta)
@@ -532,15 +532,15 @@ LiveKit room
    |        memql cognition           (BYO conductor + agent tool loop)
    |              |
    |              v
-   +-- Deepgram Aura-2 TTS            (token-by-token input streaming)
+   +-- OpenAI TTS                     (token-by-token input streaming)
    |              |
    |              v
    +-- Anam or Simli avatar           (lip-synced video)
 ```
 
 The agent supports two executors selected by `MEMQL_VOICE_EXECUTOR`:
-`cascade` (default -- the Deepgram STT -> cognition -> Deepgram TTS
-path above) and `realtime` (OpenAI gpt-realtime speech-to-speech).
+`realtime` (default -- OpenAI gpt-realtime speech-to-speech) and
+`cascade` (the OpenAI STT -> cognition -> OpenAI TTS path above).
 
 Key files (all under `integrations/voice/agent/`):
 - `config.go` / `bootstrap.go` -- env loading + class="voice_agent"
@@ -550,7 +550,7 @@ Key files (all under `integrations/voice/agent/`):
   specialists are dispatched server-side and land in chat via the
   normal agent path.
 - `cascade.go` / `stt_pipeline.go` / `tts_pipeline.go` /
-  `turntaking.go` -- the Deepgram cascade + turn-taking / barge-in.
+  `turntaking.go` -- the STT/TTS cascade + turn-taking / barge-in.
 - `realtime_executor.go` / `realtime_lifecycle.go` /
   `realtime_budget.go` -- the gpt-realtime executor + guardrails.
 - `persona.go` / `grounding.go` / `instructions.go` -- persona +
@@ -572,12 +572,11 @@ Env:
 - `MEMQL_GRPC_ADDR` -- the BFF's gRPC address (e.g. `bff:50051`).
 - `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` -- room
   transport.
-- `MEMQL_DEEPGRAM_API_KEY` -- Deepgram (STT + TTS).
-- `MEMQL_VOICE_EXECUTOR` -- `cascade` (default) or `realtime`.
+- `OPENAI_API_KEY` -- OpenAI (STT + TTS + realtime); required.
+- `MEMQL_VOICE_EXECUTOR` -- `realtime` (default) or `cascade`.
 - `MEMQL_VOICE_ROOM_NAME` -- room to join (falls back when no
   `--room` flag is passed).
-- `OPENAI_API_KEY` / `MEMQL_REALTIME_*` -- required on the realtime
-  executor path only.
+- `MEMQL_REALTIME_*` -- realtime executor tuning knobs.
 - `VOICE_AGENT_TOKEN` -- identity-issued `class="voice_agent"` JWT
   (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
   (`make voice-agent-token`); or self-bootstrap via
@@ -596,9 +595,8 @@ Docker: the `voice-agent` service in
 `docker/docker-compose.polyphon.yml` runs the `memql-voice` image (the
 `voice-runtime` CGO stage) with `command: voice-agent`.
 
-`integrations/deepgram/` + `integrations/openai/` on the Go side stay
--- they still serve the `/memql/audio` WebSocket path for voice-first
-creation modals. The earlier Python voice-agent (LiveKit Agents 1.5)
+`integrations/openai/` on the Go side also serves the `/memql/audio`
+WebSocket path for voice-first creation modals. The earlier Python voice-agent (LiveKit Agents 1.5)
 and the legacy Go Bridge Agent have both been retired.
 
 **Canonical voice catalog (`integrations/voice/voices.go`).** Every
@@ -633,7 +631,7 @@ specialist agents -- voice-agent disables the avatar plugin and falls
 back to audio-only.
 
 See [integrations/CLAUDE.md](integrations/CLAUDE.md) for the Go-side
-voice-related integrations (deepgram, openai, voices catalog) that
+voice-related integrations (openai, voices catalog) that
 the `/memql/audio` WebSocket still consumes.
 
 ### Cognition (Routing + Conductor)
@@ -1576,7 +1574,7 @@ parser rejects it with a migration hint.
 Available integrations (core, registered via the plug-in system):
 auth, database, email, embedding, files, gcs (as `storage`), identity,
 knowledge, liveavatar, router, similarity, training, plus node-type-
-scoped ones (cognition, agent, stt, openaiVoice, deepgram) wired
+scoped ones (cognition, agent, stt, openaiVoice) wired
 explicitly in `app/integrations_*.go` when their dependencies sit
 outside the stable `PluginContext` surface.
 

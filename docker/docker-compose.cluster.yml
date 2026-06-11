@@ -365,21 +365,11 @@ services:
       IDENTITY_VERIFIER_EXPECTED_ISSUER: ${IDENTITY_VERIFIER_EXPECTED_ISSUER:-https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}}
 
       # ---- STT provider selection ----
-      # Auto-selected default is "deepgram" when MEMQL_DEEPGRAM_API_KEY
-      # is set, else "openai-realtime". Valid explicit values:
-      # "deepgram", "openai-realtime", "openai-whisper".
+      # Default is "openai-realtime". Valid explicit values:
+      # "openai-realtime", "openai-whisper".
       MEMQL_STT_PROVIDER: "${MEMQL_STT_PROVIDER:-}"
 
-      # ---- Deepgram (default when key present) ----
-      MEMQL_DEEPGRAM_API_KEY: "${MEMQL_DEEPGRAM_API_KEY:-}"
-      POLYPHON_DEEPGRAM_ASR_MODEL: "${POLYPHON_DEEPGRAM_ASR_MODEL:-}"
-      POLYPHON_DEEPGRAM_TTS_MODEL: "${POLYPHON_DEEPGRAM_TTS_MODEL:-}"
-      POLYPHON_DEEPGRAM_LANGUAGE: "${POLYPHON_DEEPGRAM_LANGUAGE:-}"
-      POLYPHON_DEEPGRAM_ENDPOINTING_MS: "${POLYPHON_DEEPGRAM_ENDPOINTING_MS:-}"
-      POLYPHON_DEEPGRAM_UTTERANCE_END_MS: "${POLYPHON_DEEPGRAM_UTTERANCE_END_MS:-}"
-      POLYPHON_DEEPGRAM_CLIENT_EOU_TIMEOUT_MS: "${POLYPHON_DEEPGRAM_CLIENT_EOU_TIMEOUT_MS:-}"
-
-      # ---- OpenAI Realtime (fallback) ----
+      # ---- OpenAI Realtime (default) ----
       # Transcription model used by the Realtime API. Defaults to
       # "whisper-1" -- universally available on every OpenAI project
       # AND supported by the Realtime API's transcription-only mode

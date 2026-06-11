@@ -6,8 +6,7 @@ import (
 )
 
 // ASRProvider abstracts speech-to-text transcription. The implementation
-// is OpenAI Realtime in Stage 1; Stage 2 of the Deepgram migration adds
-// Deepgram Nova-3 as the new default.
+// is OpenAI Realtime (transcription-only mode).
 type ASRProvider interface {
 	// StartStream begins a new streaming transcription session.
 	// Audio chunks are sent via SendAudio, and transcription results
@@ -70,8 +69,8 @@ const (
 	// providers emitted, so it is the zero value for backward
 	// compatibility.
 	ASRKindTranscript ASRResultKind = iota
-	// ASRKindSpeechStarted marks a voice-activity onset (Deepgram's
-	// SpeechStarted VAD event). It carries no transcript text; it is the
+	// ASRKindSpeechStarted marks a voice-activity onset (the provider's
+	// server-VAD speech-started event). It carries no transcript text; it is the
 	// signal the turn-taking machine uses to enter human-turn and to
 	// raise a barge-in candidate while the assistant has the floor.
 	ASRKindSpeechStarted
@@ -92,8 +91,7 @@ type ASRResult struct {
 }
 
 // TTSProvider abstracts text-to-speech synthesis. The implementation is
-// OpenAI TTS in Stage 1; Stage 2 of the Deepgram migration adds Aura-2
-// as the new default.
+// OpenAI TTS (/v1/audio/speech).
 type TTSProvider interface {
 	// Synthesize converts text to speech audio, returning a reader of audio data.
 	// The audio format depends on the provider (typically PCM16 or WAV).

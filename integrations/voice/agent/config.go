@@ -43,27 +43,25 @@ type Config struct {
 	// LIVEKIT_PUBLIC_URL handling in anam_persona_session.py.
 	LiveKitPublicURLEnv string
 
-	// Deepgram (STT + TTS). Carried here for #455; not consumed yet.
-	DeepgramAPIKey string
-
-	// Voice executor selection (#440 / #434). "cascade" (default) is the
-	// Deepgram STT -> cognition -> Deepgram TTS path; "realtime" swaps in the
-	// OpenAI gpt-realtime speech-to-speech model. Validated here so a typo
-	// fails loudly at startup; the executor itself is #457.
+	// Voice executor selection (#440 / #434). "realtime" (default) is the
+	// OpenAI gpt-realtime speech-to-speech model; "cascade" is the OpenAI
+	// ASR -> cognition -> OpenAI TTS path. Validated here so a typo fails
+	// loudly at startup; the executor itself is #457.
 	VoiceExecutor string // "cascade" | "realtime"
-	OpenAIAPIKey  string // only required on the realtime path (#457)
+	OpenAIAPIKey  string // required: both executors run on OpenAI (#1355)
 	RealtimeModel string
 	// RealtimeNativeTurn enables the #478 native 1-on-1 gate (semantic_vad +
 	// native authorship for a single-human standard space). Default true.
 	RealtimeNativeTurn bool
-	// RealtimeNativeSTT takes Deepgram OFF the realtime path: gpt-realtime owns
-	// STT (native input transcription), turn detection (semantic_vad), the voice,
-	// and tool-calling -- nothing routes through Deepgram on the critical path, so
-	// the conversation is as snappy as the model allows. The human's chat
-	// transcript still arrives (from the model's input_audio_transcription) but
-	// asynchronously, off the voice path. Deepgram stays a fully-wired fallback
-	// (the cascade executor + multi-party labeled-transcript read side) -- this
-	// only disables it for the realtime executor. Default true.
+	// RealtimeNativeSTT takes the separate ASR stream OFF the realtime path:
+	// gpt-realtime owns STT (native input transcription), turn detection
+	// (semantic_vad), the voice, and tool-calling -- no second transcription
+	// stream sits on the critical path, so the conversation is as snappy as
+	// the model allows. The human's chat transcript still arrives (from the
+	// model's input_audio_transcription) but asynchronously, off the voice
+	// path. The standalone OpenAI ASR stream stays a fully-wired fallback
+	// (the cascade executor + multi-party labeled-transcript read side) --
+	// this only disables it for the realtime executor. Default true.
 	RealtimeNativeSTT bool
 	// VoiceGrounding enables per-turn knowledge grounding for voice replies
 	// (#490). When on, 1-on-1 routes through the gate (create_response:false) so
@@ -81,7 +79,7 @@ type Config struct {
 	VoiceAutoJoin bool
 	// RealtimeMultiPartySemanticVad enables the #481 multi-party gate:
 	// semantic_vad turn detection + the conductor gate + native generation for
-	// a >=2-human room (vs the turn_detection:null + Deepgram path). Default
+	// a >=2-human room (vs the turn_detection:null + labeled-ASR path). Default
 	// false -- opt-in, pending live validation. Requires RealtimeNativeTurn.
 	RealtimeMultiPartySemanticVad bool
 	// RealtimeTranscriptionModel is the model id for the realtime session's
@@ -140,14 +138,16 @@ type Config struct {
 	// Logging.
 	LogLevel string
 
-	// Deepgram tuning -- inherited from the Python defaults so the Go path
-	// picks up the same EOU semantics. Consumed by the turn-taking machine
-	// (#455), parsed here for parity.
-	DGASRModel       string
-	DGTTSModel       string
-	DGLanguage       string
-	DGEndpointingMs  int
-	DGUtteranceEndMs int
+	// Cascade / labeled-transcript ASR + TTS tuning (#1355). The cascade
+	// executor and the realtime executor's optional labeled-transcript read
+	// side both run on the OpenAI clients (integrations/openai); empty model
+	// values fall back to the openai package defaults (whisper-1 ASR,
+	// gpt-4o-mini-tts TTS).
+	CascadeASRModel string
+	CascadeTTSModel string
+	// VoiceLanguage is the BCP-47 language for ASR sessions (e.g. "en",
+	// "en-US"; OpenAI transcription wants the primary subtag).
+	VoiceLanguage string
 }
 
 // AvatarEnabled reports whether an avatar vendor is configured.
@@ -231,20 +231,20 @@ func LoadConfig(getenv Getenv) (Config, error) {
 		return Config{}, err
 	}
 	cfg.LiveKitPublicURLEnv = get("LIVEKIT_PUBLIC_URL", "")
-	if cfg.DeepgramAPIKey, err = getRequired("MEMQL_DEEPGRAM_API_KEY"); err != nil {
-		return Config{}, err
-	}
 	if cfg.MemqlGRPCAddr, err = getRequired("MEMQL_GRPC_ADDR"); err != nil {
 		return Config{}, err
 	}
 
 	// Realtime (OpenAI gpt-realtime speech-to-speech) is the default executor
 	// (#483): a fresh run uses the realtime path. It degrades cleanly back to
-	// the cascade when its preconditions fail (missing OPENAI_API_KEY / persona
-	// build) -- see SelectVoiceExecutor -- and the cascade stays available
-	// explicitly via MEMQL_VOICE_EXECUTOR=cascade.
+	// the cascade when its preconditions fail (persona build etc.) -- see
+	// SelectVoiceExecutor -- and the cascade stays available explicitly via
+	// MEMQL_VOICE_EXECUTOR=cascade. Both executors run on OpenAI (#1355), so
+	// the key is required up front.
 	cfg.VoiceExecutor = strings.ToLower(get("MEMQL_VOICE_EXECUTOR", "realtime"))
-	cfg.OpenAIAPIKey = get("OPENAI_API_KEY", "")
+	if cfg.OpenAIAPIKey, err = getRequired("OPENAI_API_KEY"); err != nil {
+		return Config{}, err
+	}
 	cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime-2")
 	// #478 native 1-on-1: gpt-realtime owns the turn (semantic_vad) when a
 	// standard space has exactly one human. On by default; set
@@ -279,11 +279,11 @@ func LoadConfig(getenv Getenv) (Config, error) {
 
 	cfg.LogLevel = strings.ToUpper(get("VOICE_AGENT_LOG_LEVEL", "INFO"))
 
-	cfg.DGASRModel = get("POLYPHON_DEEPGRAM_ASR_MODEL", "nova-3")
-	cfg.DGTTSModel = get("POLYPHON_DEEPGRAM_TTS_MODEL", "aura-2")
-	cfg.DGLanguage = get("POLYPHON_DEEPGRAM_LANGUAGE", "en")
-	cfg.DGEndpointingMs = getInt("POLYPHON_DEEPGRAM_ENDPOINTING_MS", 2000)
-	cfg.DGUtteranceEndMs = getInt("POLYPHON_DEEPGRAM_UTTERANCE_END_MS", 0)
+	// Cascade / labeled-transcript clients (#1355). Empty model values fall
+	// back to the openai package defaults.
+	cfg.CascadeASRModel = get("POLYPHON_OPENAI_ASR_MODEL", "")
+	cfg.CascadeTTSModel = get("POLYPHON_OPENAI_TTS_MODEL", "")
+	cfg.VoiceLanguage = get("POLYPHON_VOICE_LANGUAGE", "en")
 
 	if cfg.VoiceExecutor != "cascade" && cfg.VoiceExecutor != "realtime" {
 		return Config{}, fmt.Errorf(

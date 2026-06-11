@@ -829,7 +829,7 @@ builtin voicePickForGender {
 // builtinVoiceResolve -- Canonical -> provider voice ID resolution.
 //
 // Maps a canonical voice name (alto, tenor, etc.) plus a TTS provider
-// name (openai or openai-realtime in Stage 1; deepgram in Stage 2) to
+// name (openai or openai-realtime) to
 // the provider-specific voice ID the bridge / TTS clients accept.
 // Falls back to the provider default when the canonical name is
 // unknown so the audio path never goes silent.

@@ -58,7 +58,7 @@ func avatarRequestTimeout() time.Duration {
 // HTTPDoer is the minimal HTTP surface the vendor clients depend on. The real
 // clients use *http.Client; tests inject a stub so the request shape (URL,
 // headers, JSON body) is asserted without a network round-trip. Mirrors the
-// doer seam the deepgram clients use.
+// doer seam the voice provider clients use.
 type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }

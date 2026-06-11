@@ -5,7 +5,7 @@ set -e
 #
 # Creates a GKE Standard cluster with one always-on CPU node pool that
 # hosts LiveKit, Bridge Agent, and Redis. ASR/TTS runs against a cloud
-# API (OpenAI today; Deepgram in Stage 2 of the Deepgram migration), so
+# API (OpenAI), so
 # no GPU node pool is provisioned.
 #
 # Usage:

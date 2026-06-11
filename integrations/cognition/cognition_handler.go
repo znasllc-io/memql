@@ -444,7 +444,7 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// mentions are never suppressed.
 	//
 	// Voice runs the classifier too. Without it, every interim
-	// thinking pause that Deepgram commits as `is_final` triggers
+	// thinking pause the ASR commits as `is_final` triggers
 	// an agent reply, including the "um, let me think..." cases
 	// where the user is mid-thought. The classifier's
 	// `intent=follow_up` + `carriesAction=false` signal is exactly
@@ -2367,11 +2367,11 @@ func resolveAgentVoice(agent *agentPayload) string {
 	if canonical == "" {
 		return ""
 	}
-	// voice.ActiveProvider applies the same POLYPHON_VOICE_PROVIDER /
-	// MEMQL_DEEPGRAM_API_KEY auto-default rule the bridge-agent uses
-	// (see cmd/bridge-agent/main.go's initVoiceProviders). Hardcoding
-	// "openai" here is a bug -- a Deepgram-active bridge gets sent
-	// OpenAI voice ids it can't synthesize and every TTS call 400s.
+	// voice.ActiveProvider applies the same POLYPHON_VOICE_PROVIDER
+	// default rule the bridge-agent uses (see cmd/bridge-agent/main.go's
+	// initVoiceProviders). Hardcoding "openai" here is a bug -- a bridge
+	// on a different provider gets sent voice ids it can't synthesize
+	// and every TTS call 400s.
 	return voice.ResolveVoice(canonical, voice.ActiveProvider())
 }
 
@@ -3179,8 +3179,8 @@ func isConversationalAckIntent(intent string) bool {
 // responding to. Heuristic-only, intentionally conservative: a true
 // hit suppresses an agent dispatch, so the cost of a false positive
 // is "Sofia doesn't reply when she should" -- the same shape as the
-// classifier suppression itself. Tuned for the Deepgram-final-on-
-// pause failure mode: user pauses mid-sentence, Deepgram commits
+// classifier suppression itself. Tuned for the final-on-
+// pause failure mode: user pauses mid-sentence, the ASR commits
 // the in-flight chunk as a "final" transcript, the LLM classifier
 // labels it as the closest complete intent (question / answer /
 // request) because grammar pattern-matches.
@@ -3193,12 +3193,12 @@ func isConversationalAckIntent(intent string) bool {
 //     "Maybe you can help me with", "is there any" all hit this.
 //
 //  2. No terminal punctuation (`. ? !`) AND the utterance is short
-//     (<= 6 words). Deepgram tends not to punctuate the trailing
+//     (<= 6 words). ASR providers tend not to punctuate the trailing
 //     pre-pause chunk it commits as final; a short un-punctuated
 //     burst is almost always a fragment.
 //
 //  3. Ends in an obvious filler-trail token ("um", "uh", "like",
-//     "so"). Deepgram occasionally commits these as the final
+//     "so"). The ASR occasionally commits these as the final
 //     word of an interim phrase when the user is gathering the
 //     next clause.
 func looksIncompleteVoiceUtterance(text string) bool {
@@ -3218,10 +3218,10 @@ func looksIncompleteVoiceUtterance(text string) bool {
 	lastWord := strings.ToLower(words[len(words)-1])
 
 	// Terminal punctuation is the strongest "this clause is complete"
-	// signal Deepgram gives us. When it's there, trust it and don't
+	// signal the ASR gives us. When it's there, trust it and don't
 	// second-guess based on the last word. "What are you able to help
 	// me with?" ends on the preposition `with` but is unambiguously a
-	// complete question because Deepgram terminated it with `?`. The
+	// complete question because the ASR terminated it with `?`. The
 	// previous heuristic flipped this around -- it checked the last
 	// word FIRST and suppressed complete sentences whose final token
 	// happened to be a function word.
@@ -3239,14 +3239,14 @@ func looksIncompleteVoiceUtterance(text string) bool {
 	}
 	// Without terminal punctuation AND with a content word at the end,
 	// the signal is ambiguous: it could be a complete declarative
-	// ("I want pizza") that Deepgram didn't punctuate, or a fragment
+	// ("I want pizza") that the ASR didn't punctuate, or a fragment
 	// ("Maybe we should think about the"). Falling through to NOT
 	// suppress here -- the user-perceived cost of suppressing a real
 	// question is much higher than the cost of one extra reply on a
 	// trailing fragment, and the function-word + filler rules above
 	// already catch the high-confidence cases. The earlier rule (no
 	// terminal punct + >2 words = fragment) was too aggressive
-	// against Deepgram's known-unreliable punctuation on flat-
+	// against the ASR's known-unreliable punctuation on flat-
 	// intonation utterances.
 	return false
 }
@@ -3289,7 +3289,7 @@ var voiceTrailingFunctionWords = map[string]bool{
 
 // voiceFillerWords are conversational filler tokens that English
 // speakers use to gather the next clause. Sentences rarely end on
-// these; if Deepgram commits with one as the final token, the
+// these; if the ASR commits with one as the final token, the
 // utterance is mid-thought.
 var voiceFillerWords = map[string]bool{
 	"um": true, "uh": true, "uhh": true, "uhm": true, "umm": true,

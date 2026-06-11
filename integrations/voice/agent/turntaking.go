@@ -114,7 +114,7 @@ type SpeakDirective struct {
 }
 
 // TurnMachine is the five-state turn-taking machine (section 3 of the
-// #452 design). It is safe for concurrent use: the Deepgram event loop,
+// #452 design). It is safe for concurrent use: the ASR event loop,
 // the external directive path, and the assistant-done callback can drive
 // it from different goroutines.
 type TurnMachine struct {
@@ -162,7 +162,7 @@ func (m *TurnMachine) Stop() {
 	m.mu.Unlock()
 }
 
-// OnSpeechStarted feeds a human voice-activity onset (Deepgram
+// OnSpeechStarted feeds a human voice-activity onset (the ASR provider's
 // SpeechStarted, surfaced as polyphon.ASRKindSpeechStarted). Transition
 // (A) while listening -> human-turn; transition (C) [barge-in] while
 // assistant-turn. A no-op in idle.
@@ -194,7 +194,7 @@ func (m *TurnMachine) OnSpeechStarted() {
 }
 
 // OnInterim feeds an interim (non-final) transcript update. It keeps the
-// running partial so a final-before-onset edge (Deepgram commits a phrase
+// running partial so a final-before-onset edge (the ASR commits a phrase
 // without a SpeechStarted in front) still has text. While listening, an
 // interim is treated as an implicit onset (some short utterances arrive
 // as a Results event before any SpeechStarted), moving to human-turn.

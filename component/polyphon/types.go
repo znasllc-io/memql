@@ -17,8 +17,7 @@ type VoicePlatform string
 
 const (
 	// PlatformOpenAI uses OpenAI Realtime transcription (ASR) + OpenAI TTS API.
-	// Current default; replaced by Deepgram (Nova-3 + Aura-2) in Stage 2 of
-	// the Deepgram migration plan.
+	// Current default.
 	PlatformOpenAI VoicePlatform = "openai"
 )
 

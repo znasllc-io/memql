@@ -63,7 +63,7 @@ type Options struct {
 	Language string
 
 	// Provider optionally overrides the cluster's default transcription
-	// provider (e.g. "deepgram", "openai-realtime", "openai-whisper").
+	// provider (e.g. "openai-realtime", "openai-whisper").
 	// Empty uses the cluster default.
 	Provider string
 

@@ -9,8 +9,8 @@ import (
 	"github.com/znasllc-io/memql/component/polyphon"
 )
 
-// tts_pipeline.go adapts the existing Deepgram TTS client (Aura-2,
-// integrations/deepgram/tts.go) onto the cascade's ttsSynthesizer seam.
+// tts_pipeline.go adapts the OpenAI TTS client
+// (integrations/openai/tts.go) onto the cascade's ttsSynthesizer seam.
 // It is pure Go: it asks the TTS provider for linear16 PCM and chunks the
 // response into fixed-size frames on a channel, aborting promptly when the
 // playout context is cancelled (barge-in). The room-publish side
@@ -19,9 +19,9 @@ import (
 // encoder upsamples 16k PCM16 -> 48k Opus on publish (per
 // docs/internal/design/voice-451-livekit-go-room-participation.md section 4).
 
-// ttsPCMSampleRate is the linear16 PCM rate the Deepgram TTS client emits
-// (deepgram.speakURL hardcodes sample_rate=16000 for linear16). The room
-// local track is constructed with this same source rate.
+// ttsPCMSampleRate is the PCM16 rate the OpenAI TTS client emits (it
+// downsamples its native 24kHz output to 16kHz). The room local track is
+// constructed with this same source rate.
 const ttsPCMSampleRate = 16000
 
 // ttsFrameBytes is one publish frame: 20 ms of 16 kHz mono PCM16 =
@@ -30,31 +30,31 @@ const ttsPCMSampleRate = 16000
 const ttsFrameBytes = 640
 
 // pcmSynthesizer is the polyphon.TTSProvider surface the adapter drives. It
-// is satisfied by *deepgram.TTSClient.Synthesize (which returns linear16
-// PCM16 at ttsPCMSampleRate). Defined as a local interface so this file
-// does not import the deepgram package directly, keeping the cascade glue
-// decoupled from the concrete provider.
+// is satisfied by *openai.TTSClient.Synthesize (which returns PCM16 at
+// ttsPCMSampleRate). Defined as a local interface so this file does not
+// import the openai package directly, keeping the cascade glue decoupled
+// from the concrete provider.
 type pcmSynthesizer interface {
 	Synthesize(ctx context.Context, config polyphon.TTSConfig) (io.ReadCloser, error)
 }
 
-// deepgramTTSAdapter wraps a pcmSynthesizer as a cascade ttsSynthesizer.
-type deepgramTTSAdapter struct {
+// pcmTTSAdapter wraps a pcmSynthesizer as a cascade ttsSynthesizer.
+type pcmTTSAdapter struct {
 	provider pcmSynthesizer
 	logger   *slog.Logger
 }
 
-// newDeepgramTTSAdapter builds the adapter. provider is typically a
-// *deepgram.TTSClient.
-func newDeepgramTTSAdapter(provider pcmSynthesizer, logger *slog.Logger) *deepgramTTSAdapter {
-	return &deepgramTTSAdapter{provider: provider, logger: logger}
+// newPCMTTSAdapter builds the adapter. provider is typically a
+// *openai.TTSClient.
+func newPCMTTSAdapter(provider pcmSynthesizer, logger *slog.Logger) *pcmTTSAdapter {
+	return &pcmTTSAdapter{provider: provider, logger: logger}
 }
 
 // SynthesizePCM synthesizes text at voiceID and streams 20 ms PCM16 frames
 // onto the returned channel, closing it on completion or ctx cancel. The
-// underlying Deepgram REST call streams its body, so frames begin flowing
+// underlying TTS HTTP call streams its body, so frames begin flowing
 // as soon as the first bytes land rather than after the full synthesis.
-func (a *deepgramTTSAdapter) SynthesizePCM(ctx context.Context, text, voiceID string) (<-chan []byte, error) {
+func (a *pcmTTSAdapter) SynthesizePCM(ctx context.Context, text, voiceID string) (<-chan []byte, error) {
 	cfg := polyphon.DefaultTTSConfig(text, voiceID)
 	cfg.SampleRate = ttsPCMSampleRate
 	body, err := a.provider.Synthesize(ctx, cfg)

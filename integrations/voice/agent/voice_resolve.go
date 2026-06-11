@@ -7,8 +7,8 @@ package agent
 // (resolve_realtime_voice).
 //
 // CRITICAL: the canonical voice catalog is OWNED by integrations/voice
-// (voices.go). The Python agent kept LOCAL mirror maps (DEEPGRAM_AURA2_VOICES,
-// OPENAI_REALTIME_VOICES) to avoid a network call; the Go agent runs in the
+// (voices.go). The Python agent kept LOCAL mirror maps to avoid a network
+// call; the Go agent runs in the
 // same module as the catalog, so we CONSUME voice.ResolveVoice directly and
 // do NOT fork the mapping. This satisfies the issue's "voice catalog stays the
 // single source of truth" acceptance criterion -- any catalog churn lands in
@@ -19,8 +19,8 @@ import (
 )
 
 // ResolveTTSVoice maps the persona's canonical voice to the provider voice id
-// for the active TTS provider (deepgram / openai, per POLYPHON_VOICE_PROVIDER /
-// MEMQL_DEEPGRAM_API_KEY -- voice.ActiveProvider). This is the cascade path's
+// for the active TTS provider (openai, per POLYPHON_VOICE_PROVIDER --
+// voice.ActiveProvider). This is the cascade path's
 // voice (#455 consumes it at TTS synthesis time).
 //
 // voice.ResolveVoice never returns "" for a known provider (it falls back to a

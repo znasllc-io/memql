@@ -336,7 +336,7 @@ test("AudioClient.transcribe -- error frame surfaces as iterator throw", async (
   socket.pushServer({
     type: "error",
     streamId: stream.streamId,
-    error: { code: "stt_failed", message: "deepgram unreachable" },
+    error: { code: "stt_failed", message: "stt provider unreachable" },
   });
   await assert.rejects(
     (async () => {
@@ -344,7 +344,7 @@ test("AudioClient.transcribe -- error frame surfaces as iterator throw", async (
         /* ignored */
       }
     })(),
-    /AudioClient.transcribe: deepgram unreachable/,
+    /AudioClient.transcribe: stt provider unreachable/,
   );
   client.close();
 });

@@ -10,76 +10,62 @@ owner: znas
 # Voice end-of-utterance (EOU) tuning
 
 Status: baseline shipped; per-user adaptive endpointing is a design seed,
-not built. Read this before re-tuning the Deepgram knobs or starting on
-the adaptive layer.
+not built. Read this before re-tuning the VAD knobs or starting on the
+adaptive layer.
 
 ## What "end of utterance" means in the voice path
 
 The Go voice-agent (`integrations/voice/agent/`) treats a chunk of
-user speech as "done" the moment Deepgram emits a `final=true`
+user speech as "done" the moment the ASR emits a `final=true`
 transcript event for it. That event then becomes a
 `VoiceAgentFinalTranscript` to memql, which inserts the user's chat
 row and fires `VoiceAgentTurnRequest` to dispatch the agent. From the
-user's perspective: the moment Deepgram says "final", the agent will
+user's perspective: the moment the ASR says "final", the agent will
 reply -- so any over-eager "final" cuts the user off mid-thought.
 
-Two Deepgram knobs control the firing:
+Both voice paths run on OpenAI server-side VAD, with one knob each:
 
-- **`endpointing_ms`** -- phrase-commit cadence inside an utterance.
-  Deepgram waits this much silence before stabilising the current
-  in-flight transcript chunk and marking it `is_final=true`. Smaller
-  = snappier final transcripts; larger = more tolerance for thinking
-  pauses inside a sentence.
-- **`utterance_end_ms`** -- hard end-of-utterance silence floor on
-  the Deepgram wire protocol. The Go cascade speaks the Deepgram
-  streaming WebSocket directly (no LiveKit STT plugin in the middle),
-  so it forwards `POLYPHON_DEEPGRAM_UTTERANCE_END_MS` as the
-  `utterance_end_ms` query param when non-zero -- unlike the retired
-  Python path, where the LK Deepgram plugin did not expose this knob.
-
-An `UtteranceEnd` event from Deepgram causes the in-flight phrase to
-be committed as a `final` transcript. So both knobs feed the same
-downstream "transcript is final, dispatch the agent" signal.
-
-There is also a frame-level VAD (Silero) gating audio frames into
-Deepgram, but Silero only decides "this frame is speech vs noise"
--- it does NOT decide turn boundaries. The EOU decision is
-Deepgram's alone.
+- **Cascade / streaming chat mic** (`integrations/openai/asr.go`,
+  Realtime API transcription-only mode) -- the server VAD waits
+  `silence_duration_ms` of trailing silence before declaring
+  end-of-utterance and committing the transcript. Tuned via
+  `POLYPHON_OPENAI_VAD_SILENCE_MS` (default `600`).
+- **Realtime executor** (gpt-realtime speech-to-speech, native 1-on-1
+  path) -- the session's `server_vad` turn detection uses
+  `MEMQL_REALTIME_VAD_SILENCE_DURATION_MS` (default `500`), plus the
+  energy gate `MEMQL_REALTIME_VAD_THRESHOLD` (default `0.6`, raised
+  from OpenAI's 0.5 baseline so ambient noise does not commit a
+  phantom turn) and `MEMQL_REALTIME_VAD_PREFIX_PADDING_MS` (default
+  `300`).
 
 ## Baseline defaults
 
-Defined in `integrations/voice/agent/config.go` (`LoadConfig`):
+| Env var                                  | Default | Effect                                          |
+| ---------------------------------------- | ------- | ----------------------------------------------- |
+| `POLYPHON_OPENAI_VAD_SILENCE_MS`         | `600`   | Cascade/chat-mic trailing-silence window         |
+| `MEMQL_REALTIME_VAD_SILENCE_DURATION_MS` | `500`   | Realtime executor trailing-silence window        |
+| `MEMQL_REALTIME_VAD_THRESHOLD`           | `0.6`   | Realtime speech-energy gate (0..1)               |
+| `MEMQL_REALTIME_VAD_PREFIX_PADDING_MS`   | `300`   | Audio kept before the detected onset             |
 
-| Env var                                 | Default | Effect                          |
-| --------------------------------------- | ------- | ------------------------------- |
-| `POLYPHON_DEEPGRAM_ENDPOINTING_MS`      | `2000`  | Phrase-stable threshold         |
-| `POLYPHON_DEEPGRAM_UTTERANCE_END_MS`    | `0`     | Forwarded to Deepgram as `utterance_end_ms` when non-zero (see above) |
-
-These err on "let the user think." A 500ms phrase commit (the old
-default, ported forward from the retired Bridge Agent) fires on any
-natural conversational pause; users complained their sentences got
-cut mid-thought and the agent would either respond to a fragment
-or apologise that "your message got cut off." 2000ms gives ~3x more
-breathing room and is still well under the perceived-rude threshold
-for a back-and-forth.
+The 600ms cascade default is the measured sweet spot: 500ms splits
+natural mid-sentence pauses ("just wanna see how... [breath] how it
+works") into two utterances; 800ms adds perceptible end-of-turn lag.
 
 A snappier user (rapid-fire questions, prefers tight back-and-forth)
-can drop the endpointing knob via env. Typical re-tunes:
+can drop the silence window via env. Typical re-tunes:
 
-- Snappy: `endpointing=900`
-- Deliberate (default): `endpointing=2000`
-- Very deliberate / thinks out loud: `endpointing=3000`
+- Snappy: `450-500`
+- Default: `600`
+- Very deliberate / thinks out loud: `800-1000`
 
 The classifier runs on voice now (cognition_handler.go's `runClassifier`
 is no longer gated on `!isVoiceUtteranceEarly`), so `intent=follow_up`
 fragments like "um, let me think..." get suppressed BEFORE they cost an
-agent reply. The endpointing knob then becomes a less critical safety
-net rather than the sole gate on "is this thought done."
+agent reply. The silence knob then becomes a less critical safety net
+rather than the sole gate on "is this thought done."
 
-`POLYPHON_DEEPGRAM_UTTERANCE_END_MS` is forwarded to Deepgram as a
-hard end-of-utterance silence floor when non-zero; set it alongside
-endpointing when you have a target floor in mind, otherwise leave it
-at 0.
+For noisy rooms, raise `MEMQL_REALTIME_VAD_THRESHOLD` toward `0.9` so
+low-energy ambient noise stops tripping turns at all (see #1203).
 
 ## The adaptive idea (not built)
 
@@ -87,11 +73,11 @@ Each speaker has a distinct cadence -- some pause 200ms between
 phrases, some pause 2000ms. A static global default has to pick a
 compromise that's wrong for both ends. Long-term, voice-agent should
 learn each user's median inter-word and inter-phrase gap from their
-own STT history and tune `endpointing_ms` per session.
+own STT history and tune the silence window per session.
 
 Sketch of the loop:
 
-1. **Telemetry.** On every `final=true` Deepgram event, log
+1. **Telemetry.** On every `final=true` ASR event, log
    `(userId, utteranceText, interimTimestamps[], finalTimestamp,
    audioStartTs, audioEndTs)` to memql as a
    `v1:cognition:speakingprofile:sample` row. The interim timestamps
@@ -108,11 +94,10 @@ Sketch of the loop:
 
 3. **Per-session priming.** When voice-agent starts a session for a
    user, query their `speakingprofile` and set
-   `endpointing_ms = max(750, round(p90InterPhraseGapMs * 1.2))`
-   and `utterance_end_ms = max(1200, round(p90InterPhraseGapMs * 1.6))`.
-   The 1.2/1.6 multipliers give safety headroom above the observed
-   gap distribution. Falls back to the baseline defaults if the
-   user has fewer than ~20 samples.
+   `silence_duration_ms = max(450, round(p90InterPhraseGapMs * 1.2))`.
+   The 1.2 multiplier gives safety headroom above the observed gap
+   distribution. Falls back to the baseline defaults if the user has
+   fewer than ~20 samples.
 
 4. **Continuous nudging.** Inside a long session, if the
    `falseFinalsRate` over the trailing 10 turns climbs above a
@@ -130,22 +115,13 @@ data so the per-user history lives with them and never crosses
 tenants. The aggregation lives in a partition-scoped automation
 (daily) -- not in cognition's hot path.
 
-## Why not just use VAD-based turn detection?
-
-A VAD-driven turn-detection mode uses the VAD signal to call the turn
-instead of relying on Deepgram's endpointing. We tried this in a prior
-session (on the retired LiveKit Agents path); the VAD fires on ambient
-room noise (background chatter, fans, music) and produced even worse
-cut-offs. Deepgram endpointing is signal-aware (it knows when the user
-is mid-phrase vs done) and is the right authority. Adaptive tuning of
-THIS signal is the lever.
-
 ## Pre-flight before re-tuning
 
-The Go cascade's Deepgram streaming URL is built in
-`integrations/deepgram/deepgram.go` (consumed via
-`integrations/voice/agent/stt_pipeline.go`). Before changing the
-defaults, confirm there that `endpointing` and `utterance_end_ms` are
-still mapped to the Deepgram WebSocket query params. Deepgram has
-tweaked these between Nova-2 and Nova-3; future model upgrades may
-force a re-tune.
+The cascade's session config is built in
+`integrations/openai/asr.go` (`sendSessionConfig`, consumed via
+`integrations/voice/agent/stt_pipeline.go`); the realtime executor's
+`server_vad` block is built in
+`integrations/voice/agent/realtime_vad.go`. Before changing the
+defaults, confirm there that the silence/threshold knobs are still
+mapped to the session config -- OpenAI has revised the Realtime
+session schema before; future API upgrades may force a re-tune.

@@ -24,11 +24,11 @@ func (s *stubSynth) Synthesize(_ context.Context, cfg polyphon.TTSConfig) (io.Re
 	return io.NopCloser(strings.NewReader(s.payload)), nil
 }
 
-func TestDeepgramTTSAdapter_FramesPCM(t *testing.T) {
+func TestPCMTTSAdapter_FramesPCM(t *testing.T) {
 	// 1700 bytes -> two 640-byte frames + one 420-byte trailing frame.
 	payload := strings.Repeat("x", 1700)
 	stub := &stubSynth{payload: payload}
-	adapter := newDeepgramTTSAdapter(stub, nil)
+	adapter := newPCMTTSAdapter(stub, nil)
 
 	frames, err := adapter.SynthesizePCM(context.Background(), "hello", "aura-2-thalia-en")
 	require.NoError(t, err)
@@ -53,9 +53,9 @@ func TestDeepgramTTSAdapter_FramesPCM(t *testing.T) {
 	}
 }
 
-func TestDeepgramTTSAdapter_CancelStopsStream(t *testing.T) {
+func TestPCMTTSAdapter_CancelStopsStream(t *testing.T) {
 	payload := strings.Repeat("y", 64000) // many frames
-	adapter := newDeepgramTTSAdapter(&stubSynth{payload: payload}, nil)
+	adapter := newPCMTTSAdapter(&stubSynth{payload: payload}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	frames, err := adapter.SynthesizePCM(ctx, "long", "")

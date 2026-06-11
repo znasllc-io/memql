@@ -70,7 +70,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	disconnectReason := "normal"
 
 	// bridge is the per-session media plane: the cascade bridge (#455: STT per
-	// remote track + Deepgram TTS publish) or the realtime bridge (#457: STT
+	// remote track + OpenAI TTS publish) or the realtime bridge (#457: STT
 	// for labeled transcripts + active-speaker audio in, gpt-realtime output
 	// audio published), selected behind the executor seam (RoomRequest.Executor).
 	// Both satisfy mediaBridge. It is constructed after the connection is
@@ -118,7 +118,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 						"kind", pub.Kind(),
 						"source", pub.Source().String())
 				}
-				// #455 cascade: open a Deepgram STT stream for this human
+				// #455 cascade: open an OpenAI STT stream for this human
 				// audio track and feed it decoded PCM16. Falls through to
 				// diagnostics only if the bridge isn't up yet.
 				if b := getBridge(); b != nil {

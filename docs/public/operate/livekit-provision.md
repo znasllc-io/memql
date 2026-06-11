@@ -97,4 +97,4 @@ networks.
 - Mic toggle in CoPresent mints a room token (no "provider not configured").
 - Browser joins the LiveKit room; the General Assistant participates once the
   voice-agent is wired with `LIVEKIT_URL` / `_API_KEY` / `_API_SECRET` +
-  `MEMQL_DEEPGRAM_API_KEY`.
+  `OPENAI_API_KEY`.
