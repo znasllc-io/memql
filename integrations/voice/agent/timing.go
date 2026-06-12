@@ -30,8 +30,8 @@ func logVoiceTiming(logger *slog.Logger, phase string, start time.Time, attrs ..
 	if logger == nil {
 		return
 	}
-	args := make([]any, 0, len(attrs)+4)
-	args = append(args, voiceTimingKey, phase, "duration_ms", time.Since(start).Milliseconds())
-	args = append(args, attrs...)
+	// append (not a len()+k make) so CodeQL's allocation-size-overflow rule
+	// has no arithmetic to flag; the attr lists here are tiny constants.
+	args := append([]any{voiceTimingKey, phase, "duration_ms", time.Since(start).Milliseconds()}, attrs...)
 	logger.Info("voice timing", args...)
 }
