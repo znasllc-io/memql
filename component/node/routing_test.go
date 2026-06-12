@@ -41,6 +41,10 @@ func TestEvaluateRouting_ForwardRules(t *testing.T) {
 		{"graph.node.updated.v1:cluster:spawnEvent", true, true, ""},
 		{"graph.node.created.v1:cognition:participant", true, true, ""},
 		{"graph.node.updated.v1:cognition:utterance", true, true, ""},
+		// #1412 regression: the voice gate directive must reach the BFF's
+		// per-turn waiter across the mesh; default-deny stranded it on the
+		// cognition node and every gate-path voice turn timed out.
+		{"voice.gate.directive", true, false, NodeTypeBFF},
 	}
 
 	for _, tt := range tests {
