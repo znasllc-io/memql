@@ -296,3 +296,34 @@ func TestWorkbenchOutputBytes(t *testing.T) {
 		t.Errorf("cluster no-content: expected nil, got %q", got)
 	}
 }
+
+// TestDeriveInlineSummary covers the #1392 producer-side fix: inline
+// text deliverables carry a real one-line summary derived from their
+// content (heading markers stripped, whitespace collapsed, truncated),
+// and unusable bodies yield "" so the field is omitted entirely.
+func TestDeriveInlineSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"markdown heading", "# 10 Best German Folklore Tales\n\nOnce upon a time...", "10 Best German Folklore Tales"},
+		{"plain first line", "\n\nA curated list of tales.\nMore text.", "A curated list of tales."},
+		{"collapses whitespace", "First   line\twith   runs", "First line with runs"},
+		{"empty body", "   \n\n  ", ""},
+		{"hashes only", "###", ""},
+	}
+	for _, tc := range cases {
+		if got := deriveInlineSummary(tc.body); got != tc.want {
+			t.Errorf("%s: deriveInlineSummary(%q) = %q, want %q", tc.name, tc.body, got, tc.want)
+		}
+	}
+
+	// Truncation: long first line caps at inlineSummaryMaxRunes + ellipsis.
+	long := strings.Repeat("word ", 100)
+	got := deriveInlineSummary(long)
+	if r := []rune(got); len(r) > inlineSummaryMaxRunes+1 || !strings.HasSuffix(got, "…") {
+		t.Errorf("expected summary truncated to <= %d runes ending in ellipsis, got %d runes: %q",
+			inlineSummaryMaxRunes+1, len([]rune(got)), got)
+	}
+}

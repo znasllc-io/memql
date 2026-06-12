@@ -260,6 +260,36 @@ func renderMemQLValueReflect(value any) string {
 	}
 }
 
+// isCompiledReference reports whether expr has the exact `$root.path`
+// shape the automation compiler emits for runtime references
+// (compileStepHelperValue lifts `args.X` / `event.X` / `item.X` source
+// expressions to `$`-form; the executor seeds those roots on the
+// evaluator). The root must be an evaluator-seeded root and at least
+// one dot segment must follow; any whitespace, quote, paren, brace,
+// bracket, or comma disqualifies -- those are expression or user-data
+// shapes, not bare references. Used to decide whether an unresolvable
+// reference drops to null (compiler reference: its source text is
+// never valid data, memql#1392) or passes through unchanged
+// (everything else, preserving prior behaviour).
+func isCompiledReference(expr string) bool {
+	if !strings.HasPrefix(expr, "$") {
+		return false
+	}
+	path := expr[1:]
+	if path == "" || strings.ContainsAny(path, " \t\r\n\"'(){}[],") {
+		return false
+	}
+	root, rest, found := strings.Cut(path, ".")
+	if !found || rest == "" {
+		return false
+	}
+	switch root {
+	case "args", "event", "item", "input", "ctx", "steps":
+		return true
+	}
+	return false
+}
+
 func isRuntimeReference(value string) bool {
 	return strings.HasPrefix(value, "$") ||
 		value == "event" ||
@@ -358,6 +388,28 @@ func resolveArgValueRef(v any, evaluator *automations.Evaluator) (any, error) {
 			}
 			resolved, err := evaluator.EvaluateValue(expr)
 			if err != nil || resolved == nil {
+				// A compiler-emitted reference whose path is missing from
+				// the payload must degrade to null -- NEVER to its own
+				// source text. Returning the raw string here is exactly how
+				// the literal `$args.event.payload.summary` ended up stored
+				// as an artifact's summary (memql#1392): renderMemQLValue
+				// passes runtime-reference strings through unquoted, so the
+				// unresolved reference survives into the mutation row as
+				// data. Scoped to the strict `$root.path` shape the
+				// compiler produces (see isCompiledReference); anything
+				// else -- user data that happens to start with `$`, the
+				// bare `event` token pinned by #418 -- keeps the historical
+				// pass-through.
+				if isCompiledReference(expr) {
+					if err != nil {
+						evaluator.Warnf("function arg reference failed to resolve; dropping to null",
+							"reference", val, "error", err.Error())
+					} else {
+						evaluator.Warnf("function arg reference resolved to no value; dropping to null",
+							"reference", val)
+					}
+					return nil, nil
+				}
 				return v, nil // keep original if resolution fails
 			}
 			return resolved, nil

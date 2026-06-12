@@ -497,6 +497,14 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		// as the generatedOutput body -- the Library DocumentCard renders it
 		// directly (markdown / plain), no attachment round-trip needed. (memql#889)
 		fmt.Fprintf(&b, `, body:%q`, inline)
+		// Carry a real one-line summary derived from the content we already
+		// hold, so logicIndexGeneratedOutput stamps a meaningful
+		// artifact.summary instead of nothing (memql#1392). Attachment-backed
+		// and pointer rows have no text to summarize; they simply omit the
+		// field and the index logic resolves it to null.
+		if summary := deriveInlineSummary(inline); summary != "" {
+			fmt.Fprintf(&b, `, summary:%q`, summary)
+		}
 	} else {
 		// Pointer row: bytes unavailable or non-text, so describe where the file lives.
 		fmt.Fprintf(&b, `, body:%q`, fmt.Sprintf("File written to the task workspace at `%s`.", path))
@@ -522,6 +530,40 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 // isInlineTextFormat reports whether a deliverable of this format (as returned
 // by formatForExtension) is stored inline on the generatedOutput body rather
 // than uploaded to blob -- the Library renders these directly. (memql#888/#889)
+// inlineSummaryMaxRunes bounds the derived artifact summary so the
+// Library list stays a glanceable line, not a paragraph (matches the
+// agent-streaming producer's summaryMaxLen, memql#1207).
+const inlineSummaryMaxRunes = 200
+
+// deriveInlineSummary produces a one-line summary for a workbench
+// deliverable from its inline text body, mirroring the agent-streaming
+// producer's deriveOutputSummary (memql#1207): the first non-empty line
+// (leading markdown `#`s stripped), whitespace-collapsed and truncated
+// to inlineSummaryMaxRunes runes with an ellipsis. Returns "" when
+// nothing usable exists -- the row then carries no summary and
+// logicIndexGeneratedOutput resolves the missing field to null instead
+// of leaking the unresolved reference literal (memql#1392).
+func deriveInlineSummary(body string) string {
+	line := ""
+	for _, raw := range strings.Split(body, "\n") {
+		l := strings.TrimSpace(raw)
+		if l == "" {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimLeft(l, "#"))
+		break
+	}
+	line = strings.Join(strings.Fields(line), " ")
+	if line == "" {
+		return ""
+	}
+	runes := []rune(line)
+	if len(runes) > inlineSummaryMaxRunes {
+		return strings.TrimSpace(string(runes[:inlineSummaryMaxRunes])) + "…"
+	}
+	return line
+}
+
 func isInlineTextFormat(format string) bool {
 	return format == "markdown" || format == "text"
 }
