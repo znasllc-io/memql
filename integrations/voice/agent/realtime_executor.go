@@ -557,6 +557,11 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 	if utterance == "" {
 		return
 	}
+	// turnStart anchors the per-turn gate/cognition hop (#1426): turn request
+	// sent -> conductor decision received. This whole window sits between the
+	// model's end-of-speech and the response.create on gated paths, so it is
+	// the prime suspect for the end-of-speech -> first-audio gap.
+	turnStart := time.Now()
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
@@ -576,6 +581,12 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 		return
 	}
 	defer release()
+
+	// logGate stamps the gate round-trip's terminal outcome (#1426).
+	logGate := func(outcome string, extra ...any) {
+		attrs := append([]any{"space_id", e.cfg.SpaceID, "outcome", outcome}, extra...)
+		logVoiceTiming(e.logger, "turn.gate_roundtrip", turnStart, attrs...)
+	}
 
 	var reply strings.Builder
 	var utteranceID, requestID string
@@ -615,11 +626,13 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 				// legacy authored-text path below (model re-voices final_text).
 				if directiveMode := strings.TrimSpace(done.GetDirectiveMode()); directiveMode != "" {
 					if strings.EqualFold(directiveMode, "defer") {
+						logGate("defer", "request_id", requestID)
 						if e.logger != nil {
 							e.logger.Debug("voice-agent realtime: conductor gate deferred (no response.create)")
 						}
 						return
 					}
+					logGate("directive", "request_id", requestID, "mode", directiveMode)
 					e.machine.OnSpeak(SpeakDirective{
 						UtteranceID: utteranceID,
 						RequestID:   requestID,
@@ -634,11 +647,13 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 				// -> emit NO response.create. Non-empty -> engage -> drive exactly
 				// one response.create conveying the authored text.
 				if final == "" {
+					logGate("suppressed", "request_id", requestID, "error_code", done.GetErrorCode())
 					if e.logger != nil {
 						e.logger.Debug("voice-agent realtime: conductor suppressed turn (no response.create)")
 					}
 					return
 				}
+				logGate("authored", "request_id", requestID, "chars", len(final))
 				e.machine.OnSpeak(SpeakDirective{
 					Text:        final,
 					UtteranceID: utteranceID,
@@ -764,9 +779,13 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			// multi-frame response only measures once.
 			if e.firstAudioPending.CompareAndSwap(true, false) && e.logger != nil {
 				if stop := e.turnSpeechStopNanos.Swap(0); stop > 0 {
+					ms := (time.Now().UnixNano() - stop) / 1e6
 					e.logger.Info("voice trace: turntaking event",
 						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID,
-						"speech_stop_to_audio_ms", (time.Now().UnixNano()-stop)/1e6)
+						// #1426: the headline per-turn snappiness number, under
+						// the discoverable voice_timing key.
+						voiceTimingKey, "turn.speech_stop_to_first_audio", "duration_ms", ms,
+						"speech_stop_to_audio_ms", ms)
 				} else {
 					e.logger.Info("voice trace: turntaking event",
 						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
@@ -827,9 +846,13 @@ func (e *RealtimeExecutor) drainEvents() {
 				if e.logger != nil {
 					stage := "model.response_created"
 					if stop := e.turnSpeechStopNanos.Load(); stop > 0 {
+						ms := (time.Now().UnixNano() - stop) / 1e6
 						e.logger.Info("voice trace: turntaking event",
 							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID,
-							"speech_stop_to_response_ms", (time.Now().UnixNano()-stop)/1e6)
+							// #1426: end-of-speech -> response.create (the gate /
+							// cognition hops live inside this window).
+							voiceTimingKey, "turn.speech_stop_to_response", "duration_ms", ms,
+							"speech_stop_to_response_ms", ms)
 					} else {
 						e.logger.Info("voice trace: turntaking event",
 							"stage", stage, "executor", "realtime", "space_id", e.cfg.SpaceID)
@@ -975,7 +998,15 @@ func (e *RealtimeExecutor) dispatchToolCall(callID, funcName, arguments string) 
 		return
 	}
 	go func() {
+		// Tool round-trip timing (#1426): call emitted -> executed -> result
+		// injected -> follow-up response.create. The follow-up's first audio
+		// frame is stamped by the existing turn.speech_stop_to_first_audio /
+		// realtime.audio.first path once EventResponseCreated re-arms it.
+		callStart := time.Now()
 		output := e.toolBridge.Dispatch(e.ctx, funcName, arguments)
+		logVoiceTiming(e.logger, "tool.execute", callStart,
+			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
+		injectStart := time.Now()
 		if err := e.session.SendFunctionResult(callID, output); err != nil {
 			if e.logger != nil {
 				e.logger.Warn("voice-agent realtime: send function result failed",
@@ -983,12 +1014,16 @@ func (e *RealtimeExecutor) dispatchToolCall(callID, funcName, arguments string) 
 			}
 			return
 		}
+		logVoiceTiming(e.logger, "tool.result_inject", injectStart,
+			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
 		// Continue the model with the tool result in context. An empty
 		// instructions string falls back to the session-level persona.
 		if err := e.session.CreateResponse(""); err != nil && e.logger != nil {
 			e.logger.Warn("voice-agent realtime: response.create after tool failed",
 				"name", funcName, "call_id", callID, "err", err)
 		}
+		logVoiceTiming(e.logger, "tool.roundtrip", callStart,
+			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
 	}()
 }
 

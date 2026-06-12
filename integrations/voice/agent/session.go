@@ -172,12 +172,20 @@ func NewSession(cfg Config, client *Client, roomName string, joiner RoomJoiner, 
 // blocks until the room closes, ctx is cancelled, or an unrecoverable error
 // occurs. SessionEnd is always attempted (best-effort) before returning.
 func (s *Session) Run(ctx context.Context) error {
+	connectStart := time.Now()
 	if err := s.client.Connect(ctx); err != nil {
 		return err
 	}
 	defer s.client.Close()
+	// Setup phase (#1426): dispatch accepted -> gRPC stream open.
+	logVoiceTiming(s.logger, "setup.grpc_connect", connectStart, "space_id", s.spaceID)
 
+	// Setup phase (#1426): SessionStart -> SessionAck. This round-trip covers
+	// the server's synchronous engine loads (GA-id resolve, audio/video mode,
+	// persona) -- the server logs each individually under the same key.
+	ackStart := time.Now()
 	ack, err := s.start(ctx)
+	logVoiceTiming(s.logger, "setup.session_ack", ackStart, "space_id", s.spaceID, "ok", err == nil)
 	if err != nil {
 		// Best-effort end notify even on a failed start so audit sees the
 		// attempt; reason "error".

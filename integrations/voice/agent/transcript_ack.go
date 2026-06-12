@@ -36,6 +36,7 @@ func sendFinalTranscript(ctx context.Context, client *Client, logger *slog.Logge
 			VoiceAgentFinalTranscript: msg,
 		},
 	}
+	sendStart := time.Now()
 	replies, release, err := client.StreamRequest(ctx, envelope)
 	if err != nil {
 		if logger != nil {
@@ -44,7 +45,7 @@ func sendFinalTranscript(ctx context.Context, client *Client, logger *slog.Logge
 		}
 		return
 	}
-	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetSpaceId(), replies, release)
+	go consumeFinalTranscriptReply(ctx, logger, executor, msg.GetSpaceId(), sendStart, replies, release)
 }
 
 // consumeFinalTranscriptReply awaits the server's reply to one final
@@ -56,6 +57,7 @@ func consumeFinalTranscriptReply(
 	logger *slog.Logger,
 	executor string,
 	spaceID string,
+	sendStart time.Time,
 	replies <-chan *memqlv1.MemqlServerMessage,
 	release func(),
 ) {
@@ -75,6 +77,11 @@ func consumeFinalTranscriptReply(
 		if !ok {
 			return
 		}
+		// #1426: final-transcript send -> server ack. The wait is off the
+		// audio path (this goroutine), but the duration measures the server's
+		// synchronous utterance insert (engine mutation -> DB) for the turn.
+		logVoiceTiming(logger, "turn.final_transcript_ack", sendStart,
+			"executor", executor, "space_id", spaceID)
 		logFinalTranscriptReply(logger, executor, spaceID, reply)
 	}
 }

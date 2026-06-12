@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,26 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
+
+// voiceTimingKey is the discoverable structured-log key every voice-path
+// timing record carries (#1426). The voice-agent process logs its spans
+// under the same key (integrations/voice/agent/timing.go), so one grep
+// (`voice_timing`) yields the full client+server breakdown of session setup,
+// per-turn latency, and tool round-trips.
+const voiceTimingKey = "voice_timing"
+
+// logVoiceTiming emits one timing record for a completed phase that began at
+// start: `voice_timing=<phase>` + `duration_ms` + caller context. Server-side
+// twin of the voice-agent helper; measurement only, nil-logger safe.
+func logVoiceTiming(logger *slog.Logger, phase string, start time.Time, attrs ...any) {
+	if logger == nil {
+		return
+	}
+	args := make([]any, 0, len(attrs)+4)
+	args = append(args, voiceTimingKey, phase, "duration_ms", time.Since(start).Milliseconds())
+	args = append(args, attrs...)
+	logger.Info("voice timing", args...)
+}
 
 // randHex returns 2*n lowercase-hex characters of crypto/rand entropy.
 // Used to disambiguate utterance ids without leaking the speaker's
@@ -134,6 +155,12 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and gaAgentId are required")
 	}
 
+	// Session-setup timing (#1426): every engine call below runs SYNCHRONOUSLY
+	// before the SessionAck the voice-agent is waiting on -- on a slow DB these
+	// are the session-setup chokepoints. Each is timed individually plus the
+	// handler total, all under the voice_timing key.
+	setupStart := time.Now()
+
 	// The voice-agent currently sends a placeholder ga_agent_id of
 	// the form "<space_slug>-ga" (the real wiring through the LiveKit
 	// token is a follow-up). Override rows and agent records are keyed by the GA's real
@@ -141,23 +168,32 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	// the real id up from the space's group-GA participant; fall back
 	// to the wire value when the lookup fails so we don't regress
 	// existing callers that DO send a real id.
+	gaResolveStart := time.Now()
 	if resolved := resolveGroupGAAgentId(s, spaceId); resolved != "" {
 		gaAgentId = resolved
 	}
+	logVoiceTiming(s.logger, "server.session_start.resolve_ga_id", gaResolveStart, "space_id", spaceId)
 
 	// Resolve the GA's initial audio + video modes from the persistent
 	// override rows. Without this the voice-agent always saw
 	// "mirror_user" (hardcoded), so toggling Sofia's video icon to
 	// `always_on` never reached the avatar-gate at session start.
+	audioModeStart := time.Now()
 	audioMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
+	logVoiceTiming(s.logger, "server.session_start.audio_mode", audioModeStart, "space_id", spaceId)
+	videoModeStart := time.Now()
 	videoMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "video")
+	logVoiceTiming(s.logger, "server.session_start.video_mode", videoModeStart, "space_id", spaceId)
 
 	// Load the GA's persona identity (#478) from the agent record so the voice
 	// session renders the real agent via the shared agentdef identity block,
 	// not the neutral "Assistant, General Assistant" default. Best-effort: a
 	// query failure leaves the fields empty and the voice builder degrades to
 	// the neutral default, so the session still comes up.
+	personaStart := time.Now()
 	persona := resolveAgentPersona(s, gaAgentId)
+	logVoiceTiming(s.logger, "server.session_start.persona", personaStart, "space_id", spaceId)
+	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "space_id", spaceId)
 
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
@@ -406,7 +442,12 @@ func (s *streamSession) resolveAgentToolSlugs(agentId string) ([]string, bool) {
 	query := fmt.Sprintf(
 		`from(v1:agents:agent) ?.id==%s select id, payload.tools`,
 		string(agentIdJSON))
+	// #1426: synchronous engine read on the voice-session ListTools path
+	// (part of the realtime media-bridge build / setup window).
+	scopeStart := time.Now()
 	result, err := s.service.engine.Execute(ctx, query)
+	logVoiceTiming(s.logger, "server.tools.agent_scope_lookup", scopeStart,
+		"agent_id", agentId, "ok", err == nil)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("voice-agent tool scope: agent query failed -- serving unscoped registry",
@@ -643,7 +684,12 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId string
 			return
 		}
 		// Resolve current audio mode. Only always_on triggers Speak.
+		// #1426: synchronous engine query (up to two Execute calls) inside an
+		// event-bus callback on EVERY utterance-created event for the space.
+		modeStart := time.Now()
 		mode := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
+		logVoiceTiming(s.logger, "server.speak.audio_mode_lookup", modeStart,
+			"space_id", spaceId, "utterance_id", reply.utteranceId)
 		if mode != "always_on" {
 			if s.logger != nil {
 				s.logger.Info("voice-agent speak skip: audio mode not always_on",
@@ -805,8 +851,11 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 		// space's single active human participant. Runs inside the goroutine
 		// so the engine round-trip never blocks the stream read loop.
 		if speakerId == "" {
+			speakerResolveStart := time.Now()
 			resolved, rerr := resolveSingleActiveHumanParticipantId(
 				contextWithVoiceAgentActor(context.Background()), s.service.engine, spaceId)
+			logVoiceTiming(s.logger, "server.final_transcript.resolve_speaker", speakerResolveStart,
+				"space_id", spaceId, "ok", rerr == nil)
 			if rerr != nil {
 				if s.logger != nil {
 					s.logger.Warn("voice-agent final transcript rejected: speakerUserId empty and active speaker unresolvable",
@@ -848,7 +897,13 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 			string(utteranceIdJSON), string(spaceIdJSON), string(speakerIdJSON), string(textJSON), string(inputMethodJSON))
 
 		ctx := contextWithVoiceAgentActor(context.Background())
-		if _, err := s.service.engine.Execute(ctx, query); err != nil {
+		// #1426: the user-utterance insert (engine mutation -> DB) that also
+		// triggers the cognition automation for the turn.
+		insertStart := time.Now()
+		_, err := s.service.engine.Execute(ctx, query)
+		logVoiceTiming(s.logger, "server.final_transcript.insert", insertStart,
+			"space_id", spaceId, "input_method", inputMethod, "ok", err == nil)
+		if err != nil {
 			if s.logger != nil {
 				s.logger.Error("voice-agent final transcript insert failed",
 					"request_id", requestId,
@@ -991,6 +1046,9 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 	// LK Agents 1.5's AgentSession had multiple LLMStreams racing --
 	// only one's TTS reached Aura-2.
 	turnKey := spaceId + "|" + gaAgentId
+	// turnStart anchors the server-side share of the per-turn window (#1426):
+	// turn request received -> gate directive / authored reply / timeout.
+	turnStart := time.Now()
 	ctx, cancel := context.WithTimeout(s.stream.Context(), voiceTurnWaitTimeout)
 	// Use a fresh sentinel so the "is this still my slot" check on
 	// cleanup is by pointer-identity, not by comparing function
@@ -1045,12 +1103,17 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 					"request_id", requestId, "space_id", spaceId,
 					"engage", complete.DirectiveMode != "", "mode", dir.mode, "brevity", dir.brevity)
 			}
+			logVoiceTiming(s.logger, "server.turn.gate_directive", turnStart,
+				"space_id", spaceId, "request_id", requestId,
+				"engage", complete.DirectiveMode != "", "mode", dir.mode)
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
 					VoiceAgentTurnComplete: complete,
 				},
 			})
 		case reply := <-replyCh:
+			logVoiceTiming(s.logger, "server.turn.authored_reply", turnStart,
+				"space_id", spaceId, "request_id", requestId, "chars", len(reply.text))
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnDelta{
 					VoiceAgentTurnDelta: &memqlv1.VoiceAgentTurnDelta{
@@ -1090,6 +1153,8 @@ func (s *streamSession) handleVoiceAgentTurnRequest(envelope *memqlv1.MemqlClien
 					"ga_agent_id", gaAgentId,
 					"reason", reason)
 			}
+			logVoiceTiming(s.logger, "server.turn.no_reply", turnStart,
+				"space_id", spaceId, "request_id", requestId, "reason", reason)
 			s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_VoiceAgentTurnComplete{
 					VoiceAgentTurnComplete: &memqlv1.VoiceAgentTurnComplete{
@@ -1317,7 +1382,10 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 		// template id. querySiParticipantForSpace returns the active SI
 		// participant; voice rooms have a single GA, so the first active
 		// SI participant is the speaker.
+		participantResolveStart := time.Now()
 		participantId := s.resolveSIParticipantId(ctx, spaceId)
+		logVoiceTiming(s.logger, "server.realtime_output.resolve_participant", participantResolveStart,
+			"space_id", spaceId, "ok", participantId != "")
 		if participantId == "" {
 			if s.logger != nil {
 				s.logger.Error("voice-agent realtime output: no SI participant resolved",
@@ -1365,7 +1433,12 @@ func (s *streamSession) handleVoiceAgentRealtimeOutput(envelope *memqlv1.MemqlCl
 			string(textJSON), replyToClause, string(sourceJSON), citationsClause,
 		)
 
-		if _, err := s.service.engine.Execute(ctx, query); err != nil {
+		// #1426: the assistant-utterance insert (engine mutation -> DB).
+		insertStart := time.Now()
+		_, err := s.service.engine.Execute(ctx, query)
+		logVoiceTiming(s.logger, "server.realtime_output.insert", insertStart,
+			"space_id", spaceId, "ok", err == nil)
+		if err != nil {
 			if s.logger != nil {
 				s.logger.Error("voice-agent realtime output insert failed",
 					"request_id", requestId, "space_id", spaceId,
