@@ -294,9 +294,10 @@ The emit pass (`agent_loop_authoring_phases.go`) then:
   + its closure"), and
 - DETERMINISTICALLY synthesizes the headline automation in Go -- it chains the
   phase sub-automations with ordered `step` blocks, each phase after the first
-  gated on the prior step's result (`if steps.phaseN.result { automation … }`).
-  The automation scheduler's inter-step dependency topo-sort turns that into a
-  real sequence (phase 0 -> phase 1 -> …, never concurrent). Synthesizing in Go
+  gated on the prior step succeeding
+  (`if steps.<prior>.status == "success" { automation … }`, memql#1366).
+  The executor runs top-level steps sequentially in list order, so the chain
+  is a real sequence (phase 0 -> phase 1 -> …). Synthesizing in Go
   (not via the model) makes the chaining unverifiable-by-fumble and
   unit-testable without an engine; the synthesized headline is proven to compile
   through the real Gate-1 sandbox.
@@ -316,11 +317,14 @@ into ordered LAYERS: layer 0 is every phase with no unmet dependency, layer k is
 every phase whose deps all sit in earlier layers. Phases in the same layer are
 mutually independent, so:
 
-- a layer with ONE phase emits a sequential `step`;
+- a layer with ONE phase emits a sequential `step` named after the phase;
 - a layer with 2+ independent phases emits a `parallel { branches: […], wait:
-  "all" }` step -- they run CONCURRENTLY;
-- layer k>0 is gated on layer k-1's result, so layers run in order while phases
-  within a layer fan out.
+  "all", failFast: true }` step (named `layer<k>`) -- they run CONCURRENTLY
+  (grammar shipped in memql#1368; the emission was parked between PR #1367
+  and #1368 while the struct-form grammar had no parallel step);
+- layer k>0 is gated `if steps.<priorStep>.status == "success"`, so layers run
+  in order while phases within a layer fan out; `failFast: true` makes any
+  branch failure fail the layer, which skips everything downstream.
 
 When NO phase declares `dependsOn` the synthesizer defaults to a strict
 sequential chain (the #1163 shape -- you can't assume two phases are independent

@@ -786,6 +786,12 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 //	  `<step> := if <cond> { <translatedCall> }`, which the procedural
 //	  parser's parseGoStyleStep already accepts (it stamps the condition
 //	  on StepDef.Condition; the executor skip-gates the step on it).
+//	`parallel { ... }`             -- concurrent fan-out step (memql#1368):
+//	  a config-key block (`wait`, `failFast`, `branches`) whose branches
+//	  are full `step <name> { ... }` blocks, each translated recursively.
+//	  Emitted as `<step> := parallel { wait: ..., failFast: ...,
+//	  branches: [ <name> := <call>, ... ] }`, which parseGoStyleStep
+//	  parses into StepTypeParallel.
 func translateStepCall(body string) (string, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -798,6 +804,10 @@ func translateStepCall(body string) (string, error) {
 
 	if first == "if" {
 		return translateConditionalStepCall(rest)
+	}
+
+	if first == "parallel" {
+		return translateParallelStepCall(rest)
 	}
 
 	if kindPrefix(first) {
@@ -844,6 +854,240 @@ func translateConditionalStepCall(rest string) (string, error) {
 		return "", fmt.Errorf("conditional step body: %w", err)
 	}
 	return "if " + cond + " { " + call + " }", nil
+}
+
+// translateParallelStepCall handles the `parallel { ... }` step body
+// (memql#1368). rest is everything after the leading `parallel` ident: a
+// braced config block carrying, in any order:
+//
+//	wait: "all" | "any" | "none"   (optional, default "all")
+//	failFast: true | false         (optional, default false)
+//	branches: [ step <name> { <body> }, ... ]   (required, non-empty)
+//
+// Each branch is a full step block; its body goes through translateStepCall
+// recursively, so branches support every step shape -- including `if <cond>
+// { <call> }` gating and nested `parallel { ... }` blocks. The output is the
+// procedural form `parallel { wait: ..., failFast: ..., branches: [ <name>
+// := <call>, ... ] }` that parseGoStyleStep parses into StepTypeParallel.
+// Line comments (`// ...`) between config keys are skipped.
+func translateParallelStepCall(rest string) (string, error) {
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	if rest == "" || rest[0] != '{' {
+		return "", fmt.Errorf("parallel step: expected `{` after `parallel`")
+	}
+	closeIdx := findMatchingCloseBrace(rest, 0)
+	if closeIdx < 0 {
+		return "", fmt.Errorf("parallel step: missing closing brace for the parallel block")
+	}
+	if tail := strings.TrimSpace(rest[closeIdx+1:]); tail != "" {
+		return "", fmt.Errorf("parallel step: unexpected trailing text after the parallel block: %q", tail)
+	}
+	body := rest[1:closeIdx]
+
+	wait := "all"
+	failFast := "false"
+	var branches []automationStep
+	sawBranches := false
+
+	pos := 0
+	for {
+		pos = skipParallelInsignificant(body, pos)
+		if pos >= len(body) {
+			break
+		}
+		key, _ := splitLeadingIdent(body[pos:])
+		if key == "" {
+			return "", fmt.Errorf("parallel step: expected a config key (wait, failFast, branches), got %q", parallelSnippet(body[pos:]))
+		}
+		pos += len(key)
+		pos = skipParallelInsignificant(body, pos)
+		if pos >= len(body) || body[pos] != ':' {
+			return "", fmt.Errorf("parallel step: expected `:` after key %q", key)
+		}
+		pos++
+		pos = skipParallelInsignificant(body, pos)
+		switch {
+		case strings.EqualFold(key, "wait"):
+			val, next, err := parseParallelQuotedString(body, pos)
+			if err != nil {
+				return "", fmt.Errorf("parallel step: wait: %w", err)
+			}
+			switch val {
+			case "all", "any", "none":
+			default:
+				return "", fmt.Errorf("parallel step: invalid wait value %q (must be \"all\", \"any\", or \"none\")", val)
+			}
+			wait, pos = val, next
+		case strings.EqualFold(key, "failFast"):
+			ident, _ := splitLeadingIdent(body[pos:])
+			if ident != "true" && ident != "false" {
+				return "", fmt.Errorf("parallel step: failFast must be true or false, got %q", parallelSnippet(body[pos:]))
+			}
+			failFast = ident
+			pos += len(ident)
+		case strings.EqualFold(key, "branches"):
+			if pos >= len(body) || body[pos] != '[' {
+				return "", fmt.Errorf("parallel step: expected `[` after `branches:`")
+			}
+			closeBr := findMatchingCloseBracket(body, pos)
+			if closeBr < 0 {
+				return "", fmt.Errorf("parallel step: missing closing `]` for the branches list")
+			}
+			parsed, err := parseParallelBranches(body[pos+1 : closeBr])
+			if err != nil {
+				return "", err
+			}
+			branches = parsed
+			sawBranches = true
+			pos = closeBr + 1
+		default:
+			return "", fmt.Errorf("parallel step: unknown key %q (expected wait, failFast, branches)", key)
+		}
+	}
+
+	if !sawBranches {
+		return "", fmt.Errorf("parallel step: a `branches: [ step <name> { ... }, ... ]` list is required")
+	}
+	if len(branches) == 0 {
+		return "", fmt.Errorf("parallel step: branches must not be empty")
+	}
+	seen := make(map[string]struct{}, len(branches))
+	for _, b := range branches {
+		if _, dup := seen[b.name]; dup {
+			return "", fmt.Errorf("parallel step: duplicate branch id %q", b.name)
+		}
+		seen[b.name] = struct{}{}
+	}
+
+	// NOTE: branch assignments are emitted whitespace-separated (no commas).
+	// The legacy expression grammar treats `,` as logical OR, so a comma
+	// after `name := call(...)` would be swallowed into the call's
+	// expression; the procedural branches parser is newline/space-driven
+	// like the top-level step list.
+	var sb strings.Builder
+	sb.WriteString("parallel { wait: \"")
+	sb.WriteString(wait)
+	sb.WriteString("\", failFast: ")
+	sb.WriteString(failFast)
+	sb.WriteString(", branches: [ ")
+	for i, b := range branches {
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		sb.WriteString(b.name)
+		sb.WriteString(" := ")
+		sb.WriteString(b.call)
+	}
+	sb.WriteString(" ] }")
+	return sb.String(), nil
+}
+
+// parseParallelBranches parses the contents of a `branches: [ ... ]` list:
+// a comma-separated sequence of `step <name> { <body> }` blocks. Each body
+// is translated through translateStepCall (so nested gating / parallel
+// forms ride through).
+func parseParallelBranches(list string) ([]automationStep, error) {
+	var out []automationStep
+	pos := 0
+	for {
+		pos = skipParallelInsignificant(list, pos)
+		if pos >= len(list) {
+			break
+		}
+		kw, _ := splitLeadingIdent(list[pos:])
+		if kw != "step" {
+			return nil, fmt.Errorf("parallel step: each branches entry must be a `step <name> { ... }` block, got %q", parallelSnippet(list[pos:]))
+		}
+		pos += len(kw)
+		pos = skipParallelInsignificant(list, pos)
+		name, _ := splitLeadingIdent(list[pos:])
+		if name == "" {
+			return nil, fmt.Errorf("parallel step: branch step is missing a name")
+		}
+		pos += len(name)
+		pos = skipParallelInsignificant(list, pos)
+		if pos >= len(list) || list[pos] != '{' {
+			return nil, fmt.Errorf("parallel step: branch %q: expected `{` after the step name", name)
+		}
+		closeIdx := findMatchingCloseBrace(list, pos)
+		if closeIdx < 0 {
+			return nil, fmt.Errorf("parallel step: branch %q: missing closing brace", name)
+		}
+		inner := strings.TrimSpace(list[pos+1 : closeIdx])
+		if inner == "" {
+			return nil, fmt.Errorf("parallel step: branch %q: body is empty", name)
+		}
+		call, err := translateStepCall(inner)
+		if err != nil {
+			return nil, fmt.Errorf("parallel step: branch %q: %w", name, err)
+		}
+		out = append(out, automationStep{name: name, call: call})
+		pos = closeIdx + 1
+	}
+	return out, nil
+}
+
+// skipParallelInsignificant advances past whitespace, commas, and `//` line
+// comments inside a parallel config block.
+func skipParallelInsignificant(s string, pos int) int {
+	for pos < len(s) {
+		c := s[pos]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' {
+			pos++
+			continue
+		}
+		if c == '/' && pos+1 < len(s) && s[pos+1] == '/' {
+			for pos < len(s) && s[pos] != '\n' {
+				pos++
+			}
+			continue
+		}
+		break
+	}
+	return pos
+}
+
+// parseParallelQuotedString reads a double-quoted string literal at pos and
+// returns its contents plus the index just past the closing quote.
+func parseParallelQuotedString(s string, pos int) (string, int, error) {
+	if pos >= len(s) || s[pos] != '"' {
+		return "", 0, fmt.Errorf("expected a quoted string, got %q", parallelSnippet(s[pos:]))
+	}
+	end := strings.IndexByte(s[pos+1:], '"')
+	if end < 0 {
+		return "", 0, fmt.Errorf("unterminated string")
+	}
+	return s[pos+1 : pos+1+end], pos + end + 2, nil
+}
+
+// parallelSnippet truncates s for inclusion in a diagnostic.
+func parallelSnippet(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 24 {
+		return s[:24] + "..."
+	}
+	return s
+}
+
+// findMatchingCloseBracket returns the index of the `]` matching the `[` at
+// openIdx, or -1. Same depth-counting contract as findMatchingCloseBrace.
+func findMatchingCloseBracket(s string, openIdx int) int {
+	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '[' {
+		return -1
+	}
+	depth := 0
+	for i := openIdx; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func splitLeadingIdent(s string) (string, string) {
