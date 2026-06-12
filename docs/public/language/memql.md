@@ -1235,6 +1235,56 @@ Control-flow blocks (`for`, `if`, `switch`, `parallel`) remain unchanged.
 
 For migration details, see `docs/guides/migrating-from-inline-blocks.md`.
 
+### Parallel fan-out step
+
+A step body can be a `parallel { ... }` block that runs several branch
+steps CONCURRENTLY (the executor fans the branches out on goroutines):
+
+```memql
+automation gather {
+  step layer0 {
+    parallel {
+      wait: "all"        // all | any | none (default: all)
+      failFast: true      // default: false
+      branches: [
+        step sales   { automation fetchSales { } },
+        step support { automation fetchSupport { } }
+      ]
+    }
+  }
+
+  step merge {
+    if steps.layer0.status == "success" {
+      automation mergeReports { }
+    }
+  }
+}
+```
+
+Rules:
+
+- `branches` is required and non-empty. Each entry is a full `step`
+  block -- any step body works (automation / logic / query / mutation
+  calls), including per-branch `if <cond> { ... }` gating and nested
+  `parallel` blocks.
+- Branch ids must be unique within one parallel; at runtime they
+  surface as `<parent>.<branch>` (e.g. `layer0.sales`).
+- `wait` picks the join strategy: `"all"` (default) waits for every
+  branch, `"any"` returns on the first success, `"none"` is
+  fire-and-forget.
+- `failFast: true` cancels the remaining branches when one fails and
+  fails the parallel step -- combine with a downstream
+  `if steps.<id>.status == "success"` gate to skip dependents when
+  any branch fails. Without `failFast`, branch errors do not fail the
+  step under `wait: "all"`.
+- The parallel step itself can be gated:
+  `step layerN { if <cond> { parallel { ... } } }`.
+
+This is also the shape the phased-authoring headline synthesizer emits
+for a dependency layer with 2+ independent phases (within-layer
+concurrency, memql#1164 / memql#1368); single-phase layers stay plain
+sequential steps.
+
 ## MemQL Language Reference for SI Agents
 
 This is a condensed syntax specification designed to fit within limited context windows. Use this for quick reference; for detailed explanations and examples, see the sections above.

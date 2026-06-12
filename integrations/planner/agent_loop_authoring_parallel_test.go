@@ -60,13 +60,11 @@ func TestBuildPhaseLayers_CycleTerminates(t *testing.T) {
 	}
 }
 
-// TestSynthesizeParallelHeadline_DAGGating: a layer with 2+ independent phases
-// emits one ungated step per phase; the dependent phase's step is gated on
-// EVERY phase of that layer succeeding. (The earlier `parallel { branches }`
-// emission never compiled through the real Gate 1 automation rewrite -- the
-// struct-form grammar has no parallel step -- so within-layer concurrency is
-// retired in favor of a shape that actually compiles; memql#1366.)
-func TestSynthesizeParallelHeadline_DAGGating(t *testing.T) {
+// TestSynthesizeParallelHeadline_EmitsParallelStep: a layer with 2+
+// independent phases emits ONE `parallel { branches: [...] }` step so they
+// run concurrently (memql#1164, restored on the authored grammar in
+// memql#1368); the dependent phase is gated on that layer step succeeding.
+func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
 	phases := []phaseNode{
 		{Name: "fetchA"},
 		{Name: "fetchB"},
@@ -74,21 +72,26 @@ func TestSynthesizeParallelHeadline_DAGGating(t *testing.T) {
 	}
 	c := synthesizePhasedHeadline("gather", "Gather then merge.", phases)
 	src := c.Source
-	if strings.Contains(src, "parallel {") {
-		t.Fatalf("the parallel construct does not exist in the automation grammar; the headline must not emit it:\n%s", src)
+	if !strings.Contains(src, "parallel {") || !strings.Contains(src, "branches: [") {
+		t.Fatalf("independent phases must emit a parallel step:\n%s", src)
 	}
-	if !strings.Contains(src, "automation fetchA { }") || !strings.Contains(src, "automation fetchB { }") {
-		t.Errorf("layer-0 phases must each emit a step:\n%s", src)
+	if !strings.Contains(src, "step fetchA { automation fetchA { } }") ||
+		!strings.Contains(src, "step fetchB { automation fetchB { } }") {
+		t.Errorf("parallel branches must invoke both independent phases:\n%s", src)
 	}
-	if !strings.Contains(src, `if steps.fetchA.status == "success" && steps.fetchB.status == "success"`) {
-		t.Errorf("the dependent phase must be gated on every prior-layer phase succeeding:\n%s", src)
+	// The fan-out layer waits for every branch and fails on any branch
+	// failure, so the downstream success gate is meaningful.
+	if !strings.Contains(src, `wait: "all"`) || !strings.Contains(src, "failFast: true") {
+		t.Errorf("the parallel layer must carry wait:\"all\" + failFast:true:\n%s", src)
 	}
-	if !strings.Contains(src, "automation merge { }") {
-		t.Errorf("the dependent phase must still be invoked:\n%s", src)
+	// merge runs in a later step gated on the parallel layer's success.
+	if !strings.Contains(src, "automation merge { }") ||
+		!strings.Contains(src, `if steps.layer0.status == "success"`) {
+		t.Errorf("dependent phase must be gated on the parallel layer succeeding:\n%s", src)
 	}
-	// Ordering: fetchA + fetchB steps must precede merge (the executor runs
+	// Ordering: the parallel layer must precede merge (the executor runs
 	// steps sequentially in list order; layering IS the order).
-	if strings.Index(src, "step merge") < strings.Index(src, "step fetchB") {
+	if strings.Index(src, "step merge") < strings.Index(src, "step layer0") {
 		t.Errorf("dependent phase must come after its dependency layer:\n%s", src)
 	}
 }
@@ -118,6 +121,9 @@ func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 		mk("merge"), mkLogic("merge"),
 		headline,
 	}
+	if !strings.Contains(headline.Source, "parallel {") {
+		t.Fatalf("the multi-phase layer must emit a parallel step (memql#1368); headline:\n%s", headline.Source)
+	}
 	report := memql.SandboxCompileBundle(bundle)
 	requireAutomationsActuallyCompiled(t, report) // anti-vacuity (memql#1366)
 	if !report.OK {
@@ -127,7 +133,7 @@ func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 				errs = append(errs, d.Kind+"/"+d.Name+": "+d.Error)
 			}
 		}
-		t.Fatalf("DAG headline must compile through real Gate 1; errors:\n%s\n--- headline ---\n%s", strings.Join(errs, "\n"), headline.Source)
+		t.Fatalf("parallel headline must compile through real Gate 1; errors:\n%s\n--- headline ---\n%s", strings.Join(errs, "\n"), headline.Source)
 	}
 }
 

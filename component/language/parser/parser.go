@@ -1319,6 +1319,32 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		if err := p.expect(TokenBraceOpen); err != nil {
 			return nil, err
 		}
+		// Gated parallel step (memql#1368):
+		//   step := if cond { parallel { ... } }
+		// The struct-form rewriter emits this for a fan-out layer gated on
+		// a prior layer's result. The parallel config is parsed in place
+		// and the condition is stamped on the StepDef as usual.
+		if p.check(TokenIdentifier) && strings.EqualFold(p.current.Literal, "parallel") && p.peekAhead(1).Type == TokenBraceOpen {
+			p.advance() // consume `parallel`
+			p.advance() // consume `{`
+			cfg, err := p.parseParallelStepConfig()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expect(TokenBraceClose); err != nil { // close the parallel block
+				return nil, err
+			}
+			if err := p.expect(TokenBraceClose); err != nil { // close the if body
+				return nil, err
+			}
+			return &StepDef{
+				ID:         names[0],
+				Type:       StepTypeParallel,
+				Condition:  cond,
+				RetryCount: retryCount,
+				Config:     cfg,
+			}, nil
+		}
 		// Lookahead: is this body a single bare function-call
 		// expression (the legacy single-call form) or multiple
 		// statements (the multi-stmt form)?
@@ -1412,6 +1438,10 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 			stepType = StepTypeQuery
 		case "mutation":
 			stepType = StepTypeMutation
+		case "parallel":
+			// Concurrent fan-out step (memql#1368): the body is the
+			// config block parsed by parseParallelStepConfig.
+			stepType = StepTypeParallel
 		case "shape", "webhook", "event", "publishEvent", "publishevent":
 			return nil, newParseErrorf(&p.current, "inline %s blocks are no longer supported; use named function calls instead", p.current.Literal)
 		default:
@@ -3686,6 +3716,14 @@ func (p *Parser) parseForEachStepConfig() (*ForEachStepConfig, error) {
 }
 
 // parseParallelStepConfig parses: parallel { branches: [...], wait: "all", failFast: true }
+//
+// Keys may appear in any order. `branches` is required and non-empty; each
+// entry is either a Go-style step assignment (`name := call`, what the
+// struct-form rewriter emits -- including `name := if cond { call }` gating
+// and nested `name := parallel { ... }` blocks) or a legacy colon-form step
+// (`name: type { ... }`). `wait` must be "all", "any", or "none"; branch ids
+// must be unique (the executor surfaces them as `<parent>.<branch>`).
+// Unknown keys are rejected. (memql#1368)
 func (p *Parser) parseParallelStepConfig() (*ParallelStepConfig, error) {
 	config := &ParallelStepConfig{
 		Wait: "all",
@@ -3696,6 +3734,7 @@ func (p *Parser) parseParallelStepConfig() (*ParallelStepConfig, error) {
 			break
 		}
 		key := strings.ToLower(p.current.Literal)
+		keyTok := p.current
 		p.advance()
 
 		if !p.check(TokenColon) {
@@ -3705,43 +3744,77 @@ func (p *Parser) parseParallelStepConfig() (*ParallelStepConfig, error) {
 
 		switch key {
 		case "branches":
-			if p.check(TokenBracketOpen) {
-				p.advance()
-				for !p.check(TokenBracketClose) && !p.check(TokenEOF) {
-					step, err := p.parseStep()
-					if err != nil {
-						return nil, err
-					}
-					if step != nil {
-						config.Branches = append(config.Branches, *step)
-					}
-					if p.check(TokenComma) {
-						p.advance()
-					}
+			if !p.check(TokenBracketOpen) {
+				return nil, newParseErrorf(&p.current, "parallel step: expected '[' after branches:, got %q", p.current.Literal)
+			}
+			p.advance()
+			for !p.check(TokenBracketClose) && !p.check(TokenEOF) {
+				if !p.check(TokenIdentifier) {
+					return nil, newParseErrorf(&p.current, "parallel step: expected a branch step, got %q", p.current.Literal)
 				}
-				p.expect(TokenBracketClose)
+				var step *StepDef
+				var err error
+				if p.peekAhead(1).Type == TokenDefine {
+					step, err = p.parseGoStyleStep()
+				} else {
+					step, err = p.parseStep()
+				}
+				if err != nil {
+					return nil, err
+				}
+				if step != nil {
+					config.Branches = append(config.Branches, *step)
+				}
+				if p.check(TokenComma) {
+					p.advance()
+				}
+			}
+			if err := p.expect(TokenBracketClose); err != nil {
+				return nil, err
 			}
 		case "wait":
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err
 			}
-			if s, ok := val.(string); ok {
-				config.Wait = s
+			s, ok := val.(string)
+			if !ok {
+				return nil, newParseErrorf(&p.current, "parallel step: wait must be a string (\"all\", \"any\", or \"none\")")
 			}
+			switch s {
+			case "all", "any", "none":
+			default:
+				return nil, newParseErrorf(&p.current, "parallel step: invalid wait value %q (must be \"all\", \"any\", or \"none\")", s)
+			}
+			config.Wait = s
 		case "failfast":
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err
 			}
-			if b, ok := val.(bool); ok {
-				config.FailFast = b
+			b, ok := val.(bool)
+			if !ok {
+				return nil, newParseErrorf(&p.current, "parallel step: failFast must be true or false")
 			}
+			config.FailFast = b
+		default:
+			return nil, newParseErrorf(&keyTok, "parallel step: unknown key %q (expected branches, wait, failFast)", keyTok.Literal)
 		}
 
 		if p.check(TokenComma) {
 			p.advance()
 		}
+	}
+
+	if len(config.Branches) == 0 {
+		return nil, newParseErrorf(&p.current, "parallel step requires a non-empty branches list")
+	}
+	seen := make(map[string]struct{}, len(config.Branches))
+	for _, b := range config.Branches {
+		if _, dup := seen[b.ID]; dup {
+			return nil, newParseErrorf(&p.current, "parallel step: duplicate branch id %q", b.ID)
+		}
+		seen[b.ID] = struct{}{}
 	}
 
 	return config, nil
