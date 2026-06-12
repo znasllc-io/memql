@@ -1283,3 +1283,34 @@ mutation misrouteFeedback mutationRecordMisrouteFeedback {
     args.userAction
   }
 }
+
+// ---- mutations/v1/cognition/rolloverDailySpace.memql ----
+
+// rolloverDailySpace
+// ==================
+//
+// Inserts the terminal version of a daily space at rollover: the
+// dailyspace integration's sweep (memql#1384) passes the full merged
+// payload with status flipped to "archived" or "saved" (per the
+// owner's preferences.dailySpaceRolloverAction) and active=false.
+//
+// Mirrors the mutationLeaveSpace / mutationUpdateParticipantStatus
+// "caller passes the full updated payload" pattern. A dedicated
+// mutation (instead of mutationArchiveSpace / mutationSaveSpace) is
+// required because those stamp ownerUserId from actor.userId -- the
+// sweep runs under the synthetic system:dailyspaceAutomation actor,
+// which must NOT become the space owner. The sweep preserves the
+// real ownerUserId in the payload it passes.
+
+@enabled
+@description("Insert the terminal (archived/saved) version of a daily space at rollover. System-actor sweep helper; the caller passes the full updated payload including the preserved ownerUserId.")
+mutation space mutationRolloverDailySpace {
+  args {
+    spaceId  string  @required
+    payload  object  @required
+  }
+  insert {
+    id: args.spaceId
+    args.payload
+  }
+}
