@@ -59,12 +59,13 @@ spec:
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50054" }
             - { name: MEMQL_PARENT_ADDRESS, value: "bff:50058" }
             - { name: MEMQL_WORKER_PEERS, value: "agent=agent:50055" }
-            # A2 (#1198): cognition authors the voice reply via the full agent
-            # tool loop. REQUIRED with the cascade executor (voice-agent.yaml
-            # pins MEMQL_VOICE_EXECUTOR=cascade) -- the flag-off gate path
-            # delegates authoring to a realtime model that doesn't exist under
-            # cascade, so no reply is ever produced (#1412).
-            - { name: MEMQL_VOICE_AGENT_TOOL_LOOP, value: "true" }
+            # Voice authoring pairing (#1412/#1414): false = the #479 gate path
+            # (cognition gates, the REALTIME model authors natively; requires
+            # voice-agent.yaml MEMQL_VOICE_EXECUTOR=realtime + the
+            # voice.gate.directive routing rule, images >= 0.9.44). Set true ONLY
+            # together with the cascade executor -- under cascade the gate path
+            # has no author and every voice turn times out (#1412).
+            - { name: MEMQL_VOICE_AGENT_TOOL_LOOP, value: "false" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }

@@ -67,8 +67,14 @@ spec:
             - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_SECRET } } }
             # The memql gRPC surface the agent speaks VoiceAgent* on.
             - { name: MEMQL_GRPC_ADDR, value: "bff:50051" }
-            # Cascade executor (OpenAI STT -> cognition -> OpenAI TTS).
-            - { name: MEMQL_VOICE_EXECUTOR, value: "cascade" }
+            # Realtime executor (gpt-realtime speech-to-speech, #1414): the
+            # model authors + speaks natively; cognition gates WHO/WHEN/brevity
+            # via the #479 gate path. PAIRING: this requires the
+            # voice.gate.directive mesh routing rule (#1412, images >= 0.9.44)
+            # and MEMQL_VOICE_AGENT_TOOL_LOOP=false on cognition. The cascade
+            # executor (STT -> cognition tool loop -> TTS) is the tools-in-voice
+            # alternative; if reverting to it, flip the cognition flag to true.
+            - { name: MEMQL_VOICE_EXECUTOR, value: "realtime" }
             # Auto-join active polyphon rooms (no fixed room).
             - { name: MEMQL_VOICE_AUTOJOIN, value: "true" }
             # Voice-only first; avatar wiring (anam/simli) is a follow-up.
