@@ -1,8 +1,7 @@
-# Staging overlay -> 0.9.43. Engine + carrier images rebuilt from main 3bffdb3
-# (PR #1410 / #1409): the voice-agent auto-join dispatcher builds a FRESH gRPC
-# client + room joiner per session iteration -- the shared client was closed by
-# the first session's teardown, poisoning every later join with
-# ErrClientClosed (voice stuck in Preparing, 3s hot-loop). SPA unchanged
+# Staging overlay -> 0.9.44. Engine + carrier images rebuilt from main 6b2ec54:
+# the realtime voice stack -- #1413 voice.gate.directive mesh routing rule
+# (gate path now works in cluster mode), #1415 realtime executor + flag
+# pairing, #1417 full tool surface to the realtime model. SPA unchanged
 # (digest reused from 0.9.42, source b5013ab).
 # cognition/agent/planner/workbench/bff CARRIER-built; voice + identity engine.
 # livekit pin (#1043) preserved.
@@ -31,24 +30,24 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:089e16f88db130b4b2168cb55a1c2f5ca629068f03591524951553f383329b2b
-  # Carrier-built; 0.9.43.
+    digest: sha256:0178bcc6f3780b8cbddb5a0cd6ecf9c52f7f5b605456b99db8c5061d3ea76530
+  # Carrier-built; 0.9.44.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:7397c05b8f449d252886bd43d805b216fa26d4d073ec64cd99842cf538e3c4f4
-  # Carrier-built; 0.9.43.
+    digest: sha256:c356507d900a3e5958d2c0cca28a24eedbe0c71b234227d3c0722b5ac241832f
+  # Carrier-built; 0.9.44.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:b7223cc8dc12ca218181774e7406b16322e7b7a582302bd9696cf979f6fbb1ec
+    digest: sha256:f47d97c40a19c9b3c249832d01ce488cd7d67905db726d60b62727981bd7ff85
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:1a25ddbc8e2e30f56c10a4fe7bdfc1cca304a47b045364684ff0cd1f2ce33dfd
-  # Carrier-built; 0.9.43.
+    digest: sha256:bba5d2239e222c254b76c3d09ab49467a2884204342bb6c72105d8559e61a9c8
+  # Carrier-built; 0.9.44.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:bb1f115e68c8c9f204592f2466e624263737e74b6f68a584dc574acf89a8c71d
-  # Carrier-built; 0.9.43.
+    digest: sha256:bf30fcdb9deef6a96821fdd63bac50ea9feb321d96e5817632caa76b165d9024
+  # Carrier-built; 0.9.44.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:02eb7df66b3a68065f1d220313b6efaf62953d826f4a73b172d1f06437d0f561
-  # Carrier-built; 0.9.43.
+    digest: sha256:b374405a36e5bb8f1f57821a8bb8acc8fb26bcc4a2a4d6f9b8fe239ccefb4032
+  # Carrier-built; 0.9.44.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:272fcb12f671919e919c86d97433dbf163b0c263c381b1675b0310cf85016106
+    digest: sha256:92f4fad9557eb4b8b3687b164fcfad1f608f4edf1c0e2784aad7ba1af0362171
   # SPA digest reused from 0.9.42 (copresent main b5013ab unchanged).
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:503bc2139f5683c1de3446370e144f1e206539b6327b2df346f1c9bdb7216d36
