@@ -22,62 +22,49 @@ func td(name string, clientExecution bool, scopes ...string) *memqlv1.ToolDefini
 	}
 }
 
-// TestIsLowRiskTool_TierBoundary covers the default-deny tier decision:
-// allowlisted read tools are exposed; privileged, untiered, client-executed,
-// and write-scoped tools are withheld.
-func TestIsLowRiskTool_TierBoundary(t *testing.T) {
-	cases := []struct {
-		name            string
-		toolName        string
-		clientExecution bool
-		scopes          []string
-		want            bool
-	}{
-		{"allowlisted read tool exposed", "webSearch", false, []string{"read"}, true},
-		{"allowlisted snake_case exposed", "knowledge_lookup", false, nil, true},
-		{"untiered tool withheld (default-deny)", "createSpace", false, nil, false},
-		{"privileged scope withheld", "webSearch", false, []string{"write"}, false},
-		{"computer_use scope withheld", "webSearch", false, []string{"computer_use"}, false},
-		{"control scope withheld", "domainLookup", false, []string{"control"}, false},
-		{"client_execution withheld", "webSearch", true, []string{"read"}, false},
-		{"privileged tool name withheld", "copresent_control", false, []string{"control"}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, isLowRiskTool(tc.toolName, tc.clientExecution, tc.scopes))
-		})
-	}
+// TestIsExposableTool_FullSurface covers the #1416 contract: every tool is
+// exposable -- authorization is the server's job (handleCallTool role gate +
+// engine scope / kill-switch checks) -- with the single MECHANICAL exclusion
+// of client-executed tools (the voice-agent session has no browser to satisfy
+// the ClientToolCall round-trip).
+func TestIsExposableTool_FullSurface(t *testing.T) {
+	assert.True(t, isExposableTool(false), "server-executed tools are exposed regardless of name or scopes")
+	assert.False(t, isExposableTool(true), "client-executed tools are excluded for transport reasons")
 }
 
-// TestRealtimeTools_ExposesOnlyLowRisk verifies the bridge hands ONLY low-risk
-// tools to the model and records the exposed / denied partition.
-func TestRealtimeTools_ExposesOnlyLowRisk(t *testing.T) {
+// TestRealtimeTools_ExposesFullSurface verifies the bridge hands the agent's
+// FULL tool surface to the model (#1416 -- the #458 low-risk tier is retired;
+// write/control/computer_use tools are exposed and gated server-side), with
+// only client-executed tools withheld, and records the partition.
+func TestRealtimeTools_ExposesFullSurface(t *testing.T) {
 	tools := []*memqlv1.ToolDefinition{
 		td("webSearch", false, "read"),
 		td("knowledgeLookup", false),
-		td("copresent_control", false, "control"),  // privileged scope
-		td("computerUse", false, "computer_use"),   // privileged scope
-		td("uiClick", true),                        // client_execution
-		td("mutationCreateSpace", false, "create"), // privileged scope + untiered
-		td("someFutureTool", false),                // untiered -> default-deny
+		td("copresent_control", false, "control"),
+		td("computerUse", false, "computer_use"),
+		td("uiClick", true), // client_execution -> mechanical exclusion
+		td("mutationCreateSpace", false, "create"),
+		td("someFutureTool", false),
 	}
 	b := NewMcpToolBridge(nil, nil, tools, "s1", "ga1", nil)
 	rt := b.RealtimeTools()
 
-	require.Len(t, rt, 2, "only the two low-risk read tools are exposed")
+	require.Len(t, rt, 6, "every server-executed tool is exposed")
 	exposed := map[string]bool{}
 	for _, tool := range rt {
 		exposed[tool.Name] = true
 		assert.Equal(t, "function", tool.Type)
 		assert.NotEmpty(t, tool.Parameters, "parameters carry the input schema")
 	}
-	assert.True(t, exposed["webSearch"])
-	assert.True(t, exposed["knowledgeLookup"])
+	for _, name := range []string{"webSearch", "knowledgeLookup", "copresent_control", "computerUse", "mutationCreateSpace", "someFutureTool"} {
+		assert.True(t, exposed[name], "expected %s exposed", name)
+	}
+	assert.False(t, exposed["uiClick"], "client-executed tool is not exposed")
 
-	assert.ElementsMatch(t, []string{"webSearch", "knowledgeLookup"}, b.ExposedToolNames())
 	assert.ElementsMatch(t,
-		[]string{"copresent_control", "computerUse", "uiClick", "mutationCreateSpace", "someFutureTool"},
-		b.DeniedToolNames())
+		[]string{"webSearch", "knowledgeLookup", "copresent_control", "computerUse", "mutationCreateSpace", "someFutureTool"},
+		b.ExposedToolNames())
+	assert.ElementsMatch(t, []string{"uiClick"}, b.DeniedToolNames())
 }
 
 // TestRealtimeTools_EmptySchemaDefaultsToObject verifies a tool with no input
@@ -144,8 +131,8 @@ func TestDispatch_MirrorFailureTolerated(t *testing.T) {
 }
 
 // TestDispatch_RefusesNonExposedTool verifies a tool that was never exposed
-// (privileged-by-default) is refused at dispatch -- defence in depth so a
-// privileged tool can never run via the model path.
+// (absent from the agent's registry) is refused at dispatch -- defence in
+// depth so the model can only run tools the bridge actually handed it.
 func TestDispatch_RefusesNonExposedTool(t *testing.T) {
 	var transportCalled bool
 	transport := func(_ context.Context, _ string, _ map[string]any) (string, bool, error) {
