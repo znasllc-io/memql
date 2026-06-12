@@ -1,42 +1,42 @@
 package agent
 
-// mcp_tool_bridge.go exposes a curated set of low-risk read tools to the
-// gpt-realtime model via async function calling, and mirrors every
-// model-driven tool call back into cognition so cognition is never blind to
-// what the model did (#458, the Go analog of
-// the Python voice-agent's mcp_tool_bridge.py).
+// mcp_tool_bridge.go exposes memQL's tool surface to the gpt-realtime model
+// via async function calling, and mirrors every model-driven tool call back
+// into cognition so cognition is never blind to what the model did (#458).
 //
-// Risk-tier split (the heart of #435/#458). memQL already speaks MCP on the
-// bidirectional MemqlService.Stream RPC (ListToolsMsg / CallToolMsg). The full
-// registry contains both harmless read tools and privileged / side-effecting
-// tools (computer_use / workerHost / workerComputer / copresent_control UI
-// takeover / graph mutations) that carry memQL's authorization model --
-// role-locks, agentAuthorization scope, the computer-use kill switch. Letting
-// the *model* pick those is unacceptable: the model is not a party to that auth
-// model. So this bridge applies a default-deny tier boundary:
+// Full surface, server-enforced (#1416 -- owner decision, retiring the
+// #435/#458 client-side risk tier). The realtime model gets the SAME tool
+// list the text loop binds: every ToolDefinition the agent's ListToolsMsg
+// returns. Authorization is enforced where it already lives for every caller
+// -- server-side at handleCallTool (the per-tool role gate via
+// IsAllowedForRole) and in the engine's own scope / kill-switch /
+// agentAuthorization checks. The text loop's model picks tools freely under
+// exactly those gates; the realtime model is no different in kind, so a
+// client-side allowlist in front of the locked door added denial without
+// adding enforcement.
 //
-//   - A tool is exposed to the realtime model ONLY when it is on the explicit
-//     low-risk allowlist AND its registry ToolDefinition carries no
-//     side-effecting signal -- client_execution is false and none of its
-//     declared scopes are privileged.
-//   - Every other tool -- including any tool the registry grows in the future
-//     that nobody has tiered yet -- is privileged-by-default and is NOT handed
-//     to the model. Privileged tools stay on the cognition-mediated, authorized
-//     tool loop, exactly as on the text path.
+// ONE mechanical exclusion -- NOT a policy tier: client-executed tools
+// (ClientExecution=true, the browser-UI drive surface). handleCallTool's
+// executeClientTool emits the ClientToolCall on the CALLING session and parks
+// for its ClientToolResult -- and the calling session here is the voice-agent
+// process, which has no browser on it, so the call can only time out. Routing
+// those through the cross-node client-tool relay (the
+// v1:cognition:client:tool:request graph rows) is the #1416 follow-up; until
+// then they are excluded for transport reasons and logged as such.
 //
-// Awareness mirror. When the model calls a low-risk tool, the bridge (1)
-// executes it through memQL's MCP surface (CallToolMsg -> CallToolResult), the
-// same authorized backend path the text loop uses, so server-side tiering is
-// still the source of truth; and (2) emits a best-effort mirror of the call +
+// Awareness mirror. When the model calls a tool, the bridge (1) executes it
+// through memQL's MCP surface (CallToolMsg -> CallToolResult), the same
+// authorized backend path the text loop uses, so server-side enforcement is
+// the source of truth; and (2) emits a best-effort mirror of the call +
 // result into cognition so transcripts / history / the conductor / the
 // chat-canvas affordance stay coherent. The mirror is best-effort: a mirror
 // failure must NEVER fail the tool call the model is awaiting (it still gets
 // its result; we only lose the awareness breadcrumb, which we log).
 //
-// Everything here is pure Go and CGO-free: the tier decision, the RealtimeTool
-// build, and the dispatch/mirror flow are exercised in the default lane with a
-// stubbed transport + mirror. The live wiring (ListTools fetch + CallTool
-// transport) is thin glue over the existing gRPC Client.
+// Everything here is pure Go and CGO-free: the exposure decision, the
+// RealtimeTool build, and the dispatch/mirror flow are exercised in the
+// default lane with a stubbed transport + mirror. The live wiring (ListTools
+// fetch + CallTool transport) is thin glue over the existing gRPC Client.
 
 import (
 	"context"
@@ -52,73 +52,25 @@ import (
 	"github.com/znasllc-io/memql/integrations/openai"
 )
 
-// lowRiskToolAllowlist is the set of tool names that MAY reach the realtime
-// model. A tool is exposed only if its name is here AND it carries no
-// side-effecting signal (see isLowRiskTool). These are read-only / no-auth-gate
-// lookups: web search, knowledge/domain retrieval, recent-chat recall. A wrong
-// pick wastes a call -- it cannot mutate state, drive the UI, or touch a user's
-// machine. DEFAULT-DENY: anything not listed is privileged-by-default and is
-// never exposed. Adding a name here asserts "this tool is read-only and carries
-// no authorization gate." Mirrors mcp_tool_bridge.py::LOW_RISK_TOOL_ALLOWLIST.
-var lowRiskToolAllowlist = map[string]struct{}{
-	"webSearch":        {},
-	"web_search":       {},
-	"knowledgeLookup":  {},
-	"knowledge_lookup": {},
-	"domainLookup":     {},
-	"recentChat":       {},
-	"recent_chat":      {},
+// isExposableTool reports whether a tool may be handed to the realtime model.
+// Full surface (#1416): every registry tool is exposed; authorization is the
+// server's job (handleCallTool role gate + engine scope / kill-switch checks),
+// identical to the text loop. The ONLY exclusion is mechanical, not policy:
+// a client-executed tool needs a browser on the calling session to satisfy
+// its ClientToolCall round-trip, and the voice-agent's session has none --
+// the call would park until timeout. Goes away once the #1416 follow-up
+// routes client tools through the cross-node client-tool relay.
+func isExposableTool(clientExecution bool) bool {
+	return !clientExecution
 }
 
-// privilegedScopes marks a tool as side-effecting / privileged. A tool whose
-// ToolDefinition declares ANY of these is denied even if its name appears on
-// the allowlist -- a belt-and-suspenders guard so a registry change that adds a
-// write scope to a previously-read tool cannot silently leak it to the model.
-// "read" is intentionally absent: it is the only non-privileged scope. Mirrors
-// mcp_tool_bridge.py::PRIVILEGED_SCOPES.
-var privilegedScopes = map[string]struct{}{
-	"navigate":     {},
-	"highlight":    {},
-	"create":       {},
-	"update":       {},
-	"delete":       {},
-	"identity":     {},
-	"billing":      {},
-	"execute":      {},
-	"write":        {},
-	"computer_use": {},
-	"control":      {},
-}
-
-// isLowRiskTool reports whether a tool may be exposed to the realtime model.
-// The tier boundary, made explicit and default-deny: the name must be on
-// lowRiskToolAllowlist; clientExecution must be false (a client-executed tool
-// drives the browser UI -- the CoPresent Operator surface -- and is privileged
-// by construction); and none of scopes may be privileged. Any tool that fails
-// any clause is privileged-by-default and stays on the cognition-mediated
-// authorized tool loop. Mirrors mcp_tool_bridge.py::is_low_risk_tool.
-func isLowRiskTool(name string, clientExecution bool, scopes []string) bool {
-	if _, ok := lowRiskToolAllowlist[name]; !ok {
-		return false
-	}
-	if clientExecution {
-		return false
-	}
-	for _, s := range scopes {
-		if _, ok := privilegedScopes[strings.TrimSpace(s)]; ok {
-			return false
-		}
-	}
-	return true
-}
-
-// ToolCallTransport executes a low-risk tool against memQL's MCP surface and
+// ToolCallTransport executes a tool against memQL's MCP surface and
 // returns (resultText, isError). The production transport sends a CallToolMsg
 // on the stream and awaits the CallToolResult; tests inject a fake. Running the
 // model-driven call through memQL's CallTool path (rather than any direct
 // provider tool) is itself part of the awareness contract: the call traverses
-// the same authorized backend path the text loop uses, so server-side tiering
-// remains the source of truth even for the low-risk tools the model picks.
+// the same authorized backend path the text loop uses, so server-side
+// enforcement (role gate, scopes, kill switch) is the source of truth.
 type ToolCallTransport func(ctx context.Context, name string, arguments map[string]any) (string, bool, error)
 
 // MirrorRecord is one awareness breadcrumb for a model-driven tool call. It is
@@ -138,7 +90,7 @@ type MirrorRecord struct {
 // mcp_tool_bridge.py::MirrorSink.
 type MirrorSink func(ctx context.Context, record MirrorRecord) error
 
-// McpToolBridge builds the low-risk realtime tool set and mirrors every
+// McpToolBridge builds the realtime tool set (full surface, #1416) and mirrors every
 // model-driven call. Constructed with the raw registry tool definitions
 // (already fetched via ListToolsMsg), the transport that runs a tool via
 // CallToolMsg, the cognition mirror, and the space/agent attribution. Mirrors
@@ -157,7 +109,7 @@ type McpToolBridge struct {
 
 // NewMcpToolBridge builds a bridge. A nil mirror disables mirroring (the call
 // still executes); a nil transport makes every model call error (the bridge is
-// still safe to build for its tier-filtering side).
+// still safe to build for its exposure-partition side).
 func NewMcpToolBridge(
 	transport ToolCallTransport,
 	mirror MirrorSink,
@@ -180,14 +132,13 @@ func NewMcpToolBridge(
 func (b *McpToolBridge) ExposedToolNames() []string { return append([]string(nil), b.exposed...) }
 
 // DeniedToolNames returns the names withheld from the model
-// (privileged-by-default tier; set after RealtimeTools).
+// (the mechanical client-execution exclusion; set after RealtimeTools).
 func (b *McpToolBridge) DeniedToolNames() []string { return append([]string(nil), b.denied...) }
 
-// RealtimeTools returns the openai.RealtimeTool declarations for the low-risk
-// set -- the function-tool allowlist the session.update carries. Privileged
-// tools are excluded; they never appear. As a side effect it records the
-// exposed / denied partition for diagnostics. Mirrors
-// mcp_tool_bridge.py::McpToolBridge.build_function_tools.
+// RealtimeTools returns the openai.RealtimeTool declarations the
+// session.update carries -- the agent's full tool surface (#1416), minus the
+// mechanical client-execution exclusion (see isExposableTool). As a side
+// effect it records the exposed / denied partition for diagnostics.
 func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 	b.exposed = b.exposed[:0]
 	b.denied = b.denied[:0]
@@ -197,7 +148,7 @@ func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 			continue
 		}
 		name := td.GetName()
-		if isLowRiskTool(name, td.GetClientExecution(), td.GetScopes()) {
+		if isExposableTool(td.GetClientExecution()) {
 			b.exposed = append(b.exposed, name)
 			out = append(out, openai.RealtimeTool{
 				Type:        "function",
@@ -210,7 +161,7 @@ func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 		}
 	}
 	if b.logger != nil {
-		b.logger.Info("voice-agent realtime mcp bridge: tool tier resolved",
+		b.logger.Info("voice-agent realtime mcp bridge: tool surface resolved",
 			"exposed_count", len(b.exposed), "exposed", strings.Join(b.exposed, ","),
 			"denied_count", len(b.denied), "denied", strings.Join(b.denied, ","))
 	}
@@ -220,7 +171,8 @@ func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 // IsExposed reports whether the bridge handed name to the model. Used by the
 // dispatch path to refuse a function call for a tool that was never exposed
 // (defence in depth: the model should only call exposed tools, but a refusal
-// here means a registry/tier mismatch can never run a privileged tool).
+// here means a tool absent from the agent's registry can never run via the
+// model path).
 func (b *McpToolBridge) IsExposed(name string) bool {
 	for _, n := range b.exposed {
 		if n == name {
@@ -231,7 +183,7 @@ func (b *McpToolBridge) IsExposed(name string) bool {
 }
 
 // Dispatch runs one model-driven function call: it parses the JSON arguments,
-// refuses any tool not on the exposed low-risk set, executes the call through
+// refuses any tool that was never exposed, executes the call through
 // the transport, mirrors the call + result into cognition (best-effort), and
 // returns the result text to hand back to the model as the function output.
 // The returned string is ALWAYS suitable to send back as the function output
