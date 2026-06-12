@@ -72,9 +72,12 @@ func (d defaultPersonaVoice) VoiceID() string { return strings.TrimSpace(d.canon
 type CascadeConfig struct {
 	SpaceID   string
 	GaAgentID string
-	// SpeakerUserID attributes the human transcript. In a 1:1 standard
-	// space this is the single human; multi-human per-track attribution
-	// is #433. Empty is allowed (server resolves the active speaker).
+	// SpeakerUserID is the fallback/default speaker attribution for the
+	// human transcript (the 1:1 standard-space wiring). The per-track
+	// LiveKit participant identity carried through ConsumeASR wins when
+	// present (#433 / #1403). Empty is allowed only because the server
+	// resolves a space's SINGLE active human participant as a last
+	// resort; multi-human spaces require a per-track identity.
 	SpeakerUserID string
 	// Thread selects the cognition thread context for turn requests.
 	Thread memqlv1.VoiceAgentTurnRequest_ThreadContext
@@ -104,6 +107,16 @@ type Cascade struct {
 	// stop the current pump without racing a new one.
 	ttsMu     sync.Mutex
 	ttsCancel context.CancelFunc
+
+	// speakerMu guards lastSpeaker: the LiveKit participant identity of
+	// the most recent human track to produce an ASR result. The turn
+	// machine surfaces only the committed text (OnFinalTranscript carries
+	// no speaker), so the cascade tracks the active speaker per EOU here
+	// -- the commit fires synchronously on the same per-track consume
+	// goroutine that just recorded the speaker, mirroring the realtime
+	// executor's setLastSpeaker/getLastSpeaker pattern (#1403).
+	speakerMu   sync.Mutex
+	lastSpeaker string
 
 	// ctx is the session-scoped context; cancelled on Close.
 	ctx    context.Context
@@ -166,14 +179,18 @@ func (c *Cascade) Close() {
 // Machine exposes the turn-taking machine (tests / diagnostics).
 func (c *Cascade) Machine() *TurnMachine { return c.machine }
 
-// ConsumeASR drives the machine from an ASR result stream. It maps
-// each result onto a turn-taking input: a speech-started kind raises an
-// onset (transition A / barge-in C), an interim updates the partial and is
-// forwarded as a VoiceAgentPartialTranscript, and a final commits the turn
-// (transition D). It ranges until the stream channel closes or the session
-// context is cancelled, so it is the long-lived per-track consumer
-// goroutine (one per human audio track; #433 scales it to many).
-func (c *Cascade) ConsumeASR(results <-chan polyphon.ASRResult) {
+// ConsumeASR drives the machine from one human track's labeled ASR result
+// stream. speakerIdentity is the LiveKit participant identity that owns the
+// track (the canonical `v1:cognition:participant:...` id), carried with
+// every result so the committed turn is attributed to the actual speaker
+// (#1403). It maps each result onto a turn-taking input: a speech-started
+// kind raises an onset (transition A / barge-in C), an interim updates the
+// partial and is forwarded as a VoiceAgentPartialTranscript, and a final
+// commits the turn (transition D). It ranges until the stream channel
+// closes or the session context is cancelled, so it is the long-lived
+// per-track consumer goroutine (one per human audio track; #433 scales it
+// to many).
+func (c *Cascade) ConsumeASR(speakerIdentity string, results <-chan polyphon.ASRResult) {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -182,14 +199,21 @@ func (c *Cascade) ConsumeASR(results <-chan polyphon.ASRResult) {
 			if !ok {
 				return
 			}
-			c.handleASRResult(r)
+			c.handleASRResult(speakerIdentity, r)
 		}
 	}
 }
 
-// handleASRResult routes one ASR result. Split out for direct unit testing
-// without standing up a channel.
-func (c *Cascade) handleASRResult(r polyphon.ASRResult) {
+// handleASRResult routes one ASR result for a given speaker. Split out for
+// direct unit testing without standing up a channel.
+func (c *Cascade) handleASRResult(speakerIdentity string, r polyphon.ASRResult) {
+	// Track the active speaker on EVERY result, before any routing: the turn
+	// machine's commit callback carries only the text, so onCommittedTurn
+	// reads the speaker recorded here (same goroutine, so the final that
+	// commits the turn always sees its own track's identity).
+	if id := strings.TrimSpace(speakerIdentity); id != "" {
+		c.setLastSpeaker(id)
+	}
 	if r.Kind == polyphon.ASRKindSpeechStarted {
 		c.machine.OnSpeechStarted()
 		return
@@ -208,18 +232,42 @@ func (c *Cascade) handleASRResult(r polyphon.ASRResult) {
 	// VoiceAgentPartialTranscript (event-only server-side, drives the live
 	// transcript in chat). Mirrors transcript_forwarder.forward_partial.
 	c.machine.OnInterim(text)
-	c.forwardPartial(text)
+	c.forwardPartial(speakerIdentity, text)
+}
+
+// setLastSpeaker records the most recent human track to produce an ASR
+// result (the per-EOU active speaker).
+func (c *Cascade) setLastSpeaker(identity string) {
+	c.speakerMu.Lock()
+	c.lastSpeaker = identity
+	c.speakerMu.Unlock()
+}
+
+func (c *Cascade) getLastSpeaker() string {
+	c.speakerMu.Lock()
+	defer c.speakerMu.Unlock()
+	return c.lastSpeaker
+}
+
+// resolveSpeaker maps a per-track participant identity to the
+// speaker_user_id stamped on the wire: the per-track identity when present,
+// else the configured 1:1 fallback. Mirrors RealtimeExecutor.resolveSpeaker.
+func (c *Cascade) resolveSpeaker(identity string) string {
+	if id := strings.TrimSpace(identity); id != "" {
+		return id
+	}
+	return c.cfg.SpeakerUserID
 }
 
 // forwardPartial sends a VoiceAgentPartialTranscript (best-effort, no
 // reply awaited -- the server acks but we don't block the audio loop on it).
-func (c *Cascade) forwardPartial(text string) {
+func (c *Cascade) forwardPartial(speakerIdentity, text string) {
 	seq := c.seq.Add(1)
 	envelope := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript{
 			VoiceAgentPartialTranscript: &memqlv1.VoiceAgentPartialTranscript{
 				SpaceId:       c.cfg.SpaceID,
-				SpeakerUserId: c.cfg.SpeakerUserID,
+				SpeakerUserId: c.resolveSpeaker(speakerIdentity),
 				PartialText:   text,
 				Sequence:      seq,
 			},
@@ -240,24 +288,26 @@ func (c *Cascade) onCommittedTurn(text string) {
 	// Reset the partial sequence so the next utterance starts fresh
 	// (transcript_forwarder.forward_final clears its counter).
 	c.seq.Store(0)
-	c.forwardFinal(text)
-	go c.runTurn(text)
+	// Attribute the committed turn to the track that produced it: the
+	// machine's commit fires synchronously on the per-track consume
+	// goroutine, so lastSpeaker is the identity handleASRResult just
+	// recorded for this final (#1403).
+	speaker := c.resolveSpeaker(c.getLastSpeaker())
+	c.forwardFinal(speaker, text)
+	go c.runTurn(speaker, text)
 }
 
-// forwardFinal sends a VoiceAgentFinalTranscript (best-effort).
-func (c *Cascade) forwardFinal(text string) {
-	envelope := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{
-			VoiceAgentFinalTranscript: &memqlv1.VoiceAgentFinalTranscript{
-				SpaceId:       c.cfg.SpaceID,
-				SpeakerUserId: c.cfg.SpeakerUserID,
-				FinalText:     text,
-			},
-		},
-	}
-	if err := c.client.Send(c.ctx, envelope); err != nil && c.logger != nil {
-		c.logger.Warn("voice-agent final transcript send failed", "err", err)
-	}
+// forwardFinal sends a VoiceAgentFinalTranscript. The send stays
+// non-blocking, but the server's FinalAck / QueryError reply is consumed
+// and logged on a background goroutine instead of being discarded -- a
+// rejected insert here means the user's utterance never reaches chat, the
+// silent-failure core of #1403.
+func (c *Cascade) forwardFinal(speakerID, text string) {
+	sendFinalTranscript(c.ctx, c.client, c.logger, "cascade", &memqlv1.VoiceAgentFinalTranscript{
+		SpaceId:       c.cfg.SpaceID,
+		SpeakerUserId: speakerID,
+		FinalText:     text,
+	})
 }
 
 // runTurn drives one VoiceAgentTurnRequest and consumes its streamed
@@ -268,7 +318,7 @@ func (c *Cascade) forwardFinal(text string) {
 // should stay silent) -- in that case the turn times out with no delta and
 // nothing is spoken. When a non-empty reply lands, runTurn drives the
 // machine's speak path (transition B) to synthesize it.
-func (c *Cascade) runTurn(utterance string) {
+func (c *Cascade) runTurn(speakerID, utterance string) {
 	utterance = strings.TrimSpace(utterance)
 	if utterance == "" {
 		return
@@ -277,7 +327,7 @@ func (c *Cascade) runTurn(utterance string) {
 		Payload: &memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{
 			VoiceAgentTurnRequest: &memqlv1.VoiceAgentTurnRequest{
 				SpaceId:       c.cfg.SpaceID,
-				SpeakerUserId: c.cfg.SpeakerUserID,
+				SpeakerUserId: speakerID,
 				UtteranceText: utterance,
 				GaAgentId:     c.cfg.GaAgentID,
 				Thread:        c.cfg.Thread,

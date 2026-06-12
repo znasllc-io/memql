@@ -140,7 +140,10 @@ func (b *roomAudioBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *lksd
 
 	// The cascade consumes the result channel: interim/final transcripts +
 	// the surfaced SpeechStarted onset (polyphon.ASRKindSpeechStarted).
-	go b.cascade.ConsumeASR(stream.Results())
+	// The LiveKit participant identity IS the canonical participant id
+	// (`v1:cognition:participant:...`); carrying it per-track lets the
+	// cascade attribute each committed turn to the actual speaker (#1403).
+	go b.cascade.ConsumeASR(identity, stream.Results())
 
 	if _, err := lkmedia.NewPCMRemoteTrack(track, &sttSink{stream: stream, logger: b.logger},
 		lkmedia.WithTargetSampleRate(sttSampleRate),

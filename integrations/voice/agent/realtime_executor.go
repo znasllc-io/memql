@@ -523,24 +523,19 @@ func (e *RealtimeExecutor) getLastSpeaker() string {
 	return e.lastSpeaker
 }
 
-// forwardFinal sends a VoiceAgentFinalTranscript (best-effort). nativeAuthored
+// forwardFinal sends a VoiceAgentFinalTranscript. nativeAuthored
 // marks the #478 native path: the realtime model already authored AND spoke the
 // reply, so the server stamps this user utterance transcript-only and cognition
-// does not author a second reply.
+// does not author a second reply. The send stays non-blocking, but the
+// server's FinalAck / QueryError reply is consumed and logged instead of
+// being discarded (#1403).
 func (e *RealtimeExecutor) forwardFinal(speakerIdentity, text string, nativeAuthored bool) {
-	envelope := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{
-			VoiceAgentFinalTranscript: &memqlv1.VoiceAgentFinalTranscript{
-				SpaceId:        e.cfg.SpaceID,
-				SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
-				FinalText:      text,
-				NativeAuthored: nativeAuthored,
-			},
-		},
-	}
-	if err := e.client.Send(e.ctx, envelope); err != nil && e.logger != nil {
-		e.logger.Warn("voice-agent realtime: final transcript send failed", "err", err)
-	}
+	sendFinalTranscript(e.ctx, e.client, e.logger, "realtime", &memqlv1.VoiceAgentFinalTranscript{
+		SpaceId:        e.cfg.SpaceID,
+		SpeakerUserId:  e.resolveSpeaker(speakerIdentity),
+		FinalText:      text,
+		NativeAuthored: nativeAuthored,
+	})
 	// T0 (#484): the human turn is committed. The headline decision->first-audio
 	// window opens here; see docs/internal/design/voice-484-latency-fidelity-measurement.md.
 	if e.logger != nil {

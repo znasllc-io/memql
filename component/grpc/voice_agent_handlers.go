@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // randHex returns 2*n lowercase-hex characters of crypto/rand entropy.
@@ -660,6 +661,13 @@ func (s *streamSession) handleVoiceAgentPartialTranscript(envelope *memqlv1.Memq
 
 // handleVoiceAgentFinalTranscript inserts the user's utterance into
 // the single space chat via mutationSendTextUtterance.
+//
+// speakerUserId is OPTIONAL on the wire (#1403): the voice-agent's
+// CascadeConfig documents "empty is allowed (server resolves the active
+// speaker)", so an empty speaker falls back to the space's SINGLE active
+// human participant. The fallback is conservative -- zero or multiple
+// active humans reject the insert (with a WARN; attribution is never
+// guessed) via a failed VoiceAgentFinalAck the voice-agent now consumes.
 func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.VoiceAgentFinalTranscript) error {
 	if msg == nil {
 		return nil
@@ -674,8 +682,18 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	spaceId := strings.TrimSpace(msg.GetSpaceId())
 	speakerId := strings.TrimSpace(msg.GetSpeakerUserId())
 	text := strings.TrimSpace(msg.GetFinalText())
-	if spaceId == "" || speakerId == "" || text == "" {
-		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId, speakerUserId, finalText are required")
+	if spaceId == "" || text == "" {
+		// WARN on rejection: a rejected final transcript means the user's
+		// voice utterance never reaches chat or cognition -- the silent
+		// failure #1403 made invisible.
+		if s.logger != nil {
+			s.logger.Warn("voice-agent final transcript rejected: missing required fields",
+				"request_id", requestId,
+				"space_id", spaceId,
+				"missing_space_id", spaceId == "",
+				"missing_final_text", text == "")
+		}
+		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and finalText are required")
 	}
 
 	// Mint a flat slug -- speakerId is the canonical participant id
@@ -700,6 +718,40 @@ func (s *streamSession) handleVoiceAgentFinalTranscript(envelope *memqlv1.MemqlC
 	}
 
 	go func() {
+		// Empty speaker: honor the documented contract by resolving the
+		// space's single active human participant. Runs inside the goroutine
+		// so the engine round-trip never blocks the stream read loop.
+		if speakerId == "" {
+			resolved, rerr := resolveSingleActiveHumanParticipantId(
+				contextWithVoiceAgentActor(context.Background()), s.service.engine, spaceId)
+			if rerr != nil {
+				if s.logger != nil {
+					s.logger.Warn("voice-agent final transcript rejected: speakerUserId empty and active speaker unresolvable",
+						"request_id", requestId,
+						"space_id", spaceId,
+						"error", rerr)
+				}
+				s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
+					Payload: &memqlv1.MemqlServerMessage_VoiceAgentFinalAck{
+						VoiceAgentFinalAck: &memqlv1.VoiceAgentFinalAck{
+							RequestId:    requestId,
+							Success:      false,
+							ErrorCode:    "speaker_unresolvable",
+							ErrorMessage: rerr.Error(),
+						},
+					},
+				})
+				return
+			}
+			speakerId = resolved
+			if s.logger != nil {
+				s.logger.Info("voice-agent final transcript: resolved fallback speaker",
+					"request_id", requestId,
+					"space_id", spaceId,
+					"speaker_user_id", speakerId)
+			}
+		}
+
 		// JSON-marshal every interpolated string so a value containing a double
 		// quote cannot break out of its DSL string literal (CodeQL "unsafe
 		// quoting"). text already used this; do the same for the id fields and
@@ -1316,6 +1368,119 @@ func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string
 		return ""
 	}
 	return fmt.Sprintf(`, citations: %s`, string(citationsJSON))
+}
+
+// voiceParticipantResolver is the narrow engine surface the FinalTranscript
+// speaker fallback needs. *memqlengine.MemQLEngine satisfies it; an interface
+// so the resolution rule is unit-testable without standing up an engine.
+type voiceParticipantResolver interface {
+	CanonicalizeIdValue(ctx context.Context, value, conceptType string) (string, error)
+	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
+}
+
+// resolveSingleActiveHumanParticipantId implements the documented
+// VoiceAgentFinalTranscript fallback (#1403): when the voice-agent sends an
+// empty speakerUserId, attribute the utterance to the space's SINGLE active
+// human participant. Conservative rule: exactly one active human resolves;
+// zero or multiple return an error so the caller rejects rather than
+// guessing attribution.
+func resolveSingleActiveHumanParticipantId(ctx context.Context, engine voiceParticipantResolver, spaceId string) (string, error) {
+	if engine == nil {
+		return "", fmt.Errorf("engine not configured")
+	}
+	// Participant rows carry the auto-canonicalized space id
+	// (`<partition>:v1:cognition:space:<slug>`) while the voice-agent passes
+	// the bare slug; canonicalize before filtering (mirrors
+	// resolveGroupGAAgentId). On canonicalize failure fall back to the wire
+	// value so an already-canonical id still resolves.
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	if err != nil || canonicalSpace == "" {
+		canonicalSpace = spaceId
+	}
+	// JSON-marshal the interpolated id so an embedded double quote cannot
+	// break out of the DSL string literal.
+	spaceJSON, _ := json.Marshal(canonicalSpace)
+	query := fmt.Sprintf(`querySpaceParticipants({spaceId: %s, participantType: "human", status: "active"})`, string(spaceJSON))
+	result, err := engine.Execute(ctx, query)
+	if err != nil {
+		return "", fmt.Errorf("query active human participants: %w", err)
+	}
+	if result == nil {
+		return "", fmt.Errorf("no active human participant in space")
+	}
+	return singleActiveHumanParticipantId(result.OutputPayload())
+}
+
+// singleActiveHumanParticipantId applies the conservative fallback rule to a
+// querySpaceParticipants result payload: exactly one active human participant
+// row -> its canonical participant id; zero or multiple -> error. The
+// defensive concept / participantType re-checks mirror
+// integrations/cognition's findParticipantsByType (the shape runtime has been
+// observed leaking non-matching nodes through a filtered query).
+func singleActiveHumanParticipantId(payload any) (string, error) {
+	seen := map[string]bool{}
+	ids := make([]string, 0, 2)
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+
+	for _, row := range normalizeResultRows(payload) {
+		if concept, _ := row["concept"].(string); concept != "" && concept != "v1:cognition:participant" {
+			continue
+		}
+		inner, _ := row["payload"].(map[string]any)
+		pt, hasPT := "", false
+		if inner != nil {
+			if v, ok := inner["participantType"].(string); ok && v != "" {
+				pt, hasPT = v, true
+			}
+		}
+		if v, ok := row["participantType"].(string); ok && v != "" {
+			pt, hasPT = v, true
+		}
+		if hasPT && pt != "human" {
+			continue
+		}
+		id, _ := row["id"].(string)
+		if id == "" && inner != nil {
+			id, _ = inner["id"].(string)
+		}
+		add(id)
+	}
+	// `select payload.X` results can surface only as a GraphBundle (no row
+	// maps); drill into Bundle.Nodes as the final fallback, mirroring
+	// extractFirstAgentIdFromParticipants.
+	if bundle, ok := payload.(*memqlv1.GraphBundle); ok && bundle != nil {
+		for _, n := range bundle.GetNodes() {
+			if n == nil {
+				continue
+			}
+			if c := n.GetConcept(); c != "" && c != "v1:cognition:participant" {
+				continue
+			}
+			if p := n.GetPayload(); p != nil {
+				if f, ok := p.GetFields()["participantType"]; ok && f != nil {
+					if v := f.GetStringValue(); v != "" && v != "human" {
+						continue
+					}
+				}
+			}
+			add(n.GetId())
+		}
+	}
+
+	switch len(ids) {
+	case 1:
+		return ids[0], nil
+	case 0:
+		return "", fmt.Errorf("no active human participant in space")
+	default:
+		return "", fmt.Errorf("%d active human participants in space (ambiguous speaker)", len(ids))
+	}
 }
 
 func contextWithVoiceAgentActor(ctx context.Context) context.Context {
