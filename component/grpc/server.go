@@ -122,7 +122,7 @@ type Server struct {
 	// clientToolRPC serves the substrate-RPC client-tool return channel per
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
-	clientToolRPC   *node.ClientToolResultServer
+	clientToolRPC *node.ClientToolResultServer
 	// deliverySubstrate is the durable streaming substrate (memql#1266). Set by
 	// app bootstrap on every mesh node where the substrate is wired; nil on
 	// single-node / non-mesh binaries (streaming falls back to the direct
@@ -1406,10 +1406,20 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 	if registry != nil {
 		callerRole := callerRoleFromMetadata(envelope)
 		tools := registry.List()
+		// Voice-agent sessions get the GA agent's tool surface (#1419) -- the
+		// same slug-expanded list the text loop binds -- not the global
+		// registry. nil scope (any other caller, or fail-open on a lookup
+		// error) keeps the unscoped behaviour.
+		agentScope := s.voiceAgentScopedToolNames()
 		toolDefs = make([]*memqlv1.ToolDefinition, 0, len(tools))
 		for _, tool := range tools {
 			if !tool.IsAllowedForRole(callerRole) {
 				continue
+			}
+			if agentScope != nil {
+				if _, ok := agentScope[tool.Name]; !ok {
+					continue
+				}
 			}
 			toolDefs = append(toolDefs, &memqlv1.ToolDefinition{
 				Name:            tool.Name,
