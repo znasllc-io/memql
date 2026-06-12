@@ -268,6 +268,10 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		client, req.SpaceID, req.GaAgentID, NewCitationResolver(GroundingContext{}),
 	))
 	executor.SetToolBridge(toolBridge)
+	// #1430 async tool-call bounds: per-call execution timeout + concurrent
+	// pending-call cap (spoken-failure-style results past either bound).
+	executor.ConfigureToolCalls(
+		time.Duration(cfg.RealtimeToolTimeoutSec)*time.Second, cfg.RealtimeMaxPendingTools)
 	// #1431 confidence gate: drop input-transcription finals whose mean token
 	// logprob falls below the floor (finals without logprobs always pass).
 	executor.SetTranscriptConfidenceFloor(cfg.RealtimeTranscriptMinConfidence)

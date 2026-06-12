@@ -101,6 +101,14 @@ type Config struct {
 	RealtimeMaxSessionSec  int
 	RealtimeMaxAudioTokens int
 
+	// Non-blocking in-voice tool-call bounds (#1430, realtime_tools.go).
+	// RealtimeToolTimeoutSec bounds one model-driven tool's memql CallTool
+	// round-trip before a spoken-failure-style result is injected instead;
+	// RealtimeMaxPendingTools caps concurrently-executing model-driven calls
+	// (excess calls are answered with a busy error without executing).
+	RealtimeToolTimeoutSec  int
+	RealtimeMaxPendingTools int
+
 	// Realtime server_vad turn-detection knobs (#1203) for the native 1-on-1
 	// path. These tune the root-cause hallucination fix: silence/ambient noise
 	// must not cross the energy gate and commit a phantom turn the model then
@@ -293,6 +301,10 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.RealtimeIdleTimeoutSec = getInt("MEMQL_REALTIME_IDLE_TIMEOUT_SEC", 300)
 	cfg.RealtimeMaxSessionSec = getInt("MEMQL_REALTIME_MAX_SESSION_SEC", 1800)
 	cfg.RealtimeMaxAudioTokens = getInt("MEMQL_REALTIME_MAX_AUDIO_TOKENS", 1_000_000)
+	// #1430 async tool-call bounds: per-call execution timeout + concurrent
+	// pending-call cap for model-driven function calls.
+	cfg.RealtimeToolTimeoutSec = getInt("MEMQL_REALTIME_TOOL_TIMEOUT_SEC", 45)
+	cfg.RealtimeMaxPendingTools = getInt("MEMQL_REALTIME_MAX_PENDING_TOOLS", 4)
 	// #1203 server_vad knobs. Defaults tightened over the OpenAI baseline
 	// (threshold 0.5) so silence/noise no longer commits a phantom turn.
 	cfg.RealtimeVadThreshold = getFloat("MEMQL_REALTIME_VAD_THRESHOLD", 0.6)

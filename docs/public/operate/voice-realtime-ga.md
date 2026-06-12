@@ -248,5 +248,12 @@ epic, memql#1424):
   without logprobs always pass (the signal is intermittently missing).
   Composes with — does not replace — the #1199 post-hoc denylist filter.
 - `conversation.item.truncate` on barge-in: NOT SENT (memql#1427).
-- Async acknowledge-first tool prompting: not yet taught
-  (memql#1430).
+- Async acknowledge-first tools: SET (memql#1430) — the voice prompt
+  teaches a spoken acknowledgment on every tool call; execution runs in
+  the background (per-session call-order injection, pending cap via
+  `MEMQL_REALTIME_MAX_PENDING_TOOLS` default 4, per-call timeout via
+  `MEMQL_REALTIME_TOOL_TIMEOUT_SEC` default 45 with a spoken-failure
+  result), and the follow-up `response.create` queues for a quiet
+  boundary on the default conversation (single-writer constraint; never
+  over the user's speech). See
+  `integrations/voice/agent/realtime_tools.go`.
