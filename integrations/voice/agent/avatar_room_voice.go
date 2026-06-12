@@ -13,11 +13,15 @@ package agent
 // to the local Opus track.
 //
 // Source-agnostic invariant (avatar_drive.py): the cascade (#455) and the
-// realtime executor (#457) both write the assistant's PCM into the audioSink
-// the room bridge hands the cascade. The avatar intercepts THAT sink. So
-// whichever executor produced the frames, the avatar lip-syncs them with zero
-// executor-aware branching here -- the Go expression of the Python
-// `session.output.audio` reassignment.
+// realtime executor (#457) each write the assistant's PCM into the audioSink
+// their room bridge constructed, and BOTH bridges wrap that sink through
+// maybeStartAvatar (room_audio_voice.go for the cascade, room_realtime_voice.go
+// for the realtime executor -- the latter was missing until #1428, which is
+// why realtime sessions never drove the avatar). So whichever executor
+// produced the frames, the avatar lip-syncs them with zero executor-aware
+// branching here -- the Go expression of the Python `session.output.audio`
+// reassignment. The producer's PCM rate rides along (pcmSampleRate) so the
+// byte-stream header always matches the bytes.
 //
 // Everything that touches the LiveKit room/media types is here behind
 // `//go:build voice`; the REST + dispatch logic it calls is pure Go (the
@@ -27,7 +31,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -59,7 +62,14 @@ func avatarConfigFromConfig(cfg Config) avatarvendor.AvatarConfig {
 // should run, mints the avatar's LiveKit token, starts the vendor session, and
 // returns an audioSink that forwards the assistant's PCM to the avatar. The
 // returned sink WRAPS the underlying local-track sink so audio still reaches
-// any non-avatar subscriber; callers pass the wrapped sink to the cascade.
+// any non-avatar subscriber; callers pass the wrapped sink to the executor.
+//
+// pcmSampleRate is the PRODUCER's PCM16 rate -- the rate of the bytes the
+// wrapped sink will actually receive (ttsPCMSampleRate for the cascade,
+// audio.OpenAISampleRate for the realtime executor). It is stamped on the
+// avatar byte-stream header so the vendor engine resamples correctly; stamping
+// the vendor's preferred rate here instead was the #1428 format bug (24 kHz
+// realtime PCM declared as 16 kHz).
 //
 // Behavior matching the Python avatar_drive.start_avatar:
 //   - No avatar configured (plan nil) -> returns the underlying sink unchanged
@@ -70,8 +80,9 @@ func avatarConfigFromConfig(cfg Config) avatarvendor.AvatarConfig {
 //     ResolveAvatarPlan -> logged and treated as audio-only (non-fatal), so a
 //     misconfiguration never wedges the whole voice session.
 //
-// It is invoked from newRoomAudioBridge after the local track is published.
-func maybeStartAvatar(ctx context.Context, cfg Config, req RoomRequest, room *lksdk.Room, underlying audioSink, logger *slog.Logger) audioSink {
+// It is invoked from newRoomAudioBridge and newRealtimeRoomBridge after the
+// local track is published.
+func maybeStartAvatar(ctx context.Context, cfg Config, req RoomRequest, room *lksdk.Room, underlying audioSink, pcmSampleRate int, logger *slog.Logger) audioSink {
 	// Mint the avatar's LiveKit join token up front so the (CGO-free) start
 	// core can hand it to the vendor engine. A mint failure degrades to
 	// audio-only, like every other avatar failure.
@@ -120,14 +131,15 @@ func maybeStartAvatar(ctx context.Context, cfg Config, req RoomRequest, room *lk
 		logger.Info("voice-agent avatar started; lip-syncing assistant audio (source-agnostic)",
 			"avatar_identity", res.AvatarIdentity,
 			"session_id", res.SessionID,
-			"sample_rate", res.LiveKitSampleRate)
+			"pcm_sample_rate", pcmSampleRate,
+			"vendor_sample_rate", res.LiveKitSampleRate)
 	}
 
 	return &avatarForwardingSink{
 		underlying:     underlying,
 		room:           room,
 		avatarIdentity: res.AvatarIdentity,
-		sampleRate:     res.LiveKitSampleRate,
+		sampleRate:     pcmSampleRate,
 		logger:         logger,
 	}
 }
@@ -170,11 +182,17 @@ type avatarForwardingSink struct {
 	sampleRate     int
 	logger         *slog.Logger
 
-	// mu guards the lazily-opened byte-stream writer. A new writer is opened on
-	// the first frame after a Flush (each utterance is its own stream segment;
-	// closing the writer signals AudioSegmentEnd to the avatar).
+	// mu guards the lazily-opened byte-stream writer and the per-segment
+	// forwarding meter. A new writer is opened on the first frame after a Flush
+	// (each utterance is its own stream segment; closing the writer signals
+	// AudioSegmentEnd to the avatar).
 	mu     sync.Mutex
 	writer *lksdk.ByteStreamWriter
+	// meter counts the frames/bytes forwarded in the current segment; its
+	// snapshot is logged on segment close (Flush) -- the #1428
+	// frames-forwarded-to-vendor observability, so a dead forwarding leg shows
+	// up as a MISSING per-utterance log instead of silently-frozen lips.
+	meter avatarvendor.ForwardMeter
 }
 
 // WriteFrame forwards one PCM16 frame to the avatar byte-stream and to the
@@ -200,10 +218,10 @@ func (s *avatarForwardingSink) forward(pcm []byte) error {
 			Topic:                 avatarvendor.AudioStreamTopic,
 			MimeType:              "audio/x-raw",
 			DestinationIdentities: []string{s.avatarIdentity},
-			Attributes: map[string]string{
-				"sample_rate":  strconv.Itoa(s.sampleRate),
-				"num_channels": "1",
-			},
+			// The header declares the PRODUCER's PCM rate so the vendor engine
+			// resamples correctly (24 kHz realtime / 16 kHz cascade) -- see
+			// avatarvendor.PCMStreamAttributes (#1428).
+			Attributes: avatarvendor.PCMStreamAttributes(s.sampleRate),
 		})
 		if w == nil {
 			return fmt.Errorf("avatar: StreamBytes returned nil writer")
@@ -211,6 +229,7 @@ func (s *avatarForwardingSink) forward(pcm []byte) error {
 		s.writer = w
 	}
 	s.writer.Write(pcm, nil)
+	s.meter.Add(len(pcm))
 	return nil
 }
 
@@ -223,9 +242,24 @@ func (s *avatarForwardingSink) Flush() {
 	s.mu.Lock()
 	w := s.writer
 	s.writer = nil
+	snap := s.meter.SnapshotAndReset()
 	s.mu.Unlock()
 	if w != nil {
 		w.Close()
+	}
+	// Per-utterance forwarding receipt (#1428): one Info line per closed audio
+	// segment proving the assistant's PCM reached the vendor. Its ABSENCE while
+	// the assistant speaks is the dead-lips signal -- this failure mode must
+	// never be silent again. Skipped for empty segments (a barge-in can flush
+	// before any frame lands).
+	if snap.Frames > 0 && s.logger != nil {
+		s.logger.Info("voice-agent avatar audio forwarded to vendor",
+			"avatar_identity", s.avatarIdentity,
+			"frames", snap.Frames,
+			"bytes", snap.Bytes,
+			"pcm_ms", avatarvendor.PCMDurationMs(snap.Bytes, s.sampleRate),
+			"wall_ms", snap.Wall.Milliseconds(),
+			"sample_rate", s.sampleRate)
 	}
 	// Best-effort interruption signal, fired async so a barge-in's Flush never
 	// blocks the audio loop on the RPC round-trip (PerformRpc waits for a reply

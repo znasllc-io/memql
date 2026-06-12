@@ -193,7 +193,17 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		return nil, fmt.Errorf("voice-agent realtime room: publish track: %w", err)
 	}
 
-	sink := &localTrackSink{track: local}
+	// Avatar wrap (#460/#1428): like the cascade bridge, wrap the room-publish
+	// sink through maybeStartAvatar so the model's output PCM is ALSO forwarded
+	// to the avatar participant for lip-sync. This wrap was missing on the
+	// realtime path -- the executor wrote into a bare localTrackSink, so a
+	// session avatar never received realtime output audio (dead lips). The
+	// producer rate is the model's 24 kHz (audio.OpenAISampleRate), stamped on
+	// the byte-stream header so the vendor engine resamples correctly. No
+	// avatar configured / start failure -> the sink comes back unchanged
+	// (audio-only), same non-fatal contract as the cascade.
+	var sink audioSink = &localTrackSink{track: local}
+	sink = maybeStartAvatar(ctx, cfg, req, room, sink, audio.OpenAISampleRate, logger)
 	executor := NewRealtimeExecutor(ctx, CascadeConfig{
 		SpaceID:   req.SpaceID,
 		GaAgentID: req.GaAgentID,

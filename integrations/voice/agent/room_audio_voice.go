@@ -85,11 +85,13 @@ func newRoomAudioBridge(ctx context.Context, cfg Config, req RoomRequest, client
 	// this session, maybeStartAvatar wraps it so the assistant's PCM is ALSO
 	// forwarded to the avatar participant over a LiveKit byte data-stream for
 	// lip-sync; when no avatar is configured (or its start fails) it returns
-	// the local-track sink unchanged (audio-only). The wrap is at this sink --
-	// the one the cascade AND the realtime executor (#457) write into -- so the
-	// avatar lip-syncs whichever executor produced the frames, source-agnostic.
+	// the local-track sink unchanged (audio-only). The realtime bridge applies
+	// the same wrap to ITS sink (room_realtime_voice.go, #1428), so the avatar
+	// lip-syncs whichever executor produced the frames, source-agnostic. The
+	// cascade TTS emits linear16 at ttsPCMSampleRate; that producer rate is
+	// stamped on the avatar byte-stream header.
 	var sink audioSink = &localTrackSink{track: local}
-	sink = maybeStartAvatar(ctx, cfg, req, room, sink, logger)
+	sink = maybeStartAvatar(ctx, cfg, req, room, sink, ttsPCMSampleRate, logger)
 	// Consume the #456 persona resolver: ResolveTTSVoice maps the resolved
 	// canonical voice to the active provider's voice id (the cascade's TTS
 	// voice). This replaces the standalone canonical-voice default the

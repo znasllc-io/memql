@@ -77,8 +77,17 @@ spec:
             - { name: MEMQL_VOICE_EXECUTOR, value: "realtime" }
             # Auto-join active polyphon rooms (no fixed room).
             - { name: MEMQL_VOICE_AUTOJOIN, value: "true" }
-            # Voice-only first; avatar wiring (anam/simli) is a follow-up.
-            - { name: MEMQL_AVATAR_VENDOR, value: "none" }
+            # Avatar (#1428): the agent starts the GA's avatar (Simli) into the
+            # polyphon room and forwards the assistant PCM over the
+            # lk.audio_stream byte stream for lip-sync, source-agnostic across
+            # the cascade and realtime executors. SIMLI_API_KEY arrives via the
+            # genesis envelope autoload (memql-secrets). Set "none" to disable.
+            - { name: MEMQL_AVATAR_VENDOR, value: "simli" }
+            # The avatar vendor's CLOUD engine dials into LiveKit from the
+            # public internet; the in-cluster ws://livekit:7880 is unreachable
+            # for it (the avatar would never join/publish). Same public URL the
+            # BFF hands browsers (POLYPHON_LIVEKIT_PUBLIC_URL).
+            - { name: LIVEKIT_PUBLIC_URL, value: "wss://livekit.staging.copresent.ai" }
             # Per-pod instance id for the self-bootstrapped voice_agent JWT.
             - { name: MEMQL_VOICE_AGENT_INSTANCE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             # Self-bootstrap: VOICE_AGENT_TOKEN empty -> mint via the genesis
