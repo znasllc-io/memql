@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -83,6 +84,14 @@ type planExecutionRow struct {
 	SpaceId      string
 	OwnerAgentId string
 	RequestedBy  string
+	// StartedAt is the timestamp stamped on the most recent transition INTO
+	// running (mutationStartPlan / markPlanRunningFromQueue both stamp it).
+	// It is the cross-replica execution-claim discriminator (memql#1363):
+	// every replica reads the SAME row, so planId+startedAt is identical
+	// across replicas for one running spell, and a legitimate later re-run
+	// (retry after failure, re-admission from waitingForSlot) stamps a fresh
+	// startedAt and therefore claims under a fresh key.
+	StartedAt string
 	// WatchExecution is the opt-in "watch agent work" flag (memql#900),
 	// read off Plan.input.watchExecution. When true the execution turn is
 	// routed through the interactive streaming lane instead of the
@@ -393,6 +402,41 @@ func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentT
 	return history, hints
 }
 
+// planExecutionClaimName is the cross-replica claim namespace for the
+// approved-plan executor (memql#1363). Rows land in the same
+// automation_execution_claims ledger the automation cluster guard uses,
+// keyed (planExecutionClaimName, planExecutionClaimKey).
+const planExecutionClaimName = "plannerPlanExecution"
+
+// planExecutionClaimKey derives the cross-replica dedup key for one
+// execution attempt of a Plan (memql#1363).
+//
+// Key design: planId + the row's startedAt. Every transition INTO running
+// stamps startedAt (mutationStartPlan stamps now(); markPlanRunningFromQueue
+// stamps it explicitly), so:
+//   - both replicas read the SAME row for the same approval -> identical key
+//     -> the DB PK collapses the duplicate dispatch;
+//   - multiple graph.node.updated events during ONE running spell carry the
+//     same startedAt -> still one key -> still one execution, even when the
+//     extra events land on the replica that lost the first claim;
+//   - a legitimate later re-run (user retry after failure, re-admission from
+//     waitingForSlot, resume) re-stamps startedAt -> fresh key -> NOT blocked
+//     by the previous spell's claim row (the memql#800 release contract).
+//
+// The per-dispatch requestId is deliberately NOT usable here: it is minted
+// per-replica, so it differs across the replicas we need to collapse.
+//
+// Defensive fallback: a running Plan whose startedAt is somehow empty claims
+// on the bare planId. That still dedups across replicas; the cost is that a
+// re-run within the claim-retention window (1h) would be skipped too, which
+// is the safer failure for a path that should not exist.
+func planExecutionClaimKey(planId, startedAt string) string {
+	if strings.TrimSpace(startedAt) == "" {
+		return planId
+	}
+	return planId + "@" + startedAt
+}
+
 // executeApprovedPlan does the actual dispatch. Reads the Plan,
 // resolves Sofia's SI participant, forwards the agent turn,
 // consumes the response, posts the reply, and stamps the Plan
@@ -414,6 +458,29 @@ func (p *PlannerIntegration) executeApprovedPlan(ctx context.Context, planId, re
 		)
 		return
 	}
+	// Cross-replica execution claim (memql#1363). The plan-approved event
+	// reaches EVERY planner replica (the in-process executing map only dedups
+	// within one process), so without this claim each replica dispatches a
+	// full agent turn -- and the losing replica's empty duplicate turn lands
+	// markPlanFailed ~seconds AFTER the winner's markPlanSucceeded, leaving a
+	// produced deliverable reported as FAILED. Claim BEFORE any side effect
+	// (no agent turn, no markPlan*, no admission write on the loser). The
+	// guard fails open BOUNDED when the DB is unreachable (memql#1142);
+	// terminal-status protection in markPlanSucceeded / markPlanFailed covers
+	// that residual window.
+	if p.clusterClaimer != nil {
+		claimKey := planExecutionClaimKey(planId, plan.StartedAt)
+		if !p.clusterClaimer.Claim(ctx, planExecutionClaimName, claimKey) {
+			p.logger.Warn("plan execution: duplicate cross-replica dispatch prevented by cluster claim; another replica is executing this plan",
+				"plan_id", planId,
+				"claim", planExecutionClaimName,
+				"dedup_key", claimKey,
+				"node", claimNodeName(),
+			)
+			return
+		}
+	}
+
 	if plan.SpaceId == "" || plan.OwnerAgentId == "" || plan.Goal == "" {
 		p.logger.Warn("plan execution: missing required fields on Plan; skipping",
 			"plan_id", planId,
@@ -891,32 +958,61 @@ func (p *PlannerIntegration) consumeAgentTurn(
 	}
 }
 
+// shouldStampPlanTerminal is the single pre-write gate markPlanSucceeded and
+// markPlanFailed share. It reads the Plan's CURRENT status and refuses the
+// stamp when:
+//
+//   - the Plan is already in a DIFFERENT terminal status (succeeded / failed
+//     / cancelled): a late duplicate or fail-open double-run must never
+//     overwrite the real result -- failed-after-succeeded is the exact
+//     memql#1363 corruption. WARN with both statuses so the collision is
+//     observable.
+//   - the Plan is already in the SAME terminal status: idempotent re-stamp,
+//     skipped as a no-op (documented choice: no write-through, so the
+//     append-only plan history doesn't grow a duplicate version row).
+//   - the Plan was halted out-of-band while the turn was in flight -- paused
+//     (incl. a fairness pass, memql#908) or re-queued for a slot
+//     (waitingForSlot, #905). A passed plan whose turn happens to finish
+//     must stay paused for resume (memql#907). (cancelled, previously part
+//     of this list, is covered by the terminal branch above.)
+//
+// Best-effort: a lookup miss returns true so a normal turn still stamps its
+// result (matches the pre-#1363 planExternallyHalted contract).
+func (p *PlannerIntegration) shouldStampPlanTerminal(ctx context.Context, planId, incoming string) bool {
+	row, err := p.fetchPlanForExecution(ctx, planId)
+	if err != nil {
+		return true
+	}
+	switch {
+	case row.Status == incoming:
+		p.logger.Info("plan execution: plan already in the target terminal status; skipping idempotent re-stamp",
+			"plan_id", planId,
+			"status", incoming,
+		)
+		return false
+	case isTerminalPlanStatus(row.Status):
+		p.logger.Warn("plan execution: REFUSING to overwrite a terminal plan status (memql#1363)",
+			"plan_id", planId,
+			"current_status", row.Status,
+			"incoming_status", incoming,
+		)
+		return false
+	case row.Status == "paused" || row.Status == "waitingForSlot":
+		p.logger.Info("plan execution: skipping terminal stamp; plan halted out-of-band (paused/passed/waiting)",
+			"plan_id", planId,
+			"current_status", row.Status,
+			"incoming_status", incoming,
+		)
+		return false
+	}
+	return true
+}
+
 // markPlanSucceeded stamps status=succeeded + completedAt=now,
 // rolling the agent's reply text into output.reply for the Tasks
 // panel's expand-drawer view.
-// planExternallyHalted reports whether the Plan's CURRENT status was set
-// out-of-band while a dispatch turn was in flight -- paused (incl. a
-// fairness pass, memql#908), re-queued for a slot (waitingForSlot, #905), or
-// cancelled. The background dispatch must NOT stamp a terminal status over
-// any of these: a passed plan whose turn happens to finish should stay
-// paused for resume (memql#907), not flip to succeeded/failed. Best-effort:
-// a lookup miss returns false so a normal turn still stamps its result.
-func (p *PlannerIntegration) planExternallyHalted(ctx context.Context, planId string) bool {
-	row, err := p.fetchPlanForExecution(ctx, planId)
-	if err != nil {
-		return false
-	}
-	switch row.Status {
-	case "paused", "waitingForSlot", "cancelled":
-		return true
-	}
-	return false
-}
-
 func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, replyText string) {
-	if p.planExternallyHalted(ctx, planId) {
-		p.logger.Info("plan execution: skipping succeeded stamp; plan halted out-of-band (paused/passed/cancelled)",
-			"plan_id", planId)
+	if !p.shouldStampPlanTerminal(ctx, planId, "succeeded") {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -940,9 +1036,7 @@ func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, repl
 // markPlanFailed stamps status=failed + completedAt=now with the
 // supplied error message.
 func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMessage string) {
-	if p.planExternallyHalted(ctx, planId) {
-		p.logger.Info("plan execution: skipping failed stamp; plan halted out-of-band (paused/passed/cancelled)",
-			"plan_id", planId)
+	if !p.shouldStampPlanTerminal(ctx, planId, "failed") {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1086,6 +1180,9 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		if v, ok := m["requestedBy"].(string); ok {
 			row.RequestedBy = v
 		}
+		if v, ok := m["startedAt"].(string); ok {
+			row.StartedAt = v
+		}
 		// Opt-in "watch agent work" (memql#900). Read input.watchExecution
 		// off the projected Plan.input object. The planFull shape flattens
 		// payload.input to the top-level "input" key. Tolerate the field
@@ -1098,6 +1195,17 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		out = append(out, row)
 	}
 	return out
+}
+
+// claimNodeName names THIS replica in the duplicate-prevented WARN log,
+// mirroring the automation cluster guard's nodeId (hostname-derived; the
+// compose/k8s per-replica id convention).
+func claimNodeName() string {
+	host, _ := os.Hostname()
+	if host == "" {
+		return "unknown"
+	}
+	return host
 }
 
 // contextWithSystemActor stamps a system-actor token + claims on

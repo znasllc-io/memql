@@ -38,6 +38,10 @@ func (a *App) setupPlannerIntegration() {
 		// needs a *bun.DB for per-account advisory locks + running-Plan counts.
 		// a.db.BunDB is the same lazy getter the cron leader uses; nil-safe.
 		planner.WithDBGetter(a.db.BunDB),
+		// Cross-replica plan-execution claim (memql#1363): the plan-approved
+		// event reaches every planner replica; the shared cluster guard's
+		// DB-PK claim makes exactly one replica dispatch the agent turn.
+		planner.WithClusterClaimer(a.clusterGuard),
 	)
 	if err != nil {
 		a.fatal("failed to create planner integration", "error", err, "component", planner.ComponentName)
