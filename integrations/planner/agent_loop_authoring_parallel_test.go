@@ -60,10 +60,13 @@ func TestBuildPhaseLayers_CycleTerminates(t *testing.T) {
 	}
 }
 
-// TestSynthesizeParallelHeadline_EmitsParallelStep: a layer with 2+ independent
-// phases emits a `parallel { branches }` step; the dependent phase is gated
-// after it.
-func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
+// TestSynthesizeParallelHeadline_DAGGating: a layer with 2+ independent phases
+// emits one ungated step per phase; the dependent phase's step is gated on
+// EVERY phase of that layer succeeding. (The earlier `parallel { branches }`
+// emission never compiled through the real Gate 1 automation rewrite -- the
+// struct-form grammar has no parallel step -- so within-layer concurrency is
+// retired in favor of a shape that actually compiles; memql#1366.)
+func TestSynthesizeParallelHeadline_DAGGating(t *testing.T) {
 	phases := []phaseNode{
 		{Name: "fetchA"},
 		{Name: "fetchB"},
@@ -71,15 +74,22 @@ func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
 	}
 	c := synthesizePhasedHeadline("gather", "Gather then merge.", phases)
 	src := c.Source
-	if !strings.Contains(src, "parallel {") || !strings.Contains(src, "branches:") {
-		t.Fatalf("independent phases must emit a parallel step:\n%s", src)
+	if strings.Contains(src, "parallel {") {
+		t.Fatalf("the parallel construct does not exist in the automation grammar; the headline must not emit it:\n%s", src)
 	}
 	if !strings.Contains(src, "automation fetchA { }") || !strings.Contains(src, "automation fetchB { }") {
-		t.Errorf("parallel branches must invoke both independent phases:\n%s", src)
+		t.Errorf("layer-0 phases must each emit a step:\n%s", src)
 	}
-	// merge runs in a later layer gated on the parallel layer.
-	if !strings.Contains(src, "automation merge { }") || !strings.Contains(src, "if steps.layer0.result") {
-		t.Errorf("dependent phase must run after the parallel layer:\n%s", src)
+	if !strings.Contains(src, `if steps.fetchA.status == "success" && steps.fetchB.status == "success"`) {
+		t.Errorf("the dependent phase must be gated on every prior-layer phase succeeding:\n%s", src)
+	}
+	if !strings.Contains(src, "automation merge { }") {
+		t.Errorf("the dependent phase must still be invoked:\n%s", src)
+	}
+	// Ordering: fetchA + fetchB steps must precede merge (the executor runs
+	// steps sequentially in list order; layering IS the order).
+	if strings.Index(src, "step merge") < strings.Index(src, "step fetchB") {
+		t.Errorf("dependent phase must come after its dependency layer:\n%s", src)
 	}
 }
 
@@ -109,6 +119,7 @@ func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 		headline,
 	}
 	report := memql.SandboxCompileBundle(bundle)
+	requireAutomationsActuallyCompiled(t, report) // anti-vacuity (memql#1366)
 	if !report.OK {
 		var errs []string
 		for _, d := range report.Diagnostics {
@@ -116,7 +127,7 @@ func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 				errs = append(errs, d.Kind+"/"+d.Name+": "+d.Error)
 			}
 		}
-		t.Fatalf("parallel headline must compile through real Gate 1; errors:\n%s\n--- headline ---\n%s", strings.Join(errs, "\n"), headline.Source)
+		t.Fatalf("DAG headline must compile through real Gate 1; errors:\n%s\n--- headline ---\n%s", strings.Join(errs, "\n"), headline.Source)
 	}
 }
 
@@ -157,13 +168,14 @@ func TestRunDesignPass_ResolvesPhaseDependsOn(t *testing.T) {
 
 // TestSynthesizeHeadline_NoDeps_StillSequential: the #1163 back-compat wrapper
 // (no dependsOn) must still produce a strict one-per-layer sequential chain --
-// NOT a parallel fan-out.
+// each phase gated on the prior phase's success.
 func TestSynthesizeHeadline_NoDeps_StillSequential(t *testing.T) {
 	c := synthesizeHeadlineAutomation("seq", "Sequential.", []string{"seqPhase0", "seqPhase1", "seqPhase2"})
 	if strings.Contains(c.Source, "parallel {") {
 		t.Fatalf("a no-dependsOn chain must stay sequential (no parallel step):\n%s", c.Source)
 	}
-	if !strings.Contains(c.Source, "if steps.layer0.result") || !strings.Contains(c.Source, "if steps.layer1.result") {
-		t.Errorf("sequential chain must gate each phase on the prior layer:\n%s", c.Source)
+	if !strings.Contains(c.Source, `if steps.seqPhase0.status == "success"`) ||
+		!strings.Contains(c.Source, `if steps.seqPhase1.status == "success"`) {
+		t.Errorf("sequential chain must gate each phase on the prior phase succeeding:\n%s", c.Source)
 	}
 }

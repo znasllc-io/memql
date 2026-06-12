@@ -723,6 +723,25 @@ func (e *Evaluator) EvaluateFilterValue(expr string) (any, error) {
 
 	// Check if this looks like a path (contains dots, alphanumeric/underscore only)
 	if looksLikePath(expr) {
+		// Step-result references (memql#1366): a `steps.<id>.<field>` path in
+		// a condition / filter context resolves against the recorded step
+		// results, exactly like its `$steps.` form. Before this, the
+		// `event.`-prefix attempt below could never resolve it
+		// (`event.steps.*` does not exist) and the path fell through to a
+		// LITERAL string -- so `steps.x.status == "success"` compared the
+		// path text itself and was constant. Only attempted when the
+		// referenced step id is actually recorded, so a literal that merely
+		// starts with "steps." keeps the prior fall-through behaviour.
+		if strings.HasPrefix(expr, "steps.") {
+			seg := strings.SplitN(expr, ".", 3)
+			if len(seg) >= 2 {
+				if _, known := e.steps[seg[1]]; known {
+					if val, err := e.resolvePath(expr); err == nil {
+						return val, nil
+					}
+				}
+			}
+		}
 		// Try resolving as $event.{path} first
 		// If it already starts with "event.", don't add the prefix again
 		path := expr

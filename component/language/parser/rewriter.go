@@ -781,6 +781,11 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 //	`publishEvent { <args> }`      -- builtin; `publishEvent({ args })`.
 //	`<prefixedName> { <args> }`    -- direct form.
 //	`<name>(<args>)`               -- already parenthesised; passthrough.
+//	`if <cond> { <call> }`         -- conditional step (memql#1366): the
+//	  inner call is translated recursively and the form passes through as
+//	  `<step> := if <cond> { <translatedCall> }`, which the procedural
+//	  parser's parseGoStyleStep already accepts (it stamps the condition
+//	  on StepDef.Condition; the executor skip-gates the step on it).
 func translateStepCall(body string) (string, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -789,6 +794,10 @@ func translateStepCall(body string) (string, error) {
 	first, rest := splitLeadingIdent(body)
 	if first == "" {
 		return "", fmt.Errorf("expected identifier at start of call, got %q", body)
+	}
+
+	if first == "if" {
+		return translateConditionalStepCall(rest)
 	}
 
 	if kindPrefix(first) {
@@ -801,6 +810,40 @@ func translateStepCall(body string) (string, error) {
 	}
 
 	return finishCall(first, strings.TrimLeft(rest, " \t\n\r"))
+}
+
+// translateConditionalStepCall handles the `if <cond> { <call> }` step body
+// (memql#1366). rest is everything after the leading `if` ident: the condition
+// expression followed by the braced inner call. The condition is an
+// expression (no braces of its own), so the first `{` opens the if body; the
+// inner call is translated through translateStepCall recursively, which also
+// permits nesting in principle though one level is the authored norm.
+func translateConditionalStepCall(rest string) (string, error) {
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	braceIdx := strings.IndexByte(rest, '{')
+	if braceIdx < 0 {
+		return "", fmt.Errorf("conditional step: expected `{` after the if condition")
+	}
+	cond := strings.TrimSpace(rest[:braceIdx])
+	if cond == "" {
+		return "", fmt.Errorf("conditional step: missing condition between `if` and `{`")
+	}
+	closeIdx := findMatchingCloseBrace(rest, braceIdx)
+	if closeIdx < 0 {
+		return "", fmt.Errorf("conditional step: missing closing brace for the if body")
+	}
+	if tail := strings.TrimSpace(rest[closeIdx+1:]); tail != "" {
+		return "", fmt.Errorf("conditional step: unexpected trailing text after the if body: %q", tail)
+	}
+	inner := strings.TrimSpace(rest[braceIdx+1 : closeIdx])
+	if inner == "" {
+		return "", fmt.Errorf("conditional step: the if body is empty")
+	}
+	call, err := translateStepCall(inner)
+	if err != nil {
+		return "", fmt.Errorf("conditional step body: %w", err)
+	}
+	return "if " + cond + " { " + call + " }", nil
 }
 
 func splitLeadingIdent(s string) (string, string) {

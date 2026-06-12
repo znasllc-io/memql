@@ -23,30 +23,33 @@ func TestSynthesizeHeadline_ChainsPhasesInOrder(t *testing.T) {
 			t.Errorf("headline must chain %s; source:\n%s", name, src)
 		}
 	}
-	// Sequential chain: layer 0 unconditional; layer 1 gated on layer 0; layer
-	// 2 on layer 1 (steps are named by DAG layer).
-	if !strings.Contains(src, "if steps.layer0.result") {
-		t.Errorf("phase 1 must be gated on layer 0's result:\n%s", src)
+	// Sequential chain: phase 0 unconditional; each later phase gated on the
+	// prior phase's success (steps are named after their phases, memql#1366).
+	if !strings.Contains(src, `if steps.doTheThingPhase0.status == "success"`) {
+		t.Errorf("phase 1 must be gated on phase 0 succeeding:\n%s", src)
 	}
-	if !strings.Contains(src, "if steps.layer1.result") {
-		t.Errorf("phase 2 must be gated on layer 1's result:\n%s", src)
+	if !strings.Contains(src, `if steps.doTheThingPhase1.status == "success"`) {
+		t.Errorf("phase 2 must be gated on phase 1 succeeding:\n%s", src)
 	}
 	if strings.Contains(src, "parallel {") {
 		t.Errorf("a no-dependsOn chain must be sequential (no parallel):\n%s", src)
 	}
-	// Layer steps must appear in order layer0 < layer1.
-	p0 := strings.Index(src, "step layer0")
-	p1 := strings.Index(src, "step layer1")
+	// Phase steps must appear in chain order.
+	p0 := strings.Index(src, "step doTheThingPhase0")
+	p1 := strings.Index(src, "step doTheThingPhase1")
 	if p0 < 0 || p1 < 0 || p0 > p1 {
-		t.Errorf("layer steps must appear in order layer0 < layer1:\n%s", src)
+		t.Errorf("phase steps must appear in chain order:\n%s", src)
 	}
 }
 
 // TestSynthesizeHeadline_RealGate1Compiles is the load-bearing test: a
 // multi-phase bundle (two trigger-less phase sub-automations + the
 // Go-synthesized headline that chains them) must COMPILE through the real
-// Gate-1 sandbox. Proves the `step { if steps.X.result { automation Y { } } }`
-// grammar the synthesizer emits is real + bindable.
+// Gate-1 sandbox. Proves the `step { if steps.X.status == "success" {
+// automation Y { } } }` grammar the synthesizer emits is real + bindable
+// (the hook is linked by agent_loop_authoring_gate1_hook_test.go, and
+// requireAutomationsActuallyCompiled rejects a vacuous skipped pass;
+// memql#1366).
 func TestSynthesizeHeadline_RealGate1Compiles(t *testing.T) {
 	phase0 := memql.SandboxConstruct{Kind: "automation", Name: "digestPhase0",
 		Source: "@description(\"phase 0\")\nautomation digestPhase0 {\n  step run {\n    logic digestPhase0Body { }\n  }\n}"}
@@ -59,6 +62,7 @@ func TestSynthesizeHeadline_RealGate1Compiles(t *testing.T) {
 	headline := synthesizeHeadlineAutomation("digest", "Run the digest in two phases.", []string{"digestPhase0", "digestPhase1"})
 
 	report := memql.SandboxCompileBundle([]memql.SandboxConstruct{phase0, phase1, l0, l1, headline})
+	requireAutomationsActuallyCompiled(t, report) // anti-vacuity (memql#1366)
 	if !report.OK {
 		var errs []string
 		for _, d := range report.Diagnostics {
@@ -133,8 +137,8 @@ func TestEmitBundle_MultiPhase(t *testing.T) {
 	if !ok {
 		t.Fatal("bundleAutomationSource should resolve the headline")
 	}
-	if !strings.Contains(src, "step layer0") || !strings.Contains(src, "step layer1") {
-		t.Errorf("headline source should chain layer0 + layer1:\n%s", src)
+	if !strings.Contains(src, "step weeklyReportPhase0") || !strings.Contains(src, "step weeklyReportPhase1") {
+		t.Errorf("headline source should chain the two phase steps:\n%s", src)
 	}
 }
 

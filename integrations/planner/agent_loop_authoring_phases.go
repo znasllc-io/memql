@@ -13,11 +13,12 @@ package planner
 //     deps -- via the SAME authoringEmit prompt the single-phase path uses
 //     (a phase is just "one automation + its closure"). So no new prompt.
 //   - Go DETERMINISTICALLY synthesizes the headline that triggers the phase
-//     sub-automations in order. The sequence is real: each step after the
-//     first declares a condition referencing the prior step's result, so the
-//     automation scheduler's dependency-topo-sort runs them phase 0 -> 1 ->
-//     ... (never concurrently). Determinism here means the sequencing can't be
-//     fumbled by the model, and it's unit-testable without an engine.
+//     sub-automations in order. The sequence is real: the automation executor
+//     runs steps strictly sequentially in list order, and each step after the
+//     first layer is gated on the prior layer's steps having status "success"
+//     so a failed layer skips everything downstream (memql#1366). Determinism
+//     here means the sequencing can't be fumbled by the model, and it's
+//     unit-testable without an engine.
 //
 // The phase sub-automations + the headline are all trigger-less: they are
 // invoked via TriggerAutomation / the `step { automation ... }` kind, not by a
@@ -146,17 +147,25 @@ func synthesizeHeadlineAutomation(headline, purpose string, phaseAutomations []s
 
 // synthesizePhasedHeadline builds the headline automation that invokes the
 // phase sub-automations honoring their dependency DAG (epic memql#1160, issues
-// #1163 + #1164):
+// #1163 + #1164; emitted shape fixed for real Gate 1 in memql#1366):
 //
 //   - The phases are topologically LAYERED: layer 0 is every phase with no
 //     unmet dependency; layer k is every phase whose deps all sit in earlier
 //     layers. Phases in the same layer are mutually independent.
-//   - A layer with ONE phase emits a sequential `step` invoking it. A layer
-//     with 2+ independent phases emits a `parallel { branches: [...] }` step so
-//     they run CONCURRENTLY (#1164).
-//   - Layer k>0 is gated on layer k-1's result (`if steps.layerN.result { ... }`),
-//     so the layers run in order while phases WITHIN a layer fan out. The
-//     scheduler's inter-step dependency topo-sort makes the gating real.
+//   - Every phase emits ONE `step`, named after the phase, in layer order.
+//     The automation executor runs steps strictly sequentially in list
+//     order, so the layering IS the execution order. (The earlier
+//     `parallel { branches: [...] }` emission for multi-phase layers never
+//     compiled through the real Gate 1 automation rewrite -- the struct-form
+//     grammar has no parallel step -- so within-layer concurrency is retired
+//     until the grammar grows one; correctness over concurrency, memql#1366.)
+//   - Each layer-k>0 step is gated `if steps.<phase>.status == "success"`
+//     over EVERY phase of layer k-1, so a failed (or skipped) layer skips
+//     everything downstream instead of running phases whose inputs never
+//     materialized. A skipped step records status "skipped", which keeps the
+//     cascade going. The condition compiles through the struct-form rewrite
+//     (translateStepCall's `if` form) and resolves at runtime via the
+//     evaluator's steps.* filter-value resolution (both memql#1366).
 //
 // If the DAG can't be layered (a cycle, or an unknown dependsOn), the phases
 // fall back to a strict by-index sequential chain so the bundle is still valid.
@@ -164,9 +173,9 @@ func synthesizeHeadlineAutomation(headline, purpose string, phaseAutomations []s
 func synthesizePhasedHeadline(headline, purpose string, phases []phaseNode) memql.SandboxConstruct {
 	// Default to a STRICT sequential chain when NO phase declares a dependency
 	// (the #1163 shape + safe default): without explicit edges we can't know two
-	// phases are independent, so we must not parallelize them. Inject implicit
+	// phases are independent, so we must not reorder them. Inject implicit
 	// i-depends-on-(i-1) edges -> one phase per layer. Explicit dependsOn on any
-	// phase switches to the real DAG (which parallelizes independent layers).
+	// phase switches to the real DAG.
 	if !anyDependsOn(phases) {
 		for i := 1; i < len(phases); i++ {
 			phases[i].DependsOn = []string{phases[i-1].Name}
@@ -181,38 +190,35 @@ func synthesizePhasedHeadline(headline, purpose string, phases []phaseNode) memq
 		fmt.Fprintf(&b, "@description(%q)\n", fmt.Sprintf("Headline automation running %d phases across %d ordered layers.", len(phases), len(layers)))
 	}
 	fmt.Fprintf(&b, "automation %s {\n", headline)
-	prevStep := ""
-	for li, layer := range layers {
-		stepName := fmt.Sprintf("layer%d", li)
-		closeStr := ""
-		indent := "    "
-		if li > 0 {
-			// Gate this layer on the prior layer's result -- forces layer order.
-			fmt.Fprintf(&b, "  step %s {\n    if steps.%s.result {\n", stepName, prevStep)
-			closeStr, indent = "    }\n", "      "
-		} else {
-			fmt.Fprintf(&b, "  step %s {\n", stepName)
-		}
-		if len(layer) == 1 {
-			fmt.Fprintf(&b, "%sautomation %s { }\n", indent, phases[layer[0]].Name)
-		} else {
-			// Independent phases in this layer -> run concurrently.
-			fmt.Fprintf(&b, "%sparallel {\n%s  branches: [\n", indent, indent)
-			for bi, idx := range layer {
-				fmt.Fprintf(&b, "%s    step branch%d { automation %s { } }", indent, bi, phases[idx].Name)
-				if bi < len(layer)-1 {
-					b.WriteString(",")
-				}
-				b.WriteString("\n")
+	var prevLayer []int
+	for _, layer := range layers {
+		gate := layerSuccessCondition(phases, prevLayer)
+		for _, idx := range layer {
+			name := phases[idx].Name
+			if gate == "" {
+				fmt.Fprintf(&b, "  step %s {\n    automation %s { }\n  }\n", name, name)
+			} else {
+				fmt.Fprintf(&b, "  step %s {\n    if %s {\n      automation %s { }\n    }\n  }\n", name, gate, name)
 			}
-			fmt.Fprintf(&b, "%s  ],\n%s  wait: \"all\"\n%s}\n", indent, indent, indent)
 		}
-		b.WriteString(closeStr)
-		b.WriteString("  }\n")
-		prevStep = stepName
+		prevLayer = layer
 	}
 	b.WriteString("}\n")
 	return memql.SandboxConstruct{Kind: "automation", Name: headline, Source: b.String()}
+}
+
+// layerSuccessCondition builds the gate expression for a layer: every phase
+// of the PRIOR layer must have completed with status "success". Empty for
+// layer 0 (nothing to gate on).
+func layerSuccessCondition(phases []phaseNode, prevLayer []int) string {
+	if len(prevLayer) == 0 {
+		return ""
+	}
+	terms := make([]string, 0, len(prevLayer))
+	for _, idx := range prevLayer {
+		terms = append(terms, fmt.Sprintf("steps.%s.status == %q", phases[idx].Name, "success"))
+	}
+	return strings.Join(terms, " && ")
 }
 
 // anyDependsOn reports whether at least one phase declares a dependency edge.
