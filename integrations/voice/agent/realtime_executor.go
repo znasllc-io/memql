@@ -127,6 +127,18 @@ type RealtimeExecutor struct {
 	//     attribution (labeled-item injection), not to drive turns. Multi-party.
 	turnMode atomic.Int32
 
+	// suppressCapture marks the in-flight response as a RE-VOICE of text the
+	// cognition/text leg already committed to chat (the legacy authored-text
+	// path: an unsolicited VoiceAgentSpeak push, or the A2 tool loop's
+	// directive_mode-empty TurnComplete -- both carry text read off an
+	// already-inserted SI utterance). RealtimeInstructionsForReply tells the
+	// model NOT to read it verbatim, so capturing the spoken rendition would
+	// land a second, diverging assistant bubble for the same reply. The
+	// spoken-transcript bubble must have exactly one writer (#1427): set by
+	// onAssistantStart before CreateResponse, consumed (and cleared) when the
+	// response seals at EventResponseDone.
+	suppressCapture atomic.Bool
+
 	// firstAudioPending is set when a response is created and cleared on its
 	// first audio frame, so drainAudioOut can stamp the T3 "realtime.audio.first"
 	// voice-trace exactly once per response (the decision->first-audio
@@ -701,6 +713,15 @@ func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
 		}
 	}
 
+	// #1427: a directive with authored Text and no mode re-voices a reply that
+	// is ALREADY a committed chat row (the relay returns FinalText off the
+	// inserted utterance; the speak push carries an inserted utterance's text).
+	// Suppress the output capture for this one response so the model's spoken
+	// paraphrase does not land as a second, diverging assistant bubble. A
+	// directive-mode response (the model authors) keeps capture on -- there the
+	// capture IS the only writer.
+	e.suppressCapture.Store(strings.TrimSpace(req.Mode) == "" && strings.TrimSpace(req.Text) != "")
+
 	_, cancel := context.WithCancel(e.ctx)
 	e.setInFlight(cancel)
 
@@ -717,6 +738,7 @@ func (e *RealtimeExecutor) onAssistantStart(req SpeakDirective) {
 		if e.logger != nil {
 			e.logger.Warn("voice-agent realtime: response.create failed", "err", err, "request_id", req.RequestID)
 		}
+		e.suppressCapture.Store(false)
 		e.clearInFlight()
 		e.machine.OnAssistantDone()
 		return
@@ -787,7 +809,16 @@ func (e *RealtimeExecutor) drainAudioOut() {
 // calls. Output capture (transcript -> VoiceAgentRealtimeOutput) and the MCP
 // tool bridge are #458 -- the seams are marked below.
 func (e *RealtimeExecutor) drainEvents() {
+	// Assistant spoken-transcript capture is RESPONSE-scoped and append-only
+	// (#1427): transcript accumulates the CURRENT content part's
+	// output_audio_transcript deltas; each transcript.done seals one part into
+	// sealedParts; response.done seals the response and forwards the assembled
+	// transcript EXACTLY ONCE (captureOutput). GA emits transcript.done per
+	// content part -- and also for interrupted/incomplete/cancelled responses --
+	// so forwarding per transcript.done double-writes the bubble; the single
+	// response.done forward is what keeps the spoken-reply bubble single-writer.
 	var transcript strings.Builder
+	var sealedParts []string
 	// inputTranscript accumulates the model's native transcription of the
 	// human's audio (#478 native mode), so the chat transcript comes from the
 	// realtime model rather than a separate ASR pass on the critical path.
@@ -819,6 +850,12 @@ func (e *RealtimeExecutor) drainEvents() {
 						"stage", "model.speech_stopped", "executor", "realtime", "space_id", e.cfg.SpaceID)
 				}
 			case openai.EventResponseCreated:
+				// A new response opens a fresh transcript capture. Defensive
+				// reset -- EventResponseDone already seals + clears, but a
+				// response whose done never arrived (session drop) must not
+				// leak its text into the next response's bubble (#1427).
+				transcript.Reset()
+				sealedParts = nil
 				e.respMu.Lock()
 				e.inFlight = true
 				e.respMu.Unlock()
@@ -838,7 +875,36 @@ func (e *RealtimeExecutor) drainEvents() {
 			case openai.EventResponseDone:
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
+				// #458/#1427 output capture: the response is sealed -- assemble
+				// its spoken transcript and forward it as ONE
+				// VoiceAgentRealtimeOutput so chat/canvas/audit render the
+				// realtime turn (parity with the cascade reply). Any unsealed
+				// delta tail (a response cancelled before its part's
+				// transcript.done -- barge-in) joins as the final part, so a
+				// truncated response's bubble stops where its audio stopped.
+				// After this seal nothing writes to the captured transcript
+				// again: deltas appended, the seal forwarded, no later rewrite.
+				if tail := transcript.String(); strings.TrimSpace(tail) != "" {
+					sealedParts = append(sealedParts, tail)
+				}
+				final := strings.Join(sealedParts, "\n\n")
+				sealedParts = nil
 				transcript.Reset()
+				if e.suppressCapture.Swap(false) {
+					// Re-voice of a cognition-authored reply that is already a
+					// chat row -- the spoken paraphrase must not become a
+					// second bubble for the same reply (#1427).
+					if e.logger != nil && strings.TrimSpace(final) != "" {
+						e.logger.Debug("voice-agent realtime: output capture suppressed (re-voiced authored reply)",
+							"chars", len(final))
+					}
+				} else {
+					if ev.Status != "" && !strings.EqualFold(ev.Status, "completed") && e.logger != nil {
+						e.logger.Info("voice-agent realtime: response truncated; transcript sealed at cancellation point",
+							"status", ev.Status, "chars", len(final))
+					}
+					e.captureOutput(final)
+				}
 				// Feed the completed response's audio-token usage to the cost
 				// guardrail (#459). Crossing the per-session budget tears the
 				// session down and flags degrade-to-cascade.
@@ -848,14 +914,21 @@ func (e *RealtimeExecutor) drainEvents() {
 			case openai.EventTranscriptDelta:
 				transcript.WriteString(ev.Text)
 			case openai.EventTranscriptDone:
-				// #458 output capture: forward the assistant's final transcript
-				// as a VoiceAgentRealtimeOutput so chat/canvas/audit render the
-				// realtime turn with citations (parity with the cascade reply).
-				final := ev.Text
-				if final == "" {
-					final = transcript.String()
+				// One content part's spoken transcript is final. Seal the PART
+				// into the response-scoped assembly -- the forward happens once,
+				// at EventResponseDone (#1427): GA emits transcript.done per
+				// content part (and for interrupted responses), so forwarding
+				// here would double-write the bubble. The done event's
+				// transcript is authoritative for the part; when the server
+				// omits it, the part's accumulated deltas ARE the transcript.
+				part := ev.Text
+				if part == "" {
+					part = transcript.String()
 				}
-				e.captureOutput(final)
+				transcript.Reset()
+				if strings.TrimSpace(part) != "" {
+					sealedParts = append(sealedParts, part)
+				}
 			case openai.EventInputTranscriptDelta:
 				// Native human transcript (#478): stream the running text as a
 				// partial so chat ghost-texts the in-progress user utterance. Handed
@@ -927,14 +1000,17 @@ func (e *RealtimeExecutor) drainEvents() {
 // transcript is a no-op; a failed insert is logged (the voice turn still
 // played). The Go analog of realtime_output.py::_schedule_forward.
 //
-// SPOKEN == SHOWN (#482). This is the single source of truth for the assistant
-// utterance: `text` is the model's own spoken-audio transcript
-// (EventTranscriptDone / the accumulated EventTranscriptDelta stream), forwarded
-// VERBATIM (the forwarder only trims surrounding whitespace). There is no
-// re-rendering between what was said and what is shown -- because the model both
-// generates and speaks the reply (#478/#479), the spoken audio and the chat
-// utterance share one source by construction. Pinned by
-// TestRealtimeExecutor_SpokenEqualsShown.
+// SPOKEN == SHOWN (#482), single writer + append-only (#1427). This is the
+// single source of truth for the assistant utterance: `text` is the model's
+// own spoken-audio transcript (the response-scoped assembly of
+// EventTranscriptDelta / EventTranscriptDone parts, sealed once at
+// EventResponseDone), forwarded VERBATIM (the forwarder only trims surrounding
+// whitespace). Exactly one forward per response, nothing rewrites it later,
+// and a truncated (barge-in) response seals at the cancellation point. There
+// is no re-rendering between what was said and what is shown -- because the
+// model both generates and speaks the reply (#478/#479), the spoken audio and
+// the chat utterance share one source by construction. Pinned by
+// TestRealtimeExecutor_SpokenEqualsShown*, TestRealtimeExecutor_OutputCapture_*.
 func (e *RealtimeExecutor) captureOutput(text string) {
 	if e.outputForwarder == nil {
 		return

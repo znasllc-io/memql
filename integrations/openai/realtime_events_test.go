@@ -237,6 +237,13 @@ func TestParseServerEvent_ResponseLifecycle(t *testing.T) {
 	assert.Equal(t, EventResponseDone, done.Kind)
 	assert.Equal(t, "resp_1", done.ResponseID)
 	assert.Equal(t, 0, done.AudioTokens, "no usage block -> zero audio tokens")
+	assert.Equal(t, "", done.Status, "no status -> empty")
+
+	// #1427: the terminal status marks a truncated (barge-in/cancelled)
+	// response so the captured transcript seals at the cancellation point.
+	cancelled := parseServerEvent([]byte(`{"type":"response.done","response":{"id":"resp_1","status":"cancelled"}}`))
+	assert.Equal(t, EventResponseDone, cancelled.Kind)
+	assert.Equal(t, "cancelled", cancelled.Status)
 }
 
 // TestParseServerEvent_ResponseDoneAudioTokens verifies the per-session

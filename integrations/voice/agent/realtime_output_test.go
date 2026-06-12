@@ -35,6 +35,12 @@ func (f *fakeOutputSender) SendRequest(_ context.Context, env *memqlv1.MemqlClie
 	}, nil
 }
 
+func (f *fakeOutputSender) sentCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sent)
+}
+
 func (f *fakeOutputSender) lastSent() *memqlv1.VoiceAgentRealtimeOutput {
 	f.mu.Lock()
 	defer f.mu.Unlock()
