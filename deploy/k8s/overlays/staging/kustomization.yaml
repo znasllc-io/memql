@@ -1,14 +1,9 @@
-# Staging overlay -> 0.9.35. All 7 node images + the copresent SPA REBUILT from
-# current main (memql 56c802d / memql-bff-copresent 0636e33 / copresent 3397bdf).
-# Mesh-robustness release on top of 0.9.34's no-dup/no-drop end state:
-#   - #1245 (every node): the forwarder no longer buffers+TTL-expires reply
-#     events to dead-for-delivery peers (old blue-green / unready / never-dialed
-#     pods). Makes rollouts converge cleanly instead of dropping replies during
-#     the post-roll window. Builds on #1217 (gate) + #1232 (outbox).
-#   - #114 (carrier DSL): canonical-id @pattern now allows camelCase concepts
-#     (canvasState/...), so mutationCreateCanvasState stops rejecting the
-#     space.created card.
-#   - copresent: Simli-only avatar picker (#418) on top of the prior batch.
+# Staging overlay -> 0.9.43. Engine + carrier images rebuilt from main 3bffdb3
+# (PR #1410 / #1409): the voice-agent auto-join dispatcher builds a FRESH gRPC
+# client + room joiner per session iteration -- the shared client was closed by
+# the first session's teardown, poisoning every later join with
+# ErrClientClosed (voice stuck in Preparing, 3s hot-loop). SPA unchanged
+# (digest reused from 0.9.42, source b5013ab).
 # cognition/agent/planner/workbench/bff CARRIER-built; voice + identity engine.
 # livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -35,29 +30,26 @@ patches:
           value: "20.246.247.180"
 
 images:
-  # 0.9.40 — produceArtifact complexity routing (#1393): the classifier
-  # (volume-aware prompt) decides direct-turn vs decompose, so large
-  # deliverables stop timing out the 3m turn wallclock.
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:6315e3f4061885402145b286faac9c87f0b40d44608186cd8669171ed04f38c0
-  # Carrier-built; 0.9.42.
+    digest: sha256:089e16f88db130b4b2168cb55a1c2f5ca629068f03591524951553f383329b2b
+  # Carrier-built; 0.9.43.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:eda99455495efa682cf606b254c94311c9f74f50ec4a905f03d34172c13670bd
-  # Carrier-built; 0.9.42.
+    digest: sha256:7397c05b8f449d252886bd43d805b216fa26d4d073ec64cd99842cf538e3c4f4
+  # Carrier-built; 0.9.43.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:a562fec0378838831b895a49d3fefdc55db43255a1accdc0fe5d3cddb91b9d33
+    digest: sha256:b7223cc8dc12ca218181774e7406b16322e7b7a582302bd9696cf979f6fbb1ec
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:c1fd666f3f483df0e8f6aabff48f85afebdee9ddda50a1def25a8b1148c0c97b
-  # Carrier-built; 0.9.42.
+    digest: sha256:1a25ddbc8e2e30f56c10a4fe7bdfc1cca304a47b045364684ff0cd1f2ce33dfd
+  # Carrier-built; 0.9.43.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:cef9fd09efdfb86d9c0798e97cd8ccc4476cda8b7a468dd8da46b492bdb57b63
-  # Carrier-built; 0.9.42.
+    digest: sha256:bb1f115e68c8c9f204592f2466e624263737e74b6f68a584dc574acf89a8c71d
+  # Carrier-built; 0.9.43.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:998526a4ed9f72302bf1df0d8e4c8ed3feedefae4010b713fefe97afd7af9e20
-  # Carrier-built; 0.9.42.
+    digest: sha256:02eb7df66b3a68065f1d220313b6efaf62953d826f4a73b172d1f06437d0f561
+  # Carrier-built; 0.9.43.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:be3e0aee6b263d00fecb1bf80cd5484c743d0d38704d0dd24bb5c24e6bb8809e
-  # SPA rebuilt from copresent main (85fa33a) at 0.9.40 (coherence rebuild).
+    digest: sha256:272fcb12f671919e919c86d97433dbf163b0c263c381b1675b0310cf85016106
+  # SPA digest reused from 0.9.42 (copresent main b5013ab unchanged).
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:503bc2139f5683c1de3446370e144f1e206539b6327b2df346f1c9bdb7216d36
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
