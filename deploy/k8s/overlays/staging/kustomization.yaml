@@ -35,31 +35,31 @@ patches:
           value: "20.246.247.180"
 
 images:
-  # 0.9.38 — voice STT bootstrap falls back MEMQL_SI_OPENAI_API_KEY ->
-  # OPENAI_API_KEY (#1371) so the audio websocket registers on the voice node;
-  # planner claim race (#1369), Gate-1 phased headline (#1366).
+  # 0.9.39 — GA Realtime ASR migration (#1382): OpenAI retired the beta API,
+  # killing cascade/audio-WS transcription; voice-agent -ga identity classifier
+  # + human-only room discovery & idle teardown (#1378/#1379).
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:088829e671fddedf97c7632658ef51f8e307030ab5329033f517c6326625948d
-  # Carrier-built; 0.9.38.
+    digest: sha256:6a372e0ed21624ace45c56a5f5052552df8b9411066cb6cd420923ce98c6f0de
+  # Carrier-built; 0.9.39.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:345bbb881e9031dc5490ecbb8638b9566b00554e87d1f2794ef8f8d4bab0d74e
-  # Carrier-built; 0.9.38.
+    digest: sha256:7bcfc8f78273fa8446a19f74079b0da94fd988712f2e26a16d1a7baff31a29c6
+  # Carrier-built; 0.9.39.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:46a357e54db1dc0e81f9eb1ddec7b83ee0c38508819d9ea08004cd46ef665e6d
+    digest: sha256:9b91df85da86cad55e1900e0ee5feb67e9bd24e895b85167ae3fd8da2bf0db31
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:0eea86b881ddf977f5d7e3308fa2de6ed1df89683ddbf076f8dbf71cf162de46
-  # Carrier-built; 0.9.38.
+    digest: sha256:8751aa4f46fc4736b441919ab29363afe6fefa916b23f5e9117008d62bed0213
+  # Carrier-built; 0.9.39.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:cccdc4397fd1b0adae1d7ff9968c402784c61d183b9f7c901689d1321dc48721
-  # Carrier-built; 0.9.38.
+    digest: sha256:b1de6d05cdd6129dc90055b34a85c2f7e300263b382725eab242c0c08c86ec8e
+  # Carrier-built; 0.9.39.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:2789c55830d4141061512555beb2b9072fb503d4e4bf09f02b2edfaf60085491
-  # Carrier-built; 0.9.38.
+    digest: sha256:0f76c91bcaaec3c94c0522e91f613dd6743ff3023e39c3eb3aa656a20dd24b44
+  # Carrier-built; 0.9.39.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:456516eef203068451f879845241426ac26b735c134db5083769218eebb1550f
-  # SPA rebuilt from copresent main (85fa33a) at 0.9.38 (coherence rebuild).
+    digest: sha256:96b6569b0b621ab4abd9087bfe79ce5b4aa1e8c6dadf21f60f9282bade52884f
+  # SPA rebuilt from copresent main (85fa33a) at 0.9.39 (coherence rebuild).
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:6cbc24552fff4e34939013ef6fbf7ca2a0e58d1d23e089d8368a53662a12a166
+    digest: sha256:c65d5380f22308c796f2885f38d2104289edd3911eeb7890c9b47e250b4a7cf7
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
