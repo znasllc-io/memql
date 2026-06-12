@@ -64,19 +64,30 @@ func RunDispatcher(ctx context.Context, opts RunOptions) error {
 	}
 	cfg.VoiceAgentToken = token
 
-	client := NewClient(cfg.MemqlGRPCAddr, cfg.VoiceAgentToken, opts.Dialer, logger)
-	joiner := NewRoomJoiner(cfg, client, logger)
 	roomClient := lksdk.NewRoomServiceClient(httpLiveKitURL(cfg.LiveKitURL), cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
 	logger.Info("voice-agent: auto-join mode -- watching LiveKit for active polyphon rooms",
 		"livekit", cfg.LiveKitURL, "memql", cfg.MemqlGRPCAddr, "executor", cfg.VoiceExecutor)
 
+	discover := func(ctx context.Context) string {
+		return discoverActiveRoom(ctx, roomClient, logger)
+	}
+	return dispatchLoop(ctx, cfg, opts.Dialer, logger, discover, NewRoomJoiner)
+}
+
+// dispatchLoop is RunDispatcher's discover/join loop, parameterized so tests
+// can drive it without LiveKit: discover yields the next active room name (or
+// "" when idle), newJoiner builds the per-session room joiner (NewRoomJoiner
+// in production).
+func dispatchLoop(ctx context.Context, cfg Config, dial Dialer, logger *slog.Logger,
+	discover func(context.Context) string,
+	newJoiner func(Config, *Client, *slog.Logger) RoomJoiner) error {
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		room := discoverActiveRoom(ctx, roomClient, logger)
+		room := discover(ctx)
 		if room == "" {
 			// Nothing active -- wait and re-list (this is the idle state).
 			select {
@@ -88,7 +99,12 @@ func RunDispatcher(ctx context.Context, opts RunOptions) error {
 		}
 
 		logger.Info("voice-agent: joining active room", "room", room)
-		session := NewSession(cfg, client, room, joiner, logger)
+		// Each session gets its OWN client + joiner: Session.Run closes its
+		// client on teardown and a closed Client cannot reconnect, so sharing
+		// one across iterations poisons every session after the first with
+		// ErrClientClosed (#1409).
+		client := NewClient(cfg.MemqlGRPCAddr, cfg.VoiceAgentToken, dial, logger)
+		session := NewSession(cfg, client, room, newJoiner(cfg, client, logger), logger)
 		if err := session.Run(ctx); err != nil && ctx.Err() == nil {
 			logger.Warn("voice-agent: session ended with error", "room", room, "err", err)
 			// Brief backoff so a persistently-failing room can't hot-loop.
