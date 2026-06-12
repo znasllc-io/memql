@@ -56,6 +56,9 @@ func NewRoomJoiner(cfg Config, client *Client, logger *slog.Logger) RoomJoiner {
 // room, confirms the connection, and blocks until the room disconnects or
 // ctx is cancelled. It returns a reason string for VoiceAgentSessionEnd.
 func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (string, error) {
+	// joinStart anchors the setup.* spans (#1426): room join -> media bridge
+	// build -> agent ready, all greppable via voice_timing.
+	joinStart := time.Now()
 	token, err := j.mintToken(req)
 	if err != nil {
 		return "error", fmt.Errorf("voice-agent room join: mint token: %w", err)
@@ -137,6 +140,7 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 			"url", livekitURL, "room", req.RoomName, "identity", req.GaAgentID)
 	}
 
+	roomConnectStart := time.Now()
 	room, err := lksdk.ConnectToRoomWithToken(livekitURL, token, cb)
 	if err != nil {
 		return "error", fmt.Errorf("voice-agent room join: connect %q: %w", req.RoomName, err)
@@ -147,6 +151,9 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	if err := j.confirmConnected(connectCtx, room); err != nil {
 		return "error", err
 	}
+	// Setup phase (#1426): LiveKit connect + connection confirmation.
+	logVoiceTiming(j.logger, "setup.room_join", roomConnectStart,
+		"room", req.RoomName, "space_id", req.SpaceID)
 	if j.logger != nil {
 		j.logger.Info("voice-agent joined LiveKit room",
 			"room", room.Name(), "state", string(room.ConnectionState()))
@@ -162,10 +169,16 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// track into the chosen bridge.
 	bridgeCtx, bridgeCancel := context.WithCancel(ctx)
 	defer bridgeCancel()
+	bridgeStart := time.Now()
 	b, speakSink, err := j.buildMediaBridge(bridgeCtx, req, room)
 	if err != nil {
 		return "error", err
 	}
+	// Setup phase (#1426): media-plane build -- for realtime this covers the
+	// tool-registry fetch, the gpt-realtime websocket connect, and the local
+	// track publish (each timed individually inside newRealtimeRoomBridge).
+	logVoiceTiming(j.logger, "setup.media_bridge", bridgeStart,
+		"room", req.RoomName, "space_id", req.SpaceID, "executor", string(req.Executor.Kind))
 	bridgeMu.Lock()
 	bridge = b
 	bridgeMu.Unlock()
@@ -185,6 +198,13 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// so replay them into the freshly-built bridge now. onTrackSubscribed dedups
 	// per identity, so a track that races in after setBridge is not double-counted.
 	j.replaySubscribedTracks(room, b)
+
+	// Setup complete (#1426): the agent can hear and speak from here -- the
+	// end-to-end "toggle accepted -> agent ready" measurement closes (the
+	// dispatch-accept -> JoinAndServe gap is the session handshake, timed
+	// separately as setup.grpc_connect + setup.session_ack).
+	logVoiceTiming(j.logger, "setup.agent_ready", joinStart,
+		"room", req.RoomName, "space_id", req.SpaceID, "executor", string(req.Executor.Kind))
 
 	// Idle watchdog (#1378): the agent is itself a room participant, so
 	// LiveKit never closes a room the agent is sitting in -- without this,

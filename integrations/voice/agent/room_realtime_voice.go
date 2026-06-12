@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/livekit/protocol/livekit"
 	protoLogger "github.com/livekit/protocol/logger"
@@ -152,7 +153,12 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	// set, and configure the session with it. A failed list degrades to no
 	// model-driven tools (FetchToolDefinitions returns nil) -- privileged tools
 	// were never exposed anyway, so this is a safe degradation.
+	toolFetchStart := time.Now()
 	toolDefs := FetchToolDefinitions(ctx, client, logger)
+	// Setup phase (#1426): synchronous memQL round-trip (ListTools -> agent
+	// tool-scope engine queries server-side) on the bridge-build path.
+	logVoiceTiming(logger, "setup.fetch_tools", toolFetchStart,
+		"space_id", req.SpaceID, "tool_count", len(toolDefs))
 	toolBridge := NewMcpToolBridge(
 		NewGrpcToolCallTransport(client),
 		NewLogMirrorSink(logger),
@@ -172,13 +178,18 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		Voice:        req.Executor.SessionPersona.Voice,
 		Tools:        realtimeTools,
 	}
+	realtimeConnectStart := time.Now()
 	session, err := rtClient.Connect(ctx, sessionBase)
 	if err != nil {
 		return nil, fmt.Errorf("voice-agent realtime room: realtime connect: %w", err)
 	}
+	// Setup phase (#1426): gpt-realtime websocket dial + session.update -- the
+	// "realtime session established" milestone.
+	logVoiceTiming(logger, "setup.realtime_connect", realtimeConnectStart, "space_id", req.SpaceID)
 
 	// The model emits 24 kHz PCM16; the local track is constructed at that
 	// rate so the media-sdk encoder upsamples to Opus on publish.
+	publishStart := time.Now()
 	local, err := lkmedia.NewPCMLocalTrack(audio.OpenAISampleRate, 1, protoLogger.GetLogger())
 	if err != nil {
 		session.Close()
@@ -192,6 +203,8 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		_ = local.Close()
 		return nil, fmt.Errorf("voice-agent realtime room: publish track: %w", err)
 	}
+	// Setup phase (#1426): local output-track build + publish.
+	logVoiceTiming(logger, "setup.publish_track", publishStart, "space_id", req.SpaceID)
 
 	sink := &localTrackSink{track: local}
 	executor := NewRealtimeExecutor(ctx, CascadeConfig{
@@ -372,6 +385,7 @@ func (b *realtimeRoomBridge) applyGateMode() {
 	if mode == b.gateTurnMode {
 		return
 	}
+	updateStart := time.Now()
 	if err := b.session.UpdateSession(cfg); err != nil {
 		if b.logger != nil {
 			b.logger.Warn("voice-agent realtime room: gate-mode session update failed",
@@ -379,6 +393,10 @@ func (b *realtimeRoomBridge) applyGateMode() {
 		}
 		return
 	}
+	// Setup phase (#1426): gate-mode session.update -- fires on the first
+	// human's track (part of bring-up) and on later human-count transitions.
+	logVoiceTiming(b.logger, "setup.gate_mode_update", updateStart,
+		"space_id", b.roomReq.SpaceID, "mode", mode, "human_count", humanCount)
 	b.executor.SetTurnMode(mode)
 	b.gateTurnMode = mode
 	if b.logger != nil {
@@ -434,7 +452,10 @@ func (b *realtimeRoomBridge) onTrackSubscribed(track *webrtc.TrackRemote, pub *l
 	// the only executor input is the PCM pump (StreamAudio).
 	var stream polyphon.ASRStream
 	if !b.nativeSTT && b.asr != nil {
+		sttStart := time.Now()
 		s, err := b.asr.StartStream(context.Background(), asrConfigFor(b.cfg))
+		logVoiceTiming(b.logger, "setup.stt_stream", sttStart,
+			"space_id", b.roomReq.SpaceID, "identity", identity, "ok", err == nil)
 		if err != nil {
 			// Release the reservation so a later track for this identity can retry.
 			b.mu.Lock()

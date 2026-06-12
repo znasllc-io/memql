@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -345,6 +346,11 @@ func (c *Client) SendRequest(ctx context.Context, envelope *memqlv1.MemqlClientM
 	if envelope == nil {
 		return nil, fmt.Errorf("voice-agent SendRequest: nil envelope")
 	}
+	// #1426: every one-shot request/reply round-trip on the voice path is a
+	// memQL (and usually DB) call -- time them all at this choke point so the
+	// per-call breakdown (SessionStart, ListTools, CallTool, RealtimeOutput,
+	// ...) is greppable via voice_timing without instrumenting each caller.
+	start := time.Now()
 	messageID := uuid.NewString()
 	envelope.MessageId = messageID
 
@@ -369,6 +375,8 @@ func (c *Client) SendRequest(ctx context.Context, envelope *memqlv1.MemqlClientM
 		if !ok {
 			return nil, c.closeReason()
 		}
+		logVoiceTiming(c.logger, "grpc.request", start,
+			"payload", ClientPayloadName(envelope), "reply", ServerPayloadName(reply))
 		return reply, nil
 	case <-ctx.Done():
 		c.mu.Lock()
@@ -485,6 +493,25 @@ func ServerPayloadName(envelope *memqlv1.MemqlServerMessage) string {
 	// e.g. "*memqlv1.MemqlServerMessage_VoiceAgentSpeak" -> "VoiceAgentSpeak".
 	full = strings.TrimPrefix(full, "*memqlv1.MemqlServerMessage_")
 	full = strings.TrimPrefix(full, "*gen.MemqlServerMessage_")
+	return full
+}
+
+// ClientPayloadName returns a stable, log-friendly name for a client
+// message's payload oneof (e.g. "VoiceAgentSessionStart"), the send-side
+// analog of ServerPayloadName. Used by the voice_timing instrumentation
+// (#1426) to stamp WHICH memQL call a measured round-trip was.
+func ClientPayloadName(envelope *memqlv1.MemqlClientMessage) string {
+	if envelope == nil {
+		return "<nil>"
+	}
+	payload := envelope.GetPayload()
+	if payload == nil {
+		return "<empty>"
+	}
+	full := fmt.Sprintf("%T", payload)
+	// e.g. "*memqlv1.MemqlClientMessage_VoiceAgentSessionStart" -> "VoiceAgentSessionStart".
+	full = strings.TrimPrefix(full, "*memqlv1.MemqlClientMessage_")
+	full = strings.TrimPrefix(full, "*gen.MemqlClientMessage_")
 	return full
 }
 

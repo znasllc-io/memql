@@ -45,6 +45,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -205,7 +206,13 @@ func (b *McpToolBridge) Dispatch(ctx context.Context, name, argumentsJSON string
 		return "[tool error] no tool transport configured"
 	}
 
+	// #1426: the transport leg is the synchronous memQL CallTool round-trip
+	// (server-side engine + DB work) inside the tool span -- time it
+	// individually so it separates from the model-side legs.
+	transportStart := time.Now()
 	resultText, isError, err := b.transport(ctx, name, args)
+	logVoiceTiming(b.logger, "tool.transport", transportStart,
+		"space_id", b.spaceID, "tool", name, "is_error", isError || err != nil)
 	if err != nil {
 		resultText = err.Error()
 		isError = true
