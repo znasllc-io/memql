@@ -11,7 +11,9 @@ owner: znas
 
 Status: baseline shipped; per-user adaptive endpointing is a design seed,
 not built. Read this before re-tuning the VAD knobs or starting on the
-adaptive layer.
+adaptive layer. For the full GA Realtime API surface these knobs live in
+(noise reduction, transcription gating, barge-in, session lifecycle), see
+[voice-realtime-ga.md](voice-realtime-ga.md).
 
 ## What "end of utterance" means in the voice path
 
