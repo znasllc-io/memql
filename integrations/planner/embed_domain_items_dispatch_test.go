@@ -2,6 +2,7 @@ package planner
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -86,6 +87,105 @@ func TestEmbedDomainItemsDispatcher_RunsAndCompletes(t *testing.T) {
 	}
 	if got := countContains(exec, `status:"succeeded"`); got != 1 {
 		t.Errorf("expected exactly one succeeded transition; got %d (exec=%v)", got, exec)
+	}
+}
+
+// TestEmbedDomainItemsDispatcher_DuplicateEventAfterCompletionIsDropped
+// locks in the #1359 fix deterministically: a duplicate event arriving
+// AFTER the first run has fully completed (the post-completion window
+// the flaky CI run hit -- the created handler's goroutine finished the
+// whole claim->run->succeed sequence before the updated event landed)
+// must NOT re-run the embed. Before the fix the claim was released on
+// completion, so the late duplicate re-claimed and re-ran.
+func TestEmbedDomainItemsDispatcher_DuplicateEventAfterCompletionIsDropped(t *testing.T) {
+	eng := &fakeEngine{
+		execResponder: func(q string) (any, error) {
+			switch {
+			case strings.Contains(q, "queryPlanById"):
+				return embedPlanRow("plan-dup", "physics_qm", ""), nil
+			case strings.Contains(q, "embedDomainItems("):
+				return embedResultRow(2, 0), nil
+			}
+			return nil, nil
+		},
+	}
+	d := NewEmbedDomainItemsDispatcher(eng, nil)
+
+	ev := events.Event{Payload: map[string]any{
+		"id": "plan-dup",
+		"payload": map[string]any{
+			"kind":   "embedDomainItems",
+			"status": "planning",
+		},
+	}}
+
+	d.HandlePlanCreated(ev)
+	// Wait until the FIRST run is fully complete (succeeded landed)...
+	waitFor(t, func() bool {
+		exec, _, _ := eng.snapshot()
+		return countContains(exec, `status:"succeeded"`) >= 1
+	})
+	// ...then deliver the duplicate. This is the exact interleaving the
+	// CI flake hit nondeterministically.
+	d.HandlePlanUpdated(ev)
+	time.Sleep(50 * time.Millisecond)
+
+	exec, _, _ := eng.snapshot()
+	if got := countContains(exec, "embedDomainItems("); got != 1 {
+		t.Fatalf("embedDomainItems builtin invoked %d times after post-completion duplicate; want exactly 1 (exec=%v)", got, exec)
+	}
+	if got := countContains(exec, `status:"succeeded"`); got != 1 {
+		t.Errorf("expected exactly one succeeded transition; got %d (exec=%v)", got, exec)
+	}
+}
+
+// TestEmbedDomainItemsDispatcher_ConcurrentCreatedUpdatedDispatchesOnce
+// hammers the created + updated handlers concurrently for the SAME plan
+// from many goroutines and asserts the embed is dispatched exactly
+// once: the claim is an atomic, once-ever check-and-set, so no
+// interleaving of racing events can produce a second builtin call.
+// Mirrors the trainSpecialist #1084 regression test.
+func TestEmbedDomainItemsDispatcher_ConcurrentCreatedUpdatedDispatchesOnce(t *testing.T) {
+	eng := &fakeEngine{
+		execResponder: func(q string) (any, error) {
+			switch {
+			case strings.Contains(q, "queryPlanById"):
+				return embedPlanRow("plan-race", "physics_qm", ""), nil
+			case strings.Contains(q, "embedDomainItems("):
+				return embedResultRow(1, 0), nil
+			}
+			return nil, nil
+		},
+	}
+	d := NewEmbedDomainItemsDispatcher(eng, nil)
+
+	ev := events.Event{Payload: map[string]any{
+		"id": "plan-race",
+		"payload": map[string]any{
+			"kind":   "embedDomainItems",
+			"status": "planning",
+		},
+	}}
+
+	const fanout = 32
+	var wg sync.WaitGroup
+	wg.Add(fanout * 2)
+	for i := 0; i < fanout; i++ {
+		go func() { defer wg.Done(); d.HandlePlanCreated(ev) }()
+		go func() { defer wg.Done(); d.HandlePlanUpdated(ev) }()
+	}
+	wg.Wait()
+
+	waitFor(t, func() bool {
+		exec, _, _ := eng.snapshot()
+		return countContains(exec, `status:"succeeded"`) >= 1
+	})
+	// Give any erroneous second run a beat to surface.
+	time.Sleep(50 * time.Millisecond)
+
+	exec, _, _ := eng.snapshot()
+	if got := countContains(exec, "embedDomainItems("); got != 1 {
+		t.Fatalf("embedDomainItems builtin invoked %d times under concurrent created/updated; want exactly 1", got)
 	}
 }
 

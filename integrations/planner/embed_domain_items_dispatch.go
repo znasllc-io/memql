@@ -49,9 +49,17 @@ type EmbedDomainItemsDispatcher struct {
 
 	// claimed guards against double-dispatch: created + updated events
 	// for the same Plan both fire, and in cluster mode multiple planner
-	// nodes may see the same event. A best-effort in-process set keeps
-	// one node from running the embed twice for a Plan it already picked
-	// up. Mirrors the trainSpecialist dispatcher's claim model.
+	// nodes may see the same event. The claim is a once-ever, atomic
+	// check-and-set under mu: the FIRST event to reach claim() for a
+	// given Plan id wins and runs the embed; every subsequent event for
+	// that id (whether it races the in-flight run or arrives after it
+	// completes) is dropped. The claim is never released, because a Plan
+	// id is minted exactly once per embed cycle and never reused -- so
+	// there is nothing to re-pick-up under the same id. Releasing the
+	// claim once a run finished was the source of the created/updated
+	// double-dispatch race (#1359, the same bug trainSpecialist fixed in
+	// #1084): a duplicate event arriving after the goroutine completed
+	// found the id already evicted and re-ran the embed.
 	mu      sync.Mutex
 	claimed map[string]struct{}
 }
@@ -116,7 +124,6 @@ func (d *EmbedDomainItemsDispatcher) handle(ev events.Event) {
 					"planId", planId, "recover", fmt.Sprintf("%v", r))
 				_ = d.markFailed(context.Background(), planId,
 					fmt.Sprintf("embedDomainItems dispatch panic: %v", r))
-				d.release(planId)
 			}
 		}()
 		if err := d.runEmbed(context.Background(), planId); err != nil {
@@ -124,12 +131,21 @@ func (d *EmbedDomainItemsDispatcher) handle(ev events.Event) {
 				"planId", planId, "error", err)
 			_ = d.markFailed(context.Background(), planId, err.Error())
 		}
-		d.release(planId)
+		// The claim is intentionally NOT released. An embedDomainItems
+		// Plan id is minted exactly once per embed cycle and never
+		// reused, so the once-ever claim is the correct guarantee: it
+		// makes the created/updated double-fire (and any post-completion
+		// duplicate event) idempotent, dispatching the embed exactly
+		// once (#1359).
 	}()
 }
 
-// claim returns true if this dispatcher should run the Plan (it wasn't
-// already claimed). Best-effort in-process dedup.
+// claim atomically checks-and-sets the per-Plan claim under mu and
+// returns true only for the FIRST caller for a given Plan id. The
+// membership check and the insert happen under the same lock, so there
+// is no check-then-act window: two events racing through claim() for
+// the same id can never both observe an empty set. The claim is never
+// released (see the struct doc), so this is a once-ever guard.
 func (d *EmbedDomainItemsDispatcher) claim(planId string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -138,12 +154,6 @@ func (d *EmbedDomainItemsDispatcher) claim(planId string) bool {
 	}
 	d.claimed[planId] = struct{}{}
 	return true
-}
-
-func (d *EmbedDomainItemsDispatcher) release(planId string) {
-	d.mu.Lock()
-	delete(d.claimed, planId)
-	d.mu.Unlock()
 }
 
 // runEmbed is the core dispatch: mark running, resolve the domain set,
