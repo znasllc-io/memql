@@ -46,19 +46,25 @@ func NewASRClient(cfg Config) (*ASRClient, error) {
 }
 
 // StartStream begins a streaming transcription session via the OpenAI Realtime
-// API WebSocket with type: "transcription".
+// API WebSocket with a GA transcription session (session.type: "transcription").
 //
 // URL: wss://api.openai.com/v1/realtime?intent=transcription
 //
-// The ?intent=transcription form is required for transcription-only mode.
-// The ?model= form is for realtime *conversation* (and expects an LLM model
-// like gpt-4o-realtime-preview). Passing a transcription-only model to the
-// ?model= form causes OpenAI to accept the WS upgrade and then immediately
-// close the connection -- which surfaces downstream as "use of closed
-// network connection" on the next SendAudio write.
+// The ?intent=transcription form selects transcription-only mode. The ?model=
+// form is for realtime *conversation* (and expects an LLM model like
+// gpt-realtime). Passing a transcription-only model to the ?model= form causes
+// OpenAI to accept the WS upgrade and then immediately close the connection --
+// which surfaces downstream as "use of closed network connection" on the next
+// SendAudio write.
 //
-// The transcription model itself is set inside session.update via
-// input_audio_transcription.model (see sendSessionConfig).
+// GA Realtime API (#1382): NO `OpenAI-Beta: realtime=v1` header. OpenAI retired
+// the beta surface ("The Realtime Beta API is no longer supported. Please use
+// /v1/realtime for the GA API." -> close 4000 beta_api_shape_disabled); the
+// beta header is what flagged the connection as beta and got it rejected. Same
+// migration realtime.go's conversation client already made.
+//
+// The transcription model itself is set inside the GA session.update under
+// audio.input.transcription.model (see sendSessionConfig).
 //
 // Audio from the Polyphon pipeline arrives as PCM16 16kHz mono. This client
 // upsamples to 24kHz (OpenAI's native rate), base64-encodes each chunk, and
@@ -71,7 +77,6 @@ func (c *ASRClient) StartStream(ctx context.Context, config polyphon.ASRConfig) 
 
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+c.apiKey)
-	headers.Set("OpenAI-Beta", "realtime=v1")
 
 	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		HTTPHeader: headers,
@@ -193,21 +198,17 @@ func (s *openaiASRStream) Close() error {
 
 // sendSessionConfig sends the initial session configuration for transcription-only mode.
 //
-// Transcription-only sessions use a distinct event type and schema from the
-// realtime-conversation sessions. The correct event type for this mode is
-// "transcription_session.update" (NOT "session.update"), and the inner session
-// object does not carry a "type" field -- the intent is already encoded on
-// the WebSocket URL via ?intent=transcription.
-//
-// Sending "session.update" with "session.type": "transcription" results in
-// OpenAI rejecting the config with:
-//
-//	{"type":"error","error":{"message":"Unknown parameter: 'session.type'."}}
+// GA shape (#1382): "session.update" with session.type: "transcription" and the
+// audio config nested under audio.input (format / transcription / turn_detection)
+// -- the same nesting realtime_events.go's encodeSessionUpdate uses for the
+// conversation client. The retired beta shape ("transcription_session.update"
+// with flat input_audio_format / input_audio_transcription / top-level
+// turn_detection) is rejected at connect with beta_api_shape_disabled.
 //
 // Audio format: the client upsamples to 24kHz PCM16 before send (see
-// SendAudio), matching input_audio_format: "pcm16".
+// SendAudio), matching audio.input.format {type: "audio/pcm", rate: 24000}.
 //
-// Model selection: input_audio_transcription.model carries the transcription
+// Model selection: audio.input.transcription.model carries the transcription
 // model (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe). Override via
 // MEMQL_OPENAI_REALTIME_MODEL on the voice node or POLYPHON_OPENAI_ASR_MODEL
 // on the bridge agent.
@@ -235,18 +236,26 @@ func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config polyphon
 	}
 
 	msg := map[string]any{
-		"type": "transcription_session.update",
+		"type": "session.update",
 		"session": map[string]any{
-			"input_audio_format": "pcm16",
-			"input_audio_transcription": map[string]any{
-				"model":    s.model,
-				"language": lang,
-			},
-			"turn_detection": map[string]any{
-				"type":                "server_vad",
-				"threshold":           0.5,
-				"prefix_padding_ms":   300,
-				"silence_duration_ms": silenceMs,
+			"type": "transcription",
+			"audio": map[string]any{
+				"input": map[string]any{
+					"format": map[string]any{
+						"type": "audio/pcm",
+						"rate": audio.OpenAISampleRate,
+					},
+					"transcription": map[string]any{
+						"model":    s.model,
+						"language": lang,
+					},
+					"turn_detection": map[string]any{
+						"type":                "server_vad",
+						"threshold":           0.5,
+						"prefix_padding_ms":   300,
+						"silence_duration_ms": silenceMs,
+					},
+				},
 			},
 		},
 	}
