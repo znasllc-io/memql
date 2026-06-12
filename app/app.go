@@ -74,6 +74,11 @@ type App struct {
 	automationScheduler *automations.Scheduler
 	automationLoader    *automations.Loader
 	stepRegistry        *automationSteps.Registry
+	// clusterGuard is the cross-replica execution claim (#561, bounded
+	// fail-open per #1142). Built for the automation scheduler and shared
+	// with the planner integration's plan-execution dispatcher (memql#1363)
+	// so both claim through the same DB ledger + counters.
+	clusterGuard *automations.ClusterExecutionGuard
 
 	// Phase 3d: the owner-scoped authored-construct runtime (epic memql#954,
 	// #961 / #959 live glue): the registry activated bundles register into,

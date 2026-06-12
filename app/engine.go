@@ -128,6 +128,9 @@ func (a *App) engineAndBus() {
 	// duplicate so a double-fire is always observable.
 	clusterGuard := automations.NewClusterExecutionGuard(a.db.BunDB, a.Logger)
 	a.Dependencies = append(a.Dependencies, clusterGuard)
+	// Stash for the planner integration's plan-execution claim (memql#1363):
+	// the same guard instance gates approved-plan dispatch across replicas.
+	a.clusterGuard = clusterGuard
 
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:              nil,

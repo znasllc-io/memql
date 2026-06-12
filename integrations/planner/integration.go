@@ -87,6 +87,17 @@ type AgentForwarder interface {
 	) error
 }
 
+// ExecutionClaimer is the cross-replica execution gate the plan-execution
+// dispatcher consults before forwarding an agent turn (memql#1363). Claim
+// returns true when THIS replica should execute and false when another
+// replica already owns the (name, dedupKey) claim. Satisfied by
+// *automations.ClusterExecutionGuard -- the same DB-PK-backed,
+// bounded-fail-open (memql#1142) guard event-triggered automations use; the
+// app wiring passes the one instance both share.
+type ExecutionClaimer interface {
+	Claim(ctx context.Context, name, dedupKey string) bool
+}
+
 // PlannerIntegration is the integration provider registered on the
 // planner node's engine. The lifecycle layer (Start / Stop) hooks
 // into the event bus subscriptions; the dispatch logic lives in
@@ -126,7 +137,17 @@ type PlannerIntegration struct {
 	// so one plan can't be dispatched to its agent twice -- e.g. if more than
 	// one graph.node.updated event arrives while the plan is in "running".
 	// Keyed by planId; cleared when executeApprovedPlan returns. (memql#800)
+	//
+	// IN-PROCESS ONLY: this map collapses duplicate events within ONE replica.
+	// Cross-replica dedup (the plan-approved event reaches every planner
+	// replica) is the clusterClaimer's job (memql#1363).
 	executing sync.Map
+	// clusterClaimer is the cross-replica plan-execution claim (memql#1363).
+	// executeApprovedPlan consults it before dispatching the agent turn so
+	// exactly one planner replica executes an approved Plan. Optional: when
+	// nil (dev / single-binary builds, unit tests) only the in-process dedup
+	// above applies -- the pre-#1363 behavior.
+	clusterClaimer ExecutionClaimer
 }
 
 // PlannerArg is a functional option for NewPlannerIntegration.
@@ -156,6 +177,16 @@ func WithLogger(logger *slog.Logger) PlannerArg {
 // default-unlimited contract.
 func WithDBGetter(getter func() *bun.DB) PlannerArg {
 	return func(p *PlannerIntegration) { p.dbGetter = getter }
+}
+
+// WithClusterClaimer wires the cross-replica plan-execution claim
+// (memql#1363). Pass the app's ClusterExecutionGuard so the planner's
+// plan-execution dispatch shares the automation guard's DB-PK claim table,
+// observability counters, and bounded fail-open (memql#1142). Optional --
+// omitting it leaves only the in-process dedup (memql#800), which cannot
+// collapse duplicates across replicas.
+func WithClusterClaimer(claimer ExecutionClaimer) PlannerArg {
+	return func(p *PlannerIntegration) { p.clusterClaimer = claimer }
 }
 
 // NewPlannerIntegration constructs a PlannerIntegration. Engine and
