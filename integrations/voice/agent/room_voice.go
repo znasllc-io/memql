@@ -186,15 +186,73 @@ func (j *liveKitRoomJoiner) JoinAndServe(ctx context.Context, req RoomRequest) (
 	// per identity, so a track that races in after setBridge is not double-counted.
 	j.replaySubscribedTracks(room, b)
 
-	// Block until the room disconnects or the caller cancels.
+	// Idle watchdog (#1378): the agent is itself a room participant, so
+	// LiveKit never closes a room the agent is sitting in -- without this,
+	// a room whose humans have all left (or that was adopted off a rollout
+	// ghost) blocks JoinAndServe forever and wedges the single-room
+	// dispatcher. Tear down after a grace period with zero humans so the
+	// dispatcher returns to discovery.
+	idle := make(chan struct{})
+	go j.watchIdleRoom(ctx, room, idle)
+
+	// Block until the room disconnects, the room idles out, or the caller
+	// cancels.
 	select {
 	case <-disconnected:
 		reasonMu.Lock()
 		reason := disconnectReason
 		reasonMu.Unlock()
 		return normalizeDisconnectReason(reason), nil
+	case <-idle:
+		return "inactivity", nil
 	case <-ctx.Done():
 		return "normal", nil
+	}
+}
+
+// idleRoomPollInterval is how often the idle watchdog re-counts the room's
+// human participants.
+const idleRoomPollInterval = 10 * time.Second
+
+// watchIdleRoom closes idle once the room has had zero human participants
+// (per isHumanParticipantIdentity; the agent and avatar don't count)
+// continuously for the configured grace period. A human (re)joining resets
+// the clock. Returns silently when ctx ends first.
+func (j *liveKitRoomJoiner) watchIdleRoom(ctx context.Context, room *lksdk.Room, idle chan<- struct{}) {
+	grace := idleTeardownAfter(nil)
+	ticker := time.NewTicker(idleRoomPollInterval)
+	defer ticker.Stop()
+
+	var idleSince time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			human := false
+			for _, rp := range room.GetRemoteParticipants() {
+				if rp != nil && isHumanParticipantIdentity(rp.Identity()) {
+					human = true
+					break
+				}
+			}
+			if human {
+				idleSince = time.Time{}
+				continue
+			}
+			if idleSince.IsZero() {
+				idleSince = now
+				continue
+			}
+			if now.Sub(idleSince) >= grace {
+				if j.logger != nil {
+					j.logger.Info("voice-agent room idle -- tearing down session",
+						"room", room.Name(), "idle_for", now.Sub(idleSince).String(), "grace", grace.String())
+				}
+				close(idle)
+				return
+			}
+		}
 	}
 }
 
