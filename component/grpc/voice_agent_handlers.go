@@ -140,8 +140,9 @@ func extractVoiceGateDirective(e events.Event, spaceId, gaAgentId string) (voice
 }
 
 // handleVoiceAgentSessionStart binds a LiveKit room to a memql space.
-// Phase 6: still returns the persona-resolver placeholder; Phase 9
-// fills in avatar_persona_id, Phase 7 fills in the gate state.
+// The ack carries the resolved channel modes, the GA persona identity (#478)
+// and the vendor-issued avatar persona id (#1428); Phase 7 fills in the gate
+// state.
 func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.VoiceAgentSessionStart) error {
 	if msg == nil {
 		return nil
@@ -195,6 +196,19 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	logVoiceTiming(s.logger, "server.session_start.persona", personaStart, "space_id", spaceId)
 	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "space_id", spaceId)
 
+	// Resolve the vendor-issued avatar persona id (Simli faceId / Anam persona
+	// id) for the vendor the voice-agent runs (#1428). This was the "Phase 9"
+	// placeholder: the ack always carried "", so the voice-agent's avatar plan
+	// resolved to audio-only and the in-room avatar never started, on any
+	// executor. Applies the same catalog hydration/fallback rules as the
+	// direct/Guide avatar path (avatardirect, #1336/#1341): stamped catalog
+	// row id -> hydrate to the entry's vendor-issued id; stamped raw vendor id
+	// -> verbatim; unstamped -> catalog default (gender-matched, else first).
+	// Vendor-gated: the ack has no vendor field, so an id is returned only when
+	// the resolved entry's vendor matches the vendor the agent asked for.
+	// Best-effort: any failure yields "" and the session rides audio-only.
+	avatarPersonaId := resolveAgentAvatarPersona(s, gaAgentId, msg.GetAvatarVendor())
+
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
 			"request_id", requestId,
@@ -202,6 +216,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 			"ga_agent_id", gaAgentId,
 			"room_name", msg.GetRoomName(),
 			"avatar_vendor", msg.GetAvatarVendor(),
+			"avatar_persona_resolved", avatarPersonaId != "",
 			"audio_mode", audioMode,
 			"video_mode", videoMode,
 			"persona_name", persona.name,
@@ -223,7 +238,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 				RequestId:         requestId,
 				Success:           true,
 				GaCanonicalVoice:  "alto",
-				GaAvatarPersonaId: "",
+				GaAvatarPersonaId: avatarPersonaId,
 				InitialAudioMode:  audioMode,
 				InitialVideoMode:  videoMode,
 				GaDisplayName:     persona.name,
@@ -396,6 +411,165 @@ func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
 	out.description, _ = extractFirstAgentField(payload, "description")
 	out.personality, _ = extractFirstAgentField(payload, "personality")
 	return out
+}
+
+// voiceAvatarPersonaCatalogPrefix is the canonical id prefix of the operator
+// avatar-persona catalog rows (v1:agents:avatarPersona). The CoPresent
+// PersonaPicker stamps agents with the CATALOG ROW ID, not the vendor-issued
+// face/persona id, so a stamped value carrying this prefix must be hydrated
+// through the catalog before it reaches the avatar vendor client (#1336).
+// Mirrors integrations/avatardirect's avatarPersonaCatalogPrefix.
+const voiceAvatarPersonaCatalogPrefix = "v1:agents:avatarPersona:"
+
+// resolveAgentAvatarPersona resolves the vendor-issued avatar persona id
+// (Simli faceId / Anam persona id) the voice session ack carries (#1428),
+// applying the avatardirect #1336/#1341 rules to the voice path:
+//
+//  1. Agent stamped with a catalog row id -> hydrate via queryAvatarPersonaById
+//     to the entry's vendor-issued personaId.
+//  2. Agent stamped with a raw vendor id (legacy direct stamping) -> verbatim,
+//     when the stamped vendor matches the requested one.
+//  3. Agent unstamped (every auto-provisioned assistant) -> the catalog
+//     default: the entry matching the agent's gender, else the first entry.
+//
+// requestedVendor is the vendor the voice-agent runs (VoiceAgentSessionStart.
+// avatar_vendor, from MEMQL_AVATAR_VENDOR). The ack proto carries no vendor
+// field, so a persona id is returned ONLY when the resolved entry's vendor
+// matches -- handing a Simli client an Anam id would just fail the vendor REST
+// call. Best-effort throughout: nil engine, query errors, or no usable entry
+// all return "" (the voice session rides audio-only, never fails bring-up).
+func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string) string {
+	vendor := strings.ToLower(strings.TrimSpace(requestedVendor))
+	if vendor == "" || vendor == "none" {
+		return ""
+	}
+	if s == nil || s.service == nil || s.service.engine == nil {
+		return ""
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
+
+	// Agent record: stamped vendor/persona id + gender (for the catalog
+	// default). JSON-marshal interpolated ids so an embedded quote cannot break
+	// out of the DSL string literal (same pattern as resolveAgentPersona).
+	agentIdJSON, _ := json.Marshal(agentId)
+	agentQuery := fmt.Sprintf(
+		`from(v1:agents:agent) ?.id==%s select id, payload.avatarVendor, payload.avatarPersonaId, payload.gender`,
+		string(agentIdJSON))
+	result, err := s.service.engine.Execute(ctx, agentQuery)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("voice-agent avatar persona: agent query failed -- audio-only",
+				"agent_id", agentId, "err", err)
+		}
+		return ""
+	}
+	payload := result.OutputPayload()
+	stampedVendor, _ := extractFirstAgentField(payload, "avatarVendor")
+	stampedId, _ := extractFirstAgentField(payload, "avatarPersonaId")
+	gender, _ := extractFirstAgentField(payload, "gender")
+	stampedId = strings.TrimSpace(stampedId)
+
+	// 1. Catalog row id -> hydrate to the entry's vendor-issued persona id.
+	if strings.HasPrefix(stampedId, voiceAvatarPersonaCatalogPrefix) {
+		catalogIdJSON, _ := json.Marshal(stampedId)
+		raw, err := s.service.engine.Execute(ctx,
+			fmt.Sprintf(`queryAvatarPersonaById({avatarPersonaId: %s})`, string(catalogIdJSON)))
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("voice-agent avatar persona: catalog hydrate failed -- audio-only",
+					"agent_id", agentId, "catalog_id", stampedId, "err", err)
+			}
+			return ""
+		}
+		return pickAvatarPersonaId(rowsFromEnginePayload(raw.OutputPayload()), vendor, "")
+	}
+
+	// 2. Raw stamped vendor id: verbatim when the stamped vendor matches.
+	if stampedId != "" && strings.EqualFold(strings.TrimSpace(stampedVendor), vendor) {
+		return stampedId
+	}
+
+	// 3. Catalog default for unstamped (or vendor-mismatched) agents.
+	raw, err := s.service.engine.Execute(ctx, `queryAvatarPersonas({})`)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("voice-agent avatar persona: catalog default lookup failed -- audio-only",
+				"agent_id", agentId, "err", err)
+		}
+		return ""
+	}
+	resolved := pickAvatarPersonaId(rowsFromEnginePayload(raw.OutputPayload()), vendor, gender)
+	if resolved != "" && s.logger != nil {
+		s.logger.Info("voice-agent avatar persona: using catalog default",
+			"agent_id", agentId, "vendor", vendor, "gender", gender)
+	}
+	return resolved
+}
+
+// pickAvatarPersonaId picks the vendor-issued persona id from avatar-persona
+// catalog rows: only rows whose vendor matches requestedVendor (lowercased)
+// and that carry a non-empty personaId qualify; a row matching the agent's
+// gender (when given) is preferred, else the first qualifying row wins. Pure
+// so the selection rules are unit-tested without an engine.
+func pickAvatarPersonaId(rows []map[string]any, requestedVendor, gender string) string {
+	gender = strings.TrimSpace(gender)
+	var pick string
+	for _, row := range rows {
+		rowVendor := strings.ToLower(strings.TrimSpace(rowStringField(row, "vendor")))
+		if rowVendor != requestedVendor {
+			continue
+		}
+		personaId := strings.TrimSpace(rowStringField(row, "personaId"))
+		if personaId == "" {
+			continue
+		}
+		if pick == "" {
+			pick = personaId
+		}
+		if gender != "" && strings.EqualFold(strings.TrimSpace(rowStringField(row, "gender")), gender) {
+			return personaId
+		}
+	}
+	return pick
+}
+
+// rowStringField reads a string field off a row map, probing the bare key and
+// the nested payload map (shape() output nests under payload). Mirrors
+// avatardirect's rowString helper.
+func rowStringField(row map[string]any, field string) string {
+	if v, ok := row[field].(string); ok {
+		return v
+	}
+	if payload, ok := row["payload"].(map[string]any); ok {
+		if v, ok := payload[field].(string); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// rowsFromEnginePayload normalizes an engine result payload into row maps,
+// additionally unwrapping the GraphBundle shape named queries can surface
+// (normalizeResultRows handles only the map/list shapes). Mirrors
+// avatardirect's extractRows.
+func rowsFromEnginePayload(payload any) []map[string]any {
+	if bundle, ok := payload.(*memqlv1.GraphBundle); ok && bundle != nil {
+		out := make([]map[string]any, 0, len(bundle.GetNodes()))
+		for _, n := range bundle.GetNodes() {
+			if n == nil {
+				continue
+			}
+			row := map[string]any{"id": n.GetId(), "concept": n.GetConcept()}
+			if p := n.GetPayload(); p != nil {
+				for k, v := range p.AsMap() {
+					row[k] = v
+				}
+			}
+			out = append(out, row)
+		}
+		return out
+	}
+	return normalizeResultRows(payload)
 }
 
 // voiceAgentScopedToolNames returns the GA agent's expanded tool-name set when
