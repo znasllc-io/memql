@@ -72,6 +72,12 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
 		{Pattern: "cognition.response.audio", TargetType: NodeTypeVoice},
+		// Voice gate directive (#479 gate path): cognition publishes the
+		// per-turn gate decision, the BFF's voice-turn waiter subscribes
+		// (component/grpc/voice_agent_handlers.go). Without this rule the
+		// default-deny strands the directive on the cognition node and every
+		// gate-path voice turn times out after 30s in cluster mode (#1412).
+		{Pattern: "voice.gate.directive", TargetType: NodeTypeBFF},
 	}
 
 	extraRulesMu.Lock()
