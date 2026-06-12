@@ -86,34 +86,31 @@ Audit trail for state transitions:
 
 | Query | Purpose |
 |-------|---------|
-| `recordsByState` | Filter records by validation state, space, type |
-| `usableRecords` | Get records usable per policy (confirmed + optionally checked) |
-| `validationLog` | Audit trail for a record or space |
-| `detectConflicts` | Find confirmed records with matching natural keys |
-| `policy` | Get the validation policy for a record type |
+| `queryRecordsByState` | Filter records by validation state, space, type |
+| `queryUsableRecords` | Get records usable per policy (confirmed + optionally checked) |
+| `queryValidationLog` | Audit trail for a record or space |
+| `queryDetectConflicts` | Find confirmed records with matching natural keys |
+| `queryPolicy` | Get the validation policy for a record type |
 
 ## Mutations
 
 | Mutation | Purpose |
 |----------|---------|
-| `createRecord` | Create a new record in draft state |
-| `createRecordBatch` | Batch-create records in draft state |
-| `updateRecord` | Update record data (resets to draft) |
-| `deleteRecord` | Soft-delete a record |
-| `checkRecord` | Synthetic check (increments count, may transition to checked) |
-| `confirmRecord` | Human confirm (increments count, may transition to confirmed) |
-| `revertRecord` | Revert to a previous state |
-| `setPolicy` | Create or update a validation policy |
+| `mutationCreateRecord` | Create a new record in draft state |
+| `mutationCreateRecordBatch` | Create a single record in draft state as part of a batch import (one call per record) |
+| `mutationUpdateRecord` | Update record data (resets to draft) |
+| `mutationDeleteRecord` | Soft-delete a record |
+| `mutationCheckRecord` | Synthetic check (increments count, may transition to checked) |
+| `mutationConfirmRecord` | Human confirm (increments count, may transition to confirmed) |
+| `mutationRevertRecord` | Revert to a previous state |
+| `mutationSetPolicy` | Create or update a validation policy |
 
 ## Events
 
 | Event | Trigger |
 |-------|---------|
-| `graph.node.created.v1:data:record` | New record created (automatic) |
-| `data.record.checked` | Record synthetically checked |
-| `data.record.confirmed` | Record human confirmed |
-| `data.record.reverted` | Record reverted to previous state |
-| `data.conflicts.detected` | Conflict found with existing confirmed records |
+| `graph.node.created.{partition}.v1:data:record` | New record created (automatic) |
+| `data.conflicts.detected` | Conflict found with existing confirmed records (emitted by the conflict-detection automation; never auto-resolves) |
 
 ## Policy Examples
 

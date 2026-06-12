@@ -9,47 +9,97 @@ owner: znas
 
 # MemQL Function Language Specification
 
-> **Status:** Draft  
-> **Last Updated:** December 7, 2025  
-> **Purpose:** Specification for query, mutation, and automation functions in MemQL
+> **Status:** Stable
+> **Last Updated:** June 11, 2026
+> **Purpose:** Specification for the function-like DSL constructs in MemQL
 
 ---
 
 ## Overview
 
-MemQL functions provide reusable, parameterized operations. This specification defines the following function types:
+MemQL functions provide reusable, parameterized operations. Every
+construct is declared in **struct form** -- an annotated block with a
+keyword header -- and lives in a per-namespace, per-construct file
+(`dsl/<namespace>/<construct>s.memql`, e.g. `dsl/cognition/queries.memql`).
 
-| Type | Purpose | Status |
-|------|---------|--------|
-| **Query** | Read data with optional filters | Implemented |
-| **Mutation** | Insert data with parameters | Implemented |
-| **Automation** | Multi-step workflows | Implemented |
-| **Prompt** | SI prompt templates with input schemas | Implemented |
-| **Provider** | SI provider configurations | Implemented |
-| **Shape** | Reusable shape templates for data projection | Implemented |
+| Construct | Purpose |
+|-----------|---------|
+| **Query** | Read rows of a concept with a filter and a shape projection |
+| **Mutation** | Write one row (`insert` or `update`) of a concept |
+| **Logic** | Imperative orchestration block called from automation steps |
+| **Automation** | Event- or schedule-triggered workflow |
+| **Prompt** | SI prompt template with a typed input schema |
+| **Provider** | SI vendor + model configuration |
+| **Shape** | Reusable field-projection template |
+| **Tool** | SI-callable surface over a query / mutation / builtin |
+| **Builtin** | Go-backed operation behind a declarative schema |
+
+> **Retired: receiver-function constructs.** The legacy
+> `func (Query|Mutation|Spec|Tool|Prompt|Provider|Builtin|Automation|Shape|Policy) ...`
+> receiver syntax is retired and **rejected at parse time** with a
+> migration hint. The struct forms documented below are the only
+> accepted author surface.
 
 ## Naming Convention
 
-Function names should use receiver prefixes:
+Function names use kind prefixes:
 
-- Query: `query*`
-- Mutation: `mutation*`
-- Spec: `spec*`
-- Prompt: descriptive name (e.g., `agentReply`, `cognitionRouting`, `docSummary`)
-- Provider: provider name (e.g., `chat54Mini`, `claudeSonnet`)
-- Shape: descriptive name (e.g., `spaceCard`, `agentCard`)
+- Query: `query*` (e.g. `queryActiveSpaces`)
+- Mutation: `mutation*` (e.g. `mutationCreateSpace`)
+- Spec: `spec*`; trait: `trait*`
+- Logic: `logic*`
+- Prompt: descriptive name (e.g. `agentReply`, `cognitionCompaction`)
+- Provider: provider name (e.g. `chat54Mini`, `streamClaudeSonnet`)
+- Shape: descriptive name (e.g. `spaceCard`, `participantFull`)
 
 The compiler emits naming diagnostics for mismatches.
 
+## Imports and Concept Binding
+
+Cross-file dependencies are declared with **file-top `use` imports**.
+The dotted path maps to a file on disk (`cognition.concepts` →
+`dsl/cognition/concepts.memql`); the brace list names the constructs
+pulled into local scope:
+
+```memql
+use cognition.concepts.{ participant, space }
+use cognition.shapes.{ participantFull }
+use common.traits.{ traitIsActiveRecord }
+```
+
+The **concept a construct binds to is named in its signature**:
+`query <Concept> <name>`, `mutation <Concept> <name>`,
+`shape <Concept> <name>`, `seed <Concept> <name>`. The short concept
+name resolves through the file's `use ...concepts.{ ... }` import.
+
+> **Retired: the `@use*` annotation family and `@concepts(...)`.**
+> `@useConcept`, `@useShape`, `@useQuery`, `@useMutation`,
+> `@useLogic`, `@useBuiltin` (and the rest of the `@use*` family),
+> plus the `@concepts("v1:...")` shape binding, are retired and
+> rejected at parse time. Use file-top `use` imports + signature
+> binding instead.
+
 ## Builtin Functions (Registry-Driven)
 
-Builtins are declared as JSON metadata files under `functions/v1/builtin/*.json` and loaded into the same function registry as user-defined functions. Each builtin JSON definition provides:
+Builtins are declared in the DSL like every other construct -- in
+`dsl/<namespace>/builtins.memql`, struct form. The body's field list
+is the input schema; the implementation is the Go integration named
+by `@executor`:
 
-- `name` and optional `aliases` (call names)
-- `executor` (Go handler key)
-- `args` contract (parser-level argument profile/validation)
+```memql
+@enabled
+@executor("integration.auth.checkPermission")
+@args(profile="object")
+@description("Check if the current authenticated user has a specific role. Returns boolean result.")
+builtin authCheckPermission {
+  role  string  @required
+}
+```
 
-At runtime, parser resolution and executor dispatch are both registry-driven from this metadata rather than hardcoded builtin name branching.
+At runtime, parser resolution and executor dispatch are registry-driven
+from these declarations -- builtins resolve through the same function
+registry as user-defined functions, so they look like regular DSL
+calls (`authCheckPermission({ role: "admin" })`).
 
 ---
 
@@ -57,365 +107,300 @@ At runtime, parser resolution and executor dispatch are both registry-driven fro
 
 ### Consistent Accessor Pattern
 
-All data access uses the `functionName("parameter")` pattern:
+Inputs are declared in an `args { ... }` block and read as `args.X`.
+Engine-provided values are bare top-level names:
 
 ```memql
-args.fieldName           -- Function argument
-var("VARIABLE_NAME")       -- Config variable  
-node("path")               -- Node property (in shapes)
-step("stepId")             -- Step result (in automations)
-field(object, "key")       -- Field access on object
+args.fieldName       -- Caller-passed argument
+actor.userId         -- Resolved auth context (role, identityId, isClusterOwner, ...)
+now                  -- RFC3339 timestamp captured at evaluation start
+partition            -- Active partition for this call
+config.X             -- Allow-listed config entry
+payload.fieldName    -- Row payload field (query filter / shape contexts)
+id, createdAt, ...   -- Row intrinsics, bare names
 ```
 
-This avoids JavaScript-like `$var.NAME` or `${name}` interpolation.
+> **Retired: the `ctx` envelope.** `ctx.input.X` and `ctx.X` are gone
+> from the author surface; authors write `args.X`. The `node("...")`
+> accessor wrapping used by legacy shape templates is also retired.
 
 ### Operators
 
+One Go-style boolean grammar applies in every filter and expression
+context:
+
 | Operator | Meaning | Example |
 |----------|---------|---------|
-| `?.` | Optional filter (skip if arg missing) | `?.payload.status==args.status` |
-| `? :` | Ternary (choose between values) | `args.flag ? "yes" : "no"` |
 | `==` | Equal | `payload.role=="admin"` |
 | `!=` | Not equal | `payload.status!="archived"` |
-| `>` | Greater than | `payload.count>10` |
-| `>=` | Greater than or equal | `payload.count>=10` |
-| `<` | Less than | `payload.count<10` |
-| `<=` | Less than or equal | `payload.count<=10` |
-| `in` | Value in list | `payload.status in ("a","b")` |
-| `not in` | Value not in list | `payload.status not in ("x","y")` |
-| `;` | AND (logical) | `concept==x;payload.y==z` |
-| `,` | OR (logical) | `payload.a=="x",payload.a=="y"` |
+| `>` `>=` `<` `<=` | Comparisons | `payload.count>=10` |
+| `in` | Membership | `payload.kind in ["a", "b"]`, `args.x in payload.list` |
+| `&&` | Logical AND | `payload.spaceId==args.spaceId && traitIsActiveRecord` |
+| `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
+| `!` | Logical NOT | `!payload.hidden` |
+| `( )` | Grouping (Go precedence: `!` > comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
+| `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { payload.role==args.role }` |
+
+> **Retired operator forms** (all rejected at parse time and by the
+> conformance suite, `TestNoRetiredOperatorForms`):
+> - `;` AND separator → use `&&`
+> - `,` OR separator → use `||`
+> - `has` membership → use `in`
+> - `?.` optional-chain prefix → use `when(args.x) { ... }`
 
 ---
 
-## Query Functions (Implemented)
+## Query Functions
 
-Query functions are read-only operations that return data.
-
-### File Structure
-
-```
-dsl/v1/queries/v1/identity/activeUsers.memql   # struct-form query or procedural func + args { ... }
-```
+Queries are read-only struct constructs: signature-bound concept,
+optional `args`, a `filter` clause, optional `sort` / `paginate`
+directives, and a `shape` projection.
 
 ### Syntax
 
 ```memql
--- Description (becomes function description)
-concept==v1:identity:user;
-payload.active==true;
-?.payload.authorizerId==args.authorizerId;
-?.payload.role==args.role
+use cognition.concepts.{ participant }
+
+@enabled
+@description("Get active human participants in a space")
+query participant queryActiveHumanParticipants {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitStatusIsActive && traitIsActiveRecord
+  shape   participantFull
+}
 ```
 
-### Optional Filters with `?.`
+Filter rules (enforced by `dsl/conformance_test.go`):
 
-The `?.` prefix makes a filter conditional - it's only applied if the argument is provided:
+- Payload fields are `payload.<field>` -- never `<conceptName>.<field>`.
+- Intrinsics (`id`, `concept`, `createdAt`, `createdBy`, `partition`,
+  `type`, `schema`) are bare names.
+- Named trait / spec predicates are called bare
+  (`traitIsActiveRecord`), and are **mandatory** where a trait covers
+  the predicate -- inline `payload.active==true` is rejected when
+  `traitIsActiveRecord` exists.
+
+### Optional Filters with `when()`
+
+A `when(args.x) { ... }` guard applies its predicate only when the
+argument is provided:
 
 ```memql
--- Both filters are optional
-concept==v1:cognition:participant;
-?.payload.spaceId==args.spaceId;
-?.payload.status==args.status
+@enabled
+@description("Active spaces, optionally narrowed to a creator")
+query space queryActiveSpaces {
+  args {
+    userId  string
+  }
+  filter  traitIsActiveRecord && traitStatusIsActive && when(args.userId) { createdBy==args.userId }
+  shape   spaceFull
+}
 ```
 
 **Calling patterns:**
 ```memql
-spaceParticipants()                              -- No filters
-spaceParticipants({"spaceId": "s-1"})            -- Filter by spaceId only
-spaceParticipants({"status": "active"})          -- Filter by status only
-spaceParticipants({"spaceId": "s-1", "status": "active"})  -- Both filters
+queryActiveSpaces()                      -- No optional filter applied
+queryActiveSpaces({"userId": "u-1"})     -- Creator filter applied
+```
+
+### Sorting and Pagination
+
+```memql
+query context queryLatestSpaceContextForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId
+  sort    "createdAt", "desc"
+  paginate 1
+  shape   spaceContextFull
+}
 ```
 
 ---
 
-## Mutation Functions (Implemented)
+## Mutation Functions
 
-Mutation functions execute insert operations with parameters.
+Mutations write exactly one row of their signature-bound concept.
 
 ### Execution Constraints
 
-- Exactly **one** `insert(...)` per mutation function call.
-- Mutation functions can only be invoked as a **top-level** expression: `myMutation({ ... })`.
-- Mutation functions cannot be wrapped with directives like `shape()`, `paginate()`, `sort()`, `select()`, `asOf()`, or `withDepth()`.
-
-### Syntax (struct form, canonical)
-
-Each query / mutation binds its concept in the SIGNATURE:
-`mutation <Concept> <name>` / `query <Concept> <name>`. Cross-file
-constructs (other queries, mutations, shapes, traits, builtins,
-logic blocks) are pulled into local scope via file-top `use
-<module>.{ ... }` imports. The legacy per-construct `@useConcept`
-annotation and the legacy single-binding `use <ns>.<concept>`
-shape are both retired and rejected at parse time.
-
-```memql
-use <ns>.concepts.{ <conceptName> }
-
-@enabled
-@description("Creates a new record")
-mutation <conceptName> mutationFunctionName {
-  args { ... }
-  insert {
-    id: args.id
-    ...
-  }
-}
-```
-
-### Example: createUser
-
-```memql
-use identity.concepts.{ user }
-
-@enabled
-@description("Creates a new user record")
-mutation user mutationCreateUser {
-  args {
-    userId        string  @required
-    authorizerId  string  @required
-    email         string  @required
-    displayName   string
-  }
-  insert {
-    id:           args.userId
-    authorizerId: args.authorizerId
-    email:        args.email
-    displayName:  coalesce(args.displayName, args.email)
-    role:         var("MEMQL_DEFAULT_USER_ROLE")
-    preferences: {
-      theme:         var("MEMQL_DEFAULT_USER_THEME"),
-      notifications: true
-    }
-    lastSeenAt:   timestamp()
-    active:       true
-  }
-}
-```
-
-### Using Variables with `var()`
-
-Variables are fetched from the `v1:platform:partitionVariable` concept:
-
-```memql
-"role": var("MEMQL_DEFAULT_USER_ROLE")
-"theme": var("MEMQL_DEFAULT_USER_THEME")
-"webhookUrl": var("DISCORD_WEBHOOK_URL")
-```
-
-### Ternary Operator
-
-Use `condition ? valueIfTrue : valueIfFalse` for inline conditionals:
-
-```memql
-"displayName": args.displayName != "" ? args.displayName : args.email
-"role": args.isAdmin ? "admin" : "member"
-```
-
----
-
-## Automation Functions (Proposed)
-
-Automation functions define multi-step workflows with control flow.
+- Exactly **one** bare `insert { ... }` OR `update { ... }` block per
+  mutation body. `update` is the partial-update counterpart for
+  read-merge-write flows.
+- Mutation functions can only be invoked as a **top-level** expression:
+  `myMutation({ ... })`.
+- Mutation functions cannot be wrapped with directives like `shape()`,
+  `paginate()`, `sort()`, `select()`, `asOf()`, or `withDepth()`.
+- Queries and specs cannot call mutations (compile-time CQS check).
 
 ### Syntax
 
 ```memql
-automation functionName(arg1, arg2, ...) {
-  stepId: stepType { ... }
-  stepId: stepType when condition { ... }
-  ...
-  return expression
-}
-```
+use cognition.concepts.{ space }
 
-### Step Types
-
-| Step Type | Description | Syntax |
-|-----------|-------------|--------|
-| `query` | Execute MemQL query | `step: query { expression }` |
-| `mutation` | Execute insert | `step: mutation { insert(...) }` |
-| `shape` | Transform data | `step: shape { source: ..., template: {...} }` |
-| `webhook` | HTTP request | `step: webhook { url: ..., method: ..., body: {...} }` |
-| `event` | Publish event | `step: event { topic: ..., payload: {...} }` |
-| `forEach` | Iterate collection | `step: forEach source as item { ... }` |
-| `parallel` | Concurrent execution | `step: parallel { branch1, branch2 }` |
-| `switch` | Conditional branching | `step: switch expr { case "x": ... }` |
-
-### Example: bootstrapUser
-
-```memql
-automation bootstrapUser(authorizerId, email, displayName) {
-  -- Check if user already exists
-  checkUser: query {
-    activeUsers({"authorizerId": args.authorizerId})
+@enabled
+@description("Create a cognition space")
+mutation space mutationCreateSpace {
+  args {
+    spaceId  string  @required
+    name     string  @required
   }
-  
-  -- Create user if not found (use .metadata.itemCount to check step result count)
-  createUser: mutation when step("checkUser").metadata.itemCount == 0 {
-    insert("v1:identity:user",
-      id=concat("user-", args.authorizerId),
-      payload={
-        "authorizerId": args.authorizerId,
-        "email": args.email,
-        "displayName": args.displayName != "" ? args.displayName : args.email,
-        "role": var("MEMQL_DEFAULT_USER_ROLE"),
-        "preferences": {
-          "theme": var("MEMQL_DEFAULT_USER_THEME"),
-          "notifications": true
-        },
-        "lastSeenAt": timestamp(),
-        "active": true
-      }
-    )
+  insert {
+    id:          args.spaceId
+    name:        args.name
+    status:      "active"
+    ownerUserId: actor.userId
+    createdAt:   now
   }
-  
-  -- Return the user (created or existing)
-  return coalesce(step("createUser"), first(step("checkUser")))
 }
 ```
 
-### Conditional Steps with `when`
+The write target comes from the signature -- the body never restates
+the concept id, and the named-write form (`insert <concept> { ... }`)
+is rejected (`TestNoRetiredBindingForms`).
 
-Steps can have conditions that must be true for execution:
+### Args Annotations and Defaults
+
+`args { ... }` fields take `@required`, `@enum("a", "b")`,
+`@description("...")`, `@maxLength(N)`, `@pattern("re")`.
+
+> **Retired: `@default` on args fields.** It was never applied and is
+> rejected at load time. Apply a default in the body via
+> `coalesce(args.X, <default>)`, or use a concept-field `@default`
+> (those ARE honored on insert):
 
 ```memql
-createUser: mutation when step("checkUser").metadata.itemCount == 0 {
-  insert(...)
-}
-
-notify: webhook when step("createUser") != null {
-  url: var("DISCORD_WEBHOOK_URL"),
-  body: { "content": concat("New user: ", args.displayName) }
+insert {
+  id:      args.guideId
+  kind:    coalesce(args.kind, "walkthrough")
+  version: coalesce(args.version, 1)
+  active:  coalesce(args.active, true)
 }
 ```
 
-### Referencing Step Results with `step()`
+---
+
+## Logic Functions
+
+Logic blocks are the imperative tier: called from automation steps,
+they declare `args { ... }` and a `body { ... }` that is a sequence of
+named statements ending in `return <expr>`.
+
+### Single-statement form (the common case)
 
 ```memql
-step("checkUser")                        -- Full result
-step("checkUser").metadata.itemCount     -- Count of results
-step("checkUser").result                 -- Result data
-first(step("checkUser"))                 -- First result
-field(step("checkUser"), "id")           -- Field from result
-```
+use common.builtins.{ ensureDailySpaceForUser }
 
-### forEach Loops
-
-```memql
-persist: forEach step("classify") as lead {
-  insert("v1:crm:lead",
-    id=field(item(), "id"),
-    payload={
-      "name": field(item(), "name"),
-      "classification": field(item(), "classification")
-    }
-  )
-}
-
--- With filter
-routeHot: forEach step("classify") where field(item(), "classification") == "hot" as lead {
-  webhook {
-    url: var("SALES_NOTIFY_URL"),
-    body: { "leadId": field(item(), "id") }
+@enabled
+@description("On user creation, ensure today's daily space exists.")
+logic logicProvisionDailySpaceOnUserCreate {
+  args {
+    event object @required
   }
-} onError: continue
+  body {
+    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+  }
+}
 ```
 
-### Scheduled Automations
+### Multi-statement bodies
+
+Intermediate steps are `name := <call>` assignments; steps execute in
+dependency order, and the trailing `return <expr>` is the function's
+return value. A step can be guarded with `if <cond> { ... }` so it
+only fires when the condition holds:
+
+```memql
+body {
+  getUser := queryUserById({ userId: args.event.payload.ownerUserId })
+  activeAssistantId := coalesce(getUser.First().payload.preferences.activeAssistantId, "")
+
+  getActiveGA := if activeAssistantId != "" {
+    queryAgentById({ agentId: activeAssistantId })
+  }
+  getFallbackGA := if activeAssistantId == "" {
+    queryAssistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
+  }
+
+  return coalesce(getActiveGA, getFallbackGA)
+}
+```
+
+Step results are referenced by their **bare step name**; result
+navigation uses accessors like `step.First()`, `step.Empty()`, and
+`step.metadata.itemCount`.
+
+---
+
+## Automation Functions
+
+Automations are event- or schedule-triggered workflows. The canonical
+body is one or more `step` blocks, each invoking a logic function with
+the triggering event:
+
+### Event-Triggered
+
+```memql
+use cognition.logic.{ logicAutoJoinSI }
+
+@enabled
+@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+@filter(payload.active==true)
+@description("On space creation, join the creator's assistant into the space.")
+automation autoJoinSI {
+  step run {
+    logic autoJoinSI { event: event }
+  }
+}
+```
+
+Inside the logic function, the triggering event is bound as `args`, so
+`args.event.payload.<field>` is how the body reaches the event data.
+
+### Scheduled
+
+`@trigger(schedule="...")` takes a six-field cron expression
+(sec min hour dom mon dow):
 
 ```memql
 @enabled
-@schedule(cron="0 0 * * *")
-@description("Daily cleanup of temporary data")
-automation dailyCleanup() {
-  
-  input: concept==v1:temp:data;payload.createdAt<timestamp()
-  
-  cleanup: forEach input() as item {
-    insert("v1:temp:data", id=field(item(), "id"), payload={ "deleted": true })
-  }
-}
-```
-
-### Event-Triggered Automations
-
-```memql
-@enabled
-@trigger(event="graph.node.created.v1:crm:lead", filter="payload.source == 'website'")
-automation onLeadCreated() {
-  
-  classify: shape {
-    source: event(),
-    template: {
-      "id": node("payload.nodeId"),
-      "classification": si("classifyLead.v1", { "data": node("payload") })
-    }
+@trigger(schedule="0 */10 * * * *")
+@description("Every 10 min: mark departed cluster nodes as health='stopped'.")
+automation pruneStaleClusterNodes {
+  step run {
+    logic pruneStaleClusterNodes { event: event }
   }
 }
 ```
 
 ### Attribute Reference
 
-Automations are **disabled by default**. Use attributes to configure:
-
 | Attribute | Arguments | Description |
 |-----------|-----------|-------------|
-| `@enabled` | none | Activates the automation |
-| `@disabled` | none | Explicitly disables (default) |
-| `@trigger` | `event="..."`, `filter="..."` | Event-based trigger |
-| `@schedule` | `cron="..."` | Cron schedule |
+| `@enabled` / `@disabled` | none | Lifecycle switch (disabled constructs stay in the tree, are not loaded) |
+| `@trigger` | `event="..."`, `concept="..."`, `partition="*"` | Event-based trigger; lifecycle events like `system.startup` / `system.shutdown` take `event` only |
+| `@trigger` | `schedule="..."` | Six-field cron schedule |
+| `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(payload.active==true)` |
 | `@description` | `"..."` | Human-readable description |
-| `@async` | none | Run asynchronously |
-| `@timeout` | `"30s"` | Execution timeout |
-| `@retry` | `count=3` | Retry on failure |
-
-### Error Handling
-
-```memql
--- Per-step error handling
-riskyStep: webhook { ... } onError: continue
-retryableStep: webhook { ... } onError: retry retries: 3
-
--- Automation-level hooks
-onComplete: webhook {
-  url: var("DISCORD_WEBHOOK_URL"),
-  body: { "content": "Completed successfully" }
-}
-
-onError: webhook {
-  url: var("DISCORD_WEBHOOK_URL"),
-  body: { "content": concat("Failed: ", error()) }
-}
-```
 
 ---
 
 ## Helper Functions Reference
 
+Verified author-surface helpers (see `component/language/parser`):
+
 ### Data Access
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `args.name` | Function argument | `args.authorizerId` |
-| `var("NAME")` | Config variable | `var("MEMQL_DEFAULT_USER_ROLE")` |
-| `node("path")` | Node property (shapes) | `node("payload.name")` |
-| `step("id")` | Step result | `step("checkUser")` |
-| `input()` | Automation input | `input()` |
-| `event()` | Trigger event | `event()` |
-| `item()` | Current forEach item | `item()` |
-| `index()` | Current forEach index | `index()` |
-| `field(obj, "key")` | Field access | `field(item(), "name")` |
-
-### Collection & Aggregation
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `step("id").metadata.itemCount` | Count step results | `step("users").metadata.itemCount == 0` |
-| `first(collection)` | First item | `first(step("users"))` |
-| `last(collection)` | Last item | `last(step("users"))` |
-| `sum(collection, "key")` | Sum values | `sum(step("orders"), "total")` |
-| `avg(collection, "key")` | Average | `avg(step("scores"), "value")` |
+| `args.name` | Caller-passed argument | `args.spaceId` |
+| `actor.X` | Auth context (`userId`, `role`, `identityId`, `isClusterOwner`) | `actor.userId` |
+| `now` | Eval-start timestamp (bare name) | `createdAt: now` |
+| `config.X` | Allow-listed config entry | `config.someKey` |
+| `var("NAME")` | Named configuration variable (`v1:platform:variable` / `v1:platform:partitionVariable`) | `var("LOG_LEVEL")` |
 
 ### Logic
 
@@ -424,130 +409,60 @@ onError: webhook {
 | `coalesce(a, b, ...)` | First non-null | `coalesce(args.name, "default")` |
 | `cond(pred, then, else)` | Conditional value | `cond(args.flag, "yes", "no")` |
 
-### Strings
+### Strings and Ids
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `concat(a, b, ...)` | Concatenate | `concat("user-", args.id)` |
-| `lower(str)` | Lowercase | `lower(args.email)` |
-| `upper(str)` | Uppercase | `upper(args.code)` |
+| `concat(a, b, ...)` | Concatenate | `concat("si-", hash(args.agentId))` |
+| `lower(str)` / `upper(str)` | Case conversion | `lower(args.email)` |
 | `trim(str)` | Remove whitespace | `trim(args.input)` |
-| `contains(str, sub)` | Contains check | `contains(args.email, "@company.com")` |
+| `contains(str, sub)` | Substring check | `contains(args.email, "@company.com")` |
 | `hash(str)` | SHA256 hash | `hash(args.email)` |
+| `canonicalId(shortId, concept)` | Expand a short id to the canonical row id of an imported concept | `canonicalId(args.spaceId, space)` |
+| `toString(x)` | Stringify | `toString(args.count)` |
 
 ### Time
 
+| Function | Description |
+|----------|-------------|
+| `timestamp()` | Current ISO timestamp |
+| `addDuration(ts, dur)` | Timestamp arithmetic |
+| `daysBetween(a, b)` / `subtractTimestamps(a, b)` | Differences |
+| `year(ts)` / `quarter(ts)` / `month(ts)` / `dayOfMonth(ts)` | Components |
+| `isAnniversary(ts)` / `isFirstDayOfQuarter(ts)` | Calendar predicates |
+
+### SI
+
 | Function | Description | Example |
 |----------|-------------|---------|
-| `timestamp()` | Current ISO timestamp | `timestamp()` |
-| `now()` | Alias for timestamp | `now()` |
-
-### Error
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `error()` | Current error message | `error()` |
+| `si(promptName, data)` | Blocking LLM call through a named prompt | `si("consolidateMemory", {episodes: cluster})` |
+| `agent("name", "prompt", spaceId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
 
 ---
 
-## Implementation Roadmap
+## Prompt Functions
 
-### Phase 1: Query Functions (Complete)
-- [x] Directory-based function loading
-- [x] `arg()` references
-- [x] `?.` conditional filters
-- [x] JSON Schema validation
-- [x] Function composition
-
-### Phase 2: Enhanced Syntax
-- [ ] Parser support for `?.` (currently `?`)
-- [ ] `var()` function for variable lookup
-- [ ] Ternary operator `? :`
-- [ ] `concat()` and string helpers
-
-### Phase 3: Mutation Functions
-- [x] `func (Mutation)` receiver syntax in parser
-- [x] `insert()` within mutation functions
-- [x] Argument substitution in mutation templates (`args.*`, `var()`, `timestamp()`, `concat()`, `hash()`, `coalesce()`, `if()`)
-
-### Phase 4: Automation Functions
-- [ ] `automation` keyword in parser
-- [ ] Step parsing and execution
-- [ ] `when` conditions
-- [ ] `step()` references
-- [ ] `forEach` and iteration
-- [ ] `webhook`, `event` step types
-- [ ] Error handling (`onError`, `onComplete`)
-- [ ] Scheduled triggers
-- [ ] Event triggers
-
----
-
-## Migration from JSON Automations
-
-Current automations are defined in JSON. The new syntax is equivalent:
-
-**JSON (current):**
-```json
-{
-  "name": "leadClassification",
-  "schedule": "*/30 * * * * *",
-  "steps": [
-    {
-      "id": "classify",
-      "type": "shape",
-      "shape": {
-        "source": "$input",
-        "template": { "name": "$node.payload.name" }
-      }
-    }
-  ]
-}
-```
-
-**MemQL (proposed):**
-```memql
-automation leadClassification {
-  schedule: "*/30 * * * * *"
-  
-  classify: shape {
-    source: input(),
-    template: { "name": node("payload.name") }
-  }
-}
-```
-
-Both formats will be supported during transition.
-
----
-
-## Prompt Functions (Implemented)
-
-Prompt functions define SI prompt templates with typed input schemas and default provider configuration.
-
-### File Structure
-
-```
-prompts/v1/<domain>/<promptName>.memql
-```
+Prompts define SI templates with typed input schemas and a default
+provider. Struct form: the body is a **bare field list** -- it IS the
+input schema. Declared in `dsl/<namespace>/prompts.memql`; the
+rendered template is a Go text/template file named by `@templateFile`.
 
 ### Syntax
 
 ```memql
-@description("Generate an SI assistant reply")
 @defaultProvider("chat54Mini")
-@templateFile("agentReply.tmpl")
-func (Prompt) agentReply(args any) {
-  @input {
-    trigger              string  @required
-    assistant            object  @required
-    space                object  @required
-    participants         array(object)
-    history              array(object)  @required
-    conversationContext  object
-  }
+@templateFile("prompts/cognitionCompaction.tmpl")
+@description("Summarize older conversation messages into a rolling summary.")
+prompt cognitionCompaction {
+  entries          []object  @required @description("Conversation messages, oldest first.")
+  previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
 }
 ```
+
+> **Retired prompt forms** (both rejected at parse time):
+> - `func (Prompt) name(args any) { ... }` -- receiver-function wrapping.
+> - `@input { ... }` -- body-level wrapper around the field list. The
+>   field list is the body now.
 
 ### Attributes
 
@@ -556,113 +471,172 @@ func (Prompt) agentReply(args any) {
 | `@description` | Human-readable description of the prompt |
 | `@defaultProvider` | Default SI provider name to use |
 | `@templateFile` | Go text/template file for the prompt |
-| `@input` | Input schema block declaring expected arguments |
 
 ### Input Field Types
 
 | Type | Description |
 |------|-------------|
-| `string` | String value |
+| `string` / `int` / `float` / `boolean` | Scalars |
 | `object` | JSON object |
-| `array(object)` | Array of JSON objects |
+| `[]object` | Array of JSON objects |
 | `@required` | Field modifier marking the field as required |
+| `@description("...")` | Per-field documentation surfaced to the SI layer |
 
 ---
 
-## Provider Functions (Implemented)
+## Provider Functions
 
-Provider functions define SI provider configurations using MemQL syntax instead of JSON files.
-
-### File Structure
-
-```
-providers/v1/<vendor>/<providerName>.memql
-```
+Providers define SI vendor + model configurations (OpenAI and
+Anthropic are the supported vendors). Struct form, consolidated in
+`dsl/providers/providers.memql`.
 
 ### Syntax
 
 ```memql
 @extends("openai")
 @model("gpt-5.4-mini")
-func (Provider) chat54Mini {
+@description("OpenAI GPT-5.4 Mini -- balanced cost/latency chat")
+provider chat54Mini {
   params {
+    contextWindow        128000
     maxCompletionTokens  16384
   }
 }
 ```
 
+Base providers carry vendor-level auth and type; children inherit via
+`@extends`:
+
+```memql
+@base
+@type("Anthropic")
+provider anthropic {
+  auth {
+    apiKey  env("MEMQL_SI_ANTHROPIC_API_KEY")
+  }
+}
+```
+
+> **Retired:** `func (Provider) name { ... }` is rejected at parse
+> time with a migration hint.
+
 ### Attributes
 
 | Attribute | Description |
 |-----------|-------------|
-| `@type` | Provider type (`OpenAI`, `OpenAIStream`, `OpenAITTS`, `Anthropic`, `AnthropicStream`). Optional when `@extends` is used. |
+| `@type` | Provider type (e.g. `OpenAI`, `OpenAIStream`, `Anthropic`, `AnthropicStream`). Optional when `@extends` is used. |
 | `@model` | Model identifier |
-| `@default` | Marks this provider as the default fallback |
-| `@extends` | Inherits `auth` and `@type` from a named base provider (e.g., `@extends("openai")`) |
-| `@base` | Marks a file as a base provider definition (uses `provider` keyword instead of `func`) |
+| `@extends` | Inherits `auth` and `@type` from a named base provider |
+| `@base` | Marks a vendor-level base provider definition |
+| `@default` | Marks this provider as the fallback for callers that do not pick one explicitly |
+| `@enabled` / `@disabled` | Lifecycle. `@disabled` skips registration entirely (no auth resolution attempted); `@disabled` on a `@base` propagates to every child that `@extends` it. |
 
 ### Blocks
 
 | Block | Description |
 |-------|-------------|
-| `auth` | Authentication credentials using `env()` for environment variable references. Inherited from base when using `@extends`. |
-| `params` | Provider-specific parameters (temperature, maxCompletionTokens, etc.) |
+| `auth` | Credentials via `env()` environment-variable references. Inherited from the base when using `@extends`. |
+| `params` | Provider-specific parameters (contextWindow, maxCompletionTokens, voice, etc.) |
 
 ---
 
-## Shape Functions (Implemented)
+## Tool Functions
 
-Shape functions define reusable data projection templates. Each concept has one comprehensive shape
-(e.g., `participantFull`, `agentFull`) that includes all fields. Queries reference shapes by name
-instead of defining inline templates.
-
-### File Structure
-
-```
-shapes/v1/
-├── common/         agentFull, configFull, invitationFull, attachmentFull, mediaFull
-├── cognition/      participantFull, utteranceFull, spaceFull, spaceContextFull, sessionFull
-├── identity/      userFull, identityFull, partitionAccessFull
-├── data/           recordFull, policyFull, logFull
-└── memql/          variableFull
-```
-
-### Definition Syntax
+Tools are the SI-callable surface over queries, mutations, and
+builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
+tool's input schema; `@handler` binds it to the operation it runs:
 
 ```memql
-@description("Comprehensive participant projection with all fields")
-@concepts("v1:cognition:participant")
-func (Shape) participantFull {
-  @template({
-    id: node("id"),
-    spaceId: node("payload.spaceId"),
-    displayName: node("payload.displayName"),
-    participantType: node("payload.participantType"),
-    status: node("payload.status"),
-    createdAt: node("createdAt")
-  })
+@enabled
+@handler(type="query", query="queryFindEvents({\"title\": \"$args.title\"})")
+@executionTime("fast")
+@description("Find the caller's calendar events by exact title.")
+tool calendarFind {
+  title  string  @required @description("Exact event title to look up.")
+}
+```
+
+Tool body fields take `@required`, `@default("...")`, `@enum`, and
+`@description`. (Tool fields are the one place `@default` is valid --
+it is rejected on query / mutation `args` fields.) The legacy
+`func (Tool)` form is retired; the parser rejects it with a migration
+hint.
+
+---
+
+## Shape Functions
+
+Shapes are reusable field-projection templates, declared in struct
+form in `dsl/<namespace>/shapes.memql`. Each shape declares its
+**kind** via `@row` (concept payload + row intrinsics) and/or
+`@actor` (auth-context envelope); at least one is required. The body
+is a path list -- each path becomes a template entry keyed by the
+path's terminal segment.
+
+### Row Shapes
+
+The bound concept is named by the signature `shape <Concept> <name>`
+(resolved through the file-top concept import):
+
+```memql
+use cognition.concepts.{ space }
+
+@description("Space summary card")
+@row
+shape space spaceCard {
+  row.id
+  row.payload.name
+  row.payload.description
+  row.createdAt
+}
+```
+
+### Actor Shapes
+
+Project the engine envelope; no signature concept. Closed field set:
+`actor.userId` / `actor.role` / `actor.identityId` /
+`actor.isClusterOwner` / `actor.now` / `actor.config.<key>`:
+
+```memql
+@description("Actor identity envelope")
+@actor
+shape actorEnvelope {
+  actor.userId
+  actor.role
+  actor.identityId
+  actor.isClusterOwner
+}
+```
+
+### Composition
+
+A shape can `include` another shape (transitive; cycles and field
+collisions are errors):
+
+```memql
+@row
+shape space spaceCardAlias {
+  include spaceCard
 }
 ```
 
 ### Usage in Queries
 
-Queries reference shapes by name as the second argument to `shape()`:
+Struct queries reference a shape by name in their `shape` clause:
 
 ```memql
-func (Query) spaceParticipants(args any) (any, error) {
-  return shape(
-    concept==v1:cognition:participant;
-    ?.payload.spaceId==args.spaceId,
-    "participantFull"
-  ), nil
+query participant querySpaceParticipants {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId && traitIsActiveRecord
+  shape   participantFull
 }
 ```
 
-### Attributes
-
-| Attribute | Description |
-|-----------|-------------|
-| `@description` | Human-readable description |
-| `@concepts` | Concept(s) this shape applies to |
-| `@template` | Shape template using `node()` accessors |
-
+> **Retired shape forms** (rejected at parse time):
+> `func (Shape) name { ... }` receiver wrapping, the
+> `@concepts("v1:...")` binding annotation, the `@template({...})`
+> body annotation, and `node("path")` accessors. Shapes have no
+> inputs and no return; the body is a path list plus optional
+> `include` statements.

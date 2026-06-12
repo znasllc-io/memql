@@ -11,7 +11,7 @@ owner: znas
 
 **Audience:** engineers running memQL locally or operating it in lab/prod.
 **Last updated:** 2026-04-25 (post env-var refactor; Phase 8 complete)
-**Companion doc:** [`copresent/docs/public/operate/env-vars.md`](../../../copresent/docs/public/operate/env-vars.md) covers the frontend side.
+**Companion doc:** `docs/public/operate/env-vars.md` in the CoPresent repo covers the frontend side.
 
 ---
 
@@ -133,12 +133,9 @@ do them as drive-by churn.
 | `v1:platform:partitionSecret`        | partition | yes       | Per-tenant secrets. Falls back to `v1:platform:globalSecret` if no row exists for the active partition.      |
 | `v1:platform:partitionVariable`      | partition | no        | Per-tenant plaintext config. Falls back to `v1:platform:globalVariable` if no row exists.                    |
 
-Source files:
-
-- `concepts/v1/platform/secret/concept.memql`
-- `concepts/v1/platform/variable/concept.memql`
-- `concepts/v1/memql/secret/concept.memql`
-- `concepts/v1/memql/variable/concept.memql`
+Source file: `dsl/platform/concepts.memql` (declares all four --
+`globalSecret`, `globalVariable`, `partitionSecret`,
+`partitionVariable`).
 
 The `_system` partition is reserved for global concepts -- platform
 secrets and variables live there regardless of which partition the
@@ -182,7 +179,7 @@ applies to the OS env fallback.
 #### Why OS env stays around
 
 Providers are loaded eagerly during engine initialization. On a
-fresh `make dev-refresh`, the database wipe runs *before* the seed,
+fresh `make dev-cluster-refresh`, the database wipe runs *before* the seed,
 so when providers first try to resolve their auth keys the concept
 storage is empty. The OS env fallback (populated from `.env.local`
 in dev or from the deploy manifest in prod) keeps providers alive
@@ -380,7 +377,7 @@ This is the table to look at when you ask "where do I put a new API
 key" or "where do I change the default model".
 
 The authoritative manifest is
-[`scripts/secrets/manifest.yaml`](../../scripts/secrets/manifest.yaml).
+[`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml).
 Every entry in the manifest is what `make secrets-init` will prompt
 for and what `make secrets-seed` will push into the running memQL.
 
@@ -434,7 +431,7 @@ config layer (`src/lib/publicConfig.tsx`):
 
 The exact name on the memQL side has to match the entry in the
 publicConfig whitelist
-([`src/lib/publicConfig.tsx`](../../../copresent/src/lib/publicConfig.tsx))
+(`src/lib/publicConfig.tsx` in the CoPresent repo)
 exactly. To add a new one: add it to the whitelist, then
 `make variable-set NAME=... VALUE=... SCOPE=global`.
 
@@ -486,7 +483,7 @@ variables:
   ...
 ```
 
-The yaml only matters for the **dev-refresh workflow**. In
+The yaml only matters for the **dev-cluster-refresh workflow**. In
 production:
 
 - The `MEMQL_MASTER_KEY` env var is set explicitly on the deploy
@@ -496,7 +493,7 @@ production:
 
 ### Where the yaml lives in the bootstrap chain
 
-1. `make dev-refresh` runs `scripts/dev/refresh.sh`.
+1. `make dev-cluster-refresh` runs `scripts/dev/cluster-refresh.sh`.
 2. `require_master_key` in `scripts/dev/lib.sh` calls
    `go run ./scripts/secrets master-key`, which reads
    `~/.memql/dev-secrets.yaml` and prints the `masterKey` field.
@@ -518,9 +515,9 @@ All driven by `scripts/secrets/main.go`:
 | `make secrets-list`                                             | Print the manifest, scope, and whether each entry has a value locally.           |
 | `make secret-set NAME=X VALUE=Y SCOPE=global`                   | One-off; doesn't touch the yaml.                                                 |
 | `make variable-set NAME=X VALUE=Y SCOPE=global`                 | Same for plaintext variables.                                                    |
-| `make secrets-export`                                           | Pull every active secret + variable from the running memQL, decrypt locally, merge into the yaml (memQL wins on conflict). Used to back state up before a `dev-refresh` wipes the database. |
+| `make secrets-export`                                           | Pull every active secret + variable from the running memQL, decrypt locally, merge into the yaml (memQL wins on conflict). Used to back state up before a `dev-cluster-refresh` wipes the database. |
 
-`dev-refresh` does export -> wipe -> restart -> seed in one shot,
+`dev-cluster-refresh` does export -> wipe -> restart -> seed in one shot,
 so the yaml stays in sync as long as you go through that target.
 
 ### Master-key resolution order (in process)
@@ -609,14 +606,11 @@ automatically.
 
 | File                                                                          | What it tells you                                                              |
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| [`scripts/secrets/manifest.yaml`](../../scripts/secrets/manifest.yaml)        | Authoritative list of dev-bootstrap secrets + variables.                       |
-| [`scripts/secrets/main.go`](../../scripts/secrets/main.go)                    | The CLI that powers every `make secret-*` / `make variable-*` target.          |
-| `scripts/dev/lib.sh`                                                          | `require_master_key`, `wait_for_memql`, etc. used by `dev-refresh`.            |
-| `scripts/dev/refresh.sh`                                                      | The wipe -> restart -> reseed orchestrator behind `make dev-refresh`.          |
-| `concepts/v1/platform/secret/concept.memql`                                   | Schema for global encrypted secrets.                                           |
-| `concepts/v1/platform/variable/concept.memql`                                 | Schema for global plaintext variables.                                         |
-| `concepts/v1/memql/secret/concept.memql`                                      | Schema for partition-scoped encrypted secrets.                                 |
-| `concepts/v1/memql/variable/concept.memql`                                    | Schema for partition-scoped plaintext variables.                               |
+| [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml)        | Authoritative list of dev-bootstrap secrets + variables.                       |
+| [`scripts/secrets/main.go`](../../../scripts/secrets/main.go)                    | The CLI that powers every `make secret-*` / `make variable-*` target.          |
+| `scripts/dev/lib.sh`                                                          | `require_master_key`, `wait_for_memql`, etc. used by `dev-cluster-refresh`.    |
+| `scripts/dev/cluster-refresh.sh`                                              | The wipe -> restart -> reseed orchestrator behind `make dev-cluster-refresh`.  |
+| `dsl/platform/concepts.memql`                                                 | Schemas for global + partition-scoped secrets and variables.                   |
 | `component/secret/encryption.go`                                              | NaCl secretbox + `MEMQL_MASTER_KEY` resolution.                                |
 | `component/memql/si_providers.go` (`resolveAuthPlaceholders`)                 | Provider-auth resolver (the env() / placeholder chain).                        |
 | `component/memql/sense/builtins.go`                                           | DSL surface (`resolveSecret`, `resolveVariable`).                              |
@@ -655,7 +649,7 @@ make secrets-export
 Pulls every active row from the running memQL, decrypts secrets
 locally with the master key, and merges the result into the yaml.
 Conflict resolution: memQL wins. Run this before any
-`make dev-refresh` that resets the database.
+`make dev-cluster-refresh` that resets the database.
 
 ### "Why is my provider giving 'no value' errors?"
 
@@ -677,7 +671,7 @@ Check the resolver chain in order:
 
 `make secret-set` / `make variable-set` write directly to the
 running memQL without modifying the yaml. Useful for one-off
-experiments. Note that on the next `dev-refresh` the wipe-and-reseed
+experiments. Note that on the next `dev-cluster-refresh` the wipe-and-reseed
 will replace the value with whatever's in the yaml -- export first
 if you want to keep it.
 

@@ -9,102 +9,78 @@ owner: znas
 
 # Concept Seeding
 
-**Last Updated:** 2026-02-21
+Platform baseline rows -- the records that should exist in every fresh
+deployment without hard-coding payloads inside Go services -- are declared
+directly in the DSL with the `seed` construct. A seed declaration lives in a
+`dsl/<namespace>/*.memql` file next to the concept it materializes:
 
-Concept payloads can include optional `seed.json` files under each concept directory (for example, `concepts/assistant/seed.json`). These files describe the initial data that should exist in a fresh deployment without hard-coding payloads inside Go services.
+```memql
+use agents.concepts.{ agentRole }
 
-## File Structure
-
-```json
-{
-  "actor": "system",
-  "records": [
-    {
-      "id": "system",
-      "actor": "bootstrapper",
-      "payload": { "... concept payload ..." },
-      "match": [
-        { "field": "id", "value": "system" },
-        { "field": "payload.role", "value": "owner" }
-      ]
-    }
-  ]
+@description("Public-services orientation: DMV, voter registration, permits, social services, and government benefits.")
+seed agentRole civic-navigator {
+  slug:                  "civic-navigator"
+  name:                  "Civic Services Navigator"
+  category:              "civic"
+  lockedSkillIds:        ["workbench-baseline", "civic-baseline"]
+  maxSkills:             5
+  recommendedPolicySlug: "balancedChat"
+  predefined:            true
 }
 ```
 
-- `actor` (optional): default `createdBy` value used for every record unless overridden.
-- `records`: list of payloads to insert.
-  - `id` (optional): seed identifier; if omitted the concept library assigns one.
-  - `actor` (optional): record-level override for `createdBy`.
-  - `payload` (required): JSON payload that must satisfy the concept definition schema.
-  - `match` (optional): zero or more equality filters used to decide whether the record already exists. Matching supports:
-    - `id`, `concept`, `createdBy`, or `type` (compared to node columns).
-    - `payload.<path>` for nested JSON values, where `<path>` uses dot-notation (e.g., `payload.role`, `payload.profile.displayName`).
+The signature is `seed <concept> <name> { ... }`. The body is a field list;
+each field maps to a same-named argument of the concept's canonical create
+mutation (see "Write path" below).
 
-If `match` is omitted but the record has an `id`, the seeder automatically uses the `id` field. Records without an `id` must define at least one `match` filter. Supplying a `match` clause is useful for uniqueness rules such as "only seed an owner user if no owner exists":
+## Scope: global vs. per-user
 
-```json
-{
-  "payload": {
-    "email": "owner@example.com",
-    "phoneNumber": "+1-555-0100",
-    "role": "owner"
-  },
-  "match": [
-    { "field": "payload.role", "value": "owner" }
-  ]
-}
+A seed's scope is stamped with `@scope`:
+
+- **`@scope("global")`** (the default when omitted): the seed materializes
+  exactly one row, stored in the reserved `_system` partition. Used for
+  catalog rows such as agent roles and avatar personas.
+- **`@scope("perUser")`**: the seed fans out to one row per
+  `v1:identity:user`. The materializer computes the row id as
+  `<seedName>-<userId>` and stamps `ownerUserId=<userId>` automatically.
+  A perUser seed body must NOT declare its own id -- the loader rejects
+  that. Used for per-user baselines such as the Assistant
+  (`dsl/agents/assistant.memql`) and Trainer Agent
+  (`dsl/agents/trainerAgent.memql`).
+
+Long prose fields can be sourced from a template file next to the
+declaration via `@templateFile("templates/<name>.tmpl")`.
+
+## When seeds materialize
+
+The `SeedMaterializer` (`component/memql/seed_materializer.go`) runs two
+trigger paths:
+
+1. **Startup sweep.** On engine start, every registered seed is walked and
+   materialized: global seeds become one row each; perUser seeds iterate
+   every existing `v1:identity:user` and produce one row per user.
+2. **Runtime hook.** After the sweep, the materializer subscribes to
+   user-creation events. When a new user lands, it re-runs the perUser
+   sweep for just that user. Global seeds are skipped (they do not fan out
+   per user).
+
+## Idempotency
+
+Materialization is create-only with deterministic ids: memQL is
+time-series, so repeat inserts with the same id stamp a new version while
+reads still see one logical row. Operator or user edits to a seeded row
+(e.g. renaming an assistant) survive engine restarts -- the seed declaration
+is the baseline, not a reset.
+
+## Write path
+
+The materializer delegates row writes to the concept's existing canonical
+create mutation, so the platform has a single write path. The convention:
+
+```
+use <namespace>.<conceptName>   ->   mutationCreate<ConceptName>
 ```
 
-## Environment Variable Substitution
-
-Seed files support environment variable substitution using the `${VAR_NAME}` syntax. This allows secrets and environment-specific values to be injected at runtime without hardcoding them in the repository.
-
-### Syntax
-
-```json
-{
-  "id": "api-token",
-  "payload": {
-    "name": "API_TOKEN",
-    "value": "${MY_API_TOKEN}",
-    "description": "API authentication token"
-  }
-}
-```
-
-When the seeder runs, `${MY_API_TOKEN}` is replaced with the value of the `MY_API_TOKEN` environment variable.
-
-### Rules
-
-- **Pattern**: `${VAR_NAME}` where `VAR_NAME` starts with a letter or underscore, followed by letters, digits, or underscores.
-- **Missing variables**: If an environment variable is not set, the placeholder remains unchanged (e.g., `${MISSING_VAR}` stays as `${MISSING_VAR}`). This makes it obvious when a required variable is missing.
-- **Recursive substitution**: Environment variables are substituted in all string values throughout the payload, including nested objects and arrays.
-- **Non-string values**: Only string values are processed for substitution. Numbers, booleans, and null values are left unchanged.
-
-### Example: Variable Concept Seed
-
-The `v1:variable` concept uses environment variable substitution to seed configuration values:
-
-```json
-{
-  "actor": "system",
-  "records": [
-    {
-      "id": "discord-webhook",
-      "payload": {
-        "name": "DISCORD_WEBHOOK_URL",
-        "value": "${DISCORD_WEBHOOK_URL}",
-        "description": "Discord webhook for notifications",
-        "category": "webhook",
-        "sensitive": false,
-        "active": true
-      }
-    }
-  ]
-}
-```
-
-## System Assistant Seed
-
-`concepts/assistant/seed.json` defines the System assistant with the same payload previously created in `service/seeding.go`. The concept seeder will insert it once and skip future attempts when either the `assistant:system` record exists or another assistant matches the configured `match` filters.
+Each seed body field maps to a same-named mutation arg, and the concept's
+id arg follows the case-corrected `<conceptName>Id` pattern (`agent` ->
+`agentId`, `partition` -> `partitionId`).

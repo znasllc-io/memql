@@ -11,10 +11,17 @@ owner: znas
 
 ## Overview
 
-Concept IDs follow the format `{version}:{domain}:{entity}[:{subtype}]` where version
-is a monotonically increasing identifier (`v1`, `v2`, etc.).
+Concept IDs follow the format `v{MAJOR}:{namespace}:{entity}[:{subtype}]` where the
+major version is a monotonically increasing identifier (`v1`, `v2`, etc.).
 
-The version prefix is derived from the filesystem directory structure under `concepts/`.
+The engine assembles the ID from the concept declaration itself: the MAJOR segment of
+the `@version("MAJOR.MINOR.PATCH")` annotation flows into the `v<MAJOR>:` prefix, the
+`@namespace("...")` annotation supplies the namespace, and the concept name comes from
+the declaration header. Authors never write the prefix by hand. MINOR and PATCH document
+additive, non-breaking schema evolution within a major version; bumping MAJOR is the
+breaking-change signal -- it changes the concept ID, every row id, every event topic,
+and every cross-concept reference. See `dsl/_reference/_concept.memql` for the full
+annotation surface.
 
 ## Current Version: v1
 
@@ -25,15 +32,21 @@ All active concepts use the `v1` prefix. The full inventory is defined as Go con
 
 The infrastructure already supports multiple versions. To introduce a v2 concept:
 
-### 1. Create the concept directory
+### 1. Bump the concept's major version
 
-```
-concepts/v2/cognition/participant/
-  concept.memql      # Concept definition with $id "v2:cognition:participant"
+Concepts live in `dsl/<namespace>/concepts.memql`. Stamp the new major version on the
+declaration:
+
+```memql
+@version("2.0.0")
+@namespace("cognition")
+@description("Participant record, v2 schema.")
+concept participant {
+  // v2 fields ...
+}
 ```
 
-The `deriveConceptName()` function in `concept_loader.go` validates `v[0-9]+` directories
-and will automatically load `v2:cognition:participant`.
+The loader registers it as `v2:cognition:participant`.
 
 ### 2. Add a Go constant
 
@@ -47,24 +60,26 @@ Add it to `AllFilesystemConcepts()` so startup validation covers it.
 
 ### 3. Add automations (if needed)
 
-Create `automations/v2/cognition/` for v2-specific event handlers:
+Add v2-specific event handlers to `dsl/cognition/automations.memql`:
 
 ```memql
-@trigger(event="graph.node.created.v2:cognition:participant")
-func (Automation) handleV2Participant() { ... }
+@enabled
+@trigger(event="node.created", concept="v2:cognition:participant", partition="*")
+@description("Handle v2 participant creation")
+automation handleV2Participant {
+  step run {
+    logic handleV2Participant { event: event }
+  }
+}
 ```
-
-### 4. Frontend codegen picks it up automatically
-
-Run `npm run codegen:concepts` in the frontend after deploying the backend. The new v2
-concepts appear in `generated/concepts.ts` automatically.
 
 ## Coexistence
 
 - v1 and v2 concepts coexist in the same database and event bus
 - Each version has its own schema and can evolve independently
-- CDC events include the full concept ID: `graph.node.created.v2:cognition:participant`
-- Subscriptions can target specific versions or use glob patterns (`graph.node.created.v*:cognition:participant`)
+- CDC events include the full concept ID: the topic carries
+  `v2:cognition:participant`, not `v1:...`
+- Subscriptions target a specific version via the full concept ID in the topic pattern
 
 ## Concept ID Registry
 
@@ -73,14 +88,9 @@ concepts appear in `generated/concepts.ts` automatically.
 Typed constants in `component/database/memory-nodes/concept_ids.go` provide compile-time
 safety. These are validated at startup against the loaded concept registry.
 
-### Frontend (TypeScript)
-
-Generated constants in `src/lib/memql/generated/concepts.ts` are produced by
-`scripts/codegen-concepts.mjs` which fetches from the `GET /api/concepts` endpoint.
-
-Re-generate after backend changes: `npm run codegen:concepts`
-
 ### API Endpoint
 
 `GET /api/concepts` returns all registered concepts with version, domain, entity,
 description, and type metadata. Also includes available base topics and system topics.
+Client SDKs and consumer-side codegen (e.g. the CoPresent frontend) build their typed
+concept catalogs from this endpoint.

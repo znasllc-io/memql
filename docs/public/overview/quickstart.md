@@ -30,8 +30,8 @@ owner: znas
 
   Export it before `make dev-cluster-up` / `make dev-cluster-refresh`. Without it
   the `app` container's install fails (the backend still comes up). Full
-  details + how to mint the token: copresent
-  [`docs/sdk-dependency.md`](../copresent/docs/sdk-dependency.md).
+  details + how to mint the token: `docs/sdk-dependency.md` in the
+  CoPresent repo.
   No Node install on the host is needed -- the frontend runs in-container.
 
 ---
@@ -232,17 +232,12 @@ node architecture.
 
 ---
 
-## Cockpit (TUI)
+## Cockpit (terminal IDE + ops console)
 
-```bash
-make cockpit            # build cmd/memql-cockpit
-./bin/memql-cockpit
-```
-
-Tabs: Clusters (cluster + partition manager + topology), Explorer
-(concept tree + MemQL editor), Automations, Settings.
-
-See [cli/CLAUDE.md](cli/CLAUDE.md).
+The Cockpit ships from its own repo,
+[`github.com/znasllc-io/memql-cockpit`](https://github.com/znasllc-io/memql-cockpit);
+build and product docs live there. It connects to this cluster over
+gRPC (`bff.<domain>`).
 
 ---
 
@@ -251,7 +246,7 @@ See [cli/CLAUDE.md](cli/CLAUDE.md).
 - **Read the project overview:** [CLAUDE.md](../../../CLAUDE.md)
 - **Find any doc:** [GLOSSARY.md](../../../GLOSSARY.md)
 - **Architecture:** [docs/public/concepts/architecture.md](../concepts/architecture.md)
-- **Write your first automation:** [automations/CLAUDE.md](automations/CLAUDE.md)
+- **Write your first automation:** [docs/public/language/memql.md](../language/memql.md) -- the DSL reference; real examples live in `dsl/<namespace>/automations.memql`
 - **MemQL gotchas:** [docs/public/language/authoring-rules.md](../language/authoring-rules.md) -- read before authoring `.memql` files
 
 ---

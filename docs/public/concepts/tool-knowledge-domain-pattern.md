@@ -23,7 +23,8 @@ each, how the per-task approval gate works, how to recover from
 failure modes, what to never do.
 
 The naive place to put that knowledge is the agent's prompt template
-(`prompts/v1/agent/agentReply.tmpl`). That doesn't scale:
+(the `agentReply` prompt's `.tmpl`, shipped in the CoPresent DSL
+overlay as `copresent/prompts/agentReply.tmpl`). That doesn't scale:
 
 - Templates become long and capability-laden — every new skill adds
   a section, every operational nuance is template prose.
@@ -115,8 +116,9 @@ capability `<cap>`:
    audibly cited as "your X training" in agent replies).
 
 4. **Strip prompt template**
-   `prompts/v1/agent/agentReply.tmpl` — keep ONLY the
-   per-turn-dynamic capability block:
+   the `agentReply` prompt template (`copresent/prompts/agentReply.tmpl`
+   in the CoPresent DSL overlay) — keep ONLY the per-turn-dynamic
+   capability block:
 
    - The capability gate (`{{if .computerUseStatus}}` etc.)
    - One short sentence pointing the agent at its `<cap>` knowledge

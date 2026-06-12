@@ -9,16 +9,21 @@ owner: znas
 
 # MemQL Naming Conventions
 
-> Last Updated: February 10, 2026
+> Last Updated: June 11, 2026
 
-## Function Prefixes
+## Construct Prefixes
 
-Use receiver-specific prefixes so intent is obvious at call sites and in diffs.
+Use kind-specific prefixes so intent is obvious at call sites and in diffs.
 
-- Query functions: `query*`
-- Mutation functions: `mutation*`
-- Spec functions: `spec*`
-- Automation functions: use verb-first names (for example `bootstrapSession`)
+- Queries: `query*` (for example `queryActiveSpaces`)
+- Mutations: `mutation*` (for example `mutationCreateSpace`)
+- Specs: `spec*` (for example `specIsHumanParticipant`)
+- Traits: `trait*` (for example `traitIsActiveRecord`)
+- Logic: `logic*` (for example `logicAutoJoinSI`)
+- Automations: verb-first names, no prefix (for example
+  `bootstrapSession`, `autoJoinSI`)
+- Shapes: `<concept><Projection>`, no kind prefix (for example
+  `participantFull`, `spaceCard`)
 
 Examples:
 
@@ -47,7 +52,21 @@ mutation user mutationArchiveUser {
 spec specStatusIsActive {
   payload.status == "active"
 }
+
+trait traitIsActiveRecord {
+  payload.active == true
+}
 ```
+
+Constructs live in one consolidated file per kind per namespace
+(`dsl/<namespace>/queries.memql`, `dsl/<namespace>/mutations.memql`,
+...), so file names never carry an individual construct's name.
+
+One asymmetry to know: automation step bodies reference logic
+constructs by the bare, un-prefixed name -- `step run { logic
+autoJoinSI { event: event } }` resolves to `logic logicAutoJoinSI`
+through the file-top `use cognition.logic.{ logicAutoJoinSI }`
+import.
 
 ## Why This Matters
 

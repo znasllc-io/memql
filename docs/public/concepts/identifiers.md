@@ -39,8 +39,10 @@ Where:
 
 - **concept** -- exactly three colon-delimited segments
   (`{version}:{domain}:{entity}`, e.g. `v1:cognition:utterance`).
-  This matches the on-disk concept folder layout
-  `concepts/v1/cognition/utterance/`.
+  The engine assembles it from the concept declaration in
+  `dsl/<namespace>/concepts.memql`: the `@version` major flows into
+  the `v1:` prefix, `@namespace` supplies the domain, and the
+  declaration header supplies the entity name.
 - **shortId** -- a per-instance identifier, often a UUID but
   sometimes a deterministic content hash or a human-readable slug
   (`bff-local`, `general_assistant`).
@@ -84,10 +86,20 @@ There are two writer paths:
 
 ### 1. The mutation runtime (default)
 
-Most callers pass a **bare shortId** to `insert()`:
+Most callers pass a **bare shortId** in the mutation's `insert` block
+(the target concept comes from the `mutation <Concept> <name>`
+signature):
 
 ```memql
-insert("v1:cognition:utterance", id="abc-123", payload={...})
+mutation utterance mutationCreateUtterance {
+  args {
+    utteranceId  string  @required
+  }
+  insert {
+    id: args.utteranceId   // bare shortId; engine composes the full id
+    // ... payload fields ...
+  }
+}
 ```
 
 The engine's `Concept.Create()` method composes the full id at
