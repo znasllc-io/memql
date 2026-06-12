@@ -264,11 +264,11 @@ services:
       - ${GENESIS_ENV_FILE:-../.env.local}
     environment:
       MEMQL_NODE_TYPE: cognition
-      # A2 (#1198): cognition authors the voice reply via the full agent
-      # tool loop -- REQUIRED with the cascade executor; the flag-off gate
-      # path has no author under cascade (#1412). Mirrors
-      # deploy/k8s/base/cognition.yaml (staging parity).
-      MEMQL_VOICE_AGENT_TOOL_LOOP: "true"
+      # Voice authoring pairing (#1412/#1414): false = #479 gate path, the
+      # realtime model authors natively (executor=realtime + the
+      # voice.gate.directive routing rule). True ONLY with the cascade
+      # executor. Mirrors deploy/k8s/base/cognition.yaml (staging parity).
+      MEMQL_VOICE_AGENT_TOOL_LOOP: "false"
       # memql#1042 fix: force MEMQL_NODE_ID empty so the per-replica
       # hostname id (memql#1213) wins over the shared "bff-local" that
       # leaks in from the genesis env_file. Empty -> os.Hostname().
