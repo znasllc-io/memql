@@ -1,8 +1,8 @@
-# Staging overlay -> 0.9.45. Engine + carrier images rebuilt from main 0542858:
-# #1419/#1422 -- the realtime tool surface is scoped to the GA agent's
-# slug-expanded tool list (was the 517-tool global registry, which inflated
-# gpt-realtime first-audio latency and hid produceArtifact). SPA unchanged
-# (digest reused from 0.9.42, source b5013ab).
+# Staging overlay -> 0.9.46. Full coherent 8-image rebuild from main 66959bc:
+# epic #1424 realtime-voice hardening (#1432 timing, #1433 transcript capture,
+# #1435 avatar audio + simli manifest flip, #1436 noise reduction + confidence
+# gate, #1437 hot-path async, #1438 async tools) + copresent f7209bf (UI sync +
+# chimes #431, avatar tile #433). SPA REBUILT (copresent changed).
 # cognition/agent/planner/workbench/bff CARRIER-built; voice + identity engine.
 # livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -30,27 +30,21 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:b102f8f255972128c53bb1e39651f73b8ab9b043b06f9773ddb91efd1febd960
-  # Carrier-built; 0.9.45.
+    digest: sha256:7b2b9dc167341640a1afd4e12f6082e07c024cbefa996adea0b2cc813a2e7d26
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:6064d20d0a080773907e653520dd5f929acdd92b332cdae6a8374c55880137d4
-  # Carrier-built; 0.9.45.
+    digest: sha256:8b9b91cd9f6aaec2e5228863f490e958cbb5bcefd8a3648abda62ad943c1ea1b
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:d3bb8baa470b86b1551885821bc01059015314622710e6d5e96e23fe2e255f2c
+    digest: sha256:76be222d4a6b58adcf4f19955ac16efd8c662c31daa51daae42c7ac19ecd5827
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:ad0ce444dd8ec5741882ead3db690f531712ef3642387bcb9a88822c85326d61
-  # Carrier-built; 0.9.45.
+    digest: sha256:bf28c4653675dc5ac8e373d7549d404bf435f499f41d0318f212219cc4c19040
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:b51e242365026db1b0ab935257c4936184b6d44290a2884ef2046785fa2f2743
-  # Carrier-built; 0.9.45.
+    digest: sha256:af9b63193d1e45148304f9fc3f428b29be8708bb629a43dcc6c77d5712e8f5da
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:fb45344ac4f8d1d9851a5f547d415392fea1f20a2e2dcf23ecfbe39ae60aa20e
-  # Carrier-built; 0.9.45.
+    digest: sha256:f8bfbbace012ee35c95001e94786ebfc91a0586dc671b20db813a55d5309c4fb
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:5fc8802700a49bf284444504784e77caa00015d99baa29c54086d80462d15ed1
-  # SPA digest reused from 0.9.42 (copresent main b5013ab unchanged).
+    digest: sha256:a0378a13e35a656259c0c58bc702fa94c022a29e2cea1479a5ead3f6ba783c22
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:503bc2139f5683c1de3446370e144f1e206539b6327b2df346f1c9bdb7216d36
+    digest: sha256:0f02a1dfbf34743d7b9ba578ad365795fbe22f2c19b8d8ebaf8a58348e100ec2
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
