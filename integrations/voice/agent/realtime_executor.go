@@ -67,8 +67,9 @@ type realtimeSession interface {
 	// CancelResponse cancels the in-flight response + clears output audio.
 	CancelResponse() error
 	// SendFunctionResult returns a tool result by call_id (the MCP tool bridge
-	// async function-call path, #458). It does NOT itself create a response --
-	// the executor chains CreateResponse so the model continues with the result.
+	// async function-call path, #458/#1430). It does NOT itself create a
+	// response -- the executor's tool worker fires the follow-up
+	// response.create at the next quiet boundary (realtime_tools.go).
 	SendFunctionResult(callID, output string) error
 	// AudioOut is the decoded PCM16 (24 kHz) output-audio channel.
 	AudioOut() <-chan []byte
@@ -176,6 +177,26 @@ type RealtimeExecutor struct {
 	// blocks on a gRPC send to insert the chat utterance. Buffered + drop-on-full.
 	transcriptCh chan transcriptJob
 
+	// Non-blocking tool-call scheduler state (#1430, realtime_tools.go): the
+	// per-session FIFO of pending model-driven calls, the worker wakeup, and
+	// the quiet-boundary signals the announcer reads. userSpeaking tracks the
+	// model VAD's speech_started/stopped pair (the native / semantic_vad
+	// paths; the labeled-ASR path is covered by the turn machine's human-turn
+	// state); lastSpeechStopWall is the wall-clock of the most recent
+	// speech_stopped / labeled-ASR final (the announce grace anchor);
+	// gatePending counts in-flight conductor gate round-trips (their engage is
+	// about to take the response writer slot).
+	toolMu             sync.Mutex
+	toolQueue          []*pendingToolCall
+	toolKick           chan struct{}
+	toolTimeout        time.Duration
+	toolMaxPending     int
+	toolTick           time.Duration
+	toolAnnounceGrace  time.Duration
+	userSpeaking       atomic.Bool
+	lastSpeechStopWall atomic.Int64
+	gatePending        atomic.Int32
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -205,6 +226,13 @@ func NewRealtimeExecutor(
 		ctx:          ctx,
 		cancel:       cancel,
 		transcriptCh: make(chan transcriptJob, transcriptQueueDepth),
+
+		// #1430 async tool-call defaults; ConfigureToolCalls overrides.
+		toolKick:          make(chan struct{}, 1),
+		toolTimeout:       defaultToolCallTimeout,
+		toolMaxPending:    defaultMaxPendingToolCalls,
+		toolTick:          defaultToolLoopTick,
+		toolAnnounceGrace: defaultToolAnnounceGrace,
 	}
 	e.machine = NewTurnMachine(TurnCallbacks{
 		OnFinalTranscript: e.onCommittedTurn,
@@ -222,6 +250,7 @@ func (e *RealtimeExecutor) Start() {
 	go e.drainAudioOut()
 	go e.drainEvents()
 	go e.forwardTranscriptLoop()
+	go e.runToolLoop()
 }
 
 // transcriptQueueDepth bounds the human-transcript forward queue. Sized for a
@@ -446,6 +475,11 @@ func (e *RealtimeExecutor) handleASRResult(speakerIdentity string, r polyphon.AS
 		return
 	}
 	if r.IsFinal {
+		// #1430: the labeled-ASR path has no model speech_stopped event; the
+		// committed final IS its end-of-speech marker. Stamp the announce
+		// grace anchor so a tool result cannot fire into the final ->
+		// gate-round-trip gap.
+		e.lastSpeechStopWall.Store(time.Now().UnixNano())
 		// Inject the labeled conversation item BEFORE committing the turn so
 		// the model has the attributed text in context regardless of whether
 		// it heard this speaker's audio (#433 section 2a). The turn machine
@@ -574,6 +608,15 @@ func (e *RealtimeExecutor) runTurn(speakerIdentity, utterance string) {
 	if utterance == "" {
 		return
 	}
+	// #1430: a gate round-trip is in flight -- its engage is about to take the
+	// default-conversation writer slot, so the tool announcer holds back until
+	// the decision lands (then either inFlight covers the engaged response or
+	// the suppress/defer leaves the boundary quiet).
+	e.gatePending.Add(1)
+	defer func() {
+		e.gatePending.Add(-1)
+		e.kickToolLoop()
+	}()
 	// turnStart anchors the per-turn gate/cognition hop (#1426): turn request
 	// sent -> conductor decision received. This whole window sits between the
 	// model's end-of-speech and the response.create on gated paths, so it is
@@ -857,6 +900,9 @@ func (e *RealtimeExecutor) drainEvents() {
 			}
 			switch ev.Kind {
 			case openai.EventInputSpeechStarted:
+				// #1430: the user holds the floor -- the tool announcer must not
+				// speak a result into their turn.
+				e.userSpeaking.Store(true)
 				// Observability: server-side VAD heard speech onset. Stamp nothing
 				// yet (the snappiness window opens at speech_stopped); just trace it.
 				if e.logger != nil {
@@ -869,6 +915,12 @@ func (e *RealtimeExecutor) drainEvents() {
 				// drainAudioOut closes on the next response's first frame. This delta
 				// is the headline "snappiness" number with no second ASR on the path.
 				e.turnSpeechStopNanos.Store(time.Now().UnixNano())
+				// #1430: the floor is free again (modulo the announce grace --
+				// a native auto-response / gate engage may be about to claim
+				// it). Wake the tool worker so a parked result can surface.
+				e.userSpeaking.Store(false)
+				e.lastSpeechStopWall.Store(time.Now().UnixNano())
+				e.kickToolLoop()
 				if e.logger != nil {
 					e.logger.Info("voice trace: turntaking event",
 						"stage", "model.speech_stopped", "executor", "realtime", "space_id", e.cfg.SpaceID)
@@ -903,6 +955,9 @@ func (e *RealtimeExecutor) drainEvents() {
 			case openai.EventResponseDone:
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
+				// #1430: a sealed response is the canonical quiet boundary --
+				// wake the tool worker so a parked result can be announced.
+				e.kickToolLoop()
 				// #458/#1427 output capture: the response is sealed -- assemble
 				// its spoken transcript and forward it as ONE
 				// VoiceAgentRealtimeOutput so chat/canvas/audit render the
@@ -1026,10 +1081,12 @@ func (e *RealtimeExecutor) drainEvents() {
 					}
 				}
 			case openai.EventFunctionArgsDone:
-				// #458 MCP tool bridge: dispatch the model's function call on a
-				// worker goroutine (OFF this drain loop so a long tool never
-				// blocks audio), then SendFunctionResult + CreateResponse so the
-				// model continues with the tool result in context.
+				// #458/#1430 MCP tool bridge: enqueue the model's function call
+				// on the async tool scheduler (realtime_tools.go). Returns
+				// immediately -- execution runs in the background, the result
+				// injects in call order when it lands, and the audible
+				// follow-up response fires at the next quiet boundary. The
+				// model's prompt-taught spoken acknowledgment never waits.
 				e.dispatchToolCall(ev.CallID, ev.FuncName, ev.Arguments)
 			}
 		}
@@ -1075,50 +1132,6 @@ func (e *RealtimeExecutor) captureOutput(text string) {
 			e.logger.Info("voice-agent realtime: output captured",
 				"utterance_id", utteranceID, "chars", len(text))
 		}
-	}()
-}
-
-// dispatchToolCall runs one model-driven function call through the MCP tool
-// bridge on a worker goroutine (off the event drain so a long tool never
-// blocks audio), returns the result to the model via SendFunctionResult, and
-// chains a CreateResponse so the model continues with the result in context.
-// A nil bridge logs and ignores the call (model-driven tools disabled). The Go
-// analog of the async function-call path in realtime_executor.py.
-func (e *RealtimeExecutor) dispatchToolCall(callID, funcName, arguments string) {
-	if e.toolBridge == nil {
-		if e.logger != nil {
-			e.logger.Debug("voice-agent realtime: function call with no tool bridge (ignored)",
-				"name", funcName, "call_id", callID)
-		}
-		return
-	}
-	go func() {
-		// Tool round-trip timing (#1426): call emitted -> executed -> result
-		// injected -> follow-up response.create. The follow-up's first audio
-		// frame is stamped by the existing turn.speech_stop_to_first_audio /
-		// realtime.audio.first path once EventResponseCreated re-arms it.
-		callStart := time.Now()
-		output := e.toolBridge.Dispatch(e.ctx, funcName, arguments)
-		logVoiceTiming(e.logger, "tool.execute", callStart,
-			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
-		injectStart := time.Now()
-		if err := e.session.SendFunctionResult(callID, output); err != nil {
-			if e.logger != nil {
-				e.logger.Warn("voice-agent realtime: send function result failed",
-					"name", funcName, "call_id", callID, "err", err)
-			}
-			return
-		}
-		logVoiceTiming(e.logger, "tool.result_inject", injectStart,
-			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
-		// Continue the model with the tool result in context. An empty
-		// instructions string falls back to the session-level persona.
-		if err := e.session.CreateResponse(""); err != nil && e.logger != nil {
-			e.logger.Warn("voice-agent realtime: response.create after tool failed",
-				"name", funcName, "call_id", callID, "err", err)
-		}
-		logVoiceTiming(e.logger, "tool.roundtrip", callStart,
-			"space_id", e.cfg.SpaceID, "tool", funcName, "call_id", callID)
 	}()
 }
 

@@ -110,6 +110,26 @@ func TestRealtimeInstructionsForDirective(t *testing.T) {
 	unknown := RealtimeInstructionsForDirective("wat", "huh")
 	assert.Contains(t, unknown, "Answer the user directly")
 	assert.Contains(t, unknown, "few sentences")
+
+	// #1430 tool_result: the async tool worker's announce directive -- surface
+	// the injected results conversationally, including failures, without
+	// repeating what was already shared.
+	toolResult := RealtimeInstructionsForDirective(toolResultDirectiveMode, "")
+	assert.Contains(t, toolResult, "tool calls")
+	assert.Contains(t, toolResult, "error or timeout")
+	assert.Contains(t, toolResult, "Skip anything you already told them")
+}
+
+// TestBuildPersonaInstructions_AcknowledgeFirstToolBehaviour pins the #1430
+// prompt half: the session instructions teach the model to speak a brief
+// acknowledgment when calling a tool and keep conversing -- the protocol
+// supports background tools, but only the prompt produces the ack.
+func TestBuildPersonaInstructions_AcknowledgeFirstToolBehaviour(t *testing.T) {
+	out := BuildPersonaInstructions(Persona{})
+	assert.Contains(t, out, "When you call a tool")
+	assert.Contains(t, out, "acknowledgment")
+	assert.Contains(t, out, "Never go silent waiting on a tool")
+	assert.Contains(t, out, "never promise exact durations")
 }
 
 func TestRealtimeInstructionsForReply(t *testing.T) {

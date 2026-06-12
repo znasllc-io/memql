@@ -78,6 +78,10 @@ func BuildPersonaInstructions(p Persona) string {
 		"- Stay in character as the persona above across the whole conversation.",
 		"- Speak naturally and concisely. Do not recite your capabilities or add help-desk scaffolding.",
 		"- Ground answers in the conversation and any provided context. When context does not cover a question, say so rather than inventing facts.",
+		// #1430 acknowledge-first tool behaviour: the async function-calling
+		// protocol supports background execution, but only the prompt makes
+		// the model SAY something before the result lands.
+		"- When you call a tool, first say one brief natural acknowledgment (like \"on it -- give me a moment\") and keep the conversation going; the result arrives later as a function output -- weave it in naturally then. Never go silent waiting on a tool, and never promise exact durations.",
 		"- A separate per-turn directive may set the mode, brevity, and angle for a given response. Follow it; it overrides these defaults where they conflict.",
 	)
 
@@ -183,6 +187,10 @@ func RealtimeInstructionsForDirective(mode, brevity string) string {
 		lines = append(lines, "This is a brief acknowledgment: one short sentence, no agenda.")
 	case "chimein":
 		lines = append(lines, "Others are also responding this turn. Add only your distinct angle; do not restate what was already said.")
+	case toolResultDirectiveMode:
+		// #1430: the executor's tool worker injected one or more
+		// function_call_output items and is surfacing them at a quiet boundary.
+		lines = append(lines, "Results from your earlier tool calls just arrived in the conversation. Tell the user the outcome naturally and concisely; if a result reports an error or timeout, say so plainly and offer a way forward. Skip anything you already told them.")
 	default: // "primary" and any unknown mode
 		lines = append(lines, "Answer the user directly and substantively.")
 	}
