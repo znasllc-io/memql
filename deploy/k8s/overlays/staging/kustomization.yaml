@@ -39,24 +39,24 @@ images:
   # (volume-aware prompt) decides direct-turn vs decompose, so large
   # deliverables stop timing out the 3m turn wallclock.
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:49a324ff603b8040afcb97b60ed6139accc9134195d846656717fdd1c29ec428
-  # Carrier-built; 0.9.41.
+    digest: sha256:6315e3f4061885402145b286faac9c87f0b40d44608186cd8669171ed04f38c0
+  # Carrier-built; 0.9.42.
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:013b855766d6ca4cf2ed6ab58d4c97fa5fd8860b75ac4cca1f5d6a092557f1a7
-  # Carrier-built; 0.9.41.
+    digest: sha256:eda99455495efa682cf606b254c94311c9f74f50ec4a905f03d34172c13670bd
+  # Carrier-built; 0.9.42.
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:1812196323acb6097ecc3f2f70f504274562ca817b6ed3ee8b20dbaf2cfe1f24
+    digest: sha256:a562fec0378838831b895a49d3fefdc55db43255a1accdc0fe5d3cddb91b9d33
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:c2d92d4c8f792cde7181d23f76268d8552127a1ed3f8259640b4c36e237302ba
-  # Carrier-built; 0.9.41.
+    digest: sha256:c1fd666f3f483df0e8f6aabff48f85afebdee9ddda50a1def25a8b1148c0c97b
+  # Carrier-built; 0.9.42.
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:f48fa199e6969c8fcf4c6261e3f42f4089abb49e361d5c2f260483ec74a6f790
-  # Carrier-built; 0.9.41.
+    digest: sha256:cef9fd09efdfb86d9c0798e97cd8ccc4476cda8b7a468dd8da46b492bdb57b63
+  # Carrier-built; 0.9.42.
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:4395f63e5fb00dcf65d57059b6c13a785c92817dcc711f2f5b982b6a9307e16d
-  # Carrier-built; 0.9.41.
+    digest: sha256:998526a4ed9f72302bf1df0d8e4c8ed3feedefae4010b713fefe97afd7af9e20
+  # Carrier-built; 0.9.42.
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:d10cbc9d461b3bacd5ede52c04bbcf92b893a8cd266318c596c5f277e6d38c83
+    digest: sha256:be3e0aee6b263d00fecb1bf80cd5484c743d0d38704d0dd24bb5c24e6bb8809e
   # SPA rebuilt from copresent main (85fa33a) at 0.9.40 (coherence rebuild).
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:503bc2139f5683c1de3446370e144f1e206539b6327b2df346f1c9bdb7216d36
