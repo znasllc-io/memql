@@ -181,7 +181,14 @@ func SubscribeStream(
 		return nil, nil, fmt.Errorf("stream consumer: substrate not configured")
 	}
 	key := StreamKey(streamID)
-	in, err := substrate.Subscribe(ctx, key, consumerID)
+	// Streams DEPEND on first-subscribe backlog replay (memql#1328): the
+	// producing worker starts appending chunks the moment the forwarded
+	// request arrives, while the consuming bff subscribes only when its proxy
+	// turn starts -- the head of the stream legitimately predates the first
+	// Subscribe and MUST replay or the stream loses its Start frame and early
+	// deltas. Stream keys are per-request, so there is no stale rollout
+	// backlog to skip; retention bounds the window regardless.
+	in, err := substrate.Subscribe(ctx, key, consumerID, WithReplayBacklog())
 	if err != nil {
 		return nil, nil, fmt.Errorf("stream consumer: subscribe %s: %w", streamID, err)
 	}

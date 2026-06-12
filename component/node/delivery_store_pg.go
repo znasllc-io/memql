@@ -258,24 +258,74 @@ func (s *pgOutboxStore) SweepOlderThan(ctx context.Context, cutoff time.Time) (o
 	return outboxDeleted, cursorsDeleted, nil
 }
 
-// LoadCursor returns the persisted cursor seq for (key, consumerID), or 0 if
-// none is stored (a brand-new consumer replays from the watermark, ADR 4.4).
-func (s *pgOutboxStore) LoadCursor(ctx context.Context, key RoutingKey, consumerID string) (int64, error) {
+// EnsureCursor resolves the starting cursor for (key, consumerID) (ADR 4.4,
+// amended by memql#1328). An existing cursor row is returned as-is (the
+// consumer resumes exactly). When no row exists and fromStart is true, it
+// returns 0 without creating a row -- the opt-in backlog replay; the row
+// appears on the first Ack, exactly the pre-#1328 shape. Otherwise it
+// atomically initializes AND persists the cursor at the key's current high
+// watermark, so a brand-new consumer receives only deliverables produced
+// after it first subscribed.
+//
+// The watermark is mesh_key_seq.next_seq (the seq allocator's committed
+// value), not max(mesh_outbox.seq): the allocator row is never retention-swept
+// (see SweepOlderThan), so the watermark stays correct even when the outbox
+// tip rows have been pruned. Race-safety against concurrent producers: Append
+// bumps the allocator and inserts the outbox row in ONE transaction, and the
+// allocator row lock serializes per-key appends, so per-key commit order
+// equals seq order and this read sees only committed appends. Any append that
+// commits after the snapshot therefore has seq > watermark and is returned by
+// the subscriber's ReadAfter; an append committed before it is skipped by
+// design (it predates the consumer). A key that has never produced has no
+// allocator row; COALESCE pins the cursor at 0, which is equivalent.
+func (s *pgOutboxStore) EnsureCursor(ctx context.Context, key RoutingKey, consumerID string, fromStart bool) (int64, bool, error) {
 	db, err := s.db()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
+	k := key.String()
+
 	var seq int64
 	err = db.QueryRowContext(ctx,
 		`SELECT cursor_seq FROM mesh_cursor WHERE routing_key = $1 AND consumer_id = $2`,
-		key.String(), consumerID).Scan(&seq)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
+		k, consumerID).Scan(&seq)
+	switch {
+	case err == nil:
+		return seq, false, nil // existing consumer: resume exactly (ADR 4.4)
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, false, fmt.Errorf("delivery substrate: load cursor for %s/%s: %w", k, consumerID, err)
 	}
-	if err != nil {
-		return 0, fmt.Errorf("delivery substrate: load cursor for %s/%s: %w", key.String(), consumerID, err)
+
+	if fromStart {
+		return 0, false, nil
 	}
-	return seq, nil
+
+	// High-watermark init. ON CONFLICT DO NOTHING guards a concurrent
+	// subscriber initializing the same (key, consumer); the loser falls
+	// through and resumes from the winner's row.
+	err = db.QueryRowContext(ctx,
+		`INSERT INTO mesh_cursor (routing_key, consumer_id, cursor_seq, updated_at)
+		   VALUES ($1, $2,
+		           COALESCE((SELECT next_seq FROM mesh_key_seq WHERE routing_key = $1), 0),
+		           now())
+		 ON CONFLICT (routing_key, consumer_id) DO NOTHING
+		 RETURNING cursor_seq`,
+		k, consumerID).Scan(&seq)
+	switch {
+	case err == nil:
+		return seq, true, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, false, fmt.Errorf("delivery substrate: init cursor at high watermark for %s/%s: %w", k, consumerID, err)
+	}
+
+	// Lost the init race (or the row appeared between the SELECT and the
+	// INSERT): read the winner's position and resume from it.
+	if err := db.QueryRowContext(ctx,
+		`SELECT cursor_seq FROM mesh_cursor WHERE routing_key = $1 AND consumer_id = $2`,
+		k, consumerID).Scan(&seq); err != nil {
+		return 0, false, fmt.Errorf("delivery substrate: reread cursor for %s/%s: %w", k, consumerID, err)
+	}
+	return seq, false, nil
 }
 
 // SaveCursor advances the cursor for (key, consumerID) to seq, monotonically:

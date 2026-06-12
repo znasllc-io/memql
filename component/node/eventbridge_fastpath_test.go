@@ -191,11 +191,14 @@ func TestMeshFastPathDedupCollapsesWithDurable(t *testing.T) {
 	}
 }
 
-// TestMeshFastPathReplayAcrossReplica proves a DIFFERENT replica taking over the
-// space (a new consumerID) still replays the full backlog from seq 0 -- the mesh
-// fast-path is best-effort and never the source of truth, so a replica that
-// never saw the live hints still catches up entirely from the durable outbox
-// (ADR 4.4 + 4.5). This is the cross-replica-restart guarantee #1289 must keep.
+// TestMeshFastPathReplayAcrossReplica proves a DIFFERENT replica taking over
+// the space (a new consumerID, opted into backlog replay) still replays the
+// full backlog from seq 0 -- the mesh fast-path is best-effort and never the
+// source of truth, so a replica that never saw the live hints still catches up
+// entirely from the durable outbox (ADR 4.4 + 4.5). This is the
+// cross-replica-restart guarantee #1289 must keep. Since memql#1328 the
+// brand-new-consumer DEFAULT is the high watermark; the durable-catch-up
+// guarantee under test here is the opt-in WithReplayBacklog mode.
 func TestMeshFastPathReplayAcrossReplica(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -220,7 +223,7 @@ func TestMeshFastPathReplayAcrossReplica(t *testing.T) {
 	// A NEW replica C subscribes with a fresh consumerID -- it never saw the live
 	// hints, so it must replay the entire backlog from the durable store.
 	subC := NewSubstrate(store, time.Minute, nil, testLogger())
-	ch, err := subC.Subscribe(ctx, key, "consumer-C")
+	ch, err := subC.Subscribe(ctx, key, "consumer-C", WithReplayBacklog())
 	if err != nil {
 		t.Fatalf("subscribe C: %v", err)
 	}
