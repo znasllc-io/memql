@@ -121,14 +121,41 @@ func discoverActiveRoom(ctx context.Context, roomClient *lksdk.RoomServiceClient
 		if !strings.HasPrefix(name, "polyphon-") {
 			continue
 		}
-		// A participant is present (the SPA joined the space's room). We do not
-		// poll while in a session, so this count reflects others, not ourselves.
 		if r.GetNumParticipants() == 0 {
+			continue
+		}
+		// A raw participant count is not enough: during a rollout the
+		// predecessor pod's ghost participant lingers in its old room for
+		// ~15-30s, and an avatar vendor participant can outlive its session.
+		// Adopting such a room wedges the single-room dispatcher on a space
+		// no human is in (#1378) -- only a HUMAN participant marks a room
+		// active.
+		if !roomHasHumanParticipant(cctx, roomClient, name, logger) {
 			continue
 		}
 		return name
 	}
 	return ""
+}
+
+// roomHasHumanParticipant lists a room's participants and reports whether at
+// least one is a human (per isHumanParticipantIdentity). Best-effort: a list
+// error logs at debug and counts as no-humans, so a transient API failure
+// skips the room for one poll cycle instead of risking a wedge on machinery.
+func roomHasHumanParticipant(ctx context.Context, roomClient *lksdk.RoomServiceClient, room string, logger *slog.Logger) bool {
+	resp, err := roomClient.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: room})
+	if err != nil {
+		if logger != nil {
+			logger.Debug("voice-agent: list participants failed", "room", room, "err", err)
+		}
+		return false
+	}
+	for _, p := range resp.GetParticipants() {
+		if isHumanParticipantIdentity(p.GetIdentity()) {
+			return true
+		}
+	}
+	return false
 }
 
 // httpLiveKitURL converts the agent's ws(s):// LiveKit URL to the http(s)://

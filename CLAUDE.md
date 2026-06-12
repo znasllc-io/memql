@@ -576,6 +576,9 @@ Env:
 - `MEMQL_VOICE_EXECUTOR` -- `realtime` (default) or `cascade`.
 - `MEMQL_VOICE_ROOM_NAME` -- room to join (falls back when no
   `--room` flag is passed).
+- `MEMQL_VOICE_IDLE_TEARDOWN_SECONDS` -- zero-human grace period
+  before a joined session tears down (default 60) so the auto-join
+  dispatcher can't wedge on an empty room (#1378).
 - `MEMQL_REALTIME_*` -- realtime executor tuning knobs.
 - `VOICE_AGENT_TOKEN` -- identity-issued `class="voice_agent"` JWT
   (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
