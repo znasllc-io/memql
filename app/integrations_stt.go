@@ -47,6 +47,20 @@ func (a *App) selectSTTProvider() {
 	}
 }
 
+// openAIKeyFromEnv resolves the OpenAI API key for the STT bootstrap,
+// trying MEMQL_SI_OPENAI_API_KEY first and falling back to the bare
+// OPENAI_API_KEY -- the same prefix-elision chain the provider auth
+// resolver (component/memql/si_providers.go, authConceptLookupNames)
+// and integrations/openairealtime use. The genesis envelope seeds the
+// bare form, so without the fallback the voice node boots with the
+// audio websocket silently disabled (#1371).
+func openAIKeyFromEnv() string {
+	if key := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_API_KEY")); key != "" {
+		return key
+	}
+	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+}
+
 // initOpenAIRealtimeProvider wires the OpenAI Realtime API (streaming
 // transcription via WebSocket) as the active STT provider -- the default.
 //
@@ -64,9 +78,9 @@ func (a *App) selectSTTProvider() {
 // mode, unlike the /audio/transcriptions batch endpoint). Deployments
 // that have provisioned gpt-4o-transcribe can opt in via the env var.
 func (a *App) initOpenAIRealtimeProvider(name string) {
-	openAIKey := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_API_KEY"))
+	openAIKey := openAIKeyFromEnv()
 	if openAIKey == "" {
-		a.Logger.Info("audio websocket disabled (MEMQL_SI_OPENAI_API_KEY not set for openai-realtime)")
+		a.Logger.Info("audio websocket disabled (neither MEMQL_SI_OPENAI_API_KEY nor OPENAI_API_KEY set for openai-realtime)")
 		return
 	}
 
@@ -94,10 +108,10 @@ func (a *App) initOpenAIRealtimeProvider(name string) {
 }
 
 func (a *App) initWhisperProvider(name string) {
-	openAIKey := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_API_KEY"))
+	openAIKey := openAIKeyFromEnv()
 	openAIProject := strings.TrimSpace(os.Getenv("MEMQL_SI_OPENAI_PROJECT_ID"))
 	if openAIKey == "" {
-		a.Logger.Info("audio websocket disabled (MEMQL_SI_OPENAI_API_KEY not set for whisper)")
+		a.Logger.Info("audio websocket disabled (neither MEMQL_SI_OPENAI_API_KEY nor OPENAI_API_KEY set for whisper)")
 		return
 	}
 	a.sttProvider = stt.NewOpenAIWhisperProvider(openAIKey, openAIProject, nil)
