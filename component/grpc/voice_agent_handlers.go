@@ -362,6 +362,89 @@ func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
 	return out
 }
 
+// voiceAgentScopedToolNames returns the GA agent's expanded tool-name set when
+// this stream is a voice-agent session bound to a resolved agent (#1419), or
+// nil for every other caller (no scoping). The set is the SAME surface the
+// text loop binds: the agent row's tools field expanded through
+// ExpandCapabilitySlugs. Handing the model the unscoped global registry (517
+// tools: internal logic sweeps, raw mutations) measurably inflated
+// gpt-realtime's time-to-first-audio and surfaced tools no agent should call.
+// Fail-open: a lookup error returns nil (unscoped) so a transient engine
+// failure degrades to the old behaviour instead of stripping voice tools.
+func (s *streamSession) voiceAgentScopedToolNames() map[string]struct{} {
+	if s == nil {
+		return nil
+	}
+	s.voiceAgentSpeakSubMu.Lock()
+	agentId := s.voiceAgentGaAgentId
+	s.voiceAgentSpeakSubMu.Unlock()
+	if agentId == "" {
+		return nil
+	}
+	raw, found := s.resolveAgentToolSlugs(agentId)
+	if !found {
+		return nil
+	}
+	expanded := memqlengine.ExpandCapabilitySlugs(raw)
+	set := make(map[string]struct{}, len(expanded))
+	for _, n := range expanded {
+		set[n] = struct{}{}
+	}
+	return set
+}
+
+// resolveAgentToolSlugs loads the agent row's raw tools list (capability
+// slugs + concrete names). found=false means the row could not be read
+// (query error / no row) -- callers fail open. found=true with an empty
+// slice is a real answer: the agent has no tools.
+func (s *streamSession) resolveAgentToolSlugs(agentId string) ([]string, bool) {
+	if s.service == nil || s.service.engine == nil {
+		return nil, false
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
+	agentIdJSON, _ := json.Marshal(agentId)
+	query := fmt.Sprintf(
+		`from(v1:agents:agent) ?.id==%s select id, payload.tools`,
+		string(agentIdJSON))
+	result, err := s.service.engine.Execute(ctx, query)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("voice-agent tool scope: agent query failed -- serving unscoped registry",
+				"agent_id", agentId, "err", err)
+		}
+		return nil, false
+	}
+	return toolSlugsFromAgentRows(normalizeResultRows(result.OutputPayload()))
+}
+
+// toolSlugsFromAgentRows extracts the first row's tools list. Pure so the
+// row-shape handling ([]string vs []any from JSON decoding) is unit-testable
+// without an engine.
+func toolSlugsFromAgentRows(rows []map[string]any) ([]string, bool) {
+	for _, row := range rows {
+		v, ok := row["tools"]
+		if !ok || v == nil {
+			// Row exists but carries no tools list -- a real (empty) answer.
+			return nil, true
+		}
+		switch list := v.(type) {
+		case []string:
+			return append([]string(nil), list...), true
+		case []any:
+			out := make([]string, 0, len(list))
+			for _, item := range list {
+				if name, ok := item.(string); ok && strings.TrimSpace(name) != "" {
+					out = append(out, name)
+				}
+			}
+			return out, true
+		default:
+			return nil, true
+		}
+	}
+	return nil, false
+}
+
 // normalizeResultRows accepts a shape() / from-select result payload
 // in any of the three shapes the engine produces -- []map[string]any,
 // []any holding maps, or a single map -- and returns a uniform
