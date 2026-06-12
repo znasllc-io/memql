@@ -9230,6 +9230,34 @@ func MutationRevokeWorkerTokenIdentityBuild(args MutationRevokeWorkerTokenIdenti
 	return b.String()
 }
 
+// MutationRolloverDailySpace -- Insert the terminal (archived/saved) version of a daily space at rollover. System-actor sweep helper; the caller passes the full updated payload including the preserved ownerUserId.
+//
+// Bound concept: space.
+type MutationRolloverDailySpaceArgs struct {
+	SpaceId string
+	Payload map[string]any
+}
+
+// MutationRolloverDailySpace calls the engine mutation mutationRolloverDailySpace.
+func (qc *QueryClient) MutationRolloverDailySpace(ctx context.Context, args MutationRolloverDailySpaceArgs) (*Result, error) {
+	call := MutationRolloverDailySpaceBuild(args)
+	return qc.executeNamed(ctx, "mutationRolloverDailySpace", call)
+}
+
+func MutationRolloverDailySpaceBuild(args MutationRolloverDailySpaceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationRolloverDailySpace({")
+	b.WriteString("spaceId: ")
+	b.WriteString(fmt.Sprintf("%q", args.SpaceId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("payload: ")
+	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationRotateAuthSession -- Rotate refresh-token bookkeeping on a session after a successful refresh. Stores the old hash as previousRefreshTokenHash with a fresh previousRotatedAt timestamp so the rotator can accept that hash inside its grace window.
 //
 // Bound concept: authSession.

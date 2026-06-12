@@ -160,6 +160,28 @@ func QueryActiveAuthoringBundlesBuild(args QueryActiveAuthoringBundlesArgs) stri
 	return "queryActiveAuthoringBundles({})"
 }
 
+// QueryActiveDailySpacesForUser -- Active daily spaces owned by the given user. Sweep helper for the dailyspace rollover capability (system actor only).
+//
+// Bound concept: space.
+type QueryActiveDailySpacesForUserArgs struct {
+	UserId string
+}
+
+// QueryActiveDailySpacesForUser calls the engine query queryActiveDailySpacesForUser.
+func (qc *QueryClient) QueryActiveDailySpacesForUser(ctx context.Context, args QueryActiveDailySpacesForUserArgs) (*Result, error) {
+	call := QueryActiveDailySpacesForUserBuild(args)
+	return qc.executeNamed(ctx, "queryActiveDailySpacesForUser", call)
+}
+
+func QueryActiveDailySpacesForUserBuild(args QueryActiveDailySpacesForUserArgs) string {
+	var b strings.Builder
+	b.WriteString("queryActiveDailySpacesForUser({")
+	b.WriteString("userId: ")
+	b.WriteString(fmt.Sprintf("%q", args.UserId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryActiveDelegationsByIdentitySubject -- Get all active delegations whose identitySubject matches the argument. Used by the per-request DelegationResolver on the auth hot path. See memql#112.
 //
 // Bound concept: delegation.
