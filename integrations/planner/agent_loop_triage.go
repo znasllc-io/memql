@@ -182,27 +182,32 @@ func (l *PlannerAgentLoop) triageAndMaybeShortcut(ctx context.Context, planId, n
 		return false, nil
 	}
 
-	// Known-trivial kinds skip the classifier entirely (memql#835): a
-	// produceArtifact plan is a single self-contained deliverable by
-	// construction -- the Assistant's produceArtifact tool only mints it
-	// for "make me a <file>" requests, and it carries the requesting
-	// assistant as ownerAgentId. Treat it as trivial directly (zero
-	// classifier LLM call) and route to the single direct production turn.
-	// This is what lets produceArtifact flow through the unified loop (its
-	// old hardcoded HandlePlanCreated bypass was removed) while still
-	// making ZERO planner LLM calls.
-	if getString(plan, "kind") == produceArtifactPlanKind {
-		if strings.TrimSpace(getString(plan, "ownerAgentId")) == "" {
-			return false, nil // no owner to run the turn -> let the loop assign one
-		}
-		l.logger.Info("planner triage: produceArtifact is known-trivial -> single direct production turn (no classifier, no decompose)",
-			"planId", planId)
-		l.startPlanDirect(ctx, planId)
-		return true, nil
+	// produceArtifact plans run the SAME cheap classifier as every other
+	// goal (memql#1393; supersedes the #835 known-trivial shortcut). A
+	// produceArtifact goal is a single self-contained deliverable by
+	// construction, but its VOLUME is unbounded -- "10 folk tales as FULL
+	// stories" cannot be emitted in one production turn and timed out the
+	// 3m turn wallclock when hard-routed direct. The classifier (volume-
+	// aware since #1393) decides: trivial -> the single direct turn
+	// exactly as before; moderate/complex -> the bounded decompose loop,
+	// where the plannerAgent chooses the task breakdown. The only
+	// difference from a regular goal is the FAILURE posture: a classify
+	// error falls back to the direct turn (the pre-#1393 behavior --
+	// produceArtifact always carries an owning agent, and a small-file
+	// first pass beats stranding the plan on a transient classifier error).
+	isProduceArtifact := getString(plan, "kind") == produceArtifactPlanKind
+	if isProduceArtifact && strings.TrimSpace(getString(plan, "ownerAgentId")) == "" {
+		return false, nil // no owner to run a direct turn -> let the loop assign one
 	}
 
 	complexity, reasoning, cerr := l.classifyGoalComplexity(ctx, goal, nowRFC3339)
 	if cerr != nil {
+		if isProduceArtifact {
+			l.logger.Warn("planner triage: classify failed for produceArtifact; falling back to the single direct production turn",
+				"planId", planId, "error", cerr)
+			l.startPlanDirect(ctx, planId)
+			return true, nil
+		}
 		l.logger.Warn("planner triage: classify failed; falling through to decompose loop",
 			"planId", planId, "error", cerr)
 		return false, nil

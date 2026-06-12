@@ -6,14 +6,13 @@ import (
 	"testing"
 )
 
-// Acceptance for memql#835: with produceArtifact routed through the
-// unified loop (the hardcoded HandlePlanCreated bypass removed), a
-// "create a simple file" plan resolves in a BOUNDED, small number of
-// planner calls -- specifically ZERO plannerAgent decompose calls and
-// ZERO classifier calls, landing on a single direct production turn
-// (mutationStartPlan). This is the deterministic stand-in for the
-// "validate locally that produceArtifact makes a small bounded number of
-// planner calls" gate the issue requires.
+// Acceptance for memql#835 as amended by memql#1393: a small
+// produceArtifact plan still resolves in a BOUNDED number of planner
+// calls through the unified loop -- ZERO plannerAgent decompose calls
+// and a single direct production turn (mutationStartPlan) -- but the
+// known-trivial shortcut is gone: exactly ONE cheap classifier call
+// decides the route (so a LARGE deliverable can decompose instead of
+// timing out the 3m turn wallclock).
 func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 	planRow := map[string]any{
 		"output": []any{map[string]any{
@@ -32,7 +31,12 @@ func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 			}
 			return nil, nil
 		},
-		siResponder: func(_ string, _ map[string]any) (any, error) { return nil, nil },
+		siResponder: func(templateId string, _ map[string]any) (any, error) {
+			if templateId == "goalComplexityTriage" {
+				return map[string]any{"complexity": "trivial", "reasoning": "one list"}, nil
+			}
+			return nil, nil
+		},
 	}
 	l := &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}
 
@@ -45,9 +49,9 @@ func TestProduceArtifact_ThroughLoop_NoPlannerCalls(t *testing.T) {
 	if n := countContains(si, "plannerAgent"); n != 0 {
 		t.Fatalf("produceArtifact must make ZERO plannerAgent decompose calls, got %d", n)
 	}
-	// ZERO classifier calls either -- produceArtifact is known-trivial.
-	if n := countContains(si, "goalComplexityTriage"); n != 0 {
-		t.Fatalf("produceArtifact must skip the complexity classifier, got %d goalComplexityTriage calls", n)
+	// Exactly ONE cheap classifier call routes it (#1393).
+	if n := countContains(si, "goalComplexityTriage"); n != 1 {
+		t.Fatalf("produceArtifact must make exactly 1 goalComplexityTriage call, got %d", n)
 	}
 	// Exactly one direct production turn kicked off.
 	if n := countContains(exec, "mutationStartPlan"); n != 1 {
