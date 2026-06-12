@@ -18,6 +18,7 @@ import (
 
 	mediasdk "github.com/livekit/media-sdk"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/integrations/audio"
 	"github.com/znasllc-io/memql/integrations/openai"
@@ -153,21 +154,24 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	// set, and configure the session with it. A failed list degrades to no
 	// model-driven tools (FetchToolDefinitions returns nil) -- privileged tools
 	// were never exposed anyway, so this is a safe degradation.
-	toolFetchStart := time.Now()
-	toolDefs := FetchToolDefinitions(ctx, client, logger)
-	// Setup phase (#1426): synchronous memQL round-trip (ListTools -> agent
-	// tool-scope engine queries server-side) on the bridge-build path.
-	logVoiceTiming(logger, "setup.fetch_tools", toolFetchStart,
-		"space_id", req.SpaceID, "tool_count", len(toolDefs))
-	toolBridge := NewMcpToolBridge(
-		NewGrpcToolCallTransport(client),
-		NewLogMirrorSink(logger),
-		toolDefs,
-		req.SpaceID,
-		req.GaAgentID,
-		logger,
-	)
-	realtimeTools := toolBridge.RealtimeTools()
+	//
+	// #1429: the memQL ListTools round-trip (engine agent-tool-scope query on a
+	// slow DB) used to SERIALIZE with the OpenAI websocket dial. The two legs
+	// are independent: fetch concurrently, dial with the tools-less base
+	// config, then apply the tools via session.UpdateSession before the bridge
+	// returns. No audio or turn can reach the session in the tools-less window
+	// -- the room callbacks only wire to the bridge after this constructor
+	// returns.
+	toolDefsCh := make(chan []*memqlv1.ToolDefinition, 1)
+	go func() {
+		toolFetchStart := time.Now()
+		defs := FetchToolDefinitions(ctx, client, logger)
+		// Setup phase (#1426): memQL round-trip (ListTools -> agent tool-scope
+		// engine queries server-side), now overlapped with the realtime dial.
+		logVoiceTiming(logger, "setup.fetch_tools", toolFetchStart,
+			"space_id", req.SpaceID, "tool_count", len(defs))
+		toolDefsCh <- defs
+	}()
 
 	// Connect with the conductor-gated base config (turn_detection:null). The
 	// bridge flips to the #478 native config (semantic_vad + input transcription)
@@ -176,7 +180,6 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	sessionBase := openai.SessionConfig{
 		Instructions: req.Executor.SessionPersona.Instructions,
 		Voice:        req.Executor.SessionPersona.Voice,
-		Tools:        realtimeTools,
 		// Server-side input noise reduction (#1431): filters the input BEFORE
 		// the model's VAD, the documented mitigation for phantom turns from
 		// laptop-speaker echo. Carried on the base config so every posture
@@ -184,6 +187,9 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		// MEMQL_REALTIME_NOISE_REDUCTION: far_field (default) / near_field /
 		// off ("" omits the field).
 		NoiseReduction: cfg.NoiseReductionMode(),
+		// Tools are NOT on the connect-time config (#1429): the registry fetch
+		// runs concurrently with the dial and is applied via UpdateSession on
+		// the join below.
 	}
 	realtimeConnectStart := time.Now()
 	session, err := rtClient.Connect(ctx, sessionBase)
@@ -193,6 +199,29 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	// Setup phase (#1426): gpt-realtime websocket dial + session.update -- the
 	// "realtime session established" milestone.
 	logVoiceTiming(logger, "setup.realtime_connect", realtimeConnectStart, "space_id", req.SpaceID)
+
+	// Join the concurrent tool fetch and apply the tool set. sessionBase
+	// carries the tools from here on, so every later gate-mode UpdateSession
+	// (applyGateMode rebuilds from sessionBase) re-asserts them; a failed
+	// update here therefore self-heals on the first human's gate-mode
+	// transition. Failure is a warn, never a session failure -- identical
+	// degradation to a failed fetch (no model-driven tools until re-asserted).
+	toolDefs := <-toolDefsCh
+	toolBridge := NewMcpToolBridge(
+		NewGrpcToolCallTransport(client),
+		NewLogMirrorSink(logger),
+		toolDefs,
+		req.SpaceID,
+		req.GaAgentID,
+		logger,
+	)
+	sessionBase.Tools = toolBridge.RealtimeTools()
+	if len(sessionBase.Tools) > 0 {
+		if err := session.UpdateSession(sessionBase); err != nil && logger != nil {
+			logger.Warn("voice-agent realtime room: tool session update failed (re-asserted on next gate-mode update)",
+				"space_id", req.SpaceID, "tool_count", len(sessionBase.Tools), "err", err)
+		}
+	}
 
 	// The model emits 24 kHz PCM16; the local track is constructed at that
 	// rate so the media-sdk encoder upsamples to Opus on publish.
