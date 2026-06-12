@@ -625,3 +625,37 @@ query presence querySpaceParticipantPresence {
   filter  payload.spaceId==args.spaceId
   shape   presenceFull
 }
+
+// ---- queries/v1/cognition/activeDailySpacesForUser.memql ----
+
+// activeDailySpacesForUser - Daily-rollover sweep helper
+// ======================================================
+//
+// Returns the still-active (not yet rolled-over) daily spaces owned by
+// the given user. Used ONLY by the dailyspace integration's rollover
+// sweep (integrations/dailyspace, memql#1384): the hourly cron walks
+// every active user, ensures today's daily exists, then sweeps any
+// active daily whose dailyDateKey is before the user's local today --
+// ending participants, clearing presence, deleting the LiveKit room,
+// and archiving/saving the space per preferences.dailySpaceRolloverAction.
+//
+// traitStatusIsActive + traitIsActiveRecord are what make the sweep
+// idempotent at the query level: once a daily is rolled over (status
+// archived/saved, active=false) it drops out of this result set, so a
+// re-run -- on this replica or a concurrent one -- finds nothing to do.
+//
+// `@public` marks this query as intentionally not caller-scoped: it is
+// invoked exclusively under the system:dailyspaceAutomation actor with
+// a server-supplied userId from queryActiveUsers (never caller input),
+// mirroring queryAllArchivedSpacesAcrossUsers' cron-sweep precedent.
+
+@public
+@enabled
+@description("Active daily spaces owned by the given user. Sweep helper for the dailyspace rollover capability (system actor only).")
+query space queryActiveDailySpacesForUser {
+  args {
+    userId  string  @required
+  }
+  filter  payload.ownerUserId==args.userId && payload.kind=="daily" && traitIsActiveRecord && traitStatusIsActive && traitIsNotDeleted
+  shape   spaceFull
+}

@@ -68,6 +68,12 @@ const resultConcept = "integration:dailyspace:result"
 // space via mutationCreateDailySpace.
 type Integration struct {
 	engine memql.IntegrationEngineAccess
+
+	// roomDeleter deletes the LiveKit room backing a rolled-over daily
+	// space (sweep step 3, memql#1384). Wired from the polyphon room
+	// provider in plugin.go when LiveKit is configured; nil otherwise
+	// (no LiveKit in this environment = nothing to delete).
+	roomDeleter RoomDeleter
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -98,7 +104,7 @@ func (d *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rolloverAllUsers",
-			Description: "Hourly cron entry point. For every active user with dailySpaceEnabled != false: ensures today's daily exists and archives or saves any prior-day dailies per their dailySpaceRolloverAction preference. Returns one summary node with counts.",
+			Description: "Hourly cron entry point. For every active user with dailySpaceEnabled != false: ensures today's daily exists, then sweeps any prior-day active daily (ends participant rows, clears presence, deletes the LiveKit room, archives or saves the space per the dailySpaceRolloverAction preference). Idempotent and cluster-safe; returns one summary node with counts.",
 			Handler:     d.handleRolloverAllUsers,
 			ArgsSchema:  map[string]string{},
 		},
@@ -261,6 +267,7 @@ type rolloverSummary struct {
 	Skipped    int      `json:"skipped"`
 	Errors     int      `json:"errors"`
 	ErrorBatch []string `json:"errorBatch,omitempty"` // first 5 error strings for quick triage
+	sweepStats
 }
 
 func (d *Integration) handleRolloverAllUsers(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -288,19 +295,16 @@ func (d *Integration) handleRolloverAllUsers(ctx context.Context, _ map[string]a
 			continue
 		}
 		summary.Ensured++
-	}
 
-	// Yesterday-rollover (archive / save prior dailies per
-	// preferences.dailySpaceRolloverAction) is deliberately deferred
-	// to a follow-up: we need a `queryDailySpacesForUser` query first
-	// so the sweep can find the prior rows, and the archive/save
-	// path needs to interact with the existing mutationArchiveSpace /
-	// mutationSaveSpace surfaces. The visibility problem the user
-	// flagged ("the cron job might not create the daily space when
-	// the user logs in") is fully addressed by the ensureForUser
-	// path firing on user-create + auth-session; the cron is the
-	// stay-logged-in safety net. Once the prior-row query lands,
-	// the rollover step slots in here as a per-user loop.
+		// Yesterday-rollover sweep (memql#1384, formerly deferred):
+		// today's daily now exists, so close out any prior-day active
+		// daily -- end participants, clear presence, delete the
+		// LiveKit room, archive/save per dailySpaceRolloverAction.
+		// res.DateKey is the user's local today; the sweep only
+		// touches dailies whose dailyDateKey predates it. See
+		// sweep.go for the idempotency / cluster-safety contract.
+		d.sweepRolledOverDailies(ctx, uid, res.DateKey, mapField(u, "preferences"), &summary.sweepStats)
+	}
 
 	payload, err := json.Marshal(summary)
 	if err != nil {
