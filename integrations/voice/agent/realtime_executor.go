@@ -101,6 +101,11 @@ type RealtimeExecutor struct {
 	// model-driven tools (a function-call event is logged and ignored).
 	toolBridge *McpToolBridge
 
+	// confidenceGate drops low-confidence input-transcription finals by their
+	// mean token logprob (#1431, transcript_confidence.go). Nil disables the
+	// gate; finals without logprobs always pass either way.
+	confidenceGate *transcriptConfidenceGate
+
 	machine *TurnMachine
 
 	// lifecycle bounds this session's cost (empty-room / idle / max-duration /
@@ -970,6 +975,20 @@ func (e *RealtimeExecutor) drainEvents() {
 				}
 				inputTranscript.Reset()
 				e.seq.Store(0)
+				if final != "" && !e.confidenceGate.pass(ev.Logprobs) {
+					// #1431 confidence gate: the session requested per-token
+					// logprobs on input transcription; a final whose mean
+					// logprob falls below the floor is echo/noise-shaped, not
+					// speech. Finals WITHOUT logprobs always pass (the signal
+					// is intermittently missing). Composes with the #1199
+					// denylist filter below.
+					if e.logger != nil {
+						e.logger.Info("voice-agent realtime: dropped low-confidence input transcript (#1431)",
+							"space_id", e.cfg.SpaceID, "text", final,
+							"mean_logprob", meanLogprob(ev.Logprobs), "floor", e.confidenceGate.floor)
+					}
+					final = ""
+				}
 				if final != "" && !stt.NewTranscriptFilter().Keep(final, true, 0) {
 					// #1199: the realtime input transcription bypasses the cascade
 					// STT filter, so gpt-realtime's silence/non-speech

@@ -116,6 +116,53 @@ func TestEncodeSessionUpdate_NilTurnDetectionStaysNull(t *testing.T) {
 	assert.False(t, hasTranscription, "no input transcription when unset")
 }
 
+// TestEncodeSessionUpdate_NoiseReduction verifies the #1431 GA noise-reduction
+// emission: a configured mode lands as audio.input.noise_reduction.type, and
+// an empty mode omits the field entirely (off).
+func TestEncodeSessionUpdate_NoiseReduction(t *testing.T) {
+	for _, mode := range []string{NoiseReductionFarField, NoiseReductionNearField} {
+		data, err := encodeSessionUpdate(SessionConfig{
+			Instructions:   "x",
+			Voice:          "marin",
+			NoiseReduction: mode,
+		})
+		require.NoError(t, err)
+		input := decodeJSON(t, data)["session"].(map[string]any)["audio"].(map[string]any)["input"].(map[string]any)
+		nr := input["noise_reduction"].(map[string]any)
+		assert.Equal(t, mode, nr["type"], "audio.input.noise_reduction.type must carry the configured mode")
+	}
+
+	// Off: the field is omitted, not emitted empty/null.
+	data, err := encodeSessionUpdate(SessionConfig{Instructions: "x", Voice: "marin"})
+	require.NoError(t, err)
+	input := decodeJSON(t, data)["session"].(map[string]any)["audio"].(map[string]any)["input"].(map[string]any)
+	_, present := input["noise_reduction"]
+	assert.False(t, present, "no noise_reduction key when the mode is empty (off)")
+}
+
+// TestEncodeSessionUpdate_Include verifies the #1431 session include option:
+// the logprobs request is emitted at the session top level when configured and
+// omitted otherwise.
+func TestEncodeSessionUpdate_Include(t *testing.T) {
+	data, err := encodeSessionUpdate(SessionConfig{
+		Instructions:       "x",
+		Voice:              "marin",
+		InputTranscription: &InputTranscriptionConfig{Model: "gpt-4o-mini-transcribe"},
+		Include:            []string{IncludeInputTranscriptionLogprobs},
+	})
+	require.NoError(t, err)
+	session := decodeJSON(t, data)["session"].(map[string]any)
+	include := session["include"].([]any)
+	require.Len(t, include, 1)
+	assert.Equal(t, "item.input_audio_transcription.logprobs", include[0])
+
+	// Unset -> omitted.
+	data, err = encodeSessionUpdate(SessionConfig{Instructions: "x", Voice: "marin"})
+	require.NoError(t, err)
+	_, present := decodeJSON(t, data)["session"].(map[string]any)["include"]
+	assert.False(t, present, "no include key when unset")
+}
+
 func TestParseServerEvent_InputTranscript(t *testing.T) {
 	delta := parseServerEvent([]byte(`{"type":"conversation.item.input_audio_transcription.delta","delta":"cut the"}`))
 	assert.Equal(t, EventInputTranscriptDelta, delta.Kind)
@@ -124,6 +171,30 @@ func TestParseServerEvent_InputTranscript(t *testing.T) {
 	done := parseServerEvent([]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"cut the cloud spend"}`))
 	assert.Equal(t, EventInputTranscriptDone, done.Kind)
 	assert.Equal(t, "cut the cloud spend", done.Text)
+	assert.Nil(t, done.Logprobs, "no logprobs attached -> nil (the gate must then pass the final)")
+}
+
+// TestParseServerEvent_InputTranscriptLogprobs verifies the #1431 confidence
+// signal: per-token logprobs on the completed input-transcription event are
+// flattened onto the decoded event, and a null/absent logprobs field decodes
+// to nil rather than erroring.
+func TestParseServerEvent_InputTranscriptLogprobs(t *testing.T) {
+	done := parseServerEvent([]byte(`{
+		"type":"conversation.item.input_audio_transcription.completed",
+		"transcript":"cut the cloud spend",
+		"logprobs":[
+			{"token":"cut","logprob":-0.01,"bytes":[99,117,116]},
+			{"token":" the","logprob":-0.2},
+			{"token":" cloud spend","logprob":-0.39}
+		]}`))
+	assert.Equal(t, EventInputTranscriptDone, done.Kind)
+	assert.Equal(t, "cut the cloud spend", done.Text)
+	assert.Equal(t, []float64{-0.01, -0.2, -0.39}, done.Logprobs)
+
+	// Explicit null logprobs (server omitted the signal) -> nil, no error.
+	noLp := parseServerEvent([]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hi","logprobs":null}`))
+	assert.Equal(t, EventInputTranscriptDone, noLp.Kind)
+	assert.Nil(t, noLp.Logprobs)
 }
 
 func TestEncodeInputAudioAppend_Base64(t *testing.T) {

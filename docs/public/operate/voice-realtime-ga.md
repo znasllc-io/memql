@@ -237,9 +237,16 @@ epic, memql#1424):
 - GA event names, session shape, server_vad 0.6/300/500: in place
   (`integrations/openai/realtime_events.go`,
   `integrations/voice/agent/realtime_vad.go`).
-- `noise_reduction`: NOT SET — no code path emits it (memql#1431).
-- Logprob `include` + confidence gate on the native path: NOT SET;
-  the #1199 post-hoc transcript filter is the only guard (memql#1431).
+- `noise_reduction`: SET (memql#1431) — `far_field` by default, on every
+  realtime session posture (conductor-gated, native 1-on-1, multi-party).
+  Tunable via `MEMQL_REALTIME_NOISE_REDUCTION`
+  (`far_field` | `near_field` | `off`).
+- Logprob `include` + confidence gate: SET (memql#1431) — sessions with
+  input transcription request `item.input_audio_transcription.logprobs`,
+  and the executor drops a FINAL whose mean token logprob falls below
+  `MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE` (default `-1.0`). Finals
+  without logprobs always pass (the signal is intermittently missing).
+  Composes with — does not replace — the #1199 post-hoc denylist filter.
 - `conversation.item.truncate` on barge-in: NOT SENT (memql#1427).
 - Async acknowledge-first tool prompting: not yet taught
   (memql#1430).
