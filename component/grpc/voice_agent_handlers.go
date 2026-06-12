@@ -156,9 +156,15 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 		return s.sendQueryError(requestId, correlate, codes.InvalidArgument, "spaceId and gaAgentId are required")
 	}
 
-	// Session-setup timing (#1426): every engine call below runs SYNCHRONOUSLY
-	// before the SessionAck the voice-agent is waiting on -- on a slow DB these
-	// are the session-setup chokepoints. Each is timed individually plus the
+	// Session-setup timing (#1426): every engine call below runs before the
+	// SessionAck the voice-agent is waiting on -- on a slow DB these are the
+	// session-setup chokepoints. #1429 restructured the shape: the GA-id
+	// resolve stays first (every other leg keys off the resolved id), then the
+	// four independent loads (audio override, video override, agent record,
+	// avatar persona) run CONCURRENTLY, and the two per-channel agent-record
+	// fallback reads + the persona read collapse into one agent-record query.
+	// Net: many sequential engine round-trips -> 2 sequential stages, the
+	// second 4-way parallel. Each leg is still timed individually plus the
 	// handler total, all under the voice_timing key.
 	setupStart := time.Now()
 
@@ -175,39 +181,53 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	}
 	logVoiceTiming(s.logger, "server.session_start.resolve_ga_id", gaResolveStart, "space_id", spaceId)
 
-	// Resolve the GA's initial audio + video modes from the persistent
-	// override rows. Without this the voice-agent always saw
-	// "mirror_user" (hardcoded), so toggling Sofia's video icon to
-	// `always_on` never reached the avatar-gate at session start.
-	audioModeStart := time.Now()
-	audioMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
-	logVoiceTiming(s.logger, "server.session_start.audio_mode", audioModeStart, "space_id", spaceId)
-	videoModeStart := time.Now()
-	videoMode := resolveInitialChannelMode(s, spaceId, gaAgentId, "video")
-	logVoiceTiming(s.logger, "server.session_start.video_mode", videoModeStart, "space_id", spaceId)
-
-	// Load the GA's persona identity (#478) from the agent record so the voice
-	// session renders the real agent via the shared agentdef identity block,
-	// not the neutral "Assistant, General Assistant" default. Best-effort: a
-	// query failure leaves the fields empty and the voice builder degrades to
-	// the neutral default, so the session still comes up.
-	personaStart := time.Now()
-	persona := resolveAgentPersona(s, gaAgentId)
-	logVoiceTiming(s.logger, "server.session_start.persona", personaStart, "space_id", spaceId)
+	// Concurrent stage. The override resolves carry the orb-corner toggle
+	// state (without them the voice-agent always saw "mirror_user", so
+	// toggling Sofia's video icon to `always_on` never reached the avatar-gate
+	// at session start); the agent-record read carries the persona identity
+	// (#478) plus the audioControl/videoControl defaults the override layering
+	// falls back to. Every leg is best-effort -- a query failure degrades that
+	// leg to its fallback so the session still comes up.
+	state := loadVoiceSessionStartState(voiceSessionStartLoads{
+		audioOverride: func() (string, bool) {
+			legStart := time.Now()
+			mode, ok := resolveChannelOverrideMode(s, spaceId, gaAgentId, "audio")
+			logVoiceTiming(s.logger, "server.session_start.audio_mode", legStart, "space_id", spaceId)
+			return mode, ok
+		},
+		videoOverride: func() (string, bool) {
+			legStart := time.Now()
+			mode, ok := resolveChannelOverrideMode(s, spaceId, gaAgentId, "video")
+			logVoiceTiming(s.logger, "server.session_start.video_mode", legStart, "space_id", spaceId)
+			return mode, ok
+		},
+		agentRecord: func() agentRecordFields {
+			legStart := time.Now()
+			record := resolveAgentSessionRecord(s, gaAgentId)
+			logVoiceTiming(s.logger, "server.session_start.persona", legStart, "space_id", spaceId)
+			return record
+		},
+		// The vendor-issued avatar persona id (Simli faceId / Anam persona id)
+		// for the vendor the voice-agent runs (#1428): stamped catalog row id
+		// -> hydrate to the entry's vendor-issued id; stamped raw vendor id ->
+		// verbatim; unstamped -> catalog default (gender-matched, else first).
+		// Vendor-gated: the ack has no vendor field, so an id is returned only
+		// when the resolved entry's vendor matches the vendor the agent asked
+		// for. Best-effort: any failure yields "" and the session rides
+		// audio-only. Independent of the other legs (its own agent-record +
+		// catalog reads), so it rides the parallel stage.
+		avatarPersona: func() string {
+			legStart := time.Now()
+			id := resolveAgentAvatarPersona(s, gaAgentId, msg.GetAvatarVendor())
+			logVoiceTiming(s.logger, "server.session_start.avatar_persona", legStart, "space_id", spaceId)
+			return id
+		},
+	})
+	audioMode := state.audioMode
+	videoMode := state.videoMode
+	persona := state.persona
+	avatarPersonaId := state.avatarPersonaId
 	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "space_id", spaceId)
-
-	// Resolve the vendor-issued avatar persona id (Simli faceId / Anam persona
-	// id) for the vendor the voice-agent runs (#1428). This was the "Phase 9"
-	// placeholder: the ack always carried "", so the voice-agent's avatar plan
-	// resolved to audio-only and the in-room avatar never started, on any
-	// executor. Applies the same catalog hydration/fallback rules as the
-	// direct/Guide avatar path (avatardirect, #1336/#1341): stamped catalog
-	// row id -> hydrate to the entry's vendor-issued id; stamped raw vendor id
-	// -> verbatim; unstamped -> catalog default (gender-matched, else first).
-	// Vendor-gated: the ack has no vendor field, so an id is returned only when
-	// the resolved entry's vendor matches the vendor the agent asked for.
-	// Best-effort: any failure yields "" and the session rides audio-only.
-	avatarPersonaId := resolveAgentAvatarPersona(s, gaAgentId, msg.GetAvatarVendor())
 
 	if s.logger != nil {
 		s.logger.Info("voice-agent session start",
@@ -230,7 +250,7 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	// existing TurnRequest path still handles STT-initiated turns;
 	// the subscriber dedups against in-flight TurnRequests via the
 	// voiceTurns map.
-	s.startVoiceAgentSpeakSubscriber(spaceId, gaAgentId)
+	s.startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, audioMode)
 
 	return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_VoiceAgentSessionAck{
@@ -337,29 +357,18 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return fallback
 	}
-	concept := "v1:cognition:audioOverride"
-	field := "audioControl"
-	queryName := "queryAudioOverridesForSpace"
-	if channel == "video" {
-		concept = "v1:cognition:videoOverride"
-		field = "videoControl"
-		queryName = "queryVideoOverridesForSpace"
-	}
-	_ = concept // referenced for log context if we add one later
 
-	ctx := contextWithVoiceAgentActor(context.Background())
-
-	// 1) Active per-(space, agent) override. Marshal spaceId so an embedded
-	// double quote cannot break out of the DSL string literal.
-	spaceIdJSON, _ := json.Marshal(spaceId)
-	overrideQuery := fmt.Sprintf(`%s({spaceId: %s})`, queryName, string(spaceIdJSON))
-	if result, err := s.service.engine.Execute(ctx, overrideQuery); err == nil {
-		if mode, ok := extractAgentChannelMode(result.OutputPayload(), agentId); ok {
-			return mode
-		}
+	// 1) Active per-(space, agent) override.
+	if mode, ok := resolveChannelOverrideMode(s, spaceId, agentId, channel); ok {
+		return mode
 	}
 
 	// 2) Agent record's default. Marshal agentId (field is a fixed column name).
+	field := "audioControl"
+	if channel == "video" {
+		field = "videoControl"
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
 	agentIdJSON, _ := json.Marshal(agentId)
 	agentQuery := fmt.Sprintf(`from(v1:agents:agent) ?.id==%s select id, payload.%s`, string(agentIdJSON), field)
 	if result, err := s.service.engine.Execute(ctx, agentQuery); err == nil {
@@ -369,6 +378,33 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 	}
 
 	return fallback
+}
+
+// resolveChannelOverrideMode runs ONLY the override-row leg of the channel-mode
+// layering: the active v1:cognition:{audio,video}override row for this (space,
+// agent) pair (the orb-corner toggle's output). ok=false means no applicable
+// override (or a query error) -- callers fall through to the agent-record
+// default / "mirror_user". Split out of resolveInitialChannelMode (#1429) so
+// session-start can run it concurrently with the single combined agent-record
+// read instead of paying two sequential queries per channel.
+func resolveChannelOverrideMode(s *streamSession, spaceId, agentId, channel string) (string, bool) {
+	if s == nil || s.service == nil || s.service.engine == nil {
+		return "", false
+	}
+	queryName := "queryAudioOverridesForSpace"
+	if channel == "video" {
+		queryName = "queryVideoOverridesForSpace"
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
+	// Marshal spaceId so an embedded double quote cannot break out of the DSL
+	// string literal.
+	spaceIdJSON, _ := json.Marshal(spaceId)
+	overrideQuery := fmt.Sprintf(`%s({spaceId: %s})`, queryName, string(spaceIdJSON))
+	result, err := s.service.engine.Execute(ctx, overrideQuery)
+	if err != nil {
+		return "", false
+	}
+	return extractAgentChannelMode(result.OutputPayload(), agentId)
 }
 
 // agentPersonaFields is the GA persona identity loaded from the agent record
@@ -382,13 +418,25 @@ type agentPersonaFields struct {
 	personality string
 }
 
-// resolveAgentPersona loads the GA's persona identity from its v1:agents:agent
-// record in one query, mirroring resolveInitialChannelMode's agent-record read.
-// Best-effort: any failure (nil engine, query error, missing row) returns the
-// zero value so the caller stamps empty persona fields and the voice session
-// falls back to the neutral default rather than failing bring-up.
-func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
-	var out agentPersonaFields
+// agentRecordFields is everything session-start needs off the GA's
+// v1:agents:agent row, loaded in ONE query (#1429): the persona identity
+// (#478) plus the audioControl/videoControl defaults the channel-mode
+// layering falls back to when no override row applies. Previously the
+// persona and each channel's control default were three separate reads of
+// the same row.
+type agentRecordFields struct {
+	persona      agentPersonaFields
+	audioControl string
+	videoControl string
+}
+
+// resolveAgentSessionRecord loads the GA's persona identity + channel-control
+// defaults from its v1:agents:agent record in one query. Best-effort: any
+// failure (nil engine, query error, missing row) returns the zero value so the
+// caller stamps empty persona fields / falls back to "mirror_user" and the
+// voice session comes up rather than failing bring-up.
+func resolveAgentSessionRecord(s *streamSession, agentId string) agentRecordFields {
+	var out agentRecordFields
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return out
 	}
@@ -399,17 +447,19 @@ func resolveAgentPersona(s *streamSession, agentId string) agentPersonaFields {
 	// dropped and %s carries the full `"<escaped>"` token.
 	agentIdJSON, _ := json.Marshal(agentId)
 	query := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality`,
+		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality, payload.audioControl, payload.videoControl`,
 		string(agentIdJSON))
 	result, err := s.service.engine.Execute(ctx, query)
 	if err != nil {
 		return out
 	}
 	payload := result.OutputPayload()
-	out.name, _ = extractFirstAgentField(payload, "name")
-	out.role, _ = extractFirstAgentField(payload, "role")
-	out.description, _ = extractFirstAgentField(payload, "description")
-	out.personality, _ = extractFirstAgentField(payload, "personality")
+	out.persona.name, _ = extractFirstAgentField(payload, "name")
+	out.persona.role, _ = extractFirstAgentField(payload, "role")
+	out.persona.description, _ = extractFirstAgentField(payload, "description")
+	out.persona.personality, _ = extractFirstAgentField(payload, "personality")
+	out.audioControl, _ = extractFirstAgentField(payload, "audioControl")
+	out.videoControl, _ = extractFirstAgentField(payload, "videoControl")
 	return out
 }
 
@@ -450,7 +500,7 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 
 	// Agent record: stamped vendor/persona id + gender (for the catalog
 	// default). JSON-marshal interpolated ids so an embedded quote cannot break
-	// out of the DSL string literal (same pattern as resolveAgentPersona).
+	// out of the DSL string literal (same pattern as resolveAgentSessionRecord).
 	agentIdJSON, _ := json.Marshal(agentId)
 	agentQuery := fmt.Sprintf(
 		`from(v1:agents:agent) ?.id==%s select id, payload.avatarVendor, payload.avatarPersonaId, payload.gender`,
@@ -570,6 +620,86 @@ func rowsFromEnginePayload(payload any) []map[string]any {
 		return out
 	}
 	return normalizeResultRows(payload)
+}
+
+// voiceSessionStartLoads is the set of independent session-start loads
+// loadVoiceSessionStartState fans out (#1429). Each leg is best-effort and
+// must be safe to run concurrently with the others; the override legs return
+// ok=false (and the record leg the zero value) on failure so the combine
+// degrades per-leg instead of failing the ack.
+type voiceSessionStartLoads struct {
+	audioOverride func() (string, bool)
+	videoOverride func() (string, bool)
+	agentRecord   func() agentRecordFields
+	avatarPersona func() string
+}
+
+// voiceSessionStartState is the combined result the SessionAck is built from.
+type voiceSessionStartState struct {
+	audioMode       string
+	videoMode       string
+	persona         agentPersonaFields
+	avatarPersonaId string
+}
+
+// loadVoiceSessionStartState runs the four independent session-start legs
+// concurrently, waits for ALL of them (the ack needs every field), and
+// combines them with the same layering resolveInitialChannelMode applies:
+// active override row > valid agent-record control default > "mirror_user".
+func loadVoiceSessionStartState(loads voiceSessionStartLoads) voiceSessionStartState {
+	var (
+		audioOverride, videoOverride     string
+		audioOverrideOK, videoOverrideOK bool
+		record                           agentRecordFields
+		avatarPersonaId                  string
+	)
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		if loads.audioOverride != nil {
+			audioOverride, audioOverrideOK = loads.audioOverride()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if loads.videoOverride != nil {
+			videoOverride, videoOverrideOK = loads.videoOverride()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if loads.agentRecord != nil {
+			record = loads.agentRecord()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if loads.avatarPersona != nil {
+			avatarPersonaId = loads.avatarPersona()
+		}
+	}()
+	wg.Wait()
+	return voiceSessionStartState{
+		audioMode:       effectiveChannelMode(audioOverride, audioOverrideOK, record.audioControl),
+		videoMode:       effectiveChannelMode(videoOverride, videoOverrideOK, record.videoControl),
+		persona:         record.persona,
+		avatarPersonaId: avatarPersonaId,
+	}
+}
+
+// effectiveChannelMode applies the channel-mode layering to pre-fetched
+// inputs: an applicable override row wins, then a VALID agent-record control
+// default, then "mirror_user". Mirrors resolveInitialChannelMode exactly --
+// keep the two in sync.
+func effectiveChannelMode(override string, overrideOK bool, control string) string {
+	if overrideOK {
+		return override
+	}
+	if isValidChannelMode(control) {
+		return control
+	}
+	return "mirror_user"
 }
 
 // voiceAgentScopedToolNames returns the GA agent's expanded tool-name set when
@@ -782,11 +912,83 @@ func (s *streamSession) handleVoiceAgentSessionEnd(envelope *memqlv1.MemqlClient
 	})
 }
 
+// voiceSpeakQueueDepth bounds the speak-forward queue between the event-bus
+// callback (producer) and the per-session worker (consumer). Speak-eligible
+// replies are rare (chat-typed SI replies under always_on); 32 is generous.
+// On overflow the callback DROPS the reply with a warn instead of blocking
+// the bus dispatch.
+const voiceSpeakQueueDepth = 32
+
+// voiceSpeakAudioModeTTL bounds the staleness of the per-session cached audio
+// mode the speak worker gates on. Within the TTL no engine query runs at all
+// for a speak-eligible reply; past it the worker re-resolves (off the bus
+// thread). Consequence: an orb-corner audio toggle takes up to this long to
+// affect the speak path -- acceptable for a human-driven toggle, and the
+// trade that removes up-to-two engine queries per chat message (#1429).
+const voiceSpeakAudioModeTTL = 3 * time.Second
+
+// channelModeCache is a tiny single-value TTL cache for a session's resolved
+// channel mode. now is injectable for tests; nil means time.Now.
+type channelModeCache struct {
+	mu      sync.Mutex
+	mode    string
+	fetched time.Time
+	ttl     time.Duration
+	now     func() time.Time
+}
+
+// get returns the cached mode while fresh, otherwise calls resolve and caches
+// its answer. resolve runs under the cache lock -- the worker is the only
+// caller, so this just makes the cache safe if that ever changes.
+func (c *channelModeCache) get(resolve func() string) string {
+	nowFn := c.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mode != "" && nowFn().Sub(c.fetched) < c.ttl {
+		return c.mode
+	}
+	c.mode = resolve()
+	c.fetched = nowFn()
+	return c.mode
+}
+
+// runVoiceSpeakWorker drains queued GA replies in FIFO order (per-session
+// ordering: single worker, FIFO channel), resolving the CURRENT audio mode per
+// reply via resolveMode (cached/TTL'd by the caller) and forwarding always_on
+// replies via forward. Exits when done closes. Extracted from the subscriber
+// (#1429) so the event-bus callback never does an engine round-trip -- the
+// callback only filters and enqueues; this worker owns the slow legs.
+func runVoiceSpeakWorker(queue <-chan voiceAgentReply, done <-chan struct{}, resolveMode func(reply voiceAgentReply) string, forward func(reply voiceAgentReply)) {
+	for {
+		select {
+		case <-done:
+			return
+		case reply := <-queue:
+			// Only always_on triggers Speak; everything else is skipped (the
+			// caller logs the skip inside resolveMode/forward as it sees fit).
+			if resolveMode(reply) != "always_on" {
+				continue
+			}
+			forward(reply)
+		}
+	}
+}
+
 // startVoiceAgentSpeakSubscriber binds a session-long subscriber for
 // the (space, ga_agent_id) pair. The subscriber forwards SI reply
 // utterances as VoiceAgentSpeak messages so the voice-agent
 // synthesizes them via AgentSession.say(), enabling chat-typed user
 // messages to produce audible replies.
+//
+// Hot-path shape (#1429): the event-bus callback does ONLY in-memory work
+// (match, dedup, turn-in-flight check) and enqueues; a single per-session
+// worker goroutine resolves the audio mode (TTL-cached, seeded with the
+// session-start resolve) and sends the Speak. The bus dispatch never waits
+// on an engine round-trip, and the single worker preserves per-session
+// reply ordering.
 //
 // Dedup against STT-initiated turns: when a VoiceAgentTurnRequest is
 // in flight for the same (space, agent), the TurnDelta path already
@@ -799,8 +1001,8 @@ func (s *streamSession) handleVoiceAgentSessionEnd(envelope *memqlv1.MemqlClient
 // state by construction). `always_off` is skipped silently.
 //
 // Idempotent: replacing an active subscriber on a re-issued
-// SessionStart cancels the previous one first.
-func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId string) {
+// SessionStart cancels the previous one (subscription AND worker) first.
+func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, initialAudioMode string) {
 	if s == nil || s.service == nil || s.service.eventBus == nil {
 		return
 	}
@@ -823,6 +1025,19 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId string
 	// growing set never poses a memory problem in practice.
 	seenIds := make(map[string]struct{})
 	var seenMu sync.Mutex
+
+	// Speak-forward queue + worker lifetime. The callback enqueues
+	// (non-blocking, drop+warn on overflow); the worker drains FIFO.
+	speakQueue := make(chan voiceAgentReply, voiceSpeakQueueDepth)
+	done := make(chan struct{})
+
+	// Audio-mode cache, seeded with the session-start resolve so the first
+	// speak-eligible reply usually pays zero queries.
+	modeCache := &channelModeCache{ttl: voiceSpeakAudioModeTTL}
+	if initialAudioMode != "" {
+		modeCache.mode = initialAudioMode
+		modeCache.fetched = time.Now()
+	}
 
 	pattern := "graph.node.created.v1:cognition:utterance"
 	subName := fmt.Sprintf("voice-agent-speak-%s-%s", spaceId, gaAgentId)
@@ -857,56 +1072,78 @@ func (s *streamSession) startVoiceAgentSpeakSubscriber(spaceId, gaAgentId string
 			}
 			return
 		}
-		// Resolve current audio mode. Only always_on triggers Speak.
-		// #1426: synchronous engine query (up to two Execute calls) inside an
-		// event-bus callback on EVERY utterance-created event for the space.
-		modeStart := time.Now()
-		mode := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
-		logVoiceTiming(s.logger, "server.speak.audio_mode_lookup", modeStart,
-			"space_id", spaceId, "utterance_id", reply.utteranceId)
-		if mode != "always_on" {
+		// Hand off to the worker. Never block the event-bus dispatch: a full
+		// queue drops the reply (surfaced as a warn, not as bus latency).
+		select {
+		case speakQueue <- reply:
+		default:
 			if s.logger != nil {
+				s.logger.Warn("voice-agent speak queue full: dropping reply",
+					"space_id", spaceId,
+					"ga_agent_id", gaAgentId,
+					"utterance_id", reply.utteranceId)
+			}
+		}
+	}, events.WithSubscriberName(subName))
+
+	go runVoiceSpeakWorker(speakQueue, done,
+		func(reply voiceAgentReply) string {
+			// Resolve current audio mode, TTL-cached. Only a cache miss pays
+			// the engine round-trip (and is the only thing the timing record
+			// measures -- a hit costs nothing and logs nothing).
+			mode := modeCache.get(func() string {
+				modeStart := time.Now()
+				resolved := resolveInitialChannelMode(s, spaceId, gaAgentId, "audio")
+				logVoiceTiming(s.logger, "server.speak.audio_mode_lookup", modeStart,
+					"space_id", spaceId, "utterance_id", reply.utteranceId)
+				return resolved
+			})
+			if mode != "always_on" && s.logger != nil {
 				s.logger.Info("voice-agent speak skip: audio mode not always_on",
 					"space_id", spaceId,
 					"ga_agent_id", gaAgentId,
 					"utterance_id", reply.utteranceId,
 					"audio_mode", mode)
 			}
-			return
-		}
-
-		requestId := fmt.Sprintf("speak-%d-%s", time.Now().UnixNano(), randHex(4))
-		if s.logger != nil {
-			s.logger.Info("voice-agent speak emit",
-				"request_id", requestId,
-				"space_id", spaceId,
-				"ga_agent_id", gaAgentId,
-				"utterance_id", reply.utteranceId,
-				"text_len", len(reply.text))
-		}
-		// Empty correlate_to -- this is a server-pushed message, not
-		// a reply to a client request. Voice-agent's read loop has a
-		// dedicated dispatch for unsolicited VoiceAgentSpeak.
-		s.sendServerMessage("", &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_VoiceAgentSpeak{
-				VoiceAgentSpeak: &memqlv1.VoiceAgentSpeak{
-					RequestId:   requestId,
-					SpaceId:     spaceId,
-					GaAgentId:   gaAgentId,
-					UtteranceId: reply.utteranceId,
-					Text:        reply.text,
+			return mode
+		},
+		func(reply voiceAgentReply) {
+			requestId := fmt.Sprintf("speak-%d-%s", time.Now().UnixNano(), randHex(4))
+			if s.logger != nil {
+				s.logger.Info("voice-agent speak emit",
+					"request_id", requestId,
+					"space_id", spaceId,
+					"ga_agent_id", gaAgentId,
+					"utterance_id", reply.utteranceId,
+					"text_len", len(reply.text))
+			}
+			// Empty correlate_to -- this is a server-pushed message, not
+			// a reply to a client request. Voice-agent's read loop has a
+			// dedicated dispatch for unsolicited VoiceAgentSpeak.
+			s.sendServerMessage("", &memqlv1.MemqlServerMessage{
+				Payload: &memqlv1.MemqlServerMessage_VoiceAgentSpeak{
+					VoiceAgentSpeak: &memqlv1.VoiceAgentSpeak{
+						RequestId:   requestId,
+						SpaceId:     spaceId,
+						GaAgentId:   gaAgentId,
+						UtteranceId: reply.utteranceId,
+						Text:        reply.text,
+					},
 				},
-			},
+			})
 		})
-	}, events.WithSubscriberName(subName))
 
 	s.voiceAgentSpeakSubMu.Lock()
-	s.voiceAgentSpeakStop = unsubscribe
+	s.voiceAgentSpeakStop = func() {
+		unsubscribe()
+		close(done)
+	}
 	s.voiceAgentSpeakSubMu.Unlock()
 }
 
 // stopVoiceAgentSpeakSubscriber tears down the session-long
-// subscriber. Safe to call on a non-voice-agent stream (no-op).
+// subscriber (subscription AND speak worker). Safe to call on a
+// non-voice-agent stream (no-op).
 func (s *streamSession) stopVoiceAgentSpeakSubscriber() {
 	if s == nil {
 		return
