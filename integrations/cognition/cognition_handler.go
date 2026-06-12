@@ -451,15 +451,40 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 	// the "this isn't a complete thought yet, wait" check Voice
 	// needs even more than text does (text users can rephrase by
 	// editing; voice users get talked over).
+	//
+	// Deterministic short-circuit (#1329 candidate 3): in a
+	// 1-human/1-agent TEXT space with no ambiguous @-addressing, the
+	// classification is synthesized without an LLM call (see
+	// classification_shortcircuit.go for the predicate + safety
+	// argument). ClassifyWithShortCircuit returns instantly in that
+	// case, so g.Wait() no longer blocks on the classifier for the
+	// single-agent daily-space turn the #1329 trace measured.
 	var classification MessageClassification
 	var classificationOK bool
 	runClassifier := len(scoringUtterance.Mentions) == 0
 	if runClassifier {
+		humanCount := 0
+		for _, hp := range humanParticipants {
+			if hp != nil {
+				humanCount++
+			}
+		}
 		g.Go(func() error {
 			lastAgentText := mostRecentAgentText(c.scoreEngine, spaceId)
 			roster := agentRosterFromCandidates(candidates)
-			classification = c.classifier.Classify(gCtx, scoringUtterance.Text, lastAgentText, roster)
+			var shortCircuited bool
+			classification, shortCircuited = c.classifier.ClassifyWithShortCircuit(
+				gCtx, scoringUtterance.Text, lastAgentText, roster,
+				humanCount, isVoiceUtteranceEarly)
 			classificationOK = true
+			if shortCircuited {
+				c.Logger.Info("cognition: messageClassification short-circuit",
+					"spaceId", spaceId,
+					"utteranceId", utterance.ID,
+					"addressedAgentName", classification.AddressedAgentName,
+					"reason", classification.Reasoning,
+					"text", scoringUtterance.Text)
+			}
 			return nil
 		})
 	}
