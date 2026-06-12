@@ -80,6 +80,39 @@ func (f *fakeOutboxStore) LoadCursor(_ context.Context, key RoutingKey, consumer
 	return f.cursors[key.String()+"|"+consumerID], nil
 }
 
+// EnsureCursor mirrors pgOutboxStore.EnsureCursor (ADR 4.4 / memql#1328): an
+// existing cursor resumes exactly; fromStart returns 0 without creating a row
+// (the row appears on first Ack, the pre-#1328 shape); otherwise the cursor is
+// initialized AND persisted at the key's high watermark. The watermark is the
+// seq allocator's current value (mirroring mesh_key_seq.next_seq, which the
+// retention sweep never deletes), read under the same mutex Append takes, so
+// the snapshot is atomic with respect to concurrent producers -- exactly the
+// committed-read guarantee the pg path gets from the allocator row lock.
+func (f *fakeOutboxStore) EnsureCursor(_ context.Context, key RoutingKey, consumerID string, fromStart bool) (int64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ck := key.String() + "|" + consumerID
+	if seq, ok := f.cursors[ck]; ok {
+		return seq, false, nil
+	}
+	if fromStart {
+		return 0, false, nil
+	}
+	w := f.nextSeq[key.String()]
+	f.cursors[ck] = w
+	f.cursorAt[ck] = f.clock()
+	return w, true, nil
+}
+
+// hasCursorRow reports whether a cursor row exists for (key, consumer) --
+// used to prove fromStart does NOT persist a row before the first Ack.
+func (f *fakeOutboxStore) hasCursorRow(key RoutingKey, consumerID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.cursors[key.String()+"|"+consumerID]
+	return ok
+}
+
 func (f *fakeOutboxStore) SaveCursor(_ context.Context, key RoutingKey, consumerID string, seq int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -235,10 +268,12 @@ func TestSubstrateReplayFromCursor(t *testing.T) {
 		}
 	}
 
-	// First consumer connects, replays all 5 from the watermark (cursor 0),
-	// acks through e3, then disconnects.
+	// First consumer connects with opt-in backlog replay (memql#1328: a
+	// brand-new consumer defaults to the high watermark; this test wants the
+	// pre-existing rows), replays all 5 from seq 0, acks through e3, then
+	// disconnects.
 	ctx1, cancel1 := context.WithCancel(ctx)
-	ch1, err := sub.Subscribe(ctx1, key, "consumerA")
+	ch1, err := sub.Subscribe(ctx1, key, "consumerA", WithReplayBacklog())
 	if err != nil {
 		t.Fatalf("Subscribe 1: %v", err)
 	}
@@ -251,10 +286,12 @@ func TestSubstrateReplayFromCursor(t *testing.T) {
 	}
 	cancel1()
 
-	// A NEW consumer reconnects under the SAME logical consumer id (e.g. a
-	// different BFF replica taking over the key). It MUST replay exactly the
-	// rows after its cursor (e4, e5), exactly once -- the star-topology bug
-	// this design removes.
+	// A NEW subscription reconnects under the SAME logical consumer id (e.g.
+	// the replica resuming the key). It MUST replay exactly the rows after
+	// its cursor (e4, e5), exactly once -- the star-topology bug this design
+	// removes. Deliberately WITHOUT WithReplayBacklog: an existing cursor row
+	// wins over both modes (memql#1328), so the default-tip subscribe must
+	// resume from 3, not jump to the watermark 5.
 	ctx2, cancel2 := context.WithCancel(ctx)
 	defer cancel2()
 	// give tail-1 a moment to fully exit so its dedup state is irrelevant
@@ -446,12 +483,12 @@ func TestSubstrateMeshDownStillDelivers(t *testing.T) {
 	defer cancel()
 	key := testKey("meshdown")
 
-	if _, err := sub.Publish(ctx, mkDeliverable(key, "e1", "t")); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
 	ch, err := sub.Subscribe(ctx, key, "c")
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
+	}
+	if _, err := sub.Publish(ctx, mkDeliverable(key, "e1", "t")); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 	got := recvN(t, ch, 1, 2*time.Second)
 	if got[0].EventID != "e1" {

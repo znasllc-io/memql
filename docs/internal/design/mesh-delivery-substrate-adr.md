@@ -242,14 +242,37 @@ requires.
 On every (re)connect a consumer resumes from its **cursor**: the highest
 `seq` it has acknowledged for each subscribed key. Catch-up is "read all rows
 for key K with `seq > cursor` in ascending order, deliver, then advance the
-cursor." A brand-new consumer for a key (e.g. a different BFF replica taking
-over the WS) starts from a defined watermark (0, or a configured "since"
-position) and replays the retained backlog. The cursor MUST be durable enough
-to survive the consumer's restart -- either persisted per (key, consumerId)
-in the database, or reconstructed from the consumer's own
-already-applied/deduped state on reconnect. The choice between
-DB-persisted-cursor and reconstruct-from-applied-state is left to memql#1263,
-but the *semantics* above are fixed.
+cursor."
+
+A **brand-new consumer** for a key (no cursor row -- e.g. the per-pod
+consumer a rollout mints) **starts at the key's current high watermark**
+(amended by memql#1328): on first subscribe its cursor is atomically
+initialized AND persisted at the key's highest committed `seq`, so it
+receives only deliverables produced after it first subscribed. **Backlog
+replay is opt-in per subscription** (`WithReplayBacklog`) for consumers that
+genuinely need first-subscribe history -- the per-request stream and RPC
+keys, where the "backlog" is the head of the very exchange being consumed;
+the opt-in mode starts from seq 0 and replays the retained backlog.
+**Retention bounds the replayable window** either way (the memql#1328 sweep,
+PR #1348). Long-lived keys with per-pod consumer ids (the chat-reply space
+subscriptions) use the high-watermark default: replaying a retention window
+of history into every fresh pod was the failure mode the default removes.
+
+The high-watermark init MUST NOT race a concurrent producer into losing
+events: anything committed after the cursor is initialized has `seq` above
+the watermark and is delivered; anything committed before it MAY be skipped
+-- that is the point. The init therefore snapshots only committed
+seq-allocator state (per-key appends commit in seq order under the allocator
+row lock) and resolves synchronously inside Subscribe, so "produced after
+Subscribe returns" implies "delivered". An EXISTING cursor row always wins
+over both modes: the consumer resumes exactly -- never re-pinned forward,
+never rewound.
+
+The cursor MUST be durable enough to survive the consumer's restart --
+either persisted per (key, consumerId) in the database, or reconstructed
+from the consumer's own already-applied/deduped state on reconnect. The
+choice between DB-persisted-cursor and reconstruct-from-applied-state is
+left to memql#1263, but the *semantics* above are fixed.
 
 ### 4.5 Mesh fast-path coexistence
 
@@ -337,9 +360,11 @@ type DeliverySubstrate interface {
     Publish(ctx context.Context, d Deliverable) (seq int64, err error)
 
     // Subscribe returns an ordered, replayed, deduped stream for one logical
-    // key. On (re)connect it replays from the cursor for consumerID
-    // (4.4) before tailing live. Cancel via ctx.
-    Subscribe(ctx context.Context, key RoutingKey, consumerID string) (<-chan Deliverable, error)
+    // key. An existing consumer replays from its cursor (4.4) before tailing
+    // live; a brand-new consumer starts at the key's high watermark unless
+    // WithReplayBacklog opts it into replaying the retained backlog
+    // (memql#1328). Cancel via ctx.
+    Subscribe(ctx context.Context, key RoutingKey, consumerID string, opts ...SubscribeOption) (<-chan Deliverable, error)
 
     // Ack advances the cursor for (key, consumerID) to seq (4.4).
     Ack(ctx context.Context, key RoutingKey, consumerID string, seq int64) error

@@ -195,7 +195,10 @@ Routing rules use `*` to match any partition segment in event topics. For exampl
 The durable outbox+cursor backbone the ADR pins. Producers `Publish` a
 logically-addressed `Deliverable`; consumers `Subscribe(key, consumerID)` for an
 ordered, replayed, deduped stream and `Ack` to advance a durable per-(key,
-consumer) cursor. Mesh fast-path hints (`HandleFastPath`) short-circuit latency
+consumer) cursor. A brand-new consumer (no cursor row) starts at the key's
+current high watermark by default; backlog replay is opt-in per subscription
+via `WithReplayBacklog`, and retention bounds the replayable window
+(memql#1328). Mesh fast-path hints (`HandleFastPath`) short-circuit latency
 and feed the per-subscription dedup window; the cursor advances on the durable
 path only. This is a library capability today -- constructing it in `app/` and
 wiring the `EventBridge` fast-path + the WS-owning-replica consume loop lands

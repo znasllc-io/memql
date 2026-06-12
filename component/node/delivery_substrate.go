@@ -31,10 +31,16 @@ import (
 //   - Per-key ordering (ADR 4.3). Deliverables for a single key are delivered
 //     in produce order via a per-key monotonic Seq; the cursor advances
 //     monotonically. No cross-key ordering is promised (fan-out parallelism).
-//   - Replay / catch-up on (re)connect (ADR 4.4). On every (re)connect a
-//     consumer resumes from its cursor (the highest acked Seq for the key) and
-//     replays "seq > cursor" in ascending order before tailing live. A
-//     brand-new consumer starts from seq 0 and replays the retained backlog.
+//   - Replay / catch-up on (re)connect (ADR 4.4, amended by memql#1328). On
+//     every (re)connect a consumer resumes from its cursor (the highest acked
+//     Seq for the key) and replays "seq > cursor" in ascending order before
+//     tailing live. A BRAND-NEW consumer (no cursor row) starts at the key's
+//     current HIGH WATERMARK by default: its cursor is atomically initialized
+//     and persisted at the key's highest allocated seq, so it receives only
+//     deliverables produced after it first subscribed. Backlog replay is
+//     OPT-IN per subscription (WithReplayBacklog) for consumers that
+//     genuinely need first-subscribe history; retention (memql#1328) bounds
+//     the replayable window either way.
 //   - Mesh fast-path coexistence (ADR 4.5). The mesh push (EventBridge) MAY
 //     deliver the same deliverable ahead of the durable pull for latency; it
 //     carries the same EventID and is deduped against the durable path. The
@@ -55,15 +61,42 @@ type DeliverySubstrate interface {
 	Publish(ctx context.Context, d Deliverable) (seq int64, err error)
 
 	// Subscribe returns an ordered, replayed, deduped stream for one logical
-	// key. On (re)connect it replays from the cursor for consumerID (ADR 4.4)
-	// before tailing live. The returned channel is closed when ctx is
-	// cancelled. Each delivered Deliverable carries its assigned Seq; the
-	// consumer Acks to advance its cursor.
-	Subscribe(ctx context.Context, key RoutingKey, consumerID string) (<-chan Deliverable, error)
+	// key. An EXISTING consumer (one with a cursor row) replays from its
+	// cursor (ADR 4.4) before tailing live. A BRAND-NEW consumer starts at
+	// the key's current high watermark -- only deliverables produced after
+	// Subscribe returns are guaranteed delivered -- unless WithReplayBacklog
+	// opts it into replaying the retained backlog from seq 0 (memql#1328).
+	// The returned channel is closed when ctx is cancelled. Each delivered
+	// Deliverable carries its assigned Seq; the consumer Acks to advance its
+	// cursor.
+	Subscribe(ctx context.Context, key RoutingKey, consumerID string, opts ...SubscribeOption) (<-chan Deliverable, error)
 
 	// Ack advances the persisted cursor for (key, consumerID) to seq (ADR 4.4).
 	// The cursor never moves backwards.
 	Ack(ctx context.Context, key RoutingKey, consumerID string, seq int64) error
+}
+
+// SubscribeOption customizes one Subscribe call.
+type SubscribeOption func(*subscribeOptions)
+
+type subscribeOptions struct {
+	replayBacklog bool
+}
+
+// WithReplayBacklog opts this subscription into first-subscribe backlog
+// replay (memql#1328): a BRAND-NEW consumer (no cursor row) starts from seq 0
+// and replays the retained backlog instead of initializing its cursor at the
+// key's current high watermark. Reserve it for subscriptions that genuinely
+// need first-subscribe history -- per-request stream/RPC keys, where the
+// "backlog" is the head of the very exchange being consumed and the producer
+// legitimately starts before the consumer subscribes. Long-lived keys with
+// per-pod consumer ids (the chat-reply space subscriptions) must NOT use it:
+// every rollout mints brand-new consumers, and replaying a full retention
+// window of history to each fresh pod is exactly the failure mode the
+// high-watermark default removes. An EXISTING cursor row always wins over
+// either mode (the consumer resumes exactly).
+func WithReplayBacklog() SubscribeOption {
+	return func(o *subscribeOptions) { o.replayBacklog = true }
 }
 
 // RoutingKey is a logical delivery address (ADR 4.1): a typed "<kind>:<id>"
@@ -117,9 +150,19 @@ type outboxStore interface {
 	// bound). This is the catch-up/replay read (ADR 4.4).
 	ReadAfter(ctx context.Context, key RoutingKey, afterSeq int64, limit int) ([]Deliverable, error)
 
-	// LoadCursor returns the persisted cursor seq for (key, consumerID), or 0
-	// if none is stored (a brand-new consumer replays from the watermark).
-	LoadCursor(ctx context.Context, key RoutingKey, consumerID string) (int64, error)
+	// EnsureCursor resolves the starting cursor for (key, consumerID)
+	// (ADR 4.4, amended by memql#1328). An existing cursor row is returned
+	// as-is (the consumer resumes exactly). When no row exists and fromStart
+	// is true, it returns 0 WITHOUT creating a row -- the opt-in backlog
+	// replay; the row appears on the first Ack, as before. When no row exists
+	// and fromStart is false, it atomically initializes AND persists the
+	// cursor at the key's current high watermark (the highest committed seq
+	// the allocator has handed out) and returns it with initialized=true.
+	// The init MUST NOT race a concurrent producer into losing events: any
+	// append that commits after the watermark snapshot has seq > watermark
+	// and is picked up by ReadAfter; appends committed before it are skipped
+	// by design.
+	EnsureCursor(ctx context.Context, key RoutingKey, consumerID string, fromStart bool) (seq int64, initialized bool, err error)
 
 	// SaveCursor advances the persisted cursor for (key, consumerID) to seq.
 	// It MUST be monotonic: a lower seq than the stored value is ignored.
@@ -193,6 +236,7 @@ type subscription struct {
 	dedup      *eventDedup    // per-subscription cross-path dedup (ADR 4.2)
 	wake       chan struct{}  // "pull the durable outbox now" nudge
 	hints      chan Deliverable // mesh fast-path deliverables (latency short-circuit)
+	startPos   int64            // starting durable position, resolved by Subscribe via EnsureCursor
 }
 
 // NewSubstrate builds a delivery substrate over the given durable store.
@@ -249,15 +293,39 @@ func (s *Substrate) Publish(ctx context.Context, d Deliverable) (int64, error) {
 }
 
 // Subscribe returns an ordered, replayed, deduped stream for one logical key
-// (ADR 4.4). It replays from the consumer's cursor, then tails live, waking on
-// a Publish to this key, a mesh fast-path hint, or the poll interval. The
-// channel closes on ctx cancellation.
-func (s *Substrate) Subscribe(ctx context.Context, key RoutingKey, consumerID string) (<-chan Deliverable, error) {
+// (ADR 4.4, amended by memql#1328). An existing consumer replays from its
+// cursor; a brand-new consumer starts at the key's current high watermark
+// unless WithReplayBacklog is passed. It then tails live, waking on a Publish
+// to this key, a mesh fast-path hint, or the poll interval. The channel closes
+// on ctx cancellation.
+//
+// The starting position is resolved SYNCHRONOUSLY, before Subscribe returns,
+// so the high-watermark init can never race a producer into losing events:
+// every deliverable produced after Subscribe returns has seq above the pinned
+// watermark and is delivered; deliverables produced before it MAY be skipped
+// (that is the point of the default). Callers that publish a row and then
+// expect it on a subscription they opened FIRST keep that guarantee verbatim.
+func (s *Substrate) Subscribe(ctx context.Context, key RoutingKey, consumerID string, opts ...SubscribeOption) (<-chan Deliverable, error) {
 	if !key.Valid() {
 		return nil, fmt.Errorf("delivery substrate: invalid routing key %q", key.String())
 	}
 	if consumerID == "" {
 		return nil, fmt.Errorf("delivery substrate: subscribe to %s missing consumerID", key.String())
+	}
+	var o subscribeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	pos, initialized, err := s.store.EnsureCursor(ctx, key, consumerID, o.replayBacklog)
+	if err != nil {
+		return nil, fmt.Errorf("delivery substrate: ensure cursor for %s/%s: %w", key.String(), consumerID, err)
+	}
+	if initialized {
+		// Structured marker for staging verification (memql#1328): a brand-new
+		// consumer was pinned at the key's tip instead of replaying backlog.
+		s.info("delivery substrate: brand-new consumer; cursor initialized at high watermark",
+			"key", key.String(), "consumer", consumerID, "watermark", pos)
 	}
 
 	out := make(chan Deliverable, substrateChannelBuffer)
@@ -268,6 +336,7 @@ func (s *Substrate) Subscribe(ctx context.Context, key RoutingKey, consumerID st
 		dedup:      newEventDedup(s.dedupTTL),
 		wake:       make(chan struct{}, 1),
 		hints:      make(chan Deliverable, substrateChannelBuffer),
+		startPos:   pos,
 	}
 	s.register(sub)
 
@@ -321,14 +390,12 @@ func (s *Substrate) tail(ctx context.Context, sub *subscription) {
 	defer s.unregister(sub)
 
 	// pos is the local "delivered so far this connection" marker. It starts at
-	// the persisted cursor (ADR 4.4) and advances only as DURABLE rows are read
-	// -- never on a mesh hint -- so a dropped durable row is never skipped.
-	pos, err := s.store.LoadCursor(ctx, sub.key, sub.consumerID)
-	if err != nil {
-		s.warn("delivery substrate: load cursor failed; starting from 0",
-			"key", sub.key.String(), "consumer", sub.consumerID, "error", err)
-		pos = 0
-	}
+	// the position Subscribe resolved synchronously via EnsureCursor (the
+	// persisted cursor, or the freshly-pinned high watermark, or 0 under
+	// WithReplayBacklog -- ADR 4.4 / memql#1328) and advances only as DURABLE
+	// rows are read -- never on a mesh hint -- so a dropped durable row is
+	// never skipped.
+	pos := sub.startPos
 
 	ticker := time.NewTicker(substratePollInterval)
 	defer ticker.Stop()
@@ -447,6 +514,12 @@ func (s *Substrate) wakeKey(key RoutingKey) {
 func (s *Substrate) warn(msg string, args ...any) {
 	if s.logger != nil {
 		s.logger.Warn(msg, args...)
+	}
+}
+
+func (s *Substrate) info(msg string, args ...any) {
+	if s.logger != nil {
+		s.logger.Info(msg, args...)
 	}
 }
 

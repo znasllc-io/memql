@@ -274,9 +274,16 @@ func (d *ChatReplyDelivery) publishDeliverable(ctx context.Context, dl Deliverab
 	}
 }
 
-// ensureSubscribed starts a single durable subscription per space-key (idempotent
-// per key). The subscription replays from this consumer's cursor, then tails
-// live, re-publishing each deliverable onto the local bus and Acking as it goes.
+// ensureSubscribed starts a single durable subscription per space-key
+// (idempotent per key). An EXISTING consumer replays from its cursor, then
+// tails live, re-publishing each deliverable onto the local bus and Acking as
+// it goes. A BRAND-NEW consumer starts at the space key's current high
+// watermark (the memql#1328 default): consumer ids are per-pod, so every
+// rollout mints brand-new consumers, and the pre-#1328 backlog replay
+// re-delivered up to a full retention window of chat history to every fresh
+// pod. Live chat is a tail concern -- the graph rows are the source of truth
+// for history -- so the tip is the correct starting position here; the
+// browser's own (re)connect fetches history from the graph, not the outbox.
 func (d *ChatReplyDelivery) ensureSubscribed(key RoutingKey) {
 	d.mu.Lock()
 	if d.stopped || d.ctx == nil {

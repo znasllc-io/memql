@@ -218,7 +218,14 @@ func (r *SubstrateRPC) Serve(ctx context.Context, ownKey RoutingKey, handler RPC
 		return fmt.Errorf("substrate rpc: nil handler")
 	}
 
-	stream, err := r.substrate.Subscribe(ctx, ownKey, r.consumerID)
+	// RPC serve keys DEPEND on first-subscribe backlog replay (memql#1328): a
+	// request can land in the outbox before this Serve loop's subscription is
+	// initialized (the caller publishes as soon as the key exists), and the
+	// documented contract -- "a request produced while the handler replica was
+	// mid-restart is not lost" -- requires replaying it. Serve keys are
+	// per-turn / per-logical-callee, so there is no stale rollout backlog to
+	// skip; retention bounds the window regardless.
+	stream, err := r.substrate.Subscribe(ctx, ownKey, r.consumerID, WithReplayBacklog())
 	if err != nil {
 		return fmt.Errorf("substrate rpc: subscribe %s: %w", ownKey.String(), err)
 	}
@@ -322,7 +329,13 @@ func (r *SubstrateRPC) ensureStarted(ctx context.Context) error {
 	r.mu.Unlock()
 
 	pumpCtx, cancel := context.WithCancel(context.Background())
-	stream, err := r.substrate.Subscribe(pumpCtx, r.selfKey, r.consumerID)
+	// The reply pump keeps backlog replay too (memql#1328): replies are
+	// normally produced after this subscription exists (ensureStarted runs
+	// before the request Publish), but a reply that raced the pump's first
+	// subscribe -- or one left unacked by a same-consumer restart -- must
+	// still be replayed so the caller is never silently skipped. Reply keys
+	// are per-logical-caller, so there is no rollout backlog to skip.
+	stream, err := r.substrate.Subscribe(pumpCtx, r.selfKey, r.consumerID, WithReplayBacklog())
 	if err != nil {
 		cancel()
 		return fmt.Errorf("substrate rpc: subscribe reply key %s: %w", r.selfKey.String(), err)

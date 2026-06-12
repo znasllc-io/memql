@@ -262,7 +262,7 @@ func TestTextChunksStreamToWSOwningReplica(t *testing.T) {
 
 // waitForCursor polls until the stored cursor for (key, consumer) reaches at
 // least want, or times out.
-func waitForCursor(t *testing.T, store outboxStore, key RoutingKey, consumer string, want int64) error {
+func waitForCursor(t *testing.T, store *fakeOutboxStore, key RoutingKey, consumer string, want int64) error {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

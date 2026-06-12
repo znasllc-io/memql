@@ -67,7 +67,11 @@ func (f *fakeSubstrate) Publish(_ context.Context, d node.Deliverable) (int64, e
 	return seq, nil
 }
 
-func (f *fakeSubstrate) Subscribe(ctx context.Context, key node.RoutingKey, consumerID string) (<-chan node.Deliverable, error) {
+// Subscribe ignores SubscribeOptions: the fake always replays the backlog
+// after the consumer's cursor, which matches the WithReplayBacklog mode the
+// stream consumer under test passes (memql#1328) -- stream keys are
+// per-request and depend on first-subscribe replay.
+func (f *fakeSubstrate) Subscribe(ctx context.Context, key node.RoutingKey, consumerID string, _ ...node.SubscribeOption) (<-chan node.Deliverable, error) {
 	f.mu.Lock()
 	sub := &fakeSub{
 		key:      key,
