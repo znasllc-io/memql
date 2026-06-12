@@ -190,3 +190,99 @@ func TestGoalTriageDecision_RoundTrip(t *testing.T) {
 		t.Fatalf("round-trip failed: c=%q r=%q err=%v", c, r, err)
 	}
 }
+
+// --- produceArtifact routing (memql#1393: the known-trivial shortcut is
+// gone; the classifier decides, with a direct-turn fallback on error) ---
+
+// newProduceArtifactTriageLoop mirrors newTriageLoop but mints the plan as
+// kind=produceArtifact. complexity "" makes the classifier emit an
+// unparseable decision (the classify-error path).
+func newProduceArtifactTriageLoop(t *testing.T, complexity, ownerAgentId string) (*PlannerAgentLoop, *fakeEngine) {
+	t.Helper()
+	planRow := map[string]any{
+		"output": []any{
+			map[string]any{
+				"id":           "plan-1",
+				"kind":         produceArtifactPlanKind,
+				"status":       "planning",
+				"goal":         "a markdown file with 10 folk tales, each told as a complete story",
+				"requestedBy":  "user-1",
+				"ownerAgentId": ownerAgentId,
+			},
+		},
+	}
+	fe := &fakeEngine{
+		execResponder: func(query string) (any, error) {
+			if containsAll(query, "queryPlanById") {
+				return planRow, nil
+			}
+			return nil, nil
+		},
+		siResponder: func(templateId string, _ map[string]any) (any, error) {
+			if templateId == "goalComplexityTriage" {
+				return map[string]any{"complexity": complexity, "reasoning": "test"}, nil
+			}
+			return nil, nil
+		},
+	}
+	return &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}, fe
+}
+
+// Small artifact: classifier says trivial -> single direct production turn,
+// exactly the pre-#1393 behavior, now with one cheap classifier call.
+func TestTriage_ProduceArtifactTrivial_RoutesDirect(t *testing.T) {
+	l, fe := newProduceArtifactTriageLoop(t, "trivial", "agent-1")
+	handled, err := l.triageAndMaybeShortcut(context.Background(), "plan-1", "")
+	if err != nil || !handled {
+		t.Fatalf("trivial produceArtifact must shortcut direct: handled=%v err=%v", handled, err)
+	}
+	exec, si, _ := fe.snapshot()
+	if countContains(si, "goalComplexityTriage") != 1 {
+		t.Fatalf("expected exactly 1 classifier call, got %d", countContains(si, "goalComplexityTriage"))
+	}
+	if countContains(exec, "mutationStartPlan") != 1 {
+		t.Fatalf("expected 1 mutationStartPlan, got %d", countContains(exec, "mutationStartPlan"))
+	}
+}
+
+// Large artifact: classifier says moderate -> fall through to the decompose
+// loop (the #1393 fix: '10 full stories' must NOT be forced into one turn).
+func TestTriage_ProduceArtifactModerate_FallsThroughToDecompose(t *testing.T) {
+	l, fe := newProduceArtifactTriageLoop(t, "moderate", "agent-1")
+	handled, err := l.triageAndMaybeShortcut(context.Background(), "plan-1", "")
+	if err != nil || handled {
+		t.Fatalf("moderate produceArtifact must fall through to decompose: handled=%v err=%v", handled, err)
+	}
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, "mutationStartPlan") != 0 {
+		t.Fatalf("moderate artifact must NOT shortcut-start, got %d mutationStartPlan", countContains(exec, "mutationStartPlan"))
+	}
+}
+
+// Classifier failure on a produceArtifact plan falls BACK to the direct
+// turn (the pre-#1393 posture) instead of the decompose loop -- the plan
+// always has an owner and a small first pass beats stranding it.
+func TestTriage_ProduceArtifactClassifyError_FallsBackDirect(t *testing.T) {
+	l, fe := newProduceArtifactTriageLoop(t, "", "agent-1") // "" -> unknown class -> classify error
+	handled, err := l.triageAndMaybeShortcut(context.Background(), "plan-1", "")
+	if err != nil || !handled {
+		t.Fatalf("classify error on produceArtifact must fall back to direct: handled=%v err=%v", handled, err)
+	}
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, "mutationStartPlan") != 1 {
+		t.Fatalf("expected the direct-turn fallback to start the plan once, got %d", countContains(exec, "mutationStartPlan"))
+	}
+}
+
+// produceArtifact without an owning agent falls through before any
+// classifier call -- the decompose loop assigns an agent.
+func TestTriage_ProduceArtifactNoOwner_FallsThrough(t *testing.T) {
+	l, fe := newProduceArtifactTriageLoop(t, "trivial", "")
+	handled, err := l.triageAndMaybeShortcut(context.Background(), "plan-1", "")
+	if err != nil || handled {
+		t.Fatalf("ownerless produceArtifact must fall through: handled=%v err=%v", handled, err)
+	}
+	if _, si, _ := fe.snapshot(); countContains(si, "goalComplexityTriage") != 0 {
+		t.Fatalf("ownerless produceArtifact must not call the classifier, got %d", countContains(si, "goalComplexityTriage"))
+	}
+}

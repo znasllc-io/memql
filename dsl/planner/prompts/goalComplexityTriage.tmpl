@@ -17,15 +17,18 @@ Current time: {{.now}}
 
 ## CLASSIFICATION CRITERIA
 
-complexity = "trivial" when the goal is a SINGLE self-contained deliverable an agent can produce in one turn with no external research, no new specialist, and no multi-step plan:
+complexity = "trivial" when the goal is a SINGLE self-contained deliverable an agent can produce in ONE writing pass with no external research, no new specialist, and no multi-step plan:
 - "a list of 10 birds", "a haiku about the sea", "a one-page markdown summary of X"
 - "a sample JSON config", "a short outline", "rename these three things"
-- Anything where the answer IS the deliverable and it fits in one writing pass.
+- "a detailed 2-3 page essay on photosynthesis" (long-ish but still one pass)
+- Anything where the answer IS the deliverable and its FULL text fits in one writing pass (roughly up to ~2,000 words of output).
 
-complexity = "moderate" when the goal needs a few clear steps or one existing specialist, but no research, no training, and no multi-phase program:
+complexity = "moderate" when the goal needs a few clear steps or one existing specialist, but no research, no training, and no multi-phase program -- INCLUDING a conceptually-simple deliverable whose full text is too large for one writing pass and must be produced section by section:
 - "compare these two documents and write up the differences"
 - "draft a project plan from this brief"
 - "summarize across the files already in my knowledge base"
+- "a file with 10 folk tales, each told as a COMPLETE story with all scenes and dialogue" (one deliverable, but ~10 sections of full prose -- far beyond one pass)
+- "a 30-page handbook", "full chapter drafts for each item in this outline"
 
 complexity = "complex" when the goal is a multi-phase program, needs multiple specialists, requires external research/web fetches, or implies building a durable reused capability:
 - "build me a competitive-analysis report researching the top 5 vendors"
@@ -33,8 +36,9 @@ complexity = "complex" when the goal is a multi-phase program, needs multiple sp
 - "create a specialist that can do X going forward"
 
 ## RULES
-- When in doubt between trivial and moderate, prefer the CHEAPER class (trivial) -- a misclassified trivial goal that turns out to need more simply produces a first pass; a misclassified moderate goal needlessly burns the expensive loop.
-- A goal that merely sounds long but is still one deliverable ("a detailed 2-page essay on photosynthesis") is TRIVIAL -- length is not complexity.
+- When in doubt between trivial and moderate, prefer the CHEAPER class (trivial) -- a misclassified trivial goal that turns out to need more simply produces a first pass; a misclassified moderate goal needlessly burns the expensive loop. EXCEPTION: when the doubt is about OUTPUT VOLUME, prefer moderate -- a too-large deliverable forced into one pass doesn't degrade gracefully, it times out and the user gets nothing.
+- Estimate the VOLUME of the finished deliverable, not how hard it is to think about. A simple-sounding goal that requires emitting many sections of full prose ("N complete stories/chapters/profiles, each written out in full") exceeds one writing pass and is AT LEAST moderate. Rough budget: one writing pass produces ~1,500-2,000 words; beyond that the work must be split into per-section tasks.
+- Qualifiers like "full", "complete", "in full detail", "every scene", "not a summary" multiply the per-item volume -- weigh them.
 - Mentioning a tool the agent already has (write a file, make a list) is NOT complexity.
 
 Output the JSON now.
