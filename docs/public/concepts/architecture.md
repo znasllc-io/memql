@@ -96,20 +96,21 @@ and accept `SetWiring(*bus.Wiring)` to receive channel-based communication.
 ### Component Registry
 
 ```
-engine/
-├── parser/                 # Lexer, Parser, AST definitions
-│   ├── ast.go             # Abstract Syntax Tree node types
-│   ├── lexer.go           # Tokenization
-│   ├── parser.go          # Recursive descent parser
-│   └── errors.go          # Error types with position info
+component/
+├── language/
+│   ├── parser/            # Lexer, Parser, AST definitions
+│   │   ├── ast.go         # Abstract Syntax Tree node types
+│   │   ├── lexer.go       # Tokenization
+│   │   ├── parser.go      # Recursive descent parser
+│   │   └── errors.go      # Error types with position info
+│   │
+│   └── compiler/          # AST to target format transformation
+│       ├── compiler.go    # Main compiler interface
+│       ├── api.go         # Public API functions
+│       ├── automation_generator.go  # AST → JSON automation
+│       └── function_generator.go    # AST → function definition
 │
-├── compiler/              # AST to target format transformation
-│   ├── compiler.go        # Main compiler interface
-│   ├── api.go             # Public API functions
-│   ├── automation_generator.go  # AST → JSON automation
-│   └── function_generator.go    # AST → function definition
-│
-└── memql/                 # Query execution (existing)
+└── memql/                 # Query execution
     ├── engine.go          # Main memory engine
     ├── executor.go        # Query execution
     ├── relations.go       # Relationship traversal
@@ -131,7 +132,7 @@ engine/
 
 ## Parser Engine
 
-The Parser Engine (`engine/parser/`) transforms MemQL source text into an Abstract Syntax Tree (AST).
+The Parser Engine (`component/language/parser/`) transforms MemQL source text into an Abstract Syntax Tree (AST).
 
 ### Lexer Architecture
 
@@ -140,7 +141,7 @@ The Parser Engine (`engine/parser/`) transforms MemQL source text into an Abstra
 │                                   LEXER PIPELINE                                    │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                     │
-│   Input: "concept==v1:crm:lead;payload.active==true"                                │
+│   Input: "concept==v1:crm:lead && payload.active==true"                             │
 │                                                                                     │
 │   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐                      │
 │   │  Input   │    │  Rune    │    │  Token   │    │  Token   │                      │
@@ -156,7 +157,7 @@ The Parser Engine (`engine/parser/`) transforms MemQL source text into an Abstra
 │                                                                                     │
 │   Output Tokens:                                                                    │
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│   │ [IDENT:concept] [OP:==] [IDENT:v1:crm:lead] [SEMI] [IDENT:payload.active]   │   │
+│   │ [IDENT:concept] [OP:==] [IDENT:v1:crm:lead] [OP:&&] [IDENT:payload.active]  │   │
 │   │ [OP:==] [IDENT:true] [EOF]                                                  │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                     │
@@ -180,9 +181,9 @@ The Parser Engine (`engine/parser/`) transforms MemQL source text into an Abstra
 │  │   ├── TokenBracketOpen     // [                                             │
 │  │   ├── TokenBracketClose    // ]                                             │
 │  │   ├── TokenColon           // :                                             │
-│  │   ├── TokenSemicolon       // ;  (AND operator)                             │
-│  │   ├── TokenComma           // ,  (OR operator)                              │
-│  │   └── TokenAt              // @  (timestamp suffix)                         │
+│  │   ├── TokenSemicolon       // ;                                             │
+│  │   ├── TokenComma           // ,  (argument / list separator)                │
+│  │   └── TokenAt              // @  (annotation prefix)                        │
 │  │                                                                             │
 │  ├── Values                                                                    │
 │  │   ├── TokenIdentifier      // names, paths, concept refs                    │
@@ -190,10 +191,11 @@ The Parser Engine (`engine/parser/`) transforms MemQL source text into an Abstra
 │  │   └── TokenString          // "quoted strings"                              │
 │  │                                                                             │
 │  ├── Operators                                                                 │
-│  │   ├── TokenOperator        // ==, !=, >, >=, <, <=, in, has, etc.           │
+│  │   ├── TokenOperator        // ==, !=, >, >=, <, <=, in, etc.                │
+│  │   ├── TokenAmpAmp          // && (logical AND)                              │
+│  │   ├── TokenPipePipe        // || (logical OR)                               │
 │  │   ├── TokenDefine          // :=                                            │
-│  │   ├── TokenQuestion        // ?  (ternary)                                  │
-│  │   └── TokenQuestionDot     // ?. (conditional filter)                       │
+│  │   └── TokenQuestion        // ?  (ternary)                                  │
 │  │                                                                             │
 │  └── Keywords                                                                  │
 │      ├── TokenKeywordQuery        // query                                     │
@@ -218,30 +220,34 @@ The parser uses recursive descent with the following grammar productions:
 │                              PARSER GRAMMAR (EBNF)                                   │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
-│  file            = { definition } ;                                                  │
+│  file            = { useDecl } { definition } ;                                      │
 │                                                                                      │
-│  definition      = queryFunc | mutationFunc | automation ;                           │
+│  useDecl         = "use" module "." "{" name { "," name } "}" ;                      │
 │                                                                                      │
-│  queryFunc       = "query" [identifier] argList "{" expression "}" ;                 │
+│  definition      = { annotation } ( query | mutation | automation | ... ) ;          │
 │                                                                                      │
-│  mutationFunc    = "mutation" [identifier] argList ["when" condition] "{" insert "}";│
+│  query           = "query" concept identifier "{" [argsBlock] "filter" expression    │
+│                    [sortDir] [paginateDir] "shape" identifier "}" ;                  │
 │                                                                                      │
-│  automation      = "automation" identifier argList "{" { automationStmt } "}" ;      │
+│  mutation        = "mutation" concept identifier "{" [argsBlock]                     │
+│                    ( "insert" | "update" ) "{" fieldList "}" "}" ;                   │
 │                                                                                      │
-│  automationStmt  = schedule | enabled | step | returnStmt ;                          │
+│  automation      = "automation" identifier "{" { automationStmt } "}" ;              │
 │                                                                                      │
-│  step            = identifier ":" stepType ["when" condition] "{" stepBody "}" ;     │
+│  automationStmt  = step | stepAssign | controlFlow | returnStmt ;                    │
 │                                                                                      │
-│  stepType        = "query" | "mutation" | "shape" | "webhook" | "event"              │
-│                  | "forEach" | "parallel" | "switch" ;                               │
+│  step            = "step" identifier ["when" condition] "{" stepBody "}" ;           │
+│  stepAssign      = identifier ":=" functionCall ;                                    │
+│                                                                                      │
+│  argsBlock       = "args" "{" { argDecl } "}" ;                                      │
 │                                                                                      │
 │  expression      = logicalOr ;                                                       │
-│  logicalOr       = logicalAnd { "," logicalAnd } ;                                   │
-│  logicalAnd      = primary { ";" primary } ;                                         │
-│  primary         = grouped | conditionalFilter | comparison | functionCall ;         │
+│  logicalOr       = logicalAnd { "||" logicalAnd } ;                                  │
+│  logicalAnd      = primary { "&&" primary } ;                                        │
+│  primary         = grouped | whenGuard | comparison | functionCall ;                 │
 │                                                                                      │
 │  comparison      = fieldRef operator value ;                                         │
-│  conditionalFilter = "?." comparison ;                                               │
+│  whenGuard       = "when" "(" expression ")" "{" expression "}" ;                    │
 │                                                                                      │
 │  functionCall    = identifier "(" [ argList ] ")" ;                                  │
 │  argList         = "(" [ arg { "," arg } ] ")" ;                                     │
@@ -269,13 +275,13 @@ The parser uses recursive descent with the following grammar productions:
 │  │   ├── SelectExpr           // select(fields)(...)                                 │
 │  │   ├── DepthExpr            // depth(n)(...)                                       │
 │  │   ├── ShapeExpr            // shape(template)(...)                                │
-│  │   ├── ConditionalFilterExpr// ?.field==value                                      │
-│  │   ├── ArgRefExpr           // args.name                                         │
+│  │   ├── ConditionalFilterExpr// when(args.x) { field==args.x }                      │
+│  │   ├── ArgRefExpr           // args.name                                           │
 │  │   ├── LiteralExpr          // "string", 123, true                                 │
 │  │   └── AIExpr               // ai("template", data)                                │
 │  │                                                                                   │
 │  ├── StatementNode (interface)                                                       │
-│  │   ├── MutationStmt         // insert("concept", ...)                              │
+│  │   ├── MutationStmt         // insert { ... } / update { ... }                     │
 │  │   └── QueryStmt            // expression as statement                             │
 │  │                                                                                   │
 │  ├── FunctionDef              // query/mutation/automation definition                │
@@ -307,7 +313,7 @@ The parser uses recursive descent with the following grammar productions:
 
 ## Compiler Engine
 
-The Compiler Engine (`engine/compiler/`) transforms AST nodes into target output formats, primarily JSON for automations.
+The Compiler Engine (`component/language/compiler/`) transforms AST nodes into target output formats, primarily JSON for automations.
 
 ### Compilation Pipeline
 
@@ -318,11 +324,11 @@ The Compiler Engine (`engine/compiler/`) transforms AST nodes into target output
 │                                                                                      │
 │   SOURCE (.memql)                                                                    │
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│   │  automation leadProcessor() {                                                │   │
-│   │      schedule "*/30 * * * *"                                                 │   │
-│   │      fetchLeads: query {                                                     │   │
-│   │          concept==v1:crm:lead;payload.active==true                           │   │
-│   │      }                                                                       │   │
+│   │  @enabled                                                                    │   │
+│   │  @trigger(schedule="0 */30 * * * *")                                         │   │
+│   │  @description("Process active leads every 30 minutes")                       │   │
+│   │  automation leadProcessor {                                                  │   │
+│   │      fetchLeads := queryActiveLeads({})                                      │   │
 │   │  }                                                                           │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                                         │                                            │
@@ -344,9 +350,9 @@ The Compiler Engine (`engine/compiler/`) transforms AST nodes into target output
 │   │        Name: "leadProcessor"                                                 │   │
 │   │        Type: FunctionTypeAutomation                                          │   │
 │   │        Body: AutomationDef {                                                 │   │
-│   │          Schedule: "*/30 * * * *"                                            │   │
+│   │          Schedule: "0 */30 * * * *"                                          │   │
 │   │          Steps: [                                                            │   │
-│   │            StepDef { ID: "fetchLeads", Type: StepTypeQuery, ... }            │   │
+│   │            StepDef { ID: "fetchLeads", Type: StepTypeFunction, ... }         │   │
 │   │          ]                                                                   │   │
 │   │        }                                                                     │   │
 │   │      }                                                                       │   │
@@ -371,13 +377,13 @@ The Compiler Engine (`engine/compiler/`) transforms AST nodes into target output
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
 │   │  {                                                                           │   │
 │   │    "name": "leadProcessor",                                                  │   │
-│   │    "schedule": "*/30 * * * *",                                               │   │
+│   │    "schedule": "0 */30 * * * *",                                             │   │
 │   │    "steps": [                                                                │   │
 │   │      {                                                                       │   │
 │   │        "id": "fetchLeads",                                                   │   │
-│   │        "type": "query",                                                      │   │
-│   │        "query": {                                                            │   │
-│   │          "query": "concept==v1:crm:lead;payload.active==true"                │   │
+│   │        "type": "function",                                                   │   │
+│   │        "function": {                                                         │   │
+│   │          "name": "queryActiveLeads"                                          │   │
 │   │        }                                                                     │   │
 │   │      }                                                                       │   │
 │   │    ],                                                                        │   │
@@ -437,7 +443,7 @@ The Compiler Engine (`engine/compiler/`) transforms AST nodes into target output
 
 ## Executor Engine
 
-The Executor Engine (in `engine/memql/`) executes parsed queries against the database.
+The Executor Engine (in `component/memql/`) executes parsed queries against the database.
 
 ### Query Execution Flow
 
@@ -617,13 +623,15 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │                                                                                      │
 │                              ┌──────────────┐                                       │
 │                              │    main      │                                       │
-│                              │   (cmd/)     │                                       │
+│                              │ (main.go +   │                                       │
+│                              │  app/)       │                                       │
 │                              └──────┬───────┘                                       │
 │                                     │                                                │
 │                     ┌───────────────┼───────────────┐                               │
 │                     │               │               │                               │
 │                     ▼               ▼               ▼                               │
 │              ┌────────────┐  ┌────────────┐  ┌────────────┐                         │
+│              │ component/ │  │ component/ │  │ component/ │                         │
 │              │   server   │  │   grpc     │  │ automations│                         │
 │              └──────┬─────┘  └──────┬─────┘  └──────┬─────┘                         │
 │                     │               │               │                               │
@@ -631,26 +639,20 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │                                     │                                                │
 │                                     ▼                                                │
 │                           ┌──────────────────┐                                      │
-│                           │  engine/memql    │  (MemoryEngine)                      │
+│                           │ component/memql  │  (MemQLEngine)                       │
 │                           └────────┬─────────┘                                      │
 │                                    │                                                 │
 │              ┌─────────────────────┼─────────────────────┐                          │
 │              │                     │                     │                          │
 │              ▼                     ▼                     ▼                          │
 │       ┌────────────┐       ┌────────────┐        ┌────────────┐                     │
-│       │  engine/   │       │  engine/   │        │  database/ │                     │
-│       │  parser    │       │  compiler  │        │  memory-   │                     │
-│       │            │       │            │        │  nodes     │                     │
-│       └────────────┘       └──────┬─────┘        └────────────┘                     │
+│       │ component/ │       │ component/ │        │ component/ │                     │
+│       │ language/  │       │ language/  │        │ database/  │                     │
+│       │ parser     │       │ compiler   │        │ memory-    │                     │
+│       └────────────┘       └──────┬─────┘        │ nodes      │                     │
+│              ▲                    │              └────────────┘                     │
 │              │                    │                                                  │
-│              │                    │                                                  │
-│              │      ┌─────────────┘                                                  │
-│              │      │                                                                │
-│              ▼      ▼                                                                │
-│       ┌────────────────┐                                                            │
-│       │    engine/     │                                                            │
-│       │    parser      │  (AST types shared)                                        │
-│       └────────────────┘                                                            │
+│              └────────────────────┘  (AST types shared)                              │
 │                                                                                      │
 │  ─────────────────────────────────────────────────────────────────────────────────  │
 │                                                                                      │
@@ -668,9 +670,9 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 
 | Package | Imports | Imported By |
 |---------|---------|-------------|
-| `engine/parser` | Standard library only | `engine/compiler`, `engine/memql` |
-| `engine/compiler` | `engine/parser` | `cmd/`, `automations/` |
-| `engine/memql` | `engine/parser`, `database/`, `events/` | `server/`, `grpc/` |
+| `component/language/parser` | Standard library only | `component/language/compiler`, `component/memql` |
+| `component/language/compiler` | `component/language/parser` | `component/memql`, `component/automations` |
+| `component/memql` | `component/language/parser`, `component/database`, `component/events` | `component/server`, `component/grpc` |
 
 ---
 
@@ -683,7 +685,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │                           ADDING A NEW OPERATOR                                      │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
-│  1. LEXER (engine/parser/lexer.go)                                                  │
+│  1. LEXER (component/language/parser/lexer.go)                                      │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  func (l *Lexer) scanOperator(...) {                                    │     │
 │     │      // Add new operator pattern                                        │     │
@@ -694,14 +696,14 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │     │  }                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  2. AST (engine/parser/ast.go)                                                      │
+│  2. AST (component/language/parser/ast.go)                                          │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  const (                                                                │     │
 │     │      OpContains ComparisonOperator = "=contains="  // NEW               │     │
 │     │  )                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  3. EXECUTOR (engine/memql/executor.go)                                             │
+│  3. EXECUTOR (component/memql/executor.go)                                          │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  func buildFilterCondition(op ComparisonOperator, ...) {                │     │
 │     │      case OpContains:                                                   │     │
@@ -709,7 +711,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │     │  }                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  4. DOCUMENTATION (docs/memql.md)                                                   │
+│  4. DOCUMENTATION (docs/public/language/memql.md)                                   │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  | `=contains=` | Array/object contains value | `tags=contains="urgent"`│     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
@@ -724,7 +726,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │                         ADDING A NEW AUTOMATION STEP TYPE                            │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
-│  1. AST (engine/parser/ast.go)                                                      │
+│  1. AST (component/language/parser/ast.go)                                          │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  const (                                                                │     │
 │     │      StepTypeSlack StepType = "slack"  // NEW                           │     │
@@ -737,7 +739,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │     │  }                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  2. PARSER (engine/parser/parser.go)                                                │
+│  2. PARSER (component/language/parser/parser.go)                                    │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  func (p *Parser) parseStep() {                                         │     │
 │     │      case "slack":                                                      │     │
@@ -745,7 +747,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │     │  }                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  3. COMPILER (engine/compiler/automation_generator.go)                              │
+│  3. COMPILER (component/language/compiler/automation_generator.go)                  │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  func (c *Compiler) compileStep(step *StepDef) {                        │     │
 │     │      case StepTypeSlack:                                                │     │
@@ -758,7 +760,7 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 │     │  }                                                                      │     │
 │     └─────────────────────────────────────────────────────────────────────────┘     │
 │                                                                                      │
-│  4. SCHEDULER (automations/evaluator.go)                                            │
+│  4. SCHEDULER (component/automations/evaluator.go)                                  │
 │     ┌─────────────────────────────────────────────────────────────────────────┐     │
 │     │  func (e *Evaluator) executeStep(step Step) {                           │     │
 │     │      case "slack":                                                      │     │
@@ -777,12 +779,12 @@ The Executor Engine (in `engine/memql/`) executes parsed queries against the dat
 
 | Aspect | Before | After |
 |--------|--------|-------|
-| **Parser location** | Embedded in `engine/memql/parser.go` | Standalone `engine/parser/` package |
+| **Parser location** | Embedded in `component/memql/parser.go` | Standalone `component/language/parser/` package |
 | **AST ownership** | Defined alongside engine | Dedicated `ast.go` with clean hierarchy |
 | **Automation authoring** | JSON only | MemQL syntax + transpilation to JSON |
 | **Testability** | Required full engine setup | Parser testable in isolation |
 | **Reusability** | Tightly coupled | Parser usable by CLI tools, formatters |
-| **Code generation** | N/A | `engine/compiler/` package |
+| **Code generation** | N/A | `component/language/compiler/` package |
 
 ### Performance Characteristics
 

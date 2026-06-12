@@ -274,14 +274,16 @@ for the operator-side narrative.
 ```
 memQL/
 ├── CLAUDE.md              # Project overview (read first)
-├── docs/public/overview/quickstart.md          # 5-minute setup guide
 ├── GLOSSARY.md            # Complete doc index
 ├── docs/
-│   ├── core/              # Architecture, language
-│   ├── api/               # API references
-│   ├── guides/            # How-to guides
-│   ├── auth/              # Authentication
-│   └── planning/          # Historical planning
+│   ├── public/            # Published docs (rendered on memql.io)
+│   │   ├── overview/      # Quickstart, tech stack, positioning
+│   │   ├── concepts/      # Architecture, events, identifiers, ...
+│   │   ├── language/      # The DSL reference
+│   │   ├── ai/            # LLM cost control, operator capabilities
+│   │   ├── build/         # Build tags, audio streaming
+│   │   └── operate/       # Deploy, infra, env vars, auth
+│   └── internal/          # Design records, plans, internal runbooks
 └── .claude/               # Claude Code CLI configuration
 ```
 
@@ -309,7 +311,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL she
 # Testing
 go test ./...                    # Run Go test suite
 
-# Deployment (Azure AKS) -- see DEPLOYMENT_STRATEGY.md
+# Deployment (Azure AKS) -- see docs/public/operate/deployment-strategy.md
 make deploy VERSION=X            # Deploy to staging (scripts/deploy/aks-deploy.sh)
 
 # Dev secrets workflow

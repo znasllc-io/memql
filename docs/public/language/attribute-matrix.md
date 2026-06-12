@@ -9,9 +9,14 @@ owner: znas
 
 # MemQL Attribute Matrix
 
-> **Last Updated:** 2025-12-07
+> **Last Updated:** 2026-06-11
 
-This document defines all `@attribute` decorators available in MemQL and their applicability to different definition types.
+This document defines the `@attribute` decorators available on the
+function-style constructs (queries, mutations, automations) and points
+at the annotation surfaces of the other construct kinds. Every row
+below is backed by the parser (`component/language/ast/ast.go` +
+`component/language/parser/parser.go`); anything not listed is either
+construct-specific (see the end of this document) or rejected.
 
 ---
 
@@ -28,21 +33,23 @@ This document defines all `@attribute` decorators available in MemQL and their a
 | `@description("...")` | Yes | Yes | Yes | Human-readable description |
 | **Access Control** |
 | `@internal` | Yes | Yes | Yes | Not exposed to external API |
-| `@public` | Yes | Yes | Yes | Explicitly public (default behavior) |
+| `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
 | `@role("admin")` | Yes | Yes | Yes | Restrict to users with specified role |
-| `@permission("...")` | Yes | Yes | Yes | Require specific permission |
+| `@permission("...")` | Yes | Yes | No | Require specific permission |
 | **Performance** |
 | `@timeout("30s")` | Yes | Yes | Yes | Maximum execution time |
 | `@cache(ttl="5m")` | Yes | No | No | Cache results for duration |
-| `@rateLimit(...)` | Yes | Yes | Yes | Throttle calls (requests + window) |
 | **Reliability** |
 | `@retry(count=3)` | No | Yes | Yes | Retry on failure |
 | `@idempotent` | No | Yes | No | Safe to retry without side effects |
+| `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | **Auditing** |
 | `@audit` | No | Yes | Yes | Log all executions for audit trail |
 | **Triggers (Automation Only)** |
 | `@trigger(event="...")` | No | No | Yes | Event-based trigger |
-| `@schedule(cron="...")` | No | No | Yes | Cron-based schedule |
+| `@trigger(schedule="...")` | No | No | Yes | Cron-based schedule (6-field, with seconds) |
+| `@filter(...)` | No | No | Yes | Predicate over the triggering event's payload |
+| `@schedule(cron="...")` | No | No | Yes | Accepted synonym for `@trigger(schedule="...")` |
 | `@async` | No | No | Yes | Run asynchronously when triggered |
 
 ---
@@ -56,15 +63,18 @@ Activates the definition. **Required** for the definition to be used.
 
 ```memql
 @enabled
-query activeUsers() { ... }
+query user queryActiveUsers { ... }
 ```
 
 #### `@disabled`
-Explicitly disables the definition. Takes precedence over `@enabled`.
+Explicitly disables the definition. The construct is parsed but not
+loaded at runtime; it stays in the tree, is still maintained, and can
+be re-enabled at any time. ("Deprecated / abandoned" is the separate
+`@deprecated` axis.)
 
 ```memql
 @disabled
-query legacyUsers() { ... }
+query user queryLegacyUsers { ... }
 ```
 
 #### `@deprecated`
@@ -72,10 +82,10 @@ Marks the definition as deprecated. Optionally includes a message.
 
 ```memql
 @deprecated
-query oldFunction() { ... }
+query user queryOldUsers { ... }
 
-@deprecated("Use activeUsers() instead")
-query getUsers() { ... }
+@deprecated("Use queryActiveUsers instead")
+query user queryUsers { ... }
 ```
 
 #### `@version("...")`
@@ -83,7 +93,7 @@ Version tag for the definition.
 
 ```memql
 @version("v2")
-query activeUsers() { ... }
+query user queryActiveUsers { ... }
 ```
 
 ---
@@ -95,7 +105,7 @@ Human-readable description of the definition.
 
 ```memql
 @description("Returns all active user profiles with optional filters")
-query activeUsers() { ... }
+query user queryActiveUsers { ... }
 ```
 
 ---
@@ -107,37 +117,40 @@ Marks the definition as internal-only. Not exposed to the external API.
 
 ```memql
 @internal
-query systemMetrics() { ... }
+query node querySystemMetrics { ... }
 ```
 
 #### `@public`
-Explicitly marks the definition as publicly accessible (default behavior).
+Declares that the construct intentionally carries **no caller-scope
+check**. The per-row authorization gate
+(`TestPerRowAuthzClassification` in `dsl/conformance_test.go`)
+classifies every query / mutation as owned (`actor.userId` reference),
+admin (`actor.isClusterOwner` / `requiresClusterOwner`), or public --
+a construct that references user-scope fields without one of those
+fails CI unless it carries `@public` with a comment explaining why.
 
 ```memql
+// Concept catalog -- no per-user rows, safe to expose unscoped.
 @public
-query publicData() { ... }
+query nodeType queryNodeTypes { ... }
 ```
 
 #### `@role("...")`
-Restricts access to users with the specified role.
+Restricts access to users with the specified role
+(owner / admin / writer / reader).
 
 ```memql
 @role("admin")
-query adminDashboard() { ... }
-
-@role("admin", "moderator")
-mutation deleteUser() { ... }
+query auditEvent queryAdminDashboard { ... }
 ```
 
 #### `@permission("...")`
 Requires the caller to have the specified permission.
+Query / mutation only.
 
 ```memql
 @permission("read:users")
-query userProfiles() { ... }
-
-@permission("write:config")
-mutation updateConfig() { ... }
+query user queryUserProfiles { ... }
 ```
 
 ---
@@ -149,32 +162,16 @@ Maximum execution time. Supports duration formats: `"30s"`, `"5m"`, `"1h"`.
 
 ```memql
 @timeout("30s")
-query heavyQuery() { ... }
-
-@timeout("5m")
-automation longRunningTask() { ... }
+query record queryHeavyReport { ... }
 ```
 
 #### `@cache(ttl="...")`
-Cache query results for the specified duration. **Query only** - mutations and automations should not be cached.
+Cache query results for the specified duration. **Query only** -
+mutations and automations should not be cached.
 
 ```memql
 @cache(ttl="5m")
-query frequentlyAccessedData() { ... }
-
-@cache(ttl="1h")
-query staticConfig() { ... }
-```
-
-#### `@rateLimit(requests=N, per="duration")`
-Throttle calls to the definition.
-
-```memql
-@rateLimit(requests=100, per="1m")
-query apiEndpoint() { ... }
-
-@rateLimit(requests=10, per="1h")
-mutation expensiveOperation() { ... }
+query nodeType queryNodeTypeCatalog { ... }
 ```
 
 ---
@@ -186,10 +183,7 @@ Retry the operation on failure. **Mutation and Automation only**.
 
 ```memql
 @retry(count=3)
-mutation createUser() { ... }
-
-@retry(count=5)
-automation syncData() { ... }
+mutation user mutationCreateUser { ... }
 ```
 
 #### `@idempotent`
@@ -197,7 +191,19 @@ Marks the mutation as safe to retry without side effects. **Mutation only**.
 
 ```memql
 @idempotent
-mutation upsertUser() { ... }
+mutation user mutationUpsertUser { ... }
+```
+
+#### `@mergeFields("...")`
+Opts an update-kind mutation into engine-side deep-merge for the named
+object-typed payload fields: the partial object's keys merge into the
+stored object instead of replacing it wholesale (the default contract
+is top-level replace). Added for single-key preference writes that
+would otherwise wipe sibling keys (memql#1339).
+
+```memql
+@mergeFields("preferences")
+mutation user mutationToggleComputerUseEnabled { ... }
 ```
 
 ---
@@ -209,110 +215,157 @@ Log all executions for audit trail. **Mutation and Automation only**.
 
 ```memql
 @audit
-mutation deleteUser() { ... }
-
-@audit
-automation processPayments() { ... }
+mutation user mutationDeleteUser { ... }
 ```
 
 ---
 
 ### Trigger Attributes (Automation Only)
 
-#### `@trigger(event="...", filter="...")`
-Event-based trigger for automations.
+#### `@trigger(event="...", concept="...", partition="...")`
+Event-based trigger. Graph events name the lifecycle
+(`node.created` / `node.updated` / `node.deleted`) plus the concept;
+the partition segment is a #56 phase-8 vestige -- always pass
+`partition="*"`. Domain events (`cognition.response.requested`,
+`system.startup`) use the bare `event=` form.
 
 ```memql
-@trigger(event="session.opened")
-automation onUserConnect() { ... }
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+automation bootstrapSession { ... }
 
-@trigger(event="graph.node.created", filter="payload.concept == 'v1:crm:lead'")
-automation onLeadCreated() { ... }
+@trigger(event="cognition.response.requested")
+automation generateResponse { ... }
 ```
 
-#### `@schedule(cron="...")`
-Cron-based schedule for automations.
+#### `@trigger(schedule="...")`
+Cron-based schedule. The cron expression is **6-field** (seconds
+first). `@schedule(cron="...")` is accepted as a synonym, but the
+live tree uses the `@trigger(schedule=...)` form exclusively.
 
 ```memql
-@schedule(cron="0 0 * * *")
-automation dailyCleanup() { ... }
+@trigger(schedule="0 0 2 * * *")
+automation purgeExpiredArchivedSpaces { ... }
 
-@schedule(cron="*/30 * * * *")
-automation frequentSync() { ... }
+@trigger(schedule="0 */10 * * * *")
+automation pruneStaleClusterNodes { ... }
+```
+
+#### `@filter(...)`
+Predicate over the triggering event's payload. The automation only
+fires when the predicate holds.
+
+```memql
+@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+@filter(payload.active==true)
+automation autoJoinSI { ... }
 ```
 
 #### `@async`
-Run the automation asynchronously when triggered. The caller doesn't wait for completion.
+Run the automation asynchronously when triggered. The caller doesn't
+wait for completion.
 
 ```memql
 @async
 @trigger(event="report.requested")
-automation generateReport() { ... }
+automation generateReport { ... }
 ```
 
 ---
 
 ## Examples by Type
 
-### Query Function
+### Query
 
 ```memql
+use cognition.concepts.{ participant }
+use common.traits.{ traitIsActiveRecord }
+
 @enabled
-@description("Returns active user profiles with optional filters")
-@cache(ttl="5m")
-@timeout("10s")
-query activeUsers() {
-  concept==v1:identity:user;
-  payload.active==true;
-  ?.payload.authorizerId==args.authorizerId;
-  ?.payload.role==args.role
+@description("Get active human participants in a space")
+query participant queryActiveHumanParticipants {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId==args.spaceId && payload.participantType=="human" && traitIsActiveRecord
+  shape   participantFull
 }
 ```
 
-### Mutation Function
+### Mutation
 
 ```memql
+use cognition.concepts.{ space }
+
 @enabled
-@description("Creates a new user with the provided details")
+@description("Create a cognition space")
 @audit
-@idempotent
 @retry(count=3)
-@role("admin")
-mutation createUser() {
-  insert("v1:identity:user",
-    id=concat("user-", args.authorizerId),
-    payload={
-      "authorizerId": args.authorizerId,
-      "email": args.email,
-      "role": args.role,
-      "active": true
-    }
-  )
+mutation space mutationCreateSpace {
+  args {
+    spaceId  string  @required
+    name     string  @required
+  }
+  insert {
+    id:        args.spaceId
+    name:      args.name
+    status:    "active"
+    createdAt: now
+    createdBy: actor.userId
+  }
 }
 ```
 
 ### Automation
 
 ```memql
+use cognition.logic.{ logicBootstrapSession }
+
 @enabled
-@trigger(event="session.opened")
-@description("Auto-provisions user on WebSocket connect")
-@audit
-@timeout("30s")
-@retry(count=3)
-automation bootstrapUser() {
-  
-  checkUser: query {
-    concept==v1:identity:user;payload.authorizerId==event("payload.subject")
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@description("Auto-creates a session when a participant joins a space")
+automation bootstrapSession {
+  step run {
+    logic bootstrapSession { event: event }
   }
-  
-  createUser: mutation when step("checkUser").metadata.itemCount == 0 {
-    insert("v1:identity:user", payload={...})
-  }
-  
-  return coalesce(step("createUser"), first(step("checkUser")))
 }
 ```
+
+---
+
+## Annotation Surfaces of the Other Constructs
+
+The constructs outside this matrix carry their own closed annotation
+sets; unknown annotations are rejected at load time:
+
+- **Concepts**: `@description`, `@version`, `@namespace`, `@type`,
+  `@displayCard`. (`@scope` is retired, #56.) Field-level:
+  `@required`, `@default`, `@description`, `@unique`, `@pattern`,
+  `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
+  `@secret`, `@variant`. See `dsl/_reference/_concept.memql`.
+- **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
+  `@destructive`, `@enabled`, `@executionTime`, `@handler`,
+  `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,
+  `@scopes` (`component/language/parser/tool_decl.go`).
+- **Prompts**: `@description`, `@defaultProvider`, `@templateFile`,
+  lifecycle flags.
+- **Providers**: `@description`, `@extends`, `@model`, `@base`,
+  `@type`, lifecycle flags.
+- **Policies** (SI provider selection): `@primary`, `@fallback`,
+  `@maxLatencyMs`, `@maxTimeToFirstTokenMs`, `@preferredRole`,
+  `@description`.
+- **Specs / traits**: `@description`, optional `@shape("name")` on
+  specs, lifecycle flags.
+- **Shapes**: `@row` and/or `@actor` (kind declaration),
+  `@description`.
+
+**Retired annotations** (rejected at parse time with a migration
+hint): the `@use*` family (`@useConcept`, `@useShape`, `@useQuery`,
+...) -- use file-top `use <module>.{ ... }` imports; `@input` on
+prompts -- the body IS the schema; `@template` on shapes -- shapes are
+struct-form path lists; `@concepts("...")` on shapes -- the concept is
+named by the `shape <Concept> <name>` signature; `@caller` -- use
+`@actor`; the decision-policy attributes (`@tier`, `@audited`,
+`@frontend_visible`) -- the decision-policy tier is retired (#984).
 
 ---
 
@@ -324,7 +377,5 @@ automation bootstrapUser() {
 | Visibility | Public | Use `@internal` to hide from API |
 | Timeout | 30s | Platform default |
 | Cache | None | No caching by default |
-| Rate limit | None | No throttling by default |
 | Audit | Off | Must explicitly enable |
 | Retry | 0 | No retries by default |
-

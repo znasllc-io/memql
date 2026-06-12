@@ -76,15 +76,16 @@ The canonical worked example is **workspace creation**:
 use platform.concepts.{ partition }
 use identity.mutations.{ mutationGrantPartitionAccess }
 
-// 1. The product calls this mutation.
+// 1. The product calls this mutation. (`@default` is not valid on
+//    an args field -- apply defaults in the body via coalesce().)
 mutation partition mutationCreatePartition {
   args {
     name      string  @required
-    type      string  @default("standard")
+    type      string
   }
   insert {
     name: args.name
-    partitionType: args.type
+    partitionType: coalesce(args.type, "standard")
     status: "active"
     createdAt: now
     createdBy: actor.userId
@@ -92,13 +93,14 @@ mutation partition mutationCreatePartition {
 }
 
 // 2. An automation fires on the row landing and grants the
-//    creating user owner access.
+//    creating user owner access. Note the step calls the logic
+//    construct by its bare (un-prefixed) name.
 @enabled
-@trigger(event="node.created", concept=platform.partition, partition="_system")
+@trigger(event="node.created", concept="v1:platform:partition", partition="*")
 @description("Grant the partition creator owner access on first landing.")
 automation autoBootstrapWorkspaceOwnerAccess {
   step grant {
-    logic logicGrantOwnerOnPartitionCreate { event: event }
+    logic grantOwnerOnPartitionCreate { event: event }
   }
 }
 
@@ -108,7 +110,7 @@ logic logicGrantOwnerOnPartitionCreate {
     return mutationGrantPartitionAccess({
       userId:      args.event.payload.createdBy,
       partitionId: args.event.payload.id,
-      role:        "owner",
+      role:        "owner"
     })
   }
 }
@@ -141,11 +143,12 @@ frequently hit traps:
 **Rule.** `sort()`, `paginate()`, `asOf()`, `select()`, `withDepth()`,
 and `shape()` are query-level *directives*. They wrap an entire
 expression at the **outermost** layer of a query string and only work
-when called by the top-level query parser. The **function-loader
-validator** (which validates `.memql` function definitions at engine
-init) treats every bare call name in a function body as a reference to
-another registered function -- and since `sort` / `paginate` / etc.
-aren't registered functions, the engine init fails with:
+when called by the top-level query parser. The **function loader**
+(which validates `.memql` function definitions at engine init) treats
+every bare call name in a function body -- e.g. a `logic` body -- as a
+reference to another registered function, and since `sort` /
+`paginate` / etc. aren't registered functions, the engine init fails
+with:
 
 ```
 function "<name>" references unknown function "sort"
@@ -158,32 +161,45 @@ can't attach. Whole cluster bricked.
 **Wrong:**
 
 ```memql
-use platform.partition
+use cognition.queries.{ queryActiveSpaceIds }
 
-@enabled
-func (Query) queryListPartitions(_ any) (any, error) {
-  return sort(concept, "payload.name", "asc"), nil
+// `sort` is not a registered function -- engine init fails.
+logic logicListSpacesSorted {
+  args { event object @required }
+  body {
+    return sort(queryActiveSpaceIds({}), "payload.name", "asc")
+  }
 }
 ```
 
-**Right:**
+**Right -- struct queries have dedicated clauses.** Sorting,
+windowing, and latest-per-id snapshots are `sort` / `paginate` /
+`asOf` clauses on the struct query itself, not directive calls
+(live examples: `queryLatestSpaceContextForSpace` in
+`dsl/cognition/queries.memql`, `queryStaleClusterNodes` in
+`dsl/cluster/queries.memql`):
 
 ```memql
-use platform.partition
+use cognition.concepts.{ context }
 
 @enabled
-func (Query) queryListPartitions(_ any) (any, error) {
-  return concept, nil
+@description("Latest space-context row for a space.")
+query context queryLatestSpaceContextForSpace {
+  args {
+    spaceId  string  @required
+  }
+  filter  payload.spaceId == args.spaceId
+  sort    "createdAt", "desc"
+  paginate 1
+  shape   spaceContextFull
 }
 ```
 
-Sort the result on the client. The CLI does this in
-`ensureDefaultPartition` (`cli/app.go`), which pins `default` first
-and `sort.Slice`s the rest by name.
-
-The same constraint is called out in `queries/v1/cluster/queryClusterNodes.memql`
-for `asOf(..., latest)`. Treat sort/paginate/asOf/select/withDepth/shape
-the same way.
+(The historical receiver form `func (Query) queryListPartitions(_ any)
+(any, error) { return sort(...), nil }` hit this trap constantly; the
+receiver form itself is now retired and rejected at parse time, so
+the directive-in-body variant of the bug can only appear in `logic`
+bodies.)
 
 **Where directives DO work**: in raw query strings sent through
 `MemqlClientMessage.Stream` (the public RPC), e.g.
@@ -200,7 +216,7 @@ strings, numbers, booleans, null, nested objects, arrays).
 
 **Canonical:**
 ```memql
-createPartition({name: "test", partitionType: "standard"})
+mutationCreatePartition({name: "test", partitionType: "standard"})
 querySpaceParticipants({spaceId: "space-123", participantType: "si"})
 ```
 
@@ -208,7 +224,7 @@ Quoted string keys are also accepted so JSON-serialized tool calls
 that arrive through the same parser path keep working:
 
 ```memql
-createPartition({"name": "test", "partitionType": "standard"})
+mutationCreatePartition({"name": "test", "partitionType": "standard"})
 ```
 
 Both forms parse identically. Mixed is fine too. The public RPC
@@ -221,37 +237,32 @@ the bare-identifier form is easier to read.
 
 ---
 
-## 3. Concept scope: `@scope("global")` for system data
+## 3. Concept scope: `@scope` is retired (#56)
 
-**Rule.** Concepts default to **partition-scoped**: rows stamp the
-request envelope's `partition`, queries auto-filter on it. Tenant
-data lives this way.
+**Rule.** Concepts no longer declare a scope. The partition-scoped vs
+`@scope("global")` split went away with the partition removal (#56):
+every concept lives in the default partition, and the concept loader
+rejects the annotation at load time:
 
-For infrastructure concepts that should be visible from every tenant
-(cluster topology, partition registry, system bookkeeping), add
-`@scope("global")`:
-
-```memql
-@description("A registered node in the memQL cluster.")
-@scope("global")
-@cache(ttl=0)
-concept Node { ... }
+```
+`@scope` is retired -- remove the annotation; every concept lives in the default partition post-#56
 ```
 
-Effect: rows live in the reserved `_system` partition regardless of
-envelope. Reads always target `_system`. Events fire under
-`graph.node.created._system.<concept>` (subscribers using
-`graph.node.*.*.<concept>` wildcards still match).
+**Retired form (rejected at load):**
 
-**Globals as of writing**:
-- `v1:cluster:node`, `v1:cluster:nodeType`, `v1:cluster:spawnEvent`,
-  `v1:cluster:cluster`, `v1:cluster:database`,
-  `v1:cluster:identityProvider`
-- `v1:platform:partition` (the partition registry itself is global so
-  you can list partitions from any partition)
+```memql
+// REJECTED -- concept-level @scope is gone.
+@scope("global")
+concept node { ... }
+```
 
-If you add a new infrastructure concept, mark it `@scope("global")`
-or it'll vanish whenever the user switches partition.
+The full concept-annotation author surface is `@description`,
+`@version`, `@namespace`, `@type`, and `@displayCard` -- see
+[#7](#7-annotations-on-concepts-where-to-put-new-ones).
+
+(Unrelated: **seed** constructs have their own `@scope("perUser")`
+annotation -- see `dsl/agents/assistant.memql`. That is a seed
+materialization mode, not the retired concept-level scope.)
 
 ---
 
@@ -261,8 +272,7 @@ or it'll vanish whenever the user switches partition.
 `paginate()`, `sort()`, `select()`, `asOf()`, or `withDepth()`. The
 parser rejects it.
 
-This is documented in `queries/arch.md:145`. Mutations return a
-single inserted node, not a queryable result set.
+Mutations return a single inserted node, not a queryable result set.
 
 ---
 
@@ -276,11 +286,12 @@ is preserved in the database but not surfaced.
 **Implication.** Re-inserting the same id appends a new row; the
 new version becomes the visible one, the old version is invisible
 to plain queries. Use `asOf("2026-01-01T00:00:00Z")` from the
-top-level parser if you need a historical snapshot.
+top-level parser if you need a historical snapshot; struct queries
+carry an `asOf latest` clause for explicit latest-per-id reads (see
+`queryStaleClusterNodes` in `dsl/cluster/queries.memql`).
 
-The CLI defensively dedupes the result of `concept==X` queries
-anyway (in `parseClusterNodes`, `parsePartitions`) -- the engine
-might surface multiple historical rows in some shape paths.
+Consumers should still dedupe defensively -- the engine might
+surface multiple historical rows in some shape paths.
 
 ---
 
@@ -296,13 +307,11 @@ inner dashes only (no leading or trailing). Why:
   always lowercases.
 - Partition names appear as path-style prefixes; readability matters.
 
-The CLI enforces this at keystroke time and on save via
-`cli/ui/validate.go` (`ValidateName`, `IsNameChar`,
-`NormalizeName`). Server side, an `args { name string @required }`
-declaration only checks type -- the validation is currently a
-CLI-side contract. **Don't trust the wire.** If you write a
-server-side mutation that takes a name, also validate the shape on
-the server before persisting.
+Server side, an `args { name string @required }` declaration only
+checks the type -- there is no engine-side shape validation on
+names today. **Don't trust the wire.** If you write a server-side
+mutation that takes a name, validate the shape on the server before
+persisting.
 
 ---
 
@@ -318,42 +327,48 @@ add a new annotation, edit `component/database/memory-nodes/concept_parser.go`:
 3. Add the field to `Concept` struct in `concept.go`.
 4. Map it through in `ParseConceptMemQL()`.
 
-Existing concept annotations: `@description`, `@cache(ttl=N)`,
-`@skipDeleted`, `@enforceRequired`, `@defaultFilter`, `@scope("...")`,
-`@type`.
+Existing concept annotations: `@description`, `@version`,
+`@namespace`, `@type`, `@displayCard`. Anything else is rejected at
+load with `unknown concept annotation @<name>`; `@scope` gets a
+dedicated retirement error (see
+[#3](#3-concept-scope-scope-is-retired-56)).
 
 ---
 
 ## 8. The `_system` partition is reserved
 
-**Rule.** Partition names starting with `_` are reserved. The CLI's
-name validator (`dnsLabelRE`) explicitly rejects leading underscores,
-so users can't choose `_system` (or `_anything`) for their partition.
+**Rule.** Partition names starting with `_` are reserved. The
+DNS-label name shape from [#6](#6-name-shape-cluster-partition-anything-that-becomes-an-id)
+rejects leading underscores, so users can't choose `_system` (or
+`_anything`) for their partition.
 
-`_system` is where global-scoped concept rows live. Treat it as
-internal -- never surface it in user-facing partition lists.
+`_system` is the engine's internal bookkeeping partition (a #56
+phase-8 vestige). Treat it as internal -- never surface it in
+user-facing partition lists.
 
 ---
 
 ## 9. Insert id semantics: explicit vs derived
 
-**Rule.** When you write `insert("v1:foo:bar", id=ctx.name, payload=...)`,
-the engine computes the storage id as:
+**Rule.** When a mutation's `insert { ... }` block sets `id:`
+explicitly (`insert { id: args.name, ... }`), the engine computes
+the storage id as:
 
 ```
 {partition}:{concept}:{id-segment}
 ```
 
 Where:
-- `partition` = global-scope-resolved partition (envelope or `_system`)
-- `concept` = `"v1:foo:bar"`
-- `id-segment` = the trimmed value of the `id=` field
+- `partition` = the resolved partition for the call
+- `concept` = the concept bound by the `mutation <Concept> <name>`
+  signature
+- `id-segment` = the trimmed value of the `id:` field
 
-If you omit `id=`, the engine derives a content hash from the payload.
+If you omit `id:`, the engine derives a content hash from the payload.
 Same payload twice ⇒ same id ⇒ a new time-series row under that id.
 Different payload ⇒ different id ⇒ a different row.
 
-**Common bug**: forgetting to pass `id=` means duplicate inserts
+**Common bug**: forgetting to set `id:` means duplicate inserts
 create new ids instead of new versions of the same id.
 
 ---
@@ -377,9 +392,10 @@ The CLI prepends `graph.` automatically when subscription kind is
 `SUBSCRIPTION_KIND_GRAPH_EVENTS` -- so the filter you pass is
 `node.*.*.<concept>`, NOT `graph.node.*.*.<concept>`.
 
-For global-scoped concepts, the partition segment will always be
-`_system`. A wildcard subscription matches; a literal-`default`
-subscription does NOT.
+The partition segment is a #56 phase-8 vestige -- always use a `*`
+wildcard for it (the same reason `@trigger(...)` patterns in
+`dsl/*/automations.memql` carry `partition="*"`). A literal
+partition match is a bug waiting for phase 8 to land.
 
 ---
 
@@ -435,13 +451,13 @@ the AST no longer collides visually with the `if` statement.
 
 **Where cond() is evaluated.**
 
-- Inside a mutation payload (`insert("v1:foo", payload={x:
-  cond(...)})`): the mutation-template evaluator handles it.
+- Inside a mutation write block (`insert { x: cond(...) }`): the
+  mutation-template evaluator handles it.
 - As a function-call arg in an automation step
   (`createUser({role: cond(...)})`): the function-step arg resolver
   resolves it at arg-resolution time before renderMemQLValue quotes
   the result for the outgoing query. See
-  `automations/steps/function.go::resolveArgValueRef`.
+  `component/automations/steps/function.go::resolveArgValueRef`.
 
 Other expression builtins (`coalesce`, `concat`, `hash`, `first`,
 `last`, `lower`, `upper`, `trim`, ...) are evaluated by the MemQL
@@ -470,9 +486,9 @@ for the PK column, so any payload field with the same name would
 shadow it in queries and confuse the schema check.
 
 Full reserved list lives in `component/database/memory-nodes/constants.go`.
-As of Phase 1 of the language-improvements plan, the check also runs at
-mutation time (`executor.executeInsert`) -- so `insert("v1:foo",
-payload={partition: "..."})` now fails with the same error shape
+As of Phase 1 of the language-improvements plan, the check also runs
+at mutation time (`executor.executeInsert`) -- so an
+`insert { partition: ... }` write fails with the same error shape
 instead of silently stripping the field.
 
 ---
@@ -497,10 +513,10 @@ clear compile-time error.
 Example of a typo that surfaces at compile time:
 
 ```memql
-checkUser := userById({ userId: event.payload.userId })
+checkUser := queryUserById({ userId: args.event.payload.userId })
 
-result := if cehckUser.Empty() {   # typo: cehckUser -> checkUser
-  createUser({...})
+result := if cehckUser.Empty() {   // typo: cehckUser -> checkUser
+  mutationCreateUser({...})
 }
 ```
 
@@ -525,24 +541,21 @@ automation "test": dependency cycle among steps [a b]
 
 ---
 
-## 14. Function naming: filename NO prefix, function name WITH prefix
+## 14. Function naming: construct name carries the kind prefix
 
-**Rule.** The artifact type (`query` / `mutation` / `spec`) is named by
-the directory, so filenames MUST NOT carry the type prefix. Function
-declarations inside those files MUST carry a matching prefix
-(`queryActiveSpaces`, `mutationCreateSpace`, `specIsActiveRecord`). The
-first letter of the bare name is uppercased when forming the prefixed
-name.
+**Rule.** Query / mutation / spec / trait / logic constructs are
+named with a kind prefix: `queryActiveSpaces`, `mutationCreateSpace`,
+`specIsHumanParticipant`, `traitIsActiveRecord`, `logicAutoJoinSI`.
+Constructs live in one consolidated file per kind per namespace
+(`dsl/<namespace>/<construct>s.memql`), so the file name never
+carries an individual construct's name.
 
 ```
-queries/v1/cognition/activeSpaces.memql       # filename: no prefix
-    func (Query) queryActiveSpaces(args any)   # function: prefixed
-
-mutations/v1/cognition/createSpace.memql       # filename: no prefix
-    func (Mutation) mutationCreateSpace(args)  # function: prefixed
-
-specs/v1/common/isActiveRecord.memql           # filename: no prefix
-    spec specIsActiveRecord { ... }            # function: prefixed (struct form)
+dsl/cognition/queries.memql     query space queryActiveSpaces { ... }
+dsl/cognition/mutations.memql   mutation space mutationCreateSpace { ... }
+dsl/cognition/specs.memql       spec specIsHumanParticipant { ... }
+dsl/common/traits.memql         trait traitIsActiveRecord { ... }
+dsl/cognition/logic.memql       logic logicAutoJoinSI { ... }
 ```
 
 **Why it bites you.** Callers (CoPresent frontend, automations, Go
@@ -551,66 +564,67 @@ every caller has to guess whether to add a prefix. Pre-rename, the
 frontend hit runtime "function not found" errors because half the
 backend had prefixed names and half didn't.
 
-Enforcement lives in two places:
+Enforcement: the **linter** (`component/language/compiler/linter.go`)
+emits `naming.query-prefix` / `naming.mutation-prefix` /
+`naming.spec-prefix` warnings when a construct of the given kind is
+declared without the prefix. With `StrictWarnings: true` in the
+compiler config, these become hard errors. (The old filename-derived
+enforcement in the function loader was retired with the flattened
+per-construct tree.)
 
-- **Loader** (`component/memql/function_loader.go`,
-  `expectedFunctionNameFromFile`): derives the expected function name
-  from the filename + directory, rejects legacy prefixed filenames
-  (`queryActiveSpaces.memql`) with a clear message telling you what to
-  rename the file to, and requires the function declaration to match
-  the derived prefixed name exactly.
-- **Linter** (`component/language/compiler/linter.go`): emits
-  `naming.query-prefix` / `naming.mutation-prefix` / `naming.spec-prefix`
-  warnings when a function of the given kind is declared without the
-  prefix. With `StrictWarnings: true` in the compiler config, these
-  become hard errors.
+One wrinkle: automation **step bodies reference logic constructs by
+the bare, un-prefixed name** -- `step run { logic autoJoinSI { event:
+event } }` resolves to `logic logicAutoJoinSI` through the file-top
+`use cognition.logic.{ logicAutoJoinSI }` import (see
+`dsl/cognition/automations.memql`).
 
-Automations (`func (Automation) ...`) are event-triggered, not called
-by name, so their naming convention is unchanged. The same is true for
-`(Builtin)`, `(Tool)`, `(Prompt)`, `(Provider)`, and `(Shape)`; those
-are out of scope for this rule and can use their own conventions.
+Automations are event-triggered, not called by name, so they use
+verb-first names with no prefix (`autoJoinSI`, `bootstrapSession`,
+`purgeExpiredArchivedSpaces`). Builtins, tools, prompts, providers,
+and shapes are out of scope for this rule and use their own
+conventions (shapes are conventionally `<concept><Projection>`, e.g.
+`participantFull`, `spaceCard`).
 
 ---
 
-## 15. Mutation payload shorthand: `ctx.ident` infers the key
+## 15. Write-block shorthand: bare `args.ident` infers the key
 
-**Rule.** Inside a `payload={...}` object literal (and any other
-`{...}` map the mutation-template parser handles), a bare `ctx.ident`
-with no `key:` prefix is shorthand for `ident: ctx.ident`. The key
-is taken from the ctx-path's final segment.
-
-`args.ident` is retired (rejected at parse time as of Phase 1
-of the policies+DSL hygiene initiative). The equivalent form is
-`ctx.ident`. The same shorthand applies — `{ctx.name}` expands to
-`{name: ctx.name}`. Only single-segment paths are eligible;
-`ctx.user.id` falls through to the verbose `key: ctx.user.id`
-form.
+**Rule.** Inside a mutation's `insert { ... }` / `update { ... }`
+block, a bare `args.ident` with no `key:` prefix is shorthand for
+`ident: args.ident`. The key is taken from the arg path's final
+segment. Only single-segment paths are eligible; `args.user.id`
+falls through to the verbose `userId: args.user.id` form.
 
 ```memql
 // Verbose -- still valid, still works.
-payload={
-  name:        ctx.name,
-  region:      ctx.region,
-  environment: ctx.environment,
+insert {
+  spaceId:     args.spaceId
+  agentId:     args.agentId
+  displayName: args.displayName
 }
 
 // Shorthand -- equivalent.
-payload={
-  ctx.name,
-  ctx.region,
-  ctx.environment,
+insert {
+  args.spaceId
+  args.agentId
+  args.displayName
 }
 ```
 
-Mix the two freely when it reads better:
+Mix the two freely when it reads better (live example:
+`mutationAddAgentToSpace` in `dsl/cognition/mutations.memql`):
 
 ```memql
-payload={
-  ctx.nodeType,
-  address:  coalesce(ctx.address, ""),
-  parentId: "",
-  ctx.health,
-  lastSeen: coalesce(ctx.lastSeen, timestamp()),
+insert {
+  id: concat("si-", hash(concat(
+    canonicalId(args.agentId, agent), ":",
+    canonicalId(args.spaceId, space)
+  )))
+  args.spaceId
+  args.agentId
+  participantType: "si"
+  args.displayName
+  status: "active"
 }
 ```
 
@@ -621,7 +635,7 @@ payload={
   eligible; write those as `userId: args.user.id` explicitly. The
   parser rejects shorthand with dotted paths instead of inventing a
   garbage field named `user.id`.
-- **Bare `arg(...)` only.** `coalesce(args.x, default)`,
+- **Bare `args.X` only.** `coalesce(args.x, default)`,
   `concat(args.a, ":", args.b)`, `cond(...)`, and other wrapping
   expressions keep the explicit `key:` prefix. Only a plain
   `args.name` expression can be shorthand.
@@ -632,60 +646,61 @@ payload={
 **Why it bites you (if you don't know about it).** Reviewing PRs
 you'll see some mutations declaring 20-field payloads and some
 declaring 20-field payloads with half the repetition. Both are valid
-and equivalent. Shorthand support lives in three parsers, one per
-context:
-`component/memql/mutation_templates.go::tryParseShorthandArg`
-(mutation `insert()` payloads),
-`component/memql/shape_parser.go::tryParseNodeShorthand`
-(`@template({...})` blocks in Shape files), and
-`component/language/parser/parser.go::parseObject` together with
+and equivalent. Under the hood the struct-form rewriter translates
+`args.X` to the engine-internal `ctx.X` and the expansion lives in
+the mutation-template parser
+(`component/memql/mutation_templates.go`); step-call args in
+automations / logic bodies get the equivalent dotted-path shorthand
+from
 `component/language/compiler/automation_generator.go::tryParseBarePathShorthand`
-(automation step-args like
-`mutationCreateUser({event.payload.subject, event.payload.email})`).
+(see [#17](#17-automation-step-args-shorthand-bare-dotted-path-infers-the-key)).
+Authors never write `ctx.X` -- it is not part of the author surface.
 
 ---
 
-## 16. Shape template shorthand: `node("path.ident")` infers the key
+## 16. Shape bodies: the key comes from the path's terminal segment
 
-**Rule.** Inside a Shape's `@template({...})` block, a bare
-`node("path.ident")` or `node("ident")` with no `key:` prefix is
-shorthand for `ident: node("path.ident")`. The key is taken from the
-**terminal segment** of the path.
+**Rule.** Shapes are struct-form path lists. Each body line is a
+projection path (`payload.name`, `row.id`, `row.createdAt`,
+`actor.userId`); the projected field is keyed by the path's
+**terminal segment**. Every shape declares its kind via `@row`
+(concept payload + row intrinsics; the concept is named by the
+`shape <Concept> <name>` signature) and/or `@actor` (engine
+envelope, no signature concept).
 
 ```memql
-// Verbose -- still valid, still works.
-func (Shape) agentFull {
-  @template({
-    id:          node("id"),
-    name:        node("payload.name"),
-    description: node("payload.description"),
-    createdAt:   node("createdAt")
-  })
-}
+use agents.concepts.{ agent }
 
-// Shorthand -- equivalent.
+@row
+@description("Full agent projection")
+shape agent agentFull {
+  row.id
+  payload.name
+  payload.description
+  row.createdAt
+}
+```
+
+A shape can `include` another shape for composition; transitive
+inclusion is supported, cycles + field collisions are errors.
+
+**Retired forms (rejected at parse time):** the receiver form and
+its template wrapper are gone --
+
+```memql
+// REJECTED -- func (Shape), @template, and node("...") are retired.
 func (Shape) agentFull {
   @template({
     node("id"),
-    node("payload.name"),
-    node("payload.description"),
-    node("createdAt")
+    node("payload.name")
   })
 }
 ```
 
-**Constraints.**
-
-- **`node(...)` only.** Other functions (`shape(...)`, `select(...)`,
-  `concat(...)`, etc.) keep the explicit `key:` prefix.
-- **Single quoted argument.** `node("payload.name")` is eligible;
-  multi-arg calls are not.
-- **Terminal segment must be a simple identifier.** Paths whose last
-  segment is not `[A-Za-z_][A-Za-z0-9_]*` fall back to the verbose
-  form. In practice this only matters for deeply nested accessors
-  like `node("payload.transcription.text")` where you want the key
-  to be `transcription` rather than `text`: stick with the verbose
-  form there.
+The terminal-segment keying carried over from the old `node("...")`
+shorthand: `payload.name` projects as `name`, exactly like
+`node("payload.name")` did. Live examples sit in every
+`dsl/<namespace>/shapes.memql` file.
 
 ---
 
@@ -737,23 +752,18 @@ for JSON interop but are not idiomatic MemQL and must not appear in
 new code.
 
 ```memql
-// Correct
-@template({
-  id: node("id"),
-  spaceId: node("payload.spaceId"),
-  createdAt: node("createdAt")
-})
-
-payload={
-  name: ctx.name,
-  active: true,
+// Correct -- mutation write block
+insert {
+  name: args.name
+  spaceId: args.spaceId
+  active: true
 }
 
+// Correct -- step-call args in an automation / logic body
+mutationCreateUser({ userId: args.event.payload.subject, email: args.event.payload.email })
+
 // Wrong -- unnecessary quotes on simple-identifier keys
-@template({
-  "id": node("id"),
-  "spaceId": node("payload.spaceId")
-})
+mutationCreateUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
 ```
 
 **Why it bites you.** Mixed quoting styles in the same codebase make
@@ -762,8 +772,8 @@ unquoted keys except a handful in inline `shape(...)` templates that
 used JSON-style quoting; the blast radius on a frontend/Go consumer
 is small because the parsers accept both, but the inconsistency is
 what blocked us from spotting earlier bugs (quoted keys don't
-participate in the `node("X")` shorthand from rule #16 because
-shorthand only triggers when the key is absent).
+participate in the bare-`args.X` / dotted-path shorthand from rules
+#15 and #17 because shorthand only triggers when the key is absent).
 
 **Exception.** Quoted keys are accepted when the key content isn't a
 valid identifier -- for example a key with a hyphen or space, or
@@ -772,12 +782,10 @@ MemQL-parsed at all). Reach for quoted keys ONLY when the name cannot
 be expressed as `[A-Za-z_][A-Za-z0-9_]*`; everything else is a
 style violation.
 
-Where the three parsers stand today:
+Where the parsers stand today:
 
 - `component/memql/mutation_templates.go::parseObjectKey` -- accepts
   both; prefer unquoted.
-- `component/memql/shape_parser.go::parseKey` -- accepts both;
-  prefer unquoted.
 - `component/language/parser/parser.go::parseObject` -- accepts
   both; prefer unquoted.
 
@@ -820,9 +828,11 @@ Practical consequences for concept authors:
 
 Practical consequences for mutation authors:
 
-- Don't pass `createdBy=` to `insert()` -- the engine ignores it (or
-  rejects it, depending on path). Whoever fires the mutation IS the
-  recorded creator.
+- In an `insert { ... }` block, `createdBy: actor.userId` /
+  `createdAt: now` stamp the firing actor and eval-time timestamp
+  (the live pattern -- see `dsl/calendar/mutations.memql`). Never
+  stamp `createdBy` from a caller-passed arg; whoever fires the
+  mutation IS the recorded creator.
 - Don't take a `createdBy` arg in your mutation's `args { ... }`
   block. It's noise on the wire and a footgun if a caller ever sets it.
 
@@ -845,17 +855,29 @@ reference under different shapes (`"user-abc"` vs
 produce DUPLICATE rows with distinct ids.
 
 ```memql
-# Wrong -- bare-vs-canonical input shape changes the participant id
-id = concat("participant-", hash(concat(args.spaceId, ":", args.userId)))
+// Wrong -- bare-vs-canonical input shape changes the participant id
+insert {
+  id: hash(concat(args.spaceId, ":", args.userId))
+  ...
+}
 
-# Right -- canonicalId() collapses both forms to the same string. The
-# second argument is the imported concept short-name (resolved against
-# the file-top `use ...concepts.{ space, user }` imports).
-id = concat("participant-", hash(concat(
-  canonicalId(args.spaceId, space), ":",
-  canonicalId(args.userId,  user)
-)))
+// Right -- canonicalId() collapses both forms to the same string. The
+// second argument is the imported concept short-name (resolved against
+// the file-top `use ...concepts.{ space, user }` imports).
+insert {
+  id: hash(concat(
+    canonicalId(args.spaceId, space), ":",
+    canonicalId(args.userId,  user)
+  ))
+  ...
+}
 ```
+
+(Don't prefix the hash with the concept name -- `id:
+concat("participant-", hash(...))` duplicates information already in
+the canonical id position, and `dsl/conformance_test.go`'s
+`TestNoShortIdConceptPrefix` rejects known concept-name prefixes
+outright. The shortId is the bare hash / uuid / slug.)
 
 `canonicalId(value, concept)` -- `concept` is an imported concept
 short-name (the stringly-typed `"v1:ns:name"` literal is retired):
@@ -876,20 +898,19 @@ queries work with canonical-stored values. But the id derivation
 runs BEFORE the payload auto-canon, so `canonicalId()` in the id
 template is still required for stable deterministic ids.
 
-Affected mutations (audit done 2026-05-06):
+Affected mutations (audit done 2026-05-06; all live under
+`dsl/cognition/mutations.memql` today):
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
 `createSessionForParticipant`, `sendTextUtterance`,
 `sendSpeechUtterance`, `sendActionUtterance`,
-`sendRealtimeTranscriptUtterance`. Plus
-`automations/v1/cognition/autoJoinSI` (computes the GA agent id
-from `hash(actor)`) and
-`automations/v1/copresent/onUnmetCapability` (hashes spaceId +
-utteranceId).
+`sendRealtimeTranscriptUtterance`.
 
-The `concat("ga-", hash(actor))` pattern in autoJoinSI is wrapped in
-`canonicalId(...)` to canonicalize the AGENT id (not the actor) for
-the `mutationJoinSpaceAsSI` call -- the actor itself is already
-canonical post the JWT verifier fix.
+The historical `concat("ga-", hash(actor))` pattern in autoJoinSI is
+gone entirely: `logicAutoJoinSI` (`dsl/cognition/logic.memql`) now
+resolves the assistant via `queryAssistantAgentForUser` + the space
+row's `ownerUserId` (memql#273, locked in by
+`TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
+like `ga-` are banned by `TestNoShortIdConceptPrefix`.
 
 ---
 
@@ -900,8 +921,10 @@ three canonical forms:
 
 - **Struct query / mutation**: `args { ... }` sub-block INSIDE the
   construct body.
-- **Procedural function / automation / policy**: file-top
-  `args { ... }` block ABOVE the `func (...)` declaration.
+- **Logic**: `args { ... }` block inside the construct body, ahead
+  of `body { ... }` (`logic NAME { args { ... } body { ... } }`).
+- **Automation**: no declared args — the triggering event is bound
+  as `args` (see below).
 - **Builtin / tool / prompt**: body fields directly — the body IS
   the schema (no `args` wrapper).
 
@@ -918,10 +941,11 @@ is rejected at load time): `now`, `actor`, `partition`, `config`,
 **Right (struct form — the canonical author surface):**
 
 ```memql
-use cognition.utterance
+use cognition.concepts.{ utterance, space }
+use common.traits.{ traitIsActiveRecord }
 
 @description("Insert a chat utterance")
-mutation mutationSendUtterance {
+mutation utterance mutationSendUtterance {
   args {
     spaceId  string  @required
     content  string  @required
@@ -934,14 +958,12 @@ mutation mutationSendUtterance {
   }
 }
 
-use cognition.space
-
 @description("Active spaces visible to caller")
-query queryActiveSpaces {
+query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId == args.ownerId && specIsActiveRecord
+  filter  payload.ownerId == args.ownerId && traitIsActiveRecord
   shape   spaceFull
 }
 
@@ -949,13 +971,19 @@ query queryActiveSpaces {
 spec specIsHumanParticipant {
   payload.participantType == "human"
 }
+```
 
-// No-input policy — single parameter must be `_`, not `ctx`.
-@tier("bff")
-@frontend_visible
-func (Policy) alwaysAllow(_ any) bool {
-  return true
-}
+**Policies take no args at all.** The live `policy` construct is an
+empty-bodied SI provider-selection record (the decision-policy tier
+that once carried `func (Policy)` bodies with `@tier` / `@audited`
+is retired, #984 — caller-context boolean checks belong in
+context-specs called via `spec("name")`):
+
+```memql
+@primary("streamClaudeSonnet")
+@fallback("stream54Pro")
+@description("Default chat policy for non-operator agents.")
+policy balancedChat { }
 ```
 
 **Wrong (rejected at registration):**
@@ -967,7 +995,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutation example {
+mutation space mutationExample {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies
@@ -998,6 +1026,66 @@ needing the reader to guess which side is concept-field vs caller-arg.
 **For automations:** the triggering event payload is bound as
 `args`, so `args.topic`, `args.kind`, and `args.payload.<field>`
 reach the event from inside the automation body.
+
+---
+
+## 22. Tree-wide conformance gates (`dsl/conformance_test.go`)
+
+CI enforces a set of static rules over every loaded `.memql` file.
+A PR that violates any of them fails before the engine ever parses
+the change. The gates, with their test names:
+
+- **Canonical filter prefixes** (`TestFilterSyntaxCanonical`).
+  Filter predicates reference payload fields as `payload.<field>`
+  and row intrinsics (`id`, `concept`, `createdAt`, `createdBy`,
+  `partition`, `type`, `schema`) by their bare names. The
+  `<conceptName>.<field>` alias form is rejected.
+- **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
+  When a trait in `dsl/common/traits.memql` covers a predicate, the
+  filter must call the trait, not inline the comparison:
+  `traitIsActiveRecord` (not `payload.active == true`),
+  `traitIsNotDeleted` (not `payload.deleted != true`),
+  `traitStatusIsActive` (not `payload.status == "active"`), and so
+  on for the status / identity-type / deletion-scheduled traits.
+  Concept-specific predicates (`payload.ownerUserId == args.userId`)
+  stay inline.
+- **No concept-name shortId prefixes** (`TestNoShortIdConceptPrefix`).
+  Derived ids are the bare unique part (uuid / hash / slug) — never
+  `concat("agent-", ...)` or another concept-name / sub-type prefix.
+  See [#20](#20-foreign-key-id-derivation-use-canonicalid-before-hashing).
+- **Typed @relationship targets** (`TestRelationshipTargetsUseImports`,
+  memql#1067). `@relationship(..., target=user, ...)` names an
+  imported concept; the `target="v1:..."` canonical-string form is
+  rejected.
+- **Per-row authz classification** (`TestPerRowAuthzClassification`).
+  Every query / mutation that touches a user-scope field
+  (`payload.ownerUserId`, `payload.userId`, `payload.createdBy`, ...)
+  must either carry a caller-scope check (`actor.userId` in the
+  filter / write), an admin gate (`actor.isClusterOwner` or a
+  `requiresClusterOwner` spec), or an explicit `@public` annotation
+  acknowledging the intent. Anything else hard-fails.
+- **Actor vocabulary** (`TestNoCallerVocabulary`, #221). `caller.X`
+  and `@caller` are retired; write `actor.X` and `@actor`.
+
+Companion gates in sibling files lock in the operator and binding
+grammar:
+
+- `TestNoRetiredOperatorForms` (#977,
+  `dsl/no_retired_operators_test.go`): filters use the single Go
+  boolean grammar — `&&` / `||` / `!` with parens. The `;`-AND and
+  `,`-OR separators, the `has` membership operator (use `in`), and
+  the `?.` optional-chain prefix (use `when(args.x) { ... }`) are
+  rejected.
+- `TestNoInfixWordAndOr` (#973,
+  `dsl/no_word_logical_operators_test.go`): the English `and` / `or`
+  infix forms are rejected.
+- `TestNoRetiredBindingForms` (#988, `dsl/no_named_writes_test.go`):
+  named writes (`insert <concept> {` / `update <concept> {`) are
+  rejected — the write target comes from the
+  `mutation <Concept> <name>` signature, the block is bare
+  `insert {` / `update {`. `canonicalId(x, "v1:ns:name")` string
+  literals and `concat("v1:ns:concept:", id)` are rejected — pass
+  the imported concept short-name.
 
 ---
 

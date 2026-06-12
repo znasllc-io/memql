@@ -25,7 +25,7 @@ This document describes the event pub/sub system in MemQL, which enables real-ti
 │  │  • Topic-based routing with glob patterns                 │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                 │
-│  Single-instance deployment (no Redis/NATS needed)             │
+│  Per-node in-memory bus (no Redis/NATS needed)                 │
 └───────────┬─────────────────────────────────────────────────────┘
             │ Publish()                            
             ▼                                      
@@ -55,11 +55,11 @@ Events are organized into hierarchical topics using dot notation. Subscribers ca
 
 Event topics include a partition segment between the base topic and the concept. The `*` wildcard matches any single partition in subscription patterns (e.g., `graph.node.created.*.v1:cognition:participant`).
 
-**Global-scoped concepts and the `_system` partition.** Concepts that
-carry `@scope("global")` in their `.memql` definition (cluster
-topology, partition registry, and similar infrastructure metadata)
-store rows in the reserved `_system` partition regardless of the
-request envelope. Their events therefore fire under topics like
+**System-level concepts and the `_system` partition.** System-level
+rows (cluster topology, partition registry, globally-scoped seeds, and
+similar infrastructure metadata) are stored in the reserved `_system`
+partition regardless of the request envelope. Their events therefore
+fire under topics like
 `graph.node.created._system.v1:cluster:node`. Subscribers that use a
 wildcard on the partition segment (e.g. `node.*.*.v1:cluster:node`)
 match these events without modification; subscribers that need to
@@ -71,8 +71,8 @@ user-chosen partition name.
 ```json
 {
   "partition": "acme",
-  "nodeId": "acme:v1:common:agent:abc123",
-  "concept": "v1:common:agent",
+  "nodeId": "v1:agents:agent:abc123",
+  "concept": "v1:agents:agent",
   "actor": "user@example.com",
   "nodeType": "object",
   "createdAt": "2026-03-24T10:30:00Z"
@@ -236,10 +236,10 @@ The `filter` field allows further refinement using glob patterns:
 
 | Pattern | Matches | Doesn't Match |
 |---------|---------|---------------|
-| `graph.node.*` | `graph.node.created`, `graph.node.deleted` | `graph.node.created.Skills` |
-| `graph.node.created.*` | `graph.node.created.Skills` | `graph.node.created` |
+| `graph.node.*` | `graph.node.created`, `graph.node.deleted` | `graph.node.created.acme.v1:notes:note` |
+| `graph.node.created.*.v1:notes:note` | `graph.node.created.acme.v1:notes:note` | `graph.node.created` |
 | `graph.#` | All graph events | `si.completion.started` |
-| `*.*.created` | `graph.node.created` | `graph.node.created.Skills` |
+| `*.*.created` | `graph.node.created` | `graph.node.created.acme.v1:notes:note` |
 
 ### Example: Subscribe to All Graph Events
 
@@ -260,14 +260,14 @@ ws.send(JSON.stringify({
 ### Example: Subscribe to Specific Concept Events
 
 ```javascript
-// Subscribe only to Skills concept events
+// Subscribe only to note-creation events (any partition)
 ws.send(JSON.stringify({
   message_id: "sub-2",
   payload: {
     subscribe: {
-      subscription_id: "skills-events",
+      subscription_id: "note-events",
       kind: 500, // SUBSCRIPTION_KIND_GRAPH_EVENTS
-      filter: "node.created.Skills"  // Results in pattern: graph.node.created.Skills
+      filter: "node.created.*.v1:notes:note"  // Results in pattern: graph.node.created.*.v1:notes:note
     }
   }
 }));
@@ -367,10 +367,10 @@ enum EventKind {
       "kind": 301,
       "ts": "2025-12-02T10:30:00Z",
       "payload": {
-        "topic": "graph.node.created.Skills",
+        "topic": "graph.node.created.acme.v1:notes:note",
         "eventKind": "node_created",
-        "nodeId": "skills:programming-go",
-        "concept": "Skills",
+        "nodeId": "v1:notes:note:9c2f64f1-...",
+        "concept": "v1:notes:note",
         "actor": "user@example.com"
       }
     }
@@ -406,7 +406,7 @@ The event bus is a pure Go in-memory pub/sub implementation:
 
 ### No External Dependencies
 
-The event system requires no external infrastructure (Redis, NATS, etc.). All event routing happens in-memory within the single MemQL instance.
+The event system requires no external infrastructure (Redis, NATS, etc.). All event routing happens in-memory within each memQL node; in cluster mode the node-to-node `EventBridge` propagates events across the mesh (with dedup and TTL) over the same gRPC streams the nodes already share.
 
 ### Event Delivery
 

@@ -9,10 +9,10 @@ owner: znas
 
 # MemQL Reserved Names
 
-> **Last updated:** 2026-05-19
+> **Last updated:** 2026-06-11
 
 This document is the single index of every identifier MemQL reserves
-in the author surface. Field names, arg names, import aliases, and
+in the author surface. Field names, arg names, imported names, and
 function names that collide with one of these are rejected at load
 time.
 
@@ -33,7 +33,7 @@ local args / fields:
 | `now` | RFC3339 timestamp captured at evaluation start. | every body |
 | `partition` | Active partition for this call. | every body |
 | `config` | Allow-listed config entries. See `component/config/policy_exposable.go` for the surface. Read as `config.X`. | every body |
-| `trace` | Policy-trace handle (`trace.persist`, `trace.note`). | policies + logic invoked from policies |
+| `trace` | Reserved engine name. (It carried the policy-trace handle of the decision-policy tier, retired in #984; the name stays reserved so resolution rules remain unambiguous.) | every body |
 
 An args field whose name collides with any of these is a load-time
 error. Defined in `component/memql/keyword_slices.go` and enforced
@@ -85,26 +85,28 @@ migration hint pointing at the canonical `actor.X` / `@actor`.
 
 ---
 
-## 4. Import aliases (DSL import-model refactor)
+## 4. Imported names (`use` declarations)
 
-When the import-model refactor lands ([dsl-import-model-refactor.md](../../internal/design/dsl-import-model-refactor.md)),
-import aliases default to the basename of the imported file. The
-following are **reserved alias names** -- attempting
-`import "./foo" as <name>` for one of these is a load-time error:
+Cross-file dependencies are declared with file-top `use` imports:
 
-| Reserved alias | Reason |
-|----------------|--------|
-| `actor` | Top-level engine-provided name. |
-| `now` | Top-level engine-provided name. |
-| `partition` | Top-level engine-provided name. |
-| `config` | Top-level engine-provided name. |
-| `trace` | Top-level engine-provided name. |
+```memql
+use cognition.concepts.{ participant, space }
+use common.traits.{ traitIsActiveRecord }
+```
 
-The basename rule applies first: `import "./foo"` resolves to alias
-`foo`. If the resulting basename collides with another import's
-basename, the author must add `as <name>`. Files whose basename is
-not a legal identifier (regex `^[a-z][a-zA-Z0-9_]*$`) require an
-explicit `as` clause too.
+The dotted path maps to a file on disk (`cognition.concepts` →
+`dsl/cognition/concepts.memql`); the brace list names the constructs
+pulled into local scope **under their declared names** -- there is no
+aliasing clause. Every imported name shares the same identifier
+namespace as the top-level engine-provided names in section 1, so the
+five reserved names (`actor`, `now`, `partition`, `config`, `trace`)
+can never be construct names and can never enter scope through an
+import.
+
+Resolution lives in `component/memql/dslimports/`. (An earlier
+design sketch for path-based `import "./foo" as <name>` aliasing was
+superseded by the `use` model that shipped with the import-model
+pivot, memql PRs #47 / #48 / #49.)
 
 ---
 
@@ -128,7 +130,7 @@ cannot be used as identifier names anywhere in the author surface:
 | `provider` | SI vendor + model config. |
 | `builtin` | Go-backed operation wrapper. |
 | `seed` | Declarative row template. |
-| `policy` | Cross-cutting decision OR SI-router routing config. |
+| `policy` | SI provider-selection record (`@primary` / `@fallback`). The decision-policy tier is retired (#984). |
 
 Plus body-level keywords inside specific constructs: `args`, `body`,
 `filter`, `shape`, `insert`, `update`, `step`, `params`, `auth`,
@@ -146,7 +148,7 @@ parser's allow-list (search `allowedXAnnotations` in
 | Annotation | Where it applies |
 |------------|------------------|
 | `@description("...")` | Every construct. |
-| `@enabled` / `@disabled` | Lifecycle on functions / automations / traits / tools / builtins / policies. **Not on specs** -- the engine controls spec lifecycle. |
+| `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
 | `@deprecated("hint")` | Functions, automations, tools, builtins. |
 | `@internal` | Functions; hides from SI tool surfaces + external docs. |
 
@@ -182,7 +184,7 @@ several Go files. When the list below changes, update this doc:
 | Caller envelope | `component/memql/sense/builtins.go` + `runtime_evaluator.go` |
 | Construct keywords | per-construct parser allow-lists in `component/memql/` |
 | Annotation allow-lists | per-construct parser allow-lists in `component/memql/` |
-| Import aliases | `component/memql/dslimports/dslimports.go` (post-refactor) |
+| Imported names (`use`) | `component/memql/dslimports/dslimports.go` |
 
 ---
 

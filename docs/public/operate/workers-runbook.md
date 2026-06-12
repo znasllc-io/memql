@@ -72,7 +72,7 @@ TCC status, run:
 
 The setup flow is a single-panel TUI built on the same
 `cli/ui` + `cli/canvas` primitives as the operations console
-(see [cli/CLAUDE.md](../../cli/CLAUDE.md) — every interactive
+(see `cli/CLAUDE.md` in the memql-cockpit repo — every interactive
 surface in `memql-cockpit` uses the TUI). Detects non-TTY
 callers and falls back to a plain printf path so install
 scripts piping the wizard's output don't break.

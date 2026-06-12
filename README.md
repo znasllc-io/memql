@@ -39,14 +39,13 @@ Agent and voice deployments today are integration-heavy. Most of the engineering
 @version("1.0.0")
 @namespace("acme")
 concept ticket {
-  id          string   @required
   subject     string   @required
-  priority    string
-  createdAt   datetime @required
+  priority    string   @default("normal")
+  status      enum("open", "closed") @default("open")
 }
 
 @enabled
-@handler(type="query", query="concept==v1:acme:ticket && ticket.priority==args.priority")
+@handler(type="query", query="concept==v1:acme:ticket && payload.priority==\"$args.priority\"")
 @executionTime("fast")
 @description("List tickets by priority")
 tool listByPriority {
@@ -95,8 +94,8 @@ make deploy VERSION=X
 
 ### Query Language
 - **MemQL DSL:** Custom query language for time-series graphs
-- **Automations:** Event-driven workflows (.memql files)
-- **Functions:** Reusable query functions (.memql files)
+- **Constructs:** Concepts, queries, mutations, shapes, specs, tools, prompts, automations -- declared in `.memql` files under `dsl/<namespace>/`
+- **Automations:** Event- and schedule-triggered workflows
 
 ---
 
@@ -201,16 +200,16 @@ memQL/
 ├── integrations/          # External service integrations
 │   ├── cognition/         # SI collaboration
 │   └── audio/             # Audio streaming
-├── automations/           # MemQL DSL automations (.memql)
-├── queries/               # MemQL DSL query functions (.memql)
-├── mutations/             # MemQL DSL mutation functions (.memql)
-├── specs/                 # MemQL DSL specification predicates (.memql)
-├── tools/                 # MemQL DSL SI tool definitions (.memql)
+├── dsl/                   # The MemQL DSL tree (one directory per namespace)
+│   ├── cognition/         # e.g. concepts.memql, queries.memql, mutations.memql,
+│   │                      #      tools.memql, automations.memql, ... per namespace
+│   ├── identity/
+│   ├── _reference/        # Authoring reference skeletons (not loaded)
+│   └── ...
 ├── docs/                  # Documentation
-│   ├── core/              # Architecture, language
-│   ├── api/               # API references
-│   ├── guides/            # How-to guides
-│   └── auth/              # Authentication
+│   ├── public/            # Published docs (overview, concepts, language, ai,
+│   │                      #      build, operate) -- rendered on memql.io
+│   └── internal/          # Design records, plans, internal runbooks
 ├── docker/                # Docker configuration
 └── .claude/               # Configuration
 ```
@@ -292,20 +291,21 @@ MemQL DSL is a domain-specific query language for time-series memory graphs.
 
 ### Example Query
 ```memql
-// Find recent utterances in a space
-spaceUtterances({
-  "spaceId": "space_123",
-  "limit": 10
+// Find active human participants in a space
+queryActiveHumanParticipants({
+  "spaceId": "space_123"
 })
 ```
 
 ### Example Automation
 ```memql
 @enabled
-@trigger(event="graph.node.created.v1:cognition:participant")
-@description("Auto-join SI agents to spaces")
-func (Automation) autoJoinSI() {
-  // Automation logic...
+@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+@description("On space creation, auto-join the creator's assistant")
+automation autoJoinSI {
+  step run {
+    logic autoJoinSI { event: event }
+  }
 }
 ```
 
