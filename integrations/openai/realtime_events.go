@@ -114,6 +114,25 @@ type TurnDetectionConfig struct {
 	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
 }
 
+// Input noise-reduction modes for SessionConfig.NoiseReduction
+// (audio.input.noise_reduction.type). The filter runs BEFORE the model's VAD,
+// with the documented effect of reducing turn-detection false positives -- the
+// first server-side line of defense against phantom turns from speaker echo /
+// ambient noise (#1431).
+const (
+	// NoiseReductionFarField is for far-field microphones (laptop / conference
+	// room mics) -- the right mode for users on laptop speakers.
+	NoiseReductionFarField = "far_field"
+	// NoiseReductionNearField is for close-talking microphones (headsets).
+	NoiseReductionNearField = "near_field"
+)
+
+// IncludeInputTranscriptionLogprobs is the session `include` value that asks
+// the server to attach per-token logprobs to input-transcription events --
+// the confidence signal the executor's transcript gate reads (#1431). Only
+// documented for the gpt-4o-transcribe model family.
+const IncludeInputTranscriptionLogprobs = "item.input_audio_transcription.logprobs"
+
 // InputTranscriptionConfig enables the model's native transcription of the
 // user's input audio (the conversation.item.input_audio_transcription.* events),
 // so the human's chat transcript comes from the realtime model rather than a
@@ -147,6 +166,15 @@ type SessionConfig struct {
 	// InputTranscription, when non-nil, enables native input-audio
 	// transcription (#478). Nil leaves it off.
 	InputTranscription *InputTranscriptionConfig
+	// NoiseReduction, when non-empty, enables server-side input noise
+	// reduction (audio.input.noise_reduction.type): NoiseReductionFarField or
+	// NoiseReductionNearField. Empty omits the field entirely -- noise
+	// reduction off (#1431).
+	NoiseReduction string
+	// Include lists the extra event payloads the session asks the server to
+	// attach (session.include), e.g. IncludeInputTranscriptionLogprobs.
+	// Empty omits the field (#1431).
+	Include []string
 }
 
 // encodeSessionUpdate renders the session.update client event. turn_detection is
@@ -161,6 +189,12 @@ func encodeSessionUpdate(cfg SessionConfig) ([]byte, error) {
 	inputAudio := map[string]any{"format": audioFmt}
 	if cfg.InputTranscription != nil {
 		inputAudio["transcription"] = cfg.InputTranscription
+	}
+	// GA input noise reduction (#1431): filters the input BEFORE VAD and the
+	// model, the documented mitigation for phantom turn activation from
+	// far-field mics / speaker echo. Omitted (off) when unset.
+	if cfg.NoiseReduction != "" {
+		inputAudio["noise_reduction"] = map[string]string{"type": cfg.NoiseReduction}
 	}
 	// GA places turn_detection UNDER audio.input (the beta API had it at the
 	// session top level). Encoded explicitly -- key present with a null value
@@ -184,6 +218,9 @@ func encodeSessionUpdate(cfg SessionConfig) ([]byte, error) {
 	if len(cfg.Tools) > 0 {
 		session["tools"] = cfg.Tools
 		session["tool_choice"] = "auto"
+	}
+	if len(cfg.Include) > 0 {
+		session["include"] = cfg.Include
 	}
 	return json.Marshal(map[string]any{
 		"type":    clientEventSessionUpdate,
@@ -341,6 +378,13 @@ type RealtimeServerEvent struct {
 	Arguments string
 	// ErrorMessage is set on EventError.
 	ErrorMessage string
+	// Logprobs holds the per-token log-probabilities attached to
+	// EventInputTranscriptDone when the session was configured with
+	// IncludeInputTranscriptionLogprobs -- the ASR confidence signal for the
+	// transcript gate (#1431). Nil/empty when the server omitted them
+	// (community reports: intermittently missing even when requested), in
+	// which case the gate must pass the final through.
+	Logprobs []float64
 	// AudioTokens is the input+output audio-token count reported on
 	// EventResponseDone (response.usage), fed to the per-session token-budget
 	// guardrail (#459). Zero when the server omits usage. Non-audio token
@@ -362,6 +406,9 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 		CallID     string `json:"call_id"`
 		Name       string `json:"name"`
 		Arguments  string `json:"arguments"`
+		Logprobs   []struct {
+			Logprob float64 `json:"logprob"`
+		} `json:"logprobs"`
 		Response   struct {
 			ID     string `json:"id"`
 			Status string `json:"status"`
@@ -428,6 +475,15 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 	case serverEventInputTranscriptDone:
 		ev.Kind = EventInputTranscriptDone
 		ev.Text = raw.Transcript
+		// Per-token logprobs (#1431): present only when the session include
+		// option requested them AND the server attached them (intermittently
+		// missing in practice). Flattened to the values the gate consumes.
+		if len(raw.Logprobs) > 0 {
+			ev.Logprobs = make([]float64, 0, len(raw.Logprobs))
+			for _, lp := range raw.Logprobs {
+				ev.Logprobs = append(ev.Logprobs, lp.Logprob)
+			}
+		}
 	case serverEventError:
 		ev.Kind = EventError
 		ev.ErrorMessage = raw.Error.Message

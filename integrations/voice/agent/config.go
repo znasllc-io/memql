@@ -117,6 +117,24 @@ type Config struct {
 	RealtimeVadPrefixPaddingMs   int
 	RealtimeVadSilenceDurationMs int
 
+	// Realtime anti-phantom-transcript knobs (#1431), layered with the #1203
+	// VAD threshold and the #1199 post-hoc filter.
+	//
+	// RealtimeNoiseReduction selects the GA audio.input.noise_reduction mode:
+	// "far_field" (default -- laptop/conference mics, the documented mitigation
+	// for speaker-echo phantom turns), "near_field" (headsets), or "off"
+	// (field omitted). It filters input audio BEFORE the model's VAD, reducing
+	// turn-detection false positives.
+	RealtimeNoiseReduction string
+	// RealtimeTranscriptMinConfidence is the mean per-token logprob floor an
+	// input-transcription FINAL must clear to be kept (logprobs requested via
+	// the session include option). Finals WITHOUT logprobs always pass --
+	// the signal is intermittently missing, so absence must never drop a real
+	// utterance. Default -1.0 (conservative: only clearly low-confidence,
+	// noise-shaped finals fall below it); raise toward -0.5 to gate harder,
+	// set very low (e.g. -100) to effectively disable.
+	RealtimeTranscriptMinConfidence float64
+
 	// memQL gRPC.
 	MemqlGRPCAddr string
 	// Identity-issued class="voice_agent" JWT bearer presented on every
@@ -153,6 +171,17 @@ type Config struct {
 // AvatarEnabled reports whether an avatar vendor is configured.
 func (c Config) AvatarEnabled() bool {
 	return c.AvatarVendor == "anam" || c.AvatarVendor == "simli"
+}
+
+// NoiseReductionMode maps the validated MEMQL_REALTIME_NOISE_REDUCTION knob to
+// the wire value for openai.SessionConfig.NoiseReduction: "far_field" /
+// "near_field" pass through, "off" becomes the empty string (the encoder then
+// omits audio.input.noise_reduction entirely) (#1431).
+func (c Config) NoiseReductionMode() string {
+	if c.RealtimeNoiseReduction == "off" {
+		return ""
+	}
+	return c.RealtimeNoiseReduction
 }
 
 // LiveKitPublicURL is the URL the avatar vendor's cloud engine should dial to
@@ -269,6 +298,11 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.RealtimeVadThreshold = getFloat("MEMQL_REALTIME_VAD_THRESHOLD", 0.6)
 	cfg.RealtimeVadPrefixPaddingMs = getInt("MEMQL_REALTIME_VAD_PREFIX_PADDING_MS", 300)
 	cfg.RealtimeVadSilenceDurationMs = getInt("MEMQL_REALTIME_VAD_SILENCE_DURATION_MS", 500)
+	// #1431 anti-phantom-transcript knobs: server-side noise reduction
+	// (default far_field -- our primary users are on laptop mics/speakers)
+	// and the input-transcription confidence floor (mean token logprob).
+	cfg.RealtimeNoiseReduction = strings.ToLower(get("MEMQL_REALTIME_NOISE_REDUCTION", "far_field"))
+	cfg.RealtimeTranscriptMinConfidence = getFloat("MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE", -1.0)
 
 	cfg.AvatarVendor = strings.ToLower(get("MEMQL_AVATAR_VENDOR", "anam"))
 	cfg.AnamAPIKey = get("ANAM_API_KEY", "")
@@ -292,6 +326,12 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	if cfg.AvatarVendor != "anam" && cfg.AvatarVendor != "simli" && cfg.AvatarVendor != "none" {
 		return Config{}, fmt.Errorf(
 			"MEMQL_AVATAR_VENDOR=%q -- must be 'anam', 'simli', or 'none'", cfg.AvatarVendor)
+	}
+	if cfg.RealtimeNoiseReduction != "far_field" && cfg.RealtimeNoiseReduction != "near_field" &&
+		cfg.RealtimeNoiseReduction != "off" {
+		return Config{}, fmt.Errorf(
+			"MEMQL_REALTIME_NOISE_REDUCTION=%q -- must be 'far_field', 'near_field', or 'off'",
+			cfg.RealtimeNoiseReduction)
 	}
 
 	return cfg, nil

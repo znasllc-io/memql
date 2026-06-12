@@ -177,6 +177,13 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		Instructions: req.Executor.SessionPersona.Instructions,
 		Voice:        req.Executor.SessionPersona.Voice,
 		Tools:        realtimeTools,
+		// Server-side input noise reduction (#1431): filters the input BEFORE
+		// the model's VAD, the documented mitigation for phantom turns from
+		// laptop-speaker echo. Carried on the base config so every posture
+		// (conductor-gated, native 1-on-1, multi-party) inherits it.
+		// MEMQL_REALTIME_NOISE_REDUCTION: far_field (default) / near_field /
+		// off ("" omits the field).
+		NoiseReduction: cfg.NoiseReductionMode(),
 	}
 	realtimeConnectStart := time.Now()
 	session, err := rtClient.Connect(ctx, sessionBase)
@@ -232,6 +239,9 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		client, req.SpaceID, req.GaAgentID, NewCitationResolver(GroundingContext{}),
 	))
 	executor.SetToolBridge(toolBridge)
+	// #1431 confidence gate: drop input-transcription finals whose mean token
+	// logprob falls below the floor (finals without logprobs always pass).
+	executor.SetTranscriptConfidenceFloor(cfg.RealtimeTranscriptMinConfidence)
 
 	// Cost guardrails (#459): bound the warm session by empty-room / idle /
 	// max-duration / audio-token budget. The stop callback closes the realtime
@@ -317,6 +327,10 @@ func (b *realtimeRoomBridge) nativeSessionConfig() openai.SessionConfig {
 		Model:    b.transcriptionModel,
 		Language: b.language,
 	}
+	// Per-token logprobs on the input transcription (#1431): the confidence
+	// signal the executor's transcript gate reads. Requested whenever input
+	// transcription is on; the gate tolerates the server omitting them.
+	cfg.Include = []string{openai.IncludeInputTranscriptionLogprobs}
 	return cfg
 }
 
@@ -337,6 +351,8 @@ func (b *realtimeRoomBridge) multiPartySemanticVadConfig() openai.SessionConfig 
 		Model:    b.transcriptionModel,
 		Language: b.language,
 	}
+	// Logprobs for the #1431 confidence gate, same as nativeSessionConfig.
+	cfg.Include = []string{openai.IncludeInputTranscriptionLogprobs}
 	return cfg
 }
 
