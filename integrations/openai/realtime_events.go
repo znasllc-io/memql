@@ -326,6 +326,11 @@ type RealtimeServerEvent struct {
 	Type string
 	// ResponseID is set on EventResponseCreated / EventResponseDone.
 	ResponseID string
+	// Status is the response's terminal status on EventResponseDone
+	// ("completed" | "cancelled" | "incomplete" | "failed"). A non-"completed"
+	// status marks a truncated response (barge-in / cancel), so the captured
+	// transcript seals at the cancellation point (#1427). Empty when omitted.
+	Status string
 	// Audio is the decoded PCM16 (24 kHz) frame on EventAudioDelta.
 	Audio []byte
 	// Text is the transcript token (delta) or final transcript (done).
@@ -358,8 +363,9 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 		Name       string `json:"name"`
 		Arguments  string `json:"arguments"`
 		Response   struct {
-			ID    string `json:"id"`
-			Usage struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Usage  struct {
 				InputTokenDetails struct {
 					AudioTokens int `json:"audio_tokens"`
 				} `json:"input_token_details"`
@@ -386,6 +392,7 @@ func parseServerEvent(data []byte) RealtimeServerEvent {
 	case serverEventResponseDone:
 		ev.Kind = EventResponseDone
 		ev.ResponseID = raw.Response.ID
+		ev.Status = raw.Response.Status
 		ev.AudioTokens = raw.Response.Usage.InputTokenDetails.AudioTokens +
 			raw.Response.Usage.OutputTokenDetails.AudioTokens
 	case serverEventOutputAudioDelta, previewEventAudioDelta:

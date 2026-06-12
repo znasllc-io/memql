@@ -314,8 +314,8 @@ func TestRealtimeExecutor_OutputAudio_PublishedToSink(t *testing.T) {
 }
 
 // TestRealtimeExecutor_OutputCapture_ForwardsTranscript verifies the #458
-// output-capture seam: an EventTranscriptDone drives a VoiceAgentRealtimeOutput
-// to memQL (so chat/canvas render the realtime turn).
+// output-capture seam: a transcript sealed by EventResponseDone drives a
+// VoiceAgentRealtimeOutput to memQL (so chat/canvas render the realtime turn).
 func TestRealtimeExecutor_OutputCapture_ForwardsTranscript(t *testing.T) {
 	fs := newFakeStream()
 	var outputs int32
@@ -340,6 +340,7 @@ func TestRealtimeExecutor_OutputCapture_ForwardsTranscript(t *testing.T) {
 	e.Start()
 
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "Here is the answer."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1"}
 
 	require.Eventually(t, func() bool {
 		for _, env := range fs.sentEnvelopes() {
@@ -678,6 +679,7 @@ func TestRealtimeExecutor_SpokenEqualsShown(t *testing.T) {
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "The cloud spend is the place to start; "}
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "it's the biggest line item."}
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: spoken}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1", Status: "completed"}
 
 	require.Eventually(t, func() bool { return sender.lastSent() != nil }, 2*time.Second, 10*time.Millisecond,
 		"the spoken transcript must be captured as an utterance")
@@ -698,6 +700,7 @@ func TestRealtimeExecutor_SpokenEqualsShown_AccumulatedDeltas(t *testing.T) {
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Yes, "}
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "I can help with that."}
 	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone} // no text -> use accumulated
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1"}
 
 	require.Eventually(t, func() bool { return sender.lastSent() != nil }, 2*time.Second, 10*time.Millisecond)
 	assert.Equal(t, "Yes, I can help with that.", sender.lastSent().GetText())
@@ -739,4 +742,149 @@ func TestRealtimeExecutor_GateDirective_InjectsGrounding(t *testing.T) {
 	assert.True(t, found, "grounding must be injected as a system conversation item before generation")
 	// And the model still authors (directive instructions, not the grounding text).
 	assert.Contains(t, rt.lastResponse(), "Generate your own reply")
+}
+
+// newCaptureExecutorForTest wires an executor with an attached fakeOutputSender
+// forwarder -- the harness for the #1427 capture-path tests.
+func newCaptureExecutorForTest(t *testing.T, fs *fakeStream, rt *fakeRealtimeSession) (*RealtimeExecutor, *fakeOutputSender) {
+	t.Helper()
+	e := newRealtimeExecutorForTest(t, fs, rt)
+	sender := &fakeOutputSender{ack: &memqlv1.VoiceAgentRealtimeOutputAck{Success: true, UtteranceId: "utt-cap"}}
+	e.SetOutputForwarder(NewRealtimeOutputForwarder(sender, "s1", "s1-ga", NewCitationResolver(GroundingContext{})))
+	return e, sender
+}
+
+// TestRealtimeExecutor_OutputCapture_SingleForwardPerResponse pins the #1427
+// single-writer contract: GA emits one output_audio_transcript.done PER CONTENT
+// PART, so a multi-part response must still forward exactly ONE utterance --
+// the assembled parts, with no cross-part duplication (the old per-done forward
+// inserted one bubble per part, and its empty-text fallback re-sent part one's
+// accumulated deltas inside part two).
+func TestRealtimeExecutor_OutputCapture_SingleForwardPerResponse(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	_, sender := newCaptureExecutorForTest(t, fs, rt)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_1"}
+	// Part one: deltas + authoritative done text.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "First part."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "First part."}
+	// Part two: deltas, done WITHOUT text (the fallback that used to leak part
+	// one's accumulation into a second insert).
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Second part."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1", Status: "completed"}
+
+	require.Eventually(t, func() bool { return sender.sentCount() >= 1 }, 2*time.Second, 10*time.Millisecond)
+	// Settle: no second forward may follow.
+	time.Sleep(80 * time.Millisecond)
+	assert.Equal(t, 1, sender.sentCount(), "exactly one forward per response (no per-part double write)")
+	assert.Equal(t, "First part.\n\nSecond part.", sender.lastSent().GetText(),
+		"the single forward carries the assembled parts with no duplication")
+}
+
+// TestRealtimeExecutor_OutputCapture_BargeInSealsAtCancel pins the #1427
+// truncation contract: a response cancelled mid-part (barge-in) seals the
+// transcript at the cancellation point -- the deltas received up to the cut,
+// which is exactly the audio the model produced -- rather than dropping it or
+// carrying text past the truncated audio.
+func TestRealtimeExecutor_OutputCapture_BargeInSealsAtCancel(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	_, sender := newCaptureExecutorForTest(t, fs, rt)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_1"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Let me walk you through "}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "the first step"}
+	// Barge-in: no transcript.done for the part; the response dies cancelled.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1", Status: "cancelled"}
+
+	require.Eventually(t, func() bool { return sender.sentCount() == 1 }, 2*time.Second, 10*time.Millisecond,
+		"a truncated response still lands its (truncated) transcript")
+	assert.Equal(t, "Let me walk you through the first step", sender.lastSent().GetText(),
+		"truncated transcript = the deltas up to the cancellation point")
+}
+
+// TestRealtimeExecutor_OutputCapture_AppendOnly_NoCrossResponseLeak verifies a
+// response's transcript never leaks into the next response's bubble: two
+// back-to-back responses forward two utterances, each carrying only its own
+// spoken text (#1427 append-only scoping).
+func TestRealtimeExecutor_OutputCapture_AppendOnly_NoCrossResponseLeak(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	_, sender := newCaptureExecutorForTest(t, fs, rt)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_1"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Reply one."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1"}
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_2"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Reply two."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_2"}
+
+	require.Eventually(t, func() bool { return sender.sentCount() == 2 }, 2*time.Second, 10*time.Millisecond)
+	// Each capture forwards on its own goroutine, so arrival order is not
+	// guaranteed -- assert each response forwarded exactly its own text.
+	sender.mu.Lock()
+	texts := []string{sender.sent[0].GetText(), sender.sent[1].GetText()}
+	sender.mu.Unlock()
+	assert.ElementsMatch(t, []string{"Reply one.", "Reply two."}, texts,
+		"each response forwards exactly its own transcript (no cross-response leak)")
+}
+
+// TestRealtimeExecutor_OutputCapture_ReVoiceNotCaptured pins the #1427
+// no-second-writer contract for the cognition/text leg: a speak directive
+// carrying authored Text (no directive mode) re-voices a reply that is ALREADY
+// a committed chat row, so the model's spoken paraphrase must NOT be captured
+// as a second SI utterance. The suppression is per-response: the next
+// model-authored response is captured normally.
+func TestRealtimeExecutor_OutputCapture_ReVoiceNotCaptured(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e, sender := newCaptureExecutorForTest(t, fs, rt)
+
+	// Cognition-authored reply pushed for re-voicing (the chat row exists).
+	require.True(t, e.Speak(SpeakDirective{Text: "The authored reply.", UtteranceID: "utt-authored"}))
+	require.Eventually(t, func() bool { return rt.responseCount() == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_1"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDelta, Text: "Here's the authored reply, paraphrased."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "Here's the authored reply, paraphrased."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1", Status: "completed"}
+
+	// Settle: the paraphrase must never forward.
+	require.Eventually(t, func() bool { return e.Machine().State() == StateListening }, 2*time.Second, 10*time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
+	assert.Equal(t, 0, sender.sentCount(), "a re-voiced authored reply must not be captured as a second bubble")
+
+	// Next (model-authored, e.g. native) response is captured normally.
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_2"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "A native reply."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_2", Status: "completed"}
+	require.Eventually(t, func() bool { return sender.sentCount() == 1 }, 2*time.Second, 10*time.Millisecond,
+		"suppression is per-response; the next response captures")
+	assert.Equal(t, "A native reply.", sender.lastSent().GetText())
+}
+
+// TestRealtimeExecutor_OutputCapture_DirectiveModeStillCaptured guards the #479
+// gate path against over-suppression: a directive-mode speak (the model authors
+// the words natively) keeps capture ON -- there the capture is the ONLY writer
+// of the spoken reply.
+func TestRealtimeExecutor_OutputCapture_DirectiveModeStillCaptured(t *testing.T) {
+	fs := newFakeStream()
+	rt := newFakeRealtimeSession()
+	e, sender := newCaptureExecutorForTest(t, fs, rt)
+
+	require.True(t, e.Speak(SpeakDirective{Text: "ignored-on-directive", Mode: "primary", Brevity: "short"}))
+	require.Eventually(t, func() bool { return rt.responseCount() == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseCreated, ResponseID: "resp_1"}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventTranscriptDone, Text: "Natively authored reply."}
+	rt.events <- openai.RealtimeServerEvent{Kind: openai.EventResponseDone, ResponseID: "resp_1", Status: "completed"}
+
+	require.Eventually(t, func() bool { return sender.sentCount() == 1 }, 2*time.Second, 10*time.Millisecond,
+		"directive-mode responses are model-authored: capture is the only writer and must fire")
+	assert.Equal(t, "Natively authored reply.", sender.lastSent().GetText())
 }
