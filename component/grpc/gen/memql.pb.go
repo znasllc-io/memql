@@ -3590,9 +3590,20 @@ type ListToolsMsg struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Optional cursor for pagination
-	Cursor        string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// Voice-agent tool-scope context, threaded across the proxy hop (#1448).
+	// ListTools is proxied from the bff to the agent node (nodeTargetForListTools
+	// -> NodeTypeAgent), and the agent-node session has no local voiceAgentSpaceId
+	// / voiceAgentGaAgentId -- those are bound only on the bff session that
+	// received VoiceAgentSessionStart. The bff stamps the bound scope here before
+	// proxying so the receiving node can scope the realtime tool surface to the
+	// GA's tool list instead of failing open to the full registry. Empty for
+	// non-voice callers (text loop, direct browser), which keeps the local
+	// session-state path unchanged.
+	VoiceAgentSpaceId   string `protobuf:"bytes,3,opt,name=voice_agent_space_id,json=voiceAgentSpaceId,proto3" json:"voice_agent_space_id,omitempty"`
+	VoiceAgentGaAgentId string `protobuf:"bytes,4,opt,name=voice_agent_ga_agent_id,json=voiceAgentGaAgentId,proto3" json:"voice_agent_ga_agent_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ListToolsMsg) Reset() {
@@ -3635,6 +3646,20 @@ func (x *ListToolsMsg) GetRequestId() string {
 func (x *ListToolsMsg) GetCursor() string {
 	if x != nil {
 		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ListToolsMsg) GetVoiceAgentSpaceId() string {
+	if x != nil {
+		return x.VoiceAgentSpaceId
+	}
+	return ""
+}
+
+func (x *ListToolsMsg) GetVoiceAgentGaAgentId() string {
+	if x != nil {
+		return x.VoiceAgentGaAgentId
 	}
 	return ""
 }
@@ -12619,11 +12644,13 @@ const file_memql_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x17\n" +
 	"\afrom_id\x18\x02 \x01(\tR\x06fromId\x12\x13\n" +
 	"\x05to_id\x18\x03 \x01(\tR\x04toId\x12\x14\n" +
-	"\x05depth\x18\x04 \x01(\x05R\x05depth\"E\n" +
+	"\x05depth\x18\x04 \x01(\x05R\x05depth\"\xac\x01\n" +
 	"\fListToolsMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"\x89\x01\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12/\n" +
+	"\x14voice_agent_space_id\x18\x03 \x01(\tR\x11voiceAgentSpaceId\x124\n" +
+	"\x17voice_agent_ga_agent_id\x18\x04 \x01(\tR\x13voiceAgentGaAgentId\"\x89\x01\n" +
 	"\x0fListToolsResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x126\n" +

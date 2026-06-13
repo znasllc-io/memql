@@ -1404,6 +1404,16 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
 	if s.shouldProxySI(nodeTargetForListTools()) {
+		// Thread the voice session's tool-scope context across the proxy hop
+		// (#1448). ListTools is forwarded to the agent node, whose session has
+		// no local voiceAgentSpaceId / voiceAgentGaAgentId (those bind only on
+		// the bff session that received VoiceAgentSessionStart). Without this
+		// the receiving node resolves no scope and fails open to the full
+		// 517-tool registry. Stamp the bound scope onto the message (which is
+		// the same object the envelope carries) so the agent node scopes the
+		// surface to the GA's tool list. No-op for non-voice callers (both
+		// fields empty), preserving their unscoped behaviour.
+		s.stampVoiceAgentScopeOnListTools(msg)
 		return s.proxySI(envelope, requestId, nodeTargetForListTools())
 	}
 
@@ -1425,7 +1435,10 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 		// answer, NOT a reason to dump the 517-tool registry -- #1442). When
 		// false (any non-voice caller, or a genuine lookup error -- WARN'd at
 		// the lookup site) we keep the unscoped behaviour / fail open.
-		agentScope, scoped := s.voiceAgentScopedToolNames()
+		// Resolve scope from the threaded request context first (the proxied
+		// agent-node receiver path -- #1448), falling back to local session
+		// state for non-proxied callers.
+		agentScope, scoped := s.voiceAgentScopedToolNamesForRequest(msg.GetVoiceAgentSpaceId(), msg.GetVoiceAgentGaAgentId())
 		toolDefs = make([]*memqlv1.ToolDefinition, 0, len(tools))
 		for _, tool := range tools {
 			if !tool.IsAllowedForRole(callerRole) {

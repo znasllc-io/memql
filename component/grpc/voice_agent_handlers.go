@@ -760,16 +760,85 @@ func effectiveChannelMode(override string, overrideOK bool, control string) stri
 // empty. Either way the placeholder/empty id matched no agent row, found=false,
 // and the surface failed open to 517 tools -- the regression this fixes.
 func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) {
+	return s.voiceAgentScopedToolNamesForRequest("", "")
+}
+
+// stampVoiceAgentScopeOnListTools copies the bound voice-session scope
+// (spaceId + GA agent id) onto a ListToolsMsg before it is proxied to the agent
+// node (#1448). The agent-node receiver has no local voiceAgentSpaceId of its
+// own, so without this the scope context is lost across the hop and the surface
+// fails open to the full registry. No-op when this session isn't a voice-agent
+// session (both fields empty), so non-voice callers proxy unchanged.
+func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMsg) {
+	if s == nil || msg == nil {
+		return
+	}
+	s.voiceAgentSpeakSubMu.Lock()
+	spaceId := s.voiceAgentSpaceId
+	agentId := s.voiceAgentGaAgentId
+	s.voiceAgentSpeakSubMu.Unlock()
+	if spaceId != "" {
+		msg.VoiceAgentSpaceId = spaceId
+	}
+	if agentId != "" {
+		msg.VoiceAgentGaAgentId = agentId
+	}
+}
+
+// voiceAgentScopedToolNamesForRequest resolves the GA tool-scope using the
+// scope threaded through the ListTools request first (reqSpaceId / reqAgentId,
+// stamped by the bff before proxying -- #1448), falling back to this session's
+// locally bound scope for non-proxied callers. Everything else is identical to
+// the single-node #1442 resolution: resolve the GA's real id, read its tool
+// surface, fail open ONLY on a genuine lookup error.
+func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgentId string) (map[string]struct{}, bool) {
 	if s == nil {
 		return nil, false
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	spaceId := s.voiceAgentSpaceId
-	boundAgentId := s.voiceAgentGaAgentId
+	localSpaceId := s.voiceAgentSpaceId
+	localAgentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
+
+	// The threaded request scope wins (the proxied agent-node receiver path,
+	// where the local session has no bound scope); local session state is the
+	// fallback for in-process / non-proxied callers.
+	spaceId := strings.TrimSpace(reqSpaceId)
+	if spaceId == "" {
+		spaceId = localSpaceId
+	}
+	boundAgentId := strings.TrimSpace(reqAgentId)
+	if boundAgentId == "" {
+		boundAgentId = localAgentId
+	}
+	if s.service == nil {
+		return nil, false
+	}
+	return voiceAgentScopedToolNamesVia(
+		contextWithVoiceAgentActor(context.Background()),
+		s.service.engine, spaceId, boundAgentId, s.logger)
+}
+
+// voiceAgentScopedToolNamesVia is the seam-based core of the GA tool-scope
+// resolution (#1442/#1448): given the effective (spaceId, boundAgentId) -- after
+// the threaded-request-vs-local-session selection -- it resolves the GA's real
+// id and reads its tool surface through the narrow voiceParticipantResolver, so
+// the cross-node threaded path is unit-testable without a live engine. Returns
+// (nil,false) -- fail open to the unscoped registry -- ONLY on a genuine lookup
+// error or when nothing is bound; an authoritative empty surface scopes to the
+// empty set (the #1442 policy).
+func voiceAgentScopedToolNamesVia(
+	ctx context.Context,
+	engine voiceParticipantResolver,
+	spaceId, boundAgentId string,
+	logger *slog.Logger,
+) (map[string]struct{}, bool) {
 	// Not a voice-agent session: no space bound and no agent bound -> no
 	// scoping applies, every other caller keeps the unscoped registry.
 	if spaceId == "" && boundAgentId == "" {
+		return nil, false
+	}
+	if engine == nil {
 		return nil, false
 	}
 
@@ -779,7 +848,7 @@ func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) 
 	// voice session always binds a space).
 	agentId := ""
 	if spaceId != "" {
-		agentId = resolveGroupGAAgentId(s, spaceId)
+		agentId = resolveGroupGAAgentIdVia(ctx, engine, spaceId, logger)
 	}
 	if agentId == "" {
 		// The space resolve failed (no active SI participant, or query error)
@@ -790,27 +859,27 @@ func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) 
 	if agentId == "" {
 		// Nothing to scope against and no row to read -> fail open with a WARN
 		// so this is visible if it ever happens on a real voice session.
-		if s.logger != nil {
-			s.logger.Warn("voice-agent tool scope: no GA id resolvable -- serving unscoped registry",
+		if logger != nil {
+			logger.Warn("voice-agent tool scope: no GA id resolvable -- serving unscoped registry",
 				"space_id", spaceId)
 		}
 		return nil, false
 	}
 
-	raw, found := s.resolveAgentToolSlugs(agentId)
+	raw, found := resolveAgentToolSlugsVia(ctx, engine, agentId, logger)
 	set, scoped := scopeSetFromSlugs(raw, found)
 	if !scoped {
 		// Genuine lookup failure (query error, or no agent row for this id) --
-		// fail open. resolveAgentToolSlugs already logged the WARN for a query
+		// fail open. resolveAgentToolSlugsVia already logged the WARN for a query
 		// error; log here for the row-not-found case so both are visible.
-		if s.logger != nil {
-			s.logger.Warn("voice-agent tool scope: agent row not resolved -- serving unscoped registry",
+		if logger != nil {
+			logger.Warn("voice-agent tool scope: agent row not resolved -- serving unscoped registry",
 				"space_id", spaceId, "agent_id", agentId)
 		}
 		return nil, false
 	}
-	if s.logger != nil {
-		s.logger.Debug("voice-agent tool scope resolved",
+	if logger != nil {
+		logger.Debug("voice-agent tool scope resolved",
 			"space_id", spaceId, "agent_id", agentId, "scoped_count", len(set))
 	}
 	return set, true
@@ -838,20 +907,8 @@ func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 	return set, true
 }
 
-// resolveAgentToolSlugs loads the agent row's raw tools list (capability
-// slugs + concrete names). found=false means the row could not be read
-// (query error / no row) -- callers fail open. found=true with an empty
-// slice is a real answer: the agent has no tools.
-func (s *streamSession) resolveAgentToolSlugs(agentId string) ([]string, bool) {
-	if s.service == nil || s.service.engine == nil {
-		return nil, false
-	}
-	ctx := contextWithVoiceAgentActor(context.Background())
-	return resolveAgentToolSlugsVia(ctx, s.service.engine, agentId, s.logger)
-}
-
-// resolveAgentToolSlugsVia is the seam-based core of resolveAgentToolSlugs:
-// reads the agent row's raw tools list through the narrow
+// resolveAgentToolSlugsVia reads the agent row's raw tools list (capability
+// slugs + concrete names) through the narrow
 // voiceParticipantResolver so the row-shape + fail-open distinction is
 // unit-testable without a live engine (#1442). found=false means the row
 // could not be read (query error / no row) -- callers fail OPEN to the
@@ -933,8 +990,49 @@ func normalizeResultRows(payload any) []map[string]any {
 		return out
 	case map[string]any:
 		return []map[string]any{v}
+	case *memqlv1.GraphBundle:
+		// A plain `select payload.X` query (no `shape` template) surfaces only
+		// as a GraphBundle: ExecuteResult.OutputPayload() returns r.Bundle and
+		// the projected fields live in each node's Payload (applyPlanProjection
+		// writes them there). Without this case every voice-agent read off such
+		// a query parsed to zero rows -> blank persona / channel controls and a
+		// tool-scope fail-open to the 517-tool registry (#1387/#1448). Flatten
+		// each node into the row shape the row-map callers expect: payload
+		// fields hoisted to the top level, a nested `payload` map, and the id.
+		return graphBundleRows(v)
 	}
 	return nil
+}
+
+// graphBundleRows flattens a GraphBundle's nodes into the row-map shape the
+// voice-agent extractors consume. Each node yields one row carrying the node's
+// payload fields at the top level (so `row[field]` hits) AND under a nested
+// `payload` key (so the `row["payload"][field]` fallback hits), plus the node
+// id. Pure so the shape handling is unit-testable without an engine.
+func graphBundleRows(bundle *memqlv1.GraphBundle) []map[string]any {
+	if bundle == nil {
+		return nil
+	}
+	nodes := bundle.GetNodes()
+	out := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		row := map[string]any{}
+		if p := n.GetPayload(); p != nil {
+			fields := p.AsMap()
+			for k, val := range fields {
+				row[k] = val
+			}
+			row["payload"] = fields
+		}
+		if nid := n.GetId(); nid != "" {
+			row["id"] = nid
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func extractAgentChannelMode(result any, agentId string) (string, bool) {
