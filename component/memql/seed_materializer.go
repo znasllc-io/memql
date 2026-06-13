@@ -224,6 +224,21 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 		)
 	}
 
+	// Assistant skillId reconcile (#1443). The per-user create above is
+	// create-only (no-op on an existing assistant-<userId> row), so
+	// existing assistant rows never pick up skillIds added to the seed
+	// after they were minted -- the owner's staging assistant included.
+	// Merge the canonical skillId set into every existing assistant row
+	// here: idempotent, merge-only (never clobbers user-added skills or
+	// user-editable fields like name/avatar). Runs after the per-user
+	// sweep (so freshly-created rows are present) and after the global
+	// pass (so assistantRole's lock/cap is already in the catalog).
+	// Best-effort: a failure is logged, boot continues.
+	if _, err := m.reconcileAssistantSkills(ctx); err != nil && logger != nil {
+		logger.Warn("seed materializer: assistant skill reconcile failed",
+			"error", err)
+	}
+
 	// Materialization complete -- now refresh the AgentRegistry from
 	// the rows we just wrote (plus any user-created agents already
 	// in the DB). The materialized rows are the canonical source of
