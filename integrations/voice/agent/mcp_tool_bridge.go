@@ -15,14 +15,19 @@ package agent
 // client-side allowlist in front of the locked door added denial without
 // adding enforcement.
 //
-// ONE mechanical exclusion -- NOT a policy tier: client-executed tools
-// (ClientExecution=true, the browser-UI drive surface). handleCallTool's
-// executeClientTool emits the ClientToolCall on the CALLING session and parks
-// for its ClientToolResult -- and the calling session here is the voice-agent
-// process, which has no browser on it, so the call can only time out. Routing
-// those through the cross-node client-tool relay (the
-// v1:cognition:client:tool:request graph rows) is the #1416 follow-up; until
-// then they are excluded for transport reasons and logged as such.
+// Client-executed tools (ClientExecution=true, the browser-UI drive surface --
+// uiClick / uiType / copresent_control) are now ALSO exposed, gated on a
+// relay-capable transport (#1420). The browser that runs them lives on a
+// different stream/node than the voice-agent process, so they cannot execute on
+// the calling session directly; instead the engine routes a voice-agent
+// CallToolMsg for a client tool through the cross-node client-tool relay (the
+// v1:cognition:client:tool:request graph rows -- see
+// component/grpc/client_tool_relay_voice.go). Because that relay IS the
+// browser path, the bridge's existing CallTool transport drives a client tool
+// end-to-end unchanged; the bridge only needs to STOP withholding them. The one
+// remaining guard is the no-browser/no-transport case: with no relay-capable
+// transport wired (audio-only setup) a client tool has nowhere to run, so it
+// stays denied rather than being exposed to fail.
 //
 // Awareness mirror. When the model calls a tool, the bridge (1) executes it
 // through memQL's MCP surface (CallToolMsg -> CallToolResult), the same
@@ -56,13 +61,19 @@ import (
 // isExposableTool reports whether a tool may be handed to the realtime model.
 // Full surface (#1416): every registry tool is exposed; authorization is the
 // server's job (handleCallTool role gate + engine scope / kill-switch checks),
-// identical to the text loop. The ONLY exclusion is mechanical, not policy:
-// a client-executed tool needs a browser on the calling session to satisfy
-// its ClientToolCall round-trip, and the voice-agent's session has none --
-// the call would park until timeout. Goes away once the #1416 follow-up
-// routes client tools through the cross-node client-tool relay.
-func isExposableTool(clientExecution bool) bool {
-	return !clientExecution
+// identical to the text loop.
+//
+// Client-executed tools (the browser-UI drive surface) are exposed too (#1420)
+// WHEN a relay-capable path is available -- the engine routes a voice-agent
+// CallToolMsg for a client tool through the cross-node client-tool relay to the
+// browser. The only remaining guard is the no-browser case: relayCapable=false
+// (no transport / audio-only) keeps client tools withheld so the model is never
+// handed a tool that has nowhere to execute.
+func isExposableTool(clientExecution bool, relayCapable bool) bool {
+	if clientExecution {
+		return relayCapable
+	}
+	return true
 }
 
 // ToolCallTransport executes a tool against memQL's MCP surface and
@@ -104,6 +115,14 @@ type McpToolBridge struct {
 	agentID   string
 	logger    *slog.Logger
 
+	// relayCapable gates exposure of client-executed (browser-UI) tools
+	// (#1420). True when the transport can reach a browser for this session --
+	// the production CallTool transport always can (the engine relays a
+	// voice-agent client-tool call to the browser via the cross-node relay), so
+	// it defaults to (transport != nil). A nil transport (audio-only / no
+	// model-driven tools) leaves client tools withheld.
+	relayCapable bool
+
 	exposed []string
 	denied  []string
 }
@@ -125,21 +144,34 @@ func NewMcpToolBridge(
 		spaceID:   strings.TrimSpace(spaceID),
 		agentID:   strings.TrimSpace(agentID),
 		logger:    logger,
+		// A wired transport reaches the engine, which relays a voice-agent
+		// client-tool call to the browser (#1420). No transport -> no browser
+		// path -> client tools stay withheld (the exposure guard).
+		relayCapable: transport != nil,
 	}
 }
+
+// SetRelayCapable overrides whether client-executed (browser-UI) tools are
+// exposed to the model (#1420). Defaults to (transport != nil) at construction;
+// callers that know a session is audio-only (no browser will ever attach) can
+// force it off so the model is never handed a UI tool it cannot run. Call
+// before RealtimeTools.
+func (b *McpToolBridge) SetRelayCapable(capable bool) { b.relayCapable = capable }
 
 // ExposedToolNames returns the names handed to the model (set after
 // RealtimeTools).
 func (b *McpToolBridge) ExposedToolNames() []string { return append([]string(nil), b.exposed...) }
 
-// DeniedToolNames returns the names withheld from the model
-// (the mechanical client-execution exclusion; set after RealtimeTools).
+// DeniedToolNames returns the names withheld from the model (client-executed
+// tools when no relay-capable browser path is available; set after
+// RealtimeTools).
 func (b *McpToolBridge) DeniedToolNames() []string { return append([]string(nil), b.denied...) }
 
 // RealtimeTools returns the openai.RealtimeTool declarations the
-// session.update carries -- the agent's full tool surface (#1416), minus the
-// mechanical client-execution exclusion (see isExposableTool). As a side
-// effect it records the exposed / denied partition for diagnostics.
+// session.update carries -- the agent's full tool surface (#1416), including
+// client-executed (browser-UI) tools when a relay-capable path is available
+// (#1420; see isExposableTool). As a side effect it records the exposed /
+// denied partition for diagnostics.
 func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 	b.exposed = b.exposed[:0]
 	b.denied = b.denied[:0]
@@ -149,7 +181,7 @@ func (b *McpToolBridge) RealtimeTools() []openai.RealtimeTool {
 			continue
 		}
 		name := td.GetName()
-		if isExposableTool(td.GetClientExecution()) {
+		if isExposableTool(td.GetClientExecution(), b.relayCapable) {
 			b.exposed = append(b.exposed, name)
 			out = append(out, openai.RealtimeTool{
 				Type:        "function",

@@ -336,6 +336,12 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		s.serviceRef.svc = svc
 	}
 
+	// Subscribe to browser client:tool:response events so a voice-driven
+	// client-tool call relayed to the browser (#1420) resolves the local
+	// clientToolWaiters waiter on whichever node parked it. No-op when the bus
+	// is unset (single-node / non-bus builds).
+	svc.startClientToolResponseRelay()
+
 	// Run any caller-supplied registrars (e.g. WorkerService on the
 	// agent build). These attach additional gRPC service handlers to
 	// the same listener / server.
@@ -552,6 +558,11 @@ type service struct {
 	// the agent node).
 	clientToolMu      sync.Mutex
 	clientToolWaiters map[string]chan *memqlv1.ClientToolResult
+
+	// clientToolRelayOnce guards the one-time subscription to browser
+	// client:tool:response events that fires the local clientToolWaiters for
+	// the voice relay path (#1420). See client_tool_relay_voice.go.
+	clientToolRelayOnce sync.Once
 }
 
 // engineQueryRunner adapts *memqlengine.MemQLEngine to
@@ -1495,9 +1506,37 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 	args := msg.GetArguments()
 
-	// Client-executed tool: emit ClientToolCall, park until ClientToolResult
-	// arrives (or timeout), then forward the result back to the caller.
+	// Client-executed tool: the body runs in a browser, not on the engine.
+	//
+	// Direct browser session: emit ClientToolCall on THIS stream, park until
+	// the browser answers with a ClientToolResult (or timeout).
+	//
+	// Voice-agent session (#1420): the calling stream is the voice-agent
+	// process -- it has NO browser, so emitting the ClientToolCall here would
+	// only time out (the pre-#1420 behaviour). Instead route through the
+	// cross-node client-tool relay: emit a v1:cognition:client:tool:request
+	// graph node scoped to the voice space so the browser's space subscription
+	// dispatches it, and park on the service waiter until the matching
+	// client:tool:response lands (relayClientToolToBrowser, fired by the
+	// service's client:tool:response subscription). This is what lets the
+	// realtime voice model drive the browser ("change the app appearance").
 	if tool.ClientExecution {
+		if spaceId := strings.TrimSpace(s.voiceAgentSpaceId); spaceId != "" {
+			argsJSON := "{}"
+			if args != nil {
+				if b, err := json.Marshal(args.AsMap()); err == nil {
+					argsJSON = string(b)
+				}
+			}
+			// The voice bridge self-mirrors the call via its own log sink
+			// (NewLogMirrorSink), so no mirrorRealtimeToolCall here -- it is a
+			// no-op for voice-agent sessions by design (avoids a double-log).
+			content, execErr := s.relayClientToolToBrowser(ctx, tool.Name, argsJSON, spaceId)
+			if execErr != nil {
+				return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
+			}
+			return s.sendCallToolResult(envelope.GetMessageId(), requestId, content, false, "")
+		}
 		content, execErr := s.executeClientTool(ctx, tool.Name, args, envelope.GetMessageId())
 		if execErr != nil {
 			return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
