@@ -571,6 +571,17 @@ message ListToolsMsg {
   string request_id = 1;
   // Optional cursor for pagination
   string cursor = 2;
+  // Voice-agent tool-scope context, threaded across the proxy hop (#1448).
+  // ListTools is proxied from the bff to the agent node (nodeTargetForListTools
+  // -> NodeTypeAgent), and the agent-node session has no local voiceAgentSpaceId
+  // / voiceAgentGaAgentId -- those are bound only on the bff session that
+  // received VoiceAgentSessionStart. The bff stamps the bound scope here before
+  // proxying so the receiving node can scope the realtime tool surface to the
+  // GA's tool list instead of failing open to the full registry. Empty for
+  // non-voice callers (text loop, direct browser), which keeps the local
+  // session-state path unchanged.
+  string voice_agent_space_id = 3;
+  string voice_agent_ga_agent_id = 4;
 }
 
 // ListToolsResult returns available tools (MCP tools/list response equivalent).
