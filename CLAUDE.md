@@ -340,6 +340,40 @@ Nodes discover each other via mesh. All nodes share a single
 PostgreSQL + TimescaleDB database. Inter-node communication uses `NodeService` gRPC
 bidirectional stream. Events bridge across nodes with dedup and TTL.
 
+#### Multi-node is the DEFAULT -- design, implement, AND test for cross-node
+
+The cluster (2 replicas per mesh node) is the runtime EVERYWHERE: local
+parity cluster, staging, and prod. Never reason about a feature as if it
+runs in a single process. This has bitten us repeatedly -- a fix ships
+with green single-node tests and silently breaks in the mesh (e.g.
+realtime `ListTools` proxied bff->agent read `voiceAgentSpaceId` off the
+wrong-node session and failed open to the full 517-tool registry, #1448;
+the voice gate directive had no mesh routing rule, #1412; snapshot peers
+reaped after a bff cutover, #1388).
+
+**When implementing:** any state/context/event that crosses a node
+boundary needs EXPLICIT plumbing -- it does NOT travel implicitly.
+- Session / in-memory state (caches, waiters, fields like
+  `voiceAgentSpaceId`) lives on exactly ONE node. A different node
+  handling a **proxied / forwarded** request (`AiForwardRouter`,
+  `proxySI`, `NodeService` forwards) does NOT see it -- thread it
+  through the message or metadata and resolve it on the receiving side.
+- Every cross-node event-bus pub/sub needs a **routing rule**
+  (`node.RegisterRoutingRule`) or it silently dies in cluster mode.
+- Before calling a feature done, ask: *which node holds this state, and
+  which node needs it?* If those differ, you have cross-node work to do.
+
+**When testing:** a green single-node unit test is a FALSE signal for
+cross-node behaviour. Tests MUST exercise the hop -- a handler running on
+a session WITHOUT the originating node's local state, context surviving a
+proxy/forward, an event consumed on a different replica. Add coverage to
+the cluster-e2e harness (`test/clustere2e/`) and/or the proxy-path tests
+(`component/grpc/si_forward_test.go`); the test should FAIL against
+single-node-assuming code and PASS with the cross-node fix. The blessed
+local repro is the 2-replica parity cluster (`make dev-cluster-up`) --
+the only topology that reproduces this bug class. See
+[docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+
 #### Node image source: carrier-built vs engine-built (#1053) -- ENFORCED RULE
 
 A node that executes **CoPresent DSL** (the `agentReply` prompt, copresent

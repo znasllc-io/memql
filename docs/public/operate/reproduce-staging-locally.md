@@ -14,6 +14,18 @@ host reasons; every one is enumerated and justified in the
 Epics: memql#1212 (children #1213 / #1214 / #1215 / #1216) +
 memql#1260 (adopt as first-class + close/justify divergences).
 
+> **Development principle: multi-node is the default.** Every feature
+> runs across the 2-replica mesh in local, staging, and prod -- never
+> assume a single process. State/context/events that cross a node
+> boundary need explicit plumbing (proxied/forwarded requests don't
+> carry another node's session state; cross-node events need a routing
+> rule). Implement AND test for the hop: a green single-node unit test
+> is a false signal -- exercise the proxied/cross-node path
+> (`test/clustere2e/`, `component/grpc/si_forward_test.go`) and verify
+> on this cluster. See the "Multi-node is the DEFAULT" rule in the
+> root `CLAUDE.md`. (Bugs this would have caught: memql#1448, #1412,
+> #1388.)
+
 ## What "parity" means here
 
 | Aspect | Local cluster | Staging | Parity |
