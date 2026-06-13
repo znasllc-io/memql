@@ -22,7 +22,17 @@ seed agentRole assistantRole {
   defaultSkillIds:       []
   availableSkillIds:     []
   forbiddenSkillIds:     []
-  maxSkills:             2
+  // maxSkills holds the Assistant's full baseline set. The per-user
+  // `seed agent assistant` (agents/assistant.memql) ships 10 canonical
+  // skillIds -- the operator suite + execution baselines + the
+  // todos/notes/calendar personal-productivity skills (memql#1443) --
+  // and the lock validator (component/memql/agent_lock_validation.go)
+  // enforces this cap on EVERY v1:agents:agent write (the create-only
+  // seed AND the boot-time skillId reconcile), with no system-actor
+  // exemption. The prior value (2) was below even the pre-#1443 set,
+  // so it would have rejected the seed create / reconcile. 12 = 10
+  // canonical + 2 headroom for owner-added specialization.
+  maxSkills:             12
   recommendedPolicySlug: "balancedChat"
   predefined:            true
 }
