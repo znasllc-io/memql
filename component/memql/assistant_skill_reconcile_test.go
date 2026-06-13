@@ -217,6 +217,63 @@ func TestCanonicalAssistantSkillIds_AbsentSeed(t *testing.T) {
 	}
 }
 
+// TestReconcileCapsTransform_PreservesSiblingFlags pins the
+// clobber-safety contract: mutationUpdateAgent does top-level replace
+// (no @mergeFields), so the reconcile must send the FULL capabilities
+// object with only skillIds changed. This test mirrors the exact
+// copy-then-overwrite transform the reconcile loop performs and asserts
+// every sibling capability flag survives while skillIds gains the
+// canonical additions.
+func TestReconcileCapsTransform_PreservesSiblingFlags(t *testing.T) {
+	// A decoded prior row's capabilities, as it would come off the DB.
+	caps := map[string]any{
+		"avatar":       true,
+		"lipSync":      true,
+		"vision":       true,
+		"voiceToVoice": true,
+		"claw":         false,
+		"tools":        []any{},
+		"domains":      []any{},
+		"keywords":     []any{},
+		"skillIds":     []any{"copresent-ui", "workbench-baseline"},
+	}
+	canonical := []string{
+		"copresent-ui", "workbench-baseline", "todos", "notes", "calendar",
+	}
+
+	// --- the exact transform from reconcileAssistantSkills ---
+	existing := stringSliceFromAny(caps["skillIds"])
+	merged, added := unionPreservingOrder(existing, canonical)
+	newCaps := make(map[string]any, len(caps))
+	for k, v := range caps {
+		newCaps[k] = v
+	}
+	newCaps["skillIds"] = toAnySlice(merged)
+	// --------------------------------------------------------
+
+	if !reflect.DeepEqual(added, []string{"todos", "notes", "calendar"}) {
+		t.Fatalf("added = %v, want [todos notes calendar]", added)
+	}
+	// Every sibling flag preserved.
+	for _, k := range []string{"avatar", "lipSync", "vision", "voiceToVoice"} {
+		if newCaps[k] != true {
+			t.Errorf("sibling capability %q not preserved: %v", k, newCaps[k])
+		}
+	}
+	if newCaps["claw"] != false {
+		t.Errorf("claw flag not preserved: %v", newCaps["claw"])
+	}
+	// skillIds carries the merged set.
+	gotSkills := stringSliceFromAny(newCaps["skillIds"])
+	if !reflect.DeepEqual(gotSkills, []string{"copresent-ui", "workbench-baseline", "todos", "notes", "calendar"}) {
+		t.Errorf("merged skillIds = %v", gotSkills)
+	}
+	// The original caps map is untouched (defensive copy).
+	if origSkills := stringSliceFromAny(caps["skillIds"]); len(origSkills) != 2 {
+		t.Errorf("original caps mutated: skillIds = %v", origSkills)
+	}
+}
+
 // assertContainsExactlyOnce fails if any id in want is missing from
 // got, or appears more than once.
 func assertContainsExactlyOnce(t *testing.T, got, want []string) {

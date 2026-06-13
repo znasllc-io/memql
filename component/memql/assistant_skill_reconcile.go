@@ -134,11 +134,23 @@ func (m *SeedMaterializer) reconcileAssistantSkills(ctx context.Context) (Assist
 			continue
 		}
 
-		// Partial update: carry ONLY the merged skillIds inside
-		// capabilities. mutationUpdateAgent merges this into the prior
-		// row, so name / avatar / personality and every other field are
-		// preserved untouched.
-		if err := m.writeReconciledAssistantSkills(ctx, node.ID, merged); err != nil {
+		// Build the FULL capabilities object with only skillIds changed.
+		// mutationUpdateAgent has no @mergeFields, so its `update`
+		// contract is top-level REPLACE: a partial {capabilities:
+		// {skillIds}} would wipe every sibling capability flag (avatar /
+		// lipSync / vision / voiceToVoice / tools / domains / keywords).
+		// We send the prior caps verbatim with skillIds overwritten, so
+		// the replace is a no-op for every field except skillIds. Other
+		// top-level fields (name, avatar persona, personality, ...) are
+		// left out of the payload entirely and inherit from the prior
+		// row. Copying into a fresh map keeps the decoded row untouched.
+		newCaps := make(map[string]any, len(caps))
+		for k, v := range caps {
+			newCaps[k] = v
+		}
+		newCaps["skillIds"] = toAnySlice(merged)
+
+		if err := m.writeReconciledAssistantSkills(ctx, node.ID, newCaps); err != nil {
 			report.Errors = append(report.Errors,
 				fmt.Sprintf("agent %s: update: %v", node.ID, err))
 			continue
@@ -186,17 +198,19 @@ func (m *SeedMaterializer) canonicalAssistantSkillIds() []string {
 	return stringSliceFromAny(caps["skillIds"])
 }
 
-// writeReconciledAssistantSkills issues a partial mutationUpdateAgent
-// carrying only the merged skillIds. The system-actor + reconcile
+// writeReconciledAssistantSkills issues mutationUpdateAgent carrying the
+// FULL capabilities object (with skillIds merged) as the only changed
+// top-level field. Because mutationUpdateAgent does top-level replace
+// (no @mergeFields), the caller MUST pass the complete capabilities map
+// -- a partial would wipe sibling flags. Every OTHER top-level field is
+// omitted and inherits from the prior row. The system-actor + reconcile
 // provenance mirror the migration write path; the lock validator runs
 // server-side (the maxSkills cap + locked-skill checks all apply).
-func (m *SeedMaterializer) writeReconciledAssistantSkills(ctx context.Context, agentId string, skillIds []string) error {
+func (m *SeedMaterializer) writeReconciledAssistantSkills(ctx context.Context, agentId string, capabilities map[string]any) error {
 	args := map[string]any{
 		"agentId": agentId,
 		"payload": map[string]any{
-			"capabilities": map[string]any{
-				"skillIds": skillIds,
-			},
+			"capabilities": capabilities,
 		},
 	}
 	payloadJSON, err := json.Marshal(args)
@@ -270,4 +284,15 @@ func unionPreservingOrder(existing, canonical []string) (merged, added []string)
 		added = append(added, s)
 	}
 	return merged, added
+}
+
+// toAnySlice converts a []string into a []any so it round-trips through
+// json.Marshal as a JSON array (and lands in the payload as a string
+// array rather than a typed slice the downstream decoder might mishandle).
+func toAnySlice(in []string) []any {
+	out := make([]any, len(in))
+	for i, s := range in {
+		out[i] = s
+	}
+	return out
 }
