@@ -88,6 +88,19 @@ type RealtimeSessionLifecycle struct {
 	interval time.Duration
 	logger   *slog.Logger
 
+	// tearDownOnEmptyRoom controls whether the population reaching zero hard-tears
+	// the warm session down immediately (ReasonEmptyRoom). Default OFF (#1449):
+	// a mic toggle in the SPA surfaces as a transient LiveKit participant
+	// disconnect+reconnect, so an instant empty-room teardown closes the
+	// gpt-realtime session out from under a user who is about to re-enable their
+	// mic -- then re-engage updates a dead handle and voice never recovers.
+	// With this off the session stays warm-but-muted at zero humans (the #459
+	// posture); the room-level idle watchdog (#1378, 60s grace counting real
+	// participants) owns genuine departures, and the idle / max-duration / token
+	// guardrails still bound a warm-but-idle session's cost. When ON, the legacy
+	// reflexive teardown applies.
+	tearDownOnEmptyRoom bool
+
 	mu             sync.Mutex
 	started        bool
 	startedAt      time.Time
@@ -129,6 +142,13 @@ func withWatchdogInterval(d time.Duration) realtimeLifecycleOption {
 // withLifecycleSpaceID stamps the space id on the lifecycle's log lines.
 func withLifecycleSpaceID(spaceID string) realtimeLifecycleOption {
 	return func(l *RealtimeSessionLifecycle) { l.spaceID = spaceID }
+}
+
+// withEmptyRoomTeardown opts the lifecycle back into the legacy reflexive
+// empty-room hard-teardown when the population reaches zero (#1449 default is
+// off: warm-but-muted, the idle watchdog + idle guardrail govern an empty room).
+func withEmptyRoomTeardown(enabled bool) realtimeLifecycleOption {
+	return func(l *RealtimeSessionLifecycle) { l.tearDownOnEmptyRoom = enabled }
 }
 
 // NewRealtimeLifecycle builds a lifecycle from a resolved budget and an injected
@@ -212,8 +232,14 @@ func (l *RealtimeSessionLifecycle) NoteHumanJoined() {
 }
 
 // NoteHumanLeft records a human participant leaving. When the population reaches
-// zero the session is torn down with ReasonEmptyRoom -- a room with no humans has
-// nobody for the assistant to talk to, so the warm session is pure cost. No-op
+// zero the session is, by default (#1449), kept warm-but-muted rather than torn
+// down: a mic toggle in the SPA surfaces as a transient participant
+// disconnect+reconnect, and an instant empty-room teardown closes the
+// gpt-realtime session out from under a user who is about to re-enable their mic
+// (then the re-engage path updates a dead handle and voice never recovers). The
+// room-level idle watchdog (#1378) owns genuine departures, and the idle /
+// max-duration / token guardrails still bound the warm-but-idle session's cost.
+// Opt back into the reflexive teardown with withEmptyRoomTeardown(true). No-op
 // after teardown.
 func (l *RealtimeSessionLifecycle) NoteHumanLeft() {
 	l.mu.Lock()
@@ -226,9 +252,10 @@ func (l *RealtimeSessionLifecycle) NoteHumanLeft() {
 	}
 	if l.logger != nil {
 		l.logger.Debug("voice-agent realtime lifecycle human left",
-			"space", l.spaceID, "humans", l.humanCount)
+			"space", l.spaceID, "humans", l.humanCount,
+			"empty_room_teardown", l.tearDownOnEmptyRoom)
 	}
-	if l.humanCount == 0 {
+	if l.humanCount == 0 && l.tearDownOnEmptyRoom {
 		l.teardownLocked(ReasonEmptyRoom)
 	}
 }

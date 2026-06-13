@@ -66,7 +66,9 @@ func (s *recordingStop) count() int {
 
 // newTestLifecycle builds a started lifecycle wired to a fake clock + recording
 // stop, with the watchdog NOT auto-driving (a huge interval) so tests drive
-// checkExpiry deterministically. humanCount seeds the room.
+// checkExpiry deterministically. humanCount seeds the room. The reflexive
+// empty-room teardown is opted IN here so the empty-room teardown tests keep
+// exercising that path explicitly (the production default is OFF -- #1449).
 func newTestLifecycle(t *testing.T, budget RealtimeBudget, humanCount int) (*RealtimeSessionLifecycle, *fakeClock, *recordingStop) {
 	t.Helper()
 	clock := newFakeClock()
@@ -75,6 +77,7 @@ func newTestLifecycle(t *testing.T, budget RealtimeBudget, humanCount int) (*Rea
 		withLifecycleClock(clock.Now),
 		withWatchdogInterval(time.Hour), // inert; tests call checkExpiry directly
 		withLifecycleSpaceID("space-test"),
+		withEmptyRoomTeardown(true),
 	)
 	l.Start(humanCount)
 	return l, clock, stop
@@ -96,6 +99,40 @@ func TestLifecycleTeardownOnEmptyRoom(t *testing.T) {
 	assert.Equal(t, ReasonEmptyRoom, l.TeardownReason())
 	assert.True(t, l.ShouldDegradeToCascade(), "empty-room is a cost guardrail")
 	require.Equal(t, []TeardownReason{ReasonEmptyRoom}, stop.calls())
+}
+
+func TestLifecycleZeroHumansStaysWarmByDefault(t *testing.T) {
+	// #1449: with the reflexive empty-room teardown OFF (the production default),
+	// the population reaching zero must NOT tear the session down -- a mic toggle
+	// in the SPA surfaces as a transient participant disconnect+reconnect, and the
+	// session must stay warm-but-muted so a re-enable within the grace finds the
+	// SAME live session. The idle guardrail (not empty-room) governs a never-re-
+	// populated room.
+	clock := newFakeClock()
+	stop := &recordingStop{}
+	l := NewRealtimeLifecycle(defaultTestBudget(), stop.fn, nil,
+		withLifecycleClock(clock.Now),
+		withWatchdogInterval(time.Hour),
+		withLifecycleSpaceID("space-test"),
+		// no withEmptyRoomTeardown -> default OFF
+	)
+	l.Start(1)
+
+	l.NoteHumanLeft()
+	assert.False(t, l.IsTornDown(), "zero humans must stay warm-but-muted (no empty-room teardown)")
+	assert.Equal(t, 0, l.HumanCount())
+	assert.Equal(t, 0, stop.count(), "stop callback must not fire on mic-off")
+
+	// Re-presence (mic back on) bumps the count and the session is still alive.
+	l.NoteHumanJoined()
+	assert.False(t, l.IsTornDown())
+	assert.Equal(t, 1, l.HumanCount())
+
+	// The idle guardrail still bounds a session that genuinely goes quiet.
+	clock.advance(301 * time.Second)
+	assert.True(t, l.checkExpiry())
+	assert.Equal(t, ReasonIdleTimeout, l.TeardownReason(),
+		"idle guardrail (not empty-room) tears down a quiet warm session")
 }
 
 func TestLifecycleTeardownOnIdle(t *testing.T) {
