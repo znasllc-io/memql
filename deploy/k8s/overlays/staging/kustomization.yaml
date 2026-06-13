@@ -1,10 +1,8 @@
-# Staging overlay -> 0.9.46. Full coherent 8-image rebuild from main 66959bc:
-# epic #1424 realtime-voice hardening (#1432 timing, #1433 transcript capture,
-# #1435 avatar audio + simli manifest flip, #1436 noise reduction + confidence
-# gate, #1437 hot-path async, #1438 async tools) + copresent f7209bf (UI sync +
-# chimes #431, avatar tile #433). SPA REBUILT (copresent changed).
-# cognition/agent/planner/workbench/bff CARRIER-built; voice + identity engine.
-# livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.47. Engine + carrier images rebuilt from main 6464ee7:
+# realtime tool-scope + persona fix (#1442/#1387 PR #1444), todos/notes/calendar
+# on the Assistant + boot-time reconcile (#1443 PR #1445), client-tool relay so
+# the realtime model drives the browser/Takeover (#1420 PR #1446). SPA digest
+# reused from 0.9.46 (copresent main f7209bf unchanged). livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,9 +12,7 @@ resources:
   - ../../base
 
 # Pin the media IP LiveKit advertises to the livekit-rtc LoadBalancer's public
-# IP (#1043). Per-env because the LB IP differs by cluster. If the livekit-rtc
-# Service is ever recreated and Azure assigns a new IP, update this value (or
-# reserve a static IP — see docs/deploy/livekit-provision.md).
+# IP (#1043). Per-env because the LB IP differs by cluster.
 patches:
   - target:
       kind: Deployment
@@ -30,19 +26,19 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:7b2b9dc167341640a1afd4e12f6082e07c024cbefa996adea0b2cc813a2e7d26
+    digest: sha256:e37e679a415de5414f07f591b12d7f5d70d2cb957ce0fb59e8d988a68e003303
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:8b9b91cd9f6aaec2e5228863f490e958cbb5bcefd8a3648abda62ad943c1ea1b
+    digest: sha256:249565aca79b80a93a442225918a4d963b49a910d299ccb338f3cd22d949ba91
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:76be222d4a6b58adcf4f19955ac16efd8c662c31daa51daae42c7ac19ecd5827
+    digest: sha256:4cb89390cea221ced65a0b7941f720fdecaa678929f92cd99f0cd42490b72f21
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:bf28c4653675dc5ac8e373d7549d404bf435f499f41d0318f212219cc4c19040
+    digest: sha256:26d6fd07fdce4c739da271be30d0c75d0276d8f65cc96589ac7c408ffff8d51a
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:af9b63193d1e45148304f9fc3f428b29be8708bb629a43dcc6c77d5712e8f5da
+    digest: sha256:20812a838ea5f53924d1e949f013f45155307a4766be5ba56dbecb808dde8615
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:f8bfbbace012ee35c95001e94786ebfc91a0586dc671b20db813a55d5309c4fb
+    digest: sha256:262e131a6e76e8f1aa4e1aebbcf822034ae8f02ae838c20c58fca1e1bb5b8a38
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:a0378a13e35a656259c0c58bc702fa94c022a29e2cea1479a5ead3f6ba783c22
+    digest: sha256:ee6003bdcb0d5c2ed332675c994236d37c05c4096c0d7a9d694e90097f549063
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:0f02a1dfbf34743d7b9ba578ad365795fbe22f2c19b8d8ebaf8a58348e100ec2
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
