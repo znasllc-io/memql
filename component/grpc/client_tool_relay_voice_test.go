@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -110,6 +111,29 @@ func TestStartClientToolResponseRelay_BusIntegration(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("waiter never fired via the bus subscription")
+	}
+}
+
+// TestEscapeGraphJSONString_SafeQuoting proves a value containing a double
+// quote / backslash / control char cannot break out of its enclosing quotes
+// when embedded in a mutation argument (the go/unsafe-quoting concern): the
+// result is always a valid, round-trippable JSON string literal.
+func TestEscapeGraphJSONString_SafeQuoting(t *testing.T) {
+	for _, in := range []string{
+		`{"theme":"dark"}`,
+		`he said "hi"`,
+		`a\b"c` + "\n\t",
+		``,
+		`plain`,
+	} {
+		lit := escapeGraphJSONString(in)
+		var back string
+		if err := json.Unmarshal([]byte(lit), &back); err != nil {
+			t.Fatalf("escaped literal %q is not valid JSON: %v", lit, err)
+		}
+		if back != in {
+			t.Fatalf("round-trip mismatch: in=%q out=%q", in, back)
+		}
 	}
 }
 

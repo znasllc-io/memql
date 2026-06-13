@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -238,32 +239,17 @@ func (s *streamSession) relayClientToolToBrowser(
 	}
 }
 
-// escapeGraphJSONString renders a Go string as a JSON string literal for
-// embedding into a memQL mutation argument. Local copy of cognition's
-// escapeJSONString (component/grpc must not import the cognition package).
+// escapeGraphJSONString renders a Go string as a safely-quoted JSON string
+// literal for embedding into a memQL mutation argument. It delegates to
+// encoding/json, which produces a fully-escaped, balanced-quote literal so a
+// value containing a double quote (e.g. a tool argument) can never break out of
+// the enclosing quotes. A marshal error (not reachable for a Go string) falls
+// back to the empty JSON string. component/grpc must not import the cognition
+// package, so this is a local helper rather than a reuse of escapeJSONString.
 func escapeGraphJSONString(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			b.WriteString(`\"`)
-		case '\\':
-			b.WriteString(`\\`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\u%04x`, r)
-			} else {
-				b.WriteRune(r)
-			}
-		}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
 	}
-	b.WriteByte('"')
-	return b.String()
+	return string(b)
 }
