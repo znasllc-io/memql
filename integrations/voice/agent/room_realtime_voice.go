@@ -82,11 +82,23 @@ type realtimeRoomBridge struct {
 	roomReq RoomRequest
 	logger  *slog.Logger
 
+	// ctx is the bridge lifetime (bridgeCtx from JoinAndServe). Retained so a
+	// rebuild (#1449) can re-Connect a fresh realtime session + executor under
+	// the same scope. rtClient + client + sink + toolBridge are likewise retained
+	// so the rebuild re-wires an identical session without re-fetching the tool
+	// registry or re-publishing the local track.
+	ctx        context.Context
+	rtClient   *openai.RealtimeClient
+	client     *Client
+	sink       audioSink
+	toolBridge *McpToolBridge
+
 	asr       *openai.ASRClient
 	session   *openai.RealtimeSession
 	local     *lkmedia.PCMLocalTrack
 	executor  *RealtimeExecutor
 	lifecycle *RealtimeSessionLifecycle // cost guardrails (#459)
+	reengager *sessionReengager         // rebuild-vs-update on re-engage (#1449)
 
 	// Gate-mode control (#478): when nativeEnabled, the bridge flips the
 	// realtime session between the conductor gate (>=2 humans) and native
@@ -253,60 +265,19 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 	// (audio-only), same non-fatal contract as the cascade.
 	var sink audioSink = &localTrackSink{track: local}
 	sink = maybeStartAvatar(ctx, cfg, req, room, sink, audio.OpenAISampleRate, logger)
-	executor := NewRealtimeExecutor(ctx, CascadeConfig{
-		SpaceID:   req.SpaceID,
-		GaAgentID: req.GaAgentID,
-		Thread:    threadContextFor(req),
-	}, client, session, sink, req.Executor.SessionPersona, logger)
 
-	// Output capture (#458): forward the model's final spoken transcript as a
-	// VoiceAgentRealtimeOutput so chat/canvas/audit render the realtime turn.
-	// The citation resolver is built from the session grounding (#456); with no
-	// per-session grounding plumbed yet it is the strict no-op resolver, so an
-	// ungrounded realtime reply lands byte-identical to an ungrounded text reply.
-	executor.SetOutputForwarder(NewRealtimeOutputForwarder(
-		client, req.SpaceID, req.GaAgentID, NewCitationResolver(GroundingContext{}),
-	))
-	executor.SetToolBridge(toolBridge)
-	// #1430 async tool-call bounds: per-call execution timeout + concurrent
-	// pending-call cap (spoken-failure-style results past either bound).
-	executor.ConfigureToolCalls(
-		time.Duration(cfg.RealtimeToolTimeoutSec)*time.Second, cfg.RealtimeMaxPendingTools)
-	// #1431 confidence gate: drop input-transcription finals whose mean token
-	// logprob falls below the floor (finals without logprobs always pass).
-	executor.SetTranscriptConfidenceFloor(cfg.RealtimeTranscriptMinConfidence)
-
-	// Cost guardrails (#459): bound the warm session by empty-room / idle /
-	// max-duration / audio-token budget. The stop callback closes the realtime
-	// session, which unwinds the executor's drain loops; on a cost-guardrail
-	// trip ShouldDegradeToCascade is set for the caller's rebuild decision (the
-	// rebuild itself is a JoinAndServe-level follow-up seam). The executor feeds
-	// engage + audio-token usage; participant join/leave is forwarded below.
-	lifecycle := NewRealtimeLifecycle(
-		RealtimeBudgetFromConfig(cfg),
-		func(reason TeardownReason) error { return session.Close() },
-		logger,
-		withLifecycleSpaceID(req.SpaceID),
-	)
-	executor.AttachLifecycle(lifecycle)
-	executor.Start()
-	// Seed the population from zero and let track-subscribe drive joins: the
-	// empty-room guardrail must not fire before the first human's track lands,
-	// so the idle watchdog (not empty-room) governs a never-populated session.
-	// onTrackSubscribed feeds NoteHumanJoined (deduped per identity) for every
-	// human, including those already present at join (LiveKit replays their
-	// track subscriptions); onParticipantDisconnected feeds NoteHumanLeft.
-	lifecycle.Start(0)
-
-	return &realtimeRoomBridge{
+	b := &realtimeRoomBridge{
 		cfg:           cfg,
 		roomReq:       req,
 		logger:        logger,
+		ctx:           ctx,
+		rtClient:      rtClient,
+		client:        client,
+		sink:          sink,
+		toolBridge:    toolBridge,
 		asr:           asr,
 		session:       session,
 		local:         local,
-		executor:      executor,
-		lifecycle:     lifecycle,
 		nativeEnabled: cfg.RealtimeNativeTurn,
 		// Native STT (labeled ASR off) forces semantic_vad for multi-party too --
 		// without a labeled-ASR read side there is no gated-cascade path to fall back
@@ -324,7 +295,129 @@ func newRealtimeRoomBridge(ctx context.Context, cfg Config, req RoomRequest, cli
 		language:    primarySubtag(cfg.VoiceLanguage),
 		sessionBase: sessionBase,
 		streams:     make(map[string]polyphon.ASRStream),
-	}, nil
+	}
+
+	// Re-engage decision (#1449): on a human re-presenting, the gate-mode apply
+	// checks whether the live session is closed and, if so, rebuilds a fresh one
+	// (rebuildSessionLocked) instead of updating the dead handle. current reads
+	// the bridge's CURRENT session so it always evaluates the latest after a
+	// rebuild swaps it.
+	b.reengager = &sessionReengager{
+		current: func() reengageSession {
+			b.gateMu.Lock()
+			defer b.gateMu.Unlock()
+			if b.session == nil {
+				return nil
+			}
+			return b.session
+		},
+		rebuild: b.rebuildSessionLocked,
+		logger:  logger,
+		spaceID: req.SpaceID,
+	}
+
+	// Wire the executor + cost-guardrail lifecycle onto the freshly-connected
+	// session. Factored into wireExecutor so the re-engage rebuild path (#1449)
+	// can re-wire an identical executor/lifecycle onto a fresh session without
+	// duplicating the configuration.
+	b.wireExecutor(session)
+
+	return b, nil
+}
+
+// rebuildSessionLocked establishes a FRESH realtime session and re-wires the
+// executor + cost-guardrail lifecycle onto it, replacing the torn-down session
+// (#1449). The caller (ensureLiveSession, invoked from applyGateMode) holds
+// gateMu. The old executor is closed (which closes the already-dead session and
+// unwinds its drain goroutines); a fresh Connect + the standard tool-base
+// session.update re-establishes a working session, and wireExecutor stamps the
+// new session/executor/lifecycle onto the bridge. A failed dial leaves the dead
+// session in place and returns the error so the caller skips the update; the
+// room idle watchdog (#1378) and cascade fallback still apply.
+func (b *realtimeRoomBridge) rebuildSessionLocked() error {
+	if b.logger != nil {
+		b.logger.Info("voice-agent realtime room: rebuilding torn-down realtime session (#1449)",
+			"space_id", b.roomReq.SpaceID)
+	}
+	// Close the old executor (idempotent; also closes the dead session) before
+	// standing up the replacement so the old drain goroutines unwind.
+	if b.executor != nil {
+		b.executor.Close()
+	}
+	// gateTurnMode is the connect-time posture again (turn_detection:null on the
+	// fresh sessionBase), so the post-rebuild applyGateMode re-applies the live
+	// human count's mode.
+	b.gateTurnMode = turnModeGatedCascade
+
+	rebuildStart := time.Now()
+	session, err := b.rtClient.Connect(b.ctx, b.sessionBase)
+	if err != nil {
+		return fmt.Errorf("voice-agent realtime room: re-engage reconnect: %w", err)
+	}
+	logVoiceTiming(b.logger, "reengage.realtime_connect", rebuildStart, "space_id", b.roomReq.SpaceID)
+	b.wireExecutor(session)
+	return nil
+}
+
+// wireExecutor builds the realtime executor + cost-guardrail lifecycle for the
+// given (freshly-connected) session and starts them, stamping both onto the
+// bridge. Used both at construction and on a re-engage rebuild (#1449). The
+// caller holds whatever lock is appropriate for its phase (none at construction;
+// the rebuild path holds gateMu via rebuildSessionLocked).
+func (b *realtimeRoomBridge) wireExecutor(session *openai.RealtimeSession) {
+	executor := NewRealtimeExecutor(b.ctx, CascadeConfig{
+		SpaceID:   b.roomReq.SpaceID,
+		GaAgentID: b.roomReq.GaAgentID,
+		Thread:    threadContextFor(b.roomReq),
+	}, b.client, session, b.sink, b.roomReq.Executor.SessionPersona, b.logger)
+
+	// Output capture (#458): forward the model's final spoken transcript as a
+	// VoiceAgentRealtimeOutput so chat/canvas/audit render the realtime turn.
+	// The citation resolver is built from the session grounding (#456); with no
+	// per-session grounding plumbed yet it is the strict no-op resolver, so an
+	// ungrounded realtime reply lands byte-identical to an ungrounded text reply.
+	executor.SetOutputForwarder(NewRealtimeOutputForwarder(
+		b.client, b.roomReq.SpaceID, b.roomReq.GaAgentID, NewCitationResolver(GroundingContext{}),
+	))
+	executor.SetToolBridge(b.toolBridge)
+	// #1430 async tool-call bounds: per-call execution timeout + concurrent
+	// pending-call cap (spoken-failure-style results past either bound).
+	executor.ConfigureToolCalls(
+		time.Duration(b.cfg.RealtimeToolTimeoutSec)*time.Second, b.cfg.RealtimeMaxPendingTools)
+	// #1431 confidence gate: drop input-transcription finals whose mean token
+	// logprob falls below the floor (finals without logprobs always pass).
+	executor.SetTranscriptConfidenceFloor(b.cfg.RealtimeTranscriptMinConfidence)
+
+	// Cost guardrails (#459): bound the warm session by idle / max-duration /
+	// audio-token budget. The stop callback closes the realtime session, which
+	// unwinds the executor's drain loops; on a cost-guardrail trip
+	// ShouldDegradeToCascade is set for the caller's rebuild decision. The
+	// executor feeds engage + audio-token usage; participant join/leave is
+	// forwarded below.
+	//
+	// #1449: empty-room teardown is OFF -- a mic toggle (transient participant
+	// disconnect+reconnect) must NOT hard-tear-down the warm session. The
+	// room-level idle watchdog (#1378) owns genuine departures; idle / duration /
+	// token guardrails bound a warm-but-idle session.
+	lifecycle := NewRealtimeLifecycle(
+		RealtimeBudgetFromConfig(b.cfg),
+		func(reason TeardownReason) error { return session.Close() },
+		b.logger,
+		withLifecycleSpaceID(b.roomReq.SpaceID),
+	)
+	executor.AttachLifecycle(lifecycle)
+	executor.Start()
+	// Seed the population from the live count so a rebuild that happens while a
+	// human is already present does not arm a spurious idle/empty-room path. At
+	// construction streams is empty (0), and track-subscribe drives joins.
+	b.mu.Lock()
+	humans := len(b.streams)
+	b.mu.Unlock()
+	lifecycle.Start(humans)
+
+	b.session = session
+	b.executor = executor
+	b.lifecycle = lifecycle
 }
 
 // primarySubtag narrows a BCP-47 language tag to its ISO-639-1 primary subtag
@@ -439,9 +532,35 @@ func (b *realtimeRoomBridge) applyGateMode() {
 		cfg = b.sessionBase // turn_detection:null
 	}
 
+	// Re-engage (#1449): if the realtime session was torn down (idle / token /
+	// duration guardrail, or a mic-toggle that dropped + re-presented the human),
+	// REBUILD a fresh session before applying the gate mode. Updating the dead
+	// handle is exactly the bug -- it spams "session is closed" and never
+	// recovers. ensureLiveSession rebuilds at most once and acquires gateMu via
+	// rebuildSessionLocked, so it runs BEFORE we take gateMu below. A rebuild
+	// resets gateTurnMode to the connect-time posture, so the mode comparison
+	// below correctly re-applies the live human count's mode on the new session.
+	if !b.reengager.ensureLiveSession() {
+		// No usable session (rebuild needed but the fresh dial failed). Skip the
+		// update rather than poke a dead handle; the room idle watchdog (#1378)
+		// and cascade fallback still apply.
+		return
+	}
+
 	b.gateMu.Lock()
 	defer b.gateMu.Unlock()
 	if mode == b.gateTurnMode {
+		return
+	}
+	// Guard the update on a live session so a session that closed AFTER the
+	// ensureLiveSession check (a race with a concurrent teardown) does not spam
+	// the "session is closed" WARN -- it logs once at debug and bails. The next
+	// re-engage rebuilds.
+	if b.session == nil || b.session.IsClosed() {
+		if b.logger != nil {
+			b.logger.Debug("voice-agent realtime room: skipping gate-mode update on a closed session (rebuild on next re-engage)",
+				"want_mode", mode, "space_id", b.roomReq.SpaceID)
+		}
 		return
 	}
 	updateStart := time.Now()

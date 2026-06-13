@@ -237,6 +237,16 @@ func (s *RealtimeSession) Close() error {
 	return nil
 }
 
+// IsClosed reports whether the session has been torn down (Close called, or the
+// reader saw the socket drop). After this returns true every write -- including
+// UpdateSession -- fails with "session is closed", so the caller must rebuild a
+// fresh session rather than keep poking the dead handle (#1449).
+func (s *RealtimeSession) IsClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 func (s *RealtimeSession) sendSessionUpdate(ctx context.Context, sess SessionConfig) error {
 	data, err := encodeSessionUpdate(sess)
 	if err != nil {
@@ -297,6 +307,13 @@ func (s *RealtimeSession) receiveLoop(ctx context.Context) {
 			case <-s.done:
 				// Expected local close.
 			default:
+				// Server-side / transport drop: mark the session closed so
+				// IsClosed reports it and a subsequent write fails fast rather
+				// than blocking on a dead socket (#1449 -- the re-engage path
+				// reads IsClosed to decide rebuild-vs-update).
+				s.mu.Lock()
+				s.closed = true
+				s.mu.Unlock()
 				if s.logger != nil {
 					s.logger.Warn("openai realtime: stream closed unexpectedly", "error", err)
 				}
