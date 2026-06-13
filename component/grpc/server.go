@@ -1408,15 +1408,19 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 		tools := registry.List()
 		// Voice-agent sessions get the GA agent's tool surface (#1419) -- the
 		// same slug-expanded list the text loop binds -- not the global
-		// registry. nil scope (any other caller, or fail-open on a lookup
-		// error) keeps the unscoped behaviour.
-		agentScope := s.voiceAgentScopedToolNames()
+		// registry. `scoped` reports whether the GA's surface was resolved
+		// AUTHORITATIVELY: when true we restrict the exposed list to agentScope
+		// EXACTLY, even when agentScope is empty (a GA with no tools is a real
+		// answer, NOT a reason to dump the 517-tool registry -- #1442). When
+		// false (any non-voice caller, or a genuine lookup error -- WARN'd at
+		// the lookup site) we keep the unscoped behaviour / fail open.
+		agentScope, scoped := s.voiceAgentScopedToolNames()
 		toolDefs = make([]*memqlv1.ToolDefinition, 0, len(tools))
 		for _, tool := range tools {
 			if !tool.IsAllowedForRole(callerRole) {
 				continue
 			}
-			if agentScope != nil {
+			if scoped {
 				if _, ok := agentScope[tool.Name]; !ok {
 					continue
 				}

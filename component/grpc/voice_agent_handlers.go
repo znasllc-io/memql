@@ -280,28 +280,43 @@ func resolveGroupGAAgentId(s *streamSession, spaceId string) string {
 	if s == nil || s.service == nil || s.service.engine == nil {
 		return ""
 	}
-	if strings.TrimSpace(spaceId) == "" {
-		return ""
+	var logger *slog.Logger
+	if s != nil {
+		logger = s.logger
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
+	return resolveGroupGAAgentIdVia(ctx, s.service.engine, spaceId, logger)
+}
+
+// resolveGroupGAAgentIdVia is the seam-based core of resolveGroupGAAgentId:
+// it resolves the canonical GA agent id of the group-GA participant in
+// `spaceId` through the narrow voiceParticipantResolver interface so the
+// resolution (canonicalize -> queryGroupGAForSpace -> first participant
+// agentId) is unit-testable without a live engine. Returns "" when no GA
+// participant is active or on any query/canonicalize error -- callers fall
+// back to their wire-supplied id.
+func resolveGroupGAAgentIdVia(ctx context.Context, engine voiceParticipantResolver, spaceId string, logger *slog.Logger) string {
+	if engine == nil || strings.TrimSpace(spaceId) == "" {
+		return ""
+	}
 	// Canonicalize the spaceId on the Go side. Inlining canonicalId()
 	// in the query predicate triggers "unsupported literal type
 	// *ast.CanonicalIdExpr" once the WHERE chain includes a bool
 	// comparison (see queryGroupGAForSpace.memql).
-	canonicalSpace, err := s.service.engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
 	if err != nil || canonicalSpace == "" {
-		if s.logger != nil {
-			s.logger.Debug("resolveGroupGAAgentId canonicalize failed",
+		if logger != nil {
+			logger.Debug("resolveGroupGAAgentId canonicalize failed",
 				"space_id", spaceId, "error", err)
 		}
 		return ""
 	}
 	canonicalSpaceJSON, _ := json.Marshal(canonicalSpace)
 	query := fmt.Sprintf(`queryGroupGAForSpace({spaceId: %s})`, string(canonicalSpaceJSON))
-	result, err := s.service.engine.Execute(ctx, query)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Debug("resolveGroupGAAgentId query failed",
+	result, err := engine.Execute(ctx, query)
+	if err != nil || result == nil {
+		if logger != nil {
+			logger.Debug("resolveGroupGAAgentId query failed",
 				"space_id", spaceId, "error", err)
 		}
 		return ""
@@ -436,11 +451,24 @@ type agentRecordFields struct {
 // caller stamps empty persona fields / falls back to "mirror_user" and the
 // voice session comes up rather than failing bring-up.
 func resolveAgentSessionRecord(s *streamSession, agentId string) agentRecordFields {
-	var out agentRecordFields
 	if s == nil || s.service == nil || s.service.engine == nil {
-		return out
+		return agentRecordFields{}
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
+	return resolveAgentSessionRecordVia(ctx, s.service.engine, agentId)
+}
+
+// resolveAgentSessionRecordVia is the seam-based core of
+// resolveAgentSessionRecord: it reads the GA's persona identity (#478) +
+// channel-control defaults off its v1:agents:agent row through the narrow
+// voiceParticipantResolver, so the persona resolution is unit-testable and
+// provably keyed on the REAL resolved agent id (#1442/#1387) rather than the
+// placeholder. Best-effort: any failure returns the zero value.
+func resolveAgentSessionRecordVia(ctx context.Context, engine voiceParticipantResolver, agentId string) agentRecordFields {
+	var out agentRecordFields
+	if engine == nil {
+		return out
+	}
 	// JSON-marshal the interpolated id so an id containing a double quote cannot
 	// break out of the DSL string literal (CodeQL "unsafe quoting"). marshal
 	// yields a quoted, escaped literal, so the surrounding "%s" quotes are
@@ -449,8 +477,8 @@ func resolveAgentSessionRecord(s *streamSession, agentId string) agentRecordFiel
 	query := fmt.Sprintf(
 		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality, payload.audioControl, payload.videoControl`,
 		string(agentIdJSON))
-	result, err := s.service.engine.Execute(ctx, query)
-	if err != nil {
+	result, err := engine.Execute(ctx, query)
+	if err != nil || result == nil {
 		return out
 	}
 	payload := result.OutputPayload()
@@ -703,34 +731,111 @@ func effectiveChannelMode(override string, overrideOK bool, control string) stri
 }
 
 // voiceAgentScopedToolNames returns the GA agent's expanded tool-name set when
-// this stream is a voice-agent session bound to a resolved agent (#1419), or
-// nil for every other caller (no scoping). The set is the SAME surface the
-// text loop binds: the agent row's tools field expanded through
-// ExpandCapabilitySlugs. Handing the model the unscoped global registry (517
-// tools: internal logic sweeps, raw mutations) measurably inflated
-// gpt-realtime's time-to-first-audio and surfaced tools no agent should call.
-// Fail-open: a lookup error returns nil (unscoped) so a transient engine
-// failure degrades to the old behaviour instead of stripping voice tools.
-func (s *streamSession) voiceAgentScopedToolNames() map[string]struct{} {
+// this stream is a voice-agent session (#1419). The second return value reports
+// whether scoping APPLIES:
+//
+//   - (set, true)  -- this is a voice session bound to a resolved GA whose
+//     agent row was read authoritatively. The handler MUST restrict the
+//     exposed surface to `set` exactly, EVEN IF `set` is empty (the GA has no
+//     tools is a real, authoritative answer -- it is NOT a reason to dump the
+//     global registry).
+//   - (nil, false) -- scoping does not apply: either this is not a voice
+//     session (no bound space), or the GA-id / agent-row lookup hit a genuine
+//     engine error. The handler fails OPEN to the unscoped registry in this
+//     case, with a loud WARN at the lookup site, so a transient engine failure
+//     degrades to the old behaviour instead of stripping every voice tool.
+//
+// The set is the SAME surface the text loop binds: the agent row's tools field
+// expanded through ExpandCapabilitySlugs. Handing the model the unscoped global
+// registry (517 tools: internal logic sweeps, raw mutations) measurably
+// inflated gpt-realtime's time-to-first-audio and surfaced tools no agent
+// should call (#1442).
+//
+// CRITICAL (#1442): this resolves the GA's REAL canonical id itself, from the
+// session's bound space, via the same resolveGroupGAAgentId helper SessionStart
+// uses. It does NOT trust s.voiceAgentGaAgentId -- that field is only populated
+// at the END of SessionStart, so ListTools (a voice setup-window read) can race
+// ahead of it (field empty), and even after SessionStart it may hold the
+// voice-agent's placeholder `<space>-ga` when the participant resolve came up
+// empty. Either way the placeholder/empty id matched no agent row, found=false,
+// and the surface failed open to 517 tools -- the regression this fixes.
+func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) {
 	if s == nil {
-		return nil
+		return nil, false
 	}
 	s.voiceAgentSpeakSubMu.Lock()
-	agentId := s.voiceAgentGaAgentId
+	spaceId := s.voiceAgentSpaceId
+	boundAgentId := s.voiceAgentGaAgentId
 	s.voiceAgentSpeakSubMu.Unlock()
-	if agentId == "" {
-		return nil
+	// Not a voice-agent session: no space bound and no agent bound -> no
+	// scoping applies, every other caller keeps the unscoped registry.
+	if spaceId == "" && boundAgentId == "" {
+		return nil, false
 	}
+
+	// Resolve the GA's real canonical id now, independent of SessionStart
+	// ordering. Prefer a fresh space-based resolve; fall back to the bound id
+	// only when we have no space to resolve from (defensive -- in practice a
+	// voice session always binds a space).
+	agentId := ""
+	if spaceId != "" {
+		agentId = resolveGroupGAAgentId(s, spaceId)
+	}
+	if agentId == "" {
+		// The space resolve failed (no active SI participant, or query error)
+		// -- fall back to the bound id. This may be the placeholder, in which
+		// case resolveAgentToolSlugs reports found=false and we fail open.
+		agentId = boundAgentId
+	}
+	if agentId == "" {
+		// Nothing to scope against and no row to read -> fail open with a WARN
+		// so this is visible if it ever happens on a real voice session.
+		if s.logger != nil {
+			s.logger.Warn("voice-agent tool scope: no GA id resolvable -- serving unscoped registry",
+				"space_id", spaceId)
+		}
+		return nil, false
+	}
+
 	raw, found := s.resolveAgentToolSlugs(agentId)
+	set, scoped := scopeSetFromSlugs(raw, found)
+	if !scoped {
+		// Genuine lookup failure (query error, or no agent row for this id) --
+		// fail open. resolveAgentToolSlugs already logged the WARN for a query
+		// error; log here for the row-not-found case so both are visible.
+		if s.logger != nil {
+			s.logger.Warn("voice-agent tool scope: agent row not resolved -- serving unscoped registry",
+				"space_id", spaceId, "agent_id", agentId)
+		}
+		return nil, false
+	}
+	if s.logger != nil {
+		s.logger.Debug("voice-agent tool scope resolved",
+			"space_id", spaceId, "agent_id", agentId, "scoped_count", len(set))
+	}
+	return set, true
+}
+
+// scopeSetFromSlugs turns the (raw slugs, found) answer from resolveAgentToolSlugs
+// into the (scope set, scoped) the ListTools handler enforces. Pure so the
+// fail-open policy is unit-testable without an engine (#1442):
+//
+//   - found=false (query error / no agent row) -> (nil, false): fail open to
+//     the unscoped registry. This is the ONLY fail-open path.
+//   - found=true -> (set, true): authoritative. The set is the slug-expanded
+//     surface, EVEN WHEN EMPTY. A GA that legitimately exposes no tools scopes
+//     to nothing -- it must NOT fall open to the 517-tool global registry,
+//     which is the privilege/latency footgun that hid the #1442 regression.
+func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 	if !found {
-		return nil
+		return nil, false
 	}
 	expanded := memqlengine.ExpandCapabilitySlugs(raw)
 	set := make(map[string]struct{}, len(expanded))
 	for _, n := range expanded {
 		set[n] = struct{}{}
 	}
-	return set
+	return set, true
 }
 
 // resolveAgentToolSlugs loads the agent row's raw tools list (capability
@@ -742,6 +847,21 @@ func (s *streamSession) resolveAgentToolSlugs(agentId string) ([]string, bool) {
 		return nil, false
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
+	return resolveAgentToolSlugsVia(ctx, s.service.engine, agentId, s.logger)
+}
+
+// resolveAgentToolSlugsVia is the seam-based core of resolveAgentToolSlugs:
+// reads the agent row's raw tools list through the narrow
+// voiceParticipantResolver so the row-shape + fail-open distinction is
+// unit-testable without a live engine (#1442). found=false means the row
+// could not be read (query error / no row) -- callers fail OPEN to the
+// unscoped registry. found=true (even with an empty slice) is an
+// AUTHORITATIVE answer: the agent's tool surface, which the caller scopes to
+// exactly. Keeps the #1432 server.tools.agent_scope_lookup span.
+func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolver, agentId string, logger *slog.Logger) ([]string, bool) {
+	if engine == nil {
+		return nil, false
+	}
 	agentIdJSON, _ := json.Marshal(agentId)
 	query := fmt.Sprintf(
 		`from(v1:agents:agent) ?.id==%s select id, payload.tools`,
@@ -749,12 +869,12 @@ func (s *streamSession) resolveAgentToolSlugs(agentId string) ([]string, bool) {
 	// #1426: synchronous engine read on the voice-session ListTools path
 	// (part of the realtime media-bridge build / setup window).
 	scopeStart := time.Now()
-	result, err := s.service.engine.Execute(ctx, query)
-	logVoiceTiming(s.logger, "server.tools.agent_scope_lookup", scopeStart,
+	result, err := engine.Execute(ctx, query)
+	logVoiceTiming(logger, "server.tools.agent_scope_lookup", scopeStart,
 		"agent_id", agentId, "ok", err == nil)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("voice-agent tool scope: agent query failed -- serving unscoped registry",
+	if err != nil || result == nil {
+		if logger != nil {
+			logger.Warn("voice-agent tool scope: agent query failed -- serving unscoped registry",
 				"agent_id", agentId, "err", err)
 		}
 		return nil, false
