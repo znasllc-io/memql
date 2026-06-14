@@ -621,6 +621,18 @@ message CallToolMsg {
   string name = 2;
   // Arguments as a Struct (JSON object)
   google.protobuf.Struct arguments = 3;
+  // Voice-agent execution context, threaded across the proxy hop (mirror of
+  // ListToolsMsg #1448). CallTool is proxied from the bff to the agent node
+  // (nodeTargetForCallTool -> NodeTypeAgent), and the agent-node session has no
+  // local voiceAgentSpaceId / voiceAgentGaRole -- those bind only on the bff
+  // session that received VoiceAgentSessionStart. The bff stamps them here
+  // before proxying so the agent node can (a) gate tool EXECUTION on the GA's
+  // role (assistant), not the empty caller role -- unblocking GA-only tools like
+  // the operator/uiClick Takeover surface + produceArtifact -- and (b) route a
+  // client-executed tool through the cross-node relay scoped to the voice space.
+  // Empty for non-voice callers, which keeps the local session-state path.
+  string voice_agent_space_id = 4;
+  string voice_agent_ga_role = 5;
 }
 
 // CallToolResult returns tool execution result (MCP tools/call response equivalent).
