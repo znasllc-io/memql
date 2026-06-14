@@ -1,9 +1,9 @@
-# Staging overlay -> 0.9.48. Engine + carrier images rebuilt from main d9e0114:
-# cluster-mode fixes -- proxied tool-scope + GraphBundle persona shape (#1448/#1387
-# PR #1452, threads voice_agent_space_id through ListToolsMsg + flattens GraphBundle
-# so scope no longer fails open to 517 and persona populates) and mic re-enable
-# rebuilds the realtime session (#1449 PR #1451). SPA reused from 0.9.46
-# (copresent main f7209bf unchanged). livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.49. Rebuilt from main 7a326fd: THE real voice fix --
+# tool-scope + persona queries used retired ?. syntax (parser-rejected) so they
+# always served unscoped 517 + empty persona; now via queryAgentById +
+# capabilities.skillIds->ResolveSkills (#1454 PR #1455, real-engine test = 35 tools).
+# Includes #1452/#1451/#1448/#1387 from prior cuts. SPA reused (copresent f7209bf).
+# livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -25,22 +25,21 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:8afe2fc5405a158f4f98d971ad49a09321826646c7d5633b1ed5a499c464a833
+    digest: sha256:a6b46a7ffaf6b149edf87f41efac847e4a795123afe14ad0f1483a4cc8f5e123
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:00991370c1b88c87398d11c400e66834729c3da93d89a6a133c8094ac9f54023
+    digest: sha256:2456a9014d3cc39cd430eefa887a902ec8da7b8939ae09b3334747162139464b
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:e647feda7e2b7a102d121933fdcf4df9a30eb3a60119abf6f8a94721f7e09946
+    digest: sha256:d1e845b579d22a1fca73d1edf8ac866b31ff00e876c644012e33aab3b227a9b7
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:5c825df18535d57ef5abb6a1d498f4ef88f71cc9f3a3ff0862a553a7201e9760
+    digest: sha256:fa7ac7c46d6bf8a34ce2a950cb228b284ea3e652a00390fa29e782373526c190
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:4e280a37f361c102aa34a90543e4c1012bd256872f15956ac537c159a5e3e3b6
+    digest: sha256:2a51fe69b1f009147d467ddc9c41f17261bf05edb2096e4e7cda3f774aa979e0
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:61064b3e26bd7cedebd217a21b616628df3d340843c5cd83846a2deac0e4da05
+    digest: sha256:4a221ee524abf0add51fa0c9a7648ba0f7903bbbff7af0c94ccc3d2ec31fc21b
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:381fd2a2b7f0a48f79b22e54da50bff0c6aaaa1885e1c370e575e613a45936ff
+    digest: sha256:74b1cca6a63db19b2bd7d0abe4af83a7bb736e6929c266c1ae7897aefa03cca6
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:0f02a1dfbf34743d7b9ba578ad365795fbe22f2c19b8d8ebaf8a58348e100ec2
-  # Self-hosted LiveKit server (memql#1043) -- upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3
