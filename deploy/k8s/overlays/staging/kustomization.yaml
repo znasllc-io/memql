@@ -1,9 +1,10 @@
-# Staging overlay -> 0.9.51. Carriers rebuilt from main 41b5f73: skill-catalog
-# reconcile that backfills MISSING v1:agents:skill rows at boot (#1460), so the
-# CoPresent skills (copresent-takeover/guide/ui) materialize and the Assistant's
-# voice scope finally resolves uiClick/uiType. SPA rebuilt (copresent c7038b8):
-# removed the "Realtime" badge (#434). Voice reused from 0.9.50 (probes+VAD),
-# identity from 0.9.49. livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.52. Carriers rebuilt from main 8974ec2: skill-catalog
+# reconcile now HEALS stale catalog rows (#1462/#1463) -- copresent-takeover had a
+# stale pre-split (copresent-control) row that the create-only #1460 reconcile
+# left alone; the heal re-materializes predefined rows whose toolSlugs diverge,
+# so the Assistant's voice scope finally resolves uiClick/uiType. Voice reused
+# from 0.9.50 (probes+VAD), identity from 0.9.49, SPA from 0.9.51 (badge removed).
+# livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -27,17 +28,17 @@ images:
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:a6b46a7ffaf6b149edf87f41efac847e4a795123afe14ad0f1483a4cc8f5e123
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:4a9d819f8359f8dc3f645e15df79dd4289c23acb3482ff4e8ef031416d831b05
+    digest: sha256:24d2cbc62866f7e6096c1d9d9c609e20ead7f7c5cf8ac9b0c8caf82529e7d23b
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:60ab1e7aad26a880d1a098273999ba28ea55c58b0be7059998fb119f77152441
+    digest: sha256:df78e929f995723f7adaf95e9a84057cc0abbe0525f6468fa474c3a03e4ffd6a
   - name: acrmemql.azurecr.io/memql-voice
     digest: sha256:39e0db294c62b3197fdb21cf50b701e06f1156828060f58a4fe5e9b66f080aad
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:841d8fb70580121bb07f50fb8c8807b7b3a21fc4882cc62ec1338ef1680a1a99
+    digest: sha256:6f1a9050d325911859327e947331f5297131264527fa26ff82e3fc00612952b5
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:afef683e369708fcf4686587738af91984f011fcedb58cf2478ba4510a7ef38d
+    digest: sha256:4682958dfc8fb6a804689bccf277dd28a15991623a50dadeb00c42a8c0567cbe
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:01dc8b920569c687f338f1b4d5b4ad5813333db18f4e972acae991c9e84f026b
+    digest: sha256:4285cdf2aa207c12349c8af92992962a3bf79dd57c8f74d094ac0ed099c559c4
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:4ce65c37b7fce80b07b59a31492d203a08aa50cbecdf8c9e17d48eb9165dd12d
   - name: livekit/livekit-server
