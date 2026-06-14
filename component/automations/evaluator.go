@@ -1030,6 +1030,21 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 		return !result, nil
 	}
 
+	// exists(<path>) builtin -- true when the referenced field is present
+	// AND non-empty. Without this, an `exists(payload.X)` atom has no
+	// comparison operator, falls through to the truthy fallthrough below,
+	// renders as the LITERAL string "exists(payload.X)" (a non-empty
+	// string is always truthy), and the filter ALWAYS passes regardless of
+	// the field. That silently disabled `@filter(exists(payload.X))` gates
+	// (memql#1396: reRouteNeedsAgentOnAgentCreate fired on every signup's
+	// plan-less agent create and then called mutationUpdatePlanStatus with
+	// an empty planId; same latent bug on cascadeSupersession). Empty
+	// string is treated as "not exists" to match the coalesce
+	// empty-string-is-missing semantics used elsewhere in this evaluator.
+	if inner, ok := matchSingleArgCall(condition, "exists"); ok {
+		return e.evaluateExists(inner)
+	}
+
 	// Handle comparison operators
 	if strings.Contains(condition, "==") {
 		return e.evaluateComparison(condition, "==")
@@ -1056,6 +1071,55 @@ func (e *Evaluator) evaluateAtomicCondition(condition string) (bool, error) {
 		return false, err
 	}
 	return isTruthy(val), nil
+}
+
+// matchSingleArgCall reports whether expr is a single-argument call of the
+// named function (`name(<arg>)`) at the top level and, if so, returns the
+// trimmed inner argument text. It is whitespace-tolerant around the call and
+// requires the closing paren to be the final character, so it does not match
+// a larger expression that merely contains the call (those are split into
+// atoms before reaching here).
+func matchSingleArgCall(expr, name string) (string, bool) {
+	expr = strings.TrimSpace(expr)
+	prefix := name + "("
+	if !strings.HasPrefix(expr, prefix) || !strings.HasSuffix(expr, ")") {
+		return "", false
+	}
+	return strings.TrimSpace(expr[len(prefix) : len(expr)-1]), true
+}
+
+// evaluateExists resolves the inner field path of an `exists(<path>)` filter
+// builtin and reports whether the field is present AND non-empty. Path
+// resolution reuses EvaluateFilterValue so bare paths like
+// `payload.originatingPlanId` auto-resolve to `$event.payload.<...>` exactly
+// like comparison operands do. A nil value, an empty/whitespace-only string,
+// an empty array, or an empty object all count as "not exists" -- matching the
+// coalesce empty-string-is-missing semantics used elsewhere in this evaluator,
+// so a present-but-blank field does not spuriously pass the gate.
+func (e *Evaluator) evaluateExists(inner string) (bool, error) {
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return false, nil
+	}
+	val, err := e.EvaluateFilterValue(inner)
+	if err != nil {
+		// A path that fails to resolve does not exist.
+		return false, nil
+	}
+	switch v := val.(type) {
+	case nil:
+		return false, nil
+	case string:
+		return strings.TrimSpace(v) != "", nil
+	case []any:
+		return len(v) > 0, nil
+	case []map[string]any:
+		return len(v) > 0, nil
+	case map[string]any:
+		return len(v) > 0, nil
+	default:
+		return true, nil
+	}
 }
 
 // splitConditionParts splits a condition on a delimiter, respecting quoted
