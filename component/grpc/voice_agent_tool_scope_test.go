@@ -233,7 +233,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 				"todos,notes": {ToolSlugs: []string{"todosCreate", "notesCreate"}},
 			},
 		}
-		slugs, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
+		slugs, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		assert.True(t, found)
 		assert.Equal(t, []string{"todosCreate", "notesCreate"}, slugs)
 		require.Len(t, fake.resolvedCalls, 1)
@@ -245,7 +245,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 		fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
 			"queryAgentById": agentSkillsBundle(realId), // capabilities present, skillIds empty
 		}}
-		slugs, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
+		slugs, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		assert.True(t, found, "found=true is authoritative even with no skills")
 		assert.Empty(t, slugs)
 		assert.Empty(t, fake.resolvedCalls, "no ResolveSkills call when there are no skill ids")
@@ -253,7 +253,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 
 	t.Run("query error fails open", func(t *testing.T) {
 		fake := &queryRoutingResolver{execErr: fmt.Errorf("db down")}
-		_, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
+		_, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		assert.False(t, found, "a genuine query error -> found=false -> caller fails open")
 	})
 
@@ -262,7 +262,7 @@ func TestResolveAgentToolSlugsVia(t *testing.T) {
 			bySubstr:   map[string]*memqlv1.GraphBundle{"queryAgentById": agentSkillsBundle(realId, "todos")},
 			resolveErr: fmt.Errorf("skill catalog down"),
 		}
-		_, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
+		_, _, found := resolveAgentToolSlugsVia(ctx, fake, realId, nil)
 		assert.False(t, found, "a ResolveSkills error -> found=false -> caller fails open (never serves 0 off a botched resolve)")
 	})
 }

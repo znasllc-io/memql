@@ -106,7 +106,7 @@ func TestResolveAgentToolSlugsViaBundleShape(t *testing.T) {
 		},
 	}
 
-	slugs, found := resolveAgentToolSlugsVia(context.Background(), fake, realId, nil)
+	slugs, _, found := resolveAgentToolSlugsVia(context.Background(), fake, realId, nil)
 	assert.True(t, found, "the agent row resolved -> authoritative, NOT a fail-open to the full registry")
 	assert.Equal(t, []string{"todosCreate", "notesCreate"}, slugs)
 }
@@ -146,7 +146,7 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 		fake := newFake()
 		// Empty local scope (this is the proxied receiver); spaceId arrives
 		// ONLY via the threaded request.
-		set, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, spaceId, "", nil)
+		set, _, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, spaceId, "", nil)
 		require.True(t, scoped, "scope must apply off the THREADED spaceId; failing open here is the #1448 bug")
 		assert.Equal(t, map[string]struct{}{
 			"todosCreate": {},
@@ -156,7 +156,7 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 
 	t.Run("no threaded scope and no local scope -> fail open (non-voice caller)", func(t *testing.T) {
 		fake := newFake()
-		_, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, "", "", nil)
+		_, _, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, "", "", nil)
 		assert.False(t, scoped, "a caller with no bound scope at all keeps the unscoped registry")
 	})
 }
