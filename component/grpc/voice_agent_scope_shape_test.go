@@ -182,3 +182,28 @@ func TestStampVoiceAgentScopeOnListTools(t *testing.T) {
 		assert.Empty(t, msg.GetVoiceAgentGaAgentId())
 	})
 }
+
+// TestStampVoiceAgentScopeOnCallTool pins the bff SENDER half of the CallTool
+// execution-context threading: a voice-agent session stamps its bound spaceId +
+// GA role onto the CallToolMsg before it is proxied to the agent node, so the
+// agent-node role gate runs against the GA role (not the empty caller role) and
+// the client-tool relay has the voice space. Non-voice callers stay untouched.
+func TestStampVoiceAgentScopeOnCallTool(t *testing.T) {
+	t.Run("voice session stamps space + GA role", func(t *testing.T) {
+		s := &streamSession{voiceAgentSpaceId: "space-1", voiceAgentGaRole: "assistant"}
+		msg := &memqlv1.CallToolMsg{}
+		s.stampVoiceAgentScopeOnCallTool(msg)
+		assert.Equal(t, "space-1", msg.GetVoiceAgentSpaceId())
+		assert.Equal(t, "assistant", msg.GetVoiceAgentGaRole(),
+			"the GA role must travel with the proxied CallTool so the agent node gates GA-only "+
+				"tools (uiClick/operator, produceArtifact) on it, not the empty caller role")
+	})
+
+	t.Run("non-voice session leaves it empty", func(t *testing.T) {
+		s := &streamSession{}
+		msg := &memqlv1.CallToolMsg{}
+		s.stampVoiceAgentScopeOnCallTool(msg)
+		assert.Empty(t, msg.GetVoiceAgentSpaceId())
+		assert.Empty(t, msg.GetVoiceAgentGaRole())
+	})
+}

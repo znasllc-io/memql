@@ -3823,9 +3823,21 @@ type CallToolMsg struct {
 	// Name of the tool to call
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Arguments as a Struct (JSON object)
-	Arguments     *structpb.Struct `protobuf:"bytes,3,opt,name=arguments,proto3" json:"arguments,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Arguments *structpb.Struct `protobuf:"bytes,3,opt,name=arguments,proto3" json:"arguments,omitempty"`
+	// Voice-agent execution context, threaded across the proxy hop (mirror of
+	// ListToolsMsg #1448). CallTool is proxied from the bff to the agent node
+	// (nodeTargetForCallTool -> NodeTypeAgent), and the agent-node session has no
+	// local voiceAgentSpaceId / voiceAgentGaRole -- those bind only on the bff
+	// session that received VoiceAgentSessionStart. The bff stamps them here
+	// before proxying so the agent node can (a) gate tool EXECUTION on the GA's
+	// role (assistant), not the empty caller role -- unblocking GA-only tools like
+	// the operator/uiClick Takeover surface + produceArtifact -- and (b) route a
+	// client-executed tool through the cross-node relay scoped to the voice space.
+	// Empty for non-voice callers, which keeps the local session-state path.
+	VoiceAgentSpaceId string `protobuf:"bytes,4,opt,name=voice_agent_space_id,json=voiceAgentSpaceId,proto3" json:"voice_agent_space_id,omitempty"`
+	VoiceAgentGaRole  string `protobuf:"bytes,5,opt,name=voice_agent_ga_role,json=voiceAgentGaRole,proto3" json:"voice_agent_ga_role,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CallToolMsg) Reset() {
@@ -3877,6 +3889,20 @@ func (x *CallToolMsg) GetArguments() *structpb.Struct {
 		return x.Arguments
 	}
 	return nil
+}
+
+func (x *CallToolMsg) GetVoiceAgentSpaceId() string {
+	if x != nil {
+		return x.VoiceAgentSpaceId
+	}
+	return ""
+}
+
+func (x *CallToolMsg) GetVoiceAgentGaRole() string {
+	if x != nil {
+		return x.VoiceAgentGaRole
+	}
+	return ""
 }
 
 // CallToolResult returns tool execution result (MCP tools/call response equivalent).
@@ -12662,12 +12688,14 @@ const file_memql_proto_rawDesc = "" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12!\n" +
 	"\finput_schema\x18\x03 \x01(\tR\vinputSchema\x12)\n" +
 	"\x10client_execution\x18\x04 \x01(\bR\x0fclientExecution\x12\x16\n" +
-	"\x06scopes\x18\x05 \x03(\tR\x06scopes\"w\n" +
+	"\x06scopes\x18\x05 \x03(\tR\x06scopes\"\xd7\x01\n" +
 	"\vCallToolMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x125\n" +
-	"\targuments\x18\x03 \x01(\v2\x17.google.protobuf.StructR\targuments\"\x89\x01\n" +
+	"\targuments\x18\x03 \x01(\v2\x17.google.protobuf.StructR\targuments\x12/\n" +
+	"\x14voice_agent_space_id\x18\x04 \x01(\tR\x11voiceAgentSpaceId\x12-\n" +
+	"\x13voice_agent_ga_role\x18\x05 \x01(\tR\x10voiceAgentGaRole\"\x89\x01\n" +
 	"\x0eCallToolResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12=\n" +

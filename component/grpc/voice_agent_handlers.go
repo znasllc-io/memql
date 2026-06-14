@@ -812,6 +812,30 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 	}
 }
 
+// stampVoiceAgentScopeOnCallTool copies the bound voice-session execution
+// context (spaceId + the resolved GA role) onto a CallToolMsg before it is
+// proxied to the agent node. The agent-node receiver has no local
+// voiceAgentSpaceId / voiceAgentGaRole (those bind only on the bff session that
+// received VoiceAgentSessionStart), so without this the agent-node role gate
+// rejects GA-only tools against the empty caller role and the client-tool relay
+// has no voice space to scope to. No-op for non-voice callers. Mirror of
+// stampVoiceAgentScopeOnListTools (#1448).
+func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg) {
+	if s == nil || msg == nil {
+		return
+	}
+	s.voiceAgentSpeakSubMu.Lock()
+	spaceId := s.voiceAgentSpaceId
+	gaRole := s.voiceAgentGaRole
+	s.voiceAgentSpeakSubMu.Unlock()
+	if spaceId != "" {
+		msg.VoiceAgentSpaceId = spaceId
+	}
+	if gaRole != "" {
+		msg.VoiceAgentGaRole = gaRole
+	}
+}
+
 // voiceAgentScopedToolNamesForRequest resolves the GA tool-scope using the
 // scope threaded through the ListTools request first (reqSpaceId / reqAgentId,
 // stamped by the bff before proxying -- #1448), falling back to this session's

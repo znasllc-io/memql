@@ -1503,6 +1503,13 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	}
 
 	if s.shouldProxySI(nodeTargetForCallTool()) {
+		// Thread the voice-agent execution context across the proxy hop (mirror
+		// of stampVoiceAgentScopeOnListTools #1448). CallTool runs on the agent
+		// node, whose session has no local voiceAgentSpaceId / voiceAgentGaRole;
+		// without this the agent-node role gate sees the empty caller role and
+		// rejects GA-only tools (uiClick/operator, produceArtifact), and the
+		// client-tool relay has no space to scope to.
+		s.stampVoiceAgentScopeOnCallTool(msg)
 		return s.proxySI(envelope, requestId, nodeTargetForCallTool())
 	}
 
@@ -1531,11 +1538,20 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	// was allowed to SEE (produceArtifact, the operator/uiClick Takeover surface)
 	// is rejected when it actually CALLS it -- the "not allowed for caller role"
 	// failure Sofia surfaces after acknowledging the action.
-	s.voiceAgentSpeakSubMu.Lock()
-	gaRole := s.voiceAgentGaRole
-	s.voiceAgentSpeakSubMu.Unlock()
-	if gaRole != "" {
-		callerRole = gaRole
+	//
+	// On the agent node (the proxied receiver), the GA role arrives THREADED on
+	// the CallToolMsg (the bff stamped it -- handleCallTool runs on the agent
+	// node, whose local voiceAgentGaRole is empty). Prefer the threaded value;
+	// fall back to the local session role for in-process / non-proxied callers.
+	if r := strings.TrimSpace(msg.GetVoiceAgentGaRole()); r != "" {
+		callerRole = r
+	} else {
+		s.voiceAgentSpeakSubMu.Lock()
+		gaRole := s.voiceAgentGaRole
+		s.voiceAgentSpeakSubMu.Unlock()
+		if gaRole != "" {
+			callerRole = gaRole
+		}
 	}
 	if !tool.IsAllowedForRole(callerRole) {
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, fmt.Sprintf("tool %q is not allowed for caller role %q", toolName, callerRole))
@@ -1564,7 +1580,14 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	// service's client:tool:response subscription). This is what lets the
 	// realtime voice model drive the browser ("change the app appearance").
 	if tool.ClientExecution {
-		if spaceId := strings.TrimSpace(s.voiceAgentSpaceId); spaceId != "" {
+		// Voice space for the relay: local session (in-process) first, else the
+		// value threaded on the CallToolMsg (the agent-node proxied receiver, whose
+		// local voiceAgentSpaceId is empty).
+		voiceSpaceId := strings.TrimSpace(s.voiceAgentSpaceId)
+		if voiceSpaceId == "" {
+			voiceSpaceId = strings.TrimSpace(msg.GetVoiceAgentSpaceId())
+		}
+		if spaceId := voiceSpaceId; spaceId != "" {
 			argsJSON := "{}"
 			if args != nil {
 				if b, err := json.Marshal(args.AsMap()); err == nil {
