@@ -979,6 +979,19 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 		}
 		return nil, false
 	}
+	// DIAGNOSTIC (Option C / #1462 follow-up): the Assistant's voice scope keeps
+	// resolving zero UI + delegation tools (no uiClick, no produceArtifact)
+	// despite the skill rows existing. Log the EXACT resolution stages -- the
+	// extracted skillIds and the ResolveSkills bundle.ToolSlugs -- so one session
+	// shows whether copresent-takeover/delegation-baseline are in skillIds, and
+	// whether they resolve to their toolSlugs (produceArtifact / copresent-takeover).
+	if logger != nil {
+		logger.Info("voice-agent tool scope DIAGNOSTIC: resolution",
+			"agent_id", agentId,
+			"skill_ids", strings.Join(skillIds, ","),
+			"resolved_tool_slugs", strings.Join(bundle.ToolSlugs, ","),
+			"resolved_domain_ids", strings.Join(bundle.DomainIds, ","))
+	}
 	// bundle.ToolSlugs is the resolved tool surface; scopeSetFromSlugs applies
 	// ExpandCapabilitySlugs for any operator fan-out (copresent-takeover ->
 	// uiClick/uiType/...).

@@ -1457,6 +1457,32 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 				Scopes:          append([]string(nil), tool.Scopes...),
 			})
 		}
+		// DIAGNOSTIC (Option C): for the missing tools, show which of the 3 gates
+		// drops them -- in the resolved scope? in the node's registry? role-ok?
+		if scoped && s.logger != nil {
+			probe := []string{"uiClick", "uiType", "produceArtifact", "copresent-takeover"}
+			type probeStatus struct{ inScope, inRegistry, roleOK bool }
+			status := map[string]*probeStatus{}
+			for _, n := range probe {
+				_, isc := agentScope[n]
+				status[n] = &probeStatus{inScope: isc}
+			}
+			for _, tool := range tools {
+				if ps, ok := status[tool.Name]; ok {
+					ps.inRegistry = true
+					ps.roleOK = tool.IsAllowedForRole(callerRole)
+				}
+			}
+			scopeKeys := make([]string, 0, len(agentScope))
+			for k := range agentScope {
+				scopeKeys = append(scopeKeys, k)
+			}
+			s.logger.Info("voice-agent tool scope DIAGNOSTIC: gates",
+				"caller_role", callerRole, "scope_size", len(agentScope), "exposed_size", len(toolDefs),
+				"produceArtifact", fmt.Sprintf("scope=%v reg=%v role=%v", status["produceArtifact"].inScope, status["produceArtifact"].inRegistry, status["produceArtifact"].roleOK),
+				"uiClick", fmt.Sprintf("scope=%v reg=%v role=%v", status["uiClick"].inScope, status["uiClick"].inRegistry, status["uiClick"].roleOK),
+				"scope_keys", strings.Join(scopeKeys, ","))
+		}
 	}
 
 	result := &memqlv1.ListToolsResult{
