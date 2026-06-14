@@ -16,19 +16,20 @@ import (
 func itoa(i int) string { return strconv.Itoa(i) }
 
 // TestFilterSyntaxCanonical asserts that every filter clause in the
-// tree references payload fields via `payload.X` (or `?.payload.X`
-// for arg-conditional predicates), never via `<conceptName>.X` or
-// `?.<conceptName>.X`.
+// tree references payload fields via `payload.X`, never via
+// `<conceptName>.X` or `?.<conceptName>.X`.
 //
 // Background: prior to the 2026-05 cleanup, filter clauses mixed
 // five syntactic forms for the same operation -- payload.X,
 // <conceptName>.X, ?.<conceptName>.X, ?.X, and trait/spec calls.
 // The decision recorded in feature/dsl-improvements: payload.X is
 // the only legal prefix for payload fields; intrinsics (id, concept,
-// createdAt, createdBy, partition, type, schema) stay bare; the ?.
-// prefix is preserved wherever it carries arg-conditional semantics
-// but only over payload.X or a bare intrinsic, never over a
-// concept-name alias.
+// createdAt, createdBy, partition, type, schema) stay bare. The `?.`
+// optional-chain prefix is itself retired tree-wide (#977; rejected
+// by TestNoRetiredOperatorForms) -- arg-conditional predicates now use
+// the `when(args.x) { <expr> }` guard. This test still rejects any
+// `?.<conceptName>.` LHS so residual `?.` artifacts can't sneak a
+// concept-name alias back in.
 //
 // This test parses each .memql file line-structure-only (no full
 // parser), extracts filter clauses, and rejects any predicate whose
@@ -527,13 +528,17 @@ func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred st
 // Two contexts emit predicates:
 //
 //  1. Struct-form: a line beginning with `filter ` opens a clause
-//     whose body runs across `;`-separated predicates on the same
+//     whose body runs across `&&`-joined predicates (the canonical
+//     AND operator, #977; the `;` AND separator is retired and
+//     rejected tree-wide by TestNoRetiredOperatorForms) on the same
 //     line and indented continuation lines, terminating on a known
 //     end keyword / annotation / blank line.
 //
-//  2. Procedural-form: a `shape(concept;` call inside a `func`
-//     body. Predicates are `;`-separated between `concept;` and
-//     the closing `,` before the shape name argument.
+//  2. Procedural-form: a legacy `shape(concept;` call inside a `func`
+//     body (the author-side procedural form is retired -- this branch
+//     only matches any residual artifact). Predicates there are
+//     `;`-separated between `concept;` and the closing `,` before the
+//     shape name argument.
 //
 // @filter(...) annotations on automations are intentionally NOT
 // walked: that annotation uses a different (event-trigger)

@@ -67,7 +67,7 @@ var suggestionTemplates = map[ErrorCode]string{
 	ErrorCodeUnknownConcept:        "Check available concepts with: concepts()",
 	ErrorCodeUnknownFunction:       "Check available functions with: functions()",
 	ErrorCodeSyntaxError:           "Check MemQL syntax with: memqlDocs()",
-	ErrorCodeInvalidOperator:       "Supported operators: ==, !=, >, >=, <, <=, in, not in, has",
+	ErrorCodeInvalidOperator:       "Supported operators: ==, !=, >, >=, <, <=, in, not in",
 	ErrorCodeRelationshipNotFound:  "Check concept relationships with: help(\"conceptName\")",
 	ErrorCodeValidationFailed:      "Validate payload before insert with: validate(\"concept\", payload)",
 	ErrorCodeInvalidFieldType:      "Check expected field types in the concept schema",

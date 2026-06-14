@@ -402,22 +402,24 @@ concept relationshipExample {
 // `concept==v1:cognition:participant`). Insert mutations don't supply them.
 
 // =============================================================================
-//   13. @scope("global") concepts -- the special _system partition
+//   13. Infrastructure-metadata concepts (formerly @scope("global"))
 // =============================================================================
 //
-// Global concepts are reserved for infrastructure metadata that every
-// tenant needs to see the same way. The current canonical set:
+// Some concepts hold infrastructure metadata that every node loads
+// identically -- cluster topology, the identity service, the partition
+// registry:
 //
 //     v1:cluster:node, v1:cluster:nodeType    -- cluster topology
 //     v1:identity:user, v1:identity:identity  -- identity service
 //     v1:platform:partition                   -- the partition registry
 //
-// User-data concepts should NOT be global -- making a user-data concept
-// global breaks the tenant isolation contract.
+// These used to carry @scope("global"), but @scope was retired in #56
+// (see section 5) -- per-concept scope no longer exists, and authoring a
+// @scope annotation is a load-time error. Declare these concepts exactly
+// like any other; nothing in the body changes.
 
 @version("1.0.0")
 @namespace("cluster")
-@scope("global")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string @required

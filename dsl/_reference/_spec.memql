@@ -17,7 +17,7 @@
 //                       Trait                       Spec
 //   keyword              `trait <name>`             `spec <name>`
 //   body classification  row-spec OR context-spec   row-spec OR context-spec
-//   author lifecycle     @enabled / @disabled OK    NOT ALLOWED
+//   author lifecycle     @enabled / @disabled OK    @enabled / @disabled OK
 //
 // =============================================================================
 //   1. Spec-level annotations
@@ -63,7 +63,9 @@ spec specIsSIParticipant {
 //
 // A context-spec references `actor.X` fields only. It evaluates
 // in-process against the auth envelope; it is not pushed down to SQL.
-// Context-specs are called from policy bodies via `spec("name")`.
+// Context-specs are invoked via `spec("name")` for caller-based
+// boolean checks (the decision-policy tier that once hosted these is
+// retired -- #984).
 
 @description("Caller must hold an admin or owner role.")
 spec requiresAdmin {
@@ -113,16 +115,18 @@ trait traitStatusIsActive {
 //
 //   actor.*
 //     -> CONTEXT-SPEC. Evaluates in-process against the auth envelope.
-//        Callable from policy bodies via `spec("name")`.
+//        Invoked via `spec("name")`.
 //
 // Mixed bodies (both row + caller refs) are REJECTED at load time:
 //
 //   `spec body mixes row references (payload / intrinsics) with context
 //    references (actor.*) -- split into a row-spec + a context-spec and
-//    compose via a policy`
+//    compose them at the call site (the row-spec in a query filter, the
+//    context-spec via spec("name"))`
 //
-// Split mixed predicates into two specs + compose via a policy that
-// invokes `spec("row")` AND `spec("context")`.
+// Split mixed predicates into two specs: reference the row-spec from a
+// query's filter clause and invoke the context-spec via `spec("name")`
+// at the same call site.
 
 @description("Row-spec: payload-only body. Compiles to SQL.")
 spec rowSpecExample {
@@ -195,7 +199,8 @@ spec specRichPredicate {
 // any other named predicate:
 //
 //   - From a query's filter clause: list the spec name alongside other
-//     predicates, separated by `;`:
+//     predicates, joined with `&&` (the retired `;` AND separator is
+//     rejected tree-wide -- #977):
 //
 //         use cognition.shapes.{ participantFull }
 //         use cognition.specs.{ specIsHumanParticipant }
@@ -206,26 +211,30 @@ spec specRichPredicate {
 //           shape  participantFull
 //         }
 //
-//   - From a policy body: use `spec("name")`. Both row-specs and
-//     context-specs can be composed this way, though only context-specs
-//     evaluate without a row context.
-//
-//         policy canViewAdmin {
-//           body { return spec("requiresAdmin") }
-//         }
+//   - Via `spec("name")`: a caller-context boolean check. Both row-specs
+//     and context-specs can be invoked this way, though only context-specs
+//     evaluate without a row context. (The decision-policy tier that once
+//     hosted these `spec("name")` calls in a `policy` body is retired --
+//     #984; the live `policy` construct is SI provider-selection only.)
 //
 //   - From Go: engine.EvaluateSpec(ctx, "specName") evaluates a
 //     context-spec against the request's auth context. Row-specs cannot
 //     be called this way -- they require a row to evaluate.
 
 // =============================================================================
-//   10. EXPLICITLY REJECTED on specs
+//   10a. Lifecycle annotations ACCEPTED on specs
 // =============================================================================
 //
 //   @enabled  /  @disabled
-//     The engine owns spec lifecycle, not authors. Specs either exist
-//     (in which case they're live) or they don't. Use git to add /
-//     remove a spec; do not toggle it via annotation.
+//     Specs accept the same lifecycle flags as functions / builtins /
+//     prompts / traits. @enabled (the explicit-on default) registers the
+//     spec; @disabled parses it but skips registration so it can be
+//     re-enabled later without deleting it. Most live specs carry an
+//     explicit @enabled (e.g. dsl/agents/specs.memql).
+//
+// =============================================================================
+//   10b. EXPLICITLY REJECTED on specs
+// =============================================================================
 //
 //   @useConcept(...) / @useShape(...) / any other @use<X>(...)
 //     Retired in the import-model pivot. The concept binding is
