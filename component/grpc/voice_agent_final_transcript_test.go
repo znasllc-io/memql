@@ -44,6 +44,10 @@ func (f *fakeParticipantResolver) Execute(_ context.Context, query string) (*mem
 	return &memqlengine.ExecuteResult{Bundle: f.bundle}, nil
 }
 
+func (f *fakeParticipantResolver) ResolveSkills(_ context.Context, _ []string) (memqlengine.SkillBundle, error) {
+	return memqlengine.SkillBundle{}, nil
+}
+
 func (f *fakeParticipantResolver) lastQuery() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
