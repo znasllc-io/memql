@@ -1,0 +1,33 @@
+# Release lockfile (deployment-v2 Phase 4, #702). Assembled by
+# scripts/release/assemble-lockfile.sh from per-repo CI digests.
+version: "0.9.53"
+validatedAt: "2026-06-14T08:43:55Z"
+gate: "deep"
+engineVersion: "0.9.53"
+components:
+  memql-identity:
+    repo: znasllc-io/memql
+    digest: sha256:a6b46a7ffaf6b149edf87f41efac847e4a795123afe14ad0f1483a4cc8f5e123
+  memql-cognition:
+    repo: znasllc-io/memql
+    digest: sha256:b659d5cfd45191f86ac3ec9e27572d57b201ac7dc140cdff420bcdcbae2f4d1c
+  memql-voice:
+    repo: znasllc-io/memql
+    digest: sha256:39e0db294c62b3197fdb21cf50b701e06f1156828060f58a4fe5e9b66f080aad
+  memql-agent:
+    repo: znasllc-io/memql
+    digest: sha256:2a6af0bb0e8269aceb6b1843e26a975e5f3a7b726343955766d11f5501f2183b
+  memql-planner:
+    repo: znasllc-io/memql
+    digest: sha256:dfd72fb0bc0f7921cb27fa5bddbd9ecb2122a36cff9e551e0789732bf1b29242
+  memql-workbench:
+    repo: znasllc-io/memql
+    digest: sha256:b7a085d56392c376286b70967d1b364df43d145c738b3ab46ffcd8444552132e
+  memql-bff-copresent:
+    repo: visionarys-io/memql-bff-copresent
+    digest: sha256:04e7b0af4ab68bbcda6b3721251d89f78ab0f87684f3a84863c87ee624b4779b
+    builtAgainstEngine: "0.9.53"
+  copresent:
+    repo: visionarys-io/copresent
+    digest: sha256:4ce65c37b7fce80b07b59a31492d203a08aa50cbecdf8c9e17d48eb9165dd12d
+    builtAgainstEngine: "0.9.53"
