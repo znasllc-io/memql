@@ -488,8 +488,15 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 	result, err := m.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		if m.engine.Logger != nil {
+			// #1385: capture the EXACT built query string on the WARN so
+			// a staging parse failure is self-diagnosing -- the next run
+			// reveals the failing input (e.g. a divergent concept id or a
+			// lexer-tripping bare colon RHS) instead of just the opaque
+			// "unexpected token after expression" error. Benign fallback
+			// (fallback id == canonical deterministic id), so logging the
+			// query carries no security concern (no user secrets).
 			m.engine.Logger.Warn("seed materializer: dedup lookup failed; falling back to deterministic id",
-				"seed", def.Name, "userId", userId, "error", err)
+				"seed", def.Name, "userId", userId, "query", query, "error", err)
 		}
 		return deterministicPerUserSeedId(def, userId), nil
 	}
@@ -506,19 +513,33 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 // buildPerUserDedupQuery builds the dedup-lookup query that finds an
 // already-materialized perUser-seed row for (def, userId).
 //
-// The concept filter uses the canonical bare-RHS `concept==<id>` form
-// (the lexer special-cases the colon-bearing concept literal there --
-// quoting it would break that grammar). Every OTHER comparison RHS is
-// a payload/provenance value that may carry colons -- the userId is
-// the canonical `v1:identity:user:<uuid>` shape -- so it goes through
-// dslStringLiteral, which JSON-quotes the value. That's the same
-// canonical pattern the automations step-store uses for colon-bearing
-// id comparisons (see component/automations/steps/steps.go's
-// jsonString). Quoting is what keeps a colon-bearing id from being
-// parsed as a bare expression that trips the expression parser with
-// "unexpected token after expression: \":\"" (issue #420): the embedded
-// `:` is only legal unquoted inside the concept-filter RHS, not in an
-// arbitrary comparison value.
+// EVERY colon-bearing RHS -- the concept id, the canonical
+// `v1:identity:user:<uuid>` userId, and the provenance name -- goes
+// through dslStringLiteral, which JSON-quotes the value. Quoting is
+// what keeps a colon-bearing id from being parsed as a bare expression
+// that trips the expression parser with
+// "unexpected token after expression: \":\"" (issue #420 / #1385).
+//
+// The `concept==` RHS used to be left BARE here on the theory that the
+// lexer special-cases the colon-bearing concept literal (and that
+// quoting it "would break that grammar"). That theory is wrong on both
+// counts (#1385):
+//
+//  1. The lexer (component/language/parser/lexer.go scanIdentifier,
+//     the #1118 change) only folds a `:` into an identifier when the
+//     NEXT char is a LETTER; a `:` followed by a non-letter (digit,
+//     hyphen, EOF, ...) terminates the token. So a bare colon-bearing
+//     RHS only parses by luck of "every concept-id segment starts with
+//     a letter" -- a fragile invariant. `v1:agents:agent` happens to
+//     satisfy it; a future concept id that doesn't would split into
+//     stray `:` tokens and reproduce the exact staging error.
+//  2. Quoting the concept RHS is SAFE: `concept=="v1:agents:agent"`
+//     parses green via parseViaLangparser AND still resolves in
+//     extractConceptFromExpression (executor_filter.go), which reads
+//     node.Value.(string) -- identical for bare vs quoted RHS.
+//
+// Routing the concept RHS through the same dslStringLiteral helper as
+// the #420 userId fix removes the fragile bare-RHS dependency entirely.
 //
 // Pure (no engine / no IO) so the regression test can assert the built
 // query parses without standing up an engine.
@@ -526,7 +547,7 @@ func buildPerUserDedupQuery(def *SeedDefinition, userId string) string {
 	conceptId := fmt.Sprintf("v1:%s:%s", def.UseNamespace, def.UseConcept)
 	return fmt.Sprintf(
 		`concept==%s; payload.ownerUserId==%s; provenance.name==%s`,
-		conceptId, dslStringLiteral(userId), dslStringLiteral(def.Name),
+		dslStringLiteral(conceptId), dslStringLiteral(userId), dslStringLiteral(def.Name),
 	)
 }
 

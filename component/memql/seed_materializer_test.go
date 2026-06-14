@@ -331,13 +331,80 @@ func TestBuildPerUserDedupQuery_ParsesWithColonBearingUserId(t *testing.T) {
 
 			// (a) The colon-bearing id literal is quoted, not bare.
 			mustContain(t, q, `payload.ownerUserId=="`+tc.user+`"`)
-			// The concept filter stays the canonical bare form.
-			mustContain(t, q, "concept==v1:agents:agent")
+			// #1385: the concept RHS is now ALSO quoted (no longer the
+			// fragile bare form) so it can't trip the lexer on any
+			// concept-id shape whose colon is followed by a non-letter.
+			mustContain(t, q, `concept=="v1:agents:agent"`)
+			// provenance.name RHS is quoted too.
+			mustContain(t, q, `provenance.name=="`+tc.def.Name+`"`)
 
 			// (b) It parses through the engine's parse path with no
 			// error -- i.e. the dedup lookup will not fall back.
 			if _, err := parseViaLangparser(q); err != nil {
 				t.Fatalf("dedup query failed to parse (would trigger fallback WARN): %v\nquery: %s", err, q)
+			}
+		})
+	}
+}
+
+// TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse is the
+// #1385 regression test. It pins the EXACT built query string for each
+// of the three per-user seed agents (assistant / trainerAgent /
+// plannerAgent) and asserts every one parses green through the same
+// parser path the materializer's engine.Execute uses
+// (parseViaLangparser). This locks the contract that defeated #420 +
+// #1385: every colon-bearing comparison RHS -- including the concept
+// id -- is quoted, so no bare colon can leak into the expression
+// grammar and surface as "unexpected token after expression: \":\"".
+//
+// The concept ids deliberately exercise the lexer's colon-folding
+// edge: a bare RHS only parses when every concept-id segment starts
+// with a letter (lexer.go scanIdentifier, #1118). The "digit-leading
+// concept segment" case below would split a BARE RHS into stray `:`
+// tokens -- it parses only because the RHS is now quoted, which is the
+// whole point of the fix.
+func TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse(t *testing.T) {
+	const user = "v1:identity:user:807f4b13-1234-5678-9abc-def012345678"
+
+	cases := []struct {
+		name string
+		def  *SeedDefinition
+		want string
+	}{
+		{
+			name: "assistant",
+			def:  &SeedDefinition{Name: "assistant", UseNamespace: "agents", UseConcept: "agent"},
+			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="assistant"`,
+		},
+		{
+			name: "trainerAgent",
+			def:  &SeedDefinition{Name: "trainerAgent", UseNamespace: "agents", UseConcept: "agent"},
+			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="trainerAgent"`,
+		},
+		{
+			name: "plannerAgent",
+			def:  &SeedDefinition{Name: "plannerAgent", UseNamespace: "agents", UseConcept: "agent"},
+			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="plannerAgent"`,
+		},
+		{
+			// Defensive: a concept id with a colon followed by a NON-letter
+			// (a digit-leading segment). A BARE RHS would split into stray
+			// `:` tokens here and reproduce the #1385 staging error; the
+			// quoted RHS keeps it intact + parseable.
+			name: "digit-leading concept segment (bare would trip the lexer)",
+			def:  &SeedDefinition{Name: "weirdSeed", UseNamespace: "agents", UseConcept: "2agent"},
+			want: `concept=="v1:agents:2agent"; payload.ownerUserId=="` + user + `"; provenance.name=="weirdSeed"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPerUserDedupQuery(tc.def, user)
+			if got != tc.want {
+				t.Fatalf("built query mismatch\n got: %s\nwant: %s", got, tc.want)
+			}
+			if _, err := parseViaLangparser(got); err != nil {
+				t.Fatalf("dedup query failed to parse (would trigger fallback WARN): %v\nquery: %s", err, got)
 			}
 		})
 	}
