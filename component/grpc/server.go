@@ -805,6 +805,12 @@ type streamSession struct {
 	voiceAgentSpeakStop  func()
 	voiceAgentSpaceId    string
 	voiceAgentGaAgentId  string
+	// voiceAgentGaRole is the scoped GA agent's role (e.g. "assistant"),
+	// resolved at SessionStart. handleCallTool gates tool execution on it for
+	// voice-agent sessions so GA-only (@allowedRoles) tools the model is allowed
+	// to SEE (#1467) are also allowed to RUN, instead of being rejected against
+	// the voice-agent caller's empty role.
+	voiceAgentGaRole string
 }
 
 func newStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer, identity auth.UserIdentity) *streamSession {
@@ -1519,6 +1525,18 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 
 	// Role gate: tools with AllowedRoles reject callers outside the allowed set.
 	callerRole := callerRoleFromMetadata(envelope)
+	// Voice-agent sessions present no caller role (empty -> "specialist"); gate
+	// EXECUTION on the scoped GA agent's role (assistant), the same role the
+	// ListTools scope gate uses (#1467). Without this, a GA-only tool the model
+	// was allowed to SEE (produceArtifact, the operator/uiClick Takeover surface)
+	// is rejected when it actually CALLS it -- the "not allowed for caller role"
+	// failure Sofia surfaces after acknowledging the action.
+	s.voiceAgentSpeakSubMu.Lock()
+	gaRole := s.voiceAgentGaRole
+	s.voiceAgentSpeakSubMu.Unlock()
+	if gaRole != "" {
+		callerRole = gaRole
+	}
 	if !tool.IsAllowedForRole(callerRole) {
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, fmt.Sprintf("tool %q is not allowed for caller role %q", toolName, callerRole))
 	}

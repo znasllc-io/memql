@@ -252,6 +252,16 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 	// voiceTurns map.
 	s.startVoiceAgentSpeakSubscriber(spaceId, gaAgentId, audioMode)
 
+	// Stash the GA's role on the session so handleCallTool can gate tool
+	// EXECUTION against the GA's role (assistant), not the voice-agent caller's
+	// empty role. Without this, @allowedRoles("assistant") GA-only tools (the
+	// operator/uiClick Takeover surface, produceArtifact) pass the ListTools
+	// scope gate (#1467) but are rejected at execution ("not allowed for caller
+	// role"), so Sofia acknowledges the action but can't actually perform it.
+	s.voiceAgentSpeakSubMu.Lock()
+	s.voiceAgentGaRole = persona.role
+	s.voiceAgentSpeakSubMu.Unlock()
+
 	return s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_VoiceAgentSessionAck{
 			VoiceAgentSessionAck: &memqlv1.VoiceAgentSessionAck{
