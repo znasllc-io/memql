@@ -1,7 +1,7 @@
-# Staging overlay -> 0.9.55. Carriers rebuilt: execution-role fix (#1471) -- tool
-# EXECUTION now gated on the GA role too, so Takeover (uiClick) + produceArtifact
-# actually RUN, not just resolve. Voice 0.9.50, identity 0.9.49, SPA 0.9.51.
-# livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.56. Carriers rebuilt: CallTool proxy-context fix (#1473) --
+# GA role + voice space threaded across the CallTool proxy hop so tool EXECUTION
+# (Takeover/uiClick, produceArtifact) passes the role gate on the agent node.
+# Voice 0.9.50, identity 0.9.49, SPA 0.9.51. livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -25,17 +25,17 @@ images:
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:a6b46a7ffaf6b149edf87f41efac847e4a795123afe14ad0f1483a4cc8f5e123
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:1cf42a4eb5d45188094678d2340bc1cb1ce5e5d79b957d1f6d9ff331a1bd8b0d
+    digest: sha256:1088922c7c7447eb621a358e719f03b4bfb15a03dab671d19b62d49f4ed059ad
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:589d8f7cac992fc1306fcc310c8d639d9c2ea08f7892ea180f0e4056c851c6a9
+    digest: sha256:15b1e69245ba646d046f3aa9706ba20f9a389e6da8eb243173b3a6479e695aff
   - name: acrmemql.azurecr.io/memql-voice
     digest: sha256:39e0db294c62b3197fdb21cf50b701e06f1156828060f58a4fe5e9b66f080aad
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:d39b51dc3f0b18f04a74a54b9cf451072dbcb2a3a35d293ade4f4f8c4204b891
+    digest: sha256:82088b4eadf7e2770add3f700f5f4453b7eaa9d1788eae6a8e13558c9f76d174
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:3d100b70937a3308fe476643e78215668fb12d45e9468db42188819d392654bf
+    digest: sha256:1272cb51d5b558595c5855c81f78d7b76b74e0e1efc8a3b310bf76951ff7d7bd
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:8aaab45147091f83496000c2f4d5c51000ca354c9f607102bdcf29edf189e272
+    digest: sha256:a4fe22153223089b5fde855451b35e6488ad22427e326999b1ac7ca4657ff0a6
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:4ce65c37b7fce80b07b59a31492d203a08aa50cbecdf8c9e17d48eb9165dd12d
   - name: livekit/livekit-server
