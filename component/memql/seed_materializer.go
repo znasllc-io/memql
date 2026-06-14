@@ -224,6 +224,26 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 		)
 	}
 
+	// Skill catalog reconcile (#1459). The global pass above already
+	// materializes every registered `seed skill` -- including the
+	// carrier-RegisterTree'd CoPresent skills (copresent-takeover /
+	// -guide / -ui / -canvas) on a carrier node, since LoadUnifiedSeeds
+	// walks the overlay-inclusive dsl.Tree(). But a per-row materialize
+	// failure in the global pass is logged-and-continued and never
+	// re-verified, which is how staging ended up with the Assistant's
+	// capabilities.skillIds referencing copresent skills whose
+	// v1:agents:skill ROWS were absent -- ResolveSkills then silently
+	// dropped them and the realtime voice model got zero UI primitives.
+	// This pass re-asserts that every registered skill seed has a row,
+	// creating only the MISSING ones (idempotent, create-only). Runs
+	// BEFORE the assistant reconcile so the catalog rows the assistant's
+	// skillIds point at exist first. Best-effort: a failure is logged,
+	// boot continues.
+	if _, err := m.reconcileSkillCatalog(ctx); err != nil && logger != nil {
+		logger.Warn("seed materializer: skill catalog reconcile failed",
+			"error", err)
+	}
+
 	// Assistant skillId reconcile (#1443). The per-user create above is
 	// create-only (no-op on an existing assistant-<userId> row), so
 	// existing assistant rows never pick up skillIds added to the seed
