@@ -75,6 +75,13 @@ spec:
             # executor (STT -> cognition tool loop -> TTS) is the tools-in-voice
             # alternative; if reverting to it, flip the cognition flag to true.
             - { name: MEMQL_VOICE_EXECUTOR, value: "realtime" }
+            # Latency experiment: shorten the server_vad silence window from the
+            # 500ms default to 250ms so the model decides "you're done" sooner.
+            # ~250ms cut off the user-perceived end-of-speech -> reply latency
+            # (the biggest controllable chunk, sitting BEFORE the snappiness
+            # metric starts). Energy threshold (default 0.6) still guards noise.
+            # Revert to 500 (or drop this line) if it clips mid-sentence pauses.
+            - { name: MEMQL_REALTIME_VAD_SILENCE_DURATION_MS, value: "250" }
             # Auto-join active polyphon rooms (no fixed room).
             - { name: MEMQL_VOICE_AUTOJOIN, value: "true" }
             # Avatar (#1428): the agent starts the GA's avatar (Simli) into the

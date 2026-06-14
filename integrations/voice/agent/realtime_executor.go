@@ -157,6 +157,13 @@ type RealtimeExecutor struct {
 	// audio latency (the snappiness metric) on the next response's first frame.
 	turnSpeechStopNanos atomic.Int64
 
+	// turnResponseCreatedNanos is the wall-clock (UnixNano) of the model's most
+	// recent response.created. drainAudioOut reads it to split the snappiness
+	// window into [speech_stop -> response.created] (our trigger latency) and
+	// [response.created -> first audio] (OpenAI generation TTFB) so we can tell
+	// where the per-turn time actually goes (latency-probe instrumentation).
+	turnResponseCreatedNanos atomic.Int64
+
 	// respMu guards the in-flight output-pump cancel + the response-in-flight
 	// flag so barge-in can stop playout without racing a new response.
 	respMu     sync.Mutex
@@ -847,9 +854,11 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			// audible. Log the end-of-speech -> first-audio latency (the snappiness
 			// metric) using the most recent speech_stopped stamp, then clear it so a
 			// multi-frame response only measures once.
-			if e.firstAudioPending.CompareAndSwap(true, false) && e.logger != nil {
+			isFirstFrame := e.firstAudioPending.CompareAndSwap(true, false)
+			if isFirstFrame && e.logger != nil {
+				nowNanos := time.Now().UnixNano()
 				if stop := e.turnSpeechStopNanos.Swap(0); stop > 0 {
-					ms := (time.Now().UnixNano() - stop) / 1e6
+					ms := (nowNanos - stop) / 1e6
 					e.logger.Info("voice trace: turntaking event",
 						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID,
 						// #1426: the headline per-turn snappiness number, under
@@ -860,12 +869,33 @@ func (e *RealtimeExecutor) drainAudioOut() {
 					e.logger.Info("voice trace: turntaking event",
 						"stage", "realtime.audio.first", "executor", "realtime", "space_id", e.cfg.SpaceID)
 				}
+				// Latency probe: split the snappiness window -- response.created ->
+				// first audio is OpenAI's generation TTFB (the part NOT under our
+				// control), isolated from the speech_stop -> response.created trigger
+				// latency above. If this dominates, the per-turn delay is the model,
+				// not our pipeline.
+				if respCreated := e.turnResponseCreatedNanos.Swap(0); respCreated > 0 {
+					genMs := (nowNanos - respCreated) / 1e6
+					e.logger.Info("voice trace: turntaking event",
+						"stage", "realtime.audio.first.gen", "executor", "realtime", "space_id", e.cfg.SpaceID,
+						voiceTimingKey, "turn.response_to_first_audio", "duration_ms", genMs)
+				}
 			}
+			// Latency probe: time the first frame's sink write (our output-path
+			// handling -- LiveKit publish + any backpressure). Expected ~0; a
+			// non-trivial value would mean our forwarding, not OpenAI, adds delay.
+			writeStartNanos := time.Now().UnixNano()
 			if err := e.sink.WriteFrame(frame); err != nil {
 				if e.logger != nil {
 					e.logger.Warn("voice-agent realtime: room audio write failed", "err", err)
 				}
 				return
+			}
+			if isFirstFrame && e.logger != nil {
+				e.logger.Info("voice trace: turntaking event",
+					"stage", "realtime.audio.sink_write", "executor", "realtime", "space_id", e.cfg.SpaceID,
+					voiceTimingKey, "turn.sink_write_first", "duration_ms", (time.Now().UnixNano()-writeStartNanos)/1e6,
+					"sink_write_us", (time.Now().UnixNano()-writeStartNanos)/1e3)
 			}
 		}
 	}
@@ -937,6 +967,10 @@ func (e *RealtimeExecutor) drainEvents() {
 				e.respMu.Unlock()
 				// Arm the T3 first-audio stamp for this response (#484).
 				e.firstAudioPending.Store(true)
+				// Latency probe: stamp response.created so drainAudioOut can isolate
+				// OpenAI's generation TTFB (response.created -> first audio) from our
+				// trigger latency (speech_stop -> response.created).
+				e.turnResponseCreatedNanos.Store(time.Now().UnixNano())
 				if e.logger != nil {
 					stage := "model.response_created"
 					if stop := e.turnSpeechStopNanos.Load(); stop > 0 {
