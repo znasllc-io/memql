@@ -776,7 +776,8 @@ func effectiveChannelMode(override string, overrideOK bool, control string) stri
 // empty. Either way the placeholder/empty id matched no agent row, found=false,
 // and the surface failed open to 517 tools -- the regression this fixes.
 func (s *streamSession) voiceAgentScopedToolNames() (map[string]struct{}, bool) {
-	return s.voiceAgentScopedToolNamesForRequest("", "")
+	set, _, scoped := s.voiceAgentScopedToolNamesForRequest("", "")
+	return set, scoped
 }
 
 // stampVoiceAgentScopeOnListTools copies the bound voice-session scope
@@ -807,9 +808,9 @@ func (s *streamSession) stampVoiceAgentScopeOnListTools(msg *memqlv1.ListToolsMs
 // locally bound scope for non-proxied callers. Everything else is identical to
 // the single-node #1442 resolution: resolve the GA's real id, read its tool
 // surface, fail open ONLY on a genuine lookup error.
-func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgentId string) (map[string]struct{}, bool) {
+func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgentId string) (map[string]struct{}, string, bool) {
 	if s == nil {
-		return nil, false
+		return nil, "", false
 	}
 	s.voiceAgentSpeakSubMu.Lock()
 	localSpaceId := s.voiceAgentSpaceId
@@ -828,7 +829,7 @@ func (s *streamSession) voiceAgentScopedToolNamesForRequest(reqSpaceId, reqAgent
 		boundAgentId = localAgentId
 	}
 	if s.service == nil {
-		return nil, false
+		return nil, "", false
 	}
 	return voiceAgentScopedToolNamesVia(
 		contextWithVoiceAgentActor(context.Background()),
@@ -848,14 +849,14 @@ func voiceAgentScopedToolNamesVia(
 	engine voiceParticipantResolver,
 	spaceId, boundAgentId string,
 	logger *slog.Logger,
-) (map[string]struct{}, bool) {
+) (scope map[string]struct{}, role string, scoped bool) {
 	// Not a voice-agent session: no space bound and no agent bound -> no
 	// scoping applies, every other caller keeps the unscoped registry.
 	if spaceId == "" && boundAgentId == "" {
-		return nil, false
+		return nil, "", false
 	}
 	if engine == nil {
-		return nil, false
+		return nil, "", false
 	}
 
 	// Resolve the GA's real canonical id now, independent of SessionStart
@@ -879,12 +880,12 @@ func voiceAgentScopedToolNamesVia(
 			logger.Warn("voice-agent tool scope: no GA id resolvable -- serving unscoped registry",
 				"space_id", spaceId)
 		}
-		return nil, false
+		return nil, "", false
 	}
 
-	raw, found := resolveAgentToolSlugsVia(ctx, engine, agentId, logger)
-	set, scoped := scopeSetFromSlugs(raw, found)
-	if !scoped {
+	raw, agentRole, found := resolveAgentToolSlugsVia(ctx, engine, agentId, logger)
+	set, ok := scopeSetFromSlugs(raw, found)
+	if !ok {
 		// Genuine lookup failure (query error, or no agent row for this id) --
 		// fail open. resolveAgentToolSlugsVia already logged the WARN for a query
 		// error; log here for the row-not-found case so both are visible.
@@ -892,13 +893,13 @@ func voiceAgentScopedToolNamesVia(
 			logger.Warn("voice-agent tool scope: agent row not resolved -- serving unscoped registry",
 				"space_id", spaceId, "agent_id", agentId)
 		}
-		return nil, false
+		return nil, "", false
 	}
 	if logger != nil {
 		logger.Debug("voice-agent tool scope resolved",
-			"space_id", spaceId, "agent_id", agentId, "scoped_count", len(set))
+			"space_id", spaceId, "agent_id", agentId, "scoped_count", len(set), "agent_role", agentRole)
 	}
-	return set, true
+	return set, agentRole, true
 }
 
 // scopeSetFromSlugs turns the (raw slugs, found) answer from resolveAgentToolSlugs
@@ -945,9 +946,9 @@ func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 // (ResolveSkills failing) is treated like a query error -> fail open with a
 // WARN, since serving zero tools off a botched resolve would silently break the
 // session. Keeps the #1432 server.tools.agent_scope_lookup span.
-func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolver, agentId string, logger *slog.Logger) ([]string, bool) {
+func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolver, agentId string, logger *slog.Logger) (slugs []string, role string, found bool) {
 	if engine == nil {
-		return nil, false
+		return nil, "", false
 	}
 	// #1426: synchronous engine read on the voice-session ListTools path
 	// (part of the realtime media-bridge build / setup window).
@@ -960,16 +961,23 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 			logger.Warn("voice-agent tool scope: agent query failed -- serving unscoped registry",
 				"agent_id", agentId, "err", err)
 		}
-		return nil, false
+		return nil, "", false
 	}
-	skillIds, found := skillIdsFromAgentRows(normalizeResultRows(result.OutputPayload()))
+	rows := normalizeResultRows(result.OutputPayload())
+	// The GA agent's role gates which tools it may expose. Read it from the same
+	// row so the ListTools role check runs against the SCOPED agent's role, not
+	// the (empty) voice-agent caller role -- without this, @allowedRoles("assistant")
+	// GA-only tools (produceArtifact, the operator/uiClick surface) are scoped in
+	// but then role-filtered out, since an empty caller role defaults to "specialist".
+	role = roleFromAgentRows(rows)
+	skillIds, found := skillIdsFromAgentRows(rows)
 	if !found {
 		// No agent row -> lookup failure -> fail open.
-		return nil, false
+		return nil, "", false
 	}
 	if len(skillIds) == 0 {
 		// Row found but no skills declared -- an authoritative empty surface.
-		return nil, true
+		return nil, role, true
 	}
 	bundle, err := engine.ResolveSkills(ctx, skillIds)
 	if err != nil {
@@ -977,25 +985,23 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 			logger.Warn("voice-agent tool scope: skill resolution failed -- serving unscoped registry",
 				"agent_id", agentId, "skill_ids", skillIds, "err", err)
 		}
-		return nil, false
-	}
-	// DIAGNOSTIC (Option C / #1462 follow-up): the Assistant's voice scope keeps
-	// resolving zero UI + delegation tools (no uiClick, no produceArtifact)
-	// despite the skill rows existing. Log the EXACT resolution stages -- the
-	// extracted skillIds and the ResolveSkills bundle.ToolSlugs -- so one session
-	// shows whether copresent-takeover/delegation-baseline are in skillIds, and
-	// whether they resolve to their toolSlugs (produceArtifact / copresent-takeover).
-	if logger != nil {
-		logger.Info("voice-agent tool scope DIAGNOSTIC: resolution",
-			"agent_id", agentId,
-			"skill_ids", strings.Join(skillIds, ","),
-			"resolved_tool_slugs", strings.Join(bundle.ToolSlugs, ","),
-			"resolved_domain_ids", strings.Join(bundle.DomainIds, ","))
+		return nil, "", false
 	}
 	// bundle.ToolSlugs is the resolved tool surface; scopeSetFromSlugs applies
 	// ExpandCapabilitySlugs for any operator fan-out (copresent-takeover ->
 	// uiClick/uiType/...).
-	return bundle.ToolSlugs, true
+	return bundle.ToolSlugs, role, true
+}
+
+// roleFromAgentRows extracts the agent's role (payload.role) from a queryAgentById
+// result row. Empty when absent -- callers fall back to the caller role.
+func roleFromAgentRows(rows []map[string]any) string {
+	for _, row := range rows {
+		if v := strings.TrimSpace(rowStringField(row, "role")); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // skillIdsFromAgentRows extracts the first row's capabilities.skillIds list.

@@ -170,13 +170,17 @@ func TestVoiceAgentToolScopeRealEngine_ParsesAndResolves(t *testing.T) {
 		agentBundle: assistantAgentBundle(realId),
 		skillTools:  catalogSkillTools,
 	}
-	rawSlugs, found := resolveAgentToolSlugsVia(ctx, scopeResolver, realId, nil)
+	rawSlugs, agentRole, found := resolveAgentToolSlugsVia(ctx, scopeResolver, realId, nil)
 	require.True(t, found,
 		"the agent-row read must PARSE and resolve (found=true). found=false means the query "+
 			"parse-failed -- the #1454 `?.` bug -- and the session fails open to the 517-tool registry")
 	require.Empty(t, scopeResolver.parseFailed,
 		"the handler's agent query must parse cleanly through the real engine; "+
 			"a parse failure here is the retired `?.` syntax regression")
+	require.Equal(t, "assistant", agentRole,
+		"the GA agent's role must be read from the row so the ListTools role gate runs against "+
+			"the SCOPED agent's role, not the empty caller role -- without this, @allowedRoles(\"assistant\") "+
+			"GA-only tools (produceArtifact, the operator/uiClick surface) are scoped in but role-filtered out")
 
 	set, scoped := scopeSetFromSlugs(rawSlugs, found)
 	require.True(t, scoped)
@@ -316,7 +320,7 @@ func TestVoiceAgentToolScopeRealEngine_FullPathWithDB(t *testing.T) {
 
 	// Drive the REAL handler path: queryAgentById -> capabilities.skillIds ->
 	// ResolveSkills, through the live engine.
-	rawSlugs, found := resolveAgentToolSlugsVia(ctx, eng, agentId, eng.Logger)
+	rawSlugs, _, found := resolveAgentToolSlugsVia(ctx, eng, agentId, eng.Logger)
 	require.True(t, found, "full-path agent read must resolve (no `?.` parse failure)")
 	set, scoped := scopeSetFromSlugs(rawSlugs, found)
 	require.True(t, scoped)

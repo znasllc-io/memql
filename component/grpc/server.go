@@ -1438,10 +1438,22 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 		// Resolve scope from the threaded request context first (the proxied
 		// agent-node receiver path -- #1448), falling back to local session
 		// state for non-proxied callers.
-		agentScope, scoped := s.voiceAgentScopedToolNamesForRequest(msg.GetVoiceAgentSpaceId(), msg.GetVoiceAgentGaAgentId())
+		agentScope, scopedRole, scoped := s.voiceAgentScopedToolNamesForRequest(msg.GetVoiceAgentSpaceId(), msg.GetVoiceAgentGaAgentId())
+		// When the surface is scoped to a specific GA agent, gate tools against
+		// THAT agent's role, not the voice-agent caller's role. The voice-agent
+		// service presents no role (empty -> "specialist" default), but the tools
+		// are being exposed FOR the GA, an "assistant"-role agent. GA-only tools
+		// (@allowedRoles("assistant"): produceArtifact + the operator/uiClick
+		// surface) are correctly scoped IN but were then role-filtered OUT against
+		// the empty caller role -- the bug that made the realtime model unable to
+		// delegate work or drive the UI despite the skills resolving fine.
+		roleForGate := callerRole
+		if scoped && scopedRole != "" {
+			roleForGate = scopedRole
+		}
 		toolDefs = make([]*memqlv1.ToolDefinition, 0, len(tools))
 		for _, tool := range tools {
-			if !tool.IsAllowedForRole(callerRole) {
+			if !tool.IsAllowedForRole(roleForGate) {
 				continue
 			}
 			if scoped {
@@ -1456,32 +1468,6 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 				ClientExecution: tool.ClientExecution,
 				Scopes:          append([]string(nil), tool.Scopes...),
 			})
-		}
-		// DIAGNOSTIC (Option C): for the missing tools, show which of the 3 gates
-		// drops them -- in the resolved scope? in the node's registry? role-ok?
-		if scoped && s.logger != nil {
-			probe := []string{"uiClick", "uiType", "produceArtifact", "copresent-takeover"}
-			type probeStatus struct{ inScope, inRegistry, roleOK bool }
-			status := map[string]*probeStatus{}
-			for _, n := range probe {
-				_, isc := agentScope[n]
-				status[n] = &probeStatus{inScope: isc}
-			}
-			for _, tool := range tools {
-				if ps, ok := status[tool.Name]; ok {
-					ps.inRegistry = true
-					ps.roleOK = tool.IsAllowedForRole(callerRole)
-				}
-			}
-			scopeKeys := make([]string, 0, len(agentScope))
-			for k := range agentScope {
-				scopeKeys = append(scopeKeys, k)
-			}
-			s.logger.Info("voice-agent tool scope DIAGNOSTIC: gates",
-				"caller_role", callerRole, "scope_size", len(agentScope), "exposed_size", len(toolDefs),
-				"produceArtifact", fmt.Sprintf("scope=%v reg=%v role=%v", status["produceArtifact"].inScope, status["produceArtifact"].inRegistry, status["produceArtifact"].roleOK),
-				"uiClick", fmt.Sprintf("scope=%v reg=%v role=%v", status["uiClick"].inScope, status["uiClick"].inRegistry, status["uiClick"].roleOK),
-				"scope_keys", strings.Join(scopeKeys, ","))
 		}
 	}
 
