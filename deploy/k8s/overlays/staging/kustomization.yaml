@@ -1,9 +1,8 @@
-# Staging overlay -> 0.9.49. Rebuilt from main 7a326fd: THE real voice fix --
-# tool-scope + persona queries used retired ?. syntax (parser-rejected) so they
-# always served unscoped 517 + empty persona; now via queryAgentById +
-# capabilities.skillIds->ResolveSkills (#1454 PR #1455, real-engine test = 35 tools).
-# Includes #1452/#1451/#1448/#1387 from prior cuts. SPA reused (copresent f7209bf).
-# livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.50. Voice image rebuilt from main c44e614 (latency
+# probes: turn.response_to_first_audio / turn.sink_write_first, splitting the
+# per-turn budget) + VAD silence experiment (MEMQL_REALTIME_VAD_SILENCE_DURATION_MS
+# 500->250 in deploy/k8s/base/voice-agent.yaml, #1457). All other images reused
+# from 0.9.49 (only integrations/voice/agent changed). livekit pin (#1043) preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -31,7 +30,7 @@ images:
   - name: acrmemql.azurecr.io/memql-cognition
     digest: sha256:d1e845b579d22a1fca73d1edf8ac866b31ff00e876c644012e33aab3b227a9b7
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:fa7ac7c46d6bf8a34ce2a950cb228b284ea3e652a00390fa29e782373526c190
+    digest: sha256:39e0db294c62b3197fdb21cf50b701e06f1156828060f58a4fe5e9b66f080aad
   - name: acrmemql.azurecr.io/memql-agent
     digest: sha256:2a51fe69b1f009147d467ddc9c41f17261bf05edb2096e4e7cda3f774aa979e0
   - name: acrmemql.azurecr.io/memql-planner
