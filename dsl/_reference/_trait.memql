@@ -21,7 +21,9 @@
 //     (evaluates in-process against the auth-context envelope)
 //
 // Mixed bodies (both row and caller refs) are rejected -- the author must
-// split them into a row-spec + a context-spec and compose via a policy.
+// split them into a row-spec + a context-spec and compose them at the
+// call site (the row-spec in a query filter, the context-spec via
+// spec("name")).
 //
 // =============================================================================
 //   1. Trait-level annotations
@@ -162,7 +164,8 @@ trait traitIsClusterOwner {
 // The AST converter classifies the body as row-spec OR context-spec, never
 // both. A body that touches both `payload.*` AND `actor.*` is rejected at
 // load time. Split such logic into a row-spec trait + a context-spec trait
-// and compose via a policy.
+// and compose them at the call site (the row-spec in a query filter, the
+// context-spec via spec("name")).
 //
 // Example of what NOT to write:
 //
@@ -181,8 +184,9 @@ trait traitIsClusterOwner {
 //       payload.ownerId != null
 //     }
 //
-//     // Plus a policy that compares payload.ownerId against actor.userId
-//     // via two spec() lookups + an explicit boolean composition.
+//     // Plus a caller that references the row-spec trait from a query
+//     // filter and invokes the context-spec via spec("name"), composing
+//     // the two results explicitly.
 //
 // =============================================================================
 //   7. The legacy `func (Trait) name(...) bool { ... }` form -- doesn't exist
@@ -204,24 +208,26 @@ trait traitIsClusterOwner {
 // any other named predicate:
 //
 //   - From a query's filter clause: list the trait name alongside other
-//     predicates, separated by `;`.
+//     predicates, joined with `&&` (the retired `;` AND separator is
+//     rejected tree-wide -- #977).
 //
 //         query foo {
 //           filter payload.spaceId==args.spaceId && traitIsActiveRecord
 //           shape  fooFull
 //         }
 //
-//   - From a policy body: use `spec("traitName")` -- the trait is a
-//     context-spec or row-spec, both routed via spec().
+//   - Via `spec("traitName")`: a caller-context boolean check -- the
+//     trait is a context-spec or row-spec, both routed via spec(). (The
+//     decision-policy tier that once hosted these calls in a `policy`
+//     body is retired -- #984; the live `policy` construct is SI
+//     provider-selection only.)
 //
-//         func (Policy) canEdit(_ any) bool {
-//           return spec("traitRequiresAdmin")
-//         }
-//
-//   - As a shape binding on a spec: every spec must bind to a shape via
-//     @shape("name"). When the spec is concept-agnostic, the binding is a
-//     trait shape (a @row shape WITHOUT @concepts(...)). See the shape
-//     reference for the trait-shape pattern.
+//   - As an optional shape pin on a spec: a spec MAY pin its shape via
+//     @shape("name") (it is optional -- the eval strategy is derived from
+//     the body's field references). When the spec is concept-agnostic,
+//     the pin is a trait shape (a @row shape signature-bound to a generic
+//     trait concept, NOT a retired @concepts(...) annotation). See the
+//     shape reference for the trait-shape pattern.
 //
 // =============================================================================
 //   9. Lifecycle: @enabled and @disabled

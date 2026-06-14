@@ -831,7 +831,7 @@ func classifySpecKind(expr ExpressionNode) (SpecKind, error) {
 	})
 	switch {
 	case hasRow && hasContext:
-		return "", fmt.Errorf("spec body mixes row references (payload / intrinsics) with context references (actor.*) -- split into a row-spec + a context-spec and compose via a policy")
+		return "", fmt.Errorf("spec body mixes row references (payload / intrinsics) with context references (actor.*) -- split into a row-spec + a context-spec and compose them at the call site (the row-spec in a query filter, the context-spec via spec(\"name\"))")
 	case hasContext:
 		return SpecKindContext, nil
 	default:

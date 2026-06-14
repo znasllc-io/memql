@@ -1028,8 +1028,9 @@ How the DSL constructs lean on each other. Each layer can only depend
     SQL `WHERE` fragment.
   - body references `actor.X` → spec evaluates in-process against the
     auth-context envelope.
-  - mixed (row + actor) → spec compiles to SQL with actor fields
-    bound as query parameters.
+  - mixed (row + actor) → REJECTED at load time. Split into a
+    row-spec + a context-spec and compose them at the call site (the
+    row-spec in a query filter, the context-spec via `spec("name")`).
 - **Mutations** write to concepts via the bare `insert { ... }` /
   `update { ... }` block (target from the signature). One write per
   body.
@@ -1039,9 +1040,11 @@ How the DSL constructs lean on each other. Each layer can only depend
   pin a default provider and pull rendered templates over it.
 - **Queries** stitch concept + filter (specs) + projection (shapes)
   + args into a typed read. Phase B 2026-05: the struct form
-  `query NAME { concept ... filter ... shape ... }` is the canonical
-  shape; procedural `func (Query)` remains for queries that need
-  branching or multi-step composition.
+  `query NAME { concept ... filter ... shape ... }` is the only
+  author-facing shape. (The author-side `func (Query)` form is
+  retired and rejected at parse time; `func (Receiver)` survives
+  only as the internal rewriter target authors never write -- see
+  "Procedural form (internal only)" below.)
 - **Automations** are event-triggered side-effects. They consume
   the layers above them and never the other way around.
 - **Tools** are the SI-facing surface of queries + mutations +
@@ -1194,23 +1197,29 @@ v1:cluster:node:bff-local
 ```
 
 ### Automations
-Event-driven workflows. Trigger patterns key off concept:
+Event-driven workflows. The `@trigger` annotation keys off an event
+name plus the target concept, using keyword args (the live form
+across `dsl/<ns>/automations.memql`):
 
 ```memql
-@trigger(event="graph.node.created.*.v1:cognition:participant")
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 automation autoJoinSI { ... }
 ```
 
-> **#56 phase 8 caveat:** the event topic still embeds a partition
-> segment (`graph.node.created.{partition}.{concept}`), which is why
-> trigger patterns carry a `.*.` wildcard between `created` and the
-> concept name. That segment goes away in phase 8.
+A time-driven automation uses the `schedule` kwarg instead:
+`@trigger(schedule="0 */10 * * * *")`.
+
+> **#56 phase 8 caveat:** the `partition="*"` kwarg is still required
+> while the event topic carries a partition segment. That segment goes
+> away in phase 8, after which the kwarg drops.
 
 ### Functions
-Reusable query and mutation functions. Both default to the struct
-form. Procedural `func (Query|Mutation) NAME(ctx any) (any, error)`
-is reserved for functions that need branching or multi-step
-composition.
+Reusable query and mutation functions. Both use the struct form --
+it is the only author-facing shape. The author-side procedural
+`func (Query|Mutation) NAME(ctx any) (any, error)` form is retired
+and rejected at parse time; the `func (Receiver)` shape survives
+only as the internal rewriter target (see "Procedural form
+(internal only)" above) that authors never write by hand.
 
 **Concept binding lives in the construct signature** (locked in
 2026-05 via the import-model pivot; PR #47 / #48 / #49). The
@@ -1660,14 +1669,14 @@ Distributed node system metadata (dsl/cluster/concepts.memql)
 - `v1:cluster:cluster`, `v1:cluster:database`, `v1:cluster:identityProvider` -- topology bookkeeping
 
 ### Observability Concepts
-Runtime side of the architecture framework (dsl/observability/, all `@scope("global")`).
+Runtime side of the architecture framework (dsl/observability/; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation).
 See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
 - `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
 - `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
 - `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
 
 ### Identity Concepts
-Auth + access metadata (dsl/identity/concepts.memql, all `@scope("global")`)
+Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation)
 - `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, CoPresent Control settings)
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token)
 - `v1:identity:authSession` -- per-token session record (used for revocation)
