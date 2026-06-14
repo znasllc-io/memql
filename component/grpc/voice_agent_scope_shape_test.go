@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // agentRowBundle builds the GraphBundle shape a plain `from(v1:agents:agent)
@@ -25,17 +26,17 @@ func agentRowBundle(id string, fields map[string]any) *memqlv1.GraphBundle {
 }
 
 // TestNormalizeResultRowsGraphBundle pins the #1387/#1448 root cause fix: a
-// plain `select payload.X` query surfaces only as a *GraphBundle, and
-// normalizeResultRows MUST flatten it into the row-map shape every voice-agent
-// extractor consumes. Before the fix this returned nil -> blank persona +
-// tool-scope fail-open. The assertions below FAIL against the pre-fix code.
+// query result surfaces as a *GraphBundle, and normalizeResultRows MUST flatten
+// it into the row-map shape every voice-agent extractor consumes. Before the
+// fix this returned nil -> blank persona + tool-scope fail-open. The assertions
+// below FAIL against the pre-fix code.
 func TestNormalizeResultRowsGraphBundle(t *testing.T) {
 	bundle := agentRowBundle("v1:agents:agent:assistant-1c65cb0c", map[string]any{
 		"name":         "Assistant",
 		"role":         "assistant",
 		"personality":  "helpful",
 		"audioControl": "always_on",
-		"tools":        []any{"webSearch", "produceArtifact"},
+		"capabilities": map[string]any{"skillIds": []any{"todos", "notes"}},
 	})
 
 	rows := normalizeResultRows(bundle)
@@ -56,9 +57,9 @@ func TestNormalizeResultRowsGraphBundle(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "Assistant", name)
 
-	slugs, found := toolSlugsFromAgentRows(normalizeResultRows(bundle))
+	ids, found := skillIdsFromAgentRows(normalizeResultRows(bundle))
 	assert.True(t, found, "the agent row is present -> authoritative answer, not a fail-open")
-	assert.Equal(t, []string{"webSearch", "produceArtifact"}, slugs)
+	assert.Equal(t, []string{"todos", "notes"}, ids)
 }
 
 // TestResolveAgentSessionRecordViaBundleShape pins #1387: persona resolves REAL
@@ -67,7 +68,7 @@ func TestNormalizeResultRowsGraphBundle(t *testing.T) {
 func TestResolveAgentSessionRecordViaBundleShape(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
 	fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-		"from(v1:agents:agent)": agentRowBundle(realId, map[string]any{
+		"queryAgentById": agentRowBundle(realId, map[string]any{
 			"name":         "Assistant",
 			"role":         "assistant",
 			"description":  "Your general assistant.",
@@ -86,21 +87,28 @@ func TestResolveAgentSessionRecordViaBundleShape(t *testing.T) {
 	assert.Equal(t, "mirror_user", out.videoControl)
 }
 
-// TestResolveAgentToolSlugsViaBundleShape pins #1448's local half: the
-// tool-scope read resolves the GA's tool list off the bundle shape (authoritative
-// found=true), instead of parsing zero rows and failing open to the 517-tool
-// registry. Fails against pre-fix code.
+// TestResolveAgentToolSlugsViaBundleShape pins #1448/#1454's local half: the
+// tool-scope read resolves the GA's capabilities.skillIds off the bundle shape
+// (authoritative found=true) and resolves those skills into tool slugs, instead
+// of parsing zero rows and failing open to the 517-tool registry. Fails against
+// pre-fix code (which used the retired `?.` syntax + read the empty
+// payload.tools list).
 func TestResolveAgentToolSlugsViaBundleShape(t *testing.T) {
 	const realId = "v1:agents:agent:assistant-1c65cb0c"
-	fake := &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-		"from(v1:agents:agent)": agentRowBundle(realId, map[string]any{
-			"tools": []any{"webSearch", "produceArtifact"},
-		}),
-	}}
+	fake := &queryRoutingResolver{
+		bySubstr: map[string]*memqlv1.GraphBundle{
+			"queryAgentById": agentRowBundle(realId, map[string]any{
+				"capabilities": map[string]any{"skillIds": []any{"todos", "notes"}},
+			}),
+		},
+		skillBundles: map[string]memqlengine.SkillBundle{
+			"todos,notes": {ToolSlugs: []string{"todosCreate", "notesCreate"}},
+		},
+	}
 
 	slugs, found := resolveAgentToolSlugsVia(context.Background(), fake, realId, nil)
 	assert.True(t, found, "the agent row resolved -> authoritative, NOT a fail-open to the full registry")
-	assert.Equal(t, []string{"webSearch", "produceArtifact"}, slugs)
+	assert.Equal(t, []string{"todosCreate", "notesCreate"}, slugs)
 }
 
 // TestVoiceAgentScopedToolNamesProxiedReceiver is the CLUSTER-AWARE test that
@@ -118,14 +126,20 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 	const spaceId = "space-1"
 
 	// One fake backs both reads the receiver issues: the GA-id resolve off the
-	// threaded space, then the tool-surface read off the resolved real id.
+	// threaded space, then the tool-surface read (queryAgentById -> skillIds ->
+	// ResolveSkills) off the resolved real id.
 	newFake := func() *queryRoutingResolver {
-		return &queryRoutingResolver{bySubstr: map[string]*memqlv1.GraphBundle{
-			"queryGroupGAForSpace": gaParticipantBundle(realId),
-			"select id, payload.tools": agentRowBundle(realId, map[string]any{
-				"tools": []any{"webSearch", "produceArtifact"},
-			}),
-		}}
+		return &queryRoutingResolver{
+			bySubstr: map[string]*memqlv1.GraphBundle{
+				"queryGroupGAForSpace": gaParticipantBundle(realId),
+				"queryAgentById": agentRowBundle(realId, map[string]any{
+					"capabilities": map[string]any{"skillIds": []any{"todos", "notes"}},
+				}),
+			},
+			skillBundles: map[string]memqlengine.SkillBundle{
+				"todos,notes": {ToolSlugs: []string{"todosCreate", "notesCreate"}},
+			},
+		}
 	}
 
 	t.Run("threaded spaceId scopes the surface even with no local session state", func(t *testing.T) {
@@ -135,9 +149,9 @@ func TestVoiceAgentScopedToolNamesProxiedReceiver(t *testing.T) {
 		set, scoped := voiceAgentScopedToolNamesVia(context.Background(), fake, spaceId, "", nil)
 		require.True(t, scoped, "scope must apply off the THREADED spaceId; failing open here is the #1448 bug")
 		assert.Equal(t, map[string]struct{}{
-			"webSearch":       {},
-			"produceArtifact": {},
-		}, set, "the surface must be the GA's 2-tool list, not the full registry")
+			"todosCreate": {},
+			"notesCreate": {},
+		}, set, "the surface must be the GA's resolved tool list, not the full registry")
 	})
 
 	t.Run("no threaded scope and no local scope -> fail open (non-voice caller)", func(t *testing.T) {

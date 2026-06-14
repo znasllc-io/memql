@@ -378,15 +378,16 @@ func resolveInitialChannelMode(s *streamSession, spaceId, agentId, channel strin
 		return mode
 	}
 
-	// 2) Agent record's default. Marshal agentId (field is a fixed column name).
+	// 2) Agent record's default, read off the agent row via the tested
+	// queryAgentById named query (agentFull carries audioControl/videoControl).
+	// The retired `?.id==` raw query parsed-failed here, so this leg always fell
+	// through to "mirror_user" (#1454).
 	field := "audioControl"
 	if channel == "video" {
 		field = "videoControl"
 	}
 	ctx := contextWithVoiceAgentActor(context.Background())
-	agentIdJSON, _ := json.Marshal(agentId)
-	agentQuery := fmt.Sprintf(`from(v1:agents:agent) ?.id==%s select id, payload.%s`, string(agentIdJSON), field)
-	if result, err := s.service.engine.Execute(ctx, agentQuery); err == nil {
+	if result, err := s.service.engine.Execute(ctx, queryAgentByIdQuery(agentId)); err == nil && result != nil {
 		if mode, ok := extractFirstAgentField(result.OutputPayload(), field); ok && isValidChannelMode(mode) {
 			return mode
 		}
@@ -445,6 +446,24 @@ type agentRecordFields struct {
 	videoControl string
 }
 
+// queryAgentByIdQuery builds the canonical agent-row read every voice-session
+// leg (persona, channel-mode default, avatar persona, tool scope) issues: the
+// tested `queryAgentById({agentId: <id>})` named query, which filters
+// `id==args.agentId` and projects the agentFull shape (name, role, description,
+// personality, audioControl, videoControl, avatarVendor, avatarPersonaId,
+// gender, capabilities). It REPLACES the four hand-written
+// `from(v1:agents:agent) ?.id==%s select …` raw queries that used the retired
+// `?.` optional-chain syntax the parser rejects -- so every voice-session read
+// off the agent row parse-failed and fell back (#1454).
+//
+// agentId is JSON-marshalled so an id carrying a double quote cannot break out
+// of the DSL string literal (CodeQL "unsafe quoting"): marshal yields a quoted,
+// escaped literal token, dropped straight into the named-query arg.
+func queryAgentByIdQuery(agentId string) string {
+	agentIdJSON, _ := json.Marshal(agentId)
+	return fmt.Sprintf(`queryAgentById({agentId: %s})`, string(agentIdJSON))
+}
+
 // resolveAgentSessionRecord loads the GA's persona identity + channel-control
 // defaults from its v1:agents:agent record in one query. Best-effort: any
 // failure (nil engine, query error, missing row) returns the zero value so the
@@ -469,15 +488,14 @@ func resolveAgentSessionRecordVia(ctx context.Context, engine voiceParticipantRe
 	if engine == nil {
 		return out
 	}
-	// JSON-marshal the interpolated id so an id containing a double quote cannot
-	// break out of the DSL string literal (CodeQL "unsafe quoting"). marshal
-	// yields a quoted, escaped literal, so the surrounding "%s" quotes are
-	// dropped and %s carries the full `"<escaped>"` token.
-	agentIdJSON, _ := json.Marshal(agentId)
-	query := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id==%s select id, payload.name, payload.role, payload.description, payload.personality, payload.audioControl, payload.videoControl`,
-		string(agentIdJSON))
-	result, err := engine.Execute(ctx, query)
+	// Read the persona + channel-control defaults off the agent row via the
+	// tested queryAgentById named query (returns agentFull, which carries name /
+	// role / description / personality / audioControl / videoControl). The prior
+	// hand-written `from(...) ?.id==` raw query used the RETIRED optional-chain
+	// syntax, which the parser rejects ("unexpected token after expression:
+	// \"?.\""), so this leg ALWAYS errored -> empty persona -> voice fell back to
+	// the neutral default voice (#1454).
+	result, err := engine.Execute(ctx, queryAgentByIdQuery(agentId))
 	if err != nil || result == nil {
 		return out
 	}
@@ -527,13 +545,11 @@ func resolveAgentAvatarPersona(s *streamSession, agentId, requestedVendor string
 	ctx := contextWithVoiceAgentActor(context.Background())
 
 	// Agent record: stamped vendor/persona id + gender (for the catalog
-	// default). JSON-marshal interpolated ids so an embedded quote cannot break
-	// out of the DSL string literal (same pattern as resolveAgentSessionRecord).
-	agentIdJSON, _ := json.Marshal(agentId)
-	agentQuery := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id==%s select id, payload.avatarVendor, payload.avatarPersonaId, payload.gender`,
-		string(agentIdJSON))
-	result, err := s.service.engine.Execute(ctx, agentQuery)
+	// default), read via the tested queryAgentById named query (agentFull
+	// carries avatarVendor / avatarPersonaId / gender). The prior `?.id==` raw
+	// query used the retired optional-chain syntax the parser rejects, so this
+	// leg always errored -> audio-only (#1454).
+	result, err := s.service.engine.Execute(ctx, queryAgentByIdQuery(agentId))
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("voice-agent avatar persona: agent query failed -- audio-only",
@@ -907,26 +923,36 @@ func scopeSetFromSlugs(raw []string, found bool) (map[string]struct{}, bool) {
 	return set, true
 }
 
-// resolveAgentToolSlugsVia reads the agent row's raw tools list (capability
-// slugs + concrete names) through the narrow
-// voiceParticipantResolver so the row-shape + fail-open distinction is
-// unit-testable without a live engine (#1442). found=false means the row
-// could not be read (query error / no row) -- callers fail OPEN to the
-// unscoped registry. found=true (even with an empty slice) is an
-// AUTHORITATIVE answer: the agent's tool surface, which the caller scopes to
-// exactly. Keeps the #1432 server.tools.agent_scope_lookup span.
+// resolveAgentToolSlugsVia reads the agent's effective tool surface through the
+// narrow voiceParticipantResolver so the row-shape + fail-open distinction is
+// unit-testable. It runs the tested queryAgentById named query, reads the
+// agent's capabilities.skillIds[], and resolves those skill ids into concrete
+// tool slugs via engine.ResolveSkills -- the SAME path the cognition local
+// generation uses (integrations/cognition/si_responder.go's getAgent, #158).
+//
+// This REPLACES the retired `from(v1:agents:agent) ?.id==%s select id,
+// payload.tools` raw query, which (a) used the `?.` optional-chain syntax the
+// parser rejects (so it ALWAYS errored -> fail-open to the 517-tool registry),
+// and (b) read the flat payload.tools list, which is EMPTY on every assistant
+// materialized after the #158 skills migration (capabilities now live under
+// capabilities.skillIds). Both bugs independently produced the unscoped 517
+// (#1454).
+//
+// found=false means the agent row could not be read (query error / no row) --
+// callers fail OPEN to the unscoped registry, the ONLY fail-open path (#1442).
+// found=true (even with an empty slice) is AUTHORITATIVE: the agent's resolved
+// tool surface, which the caller scopes to exactly. A skill-resolution error
+// (ResolveSkills failing) is treated like a query error -> fail open with a
+// WARN, since serving zero tools off a botched resolve would silently break the
+// session. Keeps the #1432 server.tools.agent_scope_lookup span.
 func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolver, agentId string, logger *slog.Logger) ([]string, bool) {
 	if engine == nil {
 		return nil, false
 	}
-	agentIdJSON, _ := json.Marshal(agentId)
-	query := fmt.Sprintf(
-		`from(v1:agents:agent) ?.id==%s select id, payload.tools`,
-		string(agentIdJSON))
 	// #1426: synchronous engine read on the voice-session ListTools path
 	// (part of the realtime media-bridge build / setup window).
 	scopeStart := time.Now()
-	result, err := engine.Execute(ctx, query)
+	result, err := engine.Execute(ctx, queryAgentByIdQuery(agentId))
 	logVoiceTiming(logger, "server.tools.agent_scope_lookup", scopeStart,
 		"agent_id", agentId, "ok", err == nil)
 	if err != nil || result == nil {
@@ -936,35 +962,86 @@ func resolveAgentToolSlugsVia(ctx context.Context, engine voiceParticipantResolv
 		}
 		return nil, false
 	}
-	return toolSlugsFromAgentRows(normalizeResultRows(result.OutputPayload()))
+	skillIds, found := skillIdsFromAgentRows(normalizeResultRows(result.OutputPayload()))
+	if !found {
+		// No agent row -> lookup failure -> fail open.
+		return nil, false
+	}
+	if len(skillIds) == 0 {
+		// Row found but no skills declared -- an authoritative empty surface.
+		return nil, true
+	}
+	bundle, err := engine.ResolveSkills(ctx, skillIds)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("voice-agent tool scope: skill resolution failed -- serving unscoped registry",
+				"agent_id", agentId, "skill_ids", skillIds, "err", err)
+		}
+		return nil, false
+	}
+	// bundle.ToolSlugs is the resolved tool surface; scopeSetFromSlugs applies
+	// ExpandCapabilitySlugs for any operator fan-out (copresent-takeover ->
+	// uiClick/uiType/...).
+	return bundle.ToolSlugs, true
 }
 
-// toolSlugsFromAgentRows extracts the first row's tools list. Pure so the
-// row-shape handling ([]string vs []any from JSON decoding) is unit-testable
-// without an engine.
-func toolSlugsFromAgentRows(rows []map[string]any) ([]string, bool) {
+// skillIdsFromAgentRows extracts the first row's capabilities.skillIds list.
+// Pure so the row-shape handling (nested capabilities map; []string vs []any
+// from JSON decoding) is unit-testable without an engine. found=false means no
+// row at all (lookup failure -> fail open); found=true with an empty slice
+// means the agent exists but declares no skills (authoritative empty surface).
+func skillIdsFromAgentRows(rows []map[string]any) ([]string, bool) {
 	for _, row := range rows {
-		v, ok := row["tools"]
-		if !ok || v == nil {
-			// Row exists but carries no tools list -- a real (empty) answer.
+		caps := capabilitiesMapFromRow(row)
+		if caps == nil {
+			// Row exists but carries no capabilities block -- a real (empty)
+			// answer. (A pre-#158 row with a flat tools[] list is not a valid
+			// post-migration assistant; treat the missing skillIds as empty.)
 			return nil, true
 		}
-		switch list := v.(type) {
-		case []string:
-			return append([]string(nil), list...), true
-		case []any:
-			out := make([]string, 0, len(list))
-			for _, item := range list {
-				if name, ok := item.(string); ok && strings.TrimSpace(name) != "" {
-					out = append(out, name)
-				}
-			}
-			return out, true
-		default:
-			return nil, true
-		}
+		return stringSliceFromRowValue(caps["skillIds"]), true
 	}
 	return nil, false
+}
+
+// capabilitiesMapFromRow returns the agent row's capabilities object, probing
+// the bare key and the nested payload map (shaped results nest under payload).
+func capabilitiesMapFromRow(row map[string]any) map[string]any {
+	if caps, ok := row["capabilities"].(map[string]any); ok {
+		return caps
+	}
+	if payload, ok := row["payload"].(map[string]any); ok {
+		if caps, ok := payload["capabilities"].(map[string]any); ok {
+			return caps
+		}
+	}
+	return nil
+}
+
+// stringSliceFromRowValue normalizes a JSON-decoded list value ([]string or
+// []any) into a trimmed, non-empty []string. Mirrors the row-shape handling the
+// old payload.tools reader carried.
+func stringSliceFromRowValue(v any) []string {
+	switch list := v.(type) {
+	case []string:
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			if s := strings.TrimSpace(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			if name, ok := item.(string); ok && strings.TrimSpace(name) != "" {
+				out = append(out, strings.TrimSpace(name))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // normalizeResultRows accepts a shape() / from-select result payload
@@ -2156,11 +2233,21 @@ func buildRealtimeCitationsClause(citations []*memqlv1.AgentTurnCitation) string
 }
 
 // voiceParticipantResolver is the narrow engine surface the FinalTranscript
-// speaker fallback needs. *memqlengine.MemQLEngine satisfies it; an interface
-// so the resolution rule is unit-testable without standing up an engine.
+// speaker fallback + the persona / tool-scope reads need. *memqlengine.MemQLEngine
+// satisfies it; an interface so the resolution rules are unit-testable without
+// standing up an engine.
+//
+// ResolveSkills is part of the surface because the post-skills-migration (#158)
+// tool-scope path resolves the agent's capabilities.skillIds[] into concrete
+// tool slugs through the engine's skill catalog (mirrors
+// integrations/cognition/si_responder.go's getAgent). The flat tools[] list is
+// empty on every assistant materialized after #158, so reading it directly --
+// as the retired `?.`-syntax query did -- always scoped to nothing and fell
+// open to the 517-tool registry (#1454).
 type voiceParticipantResolver interface {
 	CanonicalizeIdValue(ctx context.Context, value, conceptType string) (string, error)
 	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
+	ResolveSkills(ctx context.Context, skillIds []string) (memqlengine.SkillBundle, error)
 }
 
 // resolveSingleActiveHumanParticipantId implements the documented
