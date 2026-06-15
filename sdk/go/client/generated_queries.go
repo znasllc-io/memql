@@ -3553,6 +3553,23 @@ func QueryStaleClusterNodesBuild(args QueryStaleClusterNodesArgs) string {
 	return "queryStaleClusterNodes({})"
 }
 
+// QueryStrandedCandidatePlans -- Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.
+//
+// Bound concept: plan.
+type QueryStrandedCandidatePlansArgs struct {
+}
+
+// QueryStrandedCandidatePlans calls the engine query queryStrandedCandidatePlans.
+func (qc *QueryClient) QueryStrandedCandidatePlans(ctx context.Context, args QueryStrandedCandidatePlansArgs) (*Result, error) {
+	call := QueryStrandedCandidatePlansBuild(args)
+	return qc.executeNamed(ctx, "queryStrandedCandidatePlans", call)
+}
+
+func QueryStrandedCandidatePlansBuild(args QueryStrandedCandidatePlansArgs) string {
+	_ = args
+	return "queryStrandedCandidatePlans({})"
+}
+
 // QuerySystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
 // Bound concept: bundle.

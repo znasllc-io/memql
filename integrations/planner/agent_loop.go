@@ -189,6 +189,61 @@ func (l *PlannerAgentLoop) HandlePlanCreated(ev events.Event) {
 	}()
 }
 
+// RecoverStranded re-drives a Plan whose plan-created event was lost
+// (memql#1389). The created event is the ONLY trigger for the first
+// Planner Agent invocation (HandlePlanCreated); when it's dropped --
+// a cross-node mesh delivery loss (cf. the peer-table decay #1388) or
+// a planner replica crash between receive and dispatch -- the Plan
+// strands in planning/queued forever with no retry. The watchdog
+// (stranded_plan_watchdog.go) detects such Plans and calls this to
+// re-enter invokeAndDispatch, making dispatch at-least-once with the
+// created event as the fast path and the watchdog as the safety net.
+//
+// Idempotency: this routes through the SAME per-plan once-guard
+// (memql#1155) HandlePlanCreated uses, so a created event that arrives
+// late (after the watchdog already recovered) is collapsed, and a
+// watchdog re-poll that races the original created event recovers at
+// most once per replica. Cross-replica dedup is the watchdog's job
+// (it claims via the ClusterExecutionGuard before calling this).
+//
+// kind handling mirrors HandlePlanCreated exactly: the dispatcher-owned
+// kinds (trainSpecialist / embedDomainItems / adHocAction /
+// scopeElevation / agentInvocation) are NOT re-driven here -- their
+// own dispatchers + the scope-elevation path own them, and the
+// watchdog filters them out before calling this (belt-and-suspenders).
+// produceArtifact flows through invokeAndDispatch like any goal plan
+// (its triage shortcut handles the single-turn case).
+//
+// Runs synchronously (the watchdog poller already runs off the bus
+// loop in its own goroutine) and returns whether recovery was actually
+// attempted (false = duplicate, already handled this plan on this
+// replica) so the caller can log accurately.
+func (l *PlannerAgentLoop) RecoverStranded(ctx context.Context, planId, kind string) (attempted bool) {
+	if l == nil || planId == "" {
+		return false
+	}
+	if !l.handled.markIfNew(planId) {
+		l.logger.Debug("planner agent loop: stranded recovery skipped; plan already handled on this replica (memql#1389)",
+			"planId", planId)
+		return false
+	}
+	l.logger.Info("planner agent loop: recovering stranded plan (created event lost)",
+		"planId", planId, "kind", kind)
+	defer func() {
+		if r := recover(); r != nil {
+			l.logger.Error("planner agent loop: PANIC in stranded recovery",
+				"planId", planId, "recover", fmt.Sprintf("%v", r))
+			l.ensurePlanLeftPlanning(ctx, planId, fmt.Errorf("panic: %v", r))
+		}
+	}()
+	if err := l.invokeAndDispatch(ctx, planId); err != nil {
+		l.logger.Warn("planner agent loop: stranded recovery invoke+dispatch failed",
+			"planId", planId, "error", err)
+		l.ensurePlanLeftPlanning(ctx, planId, err)
+	}
+	return true
+}
+
 // ensurePlanLeftPlanning is the safety net that catches every leaky
 // error path. Reads the Plan's current status; if it's still in a
 // live working state (planning / routing / running), force a

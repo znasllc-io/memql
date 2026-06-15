@@ -118,21 +118,22 @@ type PlannerIntegration struct {
 	// controller for per-account advisory locks + running-Plan counts
 	// (epic memql#902 / #904). Optional: when nil, admission fails open
 	// (no concurrency cap is enforced).
-	dbGetter        func() *bun.DB
-	entitlements    *EntitlementResolver
-	admission       *AdmissionController
-	agentLoop       *PlannerAgentLoop
-	trainDispatch   *TrainSpecialistDispatcher
-	embedDispatch   *EmbedDomainItemsDispatcher
-	intakeDispatch  *ResponsibilityIntakeDispatcher
-	captureDispatch *AuthoringCaptureDispatcher
-	refreshCron     *RefreshCron
-	reactiveLoop    *ReactiveLoop
-	fairnessCron    *FairnessCron
-	logger          *slog.Logger
-	unsubscribes    []func()
-	started         atomic.Bool
-	mu              sync.Mutex
+	dbGetter         func() *bun.DB
+	entitlements     *EntitlementResolver
+	admission        *AdmissionController
+	agentLoop        *PlannerAgentLoop
+	trainDispatch    *TrainSpecialistDispatcher
+	embedDispatch    *EmbedDomainItemsDispatcher
+	intakeDispatch   *ResponsibilityIntakeDispatcher
+	captureDispatch  *AuthoringCaptureDispatcher
+	refreshCron      *RefreshCron
+	reactiveLoop     *ReactiveLoop
+	fairnessCron     *FairnessCron
+	strandedWatchdog *StrandedPlanWatchdog
+	logger           *slog.Logger
+	unsubscribes     []func()
+	started          atomic.Bool
+	mu               sync.Mutex
 	// executing dedups the running-plan executor (handlePlanApprovedForExecution)
 	// so one plan can't be dispatched to its agent twice -- e.g. if more than
 	// one graph.node.updated event arrives while the plan is in "running".
@@ -233,6 +234,14 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	// disabled by default (MEMQL_TASK_FAIRNESS_ENABLED) and a no-op when no
 	// account has a finite cap producing a waiting queue.
 	p.fairnessCron = NewFairnessCron(p.engine, p.dbGetter, p.logger)
+	// Stranded-plan watchdog (memql#1389): the safety net behind the
+	// plan-created event. Re-drives Plans stuck in planning/queued past
+	// the strand threshold whose created event was lost (mesh drop /
+	// replica crash). Default-on; shares the cross-replica claim guard
+	// (memql#1363) so exactly one replica recovers a given Plan. Wired
+	// here so the watchdog sees the same agent loop the created-event
+	// path uses (the per-plan once-guard is shared -> idempotent).
+	p.strandedWatchdog = NewStrandedPlanWatchdog(p.engine, p.agentLoop, p.clusterClaimer, p.logger)
 	return p, nil
 }
 
@@ -411,6 +420,13 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		if p.fairnessCron != nil {
 			p.fairnessCron.Start(ctx)
 		}
+		// Start the stranded-plan watchdog (memql#1389). Polls for Plans
+		// stuck in planning/queued past the strand threshold (created event
+		// lost) and re-drives them through the agent loop, cross-replica-
+		// claimed so exactly one replica recovers each.
+		if p.strandedWatchdog != nil {
+			p.strandedWatchdog.Start(ctx)
+		}
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
 	// readyCh close, IsRunning bookkeeping) to the base
@@ -443,6 +459,9 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	}
 	if p.fairnessCron != nil {
 		p.fairnessCron.Stop()
+	}
+	if p.strandedWatchdog != nil {
+		p.strandedWatchdog.Stop()
 	}
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)
