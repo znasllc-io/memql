@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +204,7 @@ func TestIsVoiceAgentPayload_Allowlist(t *testing.T) {
 		&memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript{},
 		&memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{},
 		&memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput{},
+		&memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking{},
 		&memqlv1.MemqlClientMessage_ListTools{},
 		&memqlv1.MemqlClientMessage_CallTool{},
 	}
@@ -217,4 +219,30 @@ func TestIsVoiceAgentPayload_Allowlist(t *testing.T) {
 	for _, p := range rejected {
 		assert.Falsef(t, isVoiceAgentPayload(p), "%T must be rejected", p)
 	}
+}
+
+// TestVoiceAgentPayload_EveryClientVoiceAgentMsgAllowlisted guards against the
+// memql#1481 class of bug: a new VoiceAgent* client->server message added to
+// the proto (e.g. VoiceAgentRealtimeSpeaking, memql#1421) MUST also be added
+// to isVoiceAgentPayload. If it is not, the interceptor rejects it with
+// PermissionDenied and tears down the ENTIRE voice-agent stream -- so user +
+// assistant utterances stop landing in chat. This test enumerates every
+// voice_agent_* field in the MemqlClientMessage payload oneof and fails if any
+// one is not admitted, so the omission is caught at CI instead of in staging.
+func TestVoiceAgentPayload_EveryClientVoiceAgentMsgAllowlisted(t *testing.T) {
+	fields := (&memqlv1.MemqlClientMessage{}).ProtoReflect().Descriptor().Fields()
+	checked := 0
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if fd.ContainingOneof() == nil || !strings.HasPrefix(string(fd.Name()), "voice_agent_") {
+			continue
+		}
+		msg := &memqlv1.MemqlClientMessage{}
+		r := msg.ProtoReflect()
+		r.Set(fd, r.NewField(fd))
+		assert.Truef(t, isVoiceAgentPayload(msg.GetPayload()),
+			"voice_agent client message %q must be allowlisted in isVoiceAgentPayload (else the interceptor tears down the stream)", fd.Name())
+		checked++
+	}
+	assert.GreaterOrEqualf(t, checked, 6, "expected to enumerate the voice_agent client messages, got %d", checked)
 }

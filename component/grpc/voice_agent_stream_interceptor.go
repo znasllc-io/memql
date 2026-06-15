@@ -146,7 +146,13 @@ func isVoiceAgentPayload(payload any) bool {
 		*memqlv1.MemqlClientMessage_VoiceAgentPartialTranscript,
 		*memqlv1.MemqlClientMessage_VoiceAgentFinalTranscript,
 		*memqlv1.MemqlClientMessage_VoiceAgentTurnRequest,
-		*memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput:
+		*memqlv1.MemqlClientMessage_VoiceAgentRealtimeOutput,
+		// Speaking-state signal (memql#1421): emitted on the first output audio
+		// frame / response.done so the server writes the GA's responding/idle
+		// presence (orb animation). Missing it here was a stream-killer -- the
+		// interceptor rejected it with PermissionDenied and tore down the whole
+		// voice-agent stream, so utterances stopped landing (memql#1481).
+		*memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking:
 		return true
 	case *memqlv1.MemqlClientMessage_ListTools,
 		*memqlv1.MemqlClientMessage_CallTool:
