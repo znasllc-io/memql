@@ -19,6 +19,13 @@ import (
 // 0x434F474E spells "COGN".
 const dispatchGateLockClass int32 = 0x434F474E
 
+// greetGateLockClass namespaces the greet-on-join advisory locks. A DISTINCT
+// class from dispatchGateLockClass keeps the greeting gate's key space wholly
+// separate from the utterance-dispatch gate -- a greeting keyed on
+// (spaceId, agentId) and an utterance keyed on its id can never alias onto the
+// same lock even if their FNV hashes collide. 0x47524554 spells "GRET".
+const greetGateLockClass int32 = 0x47524554
+
 // dispatchGate gives exactly one cognition replica the right to dispatch the
 // turn for a given triggering utterance (znasllc-io/memql#1217).
 //
@@ -166,5 +173,86 @@ func (g *dispatchGate) tryDispatch(ctx context.Context, utteranceId string) (pro
 func dispatchGateLockKey(utteranceId string) int32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(utteranceId))
+	return int32(h.Sum32())
+}
+
+// tryGreet gives exactly one cognition replica the right to fire the
+// greet-on-join greeting for a given (spaceId, agentId) (znasllc-io/memql#1386).
+//
+// The bug it fixes: the v1:cognition:participant.created event is broadcast to
+// BOTH cognition replicas, so both run handleSIParticipantGreeting and both
+// call runGreetingTurn. The only cross-replica guard was the read-before-write
+// greetingExists SELECT, which BOTH replicas pass because neither inserts its
+// greeting utterance until after the multi-second initial-delay sleep + LLM
+// call. Each then inserts an agentGreeting utterance -> the greeting is posted
+// twice. (The per-space greetingPacing mutex serializes greetings WITHIN one
+// process; it does nothing across replicas.)
+//
+// The fix mirrors tryDispatch exactly: a Postgres session-level advisory lock,
+// here keyed by (spaceId, agentId) instead of utterance id and namespaced under
+// greetGateLockClass so it never aliases an utterance-dispatch lock. Exactly
+// one replica wins pg_try_advisory_lock (non-blocking); the loser bails without
+// greeting. The winner holds the lock from the gate across the initial-delay
+// sleep + LLM call + insert, then releases via the returned release func --
+// option (a), same lifetime reasoning as tryDispatch (bounded contention,
+// crash-safe auto-release vs. a wedging claim row).
+//
+// FAIL-SAFE. On ANY infrastructure failure (nil gate/getter, DB not ready,
+// connection error, lock-query error) tryGreet returns (proceed=true,
+// release=noop): the replica falls through to the existing greetingExists
+// read-before-write check, which is itself a durable dedup once one greeting
+// lands. So a gate-infra failure can at worst reproduce the old duplicate, never
+// silently SUPPRESS a legitimate greeting.
+//
+// NO-OP on single replica. The lone replica always wins, so single-node dev is
+// unaffected.
+func (g *dispatchGate) tryGreet(ctx context.Context, spaceId, agentId string) (proceed bool, release func(), err error) {
+	if g == nil || g.dbGetter == nil {
+		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
+	}
+	db := g.dbGetter()
+	if db == nil || db.DB == nil {
+		return true, dispatchGateNoop, nil // fail safe: DB not ready
+	}
+
+	conn, cerr := db.DB.Conn(ctx)
+	if cerr != nil {
+		return true, dispatchGateNoop, cerr // fail safe
+	}
+
+	objid := greetGateLockKey(spaceId, agentId)
+	var acquired bool
+	if qerr := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1, $2)", greetGateLockClass, objid).Scan(&acquired); qerr != nil {
+		_ = conn.Close()
+		return true, dispatchGateNoop, qerr // fail safe: never suppress a greeting because the gate query errored
+	}
+
+	if !acquired {
+		// Another cognition replica already holds this (space, agent) greeting
+		// lock and is firing the greeting. Release the connection and bail.
+		_ = conn.Close()
+		return false, dispatchGateNoop, nil
+	}
+
+	// We won. Hold the session lock (and its connection) until the caller's
+	// greeting turn completes; release unlocks on a background context so a
+	// cancelled ctx still frees the lock, then returns the connection to the pool.
+	release = func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1, $2)", greetGateLockClass, objid)
+		_ = conn.Close()
+	}
+	return true, release, nil
+}
+
+// greetGateLockKey hashes (spaceId, agentId) to the 32-bit object key of the
+// greet-on-join advisory lock. FNV-1a over a delimiter-joined key is stable
+// across processes so every replica derives the same key for the same greeting.
+// The NUL delimiter cannot appear in an id, so distinct (space, agent) pairs
+// never collide via concatenation ambiguity.
+func greetGateLockKey(spaceId, agentId string) int32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(spaceId))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(agentId))
 	return int32(h.Sum32())
 }

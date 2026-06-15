@@ -707,10 +707,15 @@ serializes greetings per-space: 3s initial delay before the first
 greeting fires (giving the SPA time to dismiss the create modal +
 finish the route transition), 4s minimum gap between consecutive
 greetings (so multiple `greetOnJoin` agents don't all shout hi at
-once). The greeting directive is "familiar" by default for ALL
-agents -- every agent in CoPresent is one the user created and
-named themselves, so the directive forbids the "Hi, I'm X" opener
-across the board.
+once). That per-space serialization is process-local; cross-replica
+exactly-once is enforced by `dispatchGate.tryGreet` (#1386), the
+same Postgres advisory-lock gate as the utterance dispatch path
+(`tryDispatch`) but keyed on (space, agent) under a distinct lock
+class -- so in a 2-replica deployment exactly one replica posts the
+greeting instead of both. The greeting directive is "familiar" by
+default for ALL agents -- every agent in CoPresent is one the user
+created and named themselves, so the directive forbids the
+"Hi, I'm X" opener across the board.
 
 ### Agent reply envelope (`respondToUser`)
 
