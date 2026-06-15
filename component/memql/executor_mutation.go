@@ -407,6 +407,18 @@ func (e *MemQLEngine) executeInsert(ctx context.Context, mutation MutationNode) 
 			return nil, err
 		}
 	}
+	// Generic feedback-intake guard (epic memql#1404 / memql#1405): the
+	// resume produced by mutationAttachPlanFeedback (a feedbackResponse with
+	// a respondedBy + status=running) is only legal when the Plan is
+	// currently awaitingFeedback AND the actor owns it (or is privileged).
+	// The append-only DSL cannot reject a conditional transition on its own,
+	// so the rule lives here. A no-op for every non-intake plan write. See
+	// planner_feedback_validation.go.
+	if conceptMeta.Name == conceptPlannerPlan {
+		if err := e.validateFeedbackIntakeTransition(ctx, payload, mutation.ID, actor); err != nil {
+			return nil, err
+		}
+	}
 
 	createParams := memorynodes.CreateParams{
 		Actor:   actor,
