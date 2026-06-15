@@ -68,11 +68,16 @@ EOF
 function parse_arguments() {
     MODE="rendered"
     ENV="staging"
+    NORMALIZE_ARG=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --rendered) MODE="rendered"; shift ;;
             --live)     MODE="live"; shift ;;
             --env=*)    ENV="${1#*=}"; shift ;;
+            # Hidden: canonicalize a single image ref to stdout and exit.
+            # Exposes normalize_imageref to the test harness (drift_check_test.go);
+            # not part of the user-facing CLI, so it is absent from show_help.
+            --normalize=*) MODE="normalize"; NORMALIZE_ARG="${1#*=}"; shift ;;
             --help)     show_help; exit 0 ;;
             *) echo "ERROR: unknown option: $1"; show_help; exit 2 ;;
         esac
@@ -89,6 +94,49 @@ function rendered_images() {
     kubectl kustomize "$OVERLAY_DIR" 2>/dev/null \
         | awk '/^[[:space:]]+image:[[:space:]]/ { sub(/^[[:space:]]+image:[[:space:]]*/, ""); gsub(/"/, ""); print }' \
         | sort -u
+}
+
+#=============================================================================
+# IMAGE-REF NORMALIZATION
+#=============================================================================
+
+# Canonicalize a "[registry/]repo@sha256:DIGEST" image ref so two refs that
+# name the SAME image compare equal regardless of the implicit Docker Hub
+# defaults. Docker reports a pod's imageID with the registry fully qualified
+# (docker.io/livekit/livekit-server@sha256:...) while a kustomize overlay
+# typically pins the bare form (livekit/livekit-server@sha256:...) -- same
+# digest, different surface text. Without this they spuriously diverge (#1441).
+#
+# The defaults Docker fills in for a bare reference, and which we therefore
+# strip back off:
+#   - registry host: docker.io / index.docker.io / registry-1.docker.io
+#     (the registry's own self-report) -> dropped, leaving the bare repo.
+#   - official-image namespace: a leading "library/" on a single-segment repo
+#     under Docker Hub (e.g. docker.io/library/redis -> redis) -> dropped.
+#
+# Refs pinned to any OTHER registry (an ACR host, ghcr.io, quay.io, ...) keep
+# their host: the host carries meaning there and two different registries are
+# legitimately different images. We only collapse the Docker Hub defaults.
+function normalize_imageref() {
+    local ref="$1"
+    # Strip a leading Docker Hub registry host (with optional :port). These
+    # are the only hosts for which the bare form is the canonical equivalent.
+    ref="${ref#docker.io/}"
+    ref="${ref#index.docker.io/}"
+    ref="${ref#registry-1.docker.io/}"
+    # Strip the implicit "library/" official-image namespace.
+    ref="${ref#library/}"
+    printf '%s\n' "$ref"
+}
+
+# Normalize a newline-delimited list of image refs (one per line), then
+# sort -u so set membership in check_live compares canonical forms.
+function normalize_imageref_list() {
+    local line
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        normalize_imageref "$line"
+    done | sort -u
 }
 
 #=============================================================================
@@ -132,10 +180,14 @@ function check_live() {
     fi
     info "comparing committed $ENV overlay digests vs live cluster digests..."
     local committed live
-    committed="$(rendered_images | grep -oE '[^ ]+@sha256:[a-f0-9]+' | sort -u)"
+    # Normalize the implicit docker.io/ + library/ defaults on BOTH sides so a
+    # bare overlay pin (livekit/livekit-server@sha256:...) matches the live
+    # pod's registry-qualified imageID (docker.io/livekit/...@sha256:...) for
+    # the same image (#1441).
+    committed="$(rendered_images | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
     live="$(kubectl get pods -n "$NAMESPACE" \
         -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' 2>/dev/null \
-        | grep -oE '[^ ]+@sha256:[a-f0-9]+' | sort -u)"
+        | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
     if [ -z "$committed" ]; then fail "overlay rendered no digests"; return 1; fi
     if [ -z "$live" ]; then fail "cluster reported no running image digests"; return 1; fi
 
@@ -169,8 +221,9 @@ function check_live() {
 function main() {
     parse_arguments "$@"
     case "$MODE" in
-        rendered) check_rendered ;;
-        live)     check_live ;;
+        rendered)  check_rendered ;;
+        live)      check_live ;;
+        normalize) normalize_imageref "$NORMALIZE_ARG" ;;
     esac
 }
 
