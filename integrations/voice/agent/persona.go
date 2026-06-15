@@ -74,6 +74,17 @@ type Persona struct {
 	Role        string
 	Description string
 	Style       string
+
+	// Space context (#1470 Option C) -- the bound space's name + goal statement
+	// (purpose) and the human participants present, resolved server-side and
+	// carried on the ack. The realtime instruction builder renders these so
+	// Sofia knows WHERE she is and WHO she's talking to (the native realtime
+	// path bypasses cognition, the chat path's source of this awareness). Each
+	// is optional: an ack that omits a field resolves it empty and the builder
+	// omits the corresponding line.
+	SpaceName        string
+	SpacePurpose     string
+	ParticipantNames []string
 }
 
 // AvatarEnabled reports whether this persona drives an avatar participant:
@@ -147,5 +158,10 @@ func ResolvePersona(ack SessionAck, cfg Config) Persona {
 		Role:        ack.Role,
 		Description: ack.Description,
 		Style:       ack.Personality,
+		// Space context (#1470): carried verbatim from the ack; the instruction
+		// builder omits any empty field's line.
+		SpaceName:        ack.SpaceName,
+		SpacePurpose:     ack.SpacePurpose,
+		ParticipantNames: ack.ParticipantNames,
 	}
 }

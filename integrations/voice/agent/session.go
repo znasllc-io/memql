@@ -49,6 +49,15 @@ type SessionAck struct {
 	Role        string
 	Description string
 	Personality string
+
+	// Space context (#1470 Option C), resolved server-side and stamped on the
+	// ack so the realtime instructions know WHERE Sofia is and WHO she's talking
+	// to (the native realtime path bypasses cognition, the chat path's source of
+	// this). Each is empty when the ack omits it; the instruction builder simply
+	// omits the corresponding line.
+	SpaceName        string
+	SpacePurpose     string
+	ParticipantNames []string
 }
 
 // RoomJoiner joins the LiveKit room for a session and blocks until the room
@@ -295,14 +304,17 @@ func (s *Session) start(ctx context.Context) (SessionAck, error) {
 	}
 
 	ack := SessionAck{
-		CanonicalVoice:  ackMsg.GetGaCanonicalVoice(),
-		AvatarPersonaID: ackMsg.GetGaAvatarPersonaId(),
-		InitialAudio:    ackMsg.GetInitialAudioMode(),
-		InitialVideo:    ackMsg.GetInitialVideoMode(),
-		DisplayName:     ackMsg.GetGaDisplayName(),
-		Role:            ackMsg.GetGaRole(),
-		Description:     ackMsg.GetGaDescription(),
-		Personality:     ackMsg.GetGaPersonality(),
+		CanonicalVoice:   ackMsg.GetGaCanonicalVoice(),
+		AvatarPersonaID:  ackMsg.GetGaAvatarPersonaId(),
+		InitialAudio:     ackMsg.GetInitialAudioMode(),
+		InitialVideo:     ackMsg.GetInitialVideoMode(),
+		DisplayName:      ackMsg.GetGaDisplayName(),
+		Role:             ackMsg.GetGaRole(),
+		Description:      ackMsg.GetGaDescription(),
+		Personality:      ackMsg.GetGaPersonality(),
+		SpaceName:        ackMsg.GetSpaceName(),
+		SpacePurpose:     ackMsg.GetSpacePurpose(),
+		ParticipantNames: ackMsg.GetParticipantNames(),
 	}
 	if s.logger != nil {
 		s.logger.Info("voice-agent session ack",

@@ -223,11 +223,25 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 			logVoiceTiming(s.logger, "server.session_start.avatar_persona", legStart, "space_id", spaceId)
 			return id
 		},
+		// #1470 Option C: the bound space's name + goal statement and the human
+		// participants present. Injected into the realtime session instructions
+		// so Sofia knows WHERE she is and WHO she's talking to -- the native
+		// realtime path bypasses cognition (which is where the chat path gets
+		// this). Independent of the other legs (its own space + participant
+		// reads), so it rides the parallel stage. Best-effort: any failure
+		// yields the zero value and the ack fields stay empty.
+		spaceContext: func() spaceContextFields {
+			legStart := time.Now()
+			ctxFields := resolveVoiceSpaceContext(s, spaceId)
+			logVoiceTiming(s.logger, "server.session_start.space_context", legStart, "space_id", spaceId)
+			return ctxFields
+		},
 	})
 	audioMode := state.audioMode
 	videoMode := state.videoMode
 	persona := state.persona
 	avatarPersonaId := state.avatarPersonaId
+	spaceCtx := state.spaceContext
 	logVoiceTiming(s.logger, "server.session_start.total", setupStart, "space_id", spaceId)
 
 	if s.logger != nil {
@@ -241,7 +255,10 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 			"audio_mode", audioMode,
 			"video_mode", videoMode,
 			"persona_name", persona.name,
-			"persona_populated", persona.name != "" || persona.description != "" || persona.personality != "")
+			"persona_populated", persona.name != "" || persona.description != "" || persona.personality != "",
+			"space_name", spaceCtx.name,
+			"space_purpose_set", spaceCtx.purpose != "",
+			"participant_count", len(spaceCtx.participantNames))
 	}
 
 	// Bind the stream to this (space, ga_agent_id) and kick off the
@@ -276,6 +293,9 @@ func (s *streamSession) handleVoiceAgentSessionStart(envelope *memqlv1.MemqlClie
 				GaRole:            persona.role,
 				GaDescription:     persona.description,
 				GaPersonality:     persona.personality,
+				SpaceName:         spaceCtx.name,
+				SpacePurpose:      spaceCtx.purpose,
+				ParticipantNames:  spaceCtx.participantNames,
 			},
 		},
 	})
@@ -520,6 +540,129 @@ func resolveAgentSessionRecordVia(ctx context.Context, engine voiceParticipantRe
 	return out
 }
 
+// spaceContextFields is the bound-space context the SessionAck carries for the
+// realtime instructions (#1470 Option C): the space display name, its goal
+// statement (purpose), and the human participants present. Each is best-effort
+// -- a resolution failure leaves it empty and the voice instruction builder
+// simply omits the corresponding line.
+type spaceContextFields struct {
+	name             string
+	purpose          string
+	participantNames []string
+}
+
+// resolveVoiceSpaceContext loads the bound space's name + goal statement and the
+// human participants present, for injection into the realtime session
+// instructions (#1470). Best-effort throughout: a nil engine, a query error, or
+// a missing row degrades that piece to empty rather than failing session
+// bring-up (the voice session still comes up, just without that context line).
+func resolveVoiceSpaceContext(s *streamSession, spaceId string) spaceContextFields {
+	if s == nil || s.service == nil || s.service.engine == nil {
+		return spaceContextFields{}
+	}
+	ctx := contextWithVoiceAgentActor(context.Background())
+	return resolveVoiceSpaceContextVia(ctx, s.service.engine, spaceId)
+}
+
+// resolveVoiceSpaceContextVia is the seam-based core of resolveVoiceSpaceContext
+// (mirrors resolveAgentSessionRecordVia / resolveGroupGAAgentIdVia): it resolves
+// the space name + goal statement + human-participant display names through the
+// narrow voiceParticipantResolver so the resolution is unit-testable without a
+// live engine. Each leg is independent and best-effort.
+func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantResolver, spaceId string) spaceContextFields {
+	var out spaceContextFields
+	if engine == nil || strings.TrimSpace(spaceId) == "" {
+		return out
+	}
+
+	// Canonicalize the bare space slug the voice-agent passes to the stored
+	// `<partition>:v1:cognition:space:<slug>` form the rows are keyed by, mirroring
+	// resolveSingleActiveHumanParticipantId. On failure fall back to the wire
+	// value so an already-canonical id still resolves.
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	if err != nil || canonicalSpace == "" {
+		canonicalSpace = spaceId
+	}
+	spaceJSON, _ := json.Marshal(canonicalSpace)
+
+	// Space name + goal statement off the space row (spaceFull projects name +
+	// goal).
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, string(spaceJSON))); err == nil && result != nil {
+		payload := result.OutputPayload()
+		out.name, _ = extractFirstAgentField(payload, "name")
+		out.purpose = extractSpaceGoalStatement(payload)
+	}
+
+	// Human participant display names. Reuse the existing querySpaceParticipants
+	// path the speaker-attribution fallback uses.
+	if result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceParticipants({spaceId: %s, participantType: "human", status: "active"})`, string(spaceJSON))); err == nil && result != nil {
+		out.participantNames = extractParticipantNames(result.OutputPayload())
+	}
+
+	return out
+}
+
+// extractSpaceGoalStatement pulls payload.goal.statement off a spaceFull-shaped
+// result row. Empty when the space carries no goal (the AI-describe create path
+// produces a name without a goal). Probes both the bare `goal` key and the
+// nested `payload.goal` map so it works on shape() output and bundle-derived
+// row maps.
+func extractSpaceGoalStatement(payload any) string {
+	for _, row := range normalizeResultRows(payload) {
+		goal, ok := row["goal"].(map[string]any)
+		if !ok {
+			if inner, ok := row["payload"].(map[string]any); ok {
+				goal, _ = inner["goal"].(map[string]any)
+			}
+		}
+		if goal == nil {
+			continue
+		}
+		if v, ok := goal["statement"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// extractParticipantNames pulls the human participants' display names off a
+// querySpaceParticipants result. Falls back to the userId when a participant
+// carries no displayName so a present-but-unnamed human still surfaces. Order
+// follows the result rows; duplicates are de-duped. Returns nil when there are
+// no rows.
+func extractParticipantNames(payload any) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	for _, row := range normalizeResultRows(payload) {
+		inner, _ := row["payload"].(map[string]any)
+		pickField := func(field string) string {
+			if v, ok := row[field].(string); ok && v != "" {
+				return v
+			}
+			if inner != nil {
+				if v, ok := inner[field].(string); ok && v != "" {
+					return v
+				}
+			}
+			return ""
+		}
+		if name := pickField("displayName"); name != "" {
+			add(name)
+			continue
+		}
+		add(pickField("userId"))
+	}
+	return names
+}
+
 // voiceAvatarPersonaCatalogPrefix is the canonical id prefix of the operator
 // avatar-persona catalog rows (v1:agents:avatarPersona). The CoPresent
 // PersonaPicker stamps agents with the CATALOG ROW ID, not the vendor-issued
@@ -687,6 +830,12 @@ type voiceSessionStartLoads struct {
 	videoOverride func() (string, bool)
 	agentRecord   func() agentRecordFields
 	avatarPersona func() string
+	// spaceContext resolves the bound space's name + goal statement and the
+	// human participants present (#1470 Option C), injected into the realtime
+	// instructions so Sofia knows WHERE she is and WHO she's talking to.
+	// Best-effort: any failure yields the zero value and the corresponding ack
+	// fields stay empty.
+	spaceContext func() spaceContextFields
 }
 
 // voiceSessionStartState is the combined result the SessionAck is built from.
@@ -695,6 +844,7 @@ type voiceSessionStartState struct {
 	videoMode       string
 	persona         agentPersonaFields
 	avatarPersonaId string
+	spaceContext    spaceContextFields
 }
 
 // loadVoiceSessionStartState runs the four independent session-start legs
@@ -708,8 +858,9 @@ func loadVoiceSessionStartState(loads voiceSessionStartLoads) voiceSessionStartS
 		record                           agentRecordFields
 		avatarPersonaId                  string
 	)
+	var spaceCtx spaceContextFields
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
 	go func() {
 		defer wg.Done()
 		if loads.audioOverride != nil {
@@ -734,12 +885,19 @@ func loadVoiceSessionStartState(loads voiceSessionStartLoads) voiceSessionStartS
 			avatarPersonaId = loads.avatarPersona()
 		}
 	}()
+	go func() {
+		defer wg.Done()
+		if loads.spaceContext != nil {
+			spaceCtx = loads.spaceContext()
+		}
+	}()
 	wg.Wait()
 	return voiceSessionStartState{
 		audioMode:       effectiveChannelMode(audioOverride, audioOverrideOK, record.audioControl),
 		videoMode:       effectiveChannelMode(videoOverride, videoOverrideOK, record.videoControl),
 		persona:         record.persona,
 		avatarPersonaId: avatarPersonaId,
+		spaceContext:    spaceCtx,
 	}
 }
 

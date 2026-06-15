@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,6 +237,98 @@ func TestVoiceAgentRetiredSyntaxIsRejectedByRealParser(t *testing.T) {
 	// The fix's query parses cleanly.
 	_, err := eng.Parse(queryAgentByIdQuery("v1:agents:agent:assistant-1c65cb0c"))
 	require.NoError(t, err, "queryAgentById -- the #1454 fix -- must parse through the real engine")
+}
+
+// spaceContextParseResolver is a voiceParticipantResolver that runs each query
+// through the REAL parser (like realParseResolver) and returns a per-query
+// bundle keyed by which named query the handler issued. It lets the #1470
+// space-context resolution be exercised against the genuine querySpaceMeta /
+// querySpaceParticipants strings -- proving they parse cleanly AND that the
+// space-name/goal + participant-name extraction wires through end-to-end.
+type spaceContextParseResolver struct {
+	engine          *memqlengine.MemQLEngine
+	spaceBundle     *memqlv1.GraphBundle
+	participantsB   *memqlv1.GraphBundle
+	parsedOK        []string
+	parseFailed     []string
+	sawSpaceMeta    bool
+	sawParticipants bool
+}
+
+func (r *spaceContextParseResolver) CanonicalizeIdValue(ctx context.Context, value, conceptType string) (string, error) {
+	return r.engine.CanonicalizeIdValue(ctx, value, conceptType)
+}
+
+func (r *spaceContextParseResolver) Execute(_ context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	if _, err := r.engine.Parse(query); err != nil {
+		r.parseFailed = append(r.parseFailed, query)
+		return nil, err
+	}
+	r.parsedOK = append(r.parsedOK, query)
+	switch {
+	case strings.Contains(query, "querySpaceMeta"):
+		r.sawSpaceMeta = true
+		return &memqlengine.ExecuteResult{Bundle: r.spaceBundle}, nil
+	case strings.Contains(query, "querySpaceParticipants"):
+		r.sawParticipants = true
+		return &memqlengine.ExecuteResult{Bundle: r.participantsB}, nil
+	}
+	return &memqlengine.ExecuteResult{}, nil
+}
+
+func (r *spaceContextParseResolver) ResolveSkills(_ context.Context, _ []string) (memqlengine.SkillBundle, error) {
+	return memqlengine.SkillBundle{}, nil
+}
+
+// TestVoiceSpaceContextRealEngine_ParsesAndResolves is the #1470 real-engine
+// guard: it drives the actual resolveVoiceSpaceContextVia through the REAL
+// embedded-DSL parser, proving the querySpaceMeta + querySpaceParticipants
+// strings the handler builds parse cleanly (no retired syntax) and that the
+// space name + goal statement + human participant names extract end-to-end.
+//
+// Cross-node note (#1470): the ack is built on the bff/cognition node and
+// consumed by the voice-agent on a different node -- the space context must
+// ride the ack proto, never implicit session state. This test exercises the
+// server side of that hop (the resolution that fills the ack fields).
+func TestVoiceSpaceContextRealEngine_ParsesAndResolves(t *testing.T) {
+	const spaceId = "v1:cognition:space:demo-1c65cb0c"
+	eng := newRealDSLEngine(t)
+	ctx := context.Background()
+
+	spacePayload, _ := structpb.NewStruct(map[string]any{
+		"name": "Q3 Roadmap",
+		"goal": map[string]any{"statement": "Plan the Q3 product roadmap"},
+	})
+	p1, _ := structpb.NewStruct(map[string]any{
+		"participantType": "human",
+		"displayName":     "Jose",
+	})
+	p2, _ := structpb.NewStruct(map[string]any{
+		"participantType": "human",
+		"userId":          "u-2", // no displayName -> falls back to userId
+	})
+
+	resolver := &spaceContextParseResolver{
+		engine: eng,
+		spaceBundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+			{Id: spaceId, Concept: "v1:cognition:space", Payload: spacePayload},
+		}},
+		participantsB: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+			{Id: "v1:cognition:participant:a", Concept: "v1:cognition:participant", Payload: p1},
+			{Id: "v1:cognition:participant:b", Concept: "v1:cognition:participant", Payload: p2},
+		}},
+	}
+
+	out := resolveVoiceSpaceContextVia(ctx, resolver, spaceId)
+
+	require.Empty(t, resolver.parseFailed,
+		"querySpaceMeta + querySpaceParticipants must parse cleanly through the real engine (#1470)")
+	require.True(t, resolver.sawSpaceMeta, "the resolver must issue querySpaceMeta for the space row")
+	require.True(t, resolver.sawParticipants, "the resolver must issue querySpaceParticipants for the humans")
+	assert.Equal(t, "Q3 Roadmap", out.name, "space name must resolve from the space row")
+	assert.Equal(t, "Plan the Q3 product roadmap", out.purpose, "space purpose must resolve from payload.goal.statement")
+	assert.Equal(t, []string{"Jose", "u-2"}, out.participantNames,
+		"human participant names must resolve (displayName, falling back to userId)")
 }
 
 func sortedSetKeys(set map[string]struct{}) []string {

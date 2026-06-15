@@ -132,6 +132,79 @@ func TestBuildPersonaInstructions_AcknowledgeFirstToolBehaviour(t *testing.T) {
 	assert.Contains(t, out, "never promise exact durations")
 }
 
+// TestBuildPersonaInstructions_CapabilityAwareness pins the #1470 Part A
+// capability-awareness half: the realtime instructions now tell the agent what
+// she can actually do (todos/notes/calendar, Takeover, produceArtifact via the
+// planner) and SOFTEN the old "do not recite your capabilities" line -- the
+// intent was just "no help-desk scaffolding", not "you may not know what you
+// can do".
+func TestBuildPersonaInstructions_CapabilityAwareness(t *testing.T) {
+	out := BuildPersonaInstructions(Persona{})
+
+	assert.Contains(t, out, "What you can do:")
+	assert.Contains(t, out, "todos")
+	assert.Contains(t, out, "notes")
+	assert.Contains(t, out, "calendar")
+	assert.Contains(t, out, "Takeover")
+	assert.Contains(t, out, "deliverables")
+
+	// The hard "do not recite your capabilities" gag is gone; the nuance
+	// ("no help-desk scaffolding") is kept.
+	assert.NotContains(t, out, "Do not recite your capabilities")
+	assert.Contains(t, out, "help-desk scaffolding")
+	assert.Contains(t, out, "When asked what you can do")
+}
+
+// TestBuildPersonaInstructions_AsyncDelegation pins the #1470 Part B owner
+// requirement: heavy/multi-step deliverables are delegated to the planner via
+// produceArtifact, and the agent ANNOUNCES that a task is being created.
+func TestBuildPersonaInstructions_AsyncDelegation(t *testing.T) {
+	out := BuildPersonaInstructions(Persona{})
+	assert.Contains(t, out, "produceArtifact")
+	assert.Contains(t, out, "task is being created")
+	assert.Contains(t, out, "background")
+	assert.Contains(t, out, "do NOT try to author it inline")
+	assert.Contains(t, out, "Keep talking")
+}
+
+// TestBuildPersonaInstructions_SpaceContext pins the #1470 Part A
+// context-injection half: a populated space context renders the space name,
+// purpose, and participants.
+func TestBuildPersonaInstructions_SpaceContext(t *testing.T) {
+	p := Persona{
+		SpaceName:        "Q3 Roadmap",
+		SpacePurpose:     "Plan the Q3 product roadmap",
+		ParticipantNames: []string{"Jose", "Mara"},
+	}
+	out := BuildPersonaInstructions(p)
+	assert.Contains(t, out, "Where you are:")
+	assert.Contains(t, out, "Q3 Roadmap")
+	assert.Contains(t, out, "Plan the Q3 product roadmap")
+	assert.Contains(t, out, "People here with you: Jose, Mara")
+}
+
+// TestBuildPersonaInstructions_SpaceContextSingular renders the singular phrase
+// for exactly one participant and de-dupes blanks/duplicates.
+func TestBuildPersonaInstructions_SpaceContextSingular(t *testing.T) {
+	out := BuildPersonaInstructions(Persona{
+		SpaceName:        "Daily",
+		ParticipantNames: []string{"Jose", "Jose", " "},
+	})
+	assert.Contains(t, out, "Person here with you: Jose.")
+	assert.NotContains(t, out, "People here with you")
+}
+
+// TestBuildPersonaInstructions_LeanWhenSparse pins the #1470 token-discipline
+// requirement: with NO space context the "Where you are:" block is omitted
+// entirely, keeping the realtime prompt lean (#1439).
+func TestBuildPersonaInstructions_LeanWhenSparse(t *testing.T) {
+	out := BuildPersonaInstructions(Persona{})
+	assert.NotContains(t, out, "Where you are:",
+		"the space-context block must be omitted when no context is present")
+	assert.Contains(t, out, "What you can do:")
+	assert.Contains(t, out, "produceArtifact")
+}
+
 func TestRealtimeInstructionsForReply(t *testing.T) {
 	// A decided reply is rendered as a per-response directive that carries the
 	// content verbatim with spoken-register framing (#432 conductor gate).
