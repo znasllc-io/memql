@@ -186,6 +186,32 @@ func (c *CognitionIntegration) runGreetingTurn(spaceId, participantId, agentId, 
 		return
 	}
 
+	// Cross-replica exactly-once gate (znasllc-io/memql#1386). The
+	// participant.created event is broadcast to BOTH cognition replicas,
+	// so both reach here. The greetingPacing mutex below only serializes
+	// WITHIN one process; the greetingExists pre-check above passes on
+	// both replicas because neither inserts its greeting until after the
+	// initial-delay sleep + LLM call. Without this gate both replicas
+	// greet -> the greeting posts twice. The advisory lock (keyed on
+	// (spaceId, agentId), held across the sleep + LLM call + insert,
+	// released on return) lets exactly one replica through; the loser
+	// bails. Fails SAFE (proceeds) on any DB/lock error, falling through
+	// to the greetingExists checks which are themselves a durable dedup
+	// once one greeting lands -- so a gate-infra failure can at worst
+	// reproduce the old duplicate, never suppress a legitimate greeting.
+	// No-op on single-replica dev.
+	greetProceed, releaseGreetGate, greetGateErr := c.dispatchGate.tryGreet(ctx, spaceId, agentId)
+	if greetGateErr != nil {
+		c.Logger.Warn("greet_on_join: greet gate errored; failing safe and proceeding",
+			"error", greetGateErr, "spaceId", spaceId, "agentId", agentId)
+	}
+	if !greetProceed {
+		c.Logger.Debug("greet_on_join: another replica owns this greeting, skipping",
+			"spaceId", spaceId, "agentId", agentId)
+		return
+	}
+	defer releaseGreetGate()
+
 	// Per-space greeting pacing. Two rules enforced in this block:
 	//
 	//   - First greeting in the space waits `initialGreetingDelay`

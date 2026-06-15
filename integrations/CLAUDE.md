@@ -152,12 +152,27 @@ every agent in CoPresent is one the user created and named, so
 "Hi, I'm X" openers are forbidden across the board (no per-agent
 flag; the rule lives in the directive instruction text).
 
+**Greet-on-join cross-replica gate (#1386).** The `greetingPacing`
+mutex above is PROCESS-LOCAL -- it does nothing across replicas.
+The participant.created event is broadcast to BOTH cognition
+replicas, so without a cross-node guard both would greet (the
+greetingExists read-before-write check passes on both because
+neither inserts until after the initial-delay sleep + LLM call).
+`runGreetingTurn` takes `dispatchGate.tryGreet(spaceId, agentId)` --
+the same Postgres advisory-lock primitive as the utterance
+dispatch gate (`tryDispatch`), but keyed on (space, agent) under a
+distinct lock class (`greetGateLockClass`, "GRET") -- so exactly
+one replica greets. Held across the sleep + LLM call + insert,
+released on return; fails SAFE (proceeds) on any DB error, falling
+back to the greetingExists dedup. See `dispatch_gate.go`.
+
 Key files:
 - `cognition_handler.go` -- event handler + dispatch flow
 - `conductor_consult.go` -- conductor LLM call (+ lastResponder
   computation) + plan -> outcome adapter
 - `greet_on_join.go` -- greetOnJoin handler with per-space
-  serialization + initial / inter-greeting delays
+  serialization + initial / inter-greeting delays + the
+  cross-replica greet gate (`dispatchGate.tryGreet`, #1386)
 - `si_router.go` -- voice-path router + fast-path dispatch + tool list
 - `client_tool_relay.go` -- cross-node browser tool round-trip
 - `agent_forward.go` -- BFF/cognition -> agent gRPC forwarding
