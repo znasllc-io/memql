@@ -26,6 +26,13 @@ import (
 	"strings"
 )
 
+// defaultVoiceMaxRooms bounds the per-replica concurrent session pool when
+// MEMQL_VOICE_MAX_ROOMS is unset (#1395). A single replica serving more than a
+// handful of live realtime sessions is already an outlier; the cap keeps a
+// runaway discovery (or a buggy room that re-appears) from spawning unbounded
+// gRPC + LiveKit sessions.
+const defaultVoiceMaxRooms = 8
+
 // Config is the resolved runtime configuration for one voice-agent process.
 // It mirrors the env-var family the Python config.py already defines so a
 // deployment switching from the Python agent to the Go agent re-uses the same
@@ -77,6 +84,13 @@ type Config struct {
 	// launches the agent per-room (--room), so it never hits this path. Set
 	// MEMQL_VOICE_AUTOJOIN=false to force the plain idle behaviour instead.
 	VoiceAutoJoin bool
+	// VoiceMaxRooms bounds how many rooms a single voice-agent replica serves
+	// concurrently (#1395). The auto-join dispatcher discovers every active
+	// human-occupied room and serves each in its own isolated session, so two
+	// users in different spaces both get the GA at once instead of the second
+	// waiting for the first to idle out. Default 8; MEMQL_VOICE_MAX_ROOMS
+	// overrides. A value <=0 falls back to the default.
+	VoiceMaxRooms int
 	// RealtimeMultiPartySemanticVad enables the #481 multi-party gate:
 	// semantic_vad turn detection + the conductor gate + native generation for
 	// a >=2-human room (vs the turn_detection:null + labeled-ASR path). Default
@@ -289,6 +303,10 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	// realtime path (a finer-grained rollback than dropping to the cascade).
 	cfg.VoiceGrounding = get("MEMQL_VOICE_GROUNDING", "false") == "true"
 	cfg.VoiceAutoJoin = get("MEMQL_VOICE_AUTOJOIN", "true") != "false"
+	// #1395 concurrent multi-room serving: bound the per-replica session pool.
+	if cfg.VoiceMaxRooms = getInt("MEMQL_VOICE_MAX_ROOMS", defaultVoiceMaxRooms); cfg.VoiceMaxRooms <= 0 {
+		cfg.VoiceMaxRooms = defaultVoiceMaxRooms
+	}
 	cfg.RealtimeNativeTurn = get("MEMQL_REALTIME_NATIVE_TURN", "true") != "false"
 	cfg.RealtimeNativeSTT = get("MEMQL_VOICE_REALTIME_NATIVE_STT", "true") != "false"
 	cfg.RealtimeTranscriptionModel = get("MEMQL_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")

@@ -140,6 +140,26 @@ func TestLoadConfig_VoiceAutoJoinDefaultAndOptOut(t *testing.T) {
 	assert.False(t, cfg.VoiceAutoJoin)
 }
 
+func TestLoadConfig_VoiceMaxRoomsDefaultAndOverride(t *testing.T) {
+	// #1395 concurrent multi-room serving: default cap, env override, and a
+	// non-positive override falls back to the default.
+	cfg, err := LoadConfig(envMap(baseEnv()))
+	require.NoError(t, err)
+	assert.Equal(t, defaultVoiceMaxRooms, cfg.VoiceMaxRooms, "defaults to the pool cap")
+
+	env := baseEnv()
+	env["MEMQL_VOICE_MAX_ROOMS"] = "3"
+	cfg, err = LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.Equal(t, 3, cfg.VoiceMaxRooms)
+
+	env = baseEnv()
+	env["MEMQL_VOICE_MAX_ROOMS"] = "0"
+	cfg, err = LoadConfig(envMap(env))
+	require.NoError(t, err)
+	assert.Equal(t, defaultVoiceMaxRooms, cfg.VoiceMaxRooms, "non-positive falls back to default")
+}
+
 func TestLoadConfig_MultiPartySemanticVadOptIn(t *testing.T) {
 	// #481 multi-party semantic_vad is off by default, opt-in via env.
 	cfg, err := LoadConfig(envMap(baseEnv()))

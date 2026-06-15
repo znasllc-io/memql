@@ -52,6 +52,27 @@ func isHumanParticipantIdentity(identity string) bool {
 	return !strings.HasPrefix(identity, agentIdentityPrefix)
 }
 
+// isVoiceAgentParticipantIdentity reports whether a room participant identity
+// belongs to a voice-agent (the GA's voice participant) -- the `<spaceId>-ga`
+// placeholder or a real agent-row identity the joiner might mint. This is the
+// cross-replica claim signal for concurrent multi-room serving (#1395): a room
+// that already has a voice-agent present is being served (by this replica's own
+// session or by a peer replica), so the dispatcher must NOT join a second GA
+// into it. The avatar vendor participant is NOT a voice-agent -- it is the
+// avatar's media leg the agent itself published -- so it does not count as
+// "already serving".
+func isVoiceAgentParticipantIdentity(identity string) bool {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return false
+	}
+	if identity == avatarvendor.AvatarParticipantIdentity {
+		return false
+	}
+	return strings.HasSuffix(identity, agentIdentitySuffix) ||
+		strings.HasPrefix(identity, agentIdentityPrefix)
+}
+
 // idleTeardownAfter resolves the zero-humans grace period before the session
 // tears down, honoring MEMQL_VOICE_IDLE_TEARDOWN_SECONDS (positive integer)
 // and falling back to the default.
