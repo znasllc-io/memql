@@ -47,6 +47,35 @@ query plan queryAwaitingFeedbackPlansPastTimeout {
   shape   planFull
 }
 
+// queryStrandedCandidatePlans
+// ===========================
+//
+// Returns every Plan still in a pre-dispatch lifecycle status
+// (planning / queued). Backs the planner-side stranded-plan watchdog
+// (memql#1389): a Plan only starts via the graph.node.created event
+// (PlannerAgentLoop.HandlePlanCreated). If that single event is lost
+// (cross-node mesh drop -- cf. the peer-table decay issue #1388 --
+// or a planner replica crash between receive and dispatch), the Plan
+// sits in planning/queued forever with no retry and no user-visible
+// failure. The watchdog poller re-drives such Plans through
+// invokeAndDispatch as an at-least-once safety net behind the
+// created-event fast path.
+//
+// Broad-by-design: the precise "older than N minutes AND not yet
+// claimed by the agent loop" check runs Go-side in the watchdog
+// (StrandedPlanWatchdog.pollOnce), mirroring queryDueRefreshDomains /
+// queryDueTrainAgentRetryPlans -- the MemQL comparison evaluator
+// doesn't accept now() as a comparison RHS for createdAt arithmetic
+// (component/memql/executor.go), and the candidate set is small
+// (planning/queued is a transient window). status membership uses the
+// single `in` operator since MemQL has no OR.
+@enabled
+@description("Plans still in a pre-dispatch status (planning / queued). Backs the stranded-plan watchdog (memql#1389); the age + dedup check runs Go-side.")
+query plan queryStrandedCandidatePlans {
+  filter  payload.status in ["planning", "queued"]
+  shape   planFull
+}
+
 // queryDueTrainAgentRetryPlans
 // ============================
 //
