@@ -1813,6 +1813,28 @@ func QueryExpiredWorkerInvocationsBuild(args QueryExpiredWorkerInvocationsArgs) 
 	return "queryExpiredWorkerInvocations({})"
 }
 
+// QueryFeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
+//
+// Bound concept: utterance.
+type QueryFeedbackAnnouncementForPlanArgs struct {
+	PlanId string
+}
+
+// QueryFeedbackAnnouncementForPlan calls the engine query queryFeedbackAnnouncementForPlan.
+func (qc *QueryClient) QueryFeedbackAnnouncementForPlan(ctx context.Context, args QueryFeedbackAnnouncementForPlanArgs) (*Result, error) {
+	call := QueryFeedbackAnnouncementForPlanBuild(args)
+	return qc.executeNamed(ctx, "queryFeedbackAnnouncementForPlan", call)
+}
+
+func QueryFeedbackAnnouncementForPlanBuild(args QueryFeedbackAnnouncementForPlanArgs) string {
+	var b strings.Builder
+	b.WriteString("queryFeedbackAnnouncementForPlan({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryFindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via queryUpcomingEvents and filter conversationally).
 //
 // Bound concept: calendarEvent.

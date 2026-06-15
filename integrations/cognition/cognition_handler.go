@@ -167,6 +167,22 @@ func (c *CognitionIntegration) handleUtteranceForCognition(event events.Event) {
 		}
 	}
 
+	// Assistant-mediated plan feedback (epic memql#1404 / child #1406):
+	// before the normal turn dispatch, check whether a Plan in this space is
+	// parked in awaitingFeedback and whether this user message answers its
+	// pending question. On a confident hit we route the answer into
+	// mutationAttachPlanFeedback (which resumes the Plan cross-replica
+	// exactly-once, #1405) and post a brief confirmation, then STOP -- the
+	// message was the answer to a question, not a fresh turn for an agent to
+	// respond to. On any miss / error this falls through to normal dispatch,
+	// so the cost of a false negative is just "answer via the card instead."
+	lastAgentText := mostRecentAgentText(c.scoreEngine, spaceId)
+	if c.tryRouteUtteranceAsPlanFeedback(ctx, spaceId, text, lastAgentText) {
+		c.Logger.Info("cognition: utterance routed as plan feedback; skipping normal dispatch",
+			"spaceId", spaceId, "utteranceId", utterance.ID)
+		return
+	}
+
 	// Find all SI participants in the space and build AgentCandidates.
 	// Retry once on transient errors -- the cognition handler is the
 	// only thing that runs per-utterance, so giving up on a single DB
