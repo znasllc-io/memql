@@ -5,9 +5,16 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 ```
 {
   "complexity": "trivial" | "moderate" | "complex",
-  "reasoning": "<one short sentence>"
+  "reasoning": "<one short sentence>",
+  "sectionable": true | false,
+  "assembly": "<one short sentence: how the sections combine into the final deliverable>",
+  "sections": [
+    { "label": "<short name for this section>", "instruction": "<what to produce for THIS section>" }
+  ]
 }
 ```
+
+`sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into INDEPENDENT sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
 
 ## GOAL
 "{{.goal}}"
@@ -40,5 +47,22 @@ complexity = "complex" when the goal is a multi-phase program, needs multiple sp
 - Estimate the VOLUME of the finished deliverable, not how hard it is to think about. A simple-sounding goal that requires emitting many sections of full prose ("N complete stories/chapters/profiles, each written out in full") exceeds one writing pass and is AT LEAST moderate. Rough budget: one writing pass produces ~1,500-2,000 words; beyond that the work must be split into per-section tasks.
 - Qualifiers like "full", "complete", "in full detail", "every scene", "not a summary" multiply the per-item volume -- weigh them.
 - Mentioning a tool the agent already has (write a file, make a list) is NOT complexity.
+
+## SECTIONABLE (independent sections that can run in PARALLEL)
+
+Set `sectionable: true` ONLY when the deliverable is ONE conceptually-simple deliverable that decomposes into INDEPENDENT sections -- each section producible on its own, in any order, WITHOUT needing the output of the others -- and the sections are then concatenated/assembled into the final result. When you do, list one `sections` entry per independent unit (each with a short `label` and an `instruction` for that unit) and give a one-line `assembly`.
+
+This is the "N complete things, each written out in full" pattern:
+- "a file with 10 folk tales, each a COMPLETE story" -> sectionable: true; one section per tale; assembly = "concatenate the ten stories into one markdown file".
+- "full chapter drafts for each item in this outline" -> sectionable: true; one section per chapter.
+- "a profile of each of these 6 vendors" -> sectionable: true; one section per vendor.
+
+Set `sectionable: false` (the default) when the work is NOT a clean fan-out of independent units:
+- the sections depend on each other or must be produced in order (each builds on the last),
+- the deliverable is a single continuous piece that can't be cut into independent parts ("a 30-page handbook with a flowing narrative"),
+- it's `trivial` (fits in one pass -- no sections needed), or
+- it's `complex` (needs research, multiple specialists, or a multi-phase program -- the planner handles those itself).
+
+When in doubt, prefer `sectionable: false` -- a non-sectionable goal simply routes through the normal planner; a wrongly-sectioned one fans out work that wasn't actually independent.
 
 Output the JSON now.

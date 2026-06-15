@@ -137,19 +137,6 @@ func parseGoalComplexity(resp any) (goalComplexity, string, error) {
 	return c, d.Reasoning, nil
 }
 
-// classifyGoalComplexity runs the cheap goalComplexityTriage prompt over
-// a goal and returns the normalized class + reasoning.
-func (l *PlannerAgentLoop) classifyGoalComplexity(ctx context.Context, goal, nowRFC3339 string) (goalComplexity, string, error) {
-	resp, err := l.engine.InvokeSI(systemActorContext(ctx), "goalComplexityTriage", map[string]any{
-		"goal": truncate(goal, maxGoalChars),
-		"now":  nowRFC3339,
-	})
-	if err != nil {
-		return complexityUnknown, "", err
-	}
-	return parseGoalComplexity(resp)
-}
-
 // triageAndMaybeShortcut runs the complexity classifier for a Plan and,
 // when the goal is TRIVIAL and the Plan already has an owning agent to
 // run the production turn, shortcuts to a single direct turn
@@ -200,7 +187,10 @@ func (l *PlannerAgentLoop) triageAndMaybeShortcut(ctx context.Context, planId, n
 		return false, nil // no owner to run a direct turn -> let the loop assign one
 	}
 
-	complexity, reasoning, cerr := l.classifyGoalComplexity(ctx, goal, nowRFC3339)
+	// One classifier call yields BOTH the complexity verdict and the optional
+	// SECTIONABLE shape (memql#1394) -- the sectionable fields ride the same
+	// goalComplexityTriage response, so no extra LLM call.
+	complexity, reasoning, sectionable, cerr := l.classifySectionable(ctx, goal, nowRFC3339)
 	if cerr != nil {
 		if isProduceArtifact {
 			l.logger.Warn("planner triage: classify failed for produceArtifact; falling back to the single direct production turn",
@@ -213,6 +203,20 @@ func (l *PlannerAgentLoop) triageAndMaybeShortcut(ctx context.Context, planId, n
 		return false, nil
 	}
 	if routeForComplexity(complexity) != routeDirect {
+		// Not a single-turn deliverable. Before the serial decompose loop, try
+		// the SECTIONABLE shortcut (memql#1394): when the deliverable is one
+		// conceptually-simple deliverable made of INDEPENDENT sections (the "10
+		// folk tales as full stories" case), GENERATE a parallel plan-automation
+		// (layer-0 parallel section turns + an assemble step) instead of marching
+		// the sections through a strict serial chain. A decline (not sectionable /
+		// no Gate-1 seam / compile or persist miss) falls through to the loop.
+		if handled, gerr := l.maybeGenerateSectionable(ctx, planId, plan, sectionable); gerr != nil || handled {
+			if handled {
+				l.logger.Info("planner triage: sectionable deliverable -> generated parallel plan-automation (no serial decompose chain)",
+					"planId", planId, "complexity", complexity, "sections", len(sectionable.Sections))
+			}
+			return handled, gerr
+		}
 		l.logger.Info("planner triage: goal not trivial; entering decompose loop",
 			"planId", planId, "complexity", complexity, "reasoning", reasoning)
 		return false, nil
