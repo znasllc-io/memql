@@ -16,18 +16,27 @@ only the 7 memQL node-types. Every node connects to Tiger via the
 Each node's `Service` is named after its node-type short name (`bff`,
 `cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in the
 `memql` namespace. Same-namespace cluster DNS resolves the compose mesh
-values (`bff:50058`, `agent:50055`, ...) **unchanged**, so
-`MEMQL_NODE_ADDRESS` / `MEMQL_PARENT_ADDRESS` / `MEMQL_WORKER_PEERS` are the
-exact same strings as `docker/docker-compose.cluster.yml`.
+values (`bff:50058`, `agent:50055`, ...), so `MEMQL_NODE_ADDRESS` /
+`MEMQL_WORKER_PEERS` match `docker/docker-compose.cluster.yml`.
+
+**#1399 exception -- the parent dial target is `bff-active`, not `bff`.**
+Under the live Argo Rollouts blue/green cutover the unscoped `bff` Service
+selects BOTH colors during the 3600s `scaleDownDelay`, so a leaf's single
+parent stream could land on a draining old-color pod (~1h mixed-version mesh).
+Leaf nodes therefore dial `bff-active:50058` (the Rollout-managed,
+color-pinned active Service, which carries `:50058` for exactly this reason);
+the voice-agent dials `bff-active:50051`. The local docker-compose cluster has
+a single bff color and no Rollout, so it keeps `bff:50058` -- same star
+topology, only the dial-target value differs per environment.
 
 | Node | Image | NodeService port | NODE_ADDRESS | PARENT | WORKER_PEERS |
 |------|-------|------------------|--------------|--------|--------------|
 | bff | memql-bff-copresent:0.9.0 | 50058 | bff:50058 | -- | voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056,workbench=workbench:50060 |
-| cognition | memql:0.9.0 | 50054 | cognition:50054 | bff:50058 | agent=agent:50055 |
-| voice | memql:0.9.0 | 50059 | voice:50059 | bff:50058 | -- |
-| agent | memql:0.9.0 | 50055 | agent:50055 | bff:50058 | workbench=workbench:50060 |
-| planner | memql:0.9.0 | 50056 | planner:50056 | bff:50058 | -- |
-| workbench | memql:0.9.0 | 50060 | workbench:50060 | bff:50058 | -- |
+| cognition | memql:0.9.0 | 50054 | cognition:50054 | bff-active:50058 | agent=agent:50055 |
+| voice | memql:0.9.0 | 50059 | voice:50059 | bff-active:50058 | -- |
+| agent | memql:0.9.0 | 50055 | agent:50055 | bff-active:50058 | workbench=workbench:50060 |
+| planner | memql:0.9.0 | 50056 | planner:50056 | bff-active:50058 | -- |
+| workbench | memql:0.9.0 | 50060 | workbench:50060 | bff-active:50058 | -- |
 | identity | memql:0.9.0 | 50061 | identity:50061 | -- | -- |
 
 Every ClusterIP Service exposes the node's NodeService port (5005x) + `8085`

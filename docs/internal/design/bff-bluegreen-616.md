@@ -61,12 +61,31 @@ voluntarily disconnect." That is #616.
 |---|---|---|
 | `Deployment/bff-blue` | `name=bff,color=blue` | Blue color pool |
 | `Deployment/bff-green` | `name=bff,color=green` | Green color pool |
-| `Service/bff` (ClusterIP) | `name=bff` (COLOR-AGNOSTIC) | In-mesh `bff:50058`/`:50051`/`:8085`. Cross-node forwards must reach whichever color holds the user's stream, so it selects BOTH colors. |
-| `Service/bff-active` (ClusterIP) | `name=bff,color=<active>` | USER entry behind the nginx `/memql` Ingress. The cutover anchor. |
+| `Service/bff` (ClusterIP) | `name=bff` (COLOR-AGNOSTIC) | DNS alias / tooling only. NO LONGER on the mesh hot path (see #1399 correction below). |
+| `Service/bff-active` (ClusterIP) | `name=bff,color=<active>` | USER entry behind the nginx `/memql` Ingress AND the internal mesh dial target (carries `:8085`/`:50051`/`:50058`). The cutover anchor. |
 | `Service/bff-external` (LoadBalancer) | `name=bff,color=<active>` | External entry, color-pinned. |
 
-Key invariant: the in-mesh `bff` Service is color-agnostic (mesh forwards reach
-any color); only the user-facing entry is color-pinned (new login steering).
+Key invariant (original): the in-mesh `bff` Service is color-agnostic (mesh
+forwards reach any color); only the user-facing entry is color-pinned (new
+login steering).
+
+> **CORRECTION (#1399).** The original "color-agnostic mesh Service" invariant
+> was wrong for the star topology. Each leaf (cognition/agent/planner/voice/
+> workbench/voice-agent) holds exactly ONE parent stream to a bff and the bff
+> fans events out to ITS monitored children -- there are no bff->bff
+> cross-color forwards, and browser/user streams already enter via `bff-active`.
+> An unscoped, both-colors `bff` Service meant a leaf that (re)connected during
+> the 3600s `scaleDownDelay` could pin its single parent stream to a DRAINING
+> old-color pod, producing a ~1h mixed-version mesh / dead parent stream (the
+> root cause in #1399 and the parent-stream face of #1388). FIX: the mesh dial
+> target is now `bff-active` (Rollout-managed, color-pinned to the active
+> color). `MEMQL_PARENT_ADDRESS=bff-active:50058` and the voice-agent's
+> `MEMQL_GRPC_ADDR=bff-active:50051`; `bff-active` carries port 50058. New mesh
+> connections can therefore only land on the active color. The unscoped `bff`
+> Service is retained as a same-namespace DNS alias for tooling/compat. (The
+> local docker-compose cluster has a single bff color and no Rollout, so it
+> keeps dialing `bff:50058` -- env-agnostic: same star topology, only the
+> dial-target value differs per environment.)
 
 ### Required Ingress change (applied at cutover time, not in this PR)
 

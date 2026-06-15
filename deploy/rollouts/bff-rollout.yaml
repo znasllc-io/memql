@@ -38,8 +38,12 @@ spec:
   replicas: 2
   strategy:
     blueGreen:
-      # NEW logins land here once promoted; the mesh-internal `bff` Service
-      # (NodeService :50058) stays color-agnostic and is NOT managed here.
+      # NEW logins AND internal mesh parent-stream dials land here once promoted
+      # (#1399): bff-active carries 8085/50051/50058 and the Rollout pins its
+      # selector to the active color, so neither user traffic nor a leaf's
+      # parent stream can land on the draining old color. The unscoped `bff`
+      # Service is retained only as a same-namespace DNS alias for tooling/
+      # compatibility; nothing on the mesh hot path dials it anymore.
       activeService: bff-active
       previewService: bff-preview
       # Hold the new color as preview, gate it, THEN flip. Manual promote keeps
@@ -81,6 +85,19 @@ spec:
 # selector; on promote it repoints this Service to the new color. Established
 # WS/gRPC streams stay bound to their old-color pods (the TCP connection is to a
 # specific pod), so only NEW connections steer -- the zero-dropped-stream design.
+#
+# #1399: this Service ALSO carries the NodeService port (50058) and is the dial
+# target for internal mesh consumers (MEMQL_PARENT_ADDRESS / MEMQL_GRPC_ADDR ->
+# bff-active). The leaf mesh is a star: every leaf (cognition/agent/planner/
+# voice/workbench/voice-agent) holds ONE parent stream to a bff and the bff
+# fans events out to ITS monitored children -- there are no bff->bff cross-color
+# forwards. So a leaf's parent stream MUST land on the ACTIVE color only. The
+# old, unscoped `bff` Service selected both colors, so a leaf that (re)connected
+# during the 3600s scaleDownDelay could pin its single parent stream to a
+# DRAINING old-color pod -- the ~1h mixed-version mesh / dead-parent-stream
+# window in #1399 (and the parent-stream face of the #1388 peer decay). Pinning
+# the dial target to the Rollout-managed active selector closes that window:
+# new mesh connections only ever land on the active color.
 apiVersion: v1
 kind: Service
 metadata:
@@ -97,3 +114,7 @@ spec:
   ports:
     - { name: http, port: 8085, targetPort: 8085 }
     - { name: grpc, port: 50051, targetPort: 50051 }
+    # NodeService (mesh parent stream + cross-node forwards). #1399: internal
+    # consumers dial bff-active:50058 so the parent stream is color-pinned to
+    # the active Rollout color, never the draining old one.
+    - { name: node, port: 50058, targetPort: 50058 }
