@@ -11030,8 +11030,22 @@ type VoiceAgentSessionAck struct {
 	GaRole        string `protobuf:"bytes,10,opt,name=ga_role,json=gaRole,proto3" json:"ga_role,omitempty"`
 	GaDescription string `protobuf:"bytes,11,opt,name=ga_description,json=gaDescription,proto3" json:"ga_description,omitempty"`
 	GaPersonality string `protobuf:"bytes,12,opt,name=ga_personality,json=gaPersonality,proto3" json:"ga_personality,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Space context (#1470, Option C): the bound space's name + goal statement
+	// and the human participants present, resolved server-side at session start
+	// and injected into the realtime session instructions so Sofia knows WHERE
+	// she is and WHO she is talking to (the native realtime path bypasses
+	// cognition, which is where the text path gets this). Each is best-effort:
+	// a resolution failure leaves the field empty and the instruction builder
+	// simply omits the corresponding line, so a partial ack never breaks bring-up.
+	//
+	// space_name is the space display name; space_purpose is the goal statement
+	// (payload.goal.statement) when set. participant_names are the human
+	// participants' display names (or user ids when unnamed).
+	SpaceName        string   `protobuf:"bytes,13,opt,name=space_name,json=spaceName,proto3" json:"space_name,omitempty"`
+	SpacePurpose     string   `protobuf:"bytes,14,opt,name=space_purpose,json=spacePurpose,proto3" json:"space_purpose,omitempty"`
+	ParticipantNames []string `protobuf:"bytes,15,rep,name=participant_names,json=participantNames,proto3" json:"participant_names,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VoiceAgentSessionAck) Reset() {
@@ -11146,6 +11160,27 @@ func (x *VoiceAgentSessionAck) GetGaPersonality() string {
 		return x.GaPersonality
 	}
 	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetSpaceName() string {
+	if x != nil {
+		return x.SpaceName
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetSpacePurpose() string {
+	if x != nil {
+		return x.SpacePurpose
+	}
+	return ""
+}
+
+func (x *VoiceAgentSessionAck) GetParticipantNames() []string {
+	if x != nil {
+		return x.ParticipantNames
+	}
+	return nil
 }
 
 // VoiceAgentSessionEnd closes a session. Memql persists a
@@ -13463,7 +13498,7 @@ const file_memql_proto_rawDesc = "" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x1e\n" +
 	"\vga_agent_id\x18\x03 \x01(\tR\tgaAgentId\x12\x1b\n" +
 	"\troom_name\x18\x04 \x01(\tR\broomName\x12#\n" +
-	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xdd\x03\n" +
+	"\ravatar_vendor\x18\x05 \x01(\tR\favatarVendor\"\xce\x04\n" +
 	"\x14VoiceAgentSessionAck\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
@@ -13479,7 +13514,11 @@ const file_memql_proto_rawDesc = "" +
 	"\aga_role\x18\n" +
 	" \x01(\tR\x06gaRole\x12%\n" +
 	"\x0ega_description\x18\v \x01(\tR\rgaDescription\x12%\n" +
-	"\x0ega_personality\x18\f \x01(\tR\rgaPersonality\"\x85\x01\n" +
+	"\x0ega_personality\x18\f \x01(\tR\rgaPersonality\x12\x1d\n" +
+	"\n" +
+	"space_name\x18\r \x01(\tR\tspaceName\x12#\n" +
+	"\rspace_purpose\x18\x0e \x01(\tR\fspacePurpose\x12+\n" +
+	"\x11participant_names\x18\x0f \x03(\tR\x10participantNames\"\x85\x01\n" +
 	"\x14VoiceAgentSessionEnd\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +

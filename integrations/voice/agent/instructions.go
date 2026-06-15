@@ -72,12 +72,44 @@ func BuildPersonaInstructions(p Persona) string {
 		lines = append(lines, block)
 	}
 
+	// Space context (#1470 Option C): WHERE the agent is + WHO she's with. The
+	// native realtime path bypasses cognition (the chat path's source of this),
+	// so without it the agent has no idea which space she's in. Each line is
+	// omitted when its field is empty (a starved ack), keeping the block lean.
+	if ctxBlock := buildSpaceContextBlock(p); ctxBlock != "" {
+		lines = append(lines, "", ctxBlock)
+	}
+
+	// Capability awareness (#1470 Option C): a short, natural summary of what
+	// the agent can actually do, so she can ACT on it and answer "what can you
+	// do?". Intentionally a fixed, terse summary of the assistant's real tool
+	// surface (todos/notes/calendar; driving the app via Takeover; producing
+	// files/deliverables by delegating to the planner) rather than a dump of
+	// resolved tool names -- a bloated session prompt raises gpt-realtime TTFB
+	// (#1439), so this stays surgical.
+	lines = append(lines,
+		"",
+		"What you can do:",
+		"- Manage the user's todos, notes, and calendar directly.",
+		"- Drive the app on the user's behalf when asked (Takeover): point things out, click, and navigate.",
+		"- Produce files and other deliverables by handing the work to your planner, which runs it in the background (see the delegation guidance below).",
+	)
+
 	lines = append(lines,
 		"",
 		"Constraints:",
 		"- Stay in character as the persona above across the whole conversation.",
-		"- Speak naturally and concisely. Do not recite your capabilities or add help-desk scaffolding.",
+		// #1470: the old line forbade the agent from even knowing her
+		// capabilities; the real intent was just "no help-desk scaffolding". She
+		// now KNOWS what she can do (above) and may say so naturally when asked --
+		// without reciting a menu or narrating tool plumbing.
+		"- Speak naturally and concisely. When asked what you can do, answer in a sentence or two from the list above -- do not recite a menu or add help-desk scaffolding.",
 		"- Ground answers in the conversation and any provided context. When context does not cover a question, say so rather than inventing facts.",
+		// #1470 async-delegation (OWNER REQUIREMENT): heavy/multi-step
+		// deliverables go to the planner, and the user is TOLD a task is being
+		// created. Terse on purpose -- realtime instructions are token-sensitive
+		// (#1439).
+		"- For heavy or multi-step deliverables (produce a file or document, write something long, research a topic -- anything best decomposed into tasks), do NOT try to author it inline in voice. Acknowledge naturally and TELL the user a task is being created (e.g. \"sure -- I'll set up a task for that and it'll work on it in the background; meanwhile...\"), then call produceArtifact with a self-contained description of the deliverable. Keep talking; when the result lands, weave it in.",
 		// #1430 acknowledge-first tool behaviour: the async function-calling
 		// protocol supports background execution, but only the prompt makes
 		// the model SAY something before the result lands.
@@ -86,6 +118,56 @@ func BuildPersonaInstructions(p Persona) string {
 	)
 
 	return strings.Join(lines, "\n")
+}
+
+// buildSpaceContextBlock renders the labeled space-context block from the
+// resolved Persona (#1470 Option C): the space name + purpose and the human
+// participants present. Returns "" when no context is populated (a starved
+// ack) so the caller skips the block entirely -- keeping the realtime prompt
+// lean when there's nothing to say.
+func buildSpaceContextBlock(p Persona) string {
+	name := strings.TrimSpace(p.SpaceName)
+	purpose := strings.TrimSpace(p.SpacePurpose)
+	participants := dedupeNonEmpty(p.ParticipantNames)
+	if name == "" && purpose == "" && len(participants) == 0 {
+		return ""
+	}
+
+	lines := []string{"Where you are:"}
+	switch {
+	case name != "" && purpose != "":
+		lines = append(lines, "- You are in the \""+name+"\" space. Its goal: "+purpose+".")
+	case name != "":
+		lines = append(lines, "- You are in the \""+name+"\" space.")
+	case purpose != "":
+		lines = append(lines, "- This space's goal: "+purpose+".")
+	}
+	switch len(participants) {
+	case 0:
+		// no participant line
+	case 1:
+		lines = append(lines, "- Person here with you: "+participants[0]+".")
+	default:
+		lines = append(lines, "- People here with you: "+strings.Join(participants, ", ")+".")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// dedupeNonEmpty trims, drops blanks, and de-duplicates a string slice,
+// preserving first-seen order. Used to normalise the participant-name list
+// before rendering.
+func dedupeNonEmpty(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // personaContract projects a voice Persona into the converged generation

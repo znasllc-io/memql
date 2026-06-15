@@ -1769,6 +1769,20 @@ message VoiceAgentSessionAck {
   string ga_role = 10;
   string ga_description = 11;
   string ga_personality = 12;
+  // Space context (#1470, Option C): the bound space's name + goal statement
+  // and the human participants present, resolved server-side at session start
+  // and injected into the realtime session instructions so Sofia knows WHERE
+  // she is and WHO she is talking to (the native realtime path bypasses
+  // cognition, which is where the text path gets this). Each is best-effort:
+  // a resolution failure leaves the field empty and the instruction builder
+  // simply omits the corresponding line, so a partial ack never breaks bring-up.
+  //
+  // space_name is the space display name; space_purpose is the goal statement
+  // (payload.goal.statement) when set. participant_names are the human
+  // participants' display names (or user ids when unnamed).
+  string space_name = 13;
+  string space_purpose = 14;
+  repeated string participant_names = 15;
 }
 
 // VoiceAgentSessionEnd closes a session. Memql persists a
