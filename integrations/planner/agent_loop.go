@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -50,6 +51,15 @@ type PlannerAgentLoop struct {
 	// event (cross-node mesh re-delivery, memql#1155) does not re-run
 	// decompose/dispatch for the same plan and feed a storm.
 	handled *handledPlanSet
+	// resumed dedups feedback-resume re-entries (epic memql#1404 / memql#1405)
+	// keyed by planId@startedAt: a Plan resumed from awaitingFeedback via
+	// mutationAttachPlanFeedback re-enters invokeAndDispatch exactly once per
+	// resume on this replica, even when the resume's graph.node.updated event
+	// is re-delivered. A distinct resume (a later parking + answering cycle)
+	// carries a fresh startedAt -> fresh key -> re-enters again, mirroring the
+	// planExecutionClaimKey design. Cross-replica exactly-once is the planner's
+	// ClusterExecutionGuard (planId@startedAt) one layer down.
+	resumed *handledPlanSet
 }
 
 // NewPlannerAgentLoop constructs a loop pinned to the planner integration's
@@ -62,6 +72,7 @@ func NewPlannerAgentLoop(engine Engine, logger *slog.Logger) *PlannerAgentLoop {
 		engine:  engine,
 		logger:  logger,
 		handled: newHandledPlanSet(defaultHandledPlanTTL),
+		resumed: newHandledPlanSet(defaultHandledPlanTTL),
 	}
 }
 
@@ -310,6 +321,22 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	// this does an engine roundtrip).
 	if status == "running" {
 		go func() {
+			// Resume-from-feedback re-entry (epic memql#1404 / memql#1405).
+			// A decompose-loop Plan parked in awaitingFeedback (a budget /
+			// rate-limit / convergence park, or the agent's requestUserFeedback)
+			// resumes to running via mutationAttachPlanFeedback, which stamps the
+			// user's answer on Plan.feedbackResponse and a fresh startedAt. The
+			// produceArtifact / scopeElevation kinds are handled by
+			// handlePlanApprovedForExecution (executeApprovedPlan threads the
+			// feedback into the dispatched turn), so they returned above; for the
+			// decompose-loop kinds the agent loop owns the resume, so re-enter
+			// invokeAndDispatch here -- the loop re-runs the approval gate +
+			// triage (now seeing the feedbackResponse + any approval flags the
+			// answer set) and continues. Deduped per planId@startedAt so a
+			// re-delivered resume event re-enters at most once on this replica.
+			if l.maybeResumeFromFeedback(context.Background(), planId) {
+				return
+			}
 			if _, cerr := l.maybeCheckpointAtPhaseBoundary(context.Background(), planId); cerr != nil {
 				l.logger.Warn("planner agent loop: phase-checkpoint park failed",
 					"planId", planId, "error", cerr)
@@ -319,6 +346,55 @@ func (l *PlannerAgentLoop) HandlePlanUpdated(ev events.Event) {
 	}
 	l.logger.Debug("planner agent loop: plan updated (re-invoke deferred)",
 		"planId", planId, "kind", kind, "status", status)
+}
+
+// maybeResumeFromFeedback re-enters the decompose loop for a Plan that was
+// resumed from awaitingFeedback by mutationAttachPlanFeedback (epic
+// memql#1404 / memql#1405). It is the decompose-loop counterpart to
+// handlePlanApprovedForExecution's resume of produceArtifact / scopeElevation
+// Plans. Returns true when it claimed + handled the resume (the caller then
+// skips the phase-checkpoint path), false when this running transition is NOT
+// a feedback resume (no feedbackResponse on the row) or was already handled.
+//
+// Detection: a feedback resume is a running Plan carrying a
+// Plan.feedbackResponse.response. A first-run dispatch / task-driven running
+// transition has no feedbackResponse, so this is a no-op for it. Deduped per
+// planId@startedAt via the resumed set so a re-delivered resume event
+// re-enters at most once on this replica; cross-replica exactly-once is the
+// ClusterExecutionGuard's job one layer down (invokeAndDispatch's writes are
+// idempotent on terminal/parked states).
+func (l *PlannerAgentLoop) maybeResumeFromFeedback(ctx context.Context, planId string) bool {
+	if l == nil || planId == "" {
+		return false
+	}
+	plan, err := l.loadPlan(ctx, planId)
+	if err != nil {
+		// Can't read the plan -> can't classify this as a resume. Let the
+		// caller fall through to its other running-path handling.
+		return false
+	}
+	if getString(plan, "status") != "running" {
+		return false
+	}
+	fr, ok := plan["feedbackResponse"].(map[string]any)
+	if !ok || strings.TrimSpace(getString(fr, "response")) == "" {
+		// Not a feedback resume -- a normal task-driven running transition.
+		return false
+	}
+	dedupKey := planId + "@" + strings.TrimSpace(getString(plan, "startedAt"))
+	if !l.resumed.markIfNew(dedupKey) {
+		l.logger.Debug("planner agent loop: feedback resume already handled on this replica; skipping (memql#1405)",
+			"planId", planId, "dedupKey", dedupKey)
+		return true
+	}
+	l.logger.Info("planner agent loop: resuming plan from user feedback",
+		"planId", planId, "kind", getString(plan, "kind"))
+	if rerr := l.invokeAndDispatch(ctx, planId); rerr != nil {
+		l.logger.Warn("planner agent loop: feedback-resume invoke+dispatch failed",
+			"planId", planId, "error", rerr)
+		l.ensurePlanLeftPlanning(ctx, planId, rerr)
+	}
+	return true
 }
 
 // startPlanDirect flips a freshly-created Plan straight to "running" without

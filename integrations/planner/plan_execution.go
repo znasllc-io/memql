@@ -97,6 +97,13 @@ type planExecutionRow struct {
 	// routed through the interactive streaming lane instead of the
 	// background default so live progress can be surfaced. Defaults false.
 	WatchExecution bool
+	// FeedbackResponse is the user's free-text answer when this dispatch is a
+	// resume from awaitingFeedback (epic memql#1404 / memql#1405). Read off
+	// Plan.feedbackResponse.response, stamped by mutationAttachPlanFeedback.
+	// When non-empty, buildExecutionTurn folds it into the resumed turn's
+	// history as a genuine user-role message so the owning agent incorporates
+	// the feedback. Empty for a first-run dispatch.
+	FeedbackResponse string
 }
 
 // agentTurnResult mirrors cognition.agentReplyResult -- the
@@ -360,6 +367,23 @@ func buildExecutionTurn(planId string, plan planExecutionRow) ([]*memqlv1.AgentT
 		Role:    "user",
 		Content: plan.Goal,
 	}}
+
+	// Resume-from-feedback (epic memql#1404 / memql#1405). When the Plan was
+	// parked in awaitingFeedback and the user answered via
+	// mutationAttachPlanFeedback, the resume dispatch carries their free-text
+	// answer here. Fold it into the history as a SECOND user-role message --
+	// it is GENUINE user content (the user's literal answer to the question
+	// the agent asked), so it belongs inside the untrusted-history block, not
+	// as a system hint (contrast the produce directive below, which is the
+	// system's own scaffolding and rides as a trusted hint per memql#1102).
+	// The agent sees the original goal followed by the user's clarification
+	// and continues the task with the feedback incorporated.
+	if fb := strings.TrimSpace(plan.FeedbackResponse); fb != "" {
+		history = append(history, &memqlv1.AgentTurnMessage{
+			Role:    "user",
+			Content: fb,
+		})
+	}
 
 	// Hints carry the post-approval signal + IDs the agent's tool loop needs
 	// but can't read from ctx on a system-initiated dispatch (owner-user
@@ -1190,6 +1214,16 @@ func planRowsFromExecuteResult(res any) []planExecutionRow {
 		if input, ok := m["input"].(map[string]any); ok {
 			if w, ok := input["watchExecution"].(bool); ok {
 				row.WatchExecution = w
+			}
+		}
+		// Resume-from-feedback (epic memql#1404 / memql#1405): the user's
+		// free-text answer lives on Plan.feedbackResponse.response (stamped by
+		// mutationAttachPlanFeedback). buildExecutionTurn folds it into the
+		// resumed turn's history. Tolerate the field being absent (the common
+		// first-run case).
+		if fr, ok := m["feedbackResponse"].(map[string]any); ok {
+			if resp, ok := fr["response"].(string); ok {
+				row.FeedbackResponse = strings.TrimSpace(resp)
 			}
 		}
 		out = append(out, row)

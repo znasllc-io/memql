@@ -331,6 +331,72 @@ mutation plan mutationRequestPlanFeedback {
   }
 }
 
+// mutationAttachPlanFeedback
+// ===========================
+//
+// Generic feedback intake (epic memql#1404 / child memql#1405). The
+// single entrypoint that takes the user's FREE-TEXT answer to a Plan
+// parked in awaitingFeedback, records it, and resumes the Plan with the
+// feedback folded into the owning agent's resume context. It is the
+// generic counterpart to the scope-elevation Allow/Deny path
+// (mutationUpdatePlanStatus): scope elevation is a binary
+// approve/deny via the card's buttons; THIS is the open-ended
+// "answer the question the agent asked" path.
+//
+// Designed to be cleanly callable by BOTH surfaces in the epic:
+//   - the needs-feedback canvas card's free-text input (copresent #1406-card),
+//     frontend -> WS -> engine;
+//   - the assistant-mediated chat path (cognition #1406), which classifies
+//     a user's answering utterance and routes it here via engine.Execute.
+//
+// What it stamps (partial-update via update(), so every @required field
+// inherits from the prior row):
+//   - feedbackResponse = { response: <free text>, respondedBy: actor.userId,
+//                          respondedAt: now() } -- carried into the agent's
+//     resume context (the planner threads it into the resumed turn's
+//     history; the agent prompt's feedbackResponse slot per
+//     dsl/agents/prompts.memql).
+//   - status = "running" -- resumes the Plan. The existing planner
+//     re-invocation path (handlePlanApprovedForExecution for
+//     produceArtifact/scopeElevation; the agent loop for decompose kinds)
+//     picks the running transition up and re-invokes the owning agent.
+//   - startedAt = now() -- a fresh transition-into-running timestamp so the
+//     planner's cross-replica execution claim (planId@startedAt, memql#1363)
+//     keys on a NEW value and resume executes exactly once even when the
+//     feedback lands on a different replica than the one that parked it.
+//   - feedbackReason = "" + feedbackRequest = {} -- the awaitingFeedback
+//     request is consumed; clearing it prevents the feedback-timeout
+//     auto-pause cron + the card producers from re-firing on the resumed row.
+//
+// Validation (prior status == awaitingFeedback AND the actor owns the Plan)
+// is enforced at the engine pre-insert boundary by validateFeedbackIntakeTransition
+// (component/memql/planner_feedback_validation.go), mirroring the harness
+// step-transition + agent-kind guards -- the append-only DSL cannot reject a
+// conditional transition on its own, so the rule lives in Go and is
+// load-bearing on every write path. respondedBy: actor.userId also classifies
+// this as an owned-tier write for the per-row-authz conformance test.
+
+@enabled
+@description("Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).")
+mutation plan mutationAttachPlanFeedback {
+  args {
+    planId    string  @required
+    feedback  string  @required
+  }
+  update {
+    id: args.planId
+    status: "running"
+    feedbackReason: ""
+    feedbackRequest: {}
+    startedAt: now()
+    feedbackResponse: {
+        response: args.feedback,
+        respondedBy: actor.userId,
+        respondedAt: now()
+      }
+  }
+}
+
 @enabled
 @description("Insert a v1:planner:task row in status='queued'. Single write path for Task creation, called by the planner during decomposition.")
 mutation task mutationCreateTask {

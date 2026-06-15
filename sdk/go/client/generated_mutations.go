@@ -526,6 +526,34 @@ func MutationAttachDocumentToDomainBuild(args MutationAttachDocumentToDomainArgs
 	return b.String()
 }
 
+// MutationAttachPlanFeedback -- Attach a user's free-text feedback to a Plan parked in awaitingFeedback and resume it (epic memql#1404 / #1405). Stamps feedbackResponse{response, respondedBy, respondedAt}, transitions awaitingFeedback -> running (fresh startedAt for a clean cross-replica resume claim), and clears feedbackReason/feedbackRequest so the request is consumed. The engine guard (validateFeedbackIntakeTransition) rejects the write unless the prior status is awaitingFeedback and the actor owns the Plan. The owning agent is re-invoked with the feedback in its resume context. Callable by the needs-feedback card AND the assistant chat path (#1406).
+//
+// Bound concept: plan.
+type MutationAttachPlanFeedbackArgs struct {
+	PlanId   string
+	Feedback string
+}
+
+// MutationAttachPlanFeedback calls the engine mutation mutationAttachPlanFeedback.
+func (qc *QueryClient) MutationAttachPlanFeedback(ctx context.Context, args MutationAttachPlanFeedbackArgs) (*Result, error) {
+	call := MutationAttachPlanFeedbackBuild(args)
+	return qc.executeNamed(ctx, "mutationAttachPlanFeedback", call)
+}
+
+func MutationAttachPlanFeedbackBuild(args MutationAttachPlanFeedbackArgs) string {
+	var b strings.Builder
+	b.WriteString("mutationAttachPlanFeedback({")
+	b.WriteString("planId: ")
+	b.WriteString(fmt.Sprintf("%q", args.PlanId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("feedback: ")
+	b.WriteString(fmt.Sprintf("%q", args.Feedback))
+	b.WriteString("})")
+	return b.String()
+}
+
 // MutationBumpMissingCapabilitySighting -- Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.
 //
 // Bound concept: missingCapability.

@@ -35,6 +35,9 @@ shape plan planFull {
   payload.metrics
   payload.parentPlanId
   payload.retryThreshold
+  payload.feedbackReason
+  payload.feedbackRequest
+  payload.feedbackResponse
   row.createdAt
   row.createdBy
 }

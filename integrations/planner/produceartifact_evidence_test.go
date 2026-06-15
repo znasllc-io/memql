@@ -103,6 +103,53 @@ func TestBuildExecutionTurn_TrustedScaffoldingNotInUntrustedHistory(t *testing.T
 			t.Fatalf("watchExecution should set execution_lane=interactive, got %q", hints["execution_lane"])
 		}
 	})
+
+	// Resume-from-feedback (epic memql#1404 / memql#1405): when the Plan
+	// carries a FeedbackResponse (the user's free-text answer stamped by
+	// mutationAttachPlanFeedback) it is folded into the history as a SECOND
+	// user-role message -- genuine user content, distinct from the system's
+	// trusted produce directive which still rides as a hint.
+	t.Run("feedback resume: user answer appended as a user-role history message", func(t *testing.T) {
+		const feedback = "use metric units and keep it under 200 words"
+		plan := planExecutionRow{
+			ID:               planId,
+			Kind:             produceArtifactPlanKind,
+			Goal:             goal,
+			SpaceId:          "v1:cognition:space:s1",
+			OwnerAgentId:     "v1:agents:agent:a1",
+			RequestedBy:      owner,
+			FeedbackResponse: feedback,
+		}
+		history, hints := buildExecutionTurn(planId, plan)
+		if len(history) != 2 {
+			t.Fatalf("want 2 history messages (goal + feedback), got %d", len(history))
+		}
+		if history[0].Content != goal {
+			t.Fatalf("first history message must be the raw goal, got %q", history[0].Content)
+		}
+		if history[1].Role != "user" || history[1].Content != feedback {
+			t.Fatalf("second history message must be the user feedback {user,%q}, got {%q,%q}",
+				feedback, history[1].Role, history[1].Content)
+		}
+		// The feedback is genuine user content -- it must NOT be smuggled onto
+		// a system hint.
+		for _, v := range hints {
+			if strings.Contains(v, feedback) {
+				t.Fatalf("user feedback leaked onto a system hint: %q", v)
+			}
+		}
+	})
+
+	t.Run("no feedback: single goal history message (first-run dispatch)", func(t *testing.T) {
+		plan := planExecutionRow{
+			ID: planId, Kind: produceArtifactPlanKind, Goal: goal,
+			SpaceId: "s", OwnerAgentId: "a", RequestedBy: owner,
+		}
+		history, _ := buildExecutionTurn(planId, plan)
+		if len(history) != 1 {
+			t.Fatalf("first-run dispatch must have exactly 1 history message, got %d", len(history))
+		}
+	})
 }
 
 // TestGeneratedOutputCountFromExecuteResult covers the three shape() output
