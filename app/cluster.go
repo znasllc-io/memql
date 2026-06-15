@@ -228,6 +228,35 @@ func (a *App) cluster() {
 			a.Logger.Info("chat-reply path routed through durable delivery substrate",
 				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type), "is_bff", isBFF)
 		}
+
+		// Plan-lifecycle path on the durable substrate (memql#1495): plan
+		// graph events (graph.node.created/updated.v1:planner:plan) get a real
+		// at-least-once delivery leg, mirroring ChatReplyDelivery. Before this
+		// they rode the EventBridge mesh broadcast ONLY -- a broadcast dropped
+		// while the planner was routeless (the #1388 peer-decay incident)
+		// stranded the Plan, recovered only by the #1389 DB-poll watchdog (a
+		// backstop, not a guarantee). Now:
+		//   - Producer side (every mesh node): on a locally-produced plan
+		//     graph event, PlanDelivery durably Publishes a Deliverable keyed
+		//     by the fixed plan:lifecycle key. The BFF writes new Plans and the
+		//     planner writes status transitions, so both run the producer.
+		//   - Consumer side (planner only): the planner Subscribes once and
+		//     fans the durable stream back onto its local bus, where the
+		//     PlannerAgentLoop subscribers already consume it -- catching up on
+		//     cursor-pull replay after a route gap.
+		// The mesh broadcast is left fully intact as the latency fast-path; the
+		// inbound copy is NOT suppressed (unlike chat-reply) because the
+		// planner's consumers are already idempotent -- the per-plan once-guard
+		// (memql#1155) + the cross-replica ClusterExecutionGuard
+		// (planId@startedAt, memql#1363) make a duplicate (mesh + replay)
+		// collapse downstream, so PlanDelivery can only ever ADD a missed
+		// delivery, never double-execute.
+		isPlanner := nodeIdentity.Type == node.NodeTypePlanner
+		if pd := node.NewPlanDelivery(nodeIdentity, substrate, a.eventBus, isPlanner, a.Logger); pd != nil {
+			a.Dependencies = append(a.Dependencies, pd)
+			a.Logger.Info("plan-lifecycle path routed through durable delivery substrate",
+				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type), "is_planner", isPlanner)
+		}
 	}
 
 	// Install the class="node" JWT enforcement interceptor on
