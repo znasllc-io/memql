@@ -56,7 +56,10 @@ spec:
             # node distinctly and cross-node event forwarding works.
             - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50056" }
-            - { name: MEMQL_PARENT_ADDRESS, value: "bff:50058" }
+            # #1399: dial the Rollout-managed ACTIVE bff (color-pinned), not the
+            # unscoped `bff` Service, so this leaf's parent stream never lands on
+            # a draining old-color pod during a blue/green cutover.
+            - { name: MEMQL_PARENT_ADDRESS, value: "bff-active:50058" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }

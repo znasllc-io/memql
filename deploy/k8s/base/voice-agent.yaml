@@ -66,7 +66,10 @@ spec:
             - { name: LIVEKIT_API_KEY, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_KEY } } }
             - { name: LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: POLYPHON_LIVEKIT_API_SECRET } } }
             # The memql gRPC surface the agent speaks VoiceAgent* on.
-            - { name: MEMQL_GRPC_ADDR, value: "bff:50051" }
+            # #1399: dial the Rollout-managed ACTIVE bff (color-pinned), not the
+            # unscoped `bff` Service, so the VoiceAgent* gRPC connection never
+            # lands on a draining old-color pod during a blue/green cutover.
+            - { name: MEMQL_GRPC_ADDR, value: "bff-active:50051" }
             # Realtime executor (gpt-realtime speech-to-speech, #1414): the
             # model authors + speaks natively; cognition gates WHO/WHEN/brevity
             # via the #479 gate path. PAIRING: this requires the
