@@ -222,6 +222,17 @@ message MemqlClientMessage {
     // message (operators address a specific node directly), which is how
     // the ordered-rollout driver drains one replica at a time.
     NodeMaintenanceMsg node_maintenance = 73;
+    // VoiceAgentRealtimeSpeaking signals the GA's speaking state for the
+    // native realtime path (#1421). The realtime executor (gpt-realtime)
+    // speaks directly and never routes through the cognition reply path, so
+    // nobody writes the GA participant's presence state=responding while it
+    // speaks and the CoPresent orb's speaking animation never plays. The
+    // voice-agent emits speaking=true on the FIRST output audio frame of a
+    // response and speaking=false on response.done; the server resolves the
+    // GA's SI participant and writes presence responding/idle through the
+    // same engine + mesh routing rule every other presence write uses. See
+    // handleVoiceAgentRealtimeSpeaking.
+    VoiceAgentRealtimeSpeaking voice_agent_realtime_speaking = 74;
   }
 }
 
@@ -1966,6 +1977,38 @@ message VoiceAgentRealtimeOutputAck {
   string utterance_id = 3;   // canonical row id of the inserted SI utterance
   string error_code = 4;
   string error_message = 5;
+}
+
+// VoiceAgentRealtimeSpeaking signals the GA participant's speaking state for
+// the native realtime voice path so the CoPresent orb animates while the
+// assistant speaks (#1421). On turnModeNative the realtime model (gpt-realtime)
+// authors + speaks the reply directly: cognition resets the GA's presence to
+// idle at gate-publish (it no longer authors the reply), and the only output
+// capture (VoiceAgentRealtimeOutput) fires once at response.done with the FINAL
+// transcript -- so nothing ever writes presence state=responding during the
+// spoken turn and the orb stays still.
+//
+// The voice-agent observes the realtime output stream, so it is the natural
+// emitter: speaking=true on the FIRST output audio frame of a response,
+// speaking=false on response.done. The presence WRITE stays server-side
+// (handleVoiceAgentRealtimeSpeaking): the server resolves the GA's
+// v1:cognition:participant row (resolveSIParticipantId) and upserts presence
+// state=responding / idle through the engine -- the same writer-of-record and
+// the same graph.node.created.v1:cognition:* mesh routing rule every other
+// presence write uses, so the row reaches the frontend presence stream in
+// multi-replica cluster mode (cross-node), not just single-node.
+//
+// Fire-and-forget: no ack. A first-audio responding lands AFTER the
+// gate-publish idle reset (the model only produces audio once the directive is
+// published and it engages), so it is not stomped; the response.done idle
+// closes the turn.
+message VoiceAgentRealtimeSpeaking {
+  string request_id = 1;
+  string space_id = 2;      // v1:cognition:space.id (bare slug ok)
+  string ga_agent_id = 3;   // v1:agents:agent.id of the speaking GA
+  // true = the GA started speaking this response (write presence responding);
+  // false = the response is done (write presence idle).
+  bool speaking = 4;
 }
 
 // EvaluatePolicyMsg / EvaluatePolicyResult retired with the
