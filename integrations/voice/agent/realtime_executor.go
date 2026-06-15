@@ -97,6 +97,18 @@ type RealtimeExecutor struct {
 	// turn with citations (#458). Nil disables capture (voice still plays; chat
 	// goes dark, same as the pre-#458 state).
 	outputForwarder *RealtimeOutputForwarder
+
+	// speakingSender emits the GA's speaking-state presence signal (#1421):
+	// VoiceAgentRealtimeSpeaking{speaking:true} on the first output audio frame
+	// of a response, {speaking:false} on response.done, so the CoPresent orb
+	// animates while the assistant speaks on the native realtime path. The
+	// server writes the presence row (handleVoiceAgentRealtimeSpeaking) -- the
+	// executor only OBSERVES the output stream, where the deltas land. Defaults
+	// to the gRPC client; nil disables the signal (voice still plays). speaking
+	// guards the fire-on-first-frame so one response emits exactly one
+	// responding signal even though drainAudioOut sees many frames.
+	speakingSender   realtimeSpeakingSender
+	respondingSignal atomic.Bool
 	// toolBridge dispatches model-driven function calls through the low-risk MCP
 	// tool surface and mirrors them into cognition (#458). Nil disables
 	// model-driven tools (a function-call event is logged and ignored).
@@ -223,11 +235,12 @@ func NewRealtimeExecutor(
 ) *RealtimeExecutor {
 	ctx, cancel := context.WithCancel(parent)
 	e := &RealtimeExecutor{
-		cfg:          cfg,
-		client:       client,
-		session:      session,
-		sink:         sink,
-		persona:      persona,
+		cfg:            cfg,
+		client:         client,
+		session:        session,
+		sink:           sink,
+		persona:        persona,
+		speakingSender: client,
 		roster:       newParticipantRoster(),
 		logger:       logger,
 		ctx:          ctx,
@@ -855,6 +868,14 @@ func (e *RealtimeExecutor) drainAudioOut() {
 			// metric) using the most recent speech_stopped stamp, then clear it so a
 			// multi-frame response only measures once.
 			isFirstFrame := e.firstAudioPending.CompareAndSwap(true, false)
+			if isFirstFrame {
+				// #1421: the assistant just became audible -- signal the GA's
+				// speaking-state presence so the CoPresent orb animates. The
+				// server writes presence state=responding; response.done writes
+				// idle. This is the only writer of responding on the native
+				// realtime path (cognition reset it to idle at gate-publish).
+				e.emitSpeaking(true)
+			}
 			if isFirstFrame && e.logger != nil {
 				nowNanos := time.Now().UnixNano()
 				if stop := e.turnSpeechStopNanos.Swap(0); stop > 0 {
@@ -989,6 +1010,12 @@ func (e *RealtimeExecutor) drainEvents() {
 			case openai.EventResponseDone:
 				e.clearInFlight()
 				e.machine.OnAssistantDone()
+				// #1421: the response is sealed -- the assistant stopped
+				// speaking. Signal the GA's presence back to idle so the orb's
+				// speaking animation stops. No-op if this response never went
+				// audible (respondingSignal de-dupes), so a cancelled/empty
+				// response doesn't write a spurious idle.
+				e.emitSpeaking(false)
 				// #1430: a sealed response is the canonical quiet boundary --
 				// wake the tool worker so a parked result can be announced.
 				e.kickToolLoop()
@@ -1167,6 +1194,65 @@ func (e *RealtimeExecutor) captureOutput(text string) {
 				"utterance_id", utteranceID, "chars", len(text))
 		}
 	}()
+}
+
+// realtimeSpeakingSender is the minimal one-way gRPC surface the speaking-state
+// signal needs (#1421): a fire-and-forget Send (no ack), satisfied by *Client
+// (Send) and stubbed in tests. Separate from realtimeOutputSender (which awaits
+// an ack) because the speaking signal is best-effort -- a dropped one only
+// costs one frame of orb animation, never a chat row.
+type realtimeSpeakingSender interface {
+	Send(ctx context.Context, envelope *memqlv1.MemqlClientMessage) error
+}
+
+// Compile-time assurance the production gRPC Client satisfies the speaking
+// seam in the CGO-free lane (drift caught here, not only in the voice lane).
+var _ realtimeSpeakingSender = (*Client)(nil)
+
+// emitSpeaking sends the GA's speaking-state presence signal (#1421). The orb
+// animates off the v1:cognition:participant presence state=responding; on the
+// native realtime path cognition resets presence to idle at gate-publish and
+// the only output capture is the final transcript, so nothing writes responding
+// while the assistant speaks. The executor OBSERVES the output stream -- so it
+// emits speaking=true on the first output audio frame of a response and
+// speaking=false on response.done -- and the SERVER writes the presence row
+// (handleVoiceAgentRealtimeSpeaking) through the same engine + mesh routing rule
+// every presence write uses, keeping it multi-node correct. respondingSignal
+// de-dupes so one response emits exactly one responding (drainAudioOut sees
+// many frames). Fire-and-forget + nil-safe: a failure only costs orb animation,
+// never the voice turn.
+func (e *RealtimeExecutor) emitSpeaking(speaking bool) {
+	if e.speakingSender == nil {
+		return
+	}
+	// One responding per response, one idle per done. The first audio frame
+	// flips false->true (emit responding); response.done flips true->false
+	// (emit idle). A done with no prior audio (cancelled/empty response) was
+	// never responding, so it skips the redundant idle.
+	if speaking {
+		if !e.respondingSignal.CompareAndSwap(false, true) {
+			return
+		}
+	} else {
+		if !e.respondingSignal.CompareAndSwap(true, false) {
+			return
+		}
+	}
+	envelope := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_VoiceAgentRealtimeSpeaking{
+			VoiceAgentRealtimeSpeaking: &memqlv1.VoiceAgentRealtimeSpeaking{
+				SpaceId:   e.cfg.SpaceID,
+				GaAgentId: e.cfg.GaAgentID,
+				Speaking:  speaking,
+			},
+		},
+	}
+	if err := e.speakingSender.Send(e.ctx, envelope); err != nil {
+		if e.logger != nil {
+			e.logger.Debug("voice-agent realtime: speaking signal send failed",
+				"speaking", speaking, "err", err)
+		}
+	}
 }
 
 func (e *RealtimeExecutor) setInFlight(cancel context.CancelFunc) {

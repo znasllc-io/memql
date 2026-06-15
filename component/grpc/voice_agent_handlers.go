@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -2248,6 +2249,152 @@ func (s *streamSession) resolveSIParticipantId(ctx context.Context, spaceId stri
 		}
 	}
 	return ""
+}
+
+// handleVoiceAgentRealtimeSpeaking writes the GA participant's speaking-state
+// presence for the native realtime voice path (#1421) so the CoPresent orb
+// animates while the assistant speaks.
+//
+// On turnModeNative the realtime model authors + speaks the reply directly:
+// cognition resets the GA's presence to idle at gate-publish (it no longer
+// authors the reply, integrations/cognition/cognition_handler.go), and the only
+// output capture (handleVoiceAgentRealtimeOutput) fires once at response.done.
+// So nothing ever writes presence state=responding during the spoken turn. The
+// voice-agent observes the realtime output stream and emits this signal --
+// speaking=true on the first output audio frame, speaking=false on
+// response.done -- and the WRITE lands here so it goes through the SAME engine
+// mutation and the SAME graph.node.created.v1:cognition:* mesh routing rule
+// every other presence write uses. That makes it multi-node correct: in a
+// 2-replica cluster the presence row reaches the frontend presence stream
+// cross-node, not just on the writer node.
+//
+// state=responding mirrors the cascade's "Speaking…" write
+// (integrations/cognition presenceStateResponding); state=idle mirrors the
+// gate-publish idle reset. Fire-and-forget: no ack (mirrors VoiceAgentSpeak).
+// Ordering: the first-audio responding lands AFTER the gate-publish idle reset
+// (the model only produces audio once the directive is published and it
+// engages), so it is not stomped.
+func (s *streamSession) handleVoiceAgentRealtimeSpeaking(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.VoiceAgentRealtimeSpeaking) error {
+	if msg == nil {
+		return nil
+	}
+	if s.service == nil || s.service.engine == nil {
+		if s.logger != nil {
+			s.logger.Warn("voice-agent realtime speaking: engine not configured")
+		}
+		return nil
+	}
+
+	spaceId := strings.TrimSpace(msg.GetSpaceId())
+	gaAgentId := strings.TrimSpace(msg.GetGaAgentId())
+	if spaceId == "" || gaAgentId == "" {
+		if s.logger != nil {
+			s.logger.Warn("voice-agent realtime speaking: spaceId and gaAgentId required",
+				"space_id", spaceId, "ga_agent_id", gaAgentId)
+		}
+		return nil
+	}
+
+	speaking := msg.GetSpeaking()
+
+	// Fire-and-forget: do the presence resolution + write off the read loop so
+	// a slow engine call never stalls the stream (mirrors the realtime output
+	// path). No ack message is sent.
+	go func() {
+		ctx := contextWithVoiceAgentActor(context.Background())
+
+		// Resolve the GA's v1:cognition:participant row id (NOT the agent
+		// template id) -- the presence row the frontend keys the orb on is
+		// keyed by participantId, the same id handleVoiceAgentRealtimeOutput
+		// attributes the SI utterance to.
+		participantId := s.resolveSIParticipantId(ctx, spaceId)
+		if participantId == "" {
+			if s.logger != nil {
+				s.logger.Debug("voice-agent realtime speaking: no SI participant resolved",
+					"space_id", spaceId, "ga_agent_id", gaAgentId)
+			}
+			return
+		}
+
+		state := "idle"
+		label := "Idle"
+		if speaking {
+			state = "responding"
+			label = "Speaking…"
+		}
+
+		if err := s.writeRealtimeSpeakingPresence(ctx, spaceId, participantId, state, label); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("voice-agent realtime speaking: presence write failed",
+					"space_id", spaceId, "participant_id", participantId,
+					"state", state, "error", err)
+			}
+			return
+		}
+		if s.logger != nil {
+			s.logger.Debug("voice-agent realtime speaking: presence written",
+				"space_id", spaceId, "participant_id", participantId, "state", state)
+		}
+	}()
+
+	return nil
+}
+
+// writeRealtimeSpeakingPresence upserts the GA participant's presence row with
+// the given state/label, byte-identical to cognition's upsertParticipantPresence
+// (integrations/cognition/participant_presence.go) so the realtime speaking
+// signal lands the SAME row shape the cascade/text path writes. Deterministic
+// id (one presence record per participant) and the same field set keep the
+// frontend's useParticipantPresence read unchanged.
+func (s *streamSession) writeRealtimeSpeakingPresence(ctx context.Context, spaceId, participantId, state, label string) error {
+	id := realtimePresenceRecordId(participantId)
+	if id == "" {
+		return fmt.Errorf("invalid presence record id")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	payload := map[string]any{
+		"spaceId":       spaceId,
+		"participantId": participantId,
+		"state":         state,
+		"label":         label,
+		"reason":        "",
+		"sinceAt":       now,
+		"lastUpdatedAt": now,
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	idJSON, _ := json.Marshal(id)
+	query := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		mustJSONString(memoryNodes.ConceptCognitionParticipantPresence),
+		string(idJSON), string(payloadJSON))
+	_, err = s.service.engine.Execute(ctx, query)
+	return err
+}
+
+// realtimePresenceRecordId derives the deterministic presence record id from a
+// participant id, mirroring cognition's presenceRecordId: the engine's
+// validateShortId requires a bare shortId, so we take the last `:`-delimited
+// segment of v1:cognition:participant:<short> and let the concept's storageId
+// prepend the type tag.
+func realtimePresenceRecordId(participantId string) string {
+	pid := strings.TrimSpace(participantId)
+	if pid == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(pid, ":"); idx >= 0 {
+		return pid[idx+1:]
+	}
+	return pid
+}
+
+// mustJSONString JSON-encodes a string so an interpolated concept id / literal
+// cannot break out of its DSL string literal (the unsafe-quoting escaping the
+// realtime output path also uses).
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // buildRealtimeCitationsClause renders the `, citations: [...]` mutation
