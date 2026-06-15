@@ -333,3 +333,42 @@ by-index sequence rather than deadlocking. The synthesized parallel headline is
 proven to compile through the real Gate-1 sandbox. This is the authoring half of
 #1164; the planner's own task-DAG (`v1:planner:task.dependsOn[]` + concurrent
 task dispatch) remains a separate follow-up.
+
+### Generated parallel plan-automations for sectionable deliverables (issue #1394)
+
+The same `synthesizePhasedHeadline` parallel synthesizer now also serves the
+DELIVERABLE path (not just the standing-Responsibility authoring path). The
+cheap `goalComplexityTriage` classifier (`agent_loop_triage.go`, volume-aware
+since #1393) gained a SECTIONABLE shape: alongside its complexity verdict it
+emits `sectionable` + a `sections[]` list + an `assembly` intent when a
+non-trivial deliverable is one conceptually-simple deliverable made of
+INDEPENDENT sections -- the "10 German folk tales, each a complete story" case.
+
+When triage classifies a goal as non-trivial AND sectionable,
+`maybeGenerateSectionable` (`agent_loop_sectionable_generate.go`)
+DETERMINISTICALLY synthesizes a parallel plan-automation instead of marching the
+sections through a serial decompose chain:
+
+- one production sub-automation PER section (a bounded agent turn, each writing
+  its section to the per-plan workspace) -- these are the layer-0 phases;
+- one assemble+verify sub-automation that `dependsOn` every section -- so it
+  becomes the gated step after the parallel layer;
+- the headline, built by `synthesizePhasedHeadline`: the sections collapse into
+  one `parallel { wait:"all" failFast:true branches:[…] }` layer-0 block and the
+  assemble step runs gated on `steps.layer0.status == "success"`.
+
+The bundle (sections + assemble + headline + a small logic closure) compiles
+through the SAME Gate-1 sandbox the authoring pipeline uses, then is persisted
+through the authoring-bundle pipeline (`mutationCreateAuthoringBundle` +
+per-construct rows + a validated record), stamped with `sourcePlanId`. The LLM
+only decides sectionability + the section list; the parallel STRUCTURE is
+deterministic Go (so it can't be fumbled and is unit-testable without an engine,
+`agent_loop_sectionable_test.go`). Wallclock/budget: each branch is an ordinary
+bounded turn, so the per-plan token budget + the process-wide rate ceiling gate
+the fan-out width; the branch COUNT itself is bounded by `maxSectionFanout`.
+Structurally the deliverable is immune to the single-turn timeout that
+hard-routing a many-section deliverable to one direct turn hit (#1393) -- N
+parallel section turns + 1 assembly. Every miss (not sectionable, no Gate-1 seam
+linked, compile failure, persist error) declines and the Plan falls through to
+the normal bounded decompose loop -- generation is an OPTIMIZATION, never a hard
+requirement. Kill-switch: `MEMQL_PLANNER_SECTIONABLE_ENABLED=0`.
