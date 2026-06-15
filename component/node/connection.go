@@ -30,6 +30,23 @@ const (
 	// uiClick* + utterance + presence + text:chunk + canvas events,
 	// easily >100 across a few seconds).
 	sendChCapacity = 1024
+
+	// defaultReadLivenessFactor is the multiple of the heartbeat interval
+	// after which an inbound-silent stream is declared half-dead and torn
+	// down so the outer reconnect loop re-establishes it (memql#1388).
+	//
+	// The peer's NodeService server runs serverHeartbeatLoop, which sends a
+	// NodeHeartbeat every heartbeatInterval, so a HEALTHY stream delivers an
+	// inbound message at least that often. After a bff blue-green cutover the
+	// old-color pod can go HALF-DEAD: the gRPC stream stays ESTABLISHED (no
+	// RST/EOF, so stream.Recv() blocks forever) but the parent stops sending
+	// server heartbeats AND stops fanning fresh PeerIntros/NodeWelcomes. With
+	// no inbound deadline the leaf wedges on that dead parent indefinitely --
+	// its plan-created events never leave the node and the routing table
+	// decays (no re-advertisement). 4x heartbeats (~20s at the 5s default) is
+	// well past normal jitter / a brief GC pause while still catching a
+	// silently-dead parent within one strand window.
+	defaultReadLivenessFactor = 4
 )
 
 // peerConnection manages a single gRPC stream to a peer node.
@@ -48,6 +65,13 @@ type peerConnection struct {
 	// heartbeatInterval is the cadence at which this connection sends
 	// NodeHeartbeat messages to the peer. Zero disables the send ticker.
 	heartbeatInterval time.Duration
+
+	// readLivenessTimeout bounds how long the receive loop may go without an
+	// inbound message before the stream is declared half-dead and torn down
+	// so the outer reconnect loop re-establishes it (memql#1388). Zero
+	// disables the watchdog (kept for tests that drive a stream with no
+	// server heartbeat). Defaults to defaultReadLivenessFactor * heartbeat.
+	readLivenessTimeout time.Duration
 
 	// healthFn supplies the NodeHealthStatus to stamp on each outbound
 	// heartbeat -- this node's self-asserted lifecycle health (memql#1268).
@@ -88,6 +112,32 @@ func (pc *peerConnection) SetHealthFn(fn func() nodev1.NodeHealthStatus) {
 	pc.mu.Lock()
 	pc.healthFn = fn
 	pc.mu.Unlock()
+}
+
+// SetReadLivenessTimeout overrides the inbound-silence deadline after which a
+// half-dead stream is torn down for reconnect (memql#1388). A negative value
+// disables the watchdog. Zero leaves the field at its current value (so the
+// default-from-heartbeat resolution applies). Must be called before Connect.
+func (pc *peerConnection) SetReadLivenessTimeout(d time.Duration) {
+	pc.mu.Lock()
+	pc.readLivenessTimeout = d
+	pc.mu.Unlock()
+}
+
+// resolvedReadLivenessTimeout returns the effective inbound-silence deadline:
+// an explicit override if set, otherwise defaultReadLivenessFactor x the
+// heartbeat interval. A negative override (or a non-positive heartbeat with no
+// override) disables the watchdog by returning <= 0.
+func (pc *peerConnection) resolvedReadLivenessTimeout() time.Duration {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.readLivenessTimeout != 0 {
+		return pc.readLivenessTimeout
+	}
+	if pc.heartbeatInterval <= 0 {
+		return 0
+	}
+	return time.Duration(defaultReadLivenessFactor) * pc.heartbeatInterval
 }
 
 // Connect establishes the gRPC connection and starts the send/receive loops.
@@ -135,7 +185,13 @@ func (pc *peerConnection) Connect(ctx context.Context, onMessage func(*nodev1.No
 }
 
 // connectOnce establishes a single connection attempt.
-func (pc *peerConnection) connectOnce(ctx context.Context, onMessage func(*nodev1.NodeServerMessage)) error {
+func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(*nodev1.NodeServerMessage)) error {
+	// Per-attempt context so the read-liveness watchdog (memql#1388) can tear
+	// down a half-dead stream by cancelling it, which unblocks stream.Recv()
+	// and returns control to the outer reconnect loop. Cancelling this does
+	// NOT cancel the parent (the supervising loop keeps re-dialing).
+	ctx, cancelAttempt := context.WithCancel(parentCtx)
+	defer cancelAttempt()
 	// Message-size limits: see component/node/server.go for the
 	// rationale -- screenshot-bearing AgentGenerateTurnDelta
 	// envelopes exceed gRPC's default 4 MiB cap, RST_STREAM tears
@@ -236,14 +292,67 @@ func (pc *peerConnection) connectOnce(ctx context.Context, onMessage func(*nodev
 		go pc.heartbeatLoop(ctx, hbInterval)
 	}
 
+	// Read-liveness watchdog (memql#1388). A healthy peer streams a server
+	// heartbeat every heartbeatInterval, so a live stream is never inbound-
+	// silent for long. A half-dead parent (a draining old-color bff after a
+	// blue-green cutover) can leave the gRPC stream ESTABLISHED -- so
+	// stream.Recv() blocks forever and connectOnce never returns -- while it
+	// has stopped emitting heartbeats and fresh PeerIntros/NodeWelcomes. The
+	// watchdog declares the stream dead after readLivenessTimeout of inbound
+	// silence and cancels the per-attempt context, which unblocks Recv() and
+	// drops us into the outer reconnect loop for a fresh handshake (a new
+	// NodeWelcome snapshot re-advertises the peer set, healing the routing
+	// table). recvActivity is pinged on every inbound message to reset it.
+	recvActivity := make(chan struct{}, 1)
+	if d := pc.resolvedReadLivenessTimeout(); d > 0 {
+		go pc.readLivenessWatchdog(ctx, cancelAttempt, d, recvActivity)
+	}
+
 	// Receive loop (blocks until stream ends or context cancelled)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
 			return err
 		}
+		// Reset the inbound-silence deadline. Non-blocking: a full channel
+		// already signals "saw activity since the last watchdog tick".
+		select {
+		case recvActivity <- struct{}{}:
+		default:
+		}
 		if onMessage != nil {
 			onMessage(msg)
+		}
+	}
+}
+
+// readLivenessWatchdog cancels the per-attempt context when no inbound message
+// has arrived within timeout, tearing down a half-dead stream (memql#1388).
+// It exits when the attempt context is cancelled (normal stream end / Close /
+// its own fire).
+func (pc *peerConnection) readLivenessWatchdog(ctx context.Context, cancelAttempt context.CancelFunc, timeout time.Duration, activity <-chan struct{}) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-activity:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		case <-timer.C:
+			pc.logger.Warn("peer stream inbound-silent past read-liveness deadline; tearing down for reconnect",
+				"peer_id", pc.nodeId,
+				"address", pc.address,
+				"timeout", timeout,
+			)
+			cancelAttempt()
+			return
 		}
 	}
 }
@@ -305,12 +414,19 @@ func (pc *peerConnection) sendLoop(ctx context.Context, stream nodev1.NodeServic
 }
 
 // Send queues a message for sending to the peer.
+//
+// The non-blocking channel send is performed UNDER pc.mu, paired with Close
+// taking the same lock before it closes sendCh. This closes a send-on-closed-
+// channel race (panic) and the data race the detector flags: with the
+// read-liveness watchdog (memql#1388) a torn-down attempt's heartbeat
+// goroutine can still call Send while Close (or the next attempt) runs. The
+// critical section is just a non-blocking select, so it never blocks under the
+// lock.
 func (pc *peerConnection) Send(msg *nodev1.NodeClientMessage) {
 	pc.mu.Lock()
-	closed := pc.closed
-	pc.mu.Unlock()
+	defer pc.mu.Unlock()
 
-	if closed {
+	if pc.closed {
 		return
 	}
 
