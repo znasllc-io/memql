@@ -39,6 +39,17 @@ prompt cognitionPlanTriage {
 }
 
 @defaultProvider("chat54Mini")
+@templateFile("prompts/cognitionFeedbackRoute.tmpl")
+@description("epic #1404 / child #1406 (assistant-mediated plan feedback). A Plan in this space is parked in awaitingFeedback with a pending question; classify whether the user's latest chat message is the ANSWER to that question (vs. an unrelated remark) and, when it is, extract the free-text feedback to fold into mutationAttachPlanFeedback. Cheap small-model structured call; runs only when the space actually has an awaitingFeedback Plan.")
+prompt cognitionFeedbackRoute {
+  question       string  @required @description("The feedback question the Plan is awaiting (Plan.feedbackRequest.question).")
+  userText       string  @required @description("The user's latest chat message to classify against the question.")
+  feedbackReason string             @description("Why the Plan parked (Plan.feedbackReason), e.g. scope_elevation_required / phase_checkpoint -- context only.")
+  options        []object           @description("When the question is a choice, the {label, value} options the user may be picking among.")
+  lastAgentText  string             @description("The most recent agent message before the user's, for conversational context.")
+}
+
+@defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionPrediction.tmpl")
 @description("Predict conversation trajectory for proactive cognition behavior")
 prompt cognitionPrediction {

@@ -264,6 +264,31 @@ query utterance queryGreetingUtterance {
   shape   utteranceFull
 }
 
+// Checks whether the assistant has already posted the
+// awaitingFeedback announcement chat message for a specific Plan
+// (epic memql#1404 / child #1406). The announcement utterance is
+// stamped with source.feedbackAnnouncePlanId == <planId>; this
+// read-before-write dedup is the fail-safe backstop behind the
+// cross-replica advisory-lock gate (dispatchGate.tryAnnounceFeedback)
+// so a duplicate plan-updated event while the Plan is still
+// awaitingFeedback can't re-post the same "needs your input" message.
+//
+// Arguments:
+//   planId (string, required) - The Plan whose announcement to check.
+//
+// Returns:
+//   Array of utterance records (0 or more); non-empty means the
+//   announcement was already posted.
+@enabled
+@description("Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).")
+query utterance queryFeedbackAnnouncementForPlan {
+  args {
+    planId  string  @required
+  }
+  filter  payload.source.feedbackAnnouncePlanId==args.planId && traitIsActiveRecord
+  shape   utteranceFull
+}
+
 // Callers MUST pass the canonical spaceId
 // (`<partition>:v1:cognition:space:<slug>`). Using `canonicalId()`
 // inside this predicate triggers the executor's "unsupported

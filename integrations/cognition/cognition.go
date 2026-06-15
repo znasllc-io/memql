@@ -593,6 +593,20 @@ func (c *CognitionIntegration) Start(ctx context.Context) {
 	// dispatch for "Allow on a permission card" rides on the
 	// planner node. The planner integration subscribes to
 	// graph.node.updated.v1:planner:plan in its own Start.)
+	//
+	// Assistant-mediated plan feedback (epic memql#1404 / child #1406):
+	// cognition ALSO subscribes to graph.node.updated.v1:planner:plan so
+	// that when a Plan in a space enters awaitingFeedback the space
+	// assistant can post the pending question into chat conversationally
+	// (the announce half; the route half rides the utterance handler). The
+	// plan-updated forward rule (component/node/routing.go) broadcasts to
+	// every peer, so this handler fires on cognition replicas in cluster
+	// mode; a cross-replica advisory-lock gate makes the post exactly-once.
+	c.unsubscribes = append(c.unsubscribes, c.eventBus.Subscribe(
+		"graph.node.updated.v1:planner:plan",
+		c.handlePlanUpdatedForFeedback,
+		events.WithSubscriberName("cognition:plan-feedback-announce"),
+	))
 
 	// Start space context heartbeat for reconciliation.
 	c.startSpaceContextHeartbeat(ctx)

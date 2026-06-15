@@ -26,6 +26,17 @@ const dispatchGateLockClass int32 = 0x434F474E
 // same lock even if their FNV hashes collide. 0x47524554 spells "GRET".
 const greetGateLockClass int32 = 0x47524554
 
+// feedbackAnnounceGateLockClass namespaces the assistant-mediated
+// plan-feedback announcement advisory locks (epic memql#1404 / child #1406).
+// When a Plan in a space transitions to awaitingFeedback, the
+// graph.node.updated.v1:planner:plan event is broadcast to BOTH cognition
+// replicas, so both would post the "I need your input on X" chat message
+// without a cross-replica guard -- the same double-post hazard #1386 fixed
+// for greetings. This gate is keyed on (spaceId, planId) under a distinct
+// class so it never aliases an utterance-dispatch or greeting lock even on an
+// FNV collision. 0x464E4452 spells "FNDR" (FeedbackANnounceR).
+const feedbackAnnounceGateLockClass int32 = 0x464E4452
+
 // dispatchGate gives exactly one cognition replica the right to dispatch the
 // turn for a given triggering utterance (znasllc-io/memql#1217).
 //
@@ -254,5 +265,83 @@ func greetGateLockKey(spaceId, agentId string) int32 {
 	_, _ = h.Write([]byte(spaceId))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(agentId))
+	return int32(h.Sum32())
+}
+
+// tryAnnounceFeedback gives exactly one cognition replica the right to post
+// the assistant's "Plan X needs your input" chat message for a given
+// (spaceId, planId) (epic memql#1404 / child #1406).
+//
+// The bug it fixes mirrors #1386 exactly: the
+// graph.node.updated.v1:planner:plan event for a Plan entering
+// awaitingFeedback is broadcast to BOTH cognition replicas (the
+// graph.node.updated.v1:planner:* forward rule in component/node/routing.go
+// is a broadcast), so both run the announce handler and both insert the
+// announcement utterance. The only other guard is a read-before-write dedup
+// (queryHasFeedbackAnnouncement), which BOTH replicas pass because neither
+// inserts until after its query + insert -- so a strict cross-replica gate is
+// needed to make the announcement exactly-once.
+//
+// The fix is the proven tryGreet/tryDispatch primitive: a Postgres
+// session-level advisory lock keyed by (spaceId, planId), namespaced under
+// feedbackAnnounceGateLockClass so it never aliases an utterance-dispatch or
+// greeting lock. Exactly one replica wins pg_try_advisory_lock (non-blocking);
+// the loser bails without announcing. The winner holds the lock from the gate
+// across its query + insert, then releases via the returned release func.
+//
+// FAIL-SAFE. On ANY infrastructure failure (nil gate/getter, DB not ready,
+// connection error, lock-query error) tryAnnounceFeedback returns
+// (proceed=true, release=noop): the replica falls through to the
+// read-before-write announcement dedup, which is itself durable once one
+// announcement lands. So a gate-infra failure can at worst reproduce the old
+// duplicate, never silently SUPPRESS a legitimate announcement.
+//
+// NO-OP on single replica. The lone replica always wins, so single-node dev is
+// unaffected.
+func (g *dispatchGate) tryAnnounceFeedback(ctx context.Context, spaceId, planId string) (proceed bool, release func(), err error) {
+	if g == nil || g.dbGetter == nil {
+		return true, dispatchGateNoop, nil // fail safe: no DB accounting available
+	}
+	db := g.dbGetter()
+	if db == nil || db.DB == nil {
+		return true, dispatchGateNoop, nil // fail safe: DB not ready
+	}
+
+	conn, cerr := db.DB.Conn(ctx)
+	if cerr != nil {
+		return true, dispatchGateNoop, cerr // fail safe
+	}
+
+	objid := feedbackAnnounceGateLockKey(spaceId, planId)
+	var acquired bool
+	if qerr := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1, $2)", feedbackAnnounceGateLockClass, objid).Scan(&acquired); qerr != nil {
+		_ = conn.Close()
+		return true, dispatchGateNoop, qerr // fail safe: never suppress an announcement because the gate query errored
+	}
+
+	if !acquired {
+		// Another cognition replica already holds this (space, plan) announce
+		// lock and is posting the message. Release the connection and bail.
+		_ = conn.Close()
+		return false, dispatchGateNoop, nil
+	}
+
+	release = func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1, $2)", feedbackAnnounceGateLockClass, objid)
+		_ = conn.Close()
+	}
+	return true, release, nil
+}
+
+// feedbackAnnounceGateLockKey hashes (spaceId, planId) to the 32-bit object key
+// of the plan-feedback announcement advisory lock. FNV-1a over a
+// NUL-delimiter-joined key is stable across processes so every replica derives
+// the same key for the same (space, plan). The NUL delimiter cannot appear in
+// an id, so distinct pairs never collide via concatenation ambiguity.
+func feedbackAnnounceGateLockKey(spaceId, planId string) int32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(spaceId))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(planId))
 	return int32(h.Sum32())
 }
