@@ -8,32 +8,38 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 )
 
-// dispatcher_voice.go is the dev auto-join dispatcher (voice-tagged because it
+// dispatcher_voice.go is the auto-join dispatcher (voice-tagged because it
 // pulls the LiveKit server SDK). The voice-agent is a per-room participant, but
 // there is no per-session launcher in dev -- so a long-running `voice-agent`
 // service with no --room used to sit idle (or, before #511, crash-loop). This
 // makes it useful instead: it watches LiveKit for active polyphon-<spaceId>
-// rooms and joins one, so opening a space brings the GA into voice without any
-// manual room wiring.
+// rooms and serves EACH of them concurrently, so opening a space brings the GA
+// into voice without any manual room wiring, and two humans in two different
+// spaces both get the GA at the same time (#1395) rather than the second
+// waiting for the first room to idle.
 //
-// Scope: dev convenience, one room at a time. Production launches the agent
-// per-room (--room / MEMQL_VOICE_ROOM_NAME), which takes agent.Run directly and
-// never reaches here. Concurrent multi-room dispatch is a follow-up.
+// Scope: dev convenience. Production launches the agent per-room (--room /
+// MEMQL_VOICE_ROOM_NAME), which takes agent.Run directly and never reaches
+// here.
 
 const (
-	// dispatcherPollInterval is how often we re-list LiveKit rooms while idle.
+	// dispatcherPollInterval is how often we re-list LiveKit rooms to pick up
+	// newly-active spaces.
 	dispatcherPollInterval = 3 * time.Second
 )
 
-// RunDispatcher runs the auto-join loop: discover an active polyphon room and
-// run a session for it (blocking until that session ends), then re-discover.
-// Honours MEMQL_VOICE_AUTOJOIN=false by idling instead. Returns nil on ctx
+// RunDispatcher runs the auto-join supervisor: discover every active polyphon
+// room with a human present and no voice-agent already serving it, then run a
+// session per room concurrently (each with its own gRPC client, LiveKit join,
+// and idle-teardown lifecycle), re-discovering on every poll. Honours
+// MEMQL_VOICE_AUTOJOIN=false by idling instead. Returns nil on ctx
 // cancellation (the subcommand's SIGINT/SIGTERM context).
 func RunDispatcher(ctx context.Context, opts RunOptions) error {
 	getenv := opts.Getenv
@@ -66,63 +72,118 @@ func RunDispatcher(ctx context.Context, opts RunOptions) error {
 
 	roomClient := lksdk.NewRoomServiceClient(httpLiveKitURL(cfg.LiveKitURL), cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
-	logger.Info("voice-agent: auto-join mode -- watching LiveKit for active polyphon rooms",
-		"livekit", cfg.LiveKitURL, "memql", cfg.MemqlGRPCAddr, "executor", cfg.VoiceExecutor)
+	logger.Info("voice-agent: auto-join mode -- watching LiveKit for active polyphon rooms (concurrent multi-room)",
+		"livekit", cfg.LiveKitURL, "memql", cfg.MemqlGRPCAddr, "executor", cfg.VoiceExecutor,
+		"max_rooms", cfg.VoiceMaxRooms)
 
-	discover := func(ctx context.Context) string {
-		return discoverActiveRoom(ctx, roomClient, logger)
+	discover := func(ctx context.Context) []string {
+		return discoverActiveRooms(ctx, roomClient, logger)
 	}
 	return dispatchLoop(ctx, cfg, opts.Dialer, logger, discover, NewRoomJoiner)
 }
 
-// dispatchLoop is RunDispatcher's discover/join loop, parameterized so tests
-// can drive it without LiveKit: discover yields the next active room name (or
-// "" when idle), newJoiner builds the per-session room joiner (NewRoomJoiner
-// in production).
+// dispatchLoop is RunDispatcher's discover/serve supervisor, parameterized so
+// tests can drive it without LiveKit: discover yields the set of active rooms
+// eligible to serve (those with a human and no voice-agent already present);
+// newJoiner builds the per-session room joiner (NewRoomJoiner in production).
+//
+// Each discovered room is served in its own goroutine with its OWN gRPC client
+// and joiner -- a session's lifecycle (idle teardown, disconnect, cost
+// guardrail) is fully isolated from every other room's, with no shared state
+// or cross-talk. When a session ends, its room is removed from the active set
+// so a later poll re-serves it if a human rejoins. The pool is bounded by
+// cfg.VoiceMaxRooms.
 func dispatchLoop(ctx context.Context, cfg Config, dial Dialer, logger *slog.Logger,
-	discover func(context.Context) string,
+	discover func(context.Context) []string,
 	newJoiner func(Config, *Client, *slog.Logger) RoomJoiner) error {
+
+	maxRooms := cfg.VoiceMaxRooms
+	if maxRooms <= 0 {
+		maxRooms = defaultVoiceMaxRooms
+	}
+
+	var (
+		mu     sync.Mutex
+		active = make(map[string]struct{}) // rooms this replica is currently serving
+		wg     sync.WaitGroup
+	)
+
+	// serve launches an isolated session goroutine for one room. The room is
+	// recorded in `active` before launch and removed when the session ends, so
+	// the same room is never double-served by THIS replica and is re-eligible
+	// once it idles out.
+	serve := func(room string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				mu.Lock()
+				delete(active, room)
+				mu.Unlock()
+			}()
+
+			logger.Info("voice-agent: serving active room", "room", room)
+			// Each session gets its OWN client + joiner: Session.Run closes its
+			// client on teardown and a closed Client cannot reconnect, so sharing
+			// one would poison every later session with ErrClientClosed (#1409).
+			// Independent clients also keep concurrent sessions from sharing a
+			// single multiplexed stream (no cross-talk between rooms).
+			client := NewClient(cfg.MemqlGRPCAddr, cfg.VoiceAgentToken, dial, logger)
+			session := NewSession(cfg, client, room, newJoiner(cfg, client, logger), logger)
+			if err := session.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("voice-agent: session ended with error", "room", room, "err", err)
+			}
+			// Session ended (room emptied / idle teardown / disconnect / error);
+			// the deferred delete re-opens the room for a future poll.
+		}()
+	}
+
 	for {
 		if ctx.Err() != nil {
+			break
+		}
+
+		for _, room := range discover(ctx) {
+			mu.Lock()
+			_, serving := active[room]
+			atCap := len(active) >= maxRooms
+			if !serving && !atCap {
+				active[room] = struct{}{}
+			}
+			mu.Unlock()
+
+			if serving {
+				continue
+			}
+			if atCap {
+				logger.Warn("voice-agent: at room-serving capacity -- deferring room",
+					"room", room, "max_rooms", maxRooms)
+				continue
+			}
+			serve(room)
+		}
+
+		select {
+		case <-ctx.Done():
+			// Stop discovering; sessions observe the same ctx and tear down.
+			wg.Wait()
 			return nil
+		case <-time.After(dispatcherPollInterval):
 		}
-
-		room := discover(ctx)
-		if room == "" {
-			// Nothing active -- wait and re-list (this is the idle state).
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(dispatcherPollInterval):
-			}
-			continue
-		}
-
-		logger.Info("voice-agent: joining active room", "room", room)
-		// Each session gets its OWN client + joiner: Session.Run closes its
-		// client on teardown and a closed Client cannot reconnect, so sharing
-		// one across iterations poisons every session after the first with
-		// ErrClientClosed (#1409).
-		client := NewClient(cfg.MemqlGRPCAddr, cfg.VoiceAgentToken, dial, logger)
-		session := NewSession(cfg, client, room, newJoiner(cfg, client, logger), logger)
-		if err := session.Run(ctx); err != nil && ctx.Err() == nil {
-			logger.Warn("voice-agent: session ended with error", "room", room, "err", err)
-			// Brief backoff so a persistently-failing room can't hot-loop.
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(dispatcherPollInterval):
-			}
-		}
-		// Session ended (room emptied / cost-guardrail teardown / disconnect);
-		// loop back to discover the next active room.
 	}
+
+	wg.Wait()
+	return nil
 }
 
-// discoverActiveRoom lists LiveKit rooms and returns the name of the first
-// polyphon-<spaceId> room with at least one participant present, or "" when
-// none is active. Best-effort: a list error logs at debug and returns "".
-func discoverActiveRoom(ctx context.Context, roomClient *lksdk.RoomServiceClient, logger *slog.Logger) string {
+// discoverActiveRooms lists LiveKit rooms and returns the names of every
+// polyphon-<spaceId> room eligible to serve: at least one HUMAN participant
+// present (so the agent never wedges on a room with only its own ghost or an
+// avatar vendor participant, #1378) AND no voice-agent (`-ga`) participant
+// already present (so a second replica does not double-serve a room another
+// replica already owns, #1395). Best-effort: a list error logs at debug and
+// returns nil.
+func discoverActiveRooms(ctx context.Context, roomClient *lksdk.RoomServiceClient, logger *slog.Logger) []string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	resp, err := roomClient.ListRooms(cctx, &livekit.ListRoomsRequest{})
@@ -130,8 +191,9 @@ func discoverActiveRoom(ctx context.Context, roomClient *lksdk.RoomServiceClient
 		if logger != nil {
 			logger.Debug("voice-agent: list rooms failed", "err", err)
 		}
-		return ""
+		return nil
 	}
+	var rooms []string
 	for _, r := range resp.GetRooms() {
 		name := r.GetName()
 		if !strings.HasPrefix(name, "polyphon-") {
@@ -143,35 +205,45 @@ func discoverActiveRoom(ctx context.Context, roomClient *lksdk.RoomServiceClient
 		// A raw participant count is not enough: during a rollout the
 		// predecessor pod's ghost participant lingers in its old room for
 		// ~15-30s, and an avatar vendor participant can outlive its session.
-		// Adopting such a room wedges the single-room dispatcher on a space
-		// no human is in (#1378) -- only a HUMAN participant marks a room
-		// active.
-		if !roomHasHumanParticipant(cctx, roomClient, name, logger) {
+		// Inspect the participant list once and decide on its contents:
+		//   - no human present        -> skip (avoids the agent-only wedge, #1378)
+		//   - a voice-agent present    -> skip (another replica/session owns it, #1395)
+		human, agent := classifyRoomParticipants(cctx, roomClient, name, logger)
+		if !human {
 			continue
 		}
-		return name
+		if agent {
+			// Already being served (by this replica's own session or by a peer
+			// replica). Re-serving would put a second GA in the room.
+			continue
+		}
+		rooms = append(rooms, name)
 	}
-	return ""
+	return rooms
 }
 
-// roomHasHumanParticipant lists a room's participants and reports whether at
-// least one is a human (per isHumanParticipantIdentity). Best-effort: a list
-// error logs at debug and counts as no-humans, so a transient API failure
-// skips the room for one poll cycle instead of risking a wedge on machinery.
-func roomHasHumanParticipant(ctx context.Context, roomClient *lksdk.RoomServiceClient, room string, logger *slog.Logger) bool {
+// classifyRoomParticipants lists a room's participants once and reports whether
+// it contains at least one human (per isHumanParticipantIdentity) and whether
+// it contains a voice-agent participant (the `<spaceId>-ga` / agent-row
+// identity the joiner mints). Best-effort: a list error logs at debug and
+// reports (false, false), so a transient API failure skips the room for one
+// poll cycle instead of risking a wedge on machinery or a double-serve.
+func classifyRoomParticipants(ctx context.Context, roomClient *lksdk.RoomServiceClient, room string, logger *slog.Logger) (human, agent bool) {
 	resp, err := roomClient.ListParticipants(ctx, &livekit.ListParticipantsRequest{Room: room})
 	if err != nil {
 		if logger != nil {
 			logger.Debug("voice-agent: list participants failed", "room", room, "err", err)
 		}
-		return false
+		return false, false
 	}
 	for _, p := range resp.GetParticipants() {
 		if isHumanParticipantIdentity(p.GetIdentity()) {
-			return true
+			human = true
+		} else if isVoiceAgentParticipantIdentity(p.GetIdentity()) {
+			agent = true
 		}
 	}
-	return false
+	return human, agent
 }
 
 // httpLiveKitURL converts the agent's ws(s):// LiveKit URL to the http(s)://

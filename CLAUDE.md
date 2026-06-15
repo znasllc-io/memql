@@ -613,6 +613,13 @@ Env:
 - `MEMQL_VOICE_IDLE_TEARDOWN_SECONDS` -- zero-human grace period
   before a joined session tears down (default 60) so the auto-join
   dispatcher can't wedge on an empty room (#1378).
+- `MEMQL_VOICE_MAX_ROOMS` -- max rooms a single voice-agent replica
+  serves concurrently in auto-join mode (default 8, #1395). The
+  dispatcher discovers every human-occupied polyphon room with no
+  voice-agent already present and serves each in its own isolated
+  session, so two users in different spaces both get the GA at once;
+  cross-replica double-serve is prevented by skipping rooms that
+  already contain a `-ga` participant.
 - `MEMQL_REALTIME_*` -- realtime executor tuning knobs.
 - `VOICE_AGENT_TOKEN` -- identity-issued `class="voice_agent"` JWT
   (#109). Mint via `JWTIssuer.IssueVoiceAgentAccessToken`
