@@ -36,8 +36,8 @@ func resultMap(t *testing.T, resp rpcResponse) map[string]any {
 }
 
 func TestInitialize(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "9.9.9", nil)
-	resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{}}}`))
+	s := NewServer(nil, "memql-mcp", "9.9.9", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{}}}`))
 	if resp == nil {
 		t.Fatal("initialize returned no response")
 	}
@@ -67,17 +67,20 @@ func TestInitialize(t *testing.T) {
 }
 
 func TestInitializeDefaultsProtocolVersion(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	m := resultMap(t, *resp)
 	if m["protocolVersion"] != DefaultProtocolVersion {
 		t.Fatalf("protocolVersion = %v, want default %s", m["protocolVersion"], DefaultProtocolVersion)
 	}
 }
 
-func TestToolsListIsEmpty(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","id":"abc","method":"tools/list"}`))
+func TestToolsListMetaToolsWithoutEngine(t *testing.T) {
+	// With no engine connected, the reflected DSL tools are absent but the
+	// generic dispatchers (run_query / run_mutation / run_automation) are
+	// always present (Phase 1, #1531).
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":"abc","method":"tools/list"}`))
 	if resp == nil || resp.Error != nil {
 		t.Fatalf("tools/list unexpected: %+v", resp)
 	}
@@ -89,29 +92,42 @@ func TestToolsListIsEmpty(t *testing.T) {
 	if !ok {
 		t.Fatalf("tools not an array: %v", m["tools"])
 	}
-	if len(tools) != 0 {
-		t.Fatalf("Phase 0 tools/list should be empty, got %d", len(tools))
+	names := map[string]bool{}
+	for _, raw := range tools {
+		if tm, ok := raw.(map[string]any); ok {
+			if n, ok := tm["name"].(string); ok {
+				names[n] = true
+			}
+		}
+	}
+	for _, want := range []string{toolRunQuery, toolRunMutation, toolRunAutomation} {
+		if !names[want] {
+			t.Errorf("tools/list missing meta-tool %q (got %v)", want, names)
+		}
+	}
+	if len(tools) != 3 {
+		t.Fatalf("no-engine tools/list should be the 3 meta-tools, got %d", len(tools))
 	}
 }
 
 func TestPing(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","id":7,"method":"ping"}`))
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":7,"method":"ping"}`))
 	if resp == nil || resp.Error != nil {
 		t.Fatalf("ping unexpected: %+v", resp)
 	}
 }
 
 func TestNotificationGetsNoResponse(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	if resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); resp != nil {
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	if resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); resp != nil {
 		t.Fatalf("notification should produce no response, got %+v", resp)
 	}
 }
 
 func TestUnknownMethodErrors(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	resp := s.handleMessage([]byte(`{"jsonrpc":"2.0","id":2,"method":"resources/list"}`))
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"resources/list"}`))
 	if resp == nil || resp.Error == nil {
 		t.Fatalf("unknown method should error, got %+v", resp)
 	}
@@ -121,8 +137,8 @@ func TestUnknownMethodErrors(t *testing.T) {
 }
 
 func TestParseErrorHasNullID(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
-	resp := s.handleMessage([]byte(`{not json`))
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
+	resp := s.handleMessage(context.Background(), []byte(`{not json`))
 	if resp == nil || resp.Error == nil {
 		t.Fatalf("malformed input should error, got %+v", resp)
 	}
@@ -140,7 +156,7 @@ func TestParseErrorHasNullID(t *testing.T) {
 // acceptance behaviour (memql#1530): an MCP client connects and receives an
 // empty tools/list.
 func TestServeRoundTrip(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "1.2.3", nil)
+	s := NewServer(nil, "memql-mcp", "1.2.3", nil, "")
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
@@ -168,15 +184,16 @@ func TestServeRoundTrip(t *testing.T) {
 	if listResp.Error != nil || string(listResp.ID) != "2" {
 		t.Fatalf("tools/list response wrong: %+v", listResp)
 	}
+	// No engine on this server, so tools/list is exactly the 3 meta-tools.
 	tools := resultMap(t, listResp)["tools"].([]any)
-	if len(tools) != 0 {
-		t.Fatalf("tools/list should be empty, got %d", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("no-engine tools/list should be the 3 meta-tools, got %d", len(tools))
 	}
 }
 
 // TestServeStopsAtEOF confirms Serve returns nil at EOF (no trailing newline).
 func TestServeStopsAtEOF(t *testing.T) {
-	s := NewServer(nil, "memql-mcp", "0", nil)
+	s := NewServer(nil, "memql-mcp", "0", nil, "")
 	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`) // no newline
 	var out bytes.Buffer
 	if err := s.Serve(context.Background(), in, &out); err != nil {

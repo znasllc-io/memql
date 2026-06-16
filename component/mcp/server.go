@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/znasllc-io/memql/core/common"
@@ -56,23 +57,29 @@ type Server struct {
 	version string
 
 	// engine is the in-process memQL engine handle this head serves. It is
-	// the "connection to the engine" Phase 0 stands up; the reflected tool
-	// surface that reads it lands in #1531. Stored as any so the mcp package
-	// stays decoupled from component/memql until the tool-surface phase
-	// defines the narrow interface it actually needs.
+	// the "connection to the engine" Phase 0 stands up. Stored as any (Phase 0
+	// decoupling); the Phase 1 tool surface adapts it to the narrow Engine
+	// interface via asEngine().
 	engine any
+
+	// actingRole is the role the MCP session acts as for the per-tool /
+	// per-construct authz gate. Phase 1 (#1531) sources it from MEMQL_MCP_ROLE
+	// (empty -> IsAllowedForRole's "specialist" default); the full role +
+	// capability-tier model lands in Phase 2 (#1532).
+	actingRole string
 
 	writeMu sync.Mutex
 }
 
 // NewServer constructs an MCP protocol head. name/version populate the
 // MCP serverInfo block; engine is the in-process engine handle (may be nil
-// in tests, where only the protocol surface is exercised).
-func NewServer(logger *slog.Logger, name, version string, engine any) *Server {
+// in tests, where only the protocol surface is exercised); actingRole is the
+// role the session acts as for the authz gate.
+func NewServer(logger *slog.Logger, name, version string, engine any, actingRole string) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{logger: logger, name: name, version: version, engine: engine}
+	return &Server{logger: logger, name: name, version: version, engine: engine, actingRole: actingRole}
 }
 
 // Engine returns the in-process engine handle this head serves. Used by the
@@ -120,7 +127,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 
 		line, readErr := reader.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
-			if resp := s.handleMessage(line); resp != nil {
+			if resp := s.handleMessage(ctx, line); resp != nil {
 				if err := s.writeMessage(out, resp); err != nil {
 					return fmt.Errorf("mcp: write response: %w", err)
 				}
@@ -153,7 +160,7 @@ func (s *Server) writeMessage(out io.Writer, resp *rpcResponse) error {
 
 // handleMessage parses and dispatches one raw JSON-RPC message, returning the
 // response bytes to send (nil for notifications, which get no reply).
-func (s *Server) handleMessage(raw []byte) *rpcResponse {
+func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 	var req rpcRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return errorResponse(nil, codeParseError, "parse error")
@@ -168,13 +175,36 @@ func (s *Server) handleMessage(raw []byte) *rpcResponse {
 	case "initialize":
 		return successResponse(req.ID, s.initializeResult(req.Params))
 	case "tools/list":
-		// Phase 0 surface is intentionally empty; reflected tools land in #1531.
-		return successResponse(req.ID, map[string]any{"tools": []any{}})
+		// Phase 1 (#1531): reflect the engine's DSL tools (role-gated) + the
+		// generic run_query / run_mutation / run_automation dispatchers.
+		return successResponse(req.ID, map[string]any{"tools": listMCPTools(asEngine(s.engine), s.actingRole)})
+	case "tools/call":
+		return s.handleToolsCall(ctx, req.ID, req.Params)
 	case "ping":
 		return successResponse(req.ID, map[string]any{})
 	default:
 		return errorResponse(req.ID, codeMethodNotFnd, "method not found: "+req.Method)
 	}
+}
+
+// handleToolsCall dispatches an MCP tools/call. Tool-level failures are
+// reported inside the result (isError:true) per the MCP convention; only
+// malformed requests produce a JSON-RPC protocol error.
+func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params json.RawMessage) *rpcResponse {
+	var p struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return errorResponse(id, codeInvalidParams, "invalid params: "+err.Error())
+		}
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return errorResponse(id, codeInvalidParams, "tools/call requires a tool name")
+	}
+	result := callMCPTool(ctx, asEngine(s.engine), s.actingRole, p.Name, p.Arguments)
+	return successResponse(id, result)
 }
 
 // initializeResult builds the MCP initialize result, echoing the client's

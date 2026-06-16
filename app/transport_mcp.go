@@ -2,7 +2,12 @@
 
 package app
 
-import "github.com/znasllc-io/memql/component/mcp"
+import (
+	"os"
+	"strings"
+
+	"github.com/znasllc-io/memql/component/mcp"
+)
 
 // transportMCP sets up transport for an MCP node.
 //
@@ -22,7 +27,12 @@ func (a *App) transportMCP() {
 	a.transportBase()
 	a.createHTTPServer()
 
+	// MEMQL_MCP_ROLE is the role the MCP session acts as for the per-tool /
+	// per-construct authz gate (#1531). Empty -> the engine's "specialist"
+	// default; the full role + capability-tier model lands in Phase 2 (#1532).
+	role := strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE"))
+
 	in, out := mcp.StdioStreams()
-	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine)
+	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, role)
 	a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(server, in, out, a.Logger))
 }
