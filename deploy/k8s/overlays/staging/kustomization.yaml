@@ -1,9 +1,12 @@
-# Staging overlay -> 0.9.56. SPA rebuilt (copresent fcb964e): voice keep-alive
-# survives Takeover navigation (copresent#435 -- defer transient disable + visible
-# keep-alive diagnostics) + UI fixes (readable first-run prompt #436, real ellipsis
-# in loading labels #436, Library viewer scoped to its panel #438).
-# Carriers: CallTool proxy-context fix (#1473). Voice 0.9.50, identity 0.9.49.
-# livekit pin (#1043) preserved.
+# Staging overlay -> 0.9.59. Full-stack rebuild from main (all 8 images).
+#   SPA (copresent): needs-feedback card wired to mutationAttachPlanFeedback
+#   (#429), 'Preparing' state times out with retry/error (#427), DirectVoiceSession
+#   hoisted above the layout switch so voice survives takeover panel-nav (#435),
+#   Simli avatar-tile suffix-tolerant GA match (#439).
+#   Engine/carriers: mesh read-liveness watchdog heals half-dead parent stream
+#   (#1388), durable PlanDelivery at-least-once leg (#1495), generic plan-feedback
+#   loop (#1404).
+# livekit pin (#1043) + NODE_IP patch preserved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -25,21 +28,21 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:a1328572c23e36db7e0c633bc230992fd62f64798e5035c86c1c5b3b83af5816
+    digest: sha256:32e9106501c6500f71d66b2179626dc776da0aa67c0ca74769f36c4e7432b800
   - name: acrmemql.azurecr.io/memql-bff-copresent
-    digest: sha256:ef5a750e13ddf89b0cb7169ac682e3e11cc2ae644089e5c754321560b12090ea
+    digest: sha256:b0c75dd0ddaa2c8227166ffee182d0866d11668d6981347e8c7dafc853b64945
   - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:9ddf0e8237738bb72f191d8e8b7358456242419e440e5247c3bba51c302f1b33
+    digest: sha256:280ace6591cd9ea8e8b0fd77f86832802ed1f1a54d8c364609c3f7187c58533c
   - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:c207d4d1042c51045c638a23abd1d82bff15dfb9bae1f5fa4bb35414e498fe8f
+    digest: sha256:24334b2dc6d8d1716bb061ed02f947bc216d6a36577461f8fe9a91bf4db47341
   - name: acrmemql.azurecr.io/memql-agent
-    digest: sha256:8d089b364a6cf051ad63be511fd4183eda39ca9b6f27eb0a90e468f6b280faff
+    digest: sha256:21d4e96f4f87183da611d04837ed03ed5482e4bbb1b8504e8f73c8c1c7cbd79d
   - name: acrmemql.azurecr.io/memql-planner
-    digest: sha256:dbac45359d273721e0a4b1bdeb9c0cf4059f550070daf573344d31b46cada88a
+    digest: sha256:9ee5241c14df1fdf577305e6bc3efc28fd05e914a8e1a8b2ba54df3247b395d9
   - name: acrmemql.azurecr.io/memql-workbench
-    digest: sha256:031c2fc0ca5966a909d717b17d73b2c656436a51f44c4cd24d41f55007f7b42e
+    digest: sha256:490291cd93408214e5a4c48d4240f315263634b52649ee318000156f138312ab
   - name: acrmemql.azurecr.io/copresent
-    digest: sha256:a9632205215bfbf10aac12e5ce4b36a5a86d9e5d0aa64becdce890bf9155ba28
+    digest: sha256:10036ae29f6374cbb1b6a3f9456115da843f3c52f9c4012a2cfcea927f252501
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3
