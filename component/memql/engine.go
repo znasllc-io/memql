@@ -70,6 +70,11 @@ type MemQLEngine struct {
 	// stripped-down binaries that don't load automations still get an
 	// actionable failure mode.
 	logicRunner LogicRunner
+	// promotedAuthored records the (kind:name) of constructs promoted into the
+	// shared registries via PromoteAuthoredConstruct, so re-promotion replaces
+	// the prior promotion while a name a SEALED core construct owns is still
+	// refused (core-first). Zero-value sync.Map is ready to use.
+	promotedAuthored sync.Map
 }
 
 // #250: the useLegacyMemqlParser field + UseLangparserRuntime
@@ -372,6 +377,16 @@ func (e *MemQLEngine) emitQueryExecutedEvent(startTime time.Time, result *Execut
 }
 
 func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult, error) {
+	return e.executeWith(ctx, query, e.functions)
+}
+
+// executeWith is Execute with the function registry made explicit so the
+// authored-overlay path (ExecuteAuthored) can resolve + run session-authored
+// constructs by name. fns is used for parse-time classification/inlining and
+// for the top-level mutation/logic dispatch; everything else (db, cache, specs,
+// shapes, provenance) is unchanged. Execute delegates with e.functions, so the
+// default path is byte-for-byte the prior behaviour.
+func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry) (*ExecuteResult, error) {
 	startTime := time.Now()
 
 	if !e.canResolve() {
@@ -382,7 +397,7 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 		return nil, fmt.Errorf("memory engine database not configured")
 	}
 
-	plan, err := e.Parse(query)
+	plan, err := e.parseWithFunctions(query, fns)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +406,7 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 	// LogicRunner. When no runner is wired (e.g. tests, stripped-down
 	// binaries), surface an actionable error pointing at app bootstrap.
 	if plan.LogicCall != nil {
-		result, err := e.executeLogicFunctionCall(ctx, plan.LogicCall)
+		result, err := e.executeLogicFunctionCall(ctx, plan.LogicCall, fns)
 		if err != nil {
 			return nil, err
 		}
@@ -409,7 +424,7 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 		if len(plan.Mutations) > 0 || plan.Root != nil {
 			return nil, fmt.Errorf("mutation function call cannot be combined with other query/mutation expressions")
 		}
-		result, err := e.executeMutationFunctionCall(ctx, plan.MutationCall)
+		result, err := e.executeMutationFunctionCall(ctx, plan.MutationCall, fns)
 		if err != nil {
 			return nil, err
 		}
@@ -547,15 +562,15 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 // pointing at the bootstrap wiring; this matches the pre-F.5 path
 // so stripped-down binaries that don't load automations still fail
 // loudly instead of returning nil silently.
-func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *FunctionCallExpression) (*ExecuteResult, error) {
+func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *FunctionCallExpression, fns *FunctionRegistry) (*ExecuteResult, error) {
 	if call == nil {
 		return nil, fmt.Errorf("logic call is nil")
 	}
-	if e.functions == nil {
+	if fns == nil {
 		return nil, fmt.Errorf("function registry is not initialized")
 	}
 
-	fn, err := e.functions.Get(call.Name)
+	fn, err := fns.Get(call.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +596,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(e.functions.Snapshot(), nil)
+	validator := newFunctionValidator(fns.Snapshot(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}
@@ -596,15 +611,15 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	return result, nil
 }
 
-func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *FunctionCallExpression) (*ExecuteResult, error) {
+func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *FunctionCallExpression, fns *FunctionRegistry) (*ExecuteResult, error) {
 	if call == nil {
 		return nil, fmt.Errorf("mutation call is nil")
 	}
-	if e.functions == nil {
+	if fns == nil {
 		return nil, fmt.Errorf("function registry is not initialized")
 	}
 
-	fn, err := e.functions.Get(call.Name)
+	fn, err := fns.Get(call.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +642,7 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(e.functions.Snapshot(), nil)
+	validator := newFunctionValidator(fns.Snapshot(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}

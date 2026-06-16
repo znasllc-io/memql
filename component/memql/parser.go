@@ -27,6 +27,17 @@ import (
 
 // Parse converts a MemQL query string into a QueryPlan.
 func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
+	return e.parseWithFunctions(query, e.functions)
+}
+
+// parseWithFunctions is Parse with the function registry made explicit, so an
+// authored-overlay call (ExecuteAuthored, MCP Tier-2 session constructs) can
+// classify + inline session-authored functions that core does not define. The
+// public Parse delegates with e.functions, so default behaviour is unchanged.
+// Spec resolution still reads e.specs (the authored overlay is function-only in
+// Phase 3; authored specs referenced from authored query filters are a tracked
+// follow-up).
+func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -122,7 +133,7 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 		return nil, err
 	}
 	// Resolve function calls after spec resolution
-	if err := resolvePlanFunctions(plan, e.functions, e.specs); err != nil {
+	if err := resolvePlanFunctions(plan, fns, e.specs); err != nil {
 		return nil, err
 	}
 	// Apply directive wrappers again after function resolution

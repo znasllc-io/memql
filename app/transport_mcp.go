@@ -32,8 +32,12 @@ func (a *App) transportMCP() {
 	//     engine's "specialist" default.
 	//   MEMQL_MCP_MODE -- the capability tier sealed/authoring/inline (Gate A).
 	//     Unset/unknown -> authoring (the default tier).
+	//   MEMQL_MCP_USER -- the acting user that session-authored constructs are
+	//     owner-scoped to (Phase 3 #1533). Empty -> the session has no authoring
+	//     identity and define/promote report unavailable.
 	cfg := mcp.Config{
 		ActingRole: strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE")),
+		ActingUser: strings.TrimSpace(os.Getenv("MEMQL_MCP_USER")),
 		Tier:       mcp.ParseTier(os.Getenv("MEMQL_MCP_MODE")),
 	}
 
