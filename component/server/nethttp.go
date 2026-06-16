@@ -729,12 +729,32 @@ func JWKSPaths() []string {
 	return paths
 }
 
+// MetricsPaths returns the public Prometheus scrape endpoint(s). The
+// /metrics endpoint carries no user data and is only reachable on the
+// in-cluster pod network (the public ingress routes specific paths
+// only), so it is unauthenticated like the health probes -- a
+// ServiceMonitor/Prometheus scrape can't present a bearer token.
+// memql#1523.
+func MetricsPaths() []string {
+	base := sanitizeBaseURLFromEnv()
+	metricsPath := "/metrics"
+	paths := []string{metricsPath}
+	if base != "" {
+		p := base + metricsPath
+		if p != metricsPath {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 func PublicPaths() []string {
 	paths := HealthzPaths()
-	paths = append(paths, ReadyzPaths()...) // schema-assertion readiness probe (#657)
-	paths = append(paths, LivezPaths()...)  // pure process-liveness probe (#1117)
-	paths = append(paths, JWKSPaths()...)  // public keyset (cross-node verifier fetch)
-	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
+	paths = append(paths, ReadyzPaths()...)  // schema-assertion readiness probe (#657)
+	paths = append(paths, LivezPaths()...)   // pure process-liveness probe (#1117)
+	paths = append(paths, MetricsPaths()...) // prometheus scrape (#1523)
+	paths = append(paths, JWKSPaths()...)    // public keyset (cross-node verifier fetch)
+	paths = append(paths, AuthPaths()...)    // identity-service auth endpoints
 	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)
 	paths = append(paths, PolyphonUtterancePaths()...)
 	paths = append(paths, PolyphonPreloadPaths()...)

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // JWKS represents a JSON Web Key Set in the format consumers expect
@@ -41,13 +43,31 @@ func BuildJWKS(km *KeyManager, now time.Time) JWKS {
 	return out
 }
 
+// EmitKeysetMetric publishes the key set this identity replica currently
+// serves (count + stable fingerprint) to the Prometheus surface. Called
+// at startup and on every JWKS serve so the gauge tracks what is actually
+// published. Two identity replicas that serve DIFFERENT key sets report
+// different fingerprints, so a cross-replica `max != min` over
+// memql_jwks_keyset_fingerprint is the JWKS-incoherence alert signal that
+// the 2026-06-16 silent auth failure lacked (memql#1523).
+func EmitKeysetMetric(km *KeyManager, now time.Time) {
+	doc := BuildJWKS(km, now)
+	kids := make([]string, 0, len(doc.Keys))
+	for _, k := range doc.Keys {
+		kids = append(kids, k.Kid)
+	}
+	metrics.SetJWKSKeyset(kids)
+}
+
 // JWKSHandler returns an http.Handler that serves the live JWKS
 // document. Cache-Control is set short — verifiers should refresh
 // when they encounter an unknown kid (the recommended pattern with
 // jwx / golang-jwt JWKS caches), so a low TTL keeps rotation fast.
 func JWKSHandler(km *KeyManager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := json.Marshal(BuildJWKS(km, time.Now().UTC()))
+		now := time.Now().UTC()
+		EmitKeysetMetric(km, now)
+		body, err := json.Marshal(BuildJWKS(km, now))
 		if err != nil {
 			http.Error(w, "marshal jwks", http.StatusInternalServerError)
 			return

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // MiddlewareOptions configures HTTPMiddleware.
@@ -41,12 +42,14 @@ func HTTPMiddleware(v *Verifier, opts MiddlewareOptions) func(http.Handler) http
 			token, source, err := extractTokenHTTP(r)
 			if err != nil {
 				logAuthFailure(logger, err, r, source)
+				metrics.AuthReject(metrics.SurfaceHTTP, metrics.ReasonMissingToken, metrics.CodeUnauthenticated)
 				respondUnauthorized(w, r, opts.UnauthorizedHandler)
 				return
 			}
 			vc, err := v.VerifyBearer(r.Context(), token)
 			if err != nil {
 				logAuthFailure(logger, err, r, source)
+				metrics.AuthReject(metrics.SurfaceHTTP, rejectReason(err), metrics.CodeUnauthenticated)
 				respondUnauthorized(w, r, opts.UnauthorizedHandler)
 				return
 			}

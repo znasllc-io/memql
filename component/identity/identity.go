@@ -108,6 +108,10 @@ func NewService(cfg Config, logger *slog.Logger, audit AuditLogger) (*Service, e
 	if err := km.Load(); err != nil {
 		return nil, fmt.Errorf("identity: load keys: %w", err)
 	}
+	// Publish the served keyset gauge immediately at startup so the
+	// JWKS-incoherence signal exists before the first verifier fetch
+	// (memql#1523).
+	EmitKeysetMetric(km, time.Now().UTC())
 
 	iss, err := NewJWTIssuer(km, cfg)
 	if err != nil {
@@ -315,6 +319,7 @@ func (s *Service) maybeRotate(ctx context.Context) {
 		Outcome:  AuditOutcomeSuccess,
 	})
 	s.logger.Info("jwt_signing_key_rotated", slog.String("kid", s.keys.Current().KID))
+	EmitKeysetMetric(s.keys, time.Now().UTC())
 }
 
 // maybeSweep removes the previous key from JWKS once its retirement
@@ -327,6 +332,7 @@ func (s *Service) maybeSweep(ctx context.Context) {
 	}
 	if swept {
 		s.logger.Info("retired_jwt_key_removed_from_jwks")
+		EmitKeysetMetric(s.keys, time.Now().UTC())
 		s.audit.Log(ctx, AuditEvent{
 			Category: AuditCategoryConfiguration,
 			Action:   "jwks_previous_key_retired",
@@ -341,6 +347,7 @@ func (s *Service) RotateNow(ctx context.Context, actor AuditActor) error {
 	if _, err := s.keys.Rotate(s.cfg.JWKSOverlapWindow); err != nil {
 		return err
 	}
+	EmitKeysetMetric(s.keys, time.Now().UTC())
 	s.audit.Log(ctx, AuditEvent{
 		Category:    AuditCategoryConfiguration,
 		Action:      "jwks_rotated",

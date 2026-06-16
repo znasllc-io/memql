@@ -13,7 +13,18 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/znasllc-io/memql/component/identity/verifier"
+	"github.com/znasllc-io/memql/component/metrics"
 )
+
+// nodeRejectReason maps a node-token VerifyBearer error to the metrics
+// reason label. unknown-kid (the JWKS-skew symptom that silently broke
+// the mesh on 2026-06-16, #1523) gets its own bucket.
+func nodeRejectReason(err error) string {
+	if errors.Is(err, verifier.ErrUnknownKID) {
+		return metrics.ReasonUnknownKID
+	}
+	return metrics.ReasonInvalidToken
+}
 
 // nodeBindingKey is the context key carrying the verified
 // (nodeId, nodeType) binding extracted from the class="node" JWT.
@@ -87,6 +98,7 @@ func NodeClassStreamInterceptor(v *verifier.Verifier, logger *slog.Logger) grpc.
 				}
 				logger.Warn("node auth: token extraction failed", "error", err, "method", info.FullMethod, "peer", peerAddr)
 			}
+			metrics.AuthReject(metrics.SurfaceNode, metrics.ReasonMissingToken, metrics.CodeUnauthenticated)
 			return status.Error(codes.Unauthenticated, err.Error())
 		}
 		vc, err := v.VerifyBearer(ctx, tok)
@@ -94,6 +106,7 @@ func NodeClassStreamInterceptor(v *verifier.Verifier, logger *slog.Logger) grpc.
 			if logger != nil {
 				logger.Warn("node auth: token verification failed", "error", err, "method", info.FullMethod)
 			}
+			metrics.AuthReject(metrics.SurfaceNode, nodeRejectReason(err), metrics.CodeUnauthenticated)
 			return status.Error(codes.Unauthenticated, "invalid or expired token")
 		}
 		// Surface pin: only class="node" JWTs may speak this wire.
@@ -107,9 +120,11 @@ func NodeClassStreamInterceptor(v *verifier.Verifier, logger *slog.Logger) grpc.
 					"subject", vc.UserId,
 					"method", info.FullMethod)
 			}
+			metrics.AuthReject(metrics.SurfaceNode, metrics.ReasonWrongClass, metrics.CodePermissionDenied)
 			return status.Error(codes.PermissionDenied, "node service requires a node-class token")
 		}
 		if vc.NodeId == "" || vc.NodeType == "" {
+			metrics.AuthReject(metrics.SurfaceNode, metrics.ReasonMissingBinding, metrics.CodePermissionDenied)
 			return status.Error(codes.PermissionDenied, "node-class token missing node_id / node_type binding")
 		}
 		if logger != nil {

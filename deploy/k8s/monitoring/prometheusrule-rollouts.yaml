@@ -1,0 +1,63 @@
+# PrometheusRule: Argo Rollout stuck Paused / left unpromoted.
+#
+# memql#1523. The bff Rollout is BlueGreen with autoPromotionEnabled:false
+# (deploy/rollouts/bff-rollout.yaml) -- a human/gate must promote it. On
+# 2026-06-16 a paused bff Rollout sat unpromoted and silent: the new
+# color never took traffic and nobody was paged. This rule alerts when a
+# Rollout sits Paused beyond a short window.
+#
+# ASSUMES: the Argo Rollouts controller (deploy/rollouts/install,
+# v1.7.2, namespace argo-rollouts) exposes its controller metrics and
+# the same Prometheus scrapes them. The upstream install ships an
+# `argo-rollouts-metrics` Service (port 8090); if your Prometheus does
+# not already discover it, apply monitoring/servicemonitor-argo-rollouts.yaml.
+# Argo Rollouts v1.7 exposes `rollout_info{namespace,name,phase}` (gauge,
+# value 1 for the rollout's current phase). A BlueGreen rollout awaiting
+# promotion reports phase="Paused".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: memql-rollouts
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: memql-rollout-paused
+      rules:
+        - alert: MemqlRolloutPausedTooLong
+          expr: |
+            max by (namespace, name) (
+              rollout_info{namespace="memql", phase="Paused"} == 1
+            )
+          for: 15m
+          labels:
+            severity: warning
+            team: memql
+          annotations:
+            summary: "Rollout {{ $labels.namespace }}/{{ $labels.name }} paused >15m (unpromoted release)"
+            description: >
+              An Argo Rollout has been in phase=Paused for more than 15
+              minutes -- a release is sitting unpromoted (BlueGreenPause /
+              awaiting manual promotion). The new color is not taking
+              traffic. Promote it (`kubectl argo rollouts promote
+              {{ $labels.name }} -n {{ $labels.namespace }}`) or abort it.
+              See memql#1523.
+
+        # Degraded is the harder failure (analysis failed / rollback). Page
+        # faster so a failed promotion gate doesn't linger silently.
+        - alert: MemqlRolloutDegraded
+          expr: |
+            max by (namespace, name) (
+              rollout_info{namespace="memql", phase="Degraded"} == 1
+            )
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "Rollout {{ $labels.namespace }}/{{ $labels.name }} is Degraded"
+            description: >
+              An Argo Rollout has been Degraded for >5m (analysis failed or
+              the rollout was rolled back). See memql#1523.

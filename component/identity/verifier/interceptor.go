@@ -13,7 +13,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/metrics"
 )
+
+// rejectReason maps a VerifyBearer error to the low-cardinality metrics
+// reason label. An unknown-kid failure (the JWKS-skew symptom, #1523)
+// gets its own bucket so the auth-reject-rate alert can name it;
+// everything else is invalid_token.
+func rejectReason(err error) string {
+	if errors.Is(err, ErrUnknownKID) {
+		return metrics.ReasonUnknownKID
+	}
+	return metrics.ReasonInvalidToken
+}
 
 // EpochResolver looks up the v1:identity:user.revocationEpoch for the
 // given user. Implementations should be fast + cache-friendly --
@@ -101,6 +113,7 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 			if logger != nil {
 				logger.Warn("grpc auth: token extraction failed", "error", err, "method", info.FullMethod)
 			}
+			metrics.AuthReject(metrics.SurfaceGRPC, metrics.ReasonMissingToken, metrics.CodeUnauthenticated)
 			return status.Error(codes.Unauthenticated, err.Error())
 		}
 		vc, err := v.VerifyBearer(ctx, token)
@@ -108,6 +121,7 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 			if logger != nil {
 				logger.Warn("grpc auth: token verification failed", "error", err, "method", info.FullMethod)
 			}
+			metrics.AuthReject(metrics.SurfaceGRPC, rejectReason(err), metrics.CodeUnauthenticated)
 			return status.Error(codes.Unauthenticated, "invalid or expired token")
 		}
 		if epoch != nil && epoch.Resolver != nil && vc.Source == SourceJWT {
@@ -116,6 +130,7 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 				if logger != nil {
 					logger.Warn("grpc auth: epoch lookup failed (rejecting open)", "subject", vc.UserId, "method", info.FullMethod, "error", eerr)
 				}
+				metrics.AuthReject(metrics.SurfaceGRPC, metrics.ReasonRevocationCheckError, metrics.CodeUnauthenticated)
 				return status.Error(codes.Unauthenticated, "revocation check failed")
 			}
 			if vc.RevocationEpoch < cur {
@@ -126,6 +141,7 @@ func StreamInterceptorWithEpoch(v *Verifier, logger *slog.Logger, epoch *EpochCh
 						"current_epoch", cur,
 						"method", info.FullMethod)
 				}
+				metrics.AuthReject(metrics.SurfaceGRPC, metrics.ReasonTokenRevoked, metrics.CodeUnauthenticated)
 				return status.Error(codes.Unauthenticated, "token revoked")
 			}
 		}

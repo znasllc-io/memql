@@ -1,0 +1,46 @@
+# PodMonitor: scrape every memQL node pod's /metrics endpoint once.
+#
+# memql#1523. The app emits Prometheus metrics on the http container
+# port (8085, path /metrics) from component/metrics -- auth-reject
+# counters + JWKS keyset gauges. A PodMonitor (not a ServiceMonitor) is
+# used deliberately: each pod is fronted by several Services
+# (bff / bff-active / bff-preview / bff-external), and a ServiceMonitor
+# would scrape the same pod once per Service. A PodMonitor scrapes each
+# pod exactly once.
+#
+# ASSUMES: a prometheus-operator / kube-prometheus-stack install whose
+# Prometheus CR selects PodMonitors. The `release` label below must match
+# that Prometheus's `podMonitorSelector` (kube-prometheus-stack defaults
+# to `release: <helm-release-name>`). If your operator selects all
+# PodMonitors (empty selector), the label is harmless. The same
+# Prometheus already backs the optional deploy-gate SLO analysis
+# (deploy/rollouts/analysis/deploy-gate.yaml references
+# http://prometheus-operated.monitoring:9090).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: memql-nodes
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    # Adjust to match your kube-prometheus-stack podMonitorSelector.
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - memql
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: memql
+  podMetricsEndpoints:
+    - port: http # the named container port 8085 on every memQL node
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        # Promote the node-type onto an `app` metric label so alerts can
+        # scope per node type (e.g. app="identity" for JWKS coherence).
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          targetLabel: app
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod

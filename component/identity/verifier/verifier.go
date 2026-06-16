@@ -25,6 +25,13 @@ const (
 	SourcePAT Source = "pat"
 )
 
+// ErrUnknownKID is returned by VerifyBearer/verifyJWT when the token's
+// kid header names a signing key absent from the (just-refreshed) JWKS
+// cache. This is the distinguishing symptom of JWKS incoherence /
+// signing-key skew (memql#1523): interceptors classify it as the
+// metrics ReasonUnknownKID so the auth-reject-rate alert can name it.
+var ErrUnknownKID = errors.New("verifier: unknown kid")
+
 // JWT `class` claim values. Duplicated from
 // component/identity.Class* constants so the verifier package
 // doesn't need to import the identity package (which would invert
@@ -197,7 +204,7 @@ func (v *Verifier) verifyJWT(ctx context.Context, token string) (*VerifiedClaims
 		}
 		pub, ok = v.cache.PublicKey(kid)
 		if !ok {
-			return nil, fmt.Errorf("verifier: unknown kid %q", kid)
+			return nil, fmt.Errorf("%w %q", ErrUnknownKID, kid)
 		}
 	}
 

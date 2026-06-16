@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/core/httptls"
 )
 
@@ -233,6 +234,17 @@ func (c *JWKSCache) refresh(ctx context.Context) error {
 	c.keys = keys
 	c.lastFetch = time.Now().UTC()
 	c.mu.Unlock()
+
+	// Publish the keyset this node now TRUSTS as a metric. When identity
+	// replicas serve divergent key sets, the verifiers that fetched from
+	// them report divergent fingerprints too, so this is one half of the
+	// JWKS-incoherence signal (the identity-side gauge is the other,
+	// crisper half). memql#1523.
+	kids := make([]string, 0, len(keys))
+	for kid := range keys {
+		kids = append(kids, kid)
+	}
+	metrics.SetJWKSKeyset(kids)
 
 	c.debug("jwks_cache: refreshed", "key_count", len(keys), "url", c.url)
 	return nil
