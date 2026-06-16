@@ -29,7 +29,7 @@ COMPOSE_POLY := -f docker/docker-compose.cluster.yml -f docker/docker-compose.po
 # Build targets
 # ---------------------------------------------------------------------------
 
-.PHONY: all build build-all bff voice cognition agent planner identity identity-templ identity-tailwind identity-assets identity-build healthcheck
+.PHONY: all build build-all bff voice cognition agent planner workbench mcp identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
 all: build healthcheck
@@ -68,6 +68,10 @@ planner:
 ## Build workbench node binary
 workbench:
 	$(GO) build $(GOFLAGS) -tags workbench -o $(BIN_DIR)/memql-workbench .
+
+## Build mcp node binary (Model Context Protocol server, epic memql#1529)
+mcp:
+	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
 ## Generate Go from .templ files for the identity web app.
 ## Uses `go run` so contributors don't need templ on their PATH.

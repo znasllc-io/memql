@@ -1,4 +1,4 @@
-//go:build !cognition && !agent && !planner && !bff && !voice && !workbench
+//go:build !cognition && !agent && !planner && !bff && !voice && !workbench && !mcp
 
 package node
 

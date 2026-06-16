@@ -77,6 +77,8 @@ func BootstrapFor(nodeType NodeType) NodeBootstrap {
 		return &VoiceBootstrap{}
 	case NodeTypeWorkbench:
 		return &WorkbenchBootstrap{}
+	case NodeTypeMCP:
+		return &MCPBootstrap{}
 	default:
 		// Default to BFF.
 		return &BFFBootstrap{}

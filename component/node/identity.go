@@ -43,6 +43,14 @@ const (
 	// other node calls to mint its class="node" JWT; it must never call
 	// that endpoint on itself (see EnsureBearerToken). memql#570.
 	NodeTypeIdentity NodeType = "identity"
+
+	// NodeTypeMCP is the MCP (Model Context Protocol) server -- the protocol
+	// head that exposes a deployment's tool surface to external MCP hosts
+	// (Claude Desktop / Claude Code). A first-class node role selected by the
+	// `mcp` build tag (epic memql#1529). It shares the cluster database and
+	// joins the mesh like any other role; the tool surface it serves over the
+	// wire lands in later phases (#1531+).
+	NodeTypeMCP NodeType = "mcp"
 )
 
 // ValidNodeTypes is the set of recognized node types.
@@ -53,6 +61,7 @@ var ValidNodeTypes = map[NodeType]bool{
 	NodeTypeBFF:       true,
 	NodeTypeVoice:     true,
 	NodeTypeWorkbench: true,
+	NodeTypeMCP:       true,
 }
 
 // Identity holds the runtime identity of this node.

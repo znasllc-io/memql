@@ -20,6 +20,8 @@ memQL uses Go build tags to compile separate binaries for each node type in the 
 | **cognition** | `cognition` | Cognition pipeline, Polyphon | ~35 MB |
 | **agent** | `agent` | Task execution, SI work, tool calling | ~43 MB |
 | **planner** | `planner` | Task planning and orchestration | ~25 MB |
+| **workbench** | `workbench` | Sandboxed per-Plan Linux execution surface | ~25 MB |
+| **mcp** | `mcp` | MCP (Model Context Protocol) server -- engine tool surface to external MCP hosts (epic memql#1529) | ~70 MB |
 
 ## Building
 
@@ -32,6 +34,8 @@ go build -tags voice -o bin/memql-voice .
 go build -tags cognition -o bin/memql-cognition .
 go build -tags agent -o bin/memql-agent .
 go build -tags planner -o bin/memql-planner .
+go build -tags workbench -o bin/memql-workbench .
+go build -tags mcp -o bin/memql-mcp .
 ```
 
 Tags are **mutually exclusive** -- never combine them (e.g., `-tags "bff cognition"`).
