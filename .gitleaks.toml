@@ -46,3 +46,12 @@ paths = [
   '''^docker/docker-compose\..*\.ya?ml$''',
   '''^scripts/dev/.*''',
 ]
+
+[[allowlists]]
+description    = "Dummy key-encryption-key literal in identity ephemeral-key guard tests. Not a credential -- a fake KEK used to assert the guard's behavior. Tripped the full-history `gitleaks git .` (generic-api-key) on the merge_group candidate and wedged the merge queue (memql#1539)."
+condition      = "AND"
+regexTarget    = "match"
+regexes        = ['''encryption-secret-16b''']
+paths = [
+  '''^component/identity/.*_test\.go$''',
+]
