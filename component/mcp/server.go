@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -67,6 +68,14 @@ type Server struct {
 	// and the capability tier (Gate A; #1532, from MEMQL_MCP_MODE).
 	cfg Config
 
+	// session is the per-connection, owner-scoped, NON-DURABLE authored-construct
+	// registry (Phase 3 #1533). One MCP stdio connection is one session, so a
+	// single registry per Server is the session boundary; it is dropped when the
+	// process exits (the session GC). define registers into it; ExecuteAuthored
+	// resolves from it; promote lifts a construct out of it into the durable
+	// shared registries.
+	session *memql.AuthoredRuntimeRegistry
+
 	writeMu sync.Mutex
 }
 
@@ -78,7 +87,7 @@ func NewServer(logger *slog.Logger, name, version string, engine any, cfg Config
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{logger: logger, name: name, version: version, engine: engine, cfg: cfg}
+	return &Server{logger: logger, name: name, version: version, engine: engine, cfg: cfg, session: memql.NewAuthoredRuntimeRegistry()}
 }
 
 // Engine returns the in-process engine handle this head serves. Used by the
@@ -202,6 +211,9 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	if strings.TrimSpace(p.Name) == "" {
 		return errorResponse(id, codeInvalidParams, "tools/call requires a tool name")
 	}
+	// Attach the per-connection authoring session (owner + non-durable registry)
+	// so define/promote and authored call-by-name resolve against it.
+	ctx = withMCPSession(ctx, s.cfg.ActingUser, s.session)
 	result := callMCPTool(ctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, p.Name, p.Arguments)
 	return successResponse(id, result)
 }

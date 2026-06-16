@@ -35,10 +35,13 @@ type fakeEngine struct {
 	reg *fakeRegistry
 
 	// recorded for assertions
-	toolName string
-	toolArgs map[string]any
-	roleSeen string
-	query    string
+	toolName      string
+	toolArgs      map[string]any
+	roleSeen      string
+	query         string
+	authoredOwner string
+	authoredReg   *memql.AuthoredRuntimeRegistry
+	promoted      *memql.AuthoredConstruct
 }
 
 func (e *fakeEngine) Tools() ToolLister { return e.reg }
@@ -61,6 +64,19 @@ func (e *fakeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 	e.query = query
 	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
 	return &memql.ExecuteResult{}, nil
+}
+
+func (e *fakeEngine) ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error) {
+	e.query = query
+	e.authoredOwner = owner
+	e.authoredReg = reg
+	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
+	return &memql.ExecuteResult{}, nil
+}
+
+func (e *fakeEngine) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
+	e.promoted = c
+	return nil
 }
 
 func tool(name string, roles []string, clientExec bool) *memql.Tool {

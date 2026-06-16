@@ -52,14 +52,14 @@ func resultText(res map[string]any) string {
 
 // define: gated by tier=authoring|inline (Gate A) AND role owner|developer
 // (Gate B). A wrong tier OR wrong role is REFUSED (never reaches the op); the
-// right combo PASSES the gate to the "not yet implemented" stub.
+// right combo PASSES the gate and authors the bundle into the session registry.
 func TestGate_Define(t *testing.T) {
 	eng := newFakeEngine()
 	cases := []struct {
 		name        string
 		role        string
 		tier        Tier
-		wantRefused bool   // refused by a gate (vs. reached the not-yet stub)
+		wantRefused bool   // refused by a gate (vs. reached the authoring op)
 		wantReason  string // substring of the refusal message
 	}{
 		{"sealed tier blocks owner", "owner", TierSealed, true, "tier"},
@@ -71,17 +71,28 @@ func TestGate_Define(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := callMCPTool(context.Background(), eng, c.role, c.tier, toolDefine, map[string]any{"bundle": "x"})
-			if !isError(res) {
-				t.Fatalf("define should always be isError in Phase 2, got %v", res)
+			ctx := withMCPSession(context.Background(), "owner-1", newAuthoredRegistry())
+			res := callMCPTool(ctx, eng, c.role, c.tier, toolDefine, map[string]any{"bundle": validSpecBundle})
+			if c.wantRefused {
+				if !isError(res) {
+					t.Fatalf("expected gate refusal (isError), got %v", res)
+				}
+				txt := resultText(res)
+				if !strings.Contains(txt, c.wantReason) {
+					t.Errorf("refusal reason should mention %q, got %q", c.wantReason, txt)
+				}
+				// A gate refusal must NOT have authored anything.
+				if strings.Contains(txt, `"defined"`) {
+					t.Errorf("a refused define must author nothing, got %q", txt)
+				}
+				return
 			}
-			txt := resultText(res)
-			refused := !strings.Contains(txt, "not yet implemented")
-			if refused != c.wantRefused {
-				t.Errorf("refused=%v, want %v (msg=%q)", refused, c.wantRefused, txt)
+			// Gate passed -> the bundle is authored.
+			if isError(res) {
+				t.Fatalf("gate-pass define should succeed, got error %v", res)
 			}
-			if c.wantRefused && !strings.Contains(txt, c.wantReason) {
-				t.Errorf("refusal reason should mention %q, got %q", c.wantReason, txt)
+			if !strings.Contains(resultText(res), "mcpSessionSpec") {
+				t.Errorf("authored result should name the construct, got %q", resultText(res))
 			}
 		})
 	}
@@ -121,27 +132,32 @@ func TestGate_InlineQuery(t *testing.T) {
 	}
 }
 
-// tools/list only advertises define/query when BOTH gates permit them.
+// tools/list only advertises define/query when BOTH gates permit them, and
+// promote strictly tighter than define (owner-only). define = owner|developer
+// + authoring|inline; promote = owner only + authoring|inline.
 func TestGate_Listing(t *testing.T) {
 	eng := newFakeEngine()
 	cases := []struct {
-		role              string
-		tier              Tier
-		wantDefine, wantQ bool
+		role                           string
+		tier                           Tier
+		wantDefine, wantPromote, wantQ bool
 	}{
-		{"owner", TierSealed, false, false},
-		{"owner", TierAuthoring, true, false},
-		{"developer", TierAuthoring, true, false},
-		{"admin", TierAuthoring, false, false}, // admin gets neither
-		{"owner", TierInline, true, true},
-		{"developer", TierInline, true, true},
-		{"reader", TierInline, false, false},
+		{"owner", TierSealed, false, false, false},
+		{"owner", TierAuthoring, true, true, false},
+		{"developer", TierAuthoring, true, false, false}, // developer authors but cannot promote
+		{"admin", TierAuthoring, false, false, false},    // admin gets none
+		{"owner", TierInline, true, true, true},
+		{"developer", TierInline, true, false, true},
+		{"reader", TierInline, false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.role+"/"+c.tier.String(), func(t *testing.T) {
 			names := toolNames(listMCPTools(eng, c.role, c.tier))
 			if names[toolDefine] != c.wantDefine {
 				t.Errorf("define listed=%v, want %v", names[toolDefine], c.wantDefine)
+			}
+			if names[toolPromote] != c.wantPromote {
+				t.Errorf("promote listed=%v, want %v", names[toolPromote], c.wantPromote)
 			}
 			if names[toolQuery] != c.wantQ {
 				t.Errorf("query listed=%v, want %v", names[toolQuery], c.wantQ)

@@ -71,9 +71,11 @@ func tierAllows(t Tier, c opClass) bool {
 }
 
 // Config carries the MCP-specific knobs the server enforces: the acting role
-// (Gate B) and the capability tier (Gate A).
+// (Gate B), the capability tier (Gate A), and the acting user (the session
+// owner that authored constructs are scoped to, Phase 3 #1533).
 type Config struct {
 	ActingRole string
+	ActingUser string
 	Tier       Tier
 }
 
@@ -88,17 +90,38 @@ func roleCanRunInline(role string) bool {
 	return auth.CanRunInline(auth.UserContext{Role: auth.Role(role)})
 }
 
-// gateAuthoring enforces both gates for the `define` op (Tier 2). The actual
-// authoring lands in Phase 3 (#1533); in Phase 2 a permitted call returns a
-// clean "not yet" so the gate behaviour is testable end-to-end.
-func gateAuthoring(role string, tier Tier) map[string]any {
+// roleCanPromote reports whether the role may promote a session-authored
+// construct into the durable/shared schema. Promotion is OWNER-ONLY (design §5:
+// "promotion ... is a separate, higher-privileged action -- owner only"): a
+// developer can author + run inline, but only an owner makes a construct
+// permanent. This is the higher bar than CanAuthor on purpose.
+func roleCanPromote(role string) bool {
+	return strings.EqualFold(strings.TrimSpace(role), string(auth.RoleOwner))
+}
+
+// authoringGate is Gate A + Gate B for the `define` op (Tier 2): the deployment
+// must enable the authoring class AND the role must pass CanAuthor. Returns the
+// allow decision plus a typed denial message for the refused case.
+func authoringGate(role string, tier Tier) (bool, string) {
 	if !tierAllows(tier, classAuthor) {
-		return errorResult("define is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=authoring or inline)")
+		return false, "define is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=authoring or inline)"
 	}
 	if !roleCanAuthor(role) {
-		return errorResult("define requires the owner or developer role")
+		return false, "define requires the owner or developer role"
 	}
-	return errorResult("define is permitted but not yet implemented (authoring lands in Phase 3, memql#1533)")
+	return true, ""
+}
+
+// promoteGate is Gate A + Gate B for the `promote` op: the authoring class must
+// be enabled (a sealed deployment promotes nothing) AND the role must be owner.
+func promoteGate(role string, tier Tier) (bool, string) {
+	if !tierAllows(tier, classAuthor) {
+		return false, "promote is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=authoring or inline)"
+	}
+	if !roleCanPromote(role) {
+		return false, "promote requires the owner role (developers may author + run inline, but only an owner makes a construct durable)"
+	}
+	return true, ""
 }
 
 // gateInline enforces both gates for the inline `query` op (Tier 3). The actual
