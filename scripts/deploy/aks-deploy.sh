@@ -89,6 +89,12 @@ readonly CARRIER_DOCKERFILE="$WORKSPACE_ROOT/memql-bff-copresent/Dockerfile"
 # and every carrier compile reuses it via the Dockerfile's CARRIER_BASE arg --
 # turning "N full carrier builds" into "1 base build + N tag-only compiles".
 readonly CARRIER_BASE_REPO="memql-carrier-base"
+# Engine node types that do NOT depend on the carrier base (no CoPresent DSL),
+# so they can build concurrently with the base (#1512 wave A). This is exactly
+# ENGINE_NODE_TYPES minus CARRIER_NODE_TYPES.
+readonly ENGINE_ONLY_NODE_TYPES=(identity voice)
+# Poll interval (seconds) for the async `az acr build --no-wait` runs (#1512).
+ACR_POLL_INTERVAL="${ACR_POLL_INTERVAL:-15}"
 
 # Every Deployment this script rolls -- the rollback target set when the
 # post-deploy smoke gate fails (engine nodes + the bff carrier + the SPA).
@@ -354,28 +360,46 @@ function is_carrier_node() {
     return 1
 }
 
-# build_carrier_base -- build + push the shared carrier-base image ONCE
-# (build-speed #1507), so each carrier compile (build_one for a carrier node)
-# reuses it via --build-arg CARRIER_BASE instead of re-running the expensive
-# prefix. The base is an internal build accelerator -- no manifest pins it and
-# nothing is deployed from it -- so it is NOT subject to the release-tag
-# immutability guard; it is regenerated from the same source on every cut.
-# `--target carrier-base` stops the build at the prefix stage (no compile).
-function build_carrier_base() {
+# queue_carrier_base TAG -- queue the shared carrier-base build with
+# `az acr build --no-wait` and echo its ACR run-id (build-speed #1507 + #1512).
+# The base is built ONCE so each carrier compile reuses it via --build-arg
+# CARRIER_BASE instead of re-running the expensive prefix; `--target
+# carrier-base` stops at the prefix stage (no compile). The base is an internal
+# build accelerator (no manifest pins it, nothing deploys from it), so it is NOT
+# subject to the release-tag immutability guard. All human output goes to
+# stderr; STDOUT carries ONLY the run-id so the caller can capture + poll it.
+function queue_carrier_base() {
     local tag="$1"
     local image="${CARRIER_BASE_REPO}:${tag}"
     local -a args=(acr build --registry "$ACR_NAME" --image "$image"
-        --platform linux/amd64 --target carrier-base -f "$CARRIER_DOCKERFILE")
-    info "building shared carrier base ${ACR_LOGIN_SERVER}/${image} (once for the ${#CARRIER_NODE_TYPES[@]} carrier nodes)..."
-    run_or_plan az "${args[@]}" "$WORKSPACE_ROOT"
+        --platform linux/amd64 --target carrier-base -f "$CARRIER_DOCKERFILE"
+        --no-wait --query runId --output tsv "$WORKSPACE_ROOT")
+    info "queuing shared carrier base ${ACR_LOGIN_SERVER}/${image} (once for the ${#CARRIER_NODE_TYPES[@]} carrier nodes)..." >&2
+    if [ "$DRY_RUN" = true ]; then
+        plan "az ${args[*]}" >&2
+        echo "dryrun-carrier-base"
+        return 0
+    fi
+    local run_id
+    run_id="$(az "${args[@]}")"
+    if [ -z "$run_id" ]; then
+        echo "ERROR: failed to queue carrier-base build (no run-id returned)" >&2
+        exit 1
+    fi
+    echo "$run_id"
 }
 
-function build_one() {
+# queue_build NT TAG -- queue one node image build with `az acr build --no-wait`
+# and echo its ACR run-id (build-speed #1512). Mirrors the per-node build args:
+# engine nodes build from this repo's Dockerfile, carrier nodes from the carrier
+# Dockerfile (workspace-parent context) reusing the shared base via CARRIER_BASE
+# (#1507); voice adds the CGO voice-runtime. All human output goes to stderr;
+# STDOUT carries ONLY the run-id. In --dry-run it prints the plan + echoes a
+# placeholder id so the wave plumbing stays exercised.
+function queue_build() {
     local nt="$1" tag="$2"
-    ensure_tag_immutable "$nt" "$tag"
+    ensure_tag_immutable "$nt" "$tag" >&2
     local image="memql-${nt}:${tag}"
-    # Carrier nodes (CoPresent DSL) build from the carrier Dockerfile with the
-    # workspace parent as context; engine nodes (voice/identity) from this repo.
     local dockerfile="$REPO_ROOT/Dockerfile" context="$REPO_ROOT" kind="engine"
     if is_carrier_node "$nt"; then
         dockerfile="$CARRIER_DOCKERFILE"; context="$WORKSPACE_ROOT"; kind="carrier"
@@ -384,15 +408,69 @@ function build_one() {
         --platform linux/amd64 --build-arg "BUILD_TAGS=${nt}" -f "$dockerfile")
     if is_carrier_node "$nt"; then
         # Reuse the pre-built shared base (#1507): the compile stage builds
-        # FROM this image, so only the tag-specific `go build` runs here -- not
-        # the deps/tailwind/templ/source prefix.
+        # FROM this image, so only the tag-specific `go build` runs here.
         args+=(--build-arg "CARRIER_BASE=${ACR_LOGIN_SERVER}/${CARRIER_BASE_REPO}:${tag}")
     fi
     if [ "$nt" = "voice" ]; then
         args+=(--build-arg "CGO_ENABLED=1" --target voice-runtime)
     fi
-    info "building ${ACR_LOGIN_SERVER}/${image} (BUILD_TAGS=${nt}, ${kind} build)..."
-    run_or_plan az "${args[@]}" "$context"
+    args+=(--no-wait --query runId --output tsv "$context")
+    info "queuing ${ACR_LOGIN_SERVER}/${image} (BUILD_TAGS=${nt}, ${kind})..." >&2
+    if [ "$DRY_RUN" = true ]; then
+        plan "az ${args[*]}" >&2
+        echo "dryrun-${nt}"
+        return 0
+    fi
+    local run_id
+    run_id="$(az "${args[@]}")"
+    if [ -z "$run_id" ]; then
+        echo "ERROR: failed to queue build for ${image} (no run-id returned)" >&2
+        exit 1
+    fi
+    echo "$run_id"
+}
+
+# wait_for_acr_runs LABEL=RUNID ... -- poll the given ACR runs to terminal
+# status, failing the cut on the first non-Succeeded run. ACR executes queued
+# `--no-wait` runs concurrently (~2-3 at a time), so queuing all builds up front
+# then polling overlaps them -- wall-clock ~= the slowest single image instead
+# of the sum of serial foreground builds. bash 3.2 has no associative arrays, so
+# runs are tracked as "label=runid" tokens in an indexed array.
+function wait_for_acr_runs() {
+    [ "$#" -eq 0 ] && return 0
+    if [ "$DRY_RUN" = true ]; then
+        info "(dry-run) would poll $# ACR run(s) to completion: $*"
+        return 0
+    fi
+    local -a pending=("$@")
+    while [ "${#pending[@]}" -gt 0 ]; do
+        local -a still=()
+        local pair label run_id status
+        for pair in "${pending[@]}"; do
+            label="${pair%%=*}"; run_id="${pair#*=}"
+            status="$(az acr task show-run --registry "$ACR_NAME" --run-id "$run_id" --query status --output tsv 2>/dev/null || true)"
+            case "$status" in
+                Succeeded)
+                    info "  [done] ${label} (run ${run_id})"
+                    ;;
+                Failed|Canceled|Error|Timeout)
+                    echo "ERROR: ACR build for ${label} (run ${run_id}) ended: ${status}" >&2
+                    echo "       Inspect: az acr task logs --registry ${ACR_NAME} --run-id ${run_id}" >&2
+                    exit 1
+                    ;;
+                *)
+                    # Queued / Running / Started / empty -> keep polling.
+                    still+=("${pair}")
+                    ;;
+            esac
+        done
+        # Reassign without tripping `set -u` on an empty array (bash 3.2).
+        pending=("${still[@]:-}")
+        if [ "${#pending[@]}" -eq 1 ] && [ -z "${pending[0]}" ]; then
+            pending=()
+        fi
+        [ "${#pending[@]}" -gt 0 ] && sleep "$ACR_POLL_INTERVAL"
+    done
 }
 
 function build_and_push() {
@@ -407,13 +485,31 @@ function build_and_push() {
         SKIP_BUILD=true
         return 0
     fi
-    # Build the shared carrier base ONCE (#1507) before the per-node loop;
-    # each carrier compile below reuses it via build_one's CARRIER_BASE arg.
-    build_carrier_base "$VERSION"
+    # Queue every build with `az acr build --no-wait` + poll, so ACR runs them
+    # concurrently server-side (#1512) instead of serial foreground builds.
+    # TWO waves because the carrier compiles build FROM the shared carrier base
+    # (#1507):
+    #   wave A = the base + the engine-only nodes (identity, voice) -- neither
+    #            depends on the base, so they overlap its build;
+    #   wave B = the carriers, queued only after the base run has SUCCEEDED
+    #            (and been pushed), so their `FROM .../memql-carrier-base:<tag>`
+    #            can pull it.
     local nt
-    for nt in "${ENGINE_NODE_TYPES[@]}"; do
-        build_one "$nt" "$VERSION"
+    local -a waveA=("carrier-base=$(queue_carrier_base "$VERSION")")
+    for nt in "${ENGINE_ONLY_NODE_TYPES[@]}"; do
+        waveA+=("${nt}=$(queue_build "$nt" "$VERSION")")
     done
+    info "wave A queued (carrier base + ${ENGINE_ONLY_NODE_TYPES[*]}); polling to completion..."
+    wait_for_acr_runs "${waveA[@]}"
+
+    local -a waveB=()
+    for nt in "${CARRIER_NODE_TYPES[@]}"; do
+        waveB+=("${nt}=$(queue_build "$nt" "$VERSION")")
+    done
+    info "wave B queued (carriers: ${CARRIER_NODE_TYPES[*]}); polling to completion..."
+    wait_for_acr_runs "${waveB[@]}"
+
+    info "all builds complete (1 base + ${#ENGINE_ONLY_NODE_TYPES[@]} engine + ${#CARRIER_NODE_TYPES[@]} carrier)."
     info "carrier (memql-bff-copresent) + SPA (copresent) are built + pinned from their own repos -- not built here."
 }
 
