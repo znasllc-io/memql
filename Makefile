@@ -748,6 +748,50 @@ deploy-autoscaler:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
+.PHONY: release-staging reset-staging
+
+## ONE idempotent operator command to take staging to a VALIDATED release, or to
+## RECOVER a release that went green-on-drift but is actually broken
+## (znasllc-io/memql#1524, epic #1518). Full mode pre-flights the shared identity
+## signing seed (#1515), then delegates to aks-deploy.sh -- build + push, apply
+## the digest-pinned overlay identity-first, drift-assert, PROMOTE the bff
+## Rollout (#1520), run the FUNCTIONAL post-deploy gate (#1519: bff promoted +
+## JWKS coherent + BFF->agent auth), smoke the front door, record validated.
+## VERIFY=1 is the 2026-06-16 RECOVERY as one command: skip build/apply and run
+## ONLY the bff promote + functional gate + smoke against what is already live
+## (heals a stuck/unpromoted, JWKS-incoherent release). Re-runnable + fail-loud.
+## Impl in scripts/deploy/staging-release.sh.
+##   make release-staging VERSION=0.9.61                 # full: build -> apply -> promote -> gate -> smoke
+##   make release-staging VERSION=0.9.61 DRY_RUN=1       # full plan, no changes
+##   make release-staging VERIFY=1                       # RECOVER a stuck/false-green release (promote+gate+smoke)
+##   make release-staging SKIP_BUILD=1 VERSION=0.9.61    # roll already-pushed tags, then gate
+release-staging:
+	@bash scripts/deploy/staging-release.sh \
+		--env=$${ENV:-staging} \
+		$${VERSION:+--version=$$VERSION} \
+		$${VERIFY:+--verify} \
+		$${SKIP_BUILD:+--skip-build} \
+		$${NO_SMOKE:+--no-smoke} \
+		$${NO_GATE:+--no-gate} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## ONE idempotent operator command to RESET staging to a fresh, FULLY-USABLE
+## state (znasllc-io/memql#1524): the auth-coherent DB wipe (#1500/#1522) plus a
+## post-reset FUNCTIONAL verification (#1519) so a "fresh start" comes up with
+## login working, JWKS coherent, and the mesh reconnected -- never the
+## half-broken auth state that needed a manual reseal + mesh roll on 2026-06-16.
+## DESTRUCTIVE + staging-only + context-guarded; the underlying wipe asks you to
+## type 'reset staging' unless ARGS=--yes. Impl in scripts/deploy/staging-reset.sh.
+##   make reset-staging DRY_RUN=1        # preview the reset + verify plan
+##   make reset-staging                  # wipe staging, then verify usable
+##   make reset-staging ARGS=--yes       # wipe non-interactively, then verify
+reset-staging:
+	@bash scripts/deploy/staging-reset.sh \
+		--env=$${ENV:-staging} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
 .PHONY: staging-db-reset
 
 ## DESTRUCTIVE, MANUAL staging DB reset (znasllc-io/memql#1500), AUTH-COHERENT

@@ -346,6 +346,10 @@ already-promoted Rollout is a no-op and the checks are pure reads. Tuning knobs:
   steps (`--apply` re-applies the overlay). Under Argo CD (Phase 2, #700) the
   revert push reconciles automatically. The old `kubectl rollout undo` path is
   retired — it reverted to the manifest tag, not the prior digest (#684).
+- **Stuck / false-green release recovery**: a release reported live but parked
+  unpromoted or JWKS-incoherent is healed with one idempotent command —
+  `make release-staging VERIFY=1` (promote the stuck bff + re-run the functional
+  gate + smoke, fail-loud). See §11.
 - **Secret recovery**: the sealed envelope is in Key Vault (`kv-memql-<env>/
   memql-genesis-b64`); re-store it into `memql-secrets` and roll (§4).
 - **DB**: managed Tiger Cloud (point-in-time recovery via Tiger). The DSN lives
@@ -398,3 +402,65 @@ kubectl create secret generic memql-secrets -n memql \
 
 See also `deploy/k8s/README.md` (manifest-level reference) and
 `deploy/k8s/README-public-entry.md` (ingress-nginx + cert-manager + internal TLS).
+
+---
+
+## 11. Idempotent operator entrypoints: `make release-staging` / `make reset-staging` (#1524)
+
+The 2026-06-16 outage was not bad luck — it was an *un-scripted, multi-step
+operator dance* with silent failure modes (a parked-unpromoted bff Rollout, a
+JWKS-incoherent identity) that a digest-drift check could not see, and the
+recovery took ~5 ad-hoc `/tmp` scripts. The durable fixes shipped across #1515
+(shared signing seed), #1519/#1520 (functional gate + bff auto-promote, §7.1),
+#1521 (mesh re-mint), and #1522 (auth-coherent reset). #1524 bakes them into
+**two single, re-runnable, fail-loud commands** so the dance — and its recovery
+— is never improvised again. Both are staging-only, context-guarded, and
+support `DRY_RUN=1` (full plan, no cluster needed).
+
+### `make release-staging` — take staging to a *validated* release (or recover one)
+
+`scripts/deploy/staging-release.sh`. A read-only auth-coherence **pre-flight**
+(the shared identity signing seed that was missing in the incident, #1515), then:
+
+- **Full mode** (`make release-staging VERSION=X`) delegates to the deploy
+  engine `make deploy` (§2): build + push → apply the digest-pinned overlay
+  identity-first → drift assert → **promote the bff Rollout** (#1520) → the
+  **functional post-deploy gate** (#1519: bff promoted + JWKS coherent +
+  BFF→agent auth) → front-door smoke → record validated. Re-running is
+  idempotent (immutable tags, declarative apply, promote handles
+  already-promoted, the gate re-validates). A non-zero anywhere **aborts** —
+  it never prints a green result over a broken release.
+
+- **Recovery mode** (`make release-staging VERIFY=1`) is the 2026-06-16
+  remediation as ONE command: no build, no apply — just the bff promote + the
+  functional gate + smoke against whatever is already live. A release that went
+  "green on drift" but parked unpromoted / JWKS-incoherent is healed here, and
+  it fails **loudly** if auth is still incoherent instead of an operator
+  hand-running `kubectl argo rollouts promote bff` plus a manual probe.
+
+```bash
+make release-staging VERSION=0.9.61            # full: build -> apply -> promote -> gate -> smoke -> record
+make release-staging VERSION=0.9.61 DRY_RUN=1  # full plan, nothing changes
+make release-staging VERIFY=1                  # RECOVER a stuck/false-green release
+make release-staging SKIP_BUILD=1 VERSION=0.9.61   # roll already-pushed tags, then gate
+```
+
+### `make reset-staging` — reset to a fresh, *fully-usable* state
+
+`scripts/deploy/staging-reset.sh`. Wraps the auth-coherent DB wipe
+(`staging-db-reset.sh`, #1500/#1522) with the same coherence pre-flight and a
+**post-reset functional verification** (the §7.1 gate) — so a "fresh start"
+comes up with login working, JWKS coherent, and the mesh reconnected, never the
+half-broken auth state that needed a manual reseal + mesh roll. DESTRUCTIVE; the
+underlying wipe asks you to type `reset staging` unless `ARGS=--yes`.
+
+```bash
+make reset-staging DRY_RUN=1   # preview the reset + verify plan
+make reset-staging             # wipe staging, then verify usable
+make reset-staging ARGS=--yes  # wipe non-interactively, then verify
+```
+
+> These supersede the ad-hoc recovery scripts from the incident. The lower-level
+> building blocks (`make deploy`, `make staging-db-reset`, the standalone
+> `post-deploy-gate.sh`) still exist; `release-staging` / `reset-staging` are the
+> blessed operator front doors that sequence them correctly and fail loud.
