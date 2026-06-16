@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // voiceTimingKey is the discoverable structured-log key every voice-path
@@ -602,6 +603,37 @@ func resolveVoiceSpaceContextVia(ctx context.Context, engine voiceParticipantRes
 	return out
 }
 
+// resolveVoiceSpaceOwnerVia resolves a space's ownerUserId through the narrow
+// voiceParticipantResolver so it is unit-testable without a live engine
+// (mirrors resolveVoiceSpaceContextVia). This is the source of the auto-injected
+// `ownerUserId` tool default on the realtime voice CallTool proxy hop (#1503):
+// the voice-agent authenticates as a service identity (class="voice_agent"),
+// so actor.userId is NOT the human and the ownerUserId default would otherwise
+// be empty -- the space owner is the correct artifact attribution (a plan in a
+// space belongs to the space owner; the daily space owner IS the user). Returns
+// "" on any lookup miss so the caller leaves the default unset rather than
+// stamping a wrong owner.
+func resolveVoiceSpaceOwnerVia(ctx context.Context, engine voiceParticipantResolver, spaceId string) string {
+	if engine == nil || strings.TrimSpace(spaceId) == "" {
+		return ""
+	}
+	// Canonicalize the bare space slug to the stored
+	// `<partition>:v1:cognition:space:<slug>` form (mirrors
+	// resolveVoiceSpaceContextVia); fall back to the wire value so an
+	// already-canonical id still resolves.
+	canonicalSpace, err := engine.CanonicalizeIdValue(ctx, spaceId, "v1:cognition:space")
+	if err != nil || canonicalSpace == "" {
+		canonicalSpace = spaceId
+	}
+	spaceJSON, _ := json.Marshal(canonicalSpace)
+	result, err := engine.Execute(ctx, fmt.Sprintf(`querySpaceMeta({spaceId: %s})`, string(spaceJSON)))
+	if err != nil || result == nil {
+		return ""
+	}
+	owner, _ := extractFirstAgentField(result.OutputPayload(), "ownerUserId")
+	return strings.TrimSpace(owner)
+}
+
 // extractSpaceGoalStatement pulls payload.goal.statement off a spaceFull-shaped
 // result row. Empty when the space carries no goal (the AI-describe create path
 // produces a name without a goal). Probes both the bare `goal` key and the
@@ -993,6 +1025,73 @@ func (s *streamSession) stampVoiceAgentScopeOnCallTool(msg *memqlv1.CallToolMsg)
 	if gaRole != "" {
 		msg.VoiceAgentGaRole = gaRole
 	}
+}
+
+// contextWithVoiceCallToolDefaults attaches the realtime-voice CallTool
+// auto-injection defaults to ctx so the engine's central applyToolDefaults
+// (in ExecuteTool) can stamp the `@autoInjected` spaceId / agentId /
+// ownerUserId fields the voice model is forbidden from supplying (#1503).
+//
+// This is the agent-node (proxied receiver) counterpart to the chat path's
+// turn-context stamping (integrations/agent/streaming.go). The voice CallTool
+// arrives over the bff->agent proxy hop carrying the bound voice scope on the
+// CallToolMsg (VoiceAgentSpaceId / VoiceAgentGaAgentId, stamped by
+// stampVoiceAgentScopeOnCallTool); the local agent-node session has none of it.
+//
+//   - spaceId  <- the threaded VoiceAgentSpaceId.
+//   - agentId  <- the space's group-GA agent (resolveGroupGAAgentId), the same
+//     resolution the ListTools scope gate uses. Becomes the produced plan's
+//     ownerAgentId so the production turn dispatches straight to the assistant.
+//   - ownerUserId <- the bound space's owner (resolveVoiceSpaceOwner). The
+//     voice-agent authenticates as a service identity, so actor.userId is NOT
+//     the human; the space owner is the correct artifact attribution.
+//
+// agentId is resolved server-side (not threaded on the CallToolMsg) so no proto
+// change is needed; ownerUserId/spaceId are the load-bearing defaults for
+// produceArtifact (only those two are @required on the builtin).
+//
+// No-op (returns ctx unchanged) for non-voice callers -- a plain browser
+// CallTool carries no VoiceAgentSpaceId, and the chat path already stamps its
+// own defaults upstream. Setting it for those callers would be inert anyway
+// (applyToolDefaults only touches a tool's declared @autoInjected fields), but
+// gating on the voice marker keeps the extra space lookups off the hot browser
+// path.
+func (s *streamSession) contextWithVoiceCallToolDefaults(ctx context.Context, msg *memqlv1.CallToolMsg) context.Context {
+	if s == nil || s.service == nil || s.service.engine == nil || msg == nil {
+		return ctx
+	}
+	return voiceCallToolDefaultsVia(ctx, s.service.engine, msg, s.logger)
+}
+
+// voiceCallToolDefaultsVia is the seam-based core of
+// contextWithVoiceCallToolDefaults (mirrors voiceAgentScopedToolNamesVia): it
+// reads the threaded voice scope off the CallToolMsg and resolves the
+// auto-injection defaults through the narrow voiceParticipantResolver, so the
+// cross-node proxy hop (read CallToolMsg.VoiceAgentSpaceId -> resolve space
+// owner -> stamp ToolDefaults) is unit-testable without a live engine + DB.
+func voiceCallToolDefaultsVia(ctx context.Context, engine voiceParticipantResolver, msg *memqlv1.CallToolMsg, logger *slog.Logger) context.Context {
+	if engine == nil || msg == nil {
+		return ctx
+	}
+	spaceId := strings.TrimSpace(msg.GetVoiceAgentSpaceId())
+	if spaceId == "" {
+		// Not a proxied voice CallTool (or pre-#1503 bff that doesn't thread
+		// the scope) -- leave the context untouched.
+		return ctx
+	}
+	// Run the resolution reads as the voice-agent service actor (the same actor
+	// the other voice-path resolvers use), independent of the incoming stream
+	// ctx's provenance. querySpaceMeta is @public; queryGroupGAForSpace reads
+	// the space's GA participant.
+	resolveCtx := contextWithVoiceAgentActor(ctx)
+	defaults := map[string]any{"spaceId": spaceId}
+	if agentId := resolveGroupGAAgentIdVia(resolveCtx, engine, spaceId, logger); agentId != "" {
+		defaults["agentId"] = agentId
+	}
+	if owner := resolveVoiceSpaceOwnerVia(resolveCtx, engine, spaceId); owner != "" {
+		defaults["ownerUserId"] = owner
+	}
+	return common.ContextWithToolDefaults(ctx, defaults)
 }
 
 // voiceAgentScopedToolNamesForRequest resolves the GA tool-scope using the

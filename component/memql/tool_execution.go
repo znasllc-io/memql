@@ -16,6 +16,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/znasllc-io/memql/component/safety"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // remainingPlaceholderRegex matches a `$args.<identifier>` placeholder
@@ -294,6 +295,17 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	if tool == nil {
 		return nil, fmt.Errorf("tool is nil")
 	}
+
+	// Central auto-injection chokepoint (memql#107 / memql#1503). Merge the
+	// server-provided ToolDefaults from ctx over the (LLM-supplied) args so
+	// every dispatch path -- the streaming/non-streaming tool loops AND the
+	// realtime-voice CallTool proxy hop (component/grpc handleCallTool, which
+	// does NOT pre-merge) -- stamps the tool's @autoInjected fields
+	// (ownerUserId / spaceId / agentId / ...). For @autoInjected fields the
+	// server default ALWAYS wins (forged LLM values dropped); other defaults
+	// are fill-if-missing. Idempotent for callers that already pre-merged
+	// (si_tool_loop.go), so it is safe defense-in-depth there too.
+	args = applyToolDefaults(tool, args, common.ToolDefaultsFromContext(ctx))
 
 	// Universal agent-only enforcement. Without an acting-agent role
 	// on ctx, the call is by definition not from an agent and the
