@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -88,7 +89,19 @@ type Identity struct {
 	// The peerConnection wraps its context with this token before
 	// opening the stream so the remote NodeServer's class-pin
 	// interceptor can verify. See #105.
+	//
+	// Mutated at runtime by the auth-failure re-mint path (memql#1521):
+	// when identity's signing key rotates and a dial is rejected, the
+	// reconnect loop re-fetches a freshly-signed token and stores it
+	// here so every subsequent dial presents the live token. Guard all
+	// access with tokenMu via BearerTokenValue / setBearerToken; direct
+	// field reads from a goroutine race with the re-mint write.
 	BearerToken string
+
+	// tokenMu guards BearerToken now that it is mutated post-startup by
+	// the re-mint path. Connections shared across goroutines read it on
+	// every dial.
+	tokenMu sync.RWMutex
 }
 
 // CompiledNodeType returns the node type this binary was built for.
@@ -202,7 +215,7 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 	if id == nil {
 		return nil
 	}
-	if strings.TrimSpace(id.BearerToken) != "" {
+	if strings.TrimSpace(id.BearerTokenValue()) != "" {
 		return nil
 	}
 	// The identity service is the node-token ISSUER -- it hosts the
@@ -225,8 +238,62 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 	if !ok {
 		return nil
 	}
-	id.BearerToken = token
+	id.setBearerToken(token)
 	return nil
+}
+
+// BearerTokenValue returns the current node JWT under the token lock. Use
+// this (not the bare field) from any goroutine: the re-mint path (memql#1521)
+// writes BearerToken at runtime, so a direct read races the write.
+func (id *Identity) BearerTokenValue() string {
+	if id == nil {
+		return ""
+	}
+	id.tokenMu.RLock()
+	defer id.tokenMu.RUnlock()
+	return id.BearerToken
+}
+
+// setBearerToken stores a freshly-acquired node JWT under the token lock.
+func (id *Identity) setBearerToken(tok string) {
+	if id == nil {
+		return
+	}
+	id.tokenMu.Lock()
+	defer id.tokenMu.Unlock()
+	id.BearerToken = tok
+}
+
+// CanRemintBearerToken reports whether this node can re-fetch its node token
+// on an auth failure (memql#1521): the self-bootstrap mint path must be
+// configured (MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL). When
+// the token was provisioned out-of-band via MEMQL_NODE_TOKEN there is nothing
+// to re-mint, so connections leave their reauth hook unset and fall back to
+// the legacy reconnect-with-the-same-token behaviour. The identity node never
+// re-mints (it is the issuer, not a client).
+func (id *Identity) CanRemintBearerToken() bool {
+	if id == nil || id.Type == NodeTypeIdentity {
+		return false
+	}
+	return bootstrapMintConfigured()
+}
+
+// RemintBearerToken re-acquires a fresh class="node" JWT from identity and
+// stores it on the Identity (memql#1521). Called by a connection's reauth
+// hook after an Unauthenticated / unknown-kid rejection -- identity now
+// serves the rotated signing key, so the new token verifies where the old one
+// looped forever. Returns the new token (also stored) or an error if the
+// re-mint failed (identity unreachable, wrong secret, etc.).
+func (id *Identity) RemintBearerToken(ctx context.Context, logger *slog.Logger) (string, error) {
+	if id == nil {
+		return "", nil
+	}
+	tok, err := remintNodeToken(ctx, logger, id.ID, string(id.Type))
+	if err != nil {
+		return "", err
+	}
+	id.setBearerToken(tok)
+	return tok, nil
 }
 
 // NodeId returns the node's unique identifier.

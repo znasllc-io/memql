@@ -523,6 +523,14 @@ func (wd *WorkerDialer) dialTarget(parent context.Context, target WorkerTarget) 
 	// Advertise this node's lifecycle health on every heartbeat to the worker
 	// (memql#1268) so peers route around us the instant we drain.
 	conn.SetHealthFn(wd.peerMgr.Lifecycle().Health)
+	// Re-mint our node token if the worker rejects it after an identity key
+	// rotation (memql#1521), so the BFF recovers on its own instead of looping
+	// forever on a dead token. Only wired when self-bootstrap is configured.
+	if wd.identity.CanRemintBearerToken() {
+		conn.SetReauthFn(func(ctx context.Context) (string, error) {
+			return wd.identity.RemintBearerToken(ctx, wd.logger)
+		})
+	}
 
 	entry := &dialEntry{
 		target: target,

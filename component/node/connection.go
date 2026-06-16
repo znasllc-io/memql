@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/grpctls"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -30,6 +33,14 @@ const (
 	// uiClick* + utterance + presence + text:chunk + canvas events,
 	// easily >100 across a few seconds).
 	sendChCapacity = 1024
+
+	// remintInitialBackoff / remintMaxBackoff bound the auth-failure re-mint
+	// cadence (memql#1521). The FIRST auth rejection re-mints immediately (a
+	// key rotation is the expected trigger and we want to recover fast);
+	// consecutive rejections back off so a persistently-misconfigured /
+	// down identity isn't hammered with mint POSTs.
+	remintInitialBackoff = 2 * time.Second
+	remintMaxBackoff     = 30 * time.Second
 
 	// defaultReadLivenessFactor is the multiple of the heartbeat interval
 	// after which an inbound-silent stream is declared half-dead and torn
@@ -79,6 +90,23 @@ type peerConnection struct {
 	// connection created without a lifecycle source keeps the old wire
 	// behaviour and the gossip contract stays backward-compatible.
 	healthFn func() nodev1.NodeHealthStatus
+
+	// reauthFn re-acquires a fresh node token after an auth rejection
+	// (memql#1521). When identity's signing key rotates, the token this
+	// connection presents is rejected with Unauthenticated / "unknown kid"
+	// on every dial; without a re-mint the reconnect loop reuses the dead
+	// token forever (the stuck loop). When set, the Connect loop calls this
+	// on an auth-rejection error to fetch a token signed by the CURRENT key,
+	// then retries. nil leaves the legacy reconnect-with-the-same-token
+	// behaviour (single-node dev, or an out-of-band MEMQL_NODE_TOKEN that
+	// cannot be re-minted). It returns the new token (already stored on the
+	// shared Identity) or an error if the re-mint failed.
+	reauthFn func(ctx context.Context) (string, error)
+
+	// remintBackoff bounds how often the auth-failure re-mint fires across
+	// reconnect attempts so a persistently-rejecting identity isn't hammered.
+	// Grows on consecutive auth rejections, resets on a clean connect.
+	remintBackoff time.Duration
 }
 
 // newPeerConnection creates a new outbound connection to a peer.
@@ -111,6 +139,17 @@ func (pc *peerConnection) SetHeartbeatInterval(d time.Duration) {
 func (pc *peerConnection) SetHealthFn(fn func() nodev1.NodeHealthStatus) {
 	pc.mu.Lock()
 	pc.healthFn = fn
+	pc.mu.Unlock()
+}
+
+// SetReauthFn installs the auth-failure re-mint hook (memql#1521). When set,
+// an Unauthenticated / unknown-kid rejection on a dial triggers a fresh token
+// fetch via fn before the next reconnect attempt, instead of looping forever
+// on the dead token. Must be called before Connect. A nil fn leaves the legacy
+// behaviour (no re-mint). Thread-safe.
+func (pc *peerConnection) SetReauthFn(fn func(ctx context.Context) (string, error)) {
+	pc.mu.Lock()
+	pc.reauthFn = fn
 	pc.mu.Unlock()
 }
 
@@ -164,6 +203,33 @@ func (pc *peerConnection) Connect(ctx context.Context, onMessage func(*nodev1.No
 			return err
 		}
 
+		// Auth rejection (memql#1521): identity's signing key rotated and the
+		// token this connection presents was minted under the OLD key, so the
+		// remote NodeServer rejects it with Unauthenticated / "unknown kid"
+		// every time. Reconnecting with the SAME token loops forever (the
+		// outage). When a re-mint hook is wired, fetch a token signed by the
+		// CURRENT key before retrying so the next dial verifies. The re-mint
+		// itself backs off across consecutive rejections so a down /
+		// misconfigured identity isn't hammered.
+		if isAuthRejection(err) {
+			if pc.tryReauth(ctx, err) {
+				// Fresh token obtained -- retry IMMEDIATELY (no reconnect
+				// backoff): the previous failure was purely an expired
+				// credential, not an unreachable peer, and we want to recover
+				// from the key rotation fast.
+				backoff = initialBackoff
+				continue
+			}
+			// No re-mint hook, or the re-mint failed (already backed off
+			// inside tryReauth). Fall through to the normal reconnect backoff
+			// and try again -- a transient identity blip will clear.
+		} else {
+			// A non-auth failure means the credential is (probably) fine; reset
+			// the re-mint backoff so the next genuine key rotation re-mints
+			// promptly again.
+			pc.resetRemintBackoff()
+		}
+
 		pc.logger.Warn("peer connection lost, reconnecting",
 			"peer_id", pc.nodeId,
 			"address", pc.address,
@@ -182,6 +248,100 @@ func (pc *peerConnection) Connect(ctx context.Context, onMessage func(*nodev1.No
 			backoff = maxBackoff
 		}
 	}
+}
+
+// isAuthRejection reports whether err is a node-auth rejection that a token
+// re-mint could fix (memql#1521): the remote NodeServer's class-pin
+// interceptor returns codes.Unauthenticated for an unknown-kid / expired /
+// invalid token (see component/node/auth.go). We also match the message
+// substrings so a rejection surfaced without a gRPC status (wrapped error,
+// non-status transport) is still recognised. A codes.PermissionDenied (e.g.
+// "node service requires a node-class token") is NOT included -- that is a
+// class/binding problem a fresh same-class token would not fix.
+func isAuthRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok && st.Code() == codes.Unauthenticated {
+		return true
+	}
+	msg := err.Error()
+	for _, needle := range []string{"unknown kid", "invalid or expired token", "Unauthenticated"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// tryReauth runs the re-mint hook (if wired) after an auth rejection, applying
+// a per-connection backoff so consecutive rejections don't hammer identity.
+// Returns true when a fresh token was obtained (caller retries immediately),
+// false when there is no hook or the re-mint failed (caller falls back to the
+// normal reconnect backoff). memql#1521.
+func (pc *peerConnection) tryReauth(ctx context.Context, cause error) bool {
+	pc.mu.Lock()
+	fn := pc.reauthFn
+	wait := pc.remintBackoff
+	pc.mu.Unlock()
+
+	if fn == nil {
+		return false
+	}
+
+	// Backoff BEFORE re-minting on a repeat rejection (wait==0 the first time,
+	// so the initial re-mint after a key rotation fires immediately).
+	if wait > 0 {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(wait):
+		}
+	}
+
+	pc.logger.Warn("node auth rejected; re-minting node token before reconnect",
+		"peer_id", pc.nodeId,
+		"address", pc.address,
+		"error", cause,
+	)
+
+	_, err := fn(ctx)
+	if err != nil {
+		// Grow the backoff so a persistently-failing identity isn't hammered.
+		pc.bumpRemintBackoff()
+		pc.logger.Warn("node token re-mint failed; will retry on the next reconnect",
+			"peer_id", pc.nodeId,
+			"address", pc.address,
+			"error", err,
+		)
+		return false
+	}
+
+	pc.resetRemintBackoff()
+	pc.logger.Info("node token re-minted after auth rejection; retrying connection",
+		"peer_id", pc.nodeId,
+		"address", pc.address,
+	)
+	return true
+}
+
+func (pc *peerConnection) bumpRemintBackoff() {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.remintBackoff <= 0 {
+		pc.remintBackoff = remintInitialBackoff
+		return
+	}
+	pc.remintBackoff = time.Duration(float64(pc.remintBackoff) * backoffFactor)
+	if pc.remintBackoff > remintMaxBackoff {
+		pc.remintBackoff = remintMaxBackoff
+	}
+}
+
+func (pc *peerConnection) resetRemintBackoff() {
+	pc.mu.Lock()
+	pc.remintBackoff = 0
+	pc.mu.Unlock()
 }
 
 // connectOnce establishes a single connection attempt.
@@ -246,9 +406,13 @@ func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(
 	// through unchanged and the legacy "any peer can NodeHello"
 	// behavior holds end-to-end. See #105.
 	streamCtx := ctx
-	if pc.identity != nil && pc.identity.BearerToken != "" {
-		streamCtx = metadata.AppendToOutgoingContext(streamCtx,
-			"authorization", "Bearer "+pc.identity.BearerToken)
+	if pc.identity != nil {
+		// Read under the token lock: the re-mint path (memql#1521) writes
+		// BearerToken at runtime, so a bare field read here would race it.
+		if tok := pc.identity.BearerTokenValue(); tok != "" {
+			streamCtx = metadata.AppendToOutgoingContext(streamCtx,
+				"authorization", "Bearer "+tok)
+		}
 	}
 	stream, err := client.Stream(streamCtx)
 	if err != nil {

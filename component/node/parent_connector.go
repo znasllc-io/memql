@@ -126,6 +126,15 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 	// Advertise this node's lifecycle health on every heartbeat to the parent
 	// (memql#1268) so the parent routes around us the instant we drain.
 	conn.SetHealthFn(pc.peerMgr.Lifecycle().Health)
+	// Re-mint our node token if the parent rejects it after an identity key
+	// rotation (memql#1521), so a leaf recovers on its own instead of looping
+	// forever on a dead token. Only wired when self-bootstrap is configured --
+	// an out-of-band MEMQL_NODE_TOKEN cannot be re-minted.
+	if pc.identity.CanRemintBearerToken() {
+		conn.SetReauthFn(func(ctx context.Context) (string, error) {
+			return pc.identity.RemintBearerToken(ctx, pc.logger)
+		})
+	}
 
 	pc.mu.Lock()
 	pc.conn = conn
