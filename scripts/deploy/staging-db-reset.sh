@@ -3,7 +3,8 @@
 # scripts/deploy/staging-db-reset.sh
 # ==================================
 #
-# DELIBERATE, MANUAL staging database reset (znasllc-io/memql#1500).
+# DELIBERATE, MANUAL staging database reset (znasllc-io/memql#1500), made
+# AUTH-COHERENT (znasllc-io/memql#1522).
 #
 # Wipes the STAGING database back to a fresh, empty state with the correct
 # schema, for when many app iterations have left stale / crappy data behind and
@@ -13,22 +14,53 @@
 # HARD RULE: this is NEVER part of a deploy. `make deploy` / aks-deploy.sh do
 # NOT call it. It only runs when an operator invokes it directly and confirms.
 #
+# Auth coherence (#1522 -- depends on #1515 + #1521)
+# --------------------------------------------------
+# A DB wipe used to leave staging in a HALF-BROKEN auth state: every session
+# row AND every node-token grant lives in the DB, so the wipe invalidates them
+# all, and the cluster only recovered after a manual identity reseal + a manual
+# mesh roll. Two facts make recovery automatic now, and this script LEANS ON
+# BOTH:
+#   * Identity's JWT signing key is a SHARED seed (IDENTITY_SIGNING_KEY_B64)
+#     that rides the sealed genesis envelope (MEMQL_GENESIS_B64 in the
+#     memql-secrets Secret), NOT the DB. The wipe never touches it, so every
+#     identity replica derives the SAME key + kid + JWKS after the reset --
+#     PROVIDED the seed is actually in place (#1515). If it is missing,
+#     identity either fails fast (the #1515 guard) or mints per-pod ephemeral
+#     keys that diverge across replicas, so ~50% of verifications fail. We
+#     therefore PRE-FLIGHT the seed BEFORE wiping and refuse if it is absent.
+#   * Mesh nodes re-mint their class="node" token on an auth-rejection (#1521),
+#     so once identity is back with the stable key every leaf reconnects on its
+#     own -- no manual pod roll.
+#
 # What it does:
 #   1. Refuses unless --env=staging AND the current kube-context looks like the
 #      staging cluster (a wrong-cluster guard).
-#   2. Requires an interactive typed confirmation (unless --yes).
-#   3. Captures + scales the namespace's app Deployments to 0 so nothing writes
-#      mid-reset, restoring the replica counts at the end (even on failure).
-#   4. Wipes: a one-shot in-cluster Job (postgres client) connects with
+#   2. PRE-FLIGHT (#1522): verifies the shared identity signing seed is in place
+#      (memql-secrets carries the genesis envelope, and identity is NOT running
+#      in the divergent ephemeral-key mode) so the post-reset JWKS stays
+#      coherent. Refuses LOUDLY if it is not -- a wipe without the seed would
+#      leave auth unrecoverable without a manual reseal.
+#   3. Requires an interactive typed confirmation (unless --yes).
+#   4. Captures + scales the namespace's app Deployments AND Argo Rollouts to 0
+#      so nothing writes mid-reset, restoring the replica counts at the end
+#      (even on failure).
+#   5. Wipes: a one-shot in-cluster Job (postgres client) connects with
 #      MEMORY_NODES_DATABASE_DSN from the memql-secrets Secret and runs
 #      DROP SCHEMA public CASCADE; CREATE SCHEMA public; + re-grants. The Job is
 #      generated INLINE (no destructive manifest left on disk to apply by
 #      accident).
-#   5. Rebuilds the schema by re-running the existing `memql migrate` Job
+#   6. Rebuilds the schema by re-running the existing `memql migrate` Job
 #      (deploy/k8s/base/migrate-job.yaml), pinned to the live identity image so
 #      the schema matches the deployed version. Migrations are idempotent +
 #      extension-aware.
-#   6. Scales the app back up.
+#   7. Brings the app back up ORDERED (#1522): identity FIRST (waited ready) so
+#      it is serving the stable JWKS before any mesh node bootstraps, then the
+#      remaining workloads -- node tokens re-mint cleanly against a ready issuer
+#      (#1521).
+#   8. VERIFIES auth coherence (#1522): identity becomes Available and is
+#      serving a well-formed JWKS (an in-cluster probe). Reports a clear PASS so
+#      the operator knows login + mesh are healthy with NO manual recovery.
 #
 # Usage:
 #   scripts/deploy/staging-db-reset.sh --env=staging [--namespace=memql]
@@ -61,6 +93,15 @@ WIPE_JOB="memql-db-reset-wipe"
 MIGRATE_JOB="memql-migrate"
 PSQL_IMAGE="postgres:16-alpine"
 
+# Auth coherence (#1522).
+IDENTITY_DEPLOY="identity"            # the auth/JWKS issuer Deployment
+GENESIS_KEY="MEMQL_GENESIS_B64"       # sealed envelope carrying IDENTITY_SIGNING_KEY_B64 (#1515/#550)
+SIGNING_KEY="IDENTITY_SIGNING_KEY_B64" # the shared signing seed, if surfaced directly
+EPHEMERAL_OPT_IN="IDENTITY_ALLOW_EPHEMERAL_KEY" # the #1515 per-pod ephemeral-key opt-in (divergent at >=2 replicas)
+JWKS_VERIFY_JOB="memql-db-reset-jwks-verify"
+JWKS_URL="https://identity:8085/.well-known/jwks.json"  # in-cluster identity TLS JWKS
+IDENTITY_READY_TIMEOUT="180s"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIGRATE_MANIFEST="$SCRIPT_DIR/../../deploy/k8s/base/migrate-job.yaml"
 
@@ -71,7 +112,9 @@ REPLICAS_FILE=""   # tmpfile holding "deploy<TAB>replicas" for restore
 #=============================================================================
 
 function show_help() {
-    sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'
+    # Print the header comment block (line 2 up to, but not including, the
+    # `set -euo pipefail` line) so the help text never drifts from the header.
+    sed -n '2,/^set -euo pipefail/{/^set -euo pipefail/d;p;}' "$0" | sed 's/^# \{0,1\}//'
 }
 
 function err()  { echo "ERROR: $*" >&2; }
@@ -117,6 +160,64 @@ function validate_arguments() {
     info "env=$ENV namespace=$NS context=$ctx dry-run=$DRY_RUN"
 }
 
+# PRE-FLIGHT (#1522): the post-reset cluster's JWKS is only coherent if the
+# shared identity signing seed is in place. The seed rides the sealed genesis
+# envelope ($GENESIS_KEY) in the $SECRET_NAME Secret (#1515/#550); the wipe
+# never touches the Secret, so the seed survives the reset -- but ONLY if it is
+# actually there. We REFUSE to wipe if (a) the Secret/envelope is missing, or
+# (b) identity is running in the divergent per-pod ephemeral-key mode with >=2
+# replicas. A wipe in either state leaves auth unrecoverable without a manual
+# reseal -- exactly the half-broken state #1522 exists to prevent.
+function verify_auth_seed() {
+    info "pre-flight: verifying the shared identity signing seed (#1515) is in place..."
+
+    # (a) The Secret must exist and carry the sealed genesis envelope (which
+    #     contains IDENTITY_SIGNING_KEY_B64), or the seed surfaced directly.
+    if ! kubectl -n "$NS" get secret "$SECRET_NAME" >/dev/null 2>&1; then
+        err "Secret '$SECRET_NAME' not found in namespace '$NS' -- cannot verify the identity signing seed."
+        err "the reset would leave identity with no shared key. Seal + apply the genesis envelope first"
+        err "(scripts/secrets/reseal-genesis.sh) so $GENESIS_KEY / $SIGNING_KEY is present."
+        exit 1
+    fi
+    # List the Secret's data KEY NAMES (one per line) -- go-template, not
+    # jsonpath, so we get plain key names instead of a Go map literal.
+    # The go-template vars below are template syntax, not shell expansions.
+    local secret_keys=""
+    # shellcheck disable=SC2016
+    secret_keys="$(kubectl -n "$NS" get secret "$SECRET_NAME" \
+        -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+    if ! printf '%s\n' "$secret_keys" | grep -qxE "$GENESIS_KEY|$SIGNING_KEY"; then
+        err "Secret '$SECRET_NAME' carries neither $GENESIS_KEY (sealed envelope) nor $SIGNING_KEY (direct seed)."
+        err "identity would mint a per-pod key after the reset and JWKS would diverge across replicas (#1515)."
+        err "reseal the genesis envelope (scripts/secrets/reseal-genesis.sh) before resetting."
+        exit 1
+    fi
+    info "  seed source present in $SECRET_NAME (genesis envelope or direct seed)."
+
+    # (b) Identity must NOT be in the divergent ephemeral-key mode at >=2 replicas.
+    #     The #1515 guard only opts into per-pod ephemeral keys when
+    #     $EPHEMERAL_OPT_IN=true; with multiple replicas that means divergent JWKS.
+    local replicas eph
+    replicas="$(kubectl -n "$NS" get deploy "$IDENTITY_DEPLOY" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+    eph="$(kubectl -n "$NS" get deploy "$IDENTITY_DEPLOY" \
+        -o jsonpath="{range .spec.template.spec.containers[*].env[?(@.name=='$EPHEMERAL_OPT_IN')]}{.value}{end}" \
+        2>/dev/null || true)"
+    if [[ -z "$replicas" ]]; then
+        warn "could not read identity Deployment replicas -- skipping the ephemeral-key check."
+    elif [[ "$eph" == "true" && "${replicas:-0}" -ge 2 ]]; then
+        err "identity Deployment runs $replicas replicas with $EPHEMERAL_OPT_IN=true -- per-pod ephemeral keys"
+        err "DIVERGE across replicas (#1515). Resetting now would leave ~50% of token verifications failing."
+        err "remove $EPHEMERAL_OPT_IN (rely on the shared $SIGNING_KEY seed) before resetting."
+        exit 1
+    fi
+    info "  identity (${replicas:-?} replicas) is on the shared-seed path -- JWKS will stay coherent after reset."
+
+    if [[ "$DRY_RUN" == true ]]; then
+        info "[dry-run] pre-flight passed: the post-reset JWKS would be coherent."
+    fi
+}
+
 function confirm() {
     cat >&2 <<BANNER
 
@@ -159,18 +260,27 @@ function capture_workloads() {
         >> "$REPLICAS_FILE" 2>/dev/null || true
 }
 
-# scale_workloads <0|restore>: 0 scales everything down; restore puts each back
-# to its captured replica count.
+# scale_one <kind> <name> <replicas>: scale a single captured workload.
+function scale_one() {
+    local kind="$1" name="$2" to="$3"
+    [[ -z "$kind" || -z "$name" || -z "$to" ]] && return 0
+    info "scaling $kind/$name -> $to"
+    kubectl -n "$NS" scale "$kind/$name" --replicas="$to" >/dev/null 2>&1 \
+        || warn "could not scale $kind/$name to $to -- check manually"
+}
+
+# scale_workloads <0|restore> [skip_identity]: 0 scales everything down;
+# restore puts each back to its captured count. skip_identity=true leaves the
+# identity Deployment untouched (the ordered bring-up handles it first --
+# see restore_replicas).
 function scale_workloads() {
-    local target="$1" kind name replicas to
+    local target="$1" skip_identity="${2:-false}" kind name replicas to
     while IFS=$'\t' read -r kind name replicas; do
         [[ -z "$kind" || -z "$name" ]] && continue
+        [[ "$skip_identity" == true && "$name" == "$IDENTITY_DEPLOY" ]] && continue
         to="$target"
         [[ "$target" == "restore" ]] && to="$replicas"
-        [[ -z "$to" ]] && continue
-        info "scaling $kind/$name -> $to"
-        kubectl -n "$NS" scale "$kind/$name" --replicas="$to" >/dev/null 2>&1 \
-            || warn "could not scale $kind/$name to $to -- check manually"
+        scale_one "$kind" "$name" "$to"
     done < "$REPLICAS_FILE"
 }
 
@@ -191,10 +301,111 @@ function capture_and_scale_down() {
     kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/part-of=memql --timeout=120s >/dev/null 2>&1 || true
 }
 
+# Ordered bring-up (#1522): scale identity back FIRST and wait for it to report
+# Available, so it is serving the stable JWKS before any mesh node bootstraps;
+# THEN restore the remaining workloads. The mesh re-mints its node tokens on the
+# first auth-rejection (#1521), so once identity is up every leaf reconnects on
+# its own with no manual roll. Used by BOTH the EXIT trap (failure-path safety
+# net) and the explicit success-path bring-up, so it must be idempotent.
 function restore_replicas() {
     [[ -n "$REPLICAS_FILE" && -f "$REPLICAS_FILE" ]] || return 0
-    scale_workloads restore
+
+    local irep
+    irep="$(awk -F '\t' -v d="$IDENTITY_DEPLOY" '$2==d{print $3; exit}' "$REPLICAS_FILE")"
+    if [[ -n "$irep" ]]; then
+        scale_one deployment "$IDENTITY_DEPLOY" "$irep"
+        info "waiting for identity to become Available before the mesh comes back (so node tokens re-mint cleanly)..."
+        kubectl -n "$NS" rollout status "deploy/$IDENTITY_DEPLOY" --timeout="$IDENTITY_READY_TIMEOUT" >/dev/null 2>&1 \
+            || warn "identity not Available within $IDENTITY_READY_TIMEOUT -- the mesh re-mints on auth failure (#1521), but check identity manually."
+    fi
+
+    scale_workloads restore true   # everyone except identity (already restored)
     rm -f "$REPLICAS_FILE" 2>/dev/null || true
+}
+
+# Success-path wrapper around the ordered bring-up. Dry-run aware: in a dry run
+# capture_and_scale_down never scaled anything down, so we must NOT scale up.
+function bring_up_ordered() {
+    if [[ "$DRY_RUN" == true ]]; then
+        info "[dry-run] would bring workloads back up ORDERED: identity first (waited Available), then the mesh -- node tokens re-mint against a ready JWKS issuer (#1521/#1522)."
+        rm -f "$REPLICAS_FILE" 2>/dev/null || true
+        return 0
+    fi
+    info "bringing workloads back up (identity first, then the mesh)..."
+    restore_replicas
+}
+
+# VERIFY auth coherence (#1522): the load-bearing acceptance check. After the
+# ordered bring-up, identity MUST be Available (fatal if not -- JWKS would be
+# down and both login and mesh tokens would fail). As a functional signal we
+# also probe the JWKS document in-cluster; a failed probe is a loud WARNING
+# (network/tooling flake must not fail an otherwise-good reset) that points the
+# operator at the end-to-end smoke test.
+function verify_auth_coherence() {
+    if [[ "$DRY_RUN" == true ]]; then
+        info "[dry-run] would verify post-reset auth coherence: identity Available + JWKS served at $JWKS_URL (in-cluster probe)."
+        return 0
+    fi
+    info "verifying post-reset auth coherence (#1522)..."
+    if ! kubectl -n "$NS" rollout status "deploy/$IDENTITY_DEPLOY" --timeout="$IDENTITY_READY_TIMEOUT" >/dev/null 2>&1; then
+        err "identity did not become Available within $IDENTITY_READY_TIMEOUT after the reset."
+        err "JWKS is not being served -- login + mesh tokens will fail. Investigate identity:"
+        kubectl -n "$NS" get pods -l app.kubernetes.io/name="$IDENTITY_DEPLOY" >&2 2>/dev/null || true
+        exit 1
+    fi
+    info "  identity is Available -- JWKS issuer is up."
+    if ! probe_jwks; then
+        warn "could not confirm a well-formed JWKS via the in-cluster probe."
+        warn "identity is Available, so this is most likely a probe-tooling flake; confirm login end-to-end with: make smoke-staging"
+    fi
+}
+
+# probe_jwks: one-shot in-cluster Job that fetches identity's JWKS over its
+# internal TLS surface and asserts a "keys" array. Uses the same postgres:alpine
+# image as the wipe Job (already proven to have working TLS libs, since it
+# speaks SSL to Tiger Cloud). --no-check-certificate: the cluster CA is
+# self-signed; we only need to prove identity SERVES a well-formed document.
+function probe_jwks() {
+    kubectl -n "$NS" delete job "$JWKS_VERIFY_JOB" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl apply -f - <<JOB >/dev/null 2>&1 || return 1
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $JWKS_VERIFY_JOB
+  namespace: $NS
+  labels:
+    app.kubernetes.io/name: $JWKS_VERIFY_JOB
+    app.kubernetes.io/part-of: memql
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: $JWKS_VERIFY_JOB
+        app.kubernetes.io/part-of: memql
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: probe
+          image: $PSQL_IMAGE
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              body="\$(wget -q -O - --no-check-certificate "$JWKS_URL")"
+              echo "\$body" | grep -q '"keys"' || { echo "JWKS missing keys array"; exit 1; }
+              echo "JWKS OK (contains keys)"
+      resources: {}
+JOB
+    local rc=1
+    if kubectl -n "$NS" wait --for=condition=complete --timeout=90s "job/$JWKS_VERIFY_JOB" >/dev/null 2>&1; then
+        info "  JWKS served + well-formed at $JWKS_URL (in-cluster probe)."
+        rc=0
+    fi
+    kubectl -n "$NS" logs "job/$JWKS_VERIFY_JOB" --tail=3 >&2 2>/dev/null || true
+    kubectl -n "$NS" delete job "$JWKS_VERIFY_JOB" --ignore-not-found >/dev/null 2>&1 || true
+    return $rc
 }
 
 # Wipe via a one-shot in-cluster Job: psql connects with the DSN from the
@@ -292,17 +503,22 @@ function report() {
         echo "RESULT: dry-run only -- nothing changed." >&2
         return 0
     fi
-    echo "RESULT: $ENV database reset to a fresh empty schema. App scaled back up; the owner re-registers via magic-link on next login." >&2
+    echo "RESULT: $ENV database reset to a fresh empty schema. Identity brought up first on the shared signing seed (JWKS coherent), then the mesh (node tokens re-mint via #1521) -- auth is coherent with NO manual recovery. The owner re-registers via magic-link on next login. Confirm end-to-end with: make smoke-staging" >&2
 }
 
 function main() {
     parse_arguments "$@"
     validate_arguments
+    verify_auth_seed        # PRE-FLIGHT (#1522): refuse if the shared signing seed is absent.
     confirm
     capture_and_scale_down
     wipe_schema
     rebuild_schema
-    # restore_replicas runs via the EXIT trap.
+    bring_up_ordered        # ORDERED bring-up (#1522): identity first, then the mesh.
+    verify_auth_coherence   # VERIFY (#1522): identity Available + JWKS served.
+    # The EXIT trap (restore_replicas) is now a no-op -- bring_up_ordered already
+    # restored every workload and removed the replicas file. It remains as the
+    # safety net for the FAILURE path (an exit before bring_up_ordered).
     report
 }
 

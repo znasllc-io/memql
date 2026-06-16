@@ -244,6 +244,35 @@ proper rotation: stand up the new secret, call "Rotate now" so a
 fresh key is minted under it, and only then retire the old
 secret.
 
+### Staging DB reset stays auth-coherent (#1522)
+
+`make staging-db-reset` (`scripts/deploy/staging-db-reset.sh`) wipes the
+staging database back to an empty schema. A DB wipe used to leave auth
+HALF-BROKEN: every `v1:identity:authSession` row and every mesh
+node-token grant lives in the DB, so the wipe invalidated them all, and
+the cluster only recovered after a manual reseal + mesh roll. The reset
+is now auth-coherent by construction -- it leans on two facts and you do
+NOT have to do anything by hand afterward:
+
+- **The signing key is NOT in the DB.** `IDENTITY_SIGNING_KEY_B64` rides
+  the sealed genesis envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
+  Secret); the wipe never touches the Secret, so every replica derives
+  the same key + `kid` + JWKS after the reset -- as long as the seed is
+  present. The reset **pre-flights** this BEFORE wiping: it refuses if
+  the Secret carries no genesis envelope / direct seed, or if identity is
+  running in the divergent per-pod ephemeral-key mode
+  (`IDENTITY_ALLOW_EPHEMERAL_KEY=true` at `replicas >= 2`). A wipe in
+  either state would leave auth unrecoverable, so it is blocked.
+- **Mesh nodes re-mint their token on auth failure (#1521).** Once
+  identity is back with the stable key, every leaf reconnects on its own.
+
+The reset brings **identity up FIRST** (waited Available) so the JWKS
+issuer is serving before any mesh node bootstraps, then restores the rest
+of the workloads. Finally it **verifies** identity is Available and
+probes the in-cluster JWKS document. Confirm end-to-end with
+`make smoke-staging` (checks JWKS + the login surface over the public
+front door). No manual reseal or mesh roll is required.
+
 ## Dev quick-start
 
 The local stack runs via `make dev-cluster-up` -- see

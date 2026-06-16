@@ -99,6 +99,49 @@ func TestStagingDBResetGuards(t *testing.T) {
 	}
 }
 
+// TestStagingDBResetAuthCoherence locks in the #1522 guarantee: the reset must
+// leave auth COHERENT -- it pre-flights the shared identity signing seed, brings
+// identity up before the mesh, and verifies JWKS afterward. A future edit that
+// drops any of these would re-introduce the half-broken post-reset auth state
+// (the multi-hour outage on 2026-06-16) that #1522 exists to prevent.
+func TestStagingDBResetAuthCoherence(t *testing.T) {
+	src := sdbrSource(t)
+	checks := map[string]string{
+		`pre-flight seed verification`:    `verify_auth_seed`,
+		`refuses a missing signing seed`:  `IDENTITY_SIGNING_KEY_B64`,
+		`checks the sealed genesis env`:   `MEMQL_GENESIS_B64`,
+		`ephemeral-key divergence guard`:  `IDENTITY_ALLOW_EPHEMERAL_KEY`,
+		`ordered identity-first bring-up`: `bring_up_ordered`,
+		`waits identity Available`:        `rollout status`,
+		`post-reset auth verification`:    `verify_auth_coherence`,
+		`relies on node-token re-mint`:    `#1521`,
+	}
+	for name, want := range checks {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %s (expected %q in the script)", name, want)
+		}
+	}
+
+	// verify_auth_seed must run BEFORE the destructive wipe in main(), or a
+	// missing seed would only surface after the data is already gone.
+	mainIdx := strings.Index(src, "function main()")
+	if mainIdx < 0 {
+		t.Fatal("no main() in the script")
+	}
+	mainBody := src[mainIdx:]
+	seedAt := strings.Index(mainBody, "verify_auth_seed")
+	wipeAt := strings.Index(mainBody, "wipe_schema")
+	if seedAt < 0 || wipeAt < 0 || seedAt > wipeAt {
+		t.Errorf("verify_auth_seed must be called before wipe_schema in main() (seed=%d wipe=%d)", seedAt, wipeAt)
+	}
+	// The ordered bring-up + verification must run AFTER the wipe/rebuild.
+	bringAt := strings.Index(mainBody, "bring_up_ordered")
+	verifyAt := strings.Index(mainBody, "verify_auth_coherence")
+	if bringAt < wipeAt || verifyAt < bringAt {
+		t.Errorf("expected main() order wipe_schema -> bring_up_ordered -> verify_auth_coherence (wipe=%d bring=%d verify=%d)", wipeAt, bringAt, verifyAt)
+	}
+}
+
 // TestStagingDBResetNotWiredIntoDeploy is the load-bearing guarantee: the deploy
 // orchestrator must never reference the reset. A DB wipe on deploy would be a
 // catastrophe.
