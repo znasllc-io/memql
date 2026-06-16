@@ -1,0 +1,97 @@
+name: release-lockfile-assemble
+
+# Build-speed C6 (epic znasllc-io/memql#1505, #1511). Ties the per-repo CI image
+# builds (C3 engine / C4 carriers / C5 SPA) together into a release lockfile:
+# resolves the 8 components' @sha256 digests FROM ACR by tag, runs
+# scripts/release/assemble-lockfile.sh (which self-validates via the coherence
+# gate), and opens the releases/<version>.yaml PR. No manual digest copying --
+# the operator runs ONE dispatch after the three build workflows have pushed
+# their <version> tags.
+#
+# Build-only-what-changed: a component whose source didn't change isn't rebuilt,
+# so its <version> tag won't exist. Pass --<comp>=sha256:... (or pre-seed the
+# tag) to pin a prior digest; the coherence gate still enforces
+# builtAgainstEngine == engineVersion.
+#
+# Auth: GitHub OIDC -> Azure (read the registry; the federated subject is
+# repo:znasllc-io/memql:ref:refs/heads/main -> runs on main).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version whose <comp>:<version> image tags to assemble (e.g. 0.9.61)."
+        required: true
+        type: string
+      engine_version:
+        description: "Engine version the carrier + SPA were built against (builtAgainstEngine). Defaults to version."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write # commit the lockfile to a branch
+  pull-requests: write # open the lockfile PR
+  id-token: write # OIDC token for azure/login
+
+env:
+  ACR_NAME: acrmemql
+
+jobs:
+  assemble:
+    name: assemble lockfile ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - name: Install coherence-check deps
+        run: pip install --require-hashes -r scripts/release/requirements.txt
+
+      - name: Resolve digests from ACR + assemble lockfile
+        env:
+          VERSION: ${{ inputs.version }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+        run: |
+          set -euo pipefail
+          : "${ENGINE_VERSION:=$VERSION}"
+          # The 8 lockfile components == their ACR repository names (see
+          # scripts/release/assemble-lockfile.sh). Resolve each :<version>
+          # tag's digest and export it as DIGEST_<comp_with_underscores>.
+          comps="memql-identity memql-cognition memql-voice memql-agent memql-planner memql-workbench memql-bff-copresent copresent"
+          for c in $comps; do
+            digest="$(az acr repository show --name "$ACR_NAME" --image "${c}:${VERSION}" --query digest -o tsv 2>/dev/null || true)"
+            if [ -z "$digest" ]; then
+              echo "::error::no digest for ${c}:${VERSION} in ${ACR_NAME} -- did its build workflow run + push this version?" >&2
+              exit 1
+            fi
+            var="DIGEST_$(echo "$c" | tr '-' '_')"
+            export "${var}=${digest}"
+            echo "INFO: ${c} -> ${digest}"
+          done
+          bash scripts/release/assemble-lockfile.sh \
+            --version="$VERSION" --engine-version="$ENGINE_VERSION"
+
+      - name: Open the lockfile PR
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          branch: release-lockfile/${{ inputs.version }}
+          add-paths: releases/${{ inputs.version }}.yaml
+          commit-message: "release: add releases/${{ inputs.version }}.yaml (#1511)"
+          title: "release: lockfile ${{ inputs.version }}"
+          body: |
+            Assembled by `release-lockfile-assemble` (build-speed C6, #1511).
+            Digests resolved from `acrmemql` by the `<component>:${{ inputs.version }}` tags
+            (built by C3/C4/C5). Already validated in-job by the coherence gate;
+            the `lockfiles are coherent` + `overlays are digest-pinned` checks re-run here.

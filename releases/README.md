@@ -52,11 +52,16 @@ collects the 8 into a lockfile PR:
   version it built against (→ `builtAgainstEngine`).
 - **`visionarys-io/copresent`** — the SPA, likewise.
 
-> Wiring the actual image-build-in-CI + digest export in all three repos
-> (incl. ACR OIDC push) is the remaining build-out for #702; this PR establishes
-> the lockfile format, the coherence gate, and the promotion tooling the CI
-> feeds into. Until that lands, `assemble-lockfile.sh` is run with digests from
-> `az acr build` / the live cluster.
+> The image-build-in-CI + OIDC→ACR push is now wired (build-speed epic #1505):
+> the engine images build in `build-engine-images.yml` (memql), the 5 carriers
+> in `build-carrier-images.yml` (memql-bff-copresent), and the SPA in
+> `build-spa-image.yml` (copresent) — each a `workflow_dispatch` that pushes
+> `<component>:<version>` to `acrmemql` via a GitHub OIDC federated credential
+> (no long-lived secret). The **`release-lockfile-assemble.yml`** workflow then
+> resolves the 8 `@sha256:` digests from ACR by tag, runs `assemble-lockfile.sh`,
+> and opens the lockfile PR — no manual digest copying. `assemble-lockfile.sh`
+> can still be run by hand with `--<comp>=sha256:…` overrides (e.g. a
+> build-only-what-changed cut that pins a prior component's digest).
 
 ## Relationship to `deploy/validated-versions.json`
 
