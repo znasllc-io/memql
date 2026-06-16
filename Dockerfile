@@ -36,7 +36,18 @@ RUN if [ "${CGO_ENABLED}" = "1" ]; then \
     fi
 
 COPY go.mod go.sum ./
-RUN go mod download
+# BuildKit cache mounts (build-speed #1506): the module cache (/go/pkg/mod)
+# and the Go build cache (/root/.cache/go-build) persist across builds, so a
+# rebuild of an unchanged tree reuses downloaded modules + already-compiled
+# packages instead of redoing both from scratch. Every `go` step below mounts
+# the SAME two caches -- the modules fetched here must stay visible to the
+# templ-generate + go-build steps, and cache mounts are unmounted after each
+# RUN (they are NOT baked into an image layer), so a step without the mount
+# would re-download. Requires BuildKit (docker buildx / DOCKER_BUILDKIT=1;
+# `az acr build` runs BuildKit when the Dockerfile uses mount syntax).
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Pre-fetch the pinned standalone Tailwind binary into the exact path
 # scripts/identity/build-css.sh probes (bin/tools is dockerignored, so the
@@ -70,7 +81,9 @@ COPY . .
 # shipped WITHOUT app.css -> /static/app.css 404 -> unstyled login page.
 # Cheap (a few seconds) for non-identity node builds; kept unconditional so
 # the two Dockerfiles stay in sync.
-RUN go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ
 RUN bash scripts/identity/build-css.sh
 
 # Stamp VERSION file with build timestamp
@@ -89,8 +102,12 @@ RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
 # '-m64'); the CGO-free nodes cross-compile either way. Defaults to amd64 if
 # TARGETARCH is somehow unset (preserves the prior behaviour).
 ARG TARGETARCH
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w" -o /app/bin/memql .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w" -o /app/bin/memql .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
 
 # --- Runtime: CGO-free node types (default) use distroless. ---------------
 FROM gcr.io/distroless/base-debian12 AS runtime
