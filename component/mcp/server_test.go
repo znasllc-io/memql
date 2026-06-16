@@ -127,7 +127,7 @@ func TestNotificationGetsNoResponse(t *testing.T) {
 
 func TestUnknownMethodErrors(t *testing.T) {
 	s := NewServer(nil, "memql-mcp", "0", nil, Config{})
-	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"resources/list"}`))
+	resp := s.handleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"no/such/method"}`))
 	if resp == nil || resp.Error == nil {
 		t.Fatalf("unknown method should error, got %+v", resp)
 	}

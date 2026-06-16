@@ -82,6 +82,13 @@ type Server struct {
 	autoRunner AutomationRunner
 
 	writeMu sync.Mutex
+	out     io.Writer // the active connection's output, for proactive notifications
+
+	// subs holds the active resource subscriptions for this connection (Phase 6
+	// #1536), keyed by resource uri -> the engine unsubscribe func. Torn down
+	// when the connection closes.
+	subMu sync.Mutex
+	subs  map[string]func()
 }
 
 // SetAutomationRunner injects the automation runner the MCP node's app bootstrap
@@ -136,6 +143,14 @@ type rpcResponse struct {
 // interrupted by ctx; cancellation takes effect on the next message
 // boundary (the stdio dependency bounds teardown with the shutdown ctx).
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
+	// Make the connection's writer available to proactive notifications (the
+	// resource-subscription pushes, Phase 6 #1536) and tear down any
+	// subscriptions when the connection ends.
+	s.writeMu.Lock()
+	s.out = out
+	s.writeMu.Unlock()
+	defer s.closeSubscriptions()
+
 	reader := bufio.NewReader(in)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -202,6 +217,20 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 		return successResponse(req.ID, map[string]any{"tools": tools})
 	case "tools/call":
 		return s.handleToolsCall(ctx, req.ID, req.Params)
+	case "resources/list":
+		// Phase 6 (#1536): concept schemas as MCP resources.
+		return successResponse(req.ID, map[string]any{"resources": conceptResources(asResourceEngine(s.engine))})
+	case "resources/read":
+		return s.handleResourcesRead(ctx, req.ID, req.Params)
+	case "resources/subscribe":
+		return s.handleResourcesSubscribe(req.ID, req.Params)
+	case "resources/unsubscribe":
+		return s.handleResourcesUnsubscribe(req.ID, req.Params)
+	case "prompts/list":
+		// Phase 6 (#1536): DSL prompts as MCP prompts.
+		return successResponse(req.ID, map[string]any{"prompts": promptDefinitions(asResourceEngine(s.engine))})
+	case "prompts/get":
+		return s.handlePromptsGet(ctx, req.ID, req.Params)
 	case "ping":
 		return successResponse(req.ID, map[string]any{})
 	default:
@@ -253,6 +282,9 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 		// notifications.
 		"capabilities": map[string]any{
 			"tools": map[string]any{"listChanged": false},
+			// Phase 6 (#1536): concept resources (with live subscribe) + DSL prompts.
+			"resources": map[string]any{"subscribe": true, "listChanged": false},
+			"prompts":   map[string]any{"listChanged": false},
 		},
 		"serverInfo": map[string]any{
 			"name":    s.name,

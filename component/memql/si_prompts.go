@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
@@ -44,6 +45,45 @@ func (r *PromptRegistry) Get(name string) (*PromptTemplate, bool) {
 	defer r.mu.RUnlock()
 	t, ok := r.byName[name]
 	return t, ok
+}
+
+// List returns every registered prompt template, sorted by name. Used by the
+// MCP prompts/list surface (Phase 6 #1536).
+func (r *PromptRegistry) List() []*PromptTemplate {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*PromptTemplate, 0, len(r.byName))
+	for _, t := range r.byName {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// Arguments returns the prompt's input-schema fields as MCP prompt argument
+// descriptors ({name, required}), sorted by name. Empty when the prompt declares
+// no input schema. (Phase 6 #1536)
+func (p *PromptTemplate) Arguments() []map[string]any {
+	if p == nil || p.inputSchema == nil {
+		return nil
+	}
+	required := make(map[string]bool, len(p.inputSchema.Required))
+	for _, r := range p.inputSchema.Required {
+		required[r] = true
+	}
+	names := make([]string, 0, len(p.inputSchema.Properties))
+	for n := range p.inputSchema.Properties {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, n := range names {
+		out = append(out, map[string]any{"name": n, "required": required[n]})
+	}
+	return out
 }
 
 // set registers a prompt template, replacing any existing entry.
