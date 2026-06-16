@@ -24,32 +24,33 @@ func aksDeployText(t *testing.T) string {
 func TestAksDeployBuildsCarrierBaseOnce(t *testing.T) {
 	text := aksDeployText(t)
 
-	if !strings.Contains(text, "function build_carrier_base()") {
-		t.Error("expected a build_carrier_base() function (#1507)")
+	// The shared base is queued by its own function (async since #1512).
+	if !strings.Contains(text, "function queue_carrier_base()") {
+		t.Error("expected a queue_carrier_base() function (#1507/#1512)")
 	}
 	// The base build stops at the carrier-base stage (no compile).
 	if !strings.Contains(text, "--target carrier-base") {
-		t.Error("build_carrier_base must use `--target carrier-base` to build only the prefix stage")
+		t.Error("queue_carrier_base must use `--target carrier-base` to build only the prefix stage")
 	}
 	// A repo constant names the shared base image.
 	if !strings.Contains(text, `CARRIER_BASE_REPO="memql-carrier-base"`) {
 		t.Error("expected the CARRIER_BASE_REPO=\"memql-carrier-base\" constant")
 	}
-	// build_and_push builds the base before looping the per-node builds.
+	// build_and_push queues the base (wave A) before the carriers (wave B).
 	bp := text[strings.Index(text, "function build_and_push()"):]
-	baseIdx := strings.Index(bp, "build_carrier_base ")
-	loopIdx := strings.Index(bp, "for nt in ")
+	baseIdx := strings.Index(bp, "queue_carrier_base ")
+	carrierLoopIdx := strings.Index(bp, "CARRIER_NODE_TYPES[@]")
 	if baseIdx < 0 {
-		t.Fatal("build_and_push must call build_carrier_base")
+		t.Fatal("build_and_push must queue the carrier base")
 	}
-	if loopIdx < 0 || baseIdx > loopIdx {
-		t.Error("build_carrier_base must run BEFORE the per-node build loop")
+	if carrierLoopIdx < 0 || baseIdx > carrierLoopIdx {
+		t.Error("the carrier base must be queued BEFORE the carrier build loop (carriers FROM the base)")
 	}
 }
 
 func TestAksDeployCarrierBuildsPassCarrierBaseArg(t *testing.T) {
 	text := aksDeployText(t)
-	// build_one passes the CARRIER_BASE build-arg (only for carrier nodes,
+	// queue_build passes the CARRIER_BASE build-arg (only for carrier nodes,
 	// guarded by is_carrier_node) pointing at the pushed base tag.
 	if !strings.Contains(text, `CARRIER_BASE=${ACR_LOGIN_SERVER}/${CARRIER_BASE_REPO}:${tag}`) {
 		t.Error("carrier builds must pass --build-arg CARRIER_BASE=<acr>/<repo>:<tag> so the compile reuses the shared base")

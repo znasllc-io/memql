@@ -78,9 +78,16 @@ tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
 
 One command takes the cluster from source to a rolled-out, gated deploy:
 
-1. **Build + push** the 6 engine images via `az acr build` (root `Dockerfile`,
-   one per build tag; `voice` is the CGO exception). Engine tags are
-   **immutable** — a build that would overwrite an existing
+1. **Build + push** the 6 node images via `az acr build`, queued with
+   `--no-wait` so ACR runs them **concurrently** server-side (wall-clock ≈ the
+   slowest single image, not the sum — #1512). Engine nodes (`identity`,
+   `voice`; `voice` is the CGO exception) build from the root `Dockerfile`; the
+   carrier nodes (`cognition`/`agent`/`planner`/`workbench`) build from
+   `memql-bff-copresent/Dockerfile`, each reusing a shared `memql-carrier-base`
+   image built **once** (#1507) so they cost one base build + four tag-only
+   compiles. The base + the two engine nodes are queued first (they have no base
+   dependency); the carriers follow once the base is pushed. Engine/carrier tags
+   are **immutable** — a build that would overwrite an existing
    `memql-<nt>:<tag>` is refused (see §6). `--skip-build` deploys already-pushed
    tags.
 2. **Ensure secrets**: internal TLS CA + identity cert
