@@ -82,6 +82,11 @@ type Automation struct {
 	// Enabled controls whether this automation is active. Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
+	// MCPPromoted is true when the automation carries @mcp: it is promoted into
+	// its own first-class MCP tool rather than only being reachable through the
+	// generic run_automation dispatcher (epic memql#1529 Phase 4 #1534).
+	MCPPromoted bool `json:"mcpPromoted,omitempty"`
+
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
 }

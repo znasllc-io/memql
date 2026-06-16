@@ -164,6 +164,12 @@ type Function struct {
 
 	// Audit indicates all calls should be logged (mutations only)
 	Audit bool
+
+	// MCPPromoted indicates the construct carries @mcp: it is promoted into its
+	// own first-class MCP tool (queries / mutations) rather than only being
+	// reachable through the generic run_query / run_mutation dispatchers.
+	// (epic memql#1529 Phase 4 #1534)
+	MCPPromoted bool
 }
 
 func (f *Function) clone() *Function {
@@ -210,6 +216,7 @@ func (f *Function) clone() *Function {
 		Retry:             f.Retry,
 		Idempotent:        f.Idempotent,
 		Audit:             f.Audit,
+		MCPPromoted:       f.MCPPromoted,
 	}
 }
 

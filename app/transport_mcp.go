@@ -43,5 +43,8 @@ func (a *App) transportMCP() {
 
 	in, out := mcp.StdioStreams()
 	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, cfg)
+	// Phase 4 (#1534): wire the automation runner (run_automation + @mcp
+	// automations) over the automation Loader + a dedicated manual Executor.
+	server.SetAutomationRunner(newMCPAutomationRunner(a))
 	a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(server, in, out, a.Logger))
 }

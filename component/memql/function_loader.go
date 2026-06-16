@@ -385,6 +385,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		Retry:      funcDef.Retry,
 		Idempotent: funcDef.Idempotent,
 		Audit:      funcDef.Audit,
+		// @mcp promotion (epic memql#1529 Phase 4 #1534) is a flag attribute the
+		// langparser surfaces on Attributes rather than a typed FunctionDef field.
+		MCPPromoted: hasFlagAttribute(funcDef.Attributes, "mcp"),
 	}
 
 	// Handle rate limit
@@ -839,6 +842,18 @@ func functionBodyStartsWithReturn(content string) bool {
 // collectFunctionDefsFromFile filters a parsed *File down to the
 // function definitions it contains. Used by the per-file CQS
 // validator hoist in tryParseNewFunctionSyntax.
+// hasFlagAttribute reports whether a flag-style `@name` attribute is present on
+// a parsed construct. Used for annotations the langparser surfaces only on the
+// raw Attributes slice (no typed FunctionDef field) -- e.g. @mcp (Phase 4 #1534).
+func hasFlagAttribute(attrs []*languageParser.Attribute, name string) bool {
+	for _, a := range attrs {
+		if a != nil && a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func collectFunctionDefsFromFile(file *languageParser.File) []*languageParser.FunctionDef {
 	if file == nil {
 		return nil

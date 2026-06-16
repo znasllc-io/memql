@@ -76,8 +76,17 @@ type Server struct {
 	// shared registries.
 	session *memql.AuthoredRuntimeRegistry
 
+	// autoRunner drives run_automation + @mcp-automation tools (Phase 4 #1534).
+	// Injected from the app bootstrap (it needs the automations Loader + a manual
+	// Executor + the dry-run sandbox). nil-safe: those tools report unavailable.
+	autoRunner AutomationRunner
+
 	writeMu sync.Mutex
 }
+
+// SetAutomationRunner injects the automation runner the MCP node's app bootstrap
+// builds (Phase 4 #1534). Wired before the server starts serving.
+func (s *Server) SetAutomationRunner(r AutomationRunner) { s.autoRunner = r }
 
 // NewServer constructs an MCP protocol head. name/version populate the
 // MCP serverInfo block; engine is the in-process engine handle (may be nil in
@@ -183,9 +192,14 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 	case "initialize":
 		return successResponse(req.ID, s.initializeResult(req.Params))
 	case "tools/list":
-		// Phase 1 (#1531): reflect the engine's DSL tools (role-gated) + the
-		// generic run_query / run_mutation / run_automation dispatchers.
-		return successResponse(req.ID, map[string]any{"tools": listMCPTools(asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier)})
+		// Reflect the engine's DSL tools (role-gated) + the generic dispatchers
+		// + @mcp-promoted query/mutation (Phase 4 #1534). @mcp-promoted
+		// automations come from the runner (the engine does not own automations).
+		tools := listMCPTools(asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier)
+		if s.autoRunner != nil {
+			tools = append(tools, s.autoRunner.PromotedAutomationTools()...)
+		}
+		return successResponse(req.ID, map[string]any{"tools": tools})
 	case "tools/call":
 		return s.handleToolsCall(ctx, req.ID, req.Params)
 	case "ping":
@@ -212,8 +226,10 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 		return errorResponse(id, codeInvalidParams, "tools/call requires a tool name")
 	}
 	// Attach the per-connection authoring session (owner + non-durable registry)
-	// so define/promote and authored call-by-name resolve against it.
+	// so define/promote and authored call-by-name resolve against it, plus the
+	// automation runner for run_automation + @mcp automations (Phase 4 #1534).
 	ctx = withMCPSession(ctx, s.cfg.ActingUser, s.session)
+	ctx = withMCPAutomationRunner(ctx, s.autoRunner)
 	result := callMCPTool(ctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, p.Name, p.Arguments)
 	return successResponse(id, result)
 }
