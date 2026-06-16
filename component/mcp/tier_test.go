@@ -100,7 +100,6 @@ func TestGate_Define(t *testing.T) {
 
 // query (inline): gated by tier=inline AND role owner|developer.
 func TestGate_InlineQuery(t *testing.T) {
-	eng := newFakeEngine()
 	cases := []struct {
 		name        string
 		role        string
@@ -116,17 +115,26 @@ func TestGate_InlineQuery(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := callMCPTool(context.Background(), eng, c.role, c.tier, toolQuery, map[string]any{"query": "x"})
-			if !isError(res) {
-				t.Fatalf("inline query should be isError in Phase 2, got %v", res)
+			eng := newFakeEngine()
+			res := callMCPTool(context.Background(), eng, c.role, c.tier, toolQuery, map[string]any{"query": "concept==v1:x:y"})
+			if c.wantRefused {
+				if !isError(res) {
+					t.Fatalf("expected gate refusal (isError), got %v", res)
+				}
+				if !strings.Contains(resultText(res), c.wantReason) {
+					t.Errorf("refusal reason should mention %q, got %q", c.wantReason, resultText(res))
+				}
+				if eng.inlineCalled {
+					t.Error("a refused inline query must not reach the engine")
+				}
+				return
 			}
-			txt := resultText(res)
-			refused := !strings.Contains(txt, "not yet implemented")
-			if refused != c.wantRefused {
-				t.Errorf("refused=%v, want %v (msg=%q)", refused, c.wantRefused, txt)
+			// Gate passed -> the inline query executes via ExecuteInline.
+			if isError(res) {
+				t.Fatalf("gate-pass inline query should execute, got error %v", res)
 			}
-			if c.wantRefused && !strings.Contains(txt, c.wantReason) {
-				t.Errorf("refusal reason should mention %q, got %q", c.wantReason, txt)
+			if !eng.inlineCalled || eng.query != "concept==v1:x:y" {
+				t.Errorf("inline query should reach ExecuteInline with the text, got called=%v query=%q", eng.inlineCalled, eng.query)
 			}
 		})
 	}

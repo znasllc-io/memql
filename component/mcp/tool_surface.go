@@ -41,6 +41,10 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
+	// ExecuteInline runs ad-hoc inline MemQL text with the inline-shape
+	// restrictions lifted (MCP Tier-3 #1535), resolving session-authored
+	// constructs core-first. The server gates it to inline tier + owner/developer.
+	ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	// MCPPromotedFunctionTools returns MCP tool descriptors for @mcp-promoted
 	// query/mutation constructs (Phase 4 #1534); MCPPromotedFunctionKind reports
 	// a promoted function's kind by name so a first-class call routes to the
@@ -243,7 +247,7 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 	case toolPromote:
 		return handlePromote(ctx, eng, role, tier, args)
 	case toolQuery:
-		return gateInline(role, tier)
+		return handleInlineQuery(ctx, eng, role, tier, args)
 	default:
 		// A first-class @mcp-promoted query/mutation is called by its own name
 		// with its args directly; route it to the named-construct executor.
@@ -381,6 +385,33 @@ func namedCallQuery(name string, args map[string]any) (string, error) {
 	return name + "(" + string(b) + ")", nil
 }
 
+// handleInlineQuery implements the Tier-3 `query` op (design §3 Tier 3): both
+// gates first (inline tier + CanRunInline, server-side), then run the ad-hoc
+// inline MemQL text via ExecuteInline -- which lifts the inline-shape parser
+// restrictions and resolves the caller's session-authored constructs core-first.
+func handleInlineQuery(ctx context.Context, eng Engine, role string, tier Tier, args map[string]any) map[string]any {
+	if !tierAllows(tier, classInline) {
+		return errorResult("inline query is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=inline)")
+	}
+	if !roleCanRunInline(role) {
+		return errorResult("inline query requires the owner or developer role")
+	}
+	q, _ := args["query"].(string)
+	if strings.TrimSpace(q) == "" {
+		return errorResult("query requires inline 'query' text")
+	}
+	s := mcpSessionFromContext(ctx)
+	res, err := eng.ExecuteInline(ctx, q, s.owner, s.registry)
+	if err != nil {
+		return errorResult(fmt.Sprintf("inline query failed: %v", err))
+	}
+	payload, mErr := json.Marshal(res.OutputPayload())
+	if mErr != nil {
+		return errorResult(fmt.Sprintf("inline query: encode result: %v", mErr))
+	}
+	return textResult(string(payload))
+}
+
 // executeForSession runs a query, resolving the caller's session-authored
 // constructs by name (core-first) when a session is active. With no session it
 // is the plain Execute path, so callers route every named-construct run through
@@ -506,6 +537,7 @@ type concreteEngine interface {
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
+	ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
 	MCPPromotedFunctionTools() []map[string]any
 	MCPPromotedFunctionKind(name string) (string, bool)
@@ -520,6 +552,9 @@ func (a engineAdapter) Execute(ctx context.Context, query string) (*memql.Execut
 }
 func (a engineAdapter) ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error) {
 	return a.c.ExecuteAuthored(ctx, query, owner, reg)
+}
+func (a engineAdapter) ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error) {
+	return a.c.ExecuteInline(ctx, query, owner, reg)
 }
 func (a engineAdapter) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	return a.c.PromoteAuthoredConstruct(ctx, c)

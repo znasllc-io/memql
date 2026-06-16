@@ -42,6 +42,7 @@ type fakeEngine struct {
 	authoredOwner string
 	authoredReg   *memql.AuthoredRuntimeRegistry
 	promoted      *memql.AuthoredConstruct
+	inlineCalled  bool
 
 	// @mcp promotion fakes (Phase 4 #1534)
 	promotedFnTools []map[string]any
@@ -81,6 +82,15 @@ func (e *fakeEngine) ExecuteAuthored(ctx context.Context, query, owner string, r
 func (e *fakeEngine) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	e.promoted = c
 	return nil
+}
+
+func (e *fakeEngine) ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error) {
+	e.query = query
+	e.inlineCalled = true
+	e.authoredOwner = owner
+	e.authoredReg = reg
+	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
+	return &memql.ExecuteResult{}, nil
 }
 
 func (e *fakeEngine) MCPPromotedFunctionTools() []map[string]any { return e.promotedFnTools }

@@ -27,7 +27,7 @@ import (
 
 // Parse converts a MemQL query string into a QueryPlan.
 func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
-	return e.parseWithFunctions(query, e.functions)
+	return e.parseWithFunctions(query, e.functions, false)
 }
 
 // parseWithFunctions is Parse with the function registry made explicit, so an
@@ -37,7 +37,12 @@ func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
 // Spec resolution still reads e.specs (the authored overlay is function-only in
 // Phase 3; authored specs referenced from authored query filters are a tracked
 // follow-up).
-func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry) (*QueryPlan, error) {
+//
+// allowInline (MCP Tier-3 #1535) relaxes the runtime-shape pre-rejection for the
+// inline-definition (`name := expr`) + trailing `@timestamp`/`@latest` shapes,
+// gated server-side to the inline tier + owner/developer. Default false keeps the
+// sealed behaviour for every other caller.
+func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, allowInline bool) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -97,7 +102,7 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry) (*
 	//
 	// inlineSpecs / timestamp / useLatest stay nil/zero -- the
 	// detector rejects the shapes that would have populated them.
-	root, err := parseViaLangparser(trimmed)
+	root, err := parseViaLangparser(trimmed, allowInline)
 	if err != nil {
 		return nil, err
 	}

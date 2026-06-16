@@ -22,12 +22,12 @@ import (
 // Returns a typed ErrUnsupportedQueryShape (wrapping a shape-
 // specific message) for the 8 shapes the langparser doesn't handle;
 // genuine parser errors propagate raw.
-func parseViaLangparser(query string) (ExpressionNode, error) {
+func parseViaLangparser(query string, allowInline bool) (ExpressionNode, error) {
 	trimmed := strings.TrimSpace(query)
 	if trimmed == "" {
 		return nil, ErrEmptyQuery
 	}
-	if err := unsupportedQueryShape(trimmed); err != nil {
+	if err := unsupportedQueryShape(trimmed, allowInline); err != nil {
 		return nil, err
 	}
 	parsed, err := langparser.ParseExpression(trimmed)
@@ -92,7 +92,7 @@ func flattenRuntimeFunctionArgs(node ExpressionNode) ExpressionNode {
 // short-circuited to a fallback sentinel that e.Parse routed to the
 // legacy memql parser; the parser is gone now, so callers writing
 // these shapes get an actionable error.
-func unsupportedQueryShape(query string) error {
+func unsupportedQueryShape(query string, allowInline bool) error {
 	if containsRuntimeCall(query, "shape") {
 		return fmt.Errorf("%w: shape(...) runtime usage -- use a DSL-defined query with a @shape(...) projection instead (see sub-epic #286 for the cognition migration pattern)",
 			ErrUnsupportedQueryShape)
@@ -135,11 +135,22 @@ func unsupportedQueryShape(query string) error {
 			continue
 		}
 		if c == '@' {
-			return fmt.Errorf("%w: trailing @timestamp / @latest suffix on a runtime query -- pin the timestamp at the DSL definition site instead",
+			// MCP Tier-3 (#1535): the inline tier + owner/developer lifts the
+			// pre-rejection so the langparser is given the chance to parse the
+			// shape. (The langparser grammar for trailing @timestamp/@latest is a
+			// tracked follow-up; until then the caller gets the parser's own
+			// error rather than this blanket pre-rejection.)
+			if allowInline {
+				continue
+			}
+			return fmt.Errorf("%w: trailing @timestamp / @latest suffix on a runtime query -- pin the timestamp at the DSL definition site instead (lift via the MCP inline tier)",
 				ErrUnsupportedQueryShape)
 		}
 		if c == ':' && i+1 < len(query) && query[i+1] == '=' {
-			return fmt.Errorf("%w: inline spec definition (`name := expr`) in a runtime query -- define the spec in the DSL and reference it by name",
+			if allowInline {
+				continue
+			}
+			return fmt.Errorf("%w: inline spec definition (`name := expr`) in a runtime query -- define the spec in the DSL and reference it by name (lift via the MCP inline tier)",
 				ErrUnsupportedQueryShape)
 		}
 	}

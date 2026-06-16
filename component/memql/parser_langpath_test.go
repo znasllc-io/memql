@@ -155,12 +155,12 @@ var inOperatorFallsBackQueries = []struct {
 func TestLangparserPathFallsBackOnShape(t *testing.T) {
 	for _, tc := range shapeFallsBackToMemqlQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if unsupportedQueryShape(tc.query) == nil {
+			if unsupportedQueryShape(tc.query, false) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; shape() should short-circuit until parity ships", tc.query)
 			}
 			// And the public entry must return the sentinel
 			// (not a stray parser error that would propagate).
-			_, err := parseViaLangparser(tc.query)
+			_, err := parseViaLangparser(tc.query, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {
 				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
@@ -174,10 +174,10 @@ func TestLangparserPathFallsBackOnShape(t *testing.T) {
 func TestLangparserPathFallsBackOnSelect(t *testing.T) {
 	for _, tc := range selectFallsBackToMemqlQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if unsupportedQueryShape(tc.query) == nil {
+			if unsupportedQueryShape(tc.query, false) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; select() should short-circuit until Plan.Fields parity ships", tc.query)
 			}
-			_, err := parseViaLangparser(tc.query)
+			_, err := parseViaLangparser(tc.query, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {
 				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
@@ -190,10 +190,10 @@ func TestLangparserPathFallsBackOnSelect(t *testing.T) {
 func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
 	for _, tc := range memqlVersionCompatFallsBackQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if unsupportedQueryShape(tc.query) == nil {
+			if unsupportedQueryShape(tc.query, false) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; concept==memql:version compat should short-circuit", tc.query)
 			}
-			_, err := parseViaLangparser(tc.query)
+			_, err := parseViaLangparser(tc.query, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {
 				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
@@ -206,10 +206,10 @@ func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
 func TestLangparserPathFallsBackOnInOperator(t *testing.T) {
 	for _, tc := range inOperatorFallsBackQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			if unsupportedQueryShape(tc.query) == nil {
+			if unsupportedQueryShape(tc.query, false) == nil {
 				t.Errorf("langparserPathUnsupported(%q) returned false; in (...) collection operator should short-circuit", tc.query)
 			}
-			_, err := parseViaLangparser(tc.query)
+			_, err := parseViaLangparser(tc.query, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {
 				t.Errorf("parseViaLangparser(%q) -> %v; want ErrUnsupportedQueryShape", tc.query, err)
 			}
@@ -284,7 +284,7 @@ func TestContainsRuntimeCallBoundary(t *testing.T) {
 func TestParseViaLangparser_CoversCorpus(t *testing.T) {
 	for _, tc := range representativeRuntimeQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			node, err := parseViaLangparser(tc.query)
+			node, err := parseViaLangparser(tc.query, false)
 			if err != nil {
 				t.Fatalf("parseViaLangparser(%q): %v", tc.query, err)
 			}
@@ -315,7 +315,7 @@ func TestParseViaLangparser_RejectsTimestampSuffix(t *testing.T) {
 		`concept==v1:cluster:node @"2026-01-01T00:00:00Z"`,
 	} {
 		t.Run(src, func(t *testing.T) {
-			_, err := parseViaLangparser(src)
+			_, err := parseViaLangparser(src, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {
 				t.Errorf("got %v, want ErrUnsupportedQueryShape", err)
 			}
@@ -327,7 +327,7 @@ func TestParseViaLangparser_RejectsTimestampSuffix(t *testing.T) {
 // definitions (`name := expr`) fall back too.
 func TestParseViaLangparser_RejectsInlineSpec(t *testing.T) {
 	src := `myFilter := concept==v1:cluster:node`
-	_, err := parseViaLangparser(src)
+	_, err := parseViaLangparser(src, false)
 	if !errors.Is(err, ErrUnsupportedQueryShape) {
 		t.Errorf("got %v, want ErrUnsupportedQueryShape", err)
 	}
@@ -358,7 +358,7 @@ func TestLangparserPathDirectivesNotFlagged(t *testing.T) {
 		`integerField == 5`,
 	} {
 		t.Run(src, func(t *testing.T) {
-			if unsupportedQueryShape(src) != nil {
+			if unsupportedQueryShape(src, false) != nil {
 				t.Errorf("detector flagged %q after #254 removed directive-name guard", src)
 			}
 		})
@@ -376,7 +376,7 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 		`payload.title=="x := y"`,
 	} {
 		t.Run(src, func(t *testing.T) {
-			if unsupportedQueryShape(src) != nil {
+			if unsupportedQueryShape(src, false) != nil {
 				t.Errorf("detector flagged %q (quoted content) as unsupported", src)
 			}
 		})
@@ -405,7 +405,7 @@ func TestLangparserPathUnsupported_QuoteAware(t *testing.T) {
 // fallback so langparser is canonical and its errors reach the
 // caller verbatim.
 func TestParseViaLangparser_PropagatesParseErrors(t *testing.T) {
-	_, err := parseViaLangparser(`concept==`)
+	_, err := parseViaLangparser(`concept==`, false)
 	if err == nil {
 		t.Fatal("expected raw parse error, got nil")
 	}

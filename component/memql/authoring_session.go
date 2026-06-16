@@ -270,7 +270,24 @@ func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, 
 	}
 	overlay := e.buildAuthoredFunctionOverlay(owner, reg)
 	ctx = ensureAuthorEnvelope(ctx, owner)
-	return e.executeWith(ctx, query, overlay)
+	return e.executeWith(ctx, query, overlay, false)
+}
+
+// ExecuteInline runs ad-hoc inline MemQL query text in the most-flexible mode
+// (MCP Tier-3 #1535): it resolves the owner's session-authored constructs by
+// name (core-first, like ExecuteAuthored) AND lifts the inline-shape
+// pre-rejection (`name := expr`, trailing `@timestamp`/`@latest`). It is the
+// engine entrypoint behind the MCP `query` tool; the server gates it to the
+// inline tier + owner/developer BEFORE calling, so this never relaxes the parser
+// for a non-inline caller. The run is stamped with the owner's writer envelope
+// when ctx carries none.
+func (e *MemQLEngine) ExecuteInline(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
+	fns := e.functions
+	if reg != nil && strings.TrimSpace(owner) != "" {
+		fns = e.buildAuthoredFunctionOverlay(owner, reg)
+		ctx = ensureAuthorEnvelope(ctx, owner)
+	}
+	return e.executeWith(ctx, query, fns, true)
 }
 
 // ensureAuthorEnvelope stamps the author's AccessContext onto ctx when none is

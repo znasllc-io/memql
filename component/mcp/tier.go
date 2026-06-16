@@ -123,15 +123,3 @@ func promoteGate(role string, tier Tier) (bool, string) {
 	}
 	return true, ""
 }
-
-// gateInline enforces both gates for the inline `query` op (Tier 3). The actual
-// inline path lands in Phase 5 (#1535).
-func gateInline(role string, tier Tier) map[string]any {
-	if !tierAllows(tier, classInline) {
-		return errorResult("inline query is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=inline)")
-	}
-	if !roleCanRunInline(role) {
-		return errorResult("inline query requires the owner or developer role")
-	}
-	return errorResult("inline query is permitted but not yet implemented (lands in Phase 5, memql#1535)")
-}

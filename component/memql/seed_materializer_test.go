@@ -340,7 +340,7 @@ func TestBuildPerUserDedupQuery_ParsesWithColonBearingUserId(t *testing.T) {
 
 			// (b) It parses through the engine's parse path with no
 			// error -- i.e. the dedup lookup will not fall back.
-			if _, err := parseViaLangparser(q); err != nil {
+			if _, err := parseViaLangparser(q, false); err != nil {
 				t.Fatalf("dedup query failed to parse (would trigger fallback WARN): %v\nquery: %s", err, q)
 			}
 		})
@@ -403,7 +403,7 @@ func TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("built query mismatch\n got: %s\nwant: %s", got, tc.want)
 			}
-			if _, err := parseViaLangparser(got); err != nil {
+			if _, err := parseViaLangparser(got, false); err != nil {
 				t.Fatalf("dedup query failed to parse (would trigger fallback WARN): %v\nquery: %s", err, got)
 			}
 		})
