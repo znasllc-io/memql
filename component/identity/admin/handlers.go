@@ -1128,7 +1128,7 @@ func auditViewFromNode(n *memqlv1.MemoryNode) *auditView {
 
 func isValidRole(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "owner", "admin", "writer", "reader":
+	case "owner", "admin", "developer", "writer", "reader":
 		return true
 	}
 	return false

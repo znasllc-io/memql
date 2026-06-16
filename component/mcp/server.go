@@ -62,24 +62,23 @@ type Server struct {
 	// interface via asEngine().
 	engine any
 
-	// actingRole is the role the MCP session acts as for the per-tool /
-	// per-construct authz gate. Phase 1 (#1531) sources it from MEMQL_MCP_ROLE
-	// (empty -> IsAllowedForRole's "specialist" default); the full role +
-	// capability-tier model lands in Phase 2 (#1532).
-	actingRole string
+	// cfg carries the two MCP authz gates: the acting role (Gate B; #1531,
+	// from MEMQL_MCP_ROLE -- empty -> IsAllowedForRole's "specialist" default)
+	// and the capability tier (Gate A; #1532, from MEMQL_MCP_MODE).
+	cfg Config
 
 	writeMu sync.Mutex
 }
 
 // NewServer constructs an MCP protocol head. name/version populate the
-// MCP serverInfo block; engine is the in-process engine handle (may be nil
-// in tests, where only the protocol surface is exercised); actingRole is the
-// role the session acts as for the authz gate.
-func NewServer(logger *slog.Logger, name, version string, engine any, actingRole string) *Server {
+// MCP serverInfo block; engine is the in-process engine handle (may be nil in
+// tests, where only the protocol surface is exercised); cfg carries the acting
+// role + capability tier the session enforces.
+func NewServer(logger *slog.Logger, name, version string, engine any, cfg Config) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{logger: logger, name: name, version: version, engine: engine, actingRole: actingRole}
+	return &Server{logger: logger, name: name, version: version, engine: engine, cfg: cfg}
 }
 
 // Engine returns the in-process engine handle this head serves. Used by the
@@ -177,7 +176,7 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 	case "tools/list":
 		// Phase 1 (#1531): reflect the engine's DSL tools (role-gated) + the
 		// generic run_query / run_mutation / run_automation dispatchers.
-		return successResponse(req.ID, map[string]any{"tools": listMCPTools(asEngine(s.engine), s.actingRole)})
+		return successResponse(req.ID, map[string]any{"tools": listMCPTools(asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier)})
 	case "tools/call":
 		return s.handleToolsCall(ctx, req.ID, req.Params)
 	case "ping":
@@ -203,7 +202,7 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	if strings.TrimSpace(p.Name) == "" {
 		return errorResponse(id, codeInvalidParams, "tools/call requires a tool name")
 	}
-	result := callMCPTool(ctx, asEngine(s.engine), s.actingRole, p.Name, p.Arguments)
+	result := callMCPTool(ctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, p.Name, p.Arguments)
 	return successResponse(id, result)
 }
 

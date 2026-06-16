@@ -692,9 +692,9 @@ func (c Config) Validate() error {
 	}
 
 	switch c.InternalDefaultRole {
-	case "owner", "admin", "writer", "reader":
+	case "owner", "admin", "developer", "writer", "reader":
 	default:
-		return fmt.Errorf("IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, writer, reader", c.InternalDefaultRole)
+		return fmt.Errorf("IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, developer, writer, reader", c.InternalDefaultRole)
 	}
 
 	// An env-provided signing key (#550) lives in the sealed genesis

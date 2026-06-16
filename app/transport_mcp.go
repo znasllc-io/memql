@@ -27,12 +27,17 @@ func (a *App) transportMCP() {
 	a.transportBase()
 	a.createHTTPServer()
 
-	// MEMQL_MCP_ROLE is the role the MCP session acts as for the per-tool /
-	// per-construct authz gate (#1531). Empty -> the engine's "specialist"
-	// default; the full role + capability-tier model lands in Phase 2 (#1532).
-	role := strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE"))
+	// The two MCP authz gates (#1531/#1532):
+	//   MEMQL_MCP_ROLE -- the role the session acts as (Gate B). Empty -> the
+	//     engine's "specialist" default.
+	//   MEMQL_MCP_MODE -- the capability tier sealed/authoring/inline (Gate A).
+	//     Unset/unknown -> authoring (the default tier).
+	cfg := mcp.Config{
+		ActingRole: strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE")),
+		Tier:       mcp.ParseTier(os.Getenv("MEMQL_MCP_MODE")),
+	}
 
 	in, out := mcp.StdioStreams()
-	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, role)
+	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, cfg)
 	a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(server, in, out, a.Logger))
 }
