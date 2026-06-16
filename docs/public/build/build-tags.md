@@ -40,6 +40,19 @@ go build -tags mcp -o bin/memql-mcp .
 
 Tags are **mutually exclusive** -- never combine them (e.g., `-tags "bff cognition"`).
 
+### MCP node configuration (epic memql#1529)
+
+The `mcp` node enforces two orthogonal, server-side authz gates:
+
+- `MEMQL_MCP_MODE` -- the capability tier (Gate A): `sealed` (execute named
+  constructs only), `authoring` (**default** -- adds `define`), or `inline`
+  (adds ad-hoc `query`).
+- `MEMQL_MCP_ROLE` -- the role the session acts as for the per-construct gate
+  (Gate B). Empty -> the engine's `specialist` default. Authoring (`define`)
+  and inline (`query`) require the `owner` or `developer` role. The
+  `developer` role is engineering power (author / inline / write) but not
+  user-management power.
+
 ## Docker
 
 ```bash

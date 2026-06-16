@@ -78,7 +78,7 @@ func TestUserFromContext(t *testing.T) {
 			},
 		},
 		{
-			name: "legacy developer role migrates to admin",
+			name: "developer is a first-class role (no longer migrates to admin)",
 			ctx: ContextWithClaims(context.Background(), map[string]any{
 				"sub":   "user-dev",
 				"email": "dev@example.com",
@@ -86,8 +86,14 @@ func TestUserFromContext(t *testing.T) {
 			}),
 			wantOk: true,
 			validate: func(t *testing.T, uc UserContext) {
-				if !IsAdmin(uc) {
-					t.Errorf("expected developer to migrate to admin, got %s", uc.Role)
+				if uc.Role != RoleDeveloper {
+					t.Errorf("expected developer role to stay developer, got %s", uc.Role)
+				}
+				if IsAdmin(uc) {
+					t.Errorf("developer must NOT be admin (no user-management power)")
+				}
+				if !CanAuthor(uc) || !CanRunInline(uc) || !CanWrite(uc) {
+					t.Errorf("developer should be able to author, run inline, and write")
 				}
 			},
 		},
@@ -458,7 +464,7 @@ func TestMigrateRole(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"developer", "admin"},
+		{"developer", "developer"}, // now a first-class role (#1532), not migrated
 		{"manager", "writer"},
 		{"user", "reader"},
 		{"advocate", "reader"},
@@ -475,6 +481,42 @@ func TestMigrateRole(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			if got := migrateRole(tt.input); got != tt.expected {
 				t.Errorf("migrateRole(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestDeveloperRoleCapabilities pins the #1532 capability matrix: developer is
+// engineering power (author / inline / write) but NOT user-management power.
+func TestDeveloperRoleCapabilities(t *testing.T) {
+	cases := []struct {
+		role                   Role
+		canAuthor, canInline   bool
+		canWrite, atLeastAdmin bool
+	}{
+		{RoleOwner, true, true, true, true},
+		{RoleDeveloper, true, true, true, false}, // the new role
+		{RoleAdmin, false, false, true, true},    // admin: NO authoring/inline
+		{RoleWriter, false, false, true, false},
+		{RoleReader, false, false, false, false},
+	}
+	for _, c := range cases {
+		t.Run(string(c.role), func(t *testing.T) {
+			u := UserContext{Role: c.role}
+			if CanAuthor(u) != c.canAuthor {
+				t.Errorf("CanAuthor(%s) = %v, want %v", c.role, CanAuthor(u), c.canAuthor)
+			}
+			if CanRunInline(u) != c.canInline {
+				t.Errorf("CanRunInline(%s) = %v, want %v", c.role, CanRunInline(u), c.canInline)
+			}
+			if CanWrite(u) != c.canWrite {
+				t.Errorf("CanWrite(%s) = %v, want %v", c.role, CanWrite(u), c.canWrite)
+			}
+			if AtLeastAdmin(u) != c.atLeastAdmin {
+				t.Errorf("AtLeastAdmin(%s) = %v, want %v", c.role, AtLeastAdmin(u), c.atLeastAdmin)
+			}
+			if !IsValidRole(c.role) {
+				t.Errorf("%s should be a valid role", c.role)
 			}
 		})
 	}

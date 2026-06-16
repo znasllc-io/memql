@@ -20,15 +20,20 @@ type (
 )
 
 const (
-	RoleOwner  Role = "owner"
-	RoleAdmin  Role = "admin"
-	RoleWriter Role = "writer"
-	RoleReader Role = "reader"
+	RoleOwner Role = "owner"
+	RoleAdmin Role = "admin"
+	// RoleDeveloper is engineering power, not admin power (MCP epic #1529,
+	// Phase 2 #1532): it can author constructs + run inline DSL + write data,
+	// but CANNOT manage users/identities (that stays admin/owner). owner is a
+	// superset of developer; admin gains neither authoring nor inline.
+	RoleDeveloper Role = "developer"
+	RoleWriter    Role = "writer"
+	RoleReader    Role = "reader"
 )
 
 // ValidRoles returns all valid role values.
 func ValidRoles() []Role {
-	return []Role{RoleOwner, RoleAdmin, RoleWriter, RoleReader}
+	return []Role{RoleOwner, RoleAdmin, RoleDeveloper, RoleWriter, RoleReader}
 }
 
 // RoleLevel returns the numeric privilege level for a role.
@@ -38,6 +43,13 @@ func RoleLevel(r Role) int {
 	case RoleOwner:
 		return 0
 	case RoleAdmin:
+		return 1
+	// developer sits in the privileged tier alongside admin (different power
+	// axis -- engineering, not user-management). The numeric level is used only
+	// for delegation-ceiling capping (RoleAtMost); 1 keeps a developer above
+	// writer/reader so a writer/reader ceiling caps it down, and a developer
+	// ceiling never elevates a lower role.
+	case RoleDeveloper:
 		return 1
 	case RoleWriter:
 		return 2
@@ -190,10 +202,23 @@ func AtLeastAdmin(u UserContext) bool {
 	return u.Role == RoleOwner || u.Role == RoleAdmin
 }
 
-// CanWrite returns true if the user has owner, admin, or writer role.
-// Readers cannot write.
+// CanWrite returns true if the user has owner, admin, developer, or writer
+// role. Readers cannot write.
 func CanWrite(u UserContext) bool {
-	return u.Role == RoleOwner || u.Role == RoleAdmin || u.Role == RoleWriter
+	return u.Role == RoleOwner || u.Role == RoleAdmin || u.Role == RoleDeveloper || u.Role == RoleWriter
+}
+
+// CanAuthor reports whether the user may author DSL constructs (the MCP
+// `define` op, Tier 2). Engineering power: owner or developer only -- admin
+// does NOT gain authoring (#1529 §4).
+func CanAuthor(u UserContext) bool {
+	return u.Role == RoleOwner || u.Role == RoleDeveloper
+}
+
+// CanRunInline reports whether the user may run ad-hoc inline DSL (the MCP
+// `query` op + inline definitions, Tier 3). owner or developer only.
+func CanRunInline(u UserContext) bool {
+	return u.Role == RoleOwner || u.Role == RoleDeveloper
 }
 
 // CanRead returns true if the user has any valid role. All four roles can read.
@@ -302,11 +327,12 @@ func normalizeRole(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-// migrateRole maps legacy role values to the current 4-role system
-// (owner / admin / writer / reader).
+// migrateRole maps legacy role values to the current role system
+// (owner / admin / developer / writer / reader).
 //
 // Mapping rationale:
-//   - developer: legacy alias for elevated-write, map to admin.
+//   - developer: now a FIRST-CLASS role (#1532) -- no longer migrated to
+//     admin; it passes through unchanged.
 //   - manager: retired middle-band role, map to writer (keeps write access
 //     but drops the ill-defined user-management authority).
 //   - user: retired default role, map to reader (view-only).
@@ -314,8 +340,6 @@ func normalizeRole(value string) string {
 //     the most restrictive role (reader).
 func migrateRole(role string) string {
 	switch role {
-	case "developer":
-		return "admin"
 	case "manager":
 		return "writer"
 	case "user":
@@ -327,10 +351,10 @@ func migrateRole(role string) string {
 	}
 }
 
-// IsValidRole returns true if the given role is one of the four valid roles.
+// IsValidRole returns true if the given role is one of the valid roles.
 func IsValidRole(role Role) bool {
 	switch role {
-	case RoleOwner, RoleAdmin, RoleWriter, RoleReader:
+	case RoleOwner, RoleAdmin, RoleDeveloper, RoleWriter, RoleReader:
 		return true
 	default:
 		return false

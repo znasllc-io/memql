@@ -37,18 +37,23 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 }
 
-// Meta-tool names — the generic dispatchers (design §6.2).
+// Meta-tool names — the generic dispatchers (design §6.2) + the tier-gated
+// authoring / inline ops (Phase 2 #1532; implementations land in Phase 3/5).
 const (
 	toolRunQuery      = "run_query"
 	toolRunMutation   = "run_mutation"
 	toolRunAutomation = "run_automation"
+	toolDefine        = "define"
+	toolQuery         = "query"
 )
 
 // listMCPTools reflects the engine's DSL tools 1:1 into MCP tool descriptors,
 // filtered by the acting role's per-tool gate, then appends the meta-tools.
 // Client-execution tools (browser-driven, e.g. the ui* operator primitives)
-// are skipped: they cannot run server-side over MCP.
-func listMCPTools(eng Engine, role string) []map[string]any {
+// are skipped: they cannot run server-side over MCP. The tier-gated `define`
+// (Tier 2) and `query` (Tier 3) tools are listed only when BOTH the deployment
+// tier (Gate A) and the acting role (Gate B) permit them.
+func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 	out := make([]map[string]any, 0)
 	if eng != nil {
 		if reg := eng.Tools(); reg != nil {
@@ -65,7 +70,30 @@ func listMCPTools(eng Engine, role string) []map[string]any {
 			}
 		}
 	}
-	return append(out, metaToolDefs()...)
+	out = append(out, metaToolDefs()...)
+	if tierAllows(tier, classAuthor) && roleCanAuthor(role) {
+		out = append(out, map[string]any{
+			"name":        toolDefine,
+			"description": "Author a memQL .memql bundle (validate + activate). Requires the authoring tier + owner/developer role.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"bundle": map[string]any{"type": "string", "description": "The .memql source to author."}},
+				"required":   []any{"bundle"},
+			},
+		})
+	}
+	if tierAllows(tier, classInline) && roleCanRunInline(role) {
+		out = append(out, map[string]any{
+			"name":        toolQuery,
+			"description": "Run ad-hoc inline memQL query text. Requires the inline tier + owner/developer role.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"query": map[string]any{"type": "string", "description": "Inline memQL query text."}},
+				"required":   []any{"query"},
+			},
+		})
+	}
+	return out
 }
 
 // metaToolDefs are the generic dispatchers added to tools/list alongside the
@@ -94,7 +122,7 @@ func metaToolDefs() []map[string]any {
 // or a meta-tool. It returns an MCP tools/call result object (content + isError)
 // -- tool failures are reported as isError results, not protocol errors, per the
 // MCP convention. The acting role is threaded onto the context for the gate.
-func callMCPTool(ctx context.Context, eng Engine, role, name string, args map[string]any) map[string]any {
+func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name string, args map[string]any) map[string]any {
 	if eng == nil {
 		return errorResult("mcp tool surface unavailable: engine not connected")
 	}
@@ -105,6 +133,10 @@ func callMCPTool(ctx context.Context, eng Engine, role, name string, args map[st
 		return runNamedConstruct(ctx, eng, name, args)
 	case toolRunAutomation:
 		return errorResult("run_automation is not enabled until Phase 4 (memql#1534)")
+	case toolDefine:
+		return gateAuthoring(role, tier)
+	case toolQuery:
+		return gateInline(role, tier)
 	default:
 		raw, err := eng.ExecuteToolByName(ctx, name, args)
 		if err != nil {
