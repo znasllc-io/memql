@@ -1,0 +1,108 @@
+# PrometheusRule: auth-reject rate + JWKS incoherence alerts.
+#
+# memql#1523. On 2026-06-16 a ~50% auth failure stayed silent (WARN logs
+# only) until a user noticed the product was broken. These rules page on
+# the same conditions within minutes.
+#
+# ASSUMES: a prometheus-operator / kube-prometheus-stack whose Prometheus
+# CR selects PrometheusRules (the `release` label must match its
+# `ruleSelector`, same as the PodMonitor) and Alertmanager is wired for
+# routing. The metrics referenced are emitted by component/metrics and
+# scraped via monitoring/podmonitor.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: memql-auth
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: memql-auth-rejects
+      rules:
+        # Total auth-reject storm across every surface (grpc / http /
+        # node). >1 reject/s sustained for 5m is well above the steady-
+        # state noise floor (occasional expired/garbage tokens) and is
+        # the symptom of the 2026-06-16 incident.
+        - alert: MemqlAuthRejectRateHigh
+          expr: |
+            sum(rate(memql_auth_rejects_total{namespace="memql"}[5m])) > 1
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL auth-reject rate elevated ({{ $value | printf \"%.2f\" }}/s)"
+            description: >
+              memQL is rejecting more than 1 authentication/authorization
+              request per second (5m avg) across the cluster. Likely a
+              JWKS / signing-key skew or a misconfigured verifier.
+              Break down by reason/surface:
+              sum by (surface,reason,code)(rate(memql_auth_rejects_total{namespace="memql"}[5m])).
+              See memql#1523.
+
+        # Unknown-kid specifically: a verifier holds no key for a token's
+        # kid -> the JWKS the signer used and the JWKS the verifier holds
+        # disagree. This is the crisp signing-key-skew signal; a much
+        # lower threshold is justified because steady state is ~0.
+        - alert: MemqlAuthRejectUnknownKid
+          expr: |
+            sum(rate(memql_auth_rejects_total{namespace="memql",reason="unknown_kid"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL rejecting tokens for unknown signing key (kid)"
+            description: >
+              Verifiers are rejecting JWTs whose kid is absent from their
+              JWKS cache. The identity signing key and the per-node
+              verifier keysets are out of sync (rotation gone wrong, a
+              stale identity replica, or split signing material). Cross-
+              check MemqlJWKSIncoherent. See memql#1523.
+
+    - name: memql-jwks-coherence
+      rules:
+        # Identity replicas must serve an IDENTICAL key set (in seed mode
+        # every replica derives the same key from IDENTITY_SIGNING_KEY_B64,
+        # so the fingerprint is rock-stable). If the fingerprints diverge
+        # across identity replicas, tokens signed by one replica's key are
+        # rejected by verifiers that fetched the other replica's JWKS --
+        # exactly the silent failure of 2026-06-16.
+        - alert: MemqlJWKSIncoherent
+          expr: |
+            (
+              max(memql_jwks_keyset_fingerprint{namespace="memql",app="identity"})
+              - min(memql_jwks_keyset_fingerprint{namespace="memql",app="identity"})
+            ) != 0
+          for: 10m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "identity replicas serving different JWKS key sets"
+            description: >
+              memql_jwks_keyset_fingerprint differs across identity
+              replicas: they are publishing different signing keys. Token
+              verification will fail intermittently depending on which
+              replica signed and which JWKS a verifier fetched. Inspect
+              per-replica: memql_jwks_keyset_fingerprint{app="identity"}
+              and memql_jwks_keyset_keys{app="identity"}. See memql#1523.
+
+        # An identity replica serving an EMPTY keyset cannot validate any
+        # token signed against it -- a different, equally fatal failure.
+        - alert: MemqlJWKSEmpty
+          expr: |
+            min(memql_jwks_keyset_keys{namespace="memql",app="identity"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "an identity replica is serving an empty JWKS"
+            description: >
+              memql_jwks_keyset_keys is 0 on at least one identity replica
+              -- it has no signing keys to publish, so every token it (or a
+              verifier fetching from it) checks will be rejected. See
+              memql#1523.

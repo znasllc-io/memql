@@ -1,0 +1,31 @@
+# ServiceMonitor: scrape the Argo Rollouts controller metrics.
+#
+# memql#1523. OPTIONAL -- apply this ONLY if your Prometheus does not
+# already discover the Argo Rollouts controller. The MemqlRolloutPausedTooLong
+# / MemqlRolloutDegraded alerts (monitoring/prometheusrule-rollouts.yaml)
+# query `rollout_info`, which the controller exports on its
+# `argo-rollouts-metrics` Service (port 8090) in the argo-rollouts
+# namespace (deploy/rollouts/install, upstream v1.7.2).
+#
+# ASSUMES: the same prometheus-operator selects this ServiceMonitor (the
+# `release` label must match its serviceMonitorSelector) and is allowed
+# to scrape across namespaces.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argo-rollouts-metrics
+  namespace: argo-rollouts
+  labels:
+    app.kubernetes.io/part-of: memql
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - argo-rollouts
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts-metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

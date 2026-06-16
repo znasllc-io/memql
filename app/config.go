@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/znasllc-io/memql/component/identity/verifier"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/server"
 )
 
@@ -40,6 +41,13 @@ func (a *App) configAndAuth() {
 	a.mux = http.NewServeMux()
 	a.httpArgs = make([]server.ServerArg, 0, 2)
 	a.httpArgs = append(a.httpArgs, server.WithBaseRouter(a.mux))
+	// Prometheus scrape endpoint. Mounted on every node type (auth
+	// rejects + JWKS keyset metrics live here, memql#1523). Public via
+	// server.MetricsPaths(), so the verifier HTTP middleware below does
+	// not gate it -- an in-cluster scrape can't present a bearer token.
+	for _, p := range server.MetricsPaths() {
+		a.mux.Handle("GET "+p, metrics.Handler())
+	}
 	a.middlewares = make([]server.MiddlewareFunc, 0, 4)
 	// Panic recovery is the outermost layer of the HTTP chain. A panic
 	// in any downstream middleware or handler is caught here, logged
