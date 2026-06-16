@@ -26,7 +26,7 @@ func parseStandaloneExpression(input string) (ExpressionNode, error) {
 	if trimmed == "" {
 		return nil, fmt.Errorf("expression is empty")
 	}
-	return parseViaLangparser(trimmed)
+	return parseViaLangparser(trimmed, false)
 }
 
 // detectSIUsage walks an ExpressionNode tree and reports whether
