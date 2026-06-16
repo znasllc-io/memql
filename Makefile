@@ -750,14 +750,18 @@ deploy-autoscaler:
 
 .PHONY: staging-db-reset
 
-## DESTRUCTIVE, MANUAL staging DB reset (znasllc-io/memql#1500): wipe the
-## staging database back to a fresh EMPTY schema, for when many app iterations
-## have left stale data behind and you want to start clean. NEVER part of a
-## deploy -- it runs ONLY when you invoke it and confirm. Staging-only (refuses
-## prod) + a kube-context guard + an interactive typed confirmation; the wipe
-## runs as a one-shot in-cluster Job and the schema is rebuilt by the existing
-## `memql migrate` Job. The owner re-registers via magic-link afterward. Impl
-## in scripts/deploy/staging-db-reset.sh.
+## DESTRUCTIVE, MANUAL staging DB reset (znasllc-io/memql#1500), AUTH-COHERENT
+## (znasllc-io/memql#1522): wipe the staging database back to a fresh EMPTY
+## schema, for when many app iterations have left stale data behind and you want
+## to start clean. NEVER part of a deploy -- it runs ONLY when you invoke it and
+## confirm. Staging-only (refuses prod) + a kube-context guard + an interactive
+## typed confirmation; the wipe runs as a one-shot in-cluster Job and the schema
+## is rebuilt by the existing `memql migrate` Job. Auth stays coherent (#1522):
+## it pre-flights the shared identity signing seed (#1515) and REFUSES if it is
+## absent, brings identity up BEFORE the mesh so node tokens re-mint cleanly
+## (#1521), and verifies JWKS is served afterward -- no manual reseal / mesh roll.
+## The owner re-registers via magic-link afterward. Impl in
+## scripts/deploy/staging-db-reset.sh.
 ##   make staging-db-reset DRY_RUN=1     # preview the plan, change nothing
 ##   make staging-db-reset               # wipe staging (asks you to type 'reset staging')
 ##   make staging-db-reset ARGS=--yes    # skip the prompt (still env/context guarded)
