@@ -1565,6 +1565,16 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	// stamp the originating caller's provenance instead of a fresh
 	// per-tool default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
+	// Auto-inject the voice-path tool defaults (#1503). On the realtime
+	// voice CallTool proxy hop the agent-node session has no local voice
+	// scope -- the bff threads it on the CallToolMsg. The engine's central
+	// auto-injection (applyToolDefaults in ExecuteTool) stamps the
+	// `@autoInjected` spaceId / agentId / ownerUserId fields from
+	// ToolDefaultsFromContext, so set them here for any @autoInjected tool
+	// the voice model can reach (produceArtifact, requestComputerUseScope,
+	// editDocument, ...). Resolution is at the default layer, not per-tool,
+	// so adding a new @autoInjected voice tool needs no change here.
+	ctx = s.contextWithVoiceCallToolDefaults(ctx, msg)
 	args := msg.GetArguments()
 
 	// Client-executed tool: the body runs in a browser, not on the engine.
