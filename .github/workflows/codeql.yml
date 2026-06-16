@@ -39,15 +39,32 @@ jobs:
         language: [go]
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      # Merge-queue fast pass (memql#1539): on `merge_group` we do NOT re-run
+      # CodeQL. The analyze step uploads SARIF keyed to the ephemeral
+      # `gh-readonly-queue/main/pr-*` ref, which the merge queue tears down
+      # before the upload lands -- the upload then errors with "ref ... not
+      # found" and the required `Analyze (go)` check goes red, wedging the
+      # queue. Re-analysis on the merge candidate adds no coverage anyway: the
+      # same tree was already analyzed on the PR, and push-to-main + the weekly
+      # cron re-scan after merge. So on `merge_group` the job is a no-op that
+      # simply reports the required `Analyze (go)` context green; the real
+      # CodeQL run stays on pull_request / push:main / schedule.
+      - name: merge-queue no-op (CodeQL already ran on the PR)
+        if: github.event_name == 'merge_group'
+        run: echo "CodeQL is not re-run on merge_group; PR + push:main + weekly schedule provide coverage (memql#1539)."
+      - if: github.event_name != 'merge_group'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - if: github.event_name != 'merge_group'
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
           # Richer suite: security queries + maintainability/quality
           # queries, instead of the default security-only set.
           queries: security-and-quality
-      - uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
-      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      - if: github.event_name != 'merge_group'
+        uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+      - if: github.event_name != 'merge_group'
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           category: "/language:${{ matrix.language }}"
