@@ -95,11 +95,21 @@ One command takes the cluster from source to a rolled-out, gated deploy:
    structurally gone — deployment-v2 Phase 1, #699). `identity` is waited Ready
    first (JWKS), then the rest.
 5. **Health gate**: a **drift assertion** (`drift-check.sh --live`: every live
-   pod runs the exact digest the overlay pins) followed by the **smoke gate**
-   (§7). On failure with the gate armed (default), the deploy stops and prints
-   the **git-revert** rollback procedure (§8) — it does **not** imperatively
-   revert.
+   pod runs the exact digest the overlay pins), then the **bff promote**
+   (#1520) + the **functional post-deploy gate** (#1519, §7.1), then the
+   front-door **smoke gate** (§7). On failure with the gate armed (default),
+   the deploy stops and prints the **git-revert** rollback procedure (§8) — it
+   does **not** imperatively revert.
 6. **Record validated version** (§6) on a green *deep* gate.
+
+> **Why a functional gate (#1519/#1520).** A digest match (`drift-check`) plus
+> `kubectl rollout status` are **not** proof a release works. The 0.9.60 deploy
+> went green on both while it was actually broken two ways: (a) the bff
+> blue/green Rollout sat at `BlueGreenPause` and was never promoted, so
+> `bff-active` kept selecting the **old** color (no agent peer →
+> `siSuggest: no connected agent node available`); (b) identity JWKS diverged
+> across replicas (per-pod keys) → ~50% of token verifications failed, silently.
+> The functional gate (§7.1) catches both before stamping a release validated.
 
 Carrier + SPA are built/pinned from their own repos (`memql-bff-copresent
 make release`; copresent `docker buildx` with the `node_auth_token` BuildKit
@@ -256,6 +266,60 @@ in the deploy environment, and flags a token-less deploy as not promotable.
 
 Deeper tier tracked as a follow-up: a headless-browser walkthrough +
 console-error tier (#658).
+
+### 7.1 Functional post-deploy gate + bff auto-promote (`scripts/deploy/post-deploy-gate.sh`, #1519/#1520)
+
+The **authority** that stamps a release validated — run by `aks-deploy.sh`'s
+health gate (and re-runnable standalone). It does two things a digest-drift
+check structurally cannot:
+
+**Promote the bff Rollout (#1520).** The bff blue/green Rollout is
+`autoPromotionEnabled:false`, so after the new color is Ready it parks at
+`BlueGreenPause` until promoted. The gate verifies the
+`prePromotionAnalysis` (the in-cluster `deploy-gate` AnalysisRun) is **green**,
+then runs `kubectl argo rollouts promote bff` — retrying for the documented
+"may need promoting twice" case — and asserts `bff-active` flips to the release
+color. **A failed analysis does NOT promote**: the old color stays active and
+the deploy fails loudly (traffic never flips onto an un-gated color).
+
+**Validate across three conditions (#1519)** — a release is **not** validated
+until ALL pass:
+
+1. **bff promoted** — `kubectl argo rollouts status bff` == `Healthy` **AND**
+   the `bff-active` Service's `rollouts-pod-template-hash` selector ==
+   the Rollout's stable (release) color. Catches the false-green where the
+   Service still points at the **old** color (the 0.9.60 incident) — invisible
+   to `rollout status` + `drift-check`.
+2. **JWKS coherent** — polls the LB `/.well-known/jwks.json` `JWKS_POLLS` times
+   (each may hit a different replica) **and** every `identity` pod directly
+   (`kubectl exec` → its own `:8085` JWKS); **FAILS** if the served `kid` set
+   diverges across replicas. Catches the silent per-pod-key divergence that
+   broke ~50% of token verifications.
+3. **functional auth** — a real authenticated round-trip that exercises
+   **BFF → agent** forwarding. Preferred path: the in-cluster
+   `class="service_account"` deploy-gate query (`deploy-gate` image +
+   `deploy-gate-jwt` Secret, §6.x / `deploy/rollouts/README.md`) run as a
+   one-shot Job against `bff-active` — the operator/CI path that needs no
+   interactive login. Fallback: an authed query via `MEMQL_SMOKE_TOKEN` through
+   the deep smoke profile. With neither credential it **fails loudly** (a gate
+   that can't authenticate proves nothing); set `GATE_FUNCTIONAL_OPTIONAL=1`
+   (implied by `--no-gate`) to downgrade only this condition to a warning when
+   an operator runs a manual login round-trip out of band.
+
+```bash
+# Promote bff, then run the full functional gate (what aks-deploy.sh does):
+bash scripts/deploy/post-deploy-gate.sh --env=staging
+# Re-validate an already-promoted release without re-promoting:
+bash scripts/deploy/post-deploy-gate.sh --gate-only --env=staging
+# Just promote the bff Rollout:
+bash scripts/deploy/post-deploy-gate.sh --promote-only --env=staging
+```
+
+A failure blocks the release: under the armed gate `aks-deploy.sh` stops and
+prints the git-revert rollback procedure (§8). Idempotent — a promote on an
+already-promoted Rollout is a no-op and the checks are pure reads. Tuning knobs:
+`JWKS_POLLS`, `APP_HOST`/`IDENTITY_HOST`, `DEPLOY_GATE_IMAGE`,
+`DEPLOY_GATE_JWT_SECRET`, `MEMQL_SMOKE_TOKEN`.
 
 ---
 
