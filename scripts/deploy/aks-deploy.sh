@@ -20,8 +20,12 @@
 #      one-time DB migration and serves JWKS, so it must be Ready before
 #      the workers roll (otherwise their verifiers churn). Then kustomize-
 #      apply the rest and wait for every Deployment to roll out.
-#   4. SMOKE: run scripts/deploy/staging-smoke-test.sh against the live
-#      front door (non-fatal -- DNS/cert propagation can lag a fresh apply).
+#   4. PROMOTE + GATE: promote the bff blue/green Rollout (#1520) so traffic
+#      flips off the old color, then run the FUNCTIONAL post-deploy gate
+#      (#1519, scripts/deploy/post-deploy-gate.sh) -- bff-promoted + JWKS
+#      coherent + a real BFF->agent authenticated round-trip -- as the authority
+#      that stamps a release validated (the digest-drift guard alone went green
+#      on the broken 0.9.60 deploy). Then the live-front-door smoke test.
 #
 # Engine images built here (memQL repo, per-node build tags):
 #   identity cognition voice agent planner workbench
@@ -155,10 +159,14 @@ Options:
     --skip-build      Do not build/push images; apply already-pushed tags.
     --skip-tls        Do not (re)generate the internal CA + identity cert.
     --skip-migrate    Do not run the gated pre-deploy DB migration Job.
-    --no-smoke        Skip the post-deploy smoke test (also disables the gate).
-    --no-gate         Run the smoke test but do NOT auto-rollback on failure
-                      (useful when a smoke failure is environmental, e.g.
-                      DNS/cert propagation lag). Default: gate ON.
+    --no-smoke        Skip the post-deploy smoke test (the functional gate
+                      #1519 + version-skew guard still run).
+    --no-gate         Run the checks (version-skew guard, bff promote #1520,
+                      functional gate #1519, smoke) but do NOT auto-rollback on
+                      failure -- and downgrade the functional-auth condition
+                      that needs a headless credential to a warning (useful when
+                      a failure is environmental, e.g. DNS/cert propagation lag
+                      or a missing deploy-gate-jwt Secret). Default: gate ON.
     --gate-headroom   FAIL the deploy if the nodepool lacks free CPU for the
                       rolling-update surge (#614). Default: WARN only.
     --skip-headroom   Skip the pre-deploy nodepool headroom check entirely.
@@ -742,10 +750,58 @@ function assert_engine_versions() {
     "$drift" --live --env="$ENV"
 }
 
-# The health gate: assert no version skew, then run the smoke test; if either
-# fails and the gate is armed, auto-rollback and exit non-zero so the operator
-# (or CI) sees the failure. --no-smoke skips the smoke check (the version-skew
-# guard still runs); --no-gate runs the checks but won't revert.
+# promote_bff_rollout -- #1520: fold the bff blue/green promotion into the
+# deploy flow. After apply_ordered rolls the new color, the bff Rollout
+# (autoPromotionEnabled:false) sits at BlueGreenPause until promoted; nothing
+# used to run the promote, so every release silently parked on the OLD color
+# (the 0.9.60 incident). Delegate to post-deploy-gate.sh --promote-only, which
+# verifies the prePromotionAnalysis is green, runs `kubectl argo rollouts
+# promote bff` (handling the "promote twice" case), and asserts bff-active flips
+# to the release color. A failed analysis does NOT promote and fails loudly.
+function promote_bff_rollout() {
+    local gate="$SCRIPT_DIR/post-deploy-gate.sh"
+    if [ ! -f "$gate" ]; then
+        warn "post-deploy-gate.sh not found at $gate; skipping the bff promote (#1520)."
+        return 0
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        plan "scripts/deploy/post-deploy-gate.sh --promote-only --env=$ENV (promote the bff blue/green Rollout, #1520)"
+        return 0
+    fi
+    bash "$gate" --promote-only --env="$ENV"
+}
+
+# The FUNCTIONAL post-deploy gate (#1519): promote bff, then validate the
+# release across three conditions (bff promoted + JWKS coherent + functional
+# BFF->agent auth). This is the authority that stamps a release validated --
+# the digest-drift guard (assert_engine_versions) + smoke alone went GREEN on
+# the 0.9.60 deploy that was actually broken (unpromoted bff color, divergent
+# JWKS). Delegates to post-deploy-gate.sh; a failure here is a hard gate
+# failure. --no-gate downgrades the functional condition that needs a headless
+# credential to a warning (GATE_FUNCTIONAL_OPTIONAL) so an environmental gap
+# doesn't block, but the bff-promoted + JWKS checks still run.
+function functional_post_deploy_gate() {
+    local gate="$SCRIPT_DIR/post-deploy-gate.sh"
+    if [ ! -f "$gate" ]; then
+        warn "post-deploy-gate.sh not found at $gate; skipping the functional gate (#1519)."
+        return 0
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        plan "scripts/deploy/post-deploy-gate.sh --gate-only --env=$ENV (functional gate: bff promoted + JWKS coherent + BFF->agent auth, #1519)"
+        return 0
+    fi
+    if [ "$GATE" = false ]; then
+        GATE_FUNCTIONAL_OPTIONAL=1 bash "$gate" --gate-only --env="$ENV"
+    else
+        bash "$gate" --gate-only --env="$ENV"
+    fi
+}
+
+# The health gate: assert no version skew, promote the bff Rollout (#1520), run
+# the functional post-deploy gate (#1519), then the smoke test; if any fails and
+# the gate is armed, auto-rollback and exit non-zero so the operator (or CI)
+# sees the failure. --no-smoke skips the smoke check (the version-skew guard +
+# functional gate still run); --no-gate runs the checks but won't revert.
 function health_gate() {
     if ! assert_engine_versions; then
         if [ "$GATE" = false ]; then
@@ -753,6 +809,31 @@ function health_gate() {
             return 1
         fi
         section "5. Version skew -> rollback"
+        rollback_all
+        return 1
+    fi
+    # #1520: promote the bff blue/green Rollout before validating -- otherwise
+    # the functional gate's bff-promoted condition (and the live mesh) sees the
+    # stale color.
+    section "5b. Promote bff blue/green Rollout (#1520)"
+    if ! promote_bff_rollout; then
+        if [ "$GATE" = false ]; then
+            warn "bff promote failed; gate is OFF (--no-gate), leaving the revision in place."
+            return 1
+        fi
+        section "5. bff promote FAILED -> rollback"
+        rollback_all
+        return 1
+    fi
+    # #1519: the functional gate is the authority that stamps the release
+    # validated -- catches the false-green the digest guard cannot see.
+    section "5c. Functional post-deploy gate (#1519)"
+    if ! functional_post_deploy_gate; then
+        if [ "$GATE" = false ]; then
+            warn "functional gate failed; gate is OFF (--no-gate), leaving the revision in place."
+            return 1
+        fi
+        section "5. Functional gate FAILED -> rollback"
         rollback_all
         return 1
     fi
