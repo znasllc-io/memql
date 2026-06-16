@@ -153,6 +153,58 @@ func maybeBootstrapNodeToken(ctx context.Context, logger *slog.Logger, nodeId, n
 	return token, true, nil
 }
 
+// bootstrapMintConfigured reports whether the self-bootstrap mint path is
+// usable: the shared secret + identity verifier base URL are both set. When
+// this is false the node's token was provisioned out-of-band via
+// MEMQL_NODE_TOKEN (or there is no token at all), and a re-mint is impossible
+// -- there is no endpoint to re-fetch from. The auth-failure re-mint path
+// (memql#1521) only wires its reauth hook when this returns true.
+func bootstrapMintConfigured() bool {
+	if strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")) == "" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_BASE_URL")) == "" {
+		return false
+	}
+	return true
+}
+
+// remintNodeToken re-fetches a fresh class="node" JWT from the identity
+// service's `/node/bootstrap` endpoint, ignoring the MEMQL_NODE_TOKEN
+// short-circuit that maybeBootstrapNodeToken applies (memql#1521).
+//
+// This is the CLIENT-side companion to the identity verifier's
+// fetch-on-unknown-kid behaviour: when identity's signing key rotates, a node
+// holding a token signed by the OLD key is rejected (`unknown kid` /
+// Unauthenticated) on every outbound NodeService dial and -- before this --
+// looped forever reusing the dead token until a manual pod restart. On a
+// rejection the connection calls this to re-acquire a token signed by the
+// CURRENT key (identity now serves the rotated key) and retries.
+//
+// Preconditions: MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL must
+// be set (bootstrapMintConfigured). Callers gate on that before wiring the
+// reauth hook, so an operator-provisioned (out-of-band) token -- which cannot
+// be re-minted -- never reaches here. A short, bounded retry budget keeps a
+// flapping identity from being hammered; the caller's own backoff bounds the
+// overall re-mint cadence across reconnect attempts.
+func remintNodeToken(ctx context.Context, logger *slog.Logger, nodeId, nodeType string) (string, error) {
+	secret := strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN"))
+	identityBase := strings.TrimRight(strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_BASE_URL")), "/")
+	if secret == "" || identityBase == "" {
+		return "", fmt.Errorf("node remint: bootstrap not configured (MEMQL_NODE_BOOTSTRAP_TOKEN + IDENTITY_VERIFIER_BASE_URL required)")
+	}
+	// A short budget: the re-mint runs INSIDE the reconnect loop, so the loop's
+	// own backoff already bounds how often we retry across attempts. We only
+	// want to ride out a brief identity blip within a single re-mint, not spin
+	// the whole startup budget here.
+	return bootstrapWithRetry(ctx, logger, identityBase, secret, nodeId, nodeType,
+		nodeRemintRetryBudget, nodeBootstrapRetryBaseBackoff)
+}
+
+// nodeRemintRetryBudget caps a SINGLE re-mint call. Kept short on purpose --
+// the reconnect loop's outer backoff is the real rate limiter across attempts.
+const nodeRemintRetryBudget = 10 * time.Second
+
 // bootstrapWithRetry drives attemptBootstrapMint on an exponential backoff
 // until it succeeds, hits a permanent (non-retryable) rejection, the context
 // is cancelled, or the overall budget is exhausted. A budget of 0 collapses
