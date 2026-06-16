@@ -1,0 +1,106 @@
+name: build-engine-images
+
+# Build-speed C3 (epic znasllc-io/memql#1505, #1508). Builds + pushes the two
+# ENGINE images (memql-identity, memql-voice) to ACR `acrmemql` on a release
+# cut, moving the build off the operator laptop onto native linux/amd64 CI.
+#
+# Auth: GitHub OIDC -> Azure (no long-lived secret). The federated credential
+# subject is `repo:znasllc-io/memql:ref:refs/heads/main`, so this MUST run on
+# main -- hence workflow_dispatch (which runs on the default branch). The
+# carrier nodes (cognition/agent/planner/workbench + the bff) are built by C4
+# in the memql-bff-copresent repo; the SPA by C5 in copresent.
+#
+# Tag scheme mirrors the operator (scripts/deploy/aks-deploy.sh build_one):
+# memql-<node>:<version>, release tags immutable. The lockfile-assembly step
+# (C6, #1511) resolves each component's @sha256 digest from ACR by this tag, so
+# this workflow only needs to push the tag (digests are also surfaced in the run
+# summary for visibility).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, used as the image tag (e.g. 0.9.61)."
+        required: true
+        type: string
+      allow_overwrite:
+        description: "Re-push an existing tag (release tags are normally immutable)."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write # mint the OIDC token for azure/login
+  contents: read
+
+env:
+  ACR_NAME: acrmemql
+  ACR_LOGIN_SERVER: acrmemql.azurecr.io
+
+jobs:
+  build:
+    name: build memql-${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # identity: CGO-free; matches build_one (no --target -> the
+          # Dockerfile's last stage). voice: CGO + the voice-runtime stage.
+          - node: identity
+            cgo: "0"
+            target: ""
+          - node: voice
+            cgo: "1"
+            target: voice-runtime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Immutability guard
+        if: ${{ !inputs.allow_overwrite }}
+        run: |
+          img="memql-${{ matrix.node }}:${{ inputs.version }}"
+          if az acr repository show --name "$ACR_NAME" --image "$img" >/dev/null 2>&1; then
+            echo "::error::${img} already exists in ${ACR_NAME} -- release tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
+            exit 1
+          fi
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v3
+
+      - name: Build + push memql-${{ matrix.node }}
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          target: ${{ matrix.target }}
+          build-args: |
+            BUILD_TAGS=${{ matrix.node }}
+            CGO_ENABLED=${{ matrix.cgo }}
+          tags: ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
+          cache-from: type=gha,scope=memql-${{ matrix.node }}
+          cache-to: type=gha,mode=max,scope=memql-${{ matrix.node }}
+
+      - name: Digest summary
+        run: |
+          {
+            echo "### memql-${{ matrix.node }}:${{ inputs.version }}"
+            echo '```'
+            echo "${ACR_LOGIN_SERVER}/memql-${{ matrix.node }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
