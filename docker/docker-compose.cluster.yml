@@ -649,6 +649,17 @@ services:
       # docker/nginx/templates/default.conf.template).
       IDENTITY_BASE_URL: https://identity.${IDENTITY_BOOTSTRAP_DOMAIN:-local.znas.io}
       IDENTITY_KEY_DIR: /var/identity/keys
+      # #1515 fail-fast guard opt-in. This local cluster runs identity at
+      # replicas: 2 but, unlike staging, does NOT set a shared
+      # IDENTITY_SIGNING_KEY_B64 seed -- the two replicas instead share one
+      # on-disk key via the cluster_identity_keys volume mounted below, so
+      # JWKS stays coherent. The guard refuses per-pod ephemeral keys on a
+      # non-localhost origin; the default identity.local.znas.io origin is
+      # localhost-shaped and exempt, but we set the opt-in explicitly so the
+      # cluster still boots if IDENTITY_BOOTSTRAP_DOMAIN is overridden to a
+      # real domain for local staging-parity testing. Staging/prod set the
+      # shared seed instead (deploy/k8s/base/identity.yaml) and leave this unset.
+      IDENTITY_ALLOW_EPHEMERAL_KEY: ${IDENTITY_ALLOW_EPHEMERAL_KEY:-true}
 
       # Dev escape hatch: admit plaintext HTTP requests to /node/bootstrap.
       # The docker network is in-cluster plain HTTP between containers; the

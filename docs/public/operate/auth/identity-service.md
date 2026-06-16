@@ -68,8 +68,10 @@ Identity-tagged binary:
 |------------------------------------|---------------------------|----------------------------------------------------------------------------------------|
 | `IDENTITY_ENABLED`                 | yes (`true`)              | Gates the whole service.                                                               |
 | `IDENTITY_BASE_URL`                | yes                       | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and email links.    |
-| `IDENTITY_KEY_DIR`                 | recommended               | Where the on-disk Ed25519 key files live. Default `var/identity/keys`.                 |
-| `IDENTITY_KEY_ENCRYPTION_KEY`      | yes in non-localhost prod | Master secret (>=16 bytes) wrapping the on-disk private key.                           |
+| `IDENTITY_SIGNING_KEY_B64`         | **yes for >=2 replicas**  | Shared base64-std 32-byte Ed25519 seed (#550). Every replica derives the SAME key + kid + JWKS. REQUIRED for any multi-replica / HA deployment -- see "Key management" below. |
+| `IDENTITY_ALLOW_EPHEMERAL_KEY`     | dev / single-node only    | Opt into per-pod ephemeral file keys (no shared seed). Default `false`. Only safe for one replica or a shared key volume. |
+| `IDENTITY_KEY_DIR`                 | recommended               | Where the on-disk Ed25519 key files live (file-key mode). Default `var/identity/keys`. |
+| `IDENTITY_KEY_ENCRYPTION_KEY`      | yes in non-localhost prod | Master secret (>=16 bytes) wrapping the on-disk private key (file-key mode).            |
 | `IDENTITY_REGISTERED_CLIENTS`      | yes for production        | JSON array of `{clientId, redirectURIs[]}` -- explicit, no wildcards.                  |
 | `IDENTITY_REGISTRATION_MODE`       | recommended               | `open` / `domain_restricted` / `invite_only` / `waitlist`. Default `open`.             |
 | `IDENTITY_INTERNAL_DOMAINS`        | recommended               | Comma-separated. Matches assign `internal=true` + `INTERNAL_DEFAULT_ROLE`.             |
@@ -153,6 +155,52 @@ Branding controls (`IDENTITY_BRAND_NAME`,
 flow into all outbound templates.
 
 ## Key management
+
+### Multi-replica: the signing key MUST be a shared seed (#1515)
+
+The identity service has two signing-key modes:
+
+- **Shared-seed mode (`IDENTITY_SIGNING_KEY_B64` set)** -- every
+  replica derives the SAME Ed25519 key + `kid` from the same seed
+  (#550). JWKS is coherent across all replicas, survives restarts and
+  DB resets, and the deployment can run `replicas: >=2` on a rolling
+  update. This is the REQUIRED posture for staging and prod.
+- **File-key mode (`IDENTITY_SIGNING_KEY_B64` unset)** -- each pod
+  reads/generates an Ed25519 key on its OWN `IDENTITY_KEY_DIR` (which,
+  in the cluster manifest, is the pod's ephemeral container
+  filesystem -- there is no shared PVC). With >=2 replicas, **each
+  replica mints its own key**, so `/.well-known/jwks.json` diverges
+  across replicas and ~50% of token verifications (browser sessions
+  AND mesh node tokens) fail with `unknown kid`, flapping login.
+
+> **This caused the 2026-06-16 staging auth outage.** Staging ran
+> identity at `replicas: 2` but had no `IDENTITY_SIGNING_KEY_B64` in
+> its sealed genesis envelope, so it fell into per-pod file-key mode
+> and JWKS flapped between the two pods' keys. The fix is the shared
+> seed (added to staging's envelope) plus the startup guard below.
+
+**Fail-fast guard.** `Config.Validate()` REFUSES to start a
+non-localhost deployment that has no `IDENTITY_SIGNING_KEY_B64` unless
+the operator explicitly opts into per-pod keys with
+`IDENTITY_ALLOW_EPHEMERAL_KEY=true`. This converts a silent ~50%
+auth-failure into a loud, copy-pasteable startup error. localhost /
+`*.local.<domain>` origins (local dev) are exempt.
+
+Generate a fresh seed:
+
+```bash
+head -c 32 /dev/urandom | base64
+```
+
+Set the result as `IDENTITY_SIGNING_KEY_B64` on every identity replica
+(in the sealed genesis envelope for staging/prod). Rotate by resealing
+with a new seed and rolling the deployment -- automatic rotation is
+disabled in shared-seed mode. Use `IDENTITY_ALLOW_EPHEMERAL_KEY=true`
+only for a single-replica or shared-key-volume dev deployment (the
+local docker cluster sets it because both replicas share one on-disk
+key via a Docker volume).
+
+### File-key mode (single-node / dev)
 
 Ed25519 signing keys live in `IDENTITY_KEY_DIR`:
 
