@@ -42,6 +42,10 @@ type fakeEngine struct {
 	authoredOwner string
 	authoredReg   *memql.AuthoredRuntimeRegistry
 	promoted      *memql.AuthoredConstruct
+
+	// @mcp promotion fakes (Phase 4 #1534)
+	promotedFnTools []map[string]any
+	promotedFns     map[string]string // name -> kind
 }
 
 func (e *fakeEngine) Tools() ToolLister { return e.reg }
@@ -77,6 +81,13 @@ func (e *fakeEngine) ExecuteAuthored(ctx context.Context, query, owner string, r
 func (e *fakeEngine) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	e.promoted = c
 	return nil
+}
+
+func (e *fakeEngine) MCPPromotedFunctionTools() []map[string]any { return e.promotedFnTools }
+
+func (e *fakeEngine) MCPPromotedFunctionKind(name string) (string, bool) {
+	kind, ok := e.promotedFns[name]
+	return kind, ok
 }
 
 func tool(name string, roles []string, clientExec bool) *memql.Tool {

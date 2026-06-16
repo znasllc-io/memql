@@ -212,6 +212,17 @@ func isRuntimeReference(s string) bool {
 }
 
 // compileAutomation converts an automation FunctionDef to JSON output.
+// attributeFlagPresent reports whether a flag-style `@name` attribute is present
+// in the slice (used for @mcp promotion, Phase 4 #1534).
+func attributeFlagPresent(attrs []*parser.Attribute, name string) bool {
+	for _, a := range attrs {
+		if a != nil && a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput, error) {
 	automation, ok := def.Body.(*parser.AutomationDef)
 	if !ok {
@@ -327,6 +338,11 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// Enabled state
 	output["enabled"] = automation.Enabled
+
+	// @mcp promotion (epic memql#1529 Phase 4 #1534): a flag attribute that
+	// promotes the automation into its own first-class MCP tool. It may sit on
+	// either the FunctionDef wrapper or the AutomationDef body, so check both.
+	output["mcpPromoted"] = attributeFlagPresent(def.Attributes, "mcp") || attributeFlagPresent(automation.Attributes, "mcp")
 
 	// If there's a return statement, add it as final computation metadata
 	if returnStep != nil {

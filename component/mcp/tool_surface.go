@@ -41,6 +41,44 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
+	// MCPPromotedFunctionTools returns MCP tool descriptors for @mcp-promoted
+	// query/mutation constructs (Phase 4 #1534); MCPPromotedFunctionKind reports
+	// a promoted function's kind by name so a first-class call routes to the
+	// named-construct executor.
+	MCPPromotedFunctionTools() []map[string]any
+	MCPPromotedFunctionKind(name string) (string, bool)
+}
+
+// AutomationRunner is the automation surface the MCP head drives (Phase 4
+// #1534): implemented by the app bootstrap over the automations Loader + a
+// manual Executor + the engine's Gate-2 dry-run sandbox, and injected onto the
+// Server. nil-safe: with no runner, run_automation + @mcp automations report
+// unavailable.
+type AutomationRunner interface {
+	// RunAutomation executes a named automation's action chain under the owner's
+	// authz envelope with input as the synthetic trigger event (skips trigger
+	// matching). dryRun isolates writes (Gate-2 sandbox) for a safe preview.
+	RunAutomation(ctx context.Context, owner, name string, input map[string]any, dryRun bool) (map[string]any, error)
+	// PromotedAutomationTools returns MCP tool descriptors for @mcp automations.
+	PromotedAutomationTools() []map[string]any
+	// IsPromotedAutomation reports whether name is an @mcp-promoted automation.
+	IsPromotedAutomation(name string) bool
+}
+
+type mcpRunnerKey struct{}
+
+func withMCPAutomationRunner(ctx context.Context, r AutomationRunner) context.Context {
+	if r == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, mcpRunnerKey{}, r)
+}
+
+func automationRunnerFromContext(ctx context.Context) AutomationRunner {
+	if r, ok := ctx.Value(mcpRunnerKey{}).(AutomationRunner); ok {
+		return r
+	}
+	return nil
 }
 
 // Meta-tool names — the generic dispatchers (design §6.2) + the tier-gated
@@ -146,6 +184,11 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 			},
 		})
 	}
+	// @mcp-promoted query/mutation constructs surface as first-class tools
+	// (Phase 4 #1534), in addition to staying reachable via run_query/run_mutation.
+	if eng != nil {
+		out = append(out, eng.MCPPromotedFunctionTools()...)
+	}
 	return out
 }
 
@@ -163,10 +206,19 @@ func metaToolDefs() []map[string]any {
 			"required": []any{"name"},
 		}
 	}
+	automationSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name":    map[string]any{"type": "string", "description": "Name of the automation to run."},
+			"input":   map[string]any{"type": "object", "description": "Payload bound as the synthetic trigger event (skips trigger matching)."},
+			"dry_run": map[string]any{"type": "boolean", "description": "Execute without committing writes -- a safe preview (Gate-2 sandbox isolation)."},
+		},
+		"required": []any{"name"},
+	}
 	return []map[string]any{
 		{"name": toolRunQuery, "description": "Run a named memQL query by name with args.", "inputSchema": schema("query")},
 		{"name": toolRunMutation, "description": "Run a named memQL mutation by name with args.", "inputSchema": schema("mutation")},
-		{"name": toolRunAutomation, "description": "Run a named memQL automation by name (enabled in Phase 4, memql#1534).", "inputSchema": schema("automation")},
+		{"name": toolRunAutomation, "description": "Run a named memQL automation's action chain directly with an input payload; set dry_run to preview without committing writes.", "inputSchema": automationSchema},
 	}
 }
 
@@ -185,7 +237,7 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 	case toolRunQuery, toolRunMutation:
 		return runNamedConstruct(ctx, eng, name, args)
 	case toolRunAutomation:
-		return errorResult("run_automation is not enabled until Phase 4 (memql#1534)")
+		return handleRunAutomation(ctx, args)
 	case toolDefine:
 		return handleDefine(ctx, eng, role, tier, args)
 	case toolPromote:
@@ -193,12 +245,93 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 	case toolQuery:
 		return gateInline(role, tier)
 	default:
+		// A first-class @mcp-promoted query/mutation is called by its own name
+		// with its args directly; route it to the named-construct executor.
+		if kind, ok := eng.MCPPromotedFunctionKind(name); ok {
+			return runNamedConstructDirect(ctx, eng, kind, name, args)
+		}
+		// A first-class @mcp-promoted automation is called by its own name with
+		// its input directly; route it to the automation runner.
+		if r := automationRunnerFromContext(ctx); r != nil && r.IsPromotedAutomation(name) {
+			return runAutomationVia(ctx, r, name, args, false)
+		}
 		raw, err := eng.ExecuteToolByName(ctx, name, args)
 		if err != nil {
 			return errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
 		}
 		return toolResultFromJSON(raw)
 	}
+}
+
+// handleRunAutomation implements the run_automation meta-tool: resolve the
+// runner from the session context and execute the named automation with the
+// given input, honouring dry_run. Tier-1 (run-class); the runner enforces the
+// per-construct authz under the author's envelope.
+func handleRunAutomation(ctx context.Context, args map[string]any) map[string]any {
+	r := automationRunnerFromContext(ctx)
+	if r == nil {
+		return errorResult("run_automation is unavailable: no automation runner is wired in this deployment")
+	}
+	name, _ := args["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return errorResult("run_automation requires a 'name'")
+	}
+	dryRun, _ := args["dry_run"].(bool)
+	return runAutomationVia(ctx, r, name, args, dryRun)
+}
+
+// runAutomationVia executes an automation through the runner under the session
+// owner's envelope, rendering the result (or dry-run report) as a tool result.
+// For the run_automation meta-tool the trigger payload is args["input"]; for a
+// first-class @mcp automation call the whole args map is the input.
+func runAutomationVia(ctx context.Context, r AutomationRunner, name string, args map[string]any, dryRun bool) map[string]any {
+	name = strings.TrimSpace(name)
+	owner := mcpSessionFromContext(ctx).owner
+	input := automationInput(args)
+	res, err := r.RunAutomation(ctx, owner, name, input, dryRun)
+	if err != nil {
+		return errorResult(fmt.Sprintf("automation %q failed: %v", name, err))
+	}
+	payload, mErr := json.Marshal(res)
+	if mErr != nil {
+		return errorResult(fmt.Sprintf("automation %q: encode result: %v", name, mErr))
+	}
+	return textResult(string(payload))
+}
+
+// automationInput extracts the trigger payload: the explicit `input` object for
+// the run_automation meta-tool, else the args themselves (minus the meta keys)
+// for a first-class @mcp automation call.
+func automationInput(args map[string]any) map[string]any {
+	if in, ok := args["input"].(map[string]any); ok {
+		return in
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		if k == "name" || k == "dry_run" || k == "input" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// runNamedConstructDirect runs a promoted query/mutation whose MCP call carries
+// its args directly (not wrapped in {name, args} like the run_query dispatcher).
+func runNamedConstructDirect(ctx context.Context, eng Engine, kind, name string, callArgs map[string]any) map[string]any {
+	query, err := namedCallQuery(name, callArgs)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	res, err := executeForSession(ctx, eng, query)
+	if err != nil {
+		return errorResult(fmt.Sprintf("%s %q failed: %v", kind, name, err))
+	}
+	payload, err := json.Marshal(res.OutputPayload())
+	if err != nil {
+		return errorResult(fmt.Sprintf("%s %q: encode result: %v", kind, name, err))
+	}
+	return textResult(string(payload))
 }
 
 // runNamedConstruct executes a named query/mutation via the engine's normal
@@ -374,6 +507,8 @@ type concreteEngine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
+	MCPPromotedFunctionTools() []map[string]any
+	MCPPromotedFunctionKind(name string) (string, bool)
 }
 
 func (a engineAdapter) Tools() ToolLister { return a.c.Tools() }
@@ -388,6 +523,12 @@ func (a engineAdapter) ExecuteAuthored(ctx context.Context, query, owner string,
 }
 func (a engineAdapter) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	return a.c.PromoteAuthoredConstruct(ctx, c)
+}
+func (a engineAdapter) MCPPromotedFunctionTools() []map[string]any {
+	return a.c.MCPPromotedFunctionTools()
+}
+func (a engineAdapter) MCPPromotedFunctionKind(name string) (string, bool) {
+	return a.c.MCPPromotedFunctionKind(name)
 }
 
 // asEngine adapts an arbitrary engine handle to the Engine interface, returning

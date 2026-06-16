@@ -29,17 +29,17 @@ package annotations
 // the editor projection of each decl parser's accepted set.
 var ByReceiver = map[string][]string{
 	"Query": {
-		"description", "enabled", "disabled", "internal", "public",
+		"description", "enabled", "disabled", "internal", "public", "mcp",
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "internal", "actor", "public",
-		"mergeFields",
+		"mergeFields", "mcp",
 	},
 	"Logic": {
 		"description", "enabled", "disabled",
 	},
 	"Automation": {
-		"description", "enabled", "disabled", "trigger", "filter",
+		"description", "enabled", "disabled", "trigger", "filter", "mcp",
 	},
 	"Spec": {
 		"description", "enabled", "disabled", "shape",
@@ -83,6 +83,8 @@ var Docs = map[string]string{
 	// Automation.
 	"trigger": "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":  "Filter expression for automation triggers.",
+	// MCP promotion (epic memql#1529 Phase 4 #1534).
+	"mcp": "Promote this query/mutation/automation into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers).",
 	// Tool.
 	"handler":              "Tool handler configuration. Format: @handler(type=\"query\", query=\"...\") / @handler(type=\"function\", name=\"...\").",
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
