@@ -83,6 +83,12 @@ readonly CARRIER_NODE_TYPES=(cognition agent planner workbench)
 # siblings, per the `replace ../memql` directive) + its Dockerfile.
 readonly WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 readonly CARRIER_DOCKERFILE="$WORKSPACE_ROOT/memql-bff-copresent/Dockerfile"
+# Shared carrier-base image repo (build-speed #1507). The carrier node types
+# differ ONLY by the final `go build -tags <nt>`, so the expensive prefix
+# (deps + tailwind + source + templ + build-css) is built ONCE as this image
+# and every carrier compile reuses it via the Dockerfile's CARRIER_BASE arg --
+# turning "N full carrier builds" into "1 base build + N tag-only compiles".
+readonly CARRIER_BASE_REPO="memql-carrier-base"
 
 # Every Deployment this script rolls -- the rollback target set when the
 # post-deploy smoke gate fails (engine nodes + the bff carrier + the SPA).
@@ -348,6 +354,22 @@ function is_carrier_node() {
     return 1
 }
 
+# build_carrier_base -- build + push the shared carrier-base image ONCE
+# (build-speed #1507), so each carrier compile (build_one for a carrier node)
+# reuses it via --build-arg CARRIER_BASE instead of re-running the expensive
+# prefix. The base is an internal build accelerator -- no manifest pins it and
+# nothing is deployed from it -- so it is NOT subject to the release-tag
+# immutability guard; it is regenerated from the same source on every cut.
+# `--target carrier-base` stops the build at the prefix stage (no compile).
+function build_carrier_base() {
+    local tag="$1"
+    local image="${CARRIER_BASE_REPO}:${tag}"
+    local -a args=(acr build --registry "$ACR_NAME" --image "$image"
+        --platform linux/amd64 --target carrier-base -f "$CARRIER_DOCKERFILE")
+    info "building shared carrier base ${ACR_LOGIN_SERVER}/${image} (once for the ${#CARRIER_NODE_TYPES[@]} carrier nodes)..."
+    run_or_plan az "${args[@]}" "$WORKSPACE_ROOT"
+}
+
 function build_one() {
     local nt="$1" tag="$2"
     ensure_tag_immutable "$nt" "$tag"
@@ -360,6 +382,12 @@ function build_one() {
     fi
     local -a args=(acr build --registry "$ACR_NAME" --image "$image"
         --platform linux/amd64 --build-arg "BUILD_TAGS=${nt}" -f "$dockerfile")
+    if is_carrier_node "$nt"; then
+        # Reuse the pre-built shared base (#1507): the compile stage builds
+        # FROM this image, so only the tag-specific `go build` runs here -- not
+        # the deps/tailwind/templ/source prefix.
+        args+=(--build-arg "CARRIER_BASE=${ACR_LOGIN_SERVER}/${CARRIER_BASE_REPO}:${tag}")
+    fi
     if [ "$nt" = "voice" ]; then
         args+=(--build-arg "CGO_ENABLED=1" --target voice-runtime)
     fi
@@ -379,6 +407,9 @@ function build_and_push() {
         SKIP_BUILD=true
         return 0
     fi
+    # Build the shared carrier base ONCE (#1507) before the per-node loop;
+    # each carrier compile below reuses it via build_one's CARRIER_BASE arg.
+    build_carrier_base "$VERSION"
     local nt
     for nt in "${ENGINE_NODE_TYPES[@]}"; do
         build_one "$nt" "$VERSION"
