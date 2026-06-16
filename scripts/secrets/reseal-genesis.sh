@@ -45,6 +45,14 @@ DEFAULT_SECRET="memql-secrets"
 DEFAULT_KV_KEY="memql-genesis-b64"
 DEFAULT_ES_NAME="memql-secrets"   # the ExternalSecret object name
 
+# verify_convergence polling. ESO flips the ExternalSecret "SecretSynced"
+# condition BEFORE the underlying Secret data is physically rewritten, so a
+# single immediate read can hash a stale value and false-abort (#1498). Poll
+# the live Secret until it matches what we pushed before declaring real
+# #734 divergence. CONVERGE_TRIES * CONVERGE_DELAY = the bounded wait (~60s).
+CONVERGE_TRIES=30
+CONVERGE_DELAY=2
+
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
@@ -139,16 +147,22 @@ function propagate_via_patch() {
 
 # The guardrail: the live Secret's MEMQL_GENESIS_B64 MUST equal what we pushed.
 function verify_convergence() {
-    local live_hash
-    live_hash="$(kubectl -n "$NS" get secret "$SECRET" \
-        -o jsonpath='{.data.MEMQL_GENESIS_B64}' | base64 -d | shasum -a 256 | cut -d' ' -f1)"
-    if [[ "$live_hash" != "$NEW_HASH" ]]; then
-        echo "ERROR: convergence check FAILED -- cluster Secret diverged from Key Vault" >&2
-        echo "       pushed=$NEW_HASH  live=$live_hash" >&2
-        echo "       (this is the #734 condition; NOT rolling pods)" >&2
-        exit 1
-    fi
-    echo "INFO: convergence OK -- Key Vault == cluster Secret (sha256=$NEW_HASH)" >&2
+    # Poll, don't single-shot: ESO reports SecretSynced before the Secret data
+    # physically lands, so an immediate read can hash a stale value (#1498).
+    local live_hash="" _i
+    for _i in $(seq 1 "$CONVERGE_TRIES"); do
+        live_hash="$(kubectl -n "$NS" get secret "$SECRET" \
+            -o jsonpath='{.data.MEMQL_GENESIS_B64}' | base64 -d | shasum -a 256 | cut -d' ' -f1)"
+        if [[ "$live_hash" == "$NEW_HASH" ]]; then
+            echo "INFO: convergence OK -- Key Vault == cluster Secret (sha256=$NEW_HASH)" >&2
+            return 0
+        fi
+        sleep "$CONVERGE_DELAY"
+    done
+    echo "ERROR: convergence check FAILED -- cluster Secret diverged from Key Vault" >&2
+    echo "       pushed=$NEW_HASH  live=$live_hash" >&2
+    echo "       (after polling ~$((CONVERGE_TRIES * CONVERGE_DELAY))s; this is the #734 condition; NOT rolling pods)" >&2
+    exit 1
 }
 
 function roll_consumers() {
