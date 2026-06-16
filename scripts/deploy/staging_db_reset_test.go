@@ -90,6 +90,7 @@ func TestStagingDBResetGuards(t *testing.T) {
 		`replica restore via trap`:       `trap restore_replicas EXIT`,
 		`destructive wipe`:               `DROP SCHEMA`,
 		`schema rebuilt via migrate Job`: `migrate-job.yaml`,
+		`quiesces Argo Rollouts too`:     `get rollout`,
 	}
 	for name, want := range checks {
 		if !strings.Contains(src, want) {

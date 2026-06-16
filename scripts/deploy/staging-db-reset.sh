@@ -143,16 +143,42 @@ BANNER
     fi
 }
 
-# Capture current Deployment replica counts and scale them to 0 so no app pod
-# writes (or re-bootstraps rows) mid-reset. The restore runs from a trap.
-function capture_and_scale_down() {
+# Capture the namespace's scalable workloads (Deployments AND Argo Rollouts)
+# as "kind<TAB>name<TAB>replicas". bff is an Argo Rollout that owns its pods
+# directly -- its backing Deployment sits at 0 via workloadRef -- so scaling
+# only Deployments would leave bff (a DB writer) running mid-reset. We must
+# scale the Rollout too.
+function capture_workloads() {
     REPLICAS_FILE="$(mktemp -t memql-dbreset-replicas.XXXXXX)"
     kubectl -n "$NS" get deploy \
-        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.replicas}{"\n"}{end}' \
-        > "$REPLICAS_FILE" 2>/dev/null || true
+        -o jsonpath='{range .items[*]}deployment{"\t"}{.metadata.name}{"\t"}{.spec.replicas}{"\n"}{end}' \
+        >> "$REPLICAS_FILE" 2>/dev/null || true
+    # Rollout CRD may be absent on a non-Argo cluster -- tolerate the failure.
+    kubectl -n "$NS" get rollout \
+        -o jsonpath='{range .items[*]}rollout{"\t"}{.metadata.name}{"\t"}{.spec.replicas}{"\n"}{end}' \
+        >> "$REPLICAS_FILE" 2>/dev/null || true
+}
+
+# scale_workloads <0|restore>: 0 scales everything down; restore puts each back
+# to its captured replica count.
+function scale_workloads() {
+    local target="$1" kind name replicas to
+    while IFS=$'\t' read -r kind name replicas; do
+        [[ -z "$kind" || -z "$name" ]] && continue
+        to="$target"
+        [[ "$target" == "restore" ]] && to="$replicas"
+        [[ -z "$to" ]] && continue
+        info "scaling $kind/$name -> $to"
+        kubectl -n "$NS" scale "$kind/$name" --replicas="$to" >/dev/null 2>&1 \
+            || warn "could not scale $kind/$name to $to -- check manually"
+    done < "$REPLICAS_FILE"
+}
+
+function capture_and_scale_down() {
+    capture_workloads
 
     if [[ "$DRY_RUN" == true ]]; then
-        info "[dry-run] would scale these Deployments to 0 then restore:"
+        info "[dry-run] would scale these workloads (kind name replicas) to 0 then restore:"
         sed 's/^/    /' "$REPLICAS_FILE" >&2 || true
         return 0
     fi
@@ -160,25 +186,14 @@ function capture_and_scale_down() {
     # Restore on ANY exit after this point (success or failure).
     trap restore_replicas EXIT
 
-    local name replicas
-    while IFS=$'\t' read -r name replicas; do
-        [[ -z "$name" ]] && continue
-        info "scaling deployment/$name ($replicas -> 0)"
-        kubectl -n "$NS" scale "deployment/$name" --replicas=0 >/dev/null 2>&1 || warn "could not scale $name"
-    done < "$REPLICAS_FILE"
+    scale_workloads 0
     info "waiting for app pods to terminate..."
     kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/part-of=memql --timeout=120s >/dev/null 2>&1 || true
 }
 
 function restore_replicas() {
     [[ -n "$REPLICAS_FILE" && -f "$REPLICAS_FILE" ]] || return 0
-    local name replicas
-    while IFS=$'\t' read -r name replicas; do
-        [[ -z "$name" || -z "$replicas" ]] && continue
-        info "restoring deployment/$name (-> $replicas)"
-        kubectl -n "$NS" scale "deployment/$name" --replicas="$replicas" >/dev/null 2>&1 \
-            || warn "could not restore $name to $replicas replicas -- check manually"
-    done < "$REPLICAS_FILE"
+    scale_workloads restore
     rm -f "$REPLICAS_FILE" 2>/dev/null || true
 }
 
