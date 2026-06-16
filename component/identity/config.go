@@ -330,6 +330,27 @@ type Config struct {
 	// Env: IDENTITY_SIGNING_KEY_B64 (#550)
 	SigningKeyB64 string
 
+	// AllowEphemeralKey opts a deployment INTO the per-pod ephemeral
+	// signing-key mode (no IDENTITY_SIGNING_KEY_B64). Without this, a
+	// non-localhost deployment that leaves IDENTITY_SIGNING_KEY_B64
+	// unset is REFUSED at startup: each replica would mint its own
+	// file-backed key on its own ephemeral container filesystem, so
+	// /.well-known/jwks.json diverges across replicas and ~half of all
+	// token verifications (browser sessions AND mesh node tokens) fail
+	// with `unknown kid`. That misconfiguration caused the 2026-06-16
+	// staging auth outage (#1515): staging had no seed, so the 2
+	// identity replicas published different JWKS and login flapped.
+	//
+	// Set this to true ONLY for single-node / dev deployments where one
+	// identity replica owns the only key (or where a shared key volume
+	// makes the on-disk key coherent). Multi-replica HA deployments MUST
+	// instead set IDENTITY_SIGNING_KEY_B64 so every replica derives the
+	// same key. localhost-shaped IDENTITY_BASE_URL origins are exempt
+	// from the guard (local dev), so this knob is only needed when
+	// running ephemeral keys against a real (non-localhost) origin.
+	// Env: IDENTITY_ALLOW_EPHEMERAL_KEY (bool, default false)
+	AllowEphemeralKey bool
+
 	// AccessTokenTTL is the lifetime of issued access tokens.
 	// Env: IDENTITY_ACCESS_TOKEN_TTL_SECONDS (default 900)
 	AccessTokenTTL time.Duration
@@ -570,12 +591,13 @@ type LiveTokenSettings struct {
 // payload). Missing-but-required values are caught later by Validate.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Enabled:          envBool("IDENTITY_ENABLED", false),
-		BaseURL:          strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/"),
-		JWTAudience:      envString("IDENTITY_JWT_AUDIENCE", "memql"),
-		KeyDir:           envString("IDENTITY_KEY_DIR", DefaultKeyDir),
-		KeyEncryptionKey: os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
-		SigningKeyB64:    strings.TrimSpace(os.Getenv("IDENTITY_SIGNING_KEY_B64")),
+		Enabled:           envBool("IDENTITY_ENABLED", false),
+		BaseURL:           strings.TrimRight(os.Getenv("IDENTITY_BASE_URL"), "/"),
+		JWTAudience:       envString("IDENTITY_JWT_AUDIENCE", "memql"),
+		KeyDir:            envString("IDENTITY_KEY_DIR", DefaultKeyDir),
+		KeyEncryptionKey:  os.Getenv("IDENTITY_KEY_ENCRYPTION_KEY"),
+		SigningKeyB64:     strings.TrimSpace(os.Getenv("IDENTITY_SIGNING_KEY_B64")),
+		AllowEphemeralKey: envBool("IDENTITY_ALLOW_EPHEMERAL_KEY", false),
 		Bootstrap: BootstrapConfig{
 			Domain:              strings.TrimRight(os.Getenv("IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
 			OwnerEmail:          os.Getenv("IDENTITY_BOOTSTRAP_OWNER_EMAIL"),
@@ -687,6 +709,22 @@ func (c Config) Validate() error {
 			return fmt.Errorf("IDENTITY_SIGNING_KEY_B64 must decode to %d bytes (an Ed25519 seed), got %d", ed25519.SeedSize, len(seed))
 		}
 	} else {
+		// FAIL-FAST GUARD (#1515): no IDENTITY_SIGNING_KEY_B64 means the
+		// signing key is FILE-backed on the pod's OWN ephemeral container
+		// filesystem (IDENTITY_KEY_DIR, no shared volume in the cluster
+		// manifest). With >=2 identity replicas each replica mints its
+		// OWN key, so /.well-known/jwks.json diverges across replicas and
+		// ~half of all token verifications (browser sessions AND mesh node
+		// tokens) fail with `unknown kid`. That is exactly the 2026-06-16
+		// staging auth outage. Refuse to start a non-localhost deployment
+		// in per-pod ephemeral-key mode unless the operator explicitly
+		// opts in via IDENTITY_ALLOW_EPHEMERAL_KEY=true (single-node / dev,
+		// or a deployment with a shared key volume). localhost origins are
+		// exempt -- that's the local-dev path.
+		if !c.AllowEphemeralKey && !isLocalHost(parsed.Host) {
+			return errors.New("identity: IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. For a single-node / dev deployment with no HA, set IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
+		}
+
 		// Production posture requires the master key. We approximate
 		// "production" as "BaseURL is not localhost / 127.0.0.1 /
 		// memql-internal." Operators running staging on a real domain
