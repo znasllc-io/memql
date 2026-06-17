@@ -325,8 +325,16 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 			"prompts":   map[string]any{"listChanged": false},
 		},
 		"serverInfo": map[string]any{
-			"name":    s.name,
-			"version": s.version,
+			"name":       s.name,
+			"title":      "memQL",
+			"version":    s.version,
+			"websiteUrl": "https://memql.io",
+			// Branded connector icon (MCP Implementation.icons). Clients such
+			// as Claude render this instead of a placeholder. Embedded SVG as a
+			// data: URI so there's no separate static endpoint to route/secure.
+			"icons": []map[string]any{
+				{"src": serverIconDataURI, "mimeType": "image/svg+xml", "sizes": []string{"any"}},
+			},
 		},
 	}
 }

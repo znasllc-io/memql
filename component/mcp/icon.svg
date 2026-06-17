@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="memQL">
+  <rect width="120" height="120" rx="26" fill="#1a4f8b"/>
+  <g transform="translate(8,24)">
+    <g fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round">
+      <line x1="8" y1="35" x2="48" y2="14"/>
+      <line x1="48" y1="14" x2="88" y2="42"/>
+      <line x1="8" y1="35" x2="48" y2="58"/>
+      <line x1="48" y1="58" x2="88" y2="42"/>
+      <line x1="48" y1="14" x2="48" y2="58"/>
+    </g>
+    <circle cx="88" cy="42" r="17" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.4"/>
+    <g fill="#ffffff">
+      <circle cx="8" cy="35" r="7.5"/>
+      <circle cx="48" cy="14" r="7.5"/>
+      <circle cx="48" cy="58" r="7.5"/>
+      <circle cx="88" cy="42" r="7.5"/>
+    </g>
+  </g>
+</svg>
