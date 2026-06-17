@@ -159,6 +159,10 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	// the cockpit which gRPC endpoint to dial + which OAuth
 	// client_id to use, so the user only has to paste the URL.
 	mux.Handle("GET /.well-known/memql-config.json", DiscoveryHandler(s.cfg, os.Getenv))
+	// RFC 8414 Authorization Server Metadata -- lets an MCP custom
+	// connector (and other OAuth clients) discover the authorize/token/
+	// registration endpoints + JWKS feed from a single well-known URL.
+	mux.Handle("GET /.well-known/oauth-authorization-server", OAuthServerMetadataHandler(s.cfg))
 	if s.httpMounter != nil {
 		s.httpMounter.Mount(mux)
 	}

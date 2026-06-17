@@ -57,12 +57,23 @@ func (a *App) transportMCP() {
 		if addr == "" {
 			addr = mcp.DefaultHTTPAddr
 		}
+		// OAuth discovery (epic #1556 / #1571): the public URL of this resource
+		// (advertised in the RFC 9728 Protected Resource Metadata + the 401
+		// WWW-Authenticate resource_metadata hint) and the public identity issuer
+		// (the authorization_servers entry). AuthServerURL falls back to the
+		// public issuer the verifier already expects.
+		authServerURL := strings.TrimSpace(os.Getenv("MEMQL_MCP_AUTH_SERVER_URL"))
+		if authServerURL == "" {
+			authServerURL = strings.TrimSpace(os.Getenv("IDENTITY_VERIFIER_EXPECTED_ISSUER"))
+		}
 		dep, err := mcp.NewHTTPDependency(mcp.HTTPConfig{
-			Addr:       addr,
-			Logger:     a.Logger,
-			Verifier:   a.identityVerifier,
-			BaseConfig: cfg,
-			NewServer:  newServer,
+			Addr:          addr,
+			Logger:        a.Logger,
+			Verifier:      a.identityVerifier,
+			BaseConfig:    cfg,
+			NewServer:     newServer,
+			PublicURL:     strings.TrimSpace(os.Getenv("MEMQL_MCP_PUBLIC_URL")),
+			AuthServerURL: authServerURL,
 		})
 		if err != nil {
 			// Default-deny: with no verifier wired (or any other misconfig) we
