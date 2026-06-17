@@ -104,6 +104,34 @@ func (a *App) wireAuthoredRuntime() {
 	// registrations. A re-arm failure degrades gracefully (the core engine keeps
 	// serving; only the authored surface that failed to restore is affected).
 	a.rearmActiveAuthoredBundles()
+
+	// Boot re-hydration of durably-promoted PLAIN constructs (memql#1557): the
+	// MCP `promote` op persists a v1:authoring:bundle + construct row pair and
+	// registers the construct into the SHARED engine registry so every session
+	// can call it. That shared registration is in-memory only; this step
+	// recompiles each persisted promoted construct back into e.functions /
+	// e.specs on boot so the promotion survives a restart. Core-first +
+	// idempotent; automation bundles are untouched (they re-arm above).
+	a.rehydratePromotedConstructs()
+}
+
+// rehydratePromotedConstructs recompiles every durably-promoted plain construct
+// (memql#1557) back into the shared engine registry on boot. Best-effort: a
+// failure is logged, not fatal -- the core engine keeps serving.
+func (a *App) rehydratePromotedConstructs() {
+	if a.engine == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := a.engine.RehydratePromotedConstructs(ctx)
+	if err != nil {
+		a.Logger.Warn("durably-promoted construct re-hydration failed -- promoted constructs may not be callable until re-promoted",
+			"error", err)
+		return
+	}
+	a.Logger.Info("durably-promoted constructs re-hydrated on boot",
+		"seen", res.Seen, "rehydrated", res.Rehydrated, "failed", len(res.Failed))
 }
 
 // rearmActiveAuthoredBundles re-registers the persisted active authored bundles

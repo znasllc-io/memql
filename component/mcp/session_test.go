@@ -143,6 +143,11 @@ func TestPromote_OwnerOnlyGate(t *testing.T) {
 			if eng.promoted == nil || eng.promoted.Name != "mcpSessionSpec" {
 				t.Errorf("promote should pass the construct to the engine, got %+v", eng.promoted)
 			}
+			// Durable promote (memql#1557): the session owner is threaded through so
+			// the persisted v1:authoring rows are owner-stamped.
+			if eng.durableOwner != "owner-1" {
+				t.Errorf("durable promote should thread the session owner, got %q", eng.durableOwner)
+			}
 		})
 	}
 }

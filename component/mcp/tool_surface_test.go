@@ -42,6 +42,7 @@ type fakeEngine struct {
 	authoredOwner string
 	authoredReg   *memql.AuthoredRuntimeRegistry
 	promoted      *memql.AuthoredConstruct
+	durableOwner  string // owner threaded into PromoteConstructDurable (memql#1557)
 	inlineCalled  bool
 
 	// @mcp promotion fakes (Phase 4 #1534)
@@ -81,6 +82,12 @@ func (e *fakeEngine) ExecuteAuthored(ctx context.Context, query, owner string, r
 
 func (e *fakeEngine) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	e.promoted = c
+	return nil
+}
+
+func (e *fakeEngine) PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
+	e.promoted = c
+	e.durableOwner = owner
 	return nil
 }
 
