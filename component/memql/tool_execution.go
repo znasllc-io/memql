@@ -555,18 +555,22 @@ func (e *MemQLEngine) executeWebhook(ctx context.Context, toolName string, handl
 	}, nil
 }
 
-// validateWebhookHost checks that the webhook URL's host is in the allowed list.
-// If no allowlist is configured, all hosts are permitted.
+// validateWebhookHost gates the webhook URL's host. An explicit allowlist is
+// the operator escape valve (an approved host:port is always permitted). On top
+// of that, an SSRF default-deny floor blocks any non-allowlisted host that
+// targets an internal endpoint (loopback / link-local incl. cloud metadata /
+// private / mDNS) -- even when NO allowlist is configured, so the webhook tool
+// can't be used to pivot to internal services once the engine is network-
+// exposed (the MCP node, memql#1561). With no allowlist, remaining public hosts
+// are permitted; with an allowlist, a non-allowlisted public host is rejected.
 func (e *MemQLEngine) validateWebhookHost(rawURL string) error {
-	if len(e.config.WebhookAllowedHosts) == 0 {
-		return nil
-	}
-
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL %q: %w", rawURL, err)
 	}
 
+	// Explicit allowlist wins: an operator-approved host:port is permitted even
+	// if it resolves to a private address (a deliberately-wired internal target).
 	host := parsed.Host
 	for _, allowed := range e.config.WebhookAllowedHosts {
 		if strings.EqualFold(host, allowed) {
@@ -574,6 +578,19 @@ func (e *MemQLEngine) validateWebhookHost(rawURL string) error {
 		}
 	}
 
+	// SSRF default-deny floor (memql#1561): blocks loopback / link-local
+	// (incl. 169.254.169.254) / private / mDNS targets whether or not an
+	// allowlist is configured. Allowlist a specific internal host above to
+	// override.
+	if internal, reason := safety.IsInternalNetworkHost(parsed.Hostname()); internal {
+		return fmt.Errorf("webhook host %q blocked: %s", parsed.Hostname(), reason)
+	}
+
+	// No allowlist configured -> any remaining (public) host is permitted.
+	if len(e.config.WebhookAllowedHosts) == 0 {
+		return nil
+	}
+	// Allowlist configured and the public host is not on it.
 	return fmt.Errorf("host %q not in allowed webhook hosts", host)
 }
 

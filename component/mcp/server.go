@@ -175,6 +175,44 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 }
 
+// Dispatch parses and handles a single inbound JSON-RPC message and returns
+// the marshaled response bytes. The bool is false for notifications and
+// client->server responses (no reply is expected). It is the
+// transport-agnostic entry point the HTTP head (http.go) uses; the stdio
+// Serve loop calls handleMessage directly and frames the reply itself.
+//
+// One Server == one MCP session, so callers MUST serialise Dispatch per
+// Server (the authoring registry + subscription map are not safe for
+// concurrent mutation).
+func (s *Server) Dispatch(ctx context.Context, raw []byte) ([]byte, bool) {
+	resp := s.handleMessage(ctx, raw)
+	if resp == nil {
+		return nil, false
+	}
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		// A result that won't marshal is a server bug; surface a protocol
+		// error envelope rather than dropping the reply on the floor.
+		payload, _ = json.Marshal(errorResponse(resp.ID, codeInvalidReq, "response marshal error"))
+	}
+	return payload, true
+}
+
+// SetOutput registers the writer that proactive notifications (the resource
+// subscription pushes, Phase 6 #1536) are written to. The stdio transport
+// sets this implicitly in Serve; the HTTP transport sets it when a client
+// opens the GET SSE channel and clears it (nil) when that channel closes.
+func (s *Server) SetOutput(w io.Writer) {
+	s.writeMu.Lock()
+	s.out = w
+	s.writeMu.Unlock()
+}
+
+// Close tears down any per-session state (active resource subscriptions).
+// Idempotent. The HTTP transport calls this when a session is reaped or
+// explicitly deleted; the stdio Serve loop tears subscriptions down on EOF.
+func (s *Server) Close() { s.closeSubscriptions() }
+
 // writeMessage encodes resp as a single line of JSON followed by a newline
 // (the MCP stdio framing: one message per line, no embedded newlines).
 func (s *Server) writeMessage(out io.Writer, resp *rpcResponse) error {

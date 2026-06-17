@@ -109,6 +109,47 @@ func isPrivateOrLocal(ip net.IP) bool {
 	return false
 }
 
+// IsInternalNetworkHost reports whether host (a URL hostname WITHOUT port)
+// targets an internal endpoint an internet-facing caller must never reach
+// unless explicitly allowlisted: loopback, link-local (incl. the
+// 169.254.169.254 cloud-metadata service), RFC1918 / ULA private ranges, the
+// unspecified address, multicast, `localhost`, and `.local` mDNS names. It
+// checks literal IPs directly and, for DNS names, resolves and rejects if ANY
+// resolved A/AAAA record is internal (which also blunts the simplest DNS-
+// rebinding pivots; a fully rebinding-proof guard would pin the dialed IP).
+// Returns a human-readable reason when true. Used by the engine's
+// validateWebhookHost to give the webhook tool an SSRF default-deny floor that
+// holds even when no allowlist is configured -- important once the engine is
+// network-exposed (the MCP node, memql#1561).
+func IsInternalNetworkHost(host string) (bool, string) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false, ""
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true, fmt.Sprintf("local/mDNS host %q (SSRF risk)", host)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateOrLocal(ip) {
+			return true, fmt.Sprintf("private/local IP %s (SSRF / metadata-service risk)", ip)
+		}
+		return false, ""
+	}
+	// DNS name: resolve and reject if any resolved address is internal.
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// Unresolvable -> let the actual request fail on its own; blocking an
+		// unresolvable name here would be guessing.
+		return false, ""
+	}
+	for _, ip := range ips {
+		if isPrivateOrLocal(ip) {
+			return true, fmt.Sprintf("host %q resolves to private/local IP %s (SSRF / metadata-service risk)", host, ip)
+		}
+	}
+	return false, ""
+}
+
 // NewWebhookHostAllowlistRule returns a Rule that denies any
 // http_fetch / webhook whose hostname is not on `allowedHosts`
 // (case-insensitive exact match, same semantics as the existing

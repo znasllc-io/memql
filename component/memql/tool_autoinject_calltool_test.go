@@ -36,7 +36,7 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "produceArtifactLike",
 		// ownerUserId is server-stamped (@autoInjected) -- the model must not
@@ -89,7 +89,7 @@ func TestExecuteToolAutoInjectedDropsForgedValue(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name:               "forgeable",
 		AutoInjectedFields: []string{"ownerUserId"},

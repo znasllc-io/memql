@@ -15,36 +15,65 @@ import (
 // the MemqlService gRPC server + WebSocket bridge (transportBase) and the
 // HTTP /healthz + /readyz + /livez server (createHTTPServer) -- so probes and
 // the mesh NodeService work exactly as they do elsewhere. On top of that it
-// registers the MCP protocol head: a newline-delimited JSON-RPC server over
-// stdio (the local Claude Desktop / Claude Code path; an HTTP/SSE binding is
-// the env-flagged option tracked as an open item on epic memql#1529).
+// registers the MCP protocol head, selected by MEMQL_MCP_TRANSPORT:
+//   - stdio (default): a newline-delimited JSON-RPC server over stdio (the
+//     local Claude Desktop / Claude Code subprocess path).
+//   - http: the Streamable HTTP head (POST/GET/DELETE /mcp), the remote path
+//     that lets Claude connect to a hosted deployment over the network
+//     (memql#1550). MANDATORY identity bearer-JWT auth; binds
+//     MEMQL_MCP_HTTP_ADDR (default :8090).
 //
-// The head holds the in-process engine handle (a.engine) -- that is the
-// "connects to the engine" Phase 0 stands up. Phase 0 serves an empty
-// tools/list; the reflected tool surface that reads the engine lands in
-// #1531.
+// The head holds the in-process engine handle (a.engine).
 func (a *App) transportMCP() {
 	a.transportBase()
 	a.createHTTPServer()
 
-	// The two MCP authz gates (#1531/#1532):
-	//   MEMQL_MCP_ROLE -- the role the session acts as (Gate B). Empty -> the
-	//     engine's "specialist" default.
+	// The MCP authz knobs:
+	//   MEMQL_MCP_ROLE -- the role a session acts as (Gate B). Empty -> the
+	//     engine's "specialist" default for stdio; on the http transport an
+	//     empty pin means the role is taken from the caller's verified token.
 	//   MEMQL_MCP_MODE -- the capability tier sealed/authoring/inline (Gate A).
 	//     Unset/unknown -> authoring (the default tier).
 	//   MEMQL_MCP_USER -- the acting user that session-authored constructs are
-	//     owner-scoped to (Phase 3 #1533). Empty -> the session has no authoring
-	//     identity and define/promote report unavailable.
+	//     owner-scoped to (Phase 3 #1533). Empty -> for stdio the session has no
+	//     authoring identity; on http it is taken from the caller's token.
 	cfg := mcp.Config{
 		ActingRole: strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE")),
 		ActingUser: strings.TrimSpace(os.Getenv("MEMQL_MCP_USER")),
 		Tier:       mcp.ParseTier(os.Getenv("MEMQL_MCP_MODE")),
 	}
 
-	in, out := mcp.StdioStreams()
-	server := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, cfg)
-	// Phase 4 (#1534): wire the automation runner (run_automation + @mcp
-	// automations) over the automation Loader + a dedicated manual Executor.
-	server.SetAutomationRunner(newMCPAutomationRunner(a))
-	a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(server, in, out, a.Logger))
+	newServer := func(c mcp.Config) *mcp.Server {
+		s := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, c)
+		// Phase 4 (#1534): wire the automation runner (run_automation + @mcp
+		// automations) over the automation Loader + a dedicated manual Executor.
+		s.SetAutomationRunner(newMCPAutomationRunner(a))
+		return s
+	}
+
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_MCP_TRANSPORT"))) {
+	case "http":
+		addr := strings.TrimSpace(os.Getenv("MEMQL_MCP_HTTP_ADDR"))
+		if addr == "" {
+			addr = mcp.DefaultHTTPAddr
+		}
+		dep, err := mcp.NewHTTPDependency(mcp.HTTPConfig{
+			Addr:       addr,
+			Logger:     a.Logger,
+			Verifier:   a.identityVerifier,
+			BaseConfig: cfg,
+			NewServer:  newServer,
+		})
+		if err != nil {
+			// Default-deny: with no verifier wired (or any other misconfig) we
+			// refuse to stand up an unauthenticated remote endpoint.
+			a.fatal("failed to create mcp http transport", "error", err)
+		}
+		a.Dependencies = append(a.Dependencies, dep)
+		a.Logger.Info("mcp http transport enabled", "addr", addr, "tier", cfg.Tier.String())
+	default:
+		in, out := mcp.StdioStreams()
+		a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(newServer(cfg), in, out, a.Logger))
+		a.Logger.Info("mcp stdio transport enabled", "tier", cfg.Tier.String())
+	}
 }
