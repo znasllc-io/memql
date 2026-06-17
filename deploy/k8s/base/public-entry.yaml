@@ -6,7 +6,8 @@
 # Hosts:
 #   app.staging.copresent.ai       -> copresent SPA (+ same-origin proxy to BFF/identity)
 #   identity.staging.copresent.ai  -> identity service (login UI, /setup, /admin)
-# Both A records point at the ingress controller's static public IP.
+#   mcp.staging.copresent.ai       -> mcp node (remote MCP head, /mcp; memql#1550)
+# All A records point at the ingress controller's static public IP.
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -101,3 +102,30 @@ spec:
           - { path: /auth/logout, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /oauth/token, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
           - { path: /.well-known/jwks.json, pathType: Prefix, backend: { service: { name: identity, port: { number: 8085 } } } }
+---
+# mcp.staging.copresent.ai -> mcp node (remote MCP head; memql#1550). cert-manager
+# owns the TLS cert; nginx terminates TLS and forwards plain HTTP to the mcp
+# Service :8090 (the node serves the head over plain HTTP behind the ingress).
+# The MCP auth is mandatory + default-deny at the app layer (identity bearer JWT
+# on /mcp); the ingress does NOT add a second auth layer. Long read/send timeouts
+# + buffering off keep the GET /mcp SSE notification channel open and unbuffered.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: staging-mcp
+  namespace: memql
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [mcp.staging.copresent.ai]
+      secretName: mcp-staging-copresent-tls
+  rules:
+    - host: mcp.staging.copresent.ai
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: mcp, port: { number: 8090 } } } }

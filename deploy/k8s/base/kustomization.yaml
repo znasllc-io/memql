@@ -36,6 +36,9 @@ resources:
   - agent.yaml
   - planner.yaml
   - workbench.yaml
+  # Remote MCP protocol head (engine-built; epic memql#1550). Exposed publicly
+  # via the mcp.staging.copresent.ai ingress in public-entry.yaml.
+  - mcp.yaml
   - copresent.yaml
   # Public HTTPS entry (needs ingress-nginx + cert-manager installed first;
   # see README-public-entry.md).

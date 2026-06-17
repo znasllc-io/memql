@@ -68,7 +68,7 @@ func TestAksDeployTwoWaveOrdering(t *testing.T) {
 // include a carrier (which would race the base) or drop an engine node.
 func TestAksDeployEngineOnlyNodeTypes(t *testing.T) {
 	text := aksDeployText(t)
-	if !strings.Contains(text, "readonly ENGINE_ONLY_NODE_TYPES=(identity voice)") {
-		t.Error("expected ENGINE_ONLY_NODE_TYPES=(identity voice) -- ENGINE_NODE_TYPES minus CARRIER_NODE_TYPES")
+	if !strings.Contains(text, "readonly ENGINE_ONLY_NODE_TYPES=(identity voice mcp)") {
+		t.Error("expected ENGINE_ONLY_NODE_TYPES=(identity voice mcp) -- ENGINE_NODE_TYPES minus CARRIER_NODE_TYPES")
 	}
 }

@@ -1,0 +1,153 @@
+# MCP node -- remote Model Context Protocol head (epic memql#1550, child C).
+#
+# Engine-built (BUILD_TAGS=mcp, no CoPresent DSL -- it exposes the memQL engine
+# tool surface, not the CoPresent product DSL). It stands up the standard base
+# surface every node has (MemqlService gRPC + the :8085 HTTP /healthz//readyz/
+# /livez server) PLUS the MCP Streamable HTTP protocol head on :8090
+# (POST/GET/DELETE /mcp), selected by MEMQL_MCP_TRANSPORT=http.
+#
+# AUTH (MANDATORY, default-deny): /mcp is wrapped with the identity bearer-JWT
+# verifier (same JWKS path workbench/agent use). No valid token -> 401 before
+# any engine work. The acting user/role for a session is derived from the
+# verified token claims (MEMQL_MCP_ROLE/USER are left UNSET here so each caller
+# acts as themselves, not a shared pinned identity). This endpoint can author
+# DSL + run mutations/automations, so it must never be reachable unauthenticated.
+#
+# CAPABILITY TIER: MEMQL_MCP_MODE=authoring (Gate A; owner decision 2026-06-16)
+# -- the named tool surface + session-scoped `define`. `define`/`promote` and
+# inline DSL stay gated by the caller's role (Gate B) on top of the tier.
+#
+# SINGLE REPLICA (deliberate): an MCP session (Mcp-Session-Id) maps to an
+# in-process *mcp.Server on ONE pod. With >1 replica + round-robin ingress a
+# follow-up request can land on a pod that never saw the session -> 404. HA
+# needs sticky sessions (ingress session-affinity on Mcp-Session-Id) -- a
+# tracked follow-up, not the first cut. Until then: replicas: 1.
+#
+# TLS: the public-entry ingress (mcp.staging.copresent.ai) terminates TLS and
+# forwards plain HTTP to :8090, so this node serves the head over plain HTTP
+# internally (unlike identity, which serves its own internal TLS). It still
+# mounts memql-ca so the verifier can call https://identity:8085 for JWKS.
+#
+# No DB migrations (identity owns the one-time migration). No mesh parent: like
+# identity, the head runs its own in-process engine against the shared DB and
+# does not dial a parent (engine node, no cross-node CoPresent forwarding).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: mcp
+    app.kubernetes.io/part-of: memql
+    memql/node-type: mcp
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp
+        app.kubernetes.io/part-of: memql
+        memql/node-type: mcp
+    spec:
+      volumes:
+        - name: memql-ca
+          secret:
+            secretName: memql-ca
+      # Graceful shutdown (#552): must exceed MEMQL_SHUTDOWN_DRAIN_DELAY (5s
+      # default) + the app Stop budget (30s) so drain + GracefulStop finish.
+      terminationGracePeriodSeconds: 45
+
+      containers:
+        - name: mcp
+          image: acrmemql.azurecr.io/memql-mcp:0.9.60
+          ports:
+            - { name: http, containerPort: 8085 }
+            - { name: grpc, containerPort: 50051 }
+            - { name: node, containerPort: 50060 }
+            - { name: mcp, containerPort: 8090 }
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+          env:
+            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_NODE_TYPE, value: "mcp" }
+            - { name: MEMQL_NODE_ADDRESS, value: "mcp:50060" }
+            # Unique per-pod mesh identity (#1042). Overrides the shared genesis
+            # MEMQL_NODE_ID=bff-local (set-if-absent) so PeerManager keys each
+            # node distinctly.
+            - { name: MEMQL_NODE_ID, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50060" }
+            - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
+            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            # --- MCP remote transport (child B env surface) ---
+            - { name: MEMQL_MCP_TRANSPORT, value: "http" }
+            - { name: MEMQL_MCP_HTTP_ADDR, value: ":8090" }
+            # Capability tier (Gate A). authoring = named tools + session-scoped
+            # define; role gate (Gate B) still applies on top. Owner-confirmed.
+            - { name: MEMQL_MCP_MODE, value: "authoring" }
+            # MEMQL_MCP_ROLE / MEMQL_MCP_USER intentionally UNSET: the acting
+            # identity is taken from the caller's verified token claims, so every
+            # caller acts as themselves rather than a shared pinned identity.
+            # --- identity verifier (bearer-JWT auth for /mcp) ---
+            - { name: IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
+            - { name: IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
+            - { name: IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.copresent.ai" }
+            - { name: IDENTITY_ENABLED, value: "false" }
+            # Internal TLS: trust the cluster CA when calling https://identity:8085.
+            - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
+            - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
+            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
+            - { name: MEMORY_NODES_DATABASE_AUTO_MIGRATE, value: "false" }
+          volumeMounts:
+            - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
+          # Slow boot (DSL load + engine init) must not trip liveness/readiness (#1117).
+          # Probes target the standard :8085 server (createHTTPServer), same as
+          # every other node -- /healthz is dependency- + drain-aware, /livez is
+          # pure process-liveness.
+          startupProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /livez, port: 8085 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: mcp
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mcp
+  ports:
+    - { name: node, port: 50060, targetPort: 50060 }
+    - { name: http, port: 8085, targetPort: 8085 }
+    - { name: grpc, port: 50051, targetPort: 50051 }
+    # The public ingress (mcp.staging.copresent.ai) targets this port.
+    - { name: mcp, port: 8090, targetPort: 8090 }

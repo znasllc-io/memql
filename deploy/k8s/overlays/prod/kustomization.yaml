@@ -33,6 +33,13 @@ images:
     digest: sha256:d3d849354d5615534ad74a090a42fa4b693727b9cd3dc6561aa890b5e92118d0
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:7b670c7e209cfa1f404b4ca695e3aca0f6bad06112e85160867a29e96d4e01d4
+  # memql-mcp (epic memql#1550) is in base, so this placeholder overlay must pin
+  # it too. PROD IS A PLACEHOLDER (no prod cluster yet) and the MCP node is a
+  # STAGING-only rollout for now -- this all-zeros digest only keeps the digest-pin
+  # gate green; it fails closed if ever reconciled. When prod is stood up for real,
+  # decide whether to expose MCP in prod (separate review) and pin a real digest.
+  - name: acrmemql.azurecr.io/memql-mcp
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server

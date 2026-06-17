@@ -39,6 +39,15 @@ images:
     digest: sha256:ce271d61d440df82ff40106e79c03f34241883448085e26d7dbded53554efd6a
   - name: acrmemql.azurecr.io/memql-workbench
     digest: sha256:f6c20070b95fb8393c1ae0ca099be86170a3c4b3e4d3663fae535f8396a2fc6b
+  # memql-mcp (epic memql#1550): the image is built + pushed by the OWNER-GATED
+  # live rollout (needs cloud creds) and does not exist yet, so there is no real
+  # digest to pin. The all-zeros digest below is a PLACEHOLDER that keeps the
+  # digest-pin gate green and FAILS CLOSED (ImagePullBackOff) if mis-deployed.
+  # OWNER: at the gated build, REPLACE it with the built image digest
+  # (`digest: sha256:<real>`) BEFORE reconciling, so the overlay stays the single
+  # digest-pinned image authority (#699). Until then the mcp node does not roll.
+  - name: acrmemql.azurecr.io/memql-mcp
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:10036ae29f6374cbb1b6a3f9456115da843f3c52f9c4012a2cfcea927f252501
   - name: livekit/livekit-server

@@ -79,8 +79,9 @@ ACR_LOGIN_SERVER="${ACR_LOGIN_SERVER:-${ACR_NAME}.azurecr.io}"
 # be CARRIER-built (memql-bff-copresent/Dockerfile + BUILD_TAGS=<type>, context =
 # workspace parent) so they carry the CoPresent DSL -- same as the bff carrier
 # and the local cluster (docker-compose.cluster.yml). voice (CGO voice-runtime,
-# transport-only) + identity (auth) have no CoPresent refs and stay engine-built.
-readonly ENGINE_NODE_TYPES=(identity cognition voice agent planner workbench)
+# transport-only), identity (auth), and mcp (remote MCP head, memql#1550) have
+# no CoPresent refs and stay engine-built.
+readonly ENGINE_NODE_TYPES=(identity cognition voice agent planner workbench mcp)
 # Subset of ENGINE_NODE_TYPES that must be carrier-built (CoPresent DSL).
 readonly CARRIER_NODE_TYPES=(cognition agent planner workbench)
 # Carrier build context = the workspace parent (memql + memql-bff-copresent
@@ -96,13 +97,13 @@ readonly CARRIER_BASE_REPO="memql-carrier-base"
 # Engine node types that do NOT depend on the carrier base (no CoPresent DSL),
 # so they can build concurrently with the base (#1512 wave A). This is exactly
 # ENGINE_NODE_TYPES minus CARRIER_NODE_TYPES.
-readonly ENGINE_ONLY_NODE_TYPES=(identity voice)
+readonly ENGINE_ONLY_NODE_TYPES=(identity voice mcp)
 # Poll interval (seconds) for the async `az acr build --no-wait` runs (#1512).
 ACR_POLL_INTERVAL="${ACR_POLL_INTERVAL:-15}"
 
 # Every Deployment this script rolls -- the rollback target set when the
 # post-deploy smoke gate fails (engine nodes + the bff carrier + the SPA).
-readonly ALL_DEPLOYMENTS=(identity bff cognition voice agent planner workbench copresent)
+readonly ALL_DEPLOYMENTS=(identity bff cognition voice agent planner workbench copresent mcp)
 
 # Per-Deployment rollout wait.
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-180s}"
@@ -660,7 +661,7 @@ function apply_ordered() {
     # JWKS non-fatally, so we wait on identity FIRST, then the rest.
     local nt
     rollout_wait identity
-    for nt in cognition voice agent planner workbench bff copresent; do
+    for nt in cognition voice agent planner workbench mcp bff copresent; do
         rollout_wait "$nt"
     done
 }
