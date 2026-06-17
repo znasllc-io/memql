@@ -1,12 +1,14 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/identity"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
@@ -134,7 +136,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientId, redirectURI, state, clientMatched := s.pickOAuthCtx(formClientId, formRedirectURI, returnTo, formOAuthState)
+	clientId, redirectURI, state, clientMatched := s.pickOAuthCtx(r.Context(), formClientId, formRedirectURI, returnTo, formOAuthState)
 	in := IssueMagicLinkInput{
 		Email:        email,
 		ClientId:     clientId,
@@ -543,7 +545,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		formClientId := strings.TrimSpace(r.PostForm.Get("client_id"))
 		formRedirectURI := strings.TrimSpace(r.PostForm.Get("redirect_uri"))
 		formOAuthState := strings.TrimSpace(r.PostForm.Get("state"))
-		clientId, redirectURI, oauthState, clientMatched := s.pickOAuthCtx(formClientId, formRedirectURI, formReturnTo, formOAuthState)
+		clientId, redirectURI, oauthState, clientMatched := s.pickOAuthCtx(r.Context(), formClientId, formRedirectURI, formReturnTo, formOAuthState)
 		issue := IssueMagicLinkInput{
 			Email:        in.OwnerEmail,
 			ClientId:     clientId,
@@ -706,20 +708,26 @@ func (s *Server) handleMeDeletionPending(w http.ResponseWriter, r *http.Request)
 //
 // matched=false means no relying party in scope; the caller should
 // mark the flow as AdminSession so the magic link lands in /admin/.
-func (s *Server) pickOAuthCtx(clientId, redirectURI, fallbackReturnTo, spState string) (matchedClientId, matchedRedirectURI, state string, matched bool) {
+func (s *Server) pickOAuthCtx(ctx context.Context, clientId, redirectURI, fallbackReturnTo, spState string) (matchedClientId, matchedRedirectURI, state string, matched bool) {
 	state = strings.TrimSpace(spState)
 	if state == "" {
 		state = randomState()
 	}
-	if len(s.Cfg.RegisteredClients) == 0 {
+	// No relying parties at all (no static config AND no DB store for
+	// dynamically-registered clients) -> nothing to match.
+	if len(s.Cfg.RegisteredClients) == 0 && s.Store == nil {
 		return "", "", state, false
 	}
 
-	// OAuth-canonical path: SPA supplied client_id + redirect_uri.
-	// AllowsRedirectURI handles both exact match and the RFC 8252
-	// loopback flex rule.
+	// OAuth-canonical path: SPA supplied client_id + redirect_uri. Resolve
+	// via the DB-aware helper (static IDENTITY_REGISTERED_CLIENTS + the
+	// dynamically-registered v1:identity:oauthClient store, #1573/#1586) so a
+	// DCR client (e.g. a claude.ai custom connector) matches here just as it
+	// does at /authorize -- otherwise the magic link is issued with no OAuth
+	// context and /auth/complete falls back to a plain session login.
+	// ClientAllowsRedirectURI handles exact match + the RFC 8252 loopback rule.
 	if clientId != "" && redirectURI != "" {
-		if s.Cfg.AllowsRedirectURI(clientId, redirectURI) {
+		if identity.ClientAllowsRedirectURI(ctx, s.Cfg, s.Store, clientId, redirectURI) {
 			return clientId, redirectURI, state, true
 		}
 	}

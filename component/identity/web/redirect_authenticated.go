@@ -141,7 +141,7 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 		// predicate the magic-link flow uses; matched=false means
 		// no relying party in scope, so we fall through to the form
 		// for the user to confirm.
-		clientId, redirectURI, state, matched := s.pickOAuthCtx(urlClientId, urlRedirectURI, urlReturnTo, urlState)
+		clientId, redirectURI, state, matched := s.pickOAuthCtx(r.Context(), urlClientId, urlRedirectURI, urlReturnTo, urlState)
 		if !matched || s.mintSSOAuthCode == nil {
 			next(w, r)
 			return
