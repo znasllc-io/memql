@@ -20,6 +20,8 @@ type magicLinkRequest struct {
 	ClientId     string `json:"clientId"`
 	RedirectURI  string `json:"redirectURI"`
 	State        string `json:"state,omitempty"`
+	CodeChallenge       string `json:"codeChallenge,omitempty"`
+	CodeChallengeMethod string `json:"codeChallengeMethod,omitempty"`
 	InvitationId string `json:"invitationId,omitempty"`
 }
 
@@ -48,6 +50,8 @@ func (s *Server) handleMagicLink(w http.ResponseWriter, r *http.Request) {
 		ClientId:     body.ClientId,
 		RedirectURI:  body.RedirectURI,
 		State:        body.State,
+		CodeChallenge:       body.CodeChallenge,
+		CodeChallengeMethod: body.CodeChallengeMethod,
 		InvitationId: body.InvitationId,
 		SourceIP:     clientIP(r),
 		UserAgent:    r.Header.Get("User-Agent"),

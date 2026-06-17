@@ -67,6 +67,8 @@ concept authCode {
   clientId            string  @required  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
   redirectURI         string  @required  @description("redirect_uri value supplied at /authorize, exact-matched against the registered URI for clientId. Token-exchange MUST verify the redeeming request's redirect_uri matches; mismatched = reject.")
   state               string  @description("PKCE-style state value supplied at /authorize and echoed back on the redirect to redirectURI. Informational only at this layer (the OAuth client validates state on its end); persisted for audit correlation.")
+  codeChallenge       string  @description("PKCE code_challenge (RFC 7636) captured when the OAuth context was established. Empty for legacy non-PKCE first-party flows. /oauth/token requires a matching code_verifier when this is set.")
+  codeChallengeMethod string  @description("PKCE method: S256 (required for new flows) or plain. Empty when codeChallenge is empty.")
   userId              string  @required  @description("v1:identity:user.id the code authenticates. Stamped onto the resulting session at redemption.")
   identityId          string  @required  @description("v1:identity:identity.id of the magic_link credential the code was minted from. Stamped onto the session for per-credential lastUsedAt bookkeeping.")
   magicLinkRequestId  string  @required  @description("v1:identity:magicLinkRequest.id of the consumed magic link this code was minted from. Provides a 1:1 audit trail (one magic-link click yields exactly one auth code) and lets revoking a magic link cascade-invalidate any outstanding code.")

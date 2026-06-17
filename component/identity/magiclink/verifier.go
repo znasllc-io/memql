@@ -129,7 +129,7 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 	}
 
 	// Decode the OAuth ctx.
-	clientId, redirectURI, issuedState, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
+	clientId, redirectURI, issuedState, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
 	if err != nil {
 		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
 		return nil, ErrOAuthCtxCorrupted
@@ -300,6 +300,8 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 		clientId,
 		redirectURI,
 		state,
+		codeChallenge,
+		codeChallengeMethod,
 		userId,
 		identityId,
 		row.ID,
@@ -375,14 +377,14 @@ func (v *Verifier) auditFailure(ctx context.Context, action string, in VerifyInp
 // In the adminSession path the row carries no clientId / redirectURI
 // because there is no relying party; we surface them as empty
 // strings and skip the "missing required fields" check.
-func decodeOAuthCtx(blob string) (clientId, redirectURI, state string, bootstrap, adminSession bool, err error) {
+func decodeOAuthCtx(blob string) (clientId, redirectURI, state, codeChallenge, codeChallengeMethod string, bootstrap, adminSession bool, err error) {
 	blob = strings.TrimSpace(blob)
 	if blob == "" {
-		return "", "", "", false, false, errors.New("empty oauth ctx")
+		return "", "", "", "", "", false, false, errors.New("empty oauth ctx")
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(blob), &m); err != nil {
-		return "", "", "", false, false, err
+		return "", "", "", "", "", false, false, err
 	}
 	asString := func(k string) string {
 		if v, ok := m[k]; ok {
@@ -403,12 +405,14 @@ func decodeOAuthCtx(blob string) (clientId, redirectURI, state string, bootstrap
 	clientId = asString("clientId")
 	redirectURI = asString("redirectURI")
 	state = asString("state")
+	codeChallenge = asString("codeChallenge")
+	codeChallengeMethod = asString("codeChallengeMethod")
 	bootstrap = asBool("bootstrap")
 	adminSession = asBool("adminSession")
 	if !adminSession && (clientId == "" || redirectURI == "") {
-		return "", "", "", false, false, errors.New("oauth ctx missing required fields")
+		return "", "", "", "", "", false, false, errors.New("oauth ctx missing required fields")
 	}
-	return clientId, redirectURI, state, bootstrap, adminSession, nil
+	return clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, nil
 }
 
 // newAuthCode mints a plaintext URL-safe base64 auth code + its
