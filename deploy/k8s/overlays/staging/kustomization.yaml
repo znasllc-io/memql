@@ -1,4 +1,6 @@
-# Staging overlay -> 0.9.61. Engine/carrier/mcp images rebuilt from main on the
+# Staging overlay -> 0.9.61, with identity bumped to 0.9.62 (OAuth consent hotfix:
+# DCR magic-link flow #1587 + app name+logo #1588). identity-only rebuild on the
+# build server; all other images stay at their 0.9.61 digests. Engine/carrier/mcp images rebuilt from main on the
 # GitHub BUILD SERVER (OIDC->ACR; the first release through that path) carrying
 # the MCP remote transport + node (#1550), OAuth 2.1 for custom connectors
 # (#1556: PKCE/discovery/authorize/DCR), the three MCP follow-ups (#1557/#1558/
@@ -27,7 +29,7 @@ patches:
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
-    digest: sha256:8e824b7790db158260347b4955024468116c48affc68c396145b3b8f92201776
+    digest: sha256:41e62c23d82e25ed9c7d8c9d58f57596341f7ce5d4dda7b1b0f617fb1bcd84c3
   - name: acrmemql.azurecr.io/memql-bff-copresent
     digest: sha256:da86b7d03fba6555aa2ddc95578efa19611af64fa9b92a9ffad6a2b238a30375
   - name: acrmemql.azurecr.io/memql-cognition
