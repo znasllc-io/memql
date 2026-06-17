@@ -413,6 +413,8 @@ mutation authCode mutationCreateAuthCode {
     clientId            string  @required
     redirectURI         string  @required
     state               string
+    codeChallenge       string
+    codeChallengeMethod string
     userId              string  @required
     identityId          string  @required
     magicLinkRequestId  string  @required
@@ -425,6 +427,8 @@ mutation authCode mutationCreateAuthCode {
     args.clientId
     args.redirectURI
     state: coalesce(args.state, "")
+    codeChallenge:       coalesce(args.codeChallenge, "")
+    codeChallengeMethod: coalesce(args.codeChallengeMethod, "")
     args.userId
     args.identityId
     args.magicLinkRequestId

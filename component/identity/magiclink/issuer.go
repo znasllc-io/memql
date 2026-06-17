@@ -102,6 +102,8 @@ type IssueInput struct {
 	ClientId      string
 	RedirectURI   string
 	State         string
+	CodeChallenge       string
+	CodeChallengeMethod string
 	SourceIP      string
 	UserAgent     string
 	InvitationId  string
@@ -273,6 +275,10 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) error {
 	}
 	if in.State != "" {
 		oauthCtx["state"] = in.State
+	}
+	if in.CodeChallenge != "" {
+		oauthCtx["codeChallenge"] = in.CodeChallenge
+		oauthCtx["codeChallengeMethod"] = in.CodeChallengeMethod
 	}
 	if in.Bootstrap {
 		oauthCtx["bootstrap"] = true

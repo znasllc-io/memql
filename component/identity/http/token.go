@@ -3,8 +3,11 @@ package http
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -111,6 +114,23 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	case !constantTimeEq(row.RedirectURI, body.RedirectURI):
 		s.writeJSONError(w, http.StatusBadRequest, "invalid_grant", "auth code does not match redirect_uri")
 		return
+	}
+
+	// PKCE (RFC 7636): when a challenge was bound to the code, a matching
+	// verifier is REQUIRED. Validated before the code is consumed.
+	if row.CodeChallenge != "" {
+		if err := verifyPKCE(row.CodeChallenge, row.CodeChallengeMethod, body.CodeVerifier); err != nil {
+			s.audit(r, identity.AuditEvent{
+				Category:      identity.AuditCategoryAuth,
+				Action:        "auth_code_redemption_blocked",
+				TargetType:    "authCode",
+				TargetId:      row.ID,
+				Outcome:       identity.AuditOutcomeBlocked,
+				FailureReason: "pkce_failed",
+			})
+			s.writeJSONError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
+			return
+		}
 	}
 
 	// Consume the code BEFORE minting tokens so a concurrent replay
@@ -290,4 +310,32 @@ func hashCode(plain string) string {
 // cannot probe the redirect_uri / client_id mismatch path.
 func constantTimeEq(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// verifyPKCE checks a PKCE code_verifier (RFC 7636) against the stored
+// challenge. method defaults to "S256" when empty. S256 compares
+// base64url(sha256(verifier)) (no padding) to the challenge in constant
+// time; "plain" compares the verifier directly. Any other method, or an
+// empty verifier, is an error.
+func verifyPKCE(challenge, method, verifier string) error {
+	verifier = strings.TrimSpace(verifier)
+	if verifier == "" {
+		return errors.New("code_verifier required")
+	}
+	switch strings.TrimSpace(method) {
+	case "", "S256":
+		sum := sha256.Sum256([]byte(verifier))
+		computed := base64.RawURLEncoding.EncodeToString(sum[:])
+		if subtle.ConstantTimeCompare([]byte(computed), []byte(challenge)) != 1 {
+			return errors.New("code_verifier does not match code_challenge")
+		}
+		return nil
+	case "plain":
+		if subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) != 1 {
+			return errors.New("code_verifier does not match code_challenge")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported code_challenge_method %q", method)
+	}
 }

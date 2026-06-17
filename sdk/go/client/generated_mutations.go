@@ -1917,16 +1917,18 @@ func MutationCreateAuditEventBuild(args MutationCreateAuditEventArgs) string {
 //
 // Bound concept: authCode.
 type MutationCreateAuthCodeArgs struct {
-	CodeId             string
-	Code               string
-	CodeHash           string
-	ClientId           string
-	RedirectURI        string
-	State              string
-	UserId             string
-	IdentityId         string
-	MagicLinkRequestId string
-	ExpiresAt          string
+	CodeId              string
+	Code                string
+	CodeHash            string
+	ClientId            string
+	RedirectURI         string
+	State               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	UserId              string
+	IdentityId          string
+	MagicLinkRequestId  string
+	ExpiresAt           string
 }
 
 // MutationCreateAuthCode calls the engine mutation mutationCreateAuthCode.
@@ -1966,6 +1968,20 @@ func MutationCreateAuthCodeBuild(args MutationCreateAuthCodeArgs) string {
 		}
 		b.WriteString("state: ")
 		b.WriteString(fmt.Sprintf("%q", args.State))
+	}
+	if args.CodeChallenge != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallenge: ")
+		b.WriteString(fmt.Sprintf("%q", args.CodeChallenge))
+	}
+	if args.CodeChallengeMethod != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("codeChallengeMethod: ")
+		b.WriteString(fmt.Sprintf("%q", args.CodeChallengeMethod))
 	}
 	if b.Len() > 24 {
 		b.WriteString(", ")

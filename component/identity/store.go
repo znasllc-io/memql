@@ -45,6 +45,8 @@ type AuthCodeRow struct {
 	ClientId           string
 	RedirectURI        string
 	State              string
+	CodeChallenge       string
+	CodeChallengeMethod string
 	UserId             string
 	IdentityId         string
 	MagicLinkRequestId string
@@ -203,6 +205,7 @@ func (s *Store) CreateAccessRequest(
 func (s *Store) CreateAuthCode(
 	ctx context.Context,
 	codeId, code, codeHash, clientId, redirectURI, state,
+	codeChallenge, codeChallengeMethod,
 	userId, identityId, magicLinkRequestId, expiresAt string,
 ) error {
 	var b strings.Builder
@@ -213,6 +216,8 @@ func (s *Store) CreateAuthCode(
 	writeKVString(&b, "clientId", clientId, false)
 	writeKVString(&b, "redirectURI", redirectURI, false)
 	writeKVString(&b, "state", state, false)
+	writeKVString(&b, "codeChallenge", codeChallenge, false)
+	writeKVString(&b, "codeChallengeMethod", codeChallengeMethod, false)
 	writeKVString(&b, "userId", userId, false)
 	writeKVString(&b, "identityId", identityId, false)
 	writeKVString(&b, "magicLinkRequestId", magicLinkRequestId, false)
@@ -259,6 +264,8 @@ func (s *Store) LookupAuthCodeByCodeHash(ctx context.Context, codeHash string) (
 		ClientId:           g.str("clientId"),
 		RedirectURI:        g.str("redirectURI"),
 		State:              g.str("state"),
+		CodeChallenge:       g.str("codeChallenge"),
+		CodeChallengeMethod: g.str("codeChallengeMethod"),
 		UserId:             g.str("userId"),
 		IdentityId:         g.str("identityId"),
 		MagicLinkRequestId: g.str("magicLinkRequestId"),
