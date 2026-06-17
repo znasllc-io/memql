@@ -177,3 +177,194 @@ func mustRegister(t *testing.T, reg *AuthoredRuntimeRegistry, c *AuthoredConstru
 		t.Fatalf("register %s/%s: %v", c.Kind, c.Name, err)
 	}
 }
+
+// --- #1559: session-authored spec overlay (ExecuteAuthored path only) ---
+
+// rowComparison builds a `payload.<field> == <value>` row-spec comparison.
+func rowComparison(field string, value any) *ComparisonExpression {
+	return &ComparisonExpression{
+		Field:    FieldReference{Raw: "payload." + field, Parts: []string{"payload", field}},
+		Operator: OpEq,
+		Value:    value,
+	}
+}
+
+// buildAuthoredSpecOverlay layers the owner's authored specs over the core specs
+// but NEVER shadows a core spec of the same name (core-first), exactly like the
+// function overlay. A net-new session spec is added; a colliding one is dropped.
+func TestBuildAuthoredSpecOverlay_CoreFirst(t *testing.T) {
+	coreSpecs := newSpecRegistry()
+	coreActive := &Spec{Name: "specIsActiveRecord", Kind: SpecKindRow, Expr: rowComparison("active", true)}
+	if err := coreSpecs.add(coreActive); err != nil {
+		t.Fatalf("seed core spec: %v", err)
+	}
+	e := &MemQLEngine{specs: coreSpecs}
+
+	reg := NewAuthoredRuntimeRegistry()
+	// A session spec that COLLIDES with a core spec name, plus a net-new one.
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "specIsActiveRecord", Version: 1, Status: AuthoredActive,
+		Compiled: &Spec{Name: "specIsActiveRecord", Kind: SpecKindRow, Expr: rowComparison("active", false)}})
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessRowSpec", Version: 1, Status: AuthoredActive,
+		Compiled: &Spec{Name: "mcpSessRowSpec", Kind: SpecKindRow, Expr: rowComparison("kind", "widget")}})
+
+	overlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+
+	// Collision: core wins (the session redefinition is dropped, not applied).
+	got := overlay["specIsActiveRecord"]
+	if got == nil {
+		t.Fatal("core spec missing from overlay")
+	}
+	if cmp, ok := got.Expr.(*ComparisonExpression); !ok || cmp.Value != true {
+		t.Errorf("overlay specIsActiveRecord must keep the CORE body (active==true), got %+v", got.Expr)
+	}
+	// Net-new session spec is present.
+	if overlay["mcpSessRowSpec"] == nil {
+		t.Error("net-new session spec missing from overlay")
+	}
+
+	// A different owner can NOT see owner-1's session spec.
+	otherOverlay := e.buildAuthoredSpecOverlay("owner-2", reg)
+	if otherOverlay["mcpSessRowSpec"] != nil {
+		t.Error("owner-2 must not resolve owner-1's session spec")
+	}
+}
+
+// resolveAuthoredSpecOverlay inlines a session spec reference, resolves a
+// colliding name to the CORE body (never-shadow), and detects cycles.
+func TestResolveAuthoredSpecOverlay_InlineAndNeverShadow(t *testing.T) {
+	coreSpecs := newSpecRegistry()
+	if err := coreSpecs.add(&Spec{Name: "shared", Kind: SpecKindRow, Expr: rowComparison("core", true)}); err != nil {
+		t.Fatalf("seed core spec: %v", err)
+	}
+	e := &MemQLEngine{specs: coreSpecs}
+
+	reg := NewAuthoredRuntimeRegistry()
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessRowSpec", Version: 1, Status: AuthoredActive,
+		Compiled: &Spec{Name: "mcpSessRowSpec", Kind: SpecKindRow, Expr: rowComparison("kind", "widget")}})
+	// Session spec that collides with the core "shared" name -- must be dropped.
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "shared", Version: 1, Status: AuthoredActive,
+		Compiled: &Spec{Name: "shared", Kind: SpecKindRow, Expr: rowComparison("session", true)}})
+
+	overlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+
+	// (1) A reference to the session spec inlines its body.
+	resolved, err := e.resolveAuthoredSpecOverlay(&SpecReferenceExpression{Name: "mcpSessRowSpec"}, overlay)
+	if err != nil {
+		t.Fatalf("resolve session spec: %v", err)
+	}
+	cmp, ok := resolved.(*ComparisonExpression)
+	if !ok {
+		t.Fatalf("expected inlined ComparisonExpression, got %T", resolved)
+	}
+	if cmp.Field.Raw != "payload.kind" || cmp.Value != "widget" {
+		t.Errorf("session spec body not inlined correctly: %+v", cmp)
+	}
+
+	// (2) A reference to a name a core spec owns resolves to the CORE body.
+	resolvedShared, err := e.resolveAuthoredSpecOverlay(&SpecReferenceExpression{Name: "shared"}, overlay)
+	if err != nil {
+		t.Fatalf("resolve shared: %v", err)
+	}
+	sharedCmp, ok := resolvedShared.(*ComparisonExpression)
+	if !ok || sharedCmp.Field.Raw != "payload.core" || sharedCmp.Value != true {
+		t.Errorf("colliding name must resolve to the CORE spec body, got %+v", resolvedShared)
+	}
+
+	// (3) An unknown spec is an error.
+	if _, err := e.resolveAuthoredSpecOverlay(&SpecReferenceExpression{Name: "nope"}, overlay); err == nil {
+		t.Error("expected an error for an unknown spec reference")
+	}
+
+	// (4) A circular spec reference is detected, not infinite-looped.
+	cyclic := map[string]*Spec{
+		"a": {Name: "a", Expr: &SpecReferenceExpression{Name: "b"}},
+		"b": {Name: "b", Expr: &SpecReferenceExpression{Name: "a"}},
+	}
+	if _, err := e.resolveAuthoredSpecOverlay(&SpecReferenceExpression{Name: "a"}, cyclic); err == nil {
+		t.Error("expected a circular-reference error")
+	}
+}
+
+// End-to-end through parseWithFunctions: a session-authored query whose filter
+// references a session-authored spec resolves on the ExecuteAuthored path (the
+// spec is fully inlined into plan.Root), while the public Parse path -- which
+// passes a nil overlay -- leaves the reference unresolved against e.specs.
+func TestParseWithFunctions_SessionSpecInAuthoredQueryFilter(t *testing.T) {
+	e := newParserTestEngine(t) // initialized=true, core functions, e.specs is the embedded core registry.
+
+	// Session-authored query: filter = payload.ownerUserId == "u1" && <session spec>.
+	authoredQuery := &Function{
+		Name:         "querySessionWidgets",
+		FunctionKind: "query",
+		Enabled:      true,
+		Expr: &LogicalExpression{
+			Op:    LogicalAnd,
+			Left:  rowComparison("ownerUserId", "u1"),
+			Right: &SpecReferenceExpression{Name: "mcpSessRowSpec"},
+		},
+	}
+
+	reg := NewAuthoredRuntimeRegistry()
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "querySessionWidgets", Version: 1, Status: AuthoredActive,
+		Compiled: authoredQuery})
+	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessRowSpec", Version: 1, Status: AuthoredActive,
+		Compiled: &Spec{Name: "mcpSessRowSpec", Kind: SpecKindRow, Expr: rowComparison("kind", "widget")}})
+
+	fnOverlay := e.buildAuthoredFunctionOverlay("owner-1", reg)
+	specOverlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+
+	// Authored path: the session spec is inlined; no SpecReferenceExpression survives.
+	plan, err := e.parseWithFunctions("querySessionWidgets()", fnOverlay, specOverlay, false)
+	if err != nil {
+		t.Fatalf("authored parse: %v", err)
+	}
+	if hasSpecReference(plan.Root) {
+		t.Errorf("session spec was not inlined on the authored path: %#v", plan.Root)
+	}
+	if !hasComparison(plan.Root, "payload.kind", "widget") {
+		t.Errorf("expected the session spec body (payload.kind==widget) inlined into the filter, got %#v", plan.Root)
+	}
+
+	// Public path: nil overlay -> the spec reference is left for runtime e.specs,
+	// which does NOT carry the session spec, so the reference is unresolved.
+	pubPlan, err := e.parseWithFunctions("querySessionWidgets()", fnOverlay, nil, false)
+	if err != nil {
+		t.Fatalf("public parse: %v", err)
+	}
+	if !hasSpecReference(pubPlan.Root) {
+		t.Error("public path must leave the session spec UNresolved (it is overlay-only)")
+	}
+	if e.specs != nil {
+		if _, lookupErr := e.specs.Get("mcpSessRowSpec"); lookupErr == nil {
+			t.Error("session spec must NOT be visible in the engine's core spec registry")
+		}
+	}
+}
+
+// hasSpecReference reports whether any SpecReferenceExpression survives in expr.
+func hasSpecReference(expr ExpressionNode) bool {
+	switch node := expr.(type) {
+	case *SpecReferenceExpression:
+		return true
+	case *LogicalExpression:
+		return hasSpecReference(node.Left) || hasSpecReference(node.Right)
+	case *RelationshipExpression:
+		return hasSpecReference(node.Target)
+	default:
+		return false
+	}
+}
+
+// hasComparison reports whether expr contains a `field == value` comparison.
+func hasComparison(expr ExpressionNode, field string, value any) bool {
+	switch node := expr.(type) {
+	case *ComparisonExpression:
+		return node.Field.Raw == field && node.Value == value
+	case *LogicalExpression:
+		return hasComparison(node.Left, field, value) || hasComparison(node.Right, field, value)
+	case *RelationshipExpression:
+		return hasComparison(node.Target, field, value)
+	default:
+		return false
+	}
+}

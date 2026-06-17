@@ -27,22 +27,30 @@ import (
 
 // Parse converts a MemQL query string into a QueryPlan.
 func (e *MemQLEngine) Parse(query string) (*QueryPlan, error) {
-	return e.parseWithFunctions(query, e.functions, false)
+	return e.parseWithFunctions(query, e.functions, nil, false)
 }
 
 // parseWithFunctions is Parse with the function registry made explicit, so an
 // authored-overlay call (ExecuteAuthored, MCP Tier-2 session constructs) can
 // classify + inline session-authored functions that core does not define. The
-// public Parse delegates with e.functions, so default behaviour is unchanged.
-// Spec resolution still reads e.specs (the authored overlay is function-only in
-// Phase 3; authored specs referenced from authored query filters are a tracked
-// follow-up).
+// public Parse delegates with e.functions + a nil specOverlay, so default
+// behaviour is unchanged.
+//
+// specOverlay (when non-nil) carries the owner's session-authored specs layered
+// CORE-FIRST over e.specs (#1559). It is consulted ONLY on the authored path:
+// after function calls are inlined (so an authored query's filter is now part of
+// plan.Root) we fully expand the remaining SpecReferenceExpression nodes against
+// the overlay, so a session-defined spec referenced from an authored query's
+// filter resolves -- without ever shadowing a core spec, and without the public
+// Parse/Execute path seeing the session spec. A nil overlay leaves spec
+// resolution exactly as before (the core query-filter spec refs survive parse
+// and resolve at runtime via e.specs).
 //
 // allowInline (MCP Tier-3 #1535) relaxes the runtime-shape pre-rejection for the
 // inline-definition (`name := expr`) + trailing `@timestamp`/`@latest` shapes,
 // gated server-side to the inline tier + owner/developer. Default false keeps the
 // sealed behaviour for every other caller.
-func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, allowInline bool) (*QueryPlan, error) {
+func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -149,6 +157,18 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, al
 		return nil, err
 	}
 	plan.Root = normalizedRoot
+	// #1559: authored-path spec overlay. A session-authored query's filter is
+	// only part of plan.Root AFTER function inlining above, so we expand its
+	// remaining spec references here, consulting the owner's session specs
+	// layered core-first over e.specs. The public path passes a nil overlay and
+	// is untouched -- its spec refs resolve unchanged at runtime via e.specs.
+	if specOverlay != nil {
+		resolvedRoot, err := e.resolveAuthoredSpecOverlay(plan.Root, specOverlay)
+		if err != nil {
+			return nil, err
+		}
+		plan.Root = resolvedRoot
+	}
 	populateCacheHints(plan)
 	populateConceptFields(plan)
 	if err := validateSIContext(plan.Root); err != nil {

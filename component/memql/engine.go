@@ -377,17 +377,21 @@ func (e *MemQLEngine) emitQueryExecutedEvent(startTime time.Time, result *Execut
 }
 
 func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult, error) {
-	return e.executeWith(ctx, query, e.functions, false)
+	return e.executeWith(ctx, query, e.functions, nil, false)
 }
 
 // executeWith is Execute with the function registry made explicit so the
 // authored-overlay path (ExecuteAuthored) can resolve + run session-authored
 // constructs by name. fns is used for parse-time classification/inlining and
-// for the top-level mutation/logic dispatch; everything else (db, cache, specs,
-// shapes, provenance) is unchanged. Execute delegates with e.functions, so the
-// default path is byte-for-byte the prior behaviour. allowInline (MCP Tier-3
-// #1535) relaxes the inline-shape pre-rejection; default false everywhere else.
-func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, allowInline bool) (*ExecuteResult, error) {
+// for the top-level mutation/logic dispatch; specOverlay (when non-nil) lets the
+// same authored path resolve a session-authored spec referenced inside an
+// authored query's filter -- core-first, owner-scoped, never-shadow (see
+// buildAuthoredSpecOverlay + resolveAuthoredSpecOverlay). Everything else (db,
+// cache, shapes, provenance) is unchanged. Execute delegates with e.functions
+// and a nil specOverlay, so the default path is byte-for-byte the prior
+// behaviour. allowInline (MCP Tier-3 #1535) relaxes the inline-shape
+// pre-rejection; default false everywhere else.
+func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (*ExecuteResult, error) {
 	startTime := time.Now()
 
 	if !e.canResolve() {
@@ -398,7 +402,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, fmt.Errorf("memory engine database not configured")
 	}
 
-	plan, err := e.parseWithFunctions(query, fns, allowInline)
+	plan, err := e.parseWithFunctions(query, fns, specOverlay, allowInline)
 	if err != nil {
 		return nil, err
 	}
