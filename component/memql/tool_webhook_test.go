@@ -19,6 +19,14 @@ func newTestEngineForWebhook(allowedHosts ...string) *MemQLEngine {
 	}
 }
 
+// hostOf returns an httptest server's host:port for allowlisting. httptest
+// binds loopback (127.0.0.1), which the SSRF default-deny floor blocks unless
+// explicitly allowlisted -- exactly how a real deployment wires an internal
+// webhook target -- so the mechanics tests allowlist their test server.
+func hostOf(srv *httptest.Server) string {
+	return strings.TrimPrefix(srv.URL, "http://")
+}
+
 // agentCtxForTest returns a context.Background that carries an
 // acting-agent role -- ExecuteTool's universal agent-only enforcement
 // rejects callers without one. Tests exercise the post-gate code
@@ -42,7 +50,7 @@ func TestExecuteWebhookBasicPOST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testWebhook",
 		Handler: &ToolHandler{
@@ -78,7 +86,7 @@ func TestExecuteWebhookGET(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testGet",
 		Handler: &ToolHandler{
@@ -108,7 +116,7 @@ func TestExecuteWebhookURLSubstitution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testURLSub",
 		Handler: &ToolHandler{
@@ -141,7 +149,7 @@ func TestExecuteWebhookBodySubstitution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testBodySub",
 		Handler: &ToolHandler{
@@ -184,7 +192,7 @@ func TestExecuteWebhookHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testError",
 		Handler: &ToolHandler{
@@ -214,7 +222,7 @@ func TestExecuteWebhookCustomHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testHeaders",
 		Handler: &ToolHandler{
@@ -264,13 +272,16 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 		t.Fatalf("unexpected error result for allowed host")
 	}
 
-	// Test blocked host.
+	// Test blocked host: a public host not on the allowlist is rejected before
+	// any request is made. Uses a public IP literal (no DNS) that is NOT the
+	// internal-network floor, so this exercises the allowlist-deny path
+	// specifically (the SSRF floor is covered by TestValidateWebhookHostSSRF).
 	e2 := newTestEngineForWebhook("nemoclaw:18789")
 	tool2 := &Tool{
 		Name: "testBlocked",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/test",
+			URL:    "http://93.184.216.34/test",
 			Method: "GET",
 		},
 	}
@@ -284,6 +295,49 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 	}
 }
 
+// TestValidateWebhookHostSSRF covers the SSRF default-deny floor (memql#1561):
+// loopback / link-local / metadata / private / mDNS targets are blocked even
+// with NO allowlist, while public hosts pass and an explicit allowlist entry
+// overrides the floor. Uses IP literals + localhost so it does no DNS.
+func TestValidateWebhookHostSSRF(t *testing.T) {
+	noAllow := newTestEngineForWebhook()
+
+	blocked := []string{
+		"http://127.0.0.1/x",
+		"http://127.0.0.1:9000/x",
+		"http://169.254.169.254/latest/meta-data/", // cloud metadata
+		"http://10.0.0.5/x",
+		"http://192.168.1.10/x",
+		"http://172.16.0.1/x",
+		"http://[::1]/x",
+		"http://localhost/x",
+		"http://foo.local/x",
+		"http://0.0.0.0/x",
+	}
+	for _, u := range blocked {
+		if err := noAllow.validateWebhookHost(u); err == nil {
+			t.Errorf("expected %q blocked by SSRF floor (empty allowlist), got nil", u)
+		}
+	}
+
+	// Public hosts (IP literals, no DNS) pass with no allowlist.
+	for _, u := range []string{"http://93.184.216.34/x", "http://8.8.8.8/x"} {
+		if err := noAllow.validateWebhookHost(u); err != nil {
+			t.Errorf("expected public host %q allowed with empty allowlist, got %v", u, err)
+		}
+	}
+
+	// Explicit allowlist overrides the floor (operator escape valve).
+	allowLoopback := newTestEngineForWebhook("127.0.0.1:9000")
+	if err := allowLoopback.validateWebhookHost("http://127.0.0.1:9000/x"); err != nil {
+		t.Errorf("expected allowlisted loopback permitted, got %v", err)
+	}
+	// ...but a different internal host not on the allowlist is still blocked.
+	if err := allowLoopback.validateWebhookHost("http://169.254.169.254/x"); err == nil {
+		t.Errorf("expected non-allowlisted metadata IP blocked, got nil")
+	}
+}
+
 func TestExecuteWebhookDefaultMethodPOST(t *testing.T) {
 	var receivedMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,7 +346,7 @@ func TestExecuteWebhookDefaultMethodPOST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	e := newTestEngineForWebhook()
+	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
 		Name: "testDefaultMethod",
 		Handler: &ToolHandler{
