@@ -61,9 +61,9 @@ acr = os.environ["ACR"]
 with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
 comps = doc["components"]
-# component name == ACR image name for all 8.
+# component name == ACR image name for every release component.
 order = ["memql-identity","memql-bff-copresent","memql-cognition","memql-voice",
-         "memql-agent","memql-planner","memql-workbench","copresent"]
+         "memql-mcp","memql-agent","memql-planner","memql-workbench","copresent"]
 print("images:")
 for name in order:
     print(f"  - name: {acr}/{name}")

@@ -76,6 +76,21 @@ tags). The `bff` carrier (`memql-bff-copresent`) and `copresent` SPA are built
 
 ## 2. Deploy: `make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`)
 
+> **Image builds for staging/production go through the GitHub BUILD SERVER, not
+> the operator laptop (HARD RULE).** The canonical release builds every image
+> via GitHub Actions OIDC -> ACR, across all three repos: `memql`
+> `build-engine-images.yml` (identity / voice / mcp), `memql-bff-copresent`
+> `build-carrier-images.yml` (carrier-base + bff + cognition / agent / planner /
+> workbench), and `copresent` `build-spa-image.yml` (SPA). Each is
+> `workflow_dispatch` on `main` with a `version` input + immutable tags. The
+> local `az acr build` path described in step 1 below is the **legacy / local
+> fallback** (it still drives the apply + promote + gate); for a real
+> staging/prod release, dispatch the build workflows, then assemble
+> `releases/<ver>.yaml` (`assemble-lockfile.sh`, digests resolved from ACR by
+> tag), pin `deploy/k8s/overlays/<env>`, merge, and let ArgoCD reconcile.
+> Local Docker builds (`make dev-cluster*`) are for LOCAL development only and
+> are never pushed.
+
 One command takes the cluster from source to a rolled-out, gated deploy:
 
 1. **Build + push** the 6 node images via `az acr build`, queued with
