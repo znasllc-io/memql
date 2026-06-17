@@ -124,14 +124,15 @@ func TestAksDeployHelpHasGateFlags(t *testing.T) {
 }
 
 // A dry-run deploy plans the pre-deploy headroom check with the correct surge
-// math (8 Deployments x 200m = 1600m) and never touches Azure or the cluster.
+// math (9 Deployments x 200m = 1800m -- mcp added in memql#1554) and never
+// touches Azure or the cluster.
 func TestAksDeployDryRunPlansHeadroomCheck(t *testing.T) {
 	requireKubectl(t)
 	out, err := runAks(t, "aks-deploy.sh", "--dry-run", "--skip-build")
 	if err != nil {
 		t.Fatalf("--dry-run exited non-zero: %v\n%s", err, out)
 	}
-	for _, want := range []string{"headroom guard", "8 pods", "1600m"} {
+	for _, want := range []string{"headroom guard", "9 pods", "1800m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run plan missing %q:\n%s", want, out)
 		}
