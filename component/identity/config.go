@@ -186,6 +186,11 @@ func (m RegistrationMode) IsValid() bool {
 type RegisteredClient struct {
 	ClientId     string   `json:"clientId"`
 	RedirectURIs []string `json:"redirectURIs"`
+	// Name is a human-friendly display name for consent UI (e.g. "Claude").
+	// Populated from the RFC 7591 client_name of a dynamically-registered
+	// client; empty for static config clients (the consent page falls back
+	// to the clientId).
+	Name string `json:"name,omitempty"`
 }
 
 // Config is the runtime configuration for the identity service.

@@ -32,6 +32,13 @@ type LoginData struct {
 	ClientID    string
 	RedirectURI string
 	OAuthState  string
+	// Consent display (AuthorizeMode). ClientName is the human-friendly app
+	// name (RFC 7591 client_name, falling back to ClientID); ClientLogo is a
+	// bundled /static logo asset URL when we recognize the app, else "" and
+	// ClientInitial (first letter) drives a placeholder avatar.
+	ClientName    string
+	ClientInitial string
+	ClientLogo    string
 	// PKCE challenge (RFC 7636). Carried through the form hidden fields
 	// from the /authorize endpoint so the magic-link the user receives
 	// mints a PKCE-bound auth code. The /authorize endpoint REQUIRES
@@ -105,8 +112,15 @@ func loginSubtitleFor(data LoginData) string {
 // the submitted email.
 templ loginFormEmail(data LoginData) {
 	if data.AuthorizeMode && data.ClientID != "" {
-		<div class="alert alert-info">
-			<strong>{ data.ClientID }</strong> is requesting access to your { data.Layout.BrandName } account. Sign in to approve.
+		<div class="alert alert-info" style="display:flex;align-items:center;gap:12px;text-align:left;">
+			if data.ClientLogo != "" {
+				<img src={ data.ClientLogo } alt={ data.ClientName } width="40" height="40" style="flex:0 0 auto;width:40px;height:40px;border-radius:9px;"/>
+			} else {
+				<span aria-hidden="true" style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:9px;background:#4f46e5;color:#fff;font-weight:600;font-size:18px;line-height:1;">{ data.ClientInitial }</span>
+			}
+			<span>
+				<strong>{ data.ClientName }</strong> is requesting access to your { data.Layout.BrandName } account. Sign in to approve.
+			</span>
 		</div>
 	}
 	<form method="POST" action="/login" data-submit-once>
