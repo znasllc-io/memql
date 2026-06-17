@@ -5,6 +5,7 @@ package app
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/mcp"
 )
@@ -37,10 +38,13 @@ func (a *App) transportMCP() {
 	//   MEMQL_MCP_USER -- the acting user that session-authored constructs are
 	//     owner-scoped to (Phase 3 #1533). Empty -> for stdio the session has no
 	//     authoring identity; on http it is taken from the caller's token.
+	//   MEMQL_MCP_TOOL_TIMEOUT -- per-tools/call execute deadline (#1594). A Go
+	//     duration ("30s", "1m"); unset/invalid -> mcp.DefaultToolTimeout.
 	cfg := mcp.Config{
-		ActingRole: strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE")),
-		ActingUser: strings.TrimSpace(os.Getenv("MEMQL_MCP_USER")),
-		Tier:       mcp.ParseTier(os.Getenv("MEMQL_MCP_MODE")),
+		ActingRole:  strings.TrimSpace(os.Getenv("MEMQL_MCP_ROLE")),
+		ActingUser:  strings.TrimSpace(os.Getenv("MEMQL_MCP_USER")),
+		Tier:        mcp.ParseTier(os.Getenv("MEMQL_MCP_MODE")),
+		ToolTimeout: parseToolTimeout(os.Getenv("MEMQL_MCP_TOOL_TIMEOUT")),
 	}
 
 	newServer := func(c mcp.Config) *mcp.Server {
@@ -87,4 +91,19 @@ func (a *App) transportMCP() {
 		a.Dependencies = append(a.Dependencies, mcp.NewStdioDependency(newServer(cfg), in, out, a.Logger))
 		a.Logger.Info("mcp stdio transport enabled", "tier", cfg.Tier.String())
 	}
+}
+
+// parseToolTimeout parses MEMQL_MCP_TOOL_TIMEOUT as a Go duration. An empty,
+// unparseable, or non-positive value yields 0 so the server falls back to
+// mcp.DefaultToolTimeout.
+func parseToolTimeout(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }

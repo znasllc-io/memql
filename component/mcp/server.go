@@ -26,8 +26,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -48,6 +51,12 @@ const (
 	codeInvalidReq    = -32600
 	codeMethodNotFnd  = -32601
 	codeInvalidParams = -32602
+
+	// codeToolTimeout is the implementation-defined server error returned when a
+	// tools/call exceeds the per-call execute deadline (#1594). It sits in the
+	// JSON-RPC server-error range (-32000..-32099). The client sees a structured
+	// "tool execution timed out" error instead of an indefinite hang.
+	codeToolTimeout = -32001
 )
 
 // Server is the transport-agnostic MCP protocol head. It dispatches
@@ -89,6 +98,15 @@ type Server struct {
 	// when the connection closes.
 	subMu sync.Mutex
 	subs  map[string]func()
+
+	// toolTimeout bounds a single tools/call's engine execution (#1594).
+	// Resolved from cfg.ToolTimeout with DefaultToolTimeout as the fallback.
+	toolTimeout time.Duration
+
+	// lastStackDump throttles the goroutine-stack dump emitted on a tools/call
+	// timeout so repeated hangs don't flood the log (#1594). Unix-nanos of the
+	// last dump.
+	lastStackDump atomic.Int64
 }
 
 // SetAutomationRunner injects the automation runner the MCP node's app bootstrap
@@ -103,7 +121,11 @@ func NewServer(logger *slog.Logger, name, version string, engine any, cfg Config
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{logger: logger, name: name, version: version, engine: engine, cfg: cfg, session: memql.NewAuthoredRuntimeRegistry()}
+	timeout := cfg.ToolTimeout
+	if timeout <= 0 {
+		timeout = DefaultToolTimeout
+	}
+	return &Server{logger: logger, name: name, version: version, engine: engine, cfg: cfg, session: memql.NewAuthoredRuntimeRegistry(), toolTimeout: timeout}
 }
 
 // Engine returns the in-process engine handle this head serves. Used by the
@@ -229,7 +251,10 @@ func (s *Server) writeMessage(out io.Writer, resp *rpcResponse) error {
 }
 
 // handleMessage parses and dispatches one raw JSON-RPC message, returning the
-// response bytes to send (nil for notifications, which get no reply).
+// response bytes to send (nil for notifications, which get no reply). Every
+// non-notification request emits one structured log line (method, tool name
+// for tools/call, acting user/role, request id, duration, outcome) so a slow
+// or failing call is never invisible (#1594).
 func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 	var req rpcRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -241,6 +266,14 @@ func (s *Server) handleMessage(ctx context.Context, raw []byte) *rpcResponse {
 		return nil
 	}
 
+	start := time.Now()
+	resp := s.route(ctx, &req)
+	s.logRequest(&req, resp, time.Since(start))
+	return resp
+}
+
+// route dispatches a parsed (non-notification) request to its handler.
+func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
 	switch req.Method {
 	case "initialize":
 		return successResponse(req.ID, s.initializeResult(req.Params))
@@ -297,8 +330,52 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	// automation runner for run_automation + @mcp automations (Phase 4 #1534).
 	ctx = withMCPSession(ctx, s.cfg.ActingUser, s.session)
 	ctx = withMCPAutomationRunner(ctx, s.autoRunner)
-	result := callMCPTool(ctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, p.Name, p.Arguments)
-	return successResponse(id, result)
+
+	// Bound the engine execution: a slow/blocked tool must not hang the HTTP
+	// request (and hold the per-session mutex) forever (#1594). callMCPTool runs
+	// in its own goroutine; whichever finishes first -- the tool result or the
+	// deadline -- wins. On timeout we return a structured JSON-RPC error and let
+	// the orphaned goroutine drain in the background, so the session mutex is
+	// released and the session stays usable for the next call.
+	tctx, cancel := context.WithTimeout(ctx, s.toolTimeout)
+	defer cancel()
+	done := make(chan map[string]any, 1)
+	go func() {
+		done <- callMCPTool(tctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, p.Name, p.Arguments)
+	}()
+	select {
+	case result := <-done:
+		return successResponse(id, result)
+	case <-tctx.Done():
+		// Deadline (or parent cancellation) before the tool returned. Capture a
+		// goroutine dump so the exact block is diagnosable (#1595) without
+		// crashing the single-replica node, then surface a proper error.
+		s.dumpStacksOnTimeout(p.Name)
+		s.logger.Warn("mcp tools/call timed out",
+			"tool", p.Name, "acting_user", s.cfg.ActingUser,
+			"acting_role", s.cfg.ActingRole, "timeout", s.toolTimeout.String())
+		return errorResponse(id, codeToolTimeout,
+			fmt.Sprintf("tool %q execution timed out after %s", p.Name, s.toolTimeout))
+	}
+}
+
+// dumpStacksOnTimeout writes a full goroutine stack dump to the log when a
+// tools/call times out, so the exact blocking frame is recoverable from pod
+// logs alone (no pprof endpoint, no SIGQUIT crash). Throttled to at most once
+// per toolTimeout window so a burst of hung calls can't flood the log.
+func (s *Server) dumpStacksOnTimeout(tool string) {
+	now := time.Now().UnixNano()
+	last := s.lastStackDump.Load()
+	if last != 0 && time.Duration(now-last) < s.toolTimeout {
+		return
+	}
+	if !s.lastStackDump.CompareAndSwap(last, now) {
+		return // another timeout won the race; it owns this window's dump
+	}
+	buf := make([]byte, 1<<20) // 1 MiB cap; runtime.Stack truncates to fit
+	n := runtime.Stack(buf, true)
+	s.logger.Warn("mcp tools/call timeout: goroutine dump",
+		"tool", tool, "stacks", string(buf[:n]))
 }
 
 // initializeResult builds the MCP initialize result, echoing the client's
@@ -337,6 +414,65 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 			},
 		},
 	}
+}
+
+// logRequest emits one structured line per dispatched request. For tools/call
+// it adds the tool name. Arguments/values are NEVER logged (only the tool name
+// and outcome) so caller data is not leaked into logs (#1594). The outcome is
+// "error" when the JSON-RPC response carries an error envelope OR (for
+// tools/call) when the tool result is flagged isError.
+func (s *Server) logRequest(req *rpcRequest, resp *rpcResponse, dur time.Duration) {
+	if s.logger == nil {
+		return
+	}
+	outcome := "ok"
+	var errMsg string
+	if resp != nil && resp.Error != nil {
+		outcome = "error"
+		errMsg = resp.Error.Message
+	} else if req.Method == "tools/call" && resp != nil && resultIsError(resp.Result) {
+		outcome = "error"
+	}
+	attrs := []any{
+		"method", req.Method,
+		"acting_user", s.cfg.ActingUser,
+		"acting_role", s.cfg.ActingRole,
+		"request_id", string(bytes.TrimSpace(req.ID)),
+		"duration_ms", dur.Milliseconds(),
+		"outcome", outcome,
+	}
+	if req.Method == "tools/call" {
+		attrs = append(attrs, "tool", toolNameFromParams(req.Params))
+	}
+	if errMsg != "" {
+		attrs = append(attrs, "error", errMsg)
+	}
+	s.logger.Info("mcp request", attrs...)
+}
+
+// toolNameFromParams pulls just the tool name out of a tools/call params blob
+// for logging, ignoring the arguments.
+func toolNameFromParams(params json.RawMessage) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var p struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(params, &p)
+	return p.Name
+}
+
+// resultIsError reports whether a tools/call result map is flagged isError per
+// the MCP convention (tool-level failures are reported in-band, not as
+// JSON-RPC errors).
+func resultIsError(result any) bool {
+	m, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	isErr, _ := m["isError"].(bool)
+	return isErr
 }
 
 func successResponse(id json.RawMessage, result any) *rpcResponse {

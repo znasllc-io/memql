@@ -643,6 +643,15 @@ func asEngine(engine any) Engine {
 	if engine == nil {
 		return nil
 	}
+	// A handle that already implements the narrow Engine interface is used
+	// as-is. The production engine (*memql.MemQLEngine) does NOT -- its Tools()
+	// returns the concrete *ToolRegistry, not ToolLister -- so it falls through
+	// to the concreteEngine adapter below. This branch is what lets a test
+	// inject a hand-built Engine (e.g. a blocking fake for the execute-timeout
+	// path).
+	if e, ok := engine.(Engine); ok {
+		return e
+	}
 	if c, ok := engine.(concreteEngine); ok {
 		return engineAdapter{c}
 	}
