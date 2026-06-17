@@ -73,6 +73,15 @@ type IssueMagicLinkInput struct {
 	WaitlistContext string
 	IsAccessRequest bool
 
+	// CodeChallenge / CodeChallengeMethod carry the OAuth 2.1 PKCE
+	// challenge (RFC 7636) from the /authorize browser flow through to
+	// the magic-link issuer, which stamps them onto the magic-link row's
+	// OAuth context so /auth/complete mints a PKCE-bound auth code. The
+	// /oauth/token exchange then requires the matching verifier. Empty
+	// for the non-OAuth admin-session login path.
+	CodeChallenge       string
+	CodeChallengeMethod string
+
 	// Bootstrap=true marks the call as the /setup wizard's owner-mint
 	// path. Routed straight to the magic-link issuer with the same flag,
 	// which bypasses the bootstrap-state gate AND the registration-mode
@@ -272,6 +281,11 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", wrap(preAuth(s.handleRoot)))
 	mux.HandleFunc("GET /login", wrap(preAuth(s.handleLoginGet)))
 	mux.HandleFunc("POST /login", wrap(s.handleLoginPost))
+	// OAuth 2.1 authorization endpoint (advertised by the RFC 8414
+	// metadata document). A browser-based OAuth client opens this; it
+	// validates the code-flow params and funnels into the magic-link
+	// login carrying the PKCE-bound OAuth context.
+	mux.HandleFunc("GET /authorize", wrap(s.handleAuthorize))
 	mux.HandleFunc("GET /check-email", wrap(s.handleCheckEmail))
 	mux.HandleFunc("GET /logout-complete", wrap(s.handleLogoutComplete))
 	mux.HandleFunc("GET /error", wrap(s.handleError))
