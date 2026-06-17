@@ -52,7 +52,8 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Resolve through the unified resolver (static config first, then the
 	// DB-backed oauthClient store) so dynamically-registered (RFC 7591)
 	// clients work exactly like static IDENTITY_REGISTERED_CLIENTS.
-	if clientID == "" || identity.ResolveClient(r.Context(), s.Cfg, s.Store, clientID) == nil {
+	rc := identity.ResolveClient(r.Context(), s.Cfg, s.Store, clientID)
+	if clientID == "" || rc == nil {
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Unknown client",
 			"The application requesting access is not registered with this server. The authorization request cannot continue.")
@@ -85,6 +86,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// matches the client, and threads the PKCE challenge onto the
 	// magic-link issuer.
 	settings := s.snapshotSettings(r)
+	// Consent display: prefer the client's human-friendly name (RFC 7591
+	// client_name for a DCR client) over the opaque client_id, and surface a
+	// logo when we recognize the app (placeholder initial otherwise).
+	displayName := clientID
+	if n := strings.TrimSpace(rc.Name); n != "" {
+		displayName = n
+	}
 	data := webtempl.LoginData{
 		Layout:              s.LayoutData(r, "Authorize access", false, nil, nil),
 		Mode:                string(settings.RegistrationMode),
@@ -92,6 +100,9 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		AllowedDomainsHint:  settings.RegistrationDomains,
 		PrefillEmail:        strings.TrimSpace(q.Get("login_hint")),
 		ClientID:            clientID,
+		ClientName:          displayName,
+		ClientInitial:       clientInitial(displayName),
+		ClientLogo:          s.clientLogoURL(displayName),
 		RedirectURI:         redirectURI,
 		OAuthState:          state,
 		CodeChallenge:       codeChallenge,

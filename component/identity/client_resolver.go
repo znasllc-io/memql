@@ -55,6 +55,7 @@ func ResolveClient(ctx context.Context, cfg Config, store *Store, clientId strin
 	return &RegisteredClient{
 		ClientId:     row.ClientId,
 		RedirectURIs: row.RedirectURIs,
+		Name:         row.ClientName,
 	}
 }
 
