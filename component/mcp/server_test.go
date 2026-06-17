@@ -191,6 +191,31 @@ func TestServeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestInitializeAdvertisesIcon asserts the initialize serverInfo carries the
+// branded title + icon (MCP Implementation.icons) as a data: URI, so connector
+// UIs (e.g. Claude) render the memQL mark instead of a placeholder.
+func TestInitializeAdvertisesIcon(t *testing.T) {
+	s := NewServer(nil, "memql-mcp", "1.2.3", nil, Config{})
+	res := s.initializeResult(nil)
+	si, ok := res["serverInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("serverInfo missing/wrong type: %#v", res["serverInfo"])
+	}
+	if si["title"] != "memQL" {
+		t.Errorf("serverInfo.title = %v, want memQL", si["title"])
+	}
+	icons, ok := si["icons"].([]map[string]any)
+	if !ok || len(icons) == 0 {
+		t.Fatalf("serverInfo.icons missing/empty: %#v", si["icons"])
+	}
+	if src, _ := icons[0]["src"].(string); !strings.HasPrefix(src, "data:image/svg+xml;base64,") {
+		t.Errorf("icon src is not a base64 svg data URI: %q", src)
+	}
+	if icons[0]["mimeType"] != "image/svg+xml" {
+		t.Errorf("icon mimeType = %v, want image/svg+xml", icons[0]["mimeType"])
+	}
+}
+
 // TestServeStopsAtEOF confirms Serve returns nil at EOF (no trailing newline).
 func TestServeStopsAtEOF(t *testing.T) {
 	s := NewServer(nil, "memql-mcp", "0", nil, Config{})
