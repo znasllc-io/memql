@@ -16,14 +16,24 @@ import (
 // other path requires a Bearer Authorization header (otherwise 401).
 func newTestHandler(t *testing.T, base Config) http.Handler {
 	t.Helper()
-	dep, err := NewHTTPDependency(HTTPConfig{
-		Logger:     nil,
-		BaseConfig: base,
-		NewServer: func(c Config) *Server {
+	return newTestHandlerCfg(t, HTTPConfig{BaseConfig: base})
+}
+
+// newTestHandlerCfg builds the handler from a caller-supplied HTTPConfig,
+// filling in the test defaults (stub auth middleware + nil-engine server
+// factory) so tests can set extras like PublicURL / AuthServerURL.
+func newTestHandlerCfg(t *testing.T, cfg HTTPConfig) http.Handler {
+	t.Helper()
+	cfg.Logger = nil
+	if cfg.NewServer == nil {
+		cfg.NewServer = func(c Config) *Server {
 			return NewServer(nil, "memql-mcp", "9.9.9", nil, c)
-		},
-		authMiddleware: stubAuthMiddleware,
-	})
+		}
+	}
+	if cfg.authMiddleware == nil {
+		cfg.authMiddleware = stubAuthMiddleware
+	}
+	dep, err := NewHTTPDependency(cfg)
 	if err != nil {
 		t.Fatalf("NewHTTPDependency: %v", err)
 	}
@@ -35,7 +45,7 @@ func newTestHandler(t *testing.T, base Config) http.Handler {
 func stubAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/health") || strings.HasPrefix(p, "/readyz") || strings.HasPrefix(p, "/livez") {
+		if strings.HasPrefix(p, "/health") || strings.HasPrefix(p, "/readyz") || strings.HasPrefix(p, "/livez") || p == ProtectedResourcePath {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -233,6 +243,83 @@ func TestDispatch(t *testing.T) {
 
 	if _, has := s.Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); has {
 		t.Fatal("notification should produce no reply")
+	}
+}
+
+// TestHTTPProtectedResourceMetadata asserts the RFC 9728 Protected Resource
+// Metadata document is served UNAUTHENTICATED (200, not 401) and is populated
+// from the configured PublicURL / AuthServerURL.
+func TestHTTPProtectedResourceMetadata(t *testing.T) {
+	const publicURL = "https://mcp.staging.copresent.ai"
+	const authServer = "https://identity.staging.copresent.ai"
+	h := newTestHandlerCfg(t, HTTPConfig{
+		BaseConfig:    Config{Tier: TierAuthoring},
+		PublicURL:     publicURL,
+		AuthServerURL: authServer,
+	})
+
+	// No Authorization header -- must still succeed.
+	req := httptest.NewRequest(http.MethodGet, ProtectedResourcePath, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unauthenticated %s status = %d, want 200; body=%s", ProtectedResourcePath, rec.Code, rec.Body.String())
+	}
+
+	var doc protectedResourceMetadata
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("body not JSON: %v; body=%s", err, rec.Body.String())
+	}
+	if doc.Resource != publicURL {
+		t.Errorf("resource = %q, want %q", doc.Resource, publicURL)
+	}
+	if len(doc.AuthorizationServers) != 1 || doc.AuthorizationServers[0] != authServer {
+		t.Errorf("authorization_servers = %v, want [%q]", doc.AuthorizationServers, authServer)
+	}
+	if doc.ResourceName != "memQL MCP" {
+		t.Errorf("resource_name = %q, want %q", doc.ResourceName, "memQL MCP")
+	}
+	if len(doc.BearerMethodsSupported) != 1 || doc.BearerMethodsSupported[0] != "header" {
+		t.Errorf("bearer_methods_supported = %v, want [header]", doc.BearerMethodsSupported)
+	}
+}
+
+// TestHTTPUnauthorizedWWWAuthenticate asserts an unauthenticated request to
+// /mcp returns 401 whose WWW-Authenticate header carries the RFC 9728
+// resource_metadata hint pointing at the Protected Resource Metadata URL.
+func TestHTTPUnauthorizedWWWAuthenticate(t *testing.T) {
+	const publicURL = "https://mcp.staging.copresent.ai"
+	// Use a stub middleware that exercises the production unauthorizedHandler so
+	// the WWW-Authenticate wiring is tested without a live JWKS verifier.
+	stub := func(next http.Handler) http.Handler {
+		uh := unauthorizedHandler(publicURL)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == ProtectedResourcePath {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
+				uh(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	h := newTestHandlerCfg(t, HTTPConfig{
+		BaseConfig:     Config{Tier: TierAuthoring},
+		PublicURL:      publicURL,
+		authMiddleware: stub,
+	})
+
+	rec := post(t, h, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`, "", false /* no auth */)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	wantMeta := `resource_metadata="` + publicURL + ProtectedResourcePath + `"`
+	if !strings.Contains(wwwAuth, wantMeta) {
+		t.Fatalf("WWW-Authenticate = %q, want it to contain %q", wwwAuth, wantMeta)
 	}
 }
 

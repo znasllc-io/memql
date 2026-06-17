@@ -91,6 +91,11 @@ spec:
             # --- MCP remote transport (child B env surface) ---
             - { name: MEMQL_MCP_TRANSPORT, value: "http" }
             - { name: MEMQL_MCP_HTTP_ADDR, value: ":8090" }
+            # OAuth discovery (RFC 9728): this resource's public base URL,
+            # advertised in /.well-known/oauth-protected-resource + the 401
+            # WWW-Authenticate resource_metadata hint. AuthServerURL falls back
+            # to IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
+            - { name: MEMQL_MCP_PUBLIC_URL, value: "https://mcp.staging.copresent.ai" }
             # Capability tier (Gate A). authoring = named tools + session-scoped
             # define; role gate (Gate B) still applies on top. Owner-confirmed.
             - { name: MEMQL_MCP_MODE, value: "authoring" }

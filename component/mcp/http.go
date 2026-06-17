@@ -55,6 +55,12 @@ const (
 	// MCPPath is the single Streamable HTTP endpoint path.
 	MCPPath = "/mcp"
 
+	// ProtectedResourcePath is the RFC 9728 OAuth Protected Resource Metadata
+	// well-known path. Served UNAUTHENTICATED so an MCP custom connector can
+	// discover this resource's identifier + which authorization server(s) issue
+	// the bearer tokens it accepts, before it has any token at all.
+	ProtectedResourcePath = "/.well-known/oauth-protected-resource"
+
 	// sessionHeader is the MCP session-id header (spec: Mcp-Session-Id).
 	sessionHeader = "Mcp-Session-Id"
 
@@ -95,6 +101,20 @@ type HTTPConfig struct {
 	// IdleTTL overrides DefaultSessionIdleTTL (tests / tuning).
 	IdleTTL time.Duration
 
+	// PublicURL is this resource's public base URL (e.g.
+	// https://mcp.staging.copresent.ai) -- the `resource` identifier advertised
+	// in the RFC 9728 Protected Resource Metadata document and in the
+	// WWW-Authenticate `resource_metadata` hint on a 401. Empty -> the resource
+	// is derived per-request from the inbound scheme+Host and no
+	// resource_metadata hint is emitted.
+	PublicURL string
+
+	// AuthServerURL is the public identity issuer (e.g.
+	// https://identity.staging.copresent.ai) advertised as the
+	// authorization_servers entry in the Protected Resource Metadata. Empty ->
+	// the authorization_servers field is omitted.
+	AuthServerURL string
+
 	// authMiddleware overrides the verifier-built auth wrapper. Unexported on
 	// purpose: production callers (app.transportMCP) only ever set Verifier;
 	// the in-package tests inject a stub so the unauth-rejection / health-bypass
@@ -115,6 +135,9 @@ func NewHTTPDependency(cfg HTTPConfig) (common.Dependency, error) {
 	if cfg.NewServer == nil {
 		return nil, errors.New("mcp http: NewServer factory is required")
 	}
+	publicURL := strings.TrimRight(strings.TrimSpace(cfg.PublicURL), "/")
+	authServerURL := strings.TrimSpace(cfg.AuthServerURL)
+
 	authMW := cfg.authMiddleware
 	if authMW == nil {
 		if cfg.Verifier == nil {
@@ -122,12 +145,12 @@ func NewHTTPDependency(cfg HTTPConfig) (common.Dependency, error) {
 		}
 		authMW = verifier.HTTPMiddleware(cfg.Verifier, verifier.MiddlewareOptions{
 			Logger: logger,
-			UnauthorizedHandler: func(w http.ResponseWriter, _ *http.Request) {
-				// Advertise bearer auth so a future OAuth-aware client can
-				// discover the scheme. Claude Code passes the header directly.
-				w.Header().Set("WWW-Authenticate", `Bearer realm="memql-mcp"`)
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			},
+			// The RFC 9728 Protected Resource Metadata document MUST be reachable
+			// without a bearer token (a client fetches it precisely because it has
+			// no token yet). Mark it public the same way the verifier treats
+			// /healthz + /readyz.
+			PublicPaths:         []string{ProtectedResourcePath},
+			UnauthorizedHandler: unauthorizedHandler(publicURL),
 		})
 	}
 
@@ -141,15 +164,20 @@ func NewHTTPDependency(cfg HTTPConfig) (common.Dependency, error) {
 	}
 
 	head := &httpHead{
-		logger:   logger,
-		base:     cfg.BaseConfig,
-		newSrv:   cfg.NewServer,
-		idleTTL:  idleTTL,
-		sessions: make(map[string]*httpSession),
+		logger:        logger,
+		base:          cfg.BaseConfig,
+		newSrv:        cfg.NewServer,
+		idleTTL:       idleTTL,
+		sessions:      make(map[string]*httpSession),
+		publicURL:     publicURL,
+		authServerURL: authServerURL,
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle(MCPPath, head)
+	// RFC 9728 Protected Resource Metadata, served unauthenticated (the verifier
+	// PublicPaths entry above bypasses auth for this path).
+	mux.HandleFunc(ProtectedResourcePath, head.handleProtectedResource)
 	// Unauthenticated health endpoints for k8s probes targeting this port.
 	// verifier.HTTPMiddleware treats /healthz + /readyz as public, and we add
 	// /livez here too.
@@ -194,8 +222,46 @@ type httpHead struct {
 	newSrv  func(Config) *Server
 	idleTTL time.Duration
 
+	// publicURL is this resource's public base (no trailing slash), used as the
+	// RFC 9728 `resource` identifier. Empty -> derived per-request.
+	publicURL string
+	// authServerURL is the public identity issuer advertised in
+	// authorization_servers. Empty -> omitted.
+	authServerURL string
+
 	mu       sync.Mutex
 	sessions map[string]*httpSession
+}
+
+// protectedResourceMetadata is the RFC 9728 OAuth Protected Resource Metadata
+// document. A struct (not a map) keeps JSON field order stable.
+type protectedResourceMetadata struct {
+	Resource               string   `json:"resource"`
+	AuthorizationServers   []string `json:"authorization_servers,omitempty"`
+	BearerMethodsSupported []string `json:"bearer_methods_supported"`
+	ResourceName           string   `json:"resource_name"`
+}
+
+// handleProtectedResource serves the RFC 9728 Protected Resource Metadata
+// document UNAUTHENTICATED. The client uses it to discover which authorization
+// server issues the bearer tokens this resource accepts.
+func (h *httpHead) handleProtectedResource(w http.ResponseWriter, r *http.Request) {
+	resource := h.publicURL
+	if resource == "" {
+		// No configured public URL -> derive the resource from the request.
+		resource = requestBaseURL(r)
+	}
+	doc := protectedResourceMetadata{
+		Resource:               resource,
+		BearerMethodsSupported: []string{"header"},
+		ResourceName:           "memQL MCP",
+	}
+	if h.authServerURL != "" {
+		doc.AuthorizationServers = []string{h.authServerURL}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(doc)
 }
 
 type httpSession struct {
@@ -572,3 +638,39 @@ func newSessionID() string {
 }
 
 func nowUTC() time.Time { return time.Now().UTC() }
+
+// unauthorizedHandler builds the 401 responder used by the auth middleware. It
+// advertises bearer auth so an OAuth-aware client can discover the scheme; when
+// the public URL is known it also emits the RFC 9728 §5.1 resource_metadata
+// hint pointing at the Protected Resource Metadata document. Claude Code passes
+// the bearer header directly when it already holds a token.
+func unauthorizedHandler(publicURL string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", wwwAuthenticate(publicURL))
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+	}
+}
+
+// wwwAuthenticate builds the WWW-Authenticate challenge for a 401. When
+// publicURL is set it adds the RFC 9728 §5.1 resource_metadata hint pointing at
+// the Protected Resource Metadata document; otherwise it falls back to the bare
+// realm form.
+func wwwAuthenticate(publicURL string) string {
+	if publicURL == "" {
+		return `Bearer realm="memql-mcp"`
+	}
+	return `Bearer realm="memql-mcp", resource_metadata="` + publicURL + ProtectedResourcePath + `"`
+}
+
+// requestBaseURL reconstructs the scheme+host base URL from an inbound request,
+// used as the RFC 9728 `resource` identifier when no PublicURL is configured.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if xf := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); xf != "" {
+		scheme = xf
+	}
+	return scheme + "://" + r.Host
+}
