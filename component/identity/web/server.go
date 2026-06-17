@@ -154,6 +154,13 @@ type Server struct {
 	UserExistsByEmail      UserExistsByEmailFunc
 	PersistClusterSettings PersistClusterSettingsFunc
 
+	// Store backs the DB-side OAuth client resolution on /authorize.
+	// When non-nil, a client_id not present in the static
+	// IDENTITY_REGISTERED_CLIENTS slice falls back to the
+	// dynamically-registered (RFC 7591) v1:identity:oauthClient rows.
+	// Nil keeps the static-only behaviour (tests / engine-less binaries).
+	Store *identity.Store
+
 	// Phase 7: PAT management for the /me/tokens page. Wired by the
 	// integration layer once the engine is up. Nil leaves the routes
 	// unmounted so binaries without the engine don't 500 on the page.

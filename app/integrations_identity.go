@@ -193,6 +193,9 @@ func (a *App) integrationsIdentity() {
 	if err != nil {
 		a.fatal("failed to construct identity web server", "error", err, "component", identity.ComponentName)
 	}
+	// Back the DB-side OAuth client resolution on /authorize so
+	// dynamically-registered (RFC 7591) clients resolve like static ones.
+	webSrv.Store = store
 	webSrv.IssueMagicLink = func(ctx context.Context, in identityweb.IssueMagicLinkInput) error {
 		if in.IsAccessRequest {
 			// Waitlist path lands an access-request row instead of a

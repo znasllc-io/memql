@@ -463,6 +463,15 @@ type Config struct {
 	//   [{"clientId":"copresent","redirectURIs":["https://app.copresent.ai/auth/callback"]}]
 	RegisteredClients []RegisteredClient
 
+	// OAuthDCREnabled gates the RFC 7591 dynamic client registration
+	// endpoint (POST /register). When true (the default), unknown OAuth
+	// clients -- e.g. claude.ai / Claude Desktop's "add custom connector"
+	// -- self-register a public client_id they then use at /authorize +
+	// /oauth/token. When false, POST /register returns 403
+	// registration_disabled and persists nothing.
+	// Env: IDENTITY_OAUTH_DCR_ENABLED (default true)
+	OAuthDCREnabled bool
+
 	// CORSAllowedOrigins is the set of Origin values identity will
 	// allow on credentialed cross-origin requests (the refresh-token
 	// cookie path). Comma-separated.
@@ -628,6 +637,7 @@ func LoadConfigFromEnv() (Config, error) {
 		DisposableEmailBlocklistEnabled: envBool("IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED", true),
 		MXValidationEnabled:             envBool("IDENTITY_MX_VALIDATION_ENABLED", true),
 		NodeBootstrapToken:              strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")),
+		OAuthDCREnabled:                 envBool("IDENTITY_OAUTH_DCR_ENABLED", true),
 	}
 
 	cfg.AccessTokenTTL = envDurationSeconds("IDENTITY_ACCESS_TOKEN_TTL_SECONDS", DefaultAccessTokenTTLSeconds)
@@ -789,7 +799,15 @@ func (c Config) FindClient(clientId string) *RegisteredClient {
 // No wildcards, no prefix matching, no path-only matching. Production
 // (non-loopback) URIs always go through exact-match.
 func (c Config) AllowsRedirectURI(clientId, uri string) bool {
-	client := c.FindClient(clientId)
+	return clientAllowsRedirectURI(c.FindClient(clientId), uri)
+}
+
+// clientAllowsRedirectURI applies the redirect-URI matcher to a single
+// RegisteredClient: exact-match plus the RFC 8252 §7.3 loopback-any-port
+// exception. Factored out of AllowsRedirectURI so the same rule applies
+// to DB-backed (dynamically-registered) clients via the unified resolver
+// (see client_resolver.go). nil client never matches.
+func clientAllowsRedirectURI(client *RegisteredClient, uri string) bool {
 	if client == nil {
 		return false
 	}

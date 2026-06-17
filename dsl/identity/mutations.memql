@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, user, workerPairingCode }
+use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, magicLinkRequest, oauthClient, user, workerPairingCode }
 
 @enabled
 @description("Approve an access request (status=approved, stamps reviewer + invitation).")
@@ -433,6 +433,59 @@ mutation authCode mutationCreateAuthCode {
     args.identityId
     args.magicLinkRequestId
     args.expiresAt
+  }
+}
+
+// ---- mutations/v1/identity/createOAuthClient.memql ----
+
+// createOAuthClient
+// =================
+//
+// Persists a v1:identity:oauthClient row at the moment a client
+// self-registers via POST /register (RFC 7591 dynamic client
+// registration). claude.ai / Claude Desktop's 'add custom connector'
+// flow cannot pre-configure a client_id, so the identity service mints
+// one (prefix mcp_) and stores the registration metadata here. The row
+// is then resolved at /authorize + /oauth/token exactly like a static
+// IDENTITY_REGISTERED_CLIENTS entry.
+//
+// Public clients only: no secret is issued, so there is no secretHash
+// column. redirectURIsJSON is a JSON array string (the engine doesn't
+// support nested arrays of objects in concept fields, mirroring
+// clusterSettings.registeredClientsJSON). The optional grant /
+// response / auth-method strings default to "" via coalesce.
+//
+// Arguments:
+//   clientId                 (string)            - Public client_id (id of the row)
+//   clientName               (string, optional)  - Human-readable client_name
+//   redirectURIsJSON         (string)            - JSON array of registered redirect_uris
+//   grantTypes               (string, optional)  - Space-/comma-joined grant_types
+//   responseTypes            (string, optional)  - Joined response_types
+//   tokenEndpointAuthMethod  (string, optional)  - Client auth method (public => none)
+//   registeredAt             (string)            - RFC3339 registration time
+//
+
+@enabled
+@description("Persist a dynamically-registered public OAuth client (RFC 7591).")
+mutation oauthClient mutationCreateOAuthClient {
+  args {
+    clientId                 string  @required
+    clientName               string
+    redirectURIsJSON         string  @required
+    grantTypes               string
+    responseTypes            string
+    tokenEndpointAuthMethod  string
+    registeredAt             string  @required
+  }
+  insert {
+    id: args.clientId
+    args.clientId
+    clientName: coalesce(args.clientName, "")
+    args.redirectURIsJSON
+    grantTypes: coalesce(args.grantTypes, "")
+    responseTypes: coalesce(args.responseTypes, "")
+    tokenEndpointAuthMethod: coalesce(args.tokenEndpointAuthMethod, "")
+    args.registeredAt
   }
 }
 

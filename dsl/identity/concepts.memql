@@ -83,6 +83,19 @@ concept authCode {
 
 @version("1.0.0")
 @namespace("identity")
+@description("Public OAuth client minted at dynamic client registration (RFC 7591). claude.ai / Claude Desktop's 'add custom connector' flow POSTs to /register and cannot pre-configure a client_id, so the identity service issues one here and looks it up at /authorize + /oauth/token exactly like a static IDENTITY_REGISTERED_CLIENTS entry. Public clients only -- no secret is issued (token_endpoint_auth_method = none). Global scope: registration + token redemption are unauthenticated and must work without a partition context.")
+concept oauthClient {
+  clientId                string  @required  @description("Public OAuth client_id issued at dynamic registration (RFC 7591). Lookup key in /authorize + /oauth/token.")
+  clientName              string  @description("Human-readable client_name from the registration request.")
+  redirectURIsJSON        string  @required  @description("JSON array of registered redirect_uris. Exact-matched (plus RFC 8252 loopback-any-port) at /authorize + /oauth/token.")
+  grantTypes              string  @description("Space- or comma-joined grant_types (default authorization_code,refresh_token).")
+  responseTypes           string  @description("Joined response_types (default code).")
+  tokenEndpointAuthMethod string  @description("Client auth method; public clients use none (no secret issued).")
+  registeredAt            string  @description("RFC3339 registration time. Mirrors the row's createdAt intrinsic (createdAt is reserved and cannot be a payload field), kept explicit so the RFC 7591 client_id_issued_at can be re-derived without the row envelope.")
+}
+
+@version("1.0.0")
+@namespace("identity")
 @description("Bearer-token session record. One row per access token issued by the identity service's magic-link / refresh flow. Looked up on every authenticated request to enforce per-session revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in _system so any partition's middleware can resolve a session.")
 concept authSession {
   userId          string  @description("Owning v1:identity:user. Optional because rows are written at token-issuance time, which can race ahead of the magic-link verifier's user-row insert on first-time logins. Subject is the canonical lookup key.")

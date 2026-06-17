@@ -2732,6 +2732,28 @@ func QueryNotesByTagBuild(args QueryNotesByTagArgs) string {
 	return b.String()
 }
 
+// QueryOAuthClientByClientId -- Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.
+//
+// Bound concept: oauthClient.
+type QueryOAuthClientByClientIdArgs struct {
+	ClientId string
+}
+
+// QueryOAuthClientByClientId calls the engine query queryOAuthClientByClientId.
+func (qc *QueryClient) QueryOAuthClientByClientId(ctx context.Context, args QueryOAuthClientByClientIdArgs) (*Result, error) {
+	call := QueryOAuthClientByClientIdBuild(args)
+	return qc.executeNamed(ctx, "queryOAuthClientByClientId", call)
+}
+
+func QueryOAuthClientByClientIdBuild(args QueryOAuthClientByClientIdArgs) string {
+	var b strings.Builder
+	b.WriteString("queryOAuthClientByClientId({")
+	b.WriteString("clientId: ")
+	b.WriteString(fmt.Sprintf("%q", args.ClientId))
+	b.WriteString("})")
+	return b.String()
+}
+
 // QueryOwnedSpaceById -- Return the space with the given id ONLY IF the caller is the space owner. Defense-in-depth gate for HTTP handlers (e.g. /spaces/{id}/attachments) that need to reject cross-tenant access before doing expensive side effects like blob uploads. The DSL mutation that follows the upload re-enforces ownership, but this query lets the handler short-circuit early.
 //
 // Bound concept: space.

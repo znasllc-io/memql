@@ -7,6 +7,7 @@
 //	POST /auth/magic-link  -- issue a magic link (or access request)
 //	GET  /auth/complete    -- consume a magic link, redirect to client
 //	POST /oauth/token      -- redeem auth code for tokens
+//	POST /register         -- RFC 7591 dynamic client registration (public clients)
 //	POST /auth/refresh     -- rotate refresh token
 //	POST /auth/logout      -- revoke current session
 //	POST /pair/codes       -- mint a worker-pairing code (Bearer auth)
@@ -140,6 +141,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/complete", wrap(s.handleComplete))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
+
+	// RFC 7591 dynamic client registration. Intentionally
+	// UNAUTHENTICATED (public clients self-register) and NOT behind any
+	// auth middleware -- the SystemActor wrap only stamps a system actor
+	// when no upstream auth attached one, same as /oauth/token. Gated at
+	// the handler on Cfg.OAuthDCREnabled (env IDENTITY_OAUTH_DCR_ENABLED,
+	// default true). Bounded body + JSON-only + POST-only at the handler.
+	mux.HandleFunc("POST /register", wrap(s.cors(s.handleRegister)))
+	mux.HandleFunc("OPTIONS /register", wrap(s.cors(s.handleOptions)))
 	mux.HandleFunc("POST /auth/refresh", wrap(s.cors(s.handleRefresh)))
 	mux.HandleFunc("OPTIONS /auth/refresh", wrap(s.cors(s.handleOptions)))
 	mux.HandleFunc("POST /auth/logout", wrap(s.cors(s.handleLogout)))

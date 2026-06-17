@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, user, workerPairingCode }
+use identity.concepts.{ accessRequest, accountEntitlement, auditEvent, authCode, authSession, clusterSettings, delegation, identity, invitation, magicLinkRequest, oauthClient, user, workerPairingCode }
 
 // ---- queries/v1/identity/accountEntitlement.memql ----
 
@@ -249,6 +249,38 @@ query authCode queryAuthCodeByCodeHash {
   }
   filter  payload.codeHash==args.codeHash
   shape   authCodeFull
+}
+
+// ---- queries/v1/identity/oauthClientByClientId.memql ----
+
+// oauthClientByClientId - Look up a dynamically-registered OAuth client
+// ======================================================================
+//
+// Hot path on the /authorize + /oauth/token endpoints: when a client_id
+// is not present in the static IDENTITY_REGISTERED_CLIENTS slice, the
+// resolver falls back to this query to find the DB-backed row minted at
+// POST /register (RFC 7591 dynamic client registration). Returns the row
+// regardless of state so the handler can apply the redirect-URI matcher.
+//
+// Filters on payload.clientId only -- registration + token redemption are
+// unauthenticated, so there is no caller scope to bind to (classifies as
+// 'other' in the per-row-authz audit, same as queryAuthCodeByCodeHash).
+//
+// Arguments:
+//   clientId (string, required) - the public client_id issued at registration
+//
+// Returns:
+//   Zero or one oauthClient row in oauthClientFull shape.
+//
+
+@enabled
+@description("Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.")
+query oauthClient queryOAuthClientByClientId {
+  args {
+    clientId  string  @required
+  }
+  filter  payload.clientId==args.clientId
+  shape   oauthClientFull
 }
 
 // ---- queries/v1/identity/authSessionByPreviousRefreshTokenHash.memql ----
