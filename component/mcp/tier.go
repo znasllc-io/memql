@@ -9,6 +9,7 @@ package mcp
 
 import (
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -70,6 +71,15 @@ func tierAllows(t Tier, c opClass) bool {
 	return false
 }
 
+// DefaultToolTimeout bounds a single tools/call's engine execution when
+// MEMQL_MCP_TOOL_TIMEOUT is unset. A call that exceeds it returns a JSON-RPC
+// "tool execution timed out" error (codeToolTimeout) instead of hanging the
+// HTTP request forever, and releases the per-session mutex so the session
+// stays usable for the next call (#1594). Chosen below typical MCP client
+// (Claude) request timeouts so the client sees our structured error rather
+// than its own opaque "server isn't responding".
+const DefaultToolTimeout = 30 * time.Second
+
 // Config carries the MCP-specific knobs the server enforces: the acting role
 // (Gate B), the capability tier (Gate A), and the acting user (the session
 // owner that authored constructs are scoped to, Phase 3 #1533).
@@ -77,6 +87,10 @@ type Config struct {
 	ActingRole string
 	ActingUser string
 	Tier       Tier
+
+	// ToolTimeout bounds a single tools/call's engine execution. Zero -> the
+	// server applies DefaultToolTimeout. Set from MEMQL_MCP_TOOL_TIMEOUT.
+	ToolTimeout time.Duration
 }
 
 // roleCanAuthor / roleCanRunInline bridge the acting-role string to the auth
