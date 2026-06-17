@@ -1,4 +1,5 @@
-# Staging overlay -> 0.9.61, with identity bumped to 0.9.62 (OAuth consent hotfix:
+# Staging overlay -> 0.9.61, with identity 0.9.62 (OAuth consent) +
+# mcp 0.9.63 (branded connector icon #1590). OAuth consent hotfix:
 # DCR magic-link flow #1587 + app name+logo #1588). identity-only rebuild on the
 # build server; all other images stay at their 0.9.61 digests. Engine/carrier/mcp images rebuilt from main on the
 # GitHub BUILD SERVER (OIDC->ACR; the first release through that path) carrying
@@ -45,7 +46,7 @@ images:
   # memql-mcp (epic memql#1550): remote MCP node, engine-built on the GitHub
   # build server (#1581 wired it into build-engine-images + the release tooling).
   - name: acrmemql.azurecr.io/memql-mcp
-    digest: sha256:8ad41c51351d42d4cdf9a93c596abe648c457b9aee8dfd28e5daed5a4525672c
+    digest: sha256:68f56b80267bb0cf6037bbced3413f15f26ed113eaf9bde832540003069752d3
   - name: acrmemql.azurecr.io/copresent
     digest: sha256:10036ae29f6374cbb1b6a3f9456115da843f3c52f9c4012a2cfcea927f252501
   - name: livekit/livekit-server
