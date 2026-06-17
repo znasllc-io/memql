@@ -209,16 +209,18 @@ func (a *App) integrationsIdentity() {
 			)
 		}
 		return mlIssuer.Issue(ctx, magiclink.IssueInput{
-			Email:        in.Email,
-			ClientId:     in.ClientId,
-			RedirectURI:  in.RedirectURI,
-			State:        in.State,
-			SourceIP:     in.SourceIP,
-			UserAgent:    in.UserAgent,
-			InvitationId: in.InvitationId,
-			Bootstrap:    in.Bootstrap,
-			ExistingUser: in.ExistingUser,
-			AdminSession: in.AdminSession,
+			Email:               in.Email,
+			ClientId:            in.ClientId,
+			RedirectURI:         in.RedirectURI,
+			State:               in.State,
+			CodeChallenge:       in.CodeChallenge,
+			CodeChallengeMethod: in.CodeChallengeMethod,
+			SourceIP:            in.SourceIP,
+			UserAgent:           in.UserAgent,
+			InvitationId:        in.InvitationId,
+			Bootstrap:           in.Bootstrap,
+			ExistingUser:        in.ExistingUser,
+			AdminSession:        in.AdminSession,
 		})
 	}
 	// Wizard's "404 once bootstrapped" check. Same signal as the

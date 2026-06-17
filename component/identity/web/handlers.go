@@ -124,6 +124,11 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	formClientId := strings.TrimSpace(r.PostForm.Get("client_id"))
 	formRedirectURI := strings.TrimSpace(r.PostForm.Get("redirect_uri"))
 	formOAuthState := strings.TrimSpace(r.PostForm.Get("state"))
+	// PKCE challenge carried through the /authorize browser flow's hidden
+	// fields. Threaded onto the issuer so /auth/complete mints a
+	// PKCE-bound auth code. Only meaningful when an OAuth client matches.
+	formCodeChallenge := strings.TrimSpace(r.PostForm.Get("code_challenge"))
+	formCodeChallengeMethod := strings.TrimSpace(r.PostForm.Get("code_challenge_method"))
 	if s.IssueMagicLink == nil {
 		s.renderError(w, r, http.StatusServiceUnavailable, "Sign-in is temporarily unavailable. Please try again in a moment.")
 		return
@@ -138,6 +143,12 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		SourceIP:     clientIP(r),
 		UserAgent:    r.Header.Get("User-Agent"),
 		AdminSession: !clientMatched,
+	}
+	// Only carry the PKCE challenge when the relying-party client matched;
+	// the admin-session path never mints an OAuth code.
+	if clientMatched {
+		in.CodeChallenge = formCodeChallenge
+		in.CodeChallengeMethod = formCodeChallengeMethod
 	}
 
 	switch formKind {

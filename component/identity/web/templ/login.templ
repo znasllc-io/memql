@@ -32,6 +32,17 @@ type LoginData struct {
 	ClientID    string
 	RedirectURI string
 	OAuthState  string
+	// PKCE challenge (RFC 7636). Carried through the form hidden fields
+	// from the /authorize endpoint so the magic-link the user receives
+	// mints a PKCE-bound auth code. The /authorize endpoint REQUIRES
+	// S256; these are empty on the plain /login path.
+	CodeChallenge       string
+	CodeChallengeMethod string
+	// AuthorizeMode=true means this page was reached via the OAuth 2.1
+	// /authorize endpoint (a third-party client, e.g. claude.ai, is
+	// requesting access). The page shows a short consent line naming the
+	// requesting client before the email field.
+	AuthorizeMode bool
 }
 
 templ Login(data LoginData) {
@@ -93,6 +104,11 @@ func loginSubtitleFor(data LoginData) string {
 // of registration mode; the server decides what to do once it sees
 // the submitted email.
 templ loginFormEmail(data LoginData) {
+	if data.AuthorizeMode && data.ClientID != "" {
+		<div class="alert alert-info">
+			<strong>{ data.ClientID }</strong> is requesting access to your { data.Layout.BrandName } account. Sign in to approve.
+		</div>
+	}
 	<form method="POST" action="/login" data-submit-once>
 		<input type="hidden" name="form" value="email"/>
 		if data.ReturnTo != "" {
@@ -106,6 +122,12 @@ templ loginFormEmail(data LoginData) {
 		}
 		if data.OAuthState != "" {
 			<input type="hidden" name="state" value={ data.OAuthState }/>
+		}
+		if data.CodeChallenge != "" {
+			<input type="hidden" name="code_challenge" value={ data.CodeChallenge }/>
+		}
+		if data.CodeChallengeMethod != "" {
+			<input type="hidden" name="code_challenge_method" value={ data.CodeChallengeMethod }/>
 		}
 		<div class="form-row">
 			<label for="email">Email</label>
