@@ -287,6 +287,7 @@ func (a *App) integrationsIdentity() {
 			ctx,
 			codeId, plain, hash,
 			in.ClientId, in.RedirectURI, in.State,
+			"", "", // codeChallenge, codeChallengeMethod -- SSO mint has no PKCE context (#1570)
 			in.UserId,
 			"", // identityId -- no specific credential row tracked for SSO mint
 			"", // magicLinkRequestId -- the original sign-in's magic link, not surfaced
