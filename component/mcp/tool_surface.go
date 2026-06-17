@@ -41,6 +41,12 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
+	// PromoteConstructDurable is the DB-persisted, reviewable, restart-durable
+	// promote (memql#1557): it persists a v1:authoring:bundle + construct row
+	// pair (reuse + audit) then registers into the shared registry exactly as
+	// PromoteAuthoredConstruct does. The MCP promote handler calls this so a
+	// promotion survives a restart.
+	PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
 	// ExecuteInline runs ad-hoc inline MemQL text with the inline-shape
 	// restrictions lifted (MCP Tier-3 #1535), resolving session-authored
 	// constructs core-first. The server gates it to inline tier + owner/developer.
@@ -476,10 +482,13 @@ func handlePromote(ctx context.Context, eng Engine, role string, tier Tier, args
 	if err != nil {
 		return errorResult(err.Error())
 	}
-	if err := eng.PromoteAuthoredConstruct(ctx, c); err != nil {
+	// Durable promote (memql#1557): persist a reviewable v1:authoring:bundle +
+	// construct row pair (so the promotion survives a restart) AND register into
+	// the shared registry (callable by every session, core-first never-shadow).
+	if err := eng.PromoteConstructDurable(ctx, s.owner, c); err != nil {
 		return errorResult(fmt.Sprintf("promote %s %q failed: %v", c.Kind, c.Name, err))
 	}
-	return textResult(fmt.Sprintf("promoted %s %q into the durable shared schema; it is now callable by every session", c.Kind, name))
+	return textResult(fmt.Sprintf("promoted %s %q into the durable shared schema; it is persisted (reviewable + restart-durable) and now callable by every session", c.Kind, name))
 }
 
 // resolveSessionConstruct finds an active session-authored construct by name.
@@ -539,6 +548,7 @@ type concreteEngine interface {
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
+	PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
 	MCPPromotedFunctionTools() []map[string]any
 	MCPPromotedFunctionKind(name string) (string, bool)
 }
@@ -558,6 +568,9 @@ func (a engineAdapter) ExecuteInline(ctx context.Context, query, owner string, r
 }
 func (a engineAdapter) PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error {
 	return a.c.PromoteAuthoredConstruct(ctx, c)
+}
+func (a engineAdapter) PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
+	return a.c.PromoteConstructDurable(ctx, owner, c)
 }
 func (a engineAdapter) MCPPromotedFunctionTools() []map[string]any {
 	return a.c.MCPPromotedFunctionTools()
