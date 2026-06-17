@@ -5,7 +5,7 @@
 #
 # Assemble a release lockfile from per-component digests (deployment-v2 Phase 4,
 # znasllc-io/memql#702). Each repo's CI emits its built image digest; an
-# assembly step (the release-lockfile workflow, or an operator) collects the 8
+# assembly step (the release-lockfile workflow, or an operator) collects the release
 # digests and writes releases/<version>.yaml. The lockfile is then PR'd; the
 # coherence-check gate validates it.
 #
@@ -25,7 +25,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-COMPONENTS="memql-identity memql-cognition memql-voice memql-agent memql-planner memql-workbench memql-bff-copresent copresent"
+COMPONENTS="memql-identity memql-cognition memql-voice memql-mcp memql-agent memql-planner memql-workbench memql-bff-copresent copresent"
 
 function info() { echo "INFO: $*"; }
 

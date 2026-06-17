@@ -53,6 +53,11 @@ jobs:
           - node: voice
             cgo: "1"
             target: voice-runtime
+          # mcp: engine-built (no CoPresent DSL), CGO-free -- same shape as
+          # identity. Remote MCP node (memql#1554); CI gap fixed in #1581.
+          - node: mcp
+            cgo: "0"
+            target: ""
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

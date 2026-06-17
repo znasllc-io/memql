@@ -192,6 +192,32 @@ go build -tags planner -o bin/memql-planner .
 go test ./...
 ```
 
+### Image builds: LOCAL Docker for dev, BUILD SERVER for deploys (HARD RULE)
+
+Where a container image is built depends ONLY on where it runs:
+
+- **Local development** -- build images in your **local Docker** (`make
+  dev-cluster*` / `docker compose`). Fast, throwaway, never pushed to ACR.
+- **Deploys to STAGING or PRODUCTION** -- images MUST be built on the **GitHub
+  build server** (GitHub Actions, OIDC -> ACR `acrmemql`), NOT on an operator
+  machine. This spans ALL repos in the project:
+  - `memql` -> `.github/workflows/build-engine-images.yml` (engine:
+    identity / voice / mcp)
+  - `memql-bff-copresent` -> `build-carrier-images.yml` (carrier-base + bff +
+    cognition / agent / planner / workbench)
+  - `copresent` (the frontend/SPA) -> `build-spa-image.yml`
+  Each is `workflow_dispatch` on `main` with a `version` input; tags are
+  immutable; the build server is the source of truth for deployable images
+  (reproducible, native linux/amd64, provenance, no dev-laptop drift).
+
+Do NOT hand-build + push release images locally (`az acr build`,
+`make release`, `docker push`) for a staging/prod deploy -- that path is
+superseded by the build server. A release = dispatch the three build
+workflows at one engine ref -> assemble `releases/<ver>.yaml`
+(`scripts/release/assemble-lockfile.sh`, digests resolved from ACR by tag) ->
+pin `deploy/k8s/overlays/<env>` -> merge -> ArgoCD reconciles. See
+[docs/public/operate/deployment-strategy.md](docs/public/operate/deployment-strategy.md).
+
 ---
 
 ## Branch Workflow

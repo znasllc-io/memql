@@ -1,9 +1,9 @@
 name: release-lockfile
 
 # deployment-v2 Phase 4 (znasllc-io/memql#702). A release lockfile
-# (releases/<version>.yaml) pins all 8 components by @sha256: digest; it is the
+# (releases/<version>.yaml) pins all release components by @sha256: digest; it is the
 # atomic unit of staging->prod promotion (digest copy, no rebuild). This gate
-# keeps every lockfile honest: 8 components present, all digest-pinned, and the
+# keeps every lockfile honest: all expected components present, all digest-pinned, and the
 # carrier + SPA coherent with the engine version (builtAgainstEngine ==
 # engineVersion). An incoherent set fails here instead of shipping.
 
