@@ -284,11 +284,11 @@ func TestContainsRuntimeCallBoundary(t *testing.T) {
 func TestParseViaLangparser_CoversCorpus(t *testing.T) {
 	for _, tc := range representativeRuntimeQueries {
 		t.Run(tc.name, func(t *testing.T) {
-			node, err := parseViaLangparser(tc.query, false)
+			res, err := parseViaLangparser(tc.query, false)
 			if err != nil {
 				t.Fatalf("parseViaLangparser(%q): %v", tc.query, err)
 			}
-			if node == nil {
+			if res.Root == nil {
 				t.Fatalf("parseViaLangparser(%q): returned nil node + nil error", tc.query)
 			}
 		})

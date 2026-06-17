@@ -17,11 +17,19 @@ type fakeRunner struct {
 	dryRun      bool
 	called      bool
 	promoted    []string // names reported as @mcp automations
+
+	inlineCalled bool
+	inlineSource string
+	inlineInput  map[string]any
 }
 
 func (r *fakeRunner) RunAutomation(ctx context.Context, owner, name string, input map[string]any, dryRun bool) (map[string]any, error) {
 	r.called, r.owner, r.name, r.input, r.dryRun = true, owner, name, input, dryRun
 	return map[string]any{"status": "completed", "name": name}, nil
+}
+func (r *fakeRunner) RunInlineAutomation(ctx context.Context, owner, source string, input map[string]any) (map[string]any, error) {
+	r.inlineCalled, r.owner, r.inlineSource, r.inlineInput = true, owner, source, input
+	return map[string]any{"inline": true, "persisted": false, "ok": true}, nil
 }
 func (r *fakeRunner) PromotedAutomationTools() []map[string]any {
 	out := make([]map[string]any, 0, len(r.promoted))
@@ -82,6 +90,79 @@ func TestRunAutomation_RequiresName(t *testing.T) {
 	}
 	if r.called {
 		t.Error("runner should not be called without a name")
+	}
+}
+
+// #1558: run_inline_automation routes the submitted source + input to the
+// runner under the session owner -- gated to the inline tier + owner/developer.
+func TestRunInlineAutomation_RoutesToRunner(t *testing.T) {
+	eng := newFakeEngine()
+	r := &fakeRunner{}
+	ctx := withRunnerCtx("owner-1", r)
+	const src = `@trigger(event="x") automation a { }`
+	res := callMCPTool(ctx, eng, "owner", TierInline, toolRunInlineAutomation,
+		map[string]any{"source": src, "input": map[string]any{"k": "v"}})
+	if isError(res) {
+		t.Fatalf("run_inline_automation should succeed under inline tier + owner, got %v", res)
+	}
+	if !r.inlineCalled || r.inlineSource != src || r.owner != "owner-1" {
+		t.Errorf("runner got inlineCalled=%v source=%q owner=%q", r.inlineCalled, r.inlineSource, r.owner)
+	}
+	if r.inlineInput["k"] != "v" {
+		t.Errorf("inline input = %v, want {k:v}", r.inlineInput)
+	}
+}
+
+// #1558: run_inline_automation is gated -- the wrong tier or role is refused
+// BEFORE the runner is touched.
+func TestRunInlineAutomation_Gated(t *testing.T) {
+	eng := newFakeEngine()
+	// Wrong tier (authoring, not inline).
+	r1 := &fakeRunner{}
+	res := callMCPTool(withRunnerCtx("owner-1", r1), eng, "owner", TierAuthoring, toolRunInlineAutomation,
+		map[string]any{"source": "x"})
+	if !isError(res) || r1.inlineCalled {
+		t.Errorf("authoring tier must refuse run_inline_automation before the runner, got %v called=%v", res, r1.inlineCalled)
+	}
+	// Wrong role (writer, not owner/developer) at the inline tier.
+	r2 := &fakeRunner{}
+	res = callMCPTool(withRunnerCtx("owner-1", r2), eng, "writer", TierInline, toolRunInlineAutomation,
+		map[string]any{"source": "x"})
+	if !isError(res) || r2.inlineCalled {
+		t.Errorf("writer role must refuse run_inline_automation before the runner, got %v called=%v", res, r2.inlineCalled)
+	}
+}
+
+// #1558: run_inline_automation requires source text.
+func TestRunInlineAutomation_RequiresSource(t *testing.T) {
+	eng := newFakeEngine()
+	r := &fakeRunner{}
+	res := callMCPTool(withRunnerCtx("owner-1", r), eng, "owner", TierInline, toolRunInlineAutomation, map[string]any{})
+	if !isError(res) || r.inlineCalled {
+		t.Errorf("missing source should error before the runner, got %v called=%v", res, r.inlineCalled)
+	}
+}
+
+// #1558: run_inline_automation is listed only at the inline tier for an
+// inline-capable role (owner/developer), mirroring the `query` tool's gate.
+func TestRunInlineAutomation_Listed(t *testing.T) {
+	eng := newFakeEngine()
+	has := func(tools []map[string]any, name string) bool {
+		for _, m := range tools {
+			if m["name"] == name {
+				return true
+			}
+		}
+		return false
+	}
+	if tools := listMCPTools(eng, "owner", TierInline); !has(tools, toolRunInlineAutomation) {
+		t.Errorf("run_inline_automation should be listed at the inline tier for owner")
+	}
+	if tools := listMCPTools(eng, "owner", TierAuthoring); has(tools, toolRunInlineAutomation) {
+		t.Errorf("run_inline_automation must NOT be listed below the inline tier")
+	}
+	if tools := listMCPTools(eng, "writer", TierInline); has(tools, toolRunInlineAutomation) {
+		t.Errorf("run_inline_automation must NOT be listed for a non-inline role")
 	}
 }
 
