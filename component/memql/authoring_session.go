@@ -148,10 +148,10 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource strin
 			}
 			compiled = spec
 		default:
-			// concept / shape / spec / trait register as resolvable metadata.
-			// Only the function family is executable-by-name in Phase 3;
-			// authored specs consulted inside authored query filters are a
-			// tracked follow-up.
+			// concept / shape register as resolvable metadata. The function
+			// family is executable-by-name and authored specs/traits are
+			// resolvable inside authored query filters via the session spec
+			// overlay (#1559); concept/shape carry no runtime overlay yet.
 			compiled = nil
 		}
 
@@ -254,6 +254,97 @@ func (e *MemQLEngine) buildAuthoredFunctionOverlay(owner string, reg *AuthoredRu
 	return overlay
 }
 
+// buildAuthoredSpecOverlay returns a name->spec map holding the core specs plus
+// the owner's session-authored specs, with CORE-FIRST precedence: a session spec
+// whose name a core spec already owns is dropped, so an authored spec can only
+// ADD owner-private predicates and can NEVER shadow a sealed core spec -- the same
+// one-way guarantee buildAuthoredFunctionOverlay enforces for functions. The
+// resulting map threads through parseWithFunctions -> resolveAuthoredSpecOverlay
+// so a session-defined spec referenced inside an authored query's filter
+// resolves on the authored path only. A nil/empty result is fine -- a nil overlay
+// short-circuits the authored expansion entirely.
+func (e *MemQLEngine) buildAuthoredSpecOverlay(owner string, reg *AuthoredRuntimeRegistry) map[string]*Spec {
+	overlay := make(map[string]*Spec)
+	if e.specs != nil {
+		for name, spec := range e.specs.Snapshot() {
+			overlay[name] = spec
+		}
+	}
+	if reg == nil || strings.TrimSpace(owner) == "" {
+		return overlay
+	}
+	for _, c := range reg.ListForOwner(owner) {
+		if c.Status != AuthoredActive {
+			continue
+		}
+		spec, ok := c.Compiled.(*Spec)
+		if !ok || spec == nil {
+			continue
+		}
+		// Core-first: never shadow a sealed core spec.
+		if e.specs != nil {
+			if _, exists := e.specs.Lookup(spec.Name); exists {
+				continue
+			}
+		}
+		overlay[spec.Name] = spec
+	}
+	return overlay
+}
+
+// resolveAuthoredSpecOverlay fully expands every SpecReferenceExpression in expr
+// against the supplied core-first overlay, inlining each spec's resolved body so
+// the runtime evaluator (which only knows e.specs) never has to look a
+// session-authored spec up. It recurses through the same expression-tree shapes
+// expandSpecReferences covers, with cycle detection on the spec graph. Used only
+// on the authored path (#1559); the public path passes a nil overlay and skips
+// it.
+func (e *MemQLEngine) resolveAuthoredSpecOverlay(expr ExpressionNode, overlay map[string]*Spec) (ExpressionNode, error) {
+	return expandSpecReferencesWithOverlay(expr, overlay, make(map[string]struct{}))
+}
+
+// expandSpecReferencesWithOverlay is the recursive worker for
+// resolveAuthoredSpecOverlay. resolving guards against circular spec references.
+func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Spec, resolving map[string]struct{}) (ExpressionNode, error) {
+	if expr == nil {
+		return nil, nil
+	}
+	switch node := expr.(type) {
+	case *SpecReferenceExpression:
+		name := strings.TrimSpace(node.Name)
+		spec, ok := overlay[name]
+		if !ok || spec == nil {
+			return nil, fmt.Errorf("spec reference %q: spec %q not found", node.Name, node.Name)
+		}
+		if _, cycle := resolving[name]; cycle {
+			return nil, fmt.Errorf("circular spec reference detected for %q", name)
+		}
+		resolving[name] = struct{}{}
+		resolved, err := expandSpecReferencesWithOverlay(spec.Expr, overlay, resolving)
+		delete(resolving, name)
+		return resolved, err
+	case *LogicalExpression:
+		left, err := expandSpecReferencesWithOverlay(node.Left, overlay, resolving)
+		if err != nil {
+			return nil, err
+		}
+		right, err := expandSpecReferencesWithOverlay(node.Right, overlay, resolving)
+		if err != nil {
+			return nil, err
+		}
+		return &LogicalExpression{Op: node.Op, Left: left, Right: right}, nil
+	case *RelationshipExpression:
+		target, err := expandSpecReferencesWithOverlay(node.Target, overlay, resolving)
+		if err != nil {
+			return nil, err
+		}
+		return &RelationshipExpression{Function: node.Function, Target: target}, nil
+	default:
+		// Comparisons, builtins, literals, etc. carry no nested spec refs.
+		return cloneExpressionNode(expr), nil
+	}
+}
+
 // ExecuteAuthored runs a query with the owner's session-authored functions
 // resolvable by name (core-first). It is the execution counterpart to
 // AuthorSessionBundle: the MCP run_query / run_mutation path calls it so a
@@ -262,6 +353,10 @@ func (e *MemQLEngine) buildAuthoredFunctionOverlay(owner string, reg *AuthoredRu
 // constructs execute under the author's identity -- the per-row authz model
 // then confines writes to what the author owns, exactly as for a core call.
 //
+// A session-authored spec referenced inside an authored query's filter resolves
+// too (#1559), via the core-first owner-scoped spec overlay; like the function
+// overlay it can never shadow a core spec.
+//
 // With no registry or owner it is identical to Execute, so callers can route
 // every query through it unconditionally.
 func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
@@ -269,8 +364,9 @@ func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, 
 		return e.Execute(ctx, query)
 	}
 	overlay := e.buildAuthoredFunctionOverlay(owner, reg)
+	specOverlay := e.buildAuthoredSpecOverlay(owner, reg)
 	ctx = ensureAuthorEnvelope(ctx, owner)
-	return e.executeWith(ctx, query, overlay, false)
+	return e.executeWith(ctx, query, overlay, specOverlay, false)
 }
 
 // ExecuteInline runs ad-hoc inline MemQL query text in the most-flexible mode
@@ -283,11 +379,13 @@ func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, 
 // when ctx carries none.
 func (e *MemQLEngine) ExecuteInline(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
 	fns := e.functions
+	var specOverlay map[string]*Spec
 	if reg != nil && strings.TrimSpace(owner) != "" {
 		fns = e.buildAuthoredFunctionOverlay(owner, reg)
+		specOverlay = e.buildAuthoredSpecOverlay(owner, reg)
 		ctx = ensureAuthorEnvelope(ctx, owner)
 	}
-	return e.executeWith(ctx, query, fns, true)
+	return e.executeWith(ctx, query, fns, specOverlay, true)
 }
 
 // ensureAuthorEnvelope stamps the author's AccessContext onto ctx when none is
